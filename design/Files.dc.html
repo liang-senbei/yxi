@@ -32,11 +32,33 @@
     </div>
   </div>
 
-  <!-- breadcrumb -->
-  <div style="display:flex; align-items:center; gap:6px; padding:11px 14px; background:#1e1c1a; border-bottom:1px solid #2f2b27; flex-shrink:0; font-family:'JetBrains Mono', monospace; font-size:11.5px; overflow:hidden;">
+  <!-- breadcrumb：点它唤出跳转面板（批注 #1） -->
+  <div style="display:flex; align-items:center; gap:7px; padding:11px 14px; background:#1e1c1a; border-bottom:1px solid #2f2b27; flex-shrink:0; font-family:'JetBrains Mono', monospace; font-size:11.5px; overflow:hidden;">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6d665f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
     <span style="color:#6d665f;">root / src / workspace /</span>
-    <span style="color:#e08b57; font-weight:500;">Yxi</span>
+    <span style="color:#e08b57; font-weight:500; flex-grow:1;">Yxi</span>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#e08b57" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M6 9l6 6 6-6"/></svg>
+  </div>
+
+  <!-- 跳转面板 -->
+  <div style="flex-shrink:0; background:#232120; border-bottom:1px solid #39352f; padding:12px 12px 13px; display:flex; flex-direction:column; gap:9px;">
+    <div style="height:44px; border:1px solid #4a443d; border-radius:11px; background:#1a1917; display:flex; align-items:center; gap:9px; padding:0 12px;">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6d665f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6-6-6M12 19h8"/></svg>
+      <span style="font-family:'JetBrains Mono', monospace; font-size:12.5px; color:#6d665f;">直接输入路径…</span>
+    </div>
+    <div style="display:flex; flex-wrap:wrap; gap:7px;">
+      <div style="display:flex; align-items:center; gap:6px; height:34px; padding:0 11px; border-radius:9px; background:#33241f; border:1px solid #5c4536; font-size:12px; font-weight:600; color:#e08b57;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#e08b57" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+        会话所在
+      </div>
+      <div style="display:flex; align-items:center; gap:6px; height:34px; padding:0 11px; border-radius:9px; border:1px solid #39352f; font-size:12px; color:#c9c2ba;">最近 · mail</div>
+      <div style="display:flex; align-items:center; gap:6px; height:34px; padding:0 11px; border-radius:9px; border:1px solid #39352f; font-size:12px; color:#c9c2ba;">最近 · station</div>
+      <div style="display:flex; align-items:center; gap:6px; height:34px; padding:0 11px; border-radius:9px; border:1px solid #39352f; font-size:12px; color:#c9c2ba;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#d5a244" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.9 21l1.2-6.8-5-4.9 6.9-1z"/></svg>
+        ~
+      </div>
+      <div style="display:flex; align-items:center; gap:6px; height:34px; padding:0 11px; border-radius:9px; border:1px solid #39352f; font-size:12px; color:#c9c2ba;">附件暂存区</div>
+    </div>
   </div>
 
   <div style="flex-grow:1; padding:8px 10px; display:flex; flex-direction:column; gap:2px; overflow:hidden;">
