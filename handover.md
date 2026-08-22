@@ -1,6 +1,12 @@
 # handover · Yxi
 
 ## 基础信息
+> 🔑 **一句话讲清这个项目**：什么都不装，SSH 本来就能「你去看」——看会话、进去问 Claude、
+> 渲染成对话界面、翻文件、传附件，**整个 App 几乎都能用**。
+> **`yxi-hook` 只买「主动」两个字**：让手机在 Claude 需要你时**主动响**。
+> 不装是**监视器**（你去看它），装了才是**遥控器**（它来找你）。
+> `yxi`（agent）纯属省往返，可以完全不装。详见 PRD 附录 H.0。
+
 - **是什么**：手机指挥台 —— 复刻 Moshi（手机开终端、管 tmux、给 Claude Code 下指令和远程批权限），**去掉它的整个云端层**。
 - **面向全球用户，但不跑任何后端**：每个用户连自己的服务器（PRD §2.6）。分发走 **GitHub Releases**，不上应用商店。**第一期只做 Android**（iOS 装不了 Release 的 APK，PRD §2.5）。
 - **技术栈**：客户端 = **Android 原生 APK**（Kotlin ~900 行，SSH 用纯 Java 的 `mwiede/jsch`，终端用 WebView + xterm.js）；服务器 = `yxi-agent`（**不监听端口**，由 SSH exec channel 拉起）+ `yxi-inbox`（只听 unix socket）+ `yxi-hook`。**传输走 SSH，不开任何新端口、不要证书。**
