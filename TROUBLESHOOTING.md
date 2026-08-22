@@ -75,3 +75,38 @@
 - **修法**：`sdkmanager "platforms;android-37.0" "build-tools;37.0.0"`（⚠️ 包名是
   **`android-37.0`** 带小数点，不是 `android-37`），然后 compileSdk/targetSdk 都调 37。
   minSdk 保持 26 不受影响。
+
+## 12. ⭐ Android 上 jsch 的 ed25519 认证必然失败 —— 除非注册 BouncyCastle
+- **症状**：`JSchException: Auth fail for methods 'publickey,password'`。异常消息本身**什么也说明不了**。
+- **诊断**：接上 jsch 自己的 logger（`JSch.setLogger`）才看到真话：
+  ```
+  Signature algorithms unavailable for non-agent identities = [ssh-ed25519, ssh-ed448]
+  ssh-ed25519 not available for identity <名字>
+  ```
+- **根因**：**Android 的 JCA 不提供 `Ed25519` 签名算法**。jsch 内建的 ed25519 依赖
+  JDK 15+ 的 JCA，安卓（API 34 实测）没有。
+- **走过的弯路**：
+  - 加 `net.i2p.crypto:eddsa` —— **没用**。jsch 查的算法名是 `Ed25519`，i2p 那个库注册的是 `EdDSA`/`NONEwithEdDSA`，对不上
+  - 退回 ECDSA nistp256 —— 能用，但 ed25519 才是现在的默认，没必要退
+- **修法**：注册 **BouncyCastle**（`org.bouncycastle:bcprov-jdk18on`），它正好用 `Ed25519` 这个名字：
+  ```kotlin
+  java.security.Security.removeProvider("BC")   // 先摘安卓自带的阉割版，否则算法查找命中旧的
+  java.security.Security.insertProviderAt(BouncyCastleProvider(), 1)
+  ```
+  验证：日志变成 `ssh-ed25519 auth success` / `Authentication succeeded (publickey)`。
+  代价：APK 从 12 MB 涨到 15 MB。
+
+## 13. `NetworkOnMainThreadException` —— jsch 的写入必须自己切线程
+- **症状**：认证成功、PTY 也开了，一往终端写字节就 `IOException: android.os.NetworkOnMainThreadException`。
+- **根因**：Compose 的 `LaunchedEffect` 跑在主线程。jsch 的 `OutputStream.write` 是网络操作。
+  读那边我用了 `withContext(Dispatchers.IO)` 所以没事，**写那边漏了**。
+- **修法**：`Shell.write` / `resize` 一律 `suspend` + `withContext(Dispatchers.IO)`，
+  别指望调用方记得切。
+
+## 14. 模拟器在 gradle 构建时被挤死
+- **症状**：构建跑着跑着 `adb: no devices/emulators found`，模拟器进程没了。不是 GPU 崩溃（#5 那种）。
+- **根因**：**内存**。gradle 的 JVM 默认吃到 5 GB，加上模拟器 4 GB，机器 16 GB 还跑着
+  VNC / Inspector / 多个 cc 会话 —— 可用只剩 4.9 GB 时模拟器被挤掉。
+- **修法**：① `org.gradle.jvmargs=-Xmx2048m` + `org.gradle.parallel=false`（单模块并行无收益）
+  ② 模拟器降到 `-memory 2048` ③ **先构建、构建完 `./gradlew --stop` 放掉守护进程内存，再拉模拟器**
+  —— 已固化进 `dev/run.sh`。

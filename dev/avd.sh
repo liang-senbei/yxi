@@ -18,7 +18,7 @@ create)
   # 720x1280 而不是 1080x2400：软件渲染下大分辨率会触发 gfxstream 崩溃
   #   （ERROR | Failed to find ColorBuffer: NN），见 TROUBLESHOOTING #5
   sed -i 's/^hw.lcd.width=.*/hw.lcd.width=720/;s/^hw.lcd.height=.*/hw.lcd.height=1280/;s/^hw.lcd.density=.*/hw.lcd.density=320/' "$C"
-  sed -i 's/^hw.ramSize=.*/hw.ramSize=4096/' "$C"
+  sed -i 's/^hw.ramSize=.*/hw.ramSize=2048/' "$C"
   echo "✅ AVD '$AVD' 已建（720x1280）"
   ;;
 start)
@@ -26,7 +26,7 @@ start)
   pkill -f 'qemu-sys[t]em' 2>/dev/null; sleep 2; adb kill-server >/dev/null 2>&1
   nohup emulator -avd "$AVD" -no-window -no-audio -no-boot-anim -no-metrics \
       -gpu swiftshader_indirect -no-snapshot -skin 720x1280 \
-      -http-proxy "$PROXY" -memory 4096 -cores 4 > /tmp/emulator.log 2>&1 &
+      -http-proxy "$PROXY" -memory 2048 -cores 4 > /tmp/emulator.log 2>&1 &
   adb wait-for-device
   n=0; until [ "$(adb shell getprop sys.boot_completed 2>/dev/null|tr -d '\r')" = "1" ] || [ $n -gt 90 ]; do sleep 4; n=$((n+1)); done
   echo "✅ 开机完成 Android $(adb shell getprop ro.build.version.release|tr -d '\r') · abilist=$(adb shell getprop ro.product.cpu.abilist|tr -d '\r')"

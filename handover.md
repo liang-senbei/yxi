@@ -26,7 +26,11 @@
   `android/`（AGP 9.3.1 · Kotlin 2.4.10 · Gradle 9.7.1 · compose-bom 2026.08.00 · **compileSdk/targetSdk 37** · minSdk 26）。
   配色写在 `android/app/src/main/kotlin/app/yxi/ui/theme/Color.kt` —— **改配色只改这一个文件**。
   产物 `Yxi-0.1.0-debug.apk`（11 MB）。踩的 3 个坑见 TROUBLESHOOTING #9–#11。
-- ⬜ **进行中**：G2（连上一台机、开出终端）。目标清单见 [GOALS.md](./GOALS.md)
+- 🔄 **G2 进行中**：**SSH 层已跑通** —— 连接 / ed25519 公钥认证 / PTY / `tmux attach` / 双向读写全部验证成功
+  （截图里能看到 `[cc-root] 0:claude*` 和 Claude Code 的 TUI）。
+  `android/app/src/main/kotlin/app/yxi/ssh/`：`HostConfig.kt` + `SshSession.kt`（分层参考 ConnectBot 的 `transport/`）。
+  **剩终端控件选型**（临时用 ANSI 剥离显示，TUI 排版必然错乱 —— 正说明需要真 VT 状态机）。
+  开发回路固化进 `dev/run.sh`（一条命令：保证模拟器在 → 构建 → 装 → 起 → 抓日志 → 截图）。目标清单见 [GOALS.md](./GOALS.md)
 - ⬜ **原待办**：Phase 0（Android 工具链 + 空壳 APK + AVD，**最大未知，先做**）→ 1（SSH 层+多主机+终端，2 天，**到这已可替代现有 SSH App**）→ 2（终端打磨：中文/方向键/重连）→ 3（yxi-agent + 会话看板）→ 4（事件+通知）→ 5（远程审批）→ 6（P1）。**P0 约 6.5 天**
 
 ## 读写信息在哪
@@ -85,6 +89,7 @@
 
 | # | 决定 | 理由 / 出处 |
 |---|---|---|
+| D20 | **SSH 密钥用 ed25519，靠 BouncyCastle 支撑** | Android 的 JCA 没有 `Ed25519` 签名算法，jsch 认证必失败。<br>试过 `net.i2p.crypto:eddsa`（算法名对不上，无效）和退回 ECDSA（可行但没必要）。<br>**注册 BouncyCastle 即解决**，代价 APK +3 MB。TROUBLESHOOTING #12 |
 | D19 | **用量显示，按服务器关联** | 数据源 = `ccusage`（`remote-dev-station/bin/cc-quota` 已在用）读本机 `~/.claude`，**天然按服务器分，零关联工作**。转录里每条 assistant 消息自带完整 `usage` + `model` → **本地算钱，不调 API**。<br>两层：主机列表紧凑条 / 会话看板详情卡。中转站余额记 P2（token 留服务器，不进 App）。PRD 附录 K |
 | D18 | **悬浮排列的会话切换** | 像手机后台：卡片轮播 + `capture-pane` 实时缩略预览。与列表视图并存（`[列表│悬浮]`）。<br>⚠️ **上滑 = 归档，不杀 tmux 会话**（不可逆操作绝不能是滑动手势；杀会话要长按+二次确认）。PRD 附录 J.3 |
 | D17 | **滑动切卡的视差过渡** | 三层不同速度：焦点卡 1.0x / 邻居 0.86x+缩放+压暗 / 背景 0.3x。`ViewPager2` + 自定义 `PageTransformer`，无额外依赖。<br>⚠️ **必须尊重系统「移除动画」设置**——对前庭障碍用户视差会引发不适。PRD 附录 J.2 |
