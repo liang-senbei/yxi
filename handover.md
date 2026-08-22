@@ -9,11 +9,17 @@
 
 - **是什么**：手机指挥台 —— 复刻 Moshi（手机开终端、管 tmux、给 Claude Code 下指令和远程批权限），**去掉它的整个云端层**。
 - **面向全球用户，但不跑任何后端**：每个用户连自己的服务器（PRD §2.6）。分发走 **GitHub Releases**，不上应用商店。**第一期只做 Android**（iOS 装不了 Release 的 APK，PRD §2.5）。
-- **技术栈**：客户端 = **Android 原生 APK**（Kotlin ~900 行，SSH 用纯 Java 的 `mwiede/jsch`，终端用 WebView + xterm.js）；服务器 = `yxi-agent`（**不监听端口**，由 SSH exec channel 拉起）+ `yxi-inbox`（只听 unix socket）+ `yxi-hook`。**传输走 SSH，不开任何新端口、不要证书。**
-- **部署在哪**：`yxi-agent` 装在任何想要完整功能的机器上（本机 / `station` / `inst2` / …）；没装的机器 App 也能当普通 SSH 终端连。**不占用任何网络端口。**
+- **技术栈**：客户端 = **Android 原生 APK**（Kotlin + Compose + Material 3；SSH 用纯 Java 的 `mwiede/jsch`，
+  终端用 **`org.connectbot:termlib`**（Compose 原生终端控件，不是 WebView），
+  markdown 用 `multiplatform-markdown-renderer-m3`，ed25519 靠 BouncyCastle）。
+  服务器端 = **只有一个 `yxi-hook`**（往 `~/.yxi/events.jsonl` 追加写，App `tail -f`）。
+  **传输走 SSH，不开任何新端口、不要证书。**
+- **部署在哪**：**默认哪台都不用装。** 会话看板、对话渲染、发指令、文件模式全部用现成的
+  `tmux` / `~/.claude/projects` / sshd 自带的 SFTP。只有「手机主动响」需要在那台机器上装 `yxi-hook`。
 - **开发回路**：本机 `/dev/kvm` 可用、嵌套虚拟化已开 → **AVD 模拟器硬件加速**，`adb install` 迭代（MuMuPlayer 无 Linux 版）。
 - **鉴权**：复用 SSH 公钥认证，私钥存 Android Keystore。**不需要 CA 证书 / mTLS / token / Tailscale / 改 ufw**——见 PRD §2.3。手机丢了 = 删一行 `authorized_keys`。
-- **怎么跑**：尚未开工，见 [PLAN.md](./PLAN.md) Phase 0。
+- **怎么跑**：`dev/run.sh`（构建→模拟器→装→起→截图）；测试 `cd android && ./gradlew connectedDebugAndroidTest`（15 条）。
+  APK 产物 `Yxi-0.1.0-debug.apk`，手机直接下的地址见下面「APK 分发」。
 
 ## 进度
 - ✅ **已完成**：**Moshi Android 3.10.0 APK 逆向**（`/root/inbox/base.apk`，解包 `/root/inbox/apk/`；Expo/RN + Hermes，字符串表可读 → 挖出会话枚举命令、云端+本地网关接口清单、Inbox SQLite 表结构，见 PRD §1 与附录 A）；[PRD.md](./PRD.md)；[PLAN.md](./PLAN.md)；全部技术前置在本机验证（PLAN §4）
@@ -21,7 +27,6 @@
 - ✅ **App 内必须实现 SSH**（`mwiede/jsch`，纯 Java 不用 NDK）。**这是刚需，不是可选**：要能连**任意服务器，包括以后新增的**，在 App 里现加（PRD §2.4）
   > ⚠️ 早期版本一度写成"App 内不实现 SSH，只连自己的服务器"——**那是错的，已纠正**。别再退回那个结论
 - ✅ **三个决策全部落定**：①先 Android，iOS 继续用原版 Moshi（装不上自签 App）②不用 Tailscale / CA 证书 ③安卓侧不并行用 Moshi
-- ⬜ **无阻塞项**，可直接开工 Phase 0
 - ✅ **G1 完成**（2026-08-22）：Gradle 工程建好，debug APK 编出并在模拟器跑通，M3 深色主题生效。
   `android/`（AGP 9.3.1 · Kotlin 2.4.10 · Gradle 9.7.1 · compose-bom 2026.08.00 · **compileSdk/targetSdk 37** · minSdk 26）。
   配色写在 `android/app/src/main/kotlin/app/yxi/ui/theme/Color.kt` —— **改配色只改这一个文件**。
