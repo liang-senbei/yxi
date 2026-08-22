@@ -22,6 +22,7 @@ private sealed interface Nav {
     data object Hosts : Nav
     data class Sessions(val host: Host) : Nav
     data class Terminal(val host: Host, val attachTo: String?) : Nav
+    data class Chat(val host: Host, val session: String, val cwd: String) : Nav
 }
 
 class MainActivity : ComponentActivity() {
@@ -37,6 +38,7 @@ class MainActivity : ComponentActivity() {
                 BackHandler(enabled = nav !is Nav.Hosts) {
                     nav = when (val n = nav) {
                         is Nav.Terminal -> Nav.Sessions(n.host)
+                        is Nav.Chat -> Nav.Sessions(n.host)
                         else -> Nav.Hosts
                     }
                 }
@@ -47,8 +49,10 @@ class MainActivity : ComponentActivity() {
                         is Nav.Sessions -> SessionsScreen(
                             store, keys, n.host,
                             onOpenTerminal = { target -> nav = Nav.Terminal(n.host, target) },
+                            onOpenChat = { name, cwd -> nav = Nav.Chat(n.host, name, cwd) },
                             modifier = m,
                         )
+                        is Nav.Chat -> app.yxi.ui.ChatScreen(store, keys, n.host, n.session, n.cwd, modifier = m)
                         is Nav.Terminal -> TerminalScreen(store, keys, n.host, n.attachTo, modifier = m)
                     }
                 }

@@ -168,6 +168,31 @@ class SshSession(
             Shell(ch, out, inp)
         }
 
+    /**
+     * 开一条**不带 PTY** 的 exec 流，用来跟随长期输出（`tail -f` 之类）。
+     *
+     * ⚠️ 别给它 `setPty(true)`：带 PTY 的 exec 输入流在**没有数据可读时会提前返回 EOF**
+     * （实测 `sleep 25` 只读到 13 字节，而通道还 connected）——见 TROUBLESHOOTING #17。
+     * 不带 PTY 就没这问题，而且 `tail -f` 本来也不需要终端。
+     */
+    suspend fun openExecStream(command: String): Shell = withContext(Dispatchers.IO) {
+        val s = requireNotNull(session) { "还没 connect()" }
+        val ch = s.openChannel("exec") as com.jcraft.jsch.ChannelExec
+        ch.setCommand(command)
+        val out = ch.inputStream
+        val inp = ch.outputStream
+        val err = ch.errStream
+        ch.connect(10_000)
+        Thread {
+            runCatching {
+                val b = ByteArray(2048)
+                while (true) { val n = err.read(b); if (n < 0) break
+                    Log.w("YxiSSH", "远端 stderr: " + String(b, 0, n).trim()) }
+            }
+        }.apply { isDaemon = true }.start()
+        Shell(ch, out, inp)
+    }
+
     /** 跑一条命令拿输出就退（会话枚举、探测都走它）。G4 起大量使用。 */
     suspend fun exec(command: String): String = withContext(Dispatchers.IO) {
         val s = requireNotNull(session) { "还没 connect()" }

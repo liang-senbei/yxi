@@ -44,6 +44,7 @@ fun SessionsScreen(
     keys: KeyManager,
     host: Host,
     onOpenTerminal: (String?) -> Unit,
+    onOpenChat: (String, String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -78,7 +79,7 @@ fun SessionsScreen(
             Column(Modifier.weight(1f)) {
                 Text(host.alias, style = MaterialTheme.typography.headlineSmall)
                 Text(
-                    if (status.isEmpty()) "${sessions.size} 个会话 · 点开终端 · 长按发消息" else status,
+                    if (status.isEmpty()) "${sessions.size} 个会话 · 点读对话 · 长按发消息" else status,
                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                     color = MaterialTheme.colorScheme.outline,
                 )
@@ -106,7 +107,9 @@ fun SessionsScreen(
                     items(group.size, key = { group[it].name }) { i ->
                         SessionCard(
                             group[i],
-                            onOpen = { onOpenTerminal(group[i].name) },
+                            // 点卡片 = 对话模式（主界面）；「开终端」按钮才去终端
+                            onOpen = { onOpenChat(group[i].name, group[i].cwd) },
+                            onTerminal = { onOpenTerminal(group[i].name) },
                             onSend = { sendTo = group[i] },
                         )
                     }
@@ -151,7 +154,7 @@ private fun GroupHeader(st: SessionState, n: Int) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SessionCard(s: Session, onOpen: () -> Unit, onSend: () -> Unit) {
+private fun SessionCard(s: Session, onOpen: () -> Unit, onTerminal: () -> Unit, onSend: () -> Unit) {
     val needs = s.state == SessionState.NeedsYou
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -189,7 +192,7 @@ private fun SessionCard(s: Session, onOpen: () -> Unit, onSend: () -> Unit) {
             if (needs) {
                 Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onSend, shape = Pill, modifier = Modifier.weight(1f).height(44.dp)) { Text("回它一句") }
-                    OutlinedButton(onOpen, shape = Pill, modifier = Modifier.weight(1f).height(44.dp)) { Text("开终端") }
+                    OutlinedButton(onTerminal, shape = Pill, modifier = Modifier.weight(1f).height(44.dp)) { Text("开终端") }
                 }
             }
         }

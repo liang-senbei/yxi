@@ -42,6 +42,8 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.jsch)
     implementation(libs.termlib)
+    implementation(libs.markdown)
+    implementation(libs.markdown.m3)
     implementation(libs.bouncycastle)
     implementation(libs.kotlinx.coroutines.android)
 }

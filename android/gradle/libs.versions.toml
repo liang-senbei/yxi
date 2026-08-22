@@ -7,6 +7,7 @@ lifecycle = "2.11.0"
 activityCompose = "1.13.0"
 composeBom = "2026.08.00"
 coroutines = "1.10.2"
+markdown = "0.44.0"      # Compose 原生 markdown 渲染，不用 AndroidView 包 Markwon
 termlib = "0.1.0"       # ConnectBot 的 Compose 原生终端控件（Apache-2.0，4 个 ABI 预编译）
 jsch = "2.28.7"
 bouncycastle = "1.85.2"  # Android JCA 没有 Ed25519 Signature，靠 BC 提供（TROUBLESHOOTING #12）
@@ -22,6 +23,8 @@ androidx-compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling
 androidx-compose-material3 = { module = "androidx.compose.material3:material3" }
 jsch = { module = "com.github.mwiede:jsch", version.ref = "jsch" }
 termlib = { module = "org.connectbot:termlib", version.ref = "termlib" }
+markdown = { module = "com.mikepenz:multiplatform-markdown-renderer-android", version.ref = "markdown" }
+markdown-m3 = { module = "com.mikepenz:multiplatform-markdown-renderer-m3-android", version.ref = "markdown" }
 bouncycastle = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 

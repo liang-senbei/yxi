@@ -41,6 +41,12 @@
   `tmux list-sessions` 和 `~/.cloud-status` 都是现成的。
   实测：本机 16 个会话、station 3 个会话（远程、公网）都正确分组；
   长按会话发 `touch /tmp/yxi-g4-sent`，服务器上文件出现、tmux 有回显。
+- ✅ **G5 完成**（实测通过）：**对话渲染模式**——读 `~/.claude/projects` 下的转录 JSONL（`tail -n N -f`），
+  **不刮屏**。消息气泡 / 思考默认折叠 / markdown 渲染（`com.mikepenz:multiplatform-markdown-renderer-m3`，
+  Compose 原生，不用 AndroidView 包 Markwon）/ 工具卡片（Bash 铜色 · Edit/Write 青色 · 带完成状态）。
+  输入框走 `tmux send-keys` 打进活着的会话 —— **不重新实现 agent 协议**，
+  所以 Claude Code 的配置、权限、MCP、skills 原样生效。
+  解析分层抄 Lucarne 的 `agent-sessions`：原始层与语义层分开，`Unknown` 是兜底不是终点。
 - 🔄 **原 G2 进行中**：**SSH 层已跑通** —— 连接 / ed25519 公钥认证 / PTY / `tmux attach` / 双向读写全部验证成功
   （截图里能看到 `[cc-root] 0:claude*` 和 Claude Code 的 TUI）。
   `android/app/src/main/kotlin/app/yxi/ssh/`：`HostConfig.kt` + `SshSession.kt`（分层参考 ConnectBot 的 `transport/`）。
