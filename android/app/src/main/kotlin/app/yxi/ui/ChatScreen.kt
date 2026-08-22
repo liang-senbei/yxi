@@ -22,8 +22,10 @@ import app.yxi.ssh.HostStore
 import app.yxi.ssh.KeyManager
 import app.yxi.ssh.SshSession
 import com.mikepenz.markdown.m3.Markdown
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private val Pill = RoundedCornerShape(100.dp)
 
@@ -36,80 +38,70 @@ private val Pill = RoundedCornerShape(100.dp)
  */
 @Composable
 fun ChatScreen(
-    store: HostStore,
-    keys: KeyManager,
-    host: Host,
+    /** ⚠️ 连接由 [Workspace] 持有并传进来 —— 切模式时这个 composable 会销毁，连接不能跟着断 */
+    ssh: SshSession?,
     sessionName: String,
     cwd: String,
-    onOpenFiles: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
-    val connect = rememberSshConnector(store, keys, host)
     var items by remember { mutableStateOf<List<ChatItem>>(emptyList()) }
     var status by remember { mutableStateOf<String?>("连接中…") }
-    var ssh by remember { mutableStateOf<SshSession?>(null) }
     var draft by remember { mutableStateOf("") }
     var pending by remember { mutableStateOf<Pending?>(null) }
     var busy by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
-    LaunchedEffect(sessionName) {
-        val c = connect() ?: run { status = "这台主机还没有可用的认证方式"; return@LaunchedEffect }
-        runCatching { c.session.connect(); ssh = c.session }.onFailure {
-            status = c.explain(it)
-            return@LaunchedEffect
-        }
-        val file = TranscriptStream.latestFor(c.session, cwd)
+    LaunchedEffect(sessionName, ssh) {
+        val s = ssh ?: return@LaunchedEffect
+        val file = TranscriptStream.latestFor(s, cwd)
         if (file == null) {
             status = "这个会话里没找到 Claude Code 的转录\n（$cwd）"
             return@LaunchedEffect
         }
         status = null
-        // 攒一批再解析：tail 一上来就吐几百行，逐行重解会把 UI 卡住
+        // 攒一批再解析：tail 一上来就吐几百行，逐行重解会把 UI 卡住。
+        //
+        // ⚠️ **节流必须有「尾随刷新」。** 第一版写成「距上次解析超过 250ms 才解析」，
+        // 结果是：tail 把历史一次性吐完（都在同一个 250ms 窗口里），只有第一行触发了解析，
+        // 剩下的全被吞掉，然后 tail 阻塞等新内容 —— **界面永远停在第一行的解析结果**。
+        // 现象是「忙的会话正常、闲的会话永远空白」，最容易被当成偶发问题。
+        // 现在改成：收行的只管往 buf 里塞并标脏，另一个协程定时把脏的刷出来。
         val buf = ArrayList<String>()
-        var lastEmit = 0L
-        TranscriptStream.stream(c.session, file).collect { line ->
-            buf += line
-            val now = System.currentTimeMillis()
-            if (now - lastEmit > 250) {
-                lastEmit = now
-                items = Transcript.parse(buf.asSequence())
+        var dirty = false
+        launch {
+            while (true) {
+                delay(300)
+                if (!dirty) continue
+                dirty = false
+                val snapshot = buf.toList()   // 在收行的同一个线程上拷一份，再拿去后台解析
+                items = withContext(Dispatchers.Default) { Transcript.parse(snapshot.asSequence()) }
             }
         }
+        TranscriptStream.stream(s, file).collect { line -> buf += line; dirty = true }
     }
     // ⚠️ 「此刻在等你选」这件事**只有屏幕知道** —— tool_use 要等工具跑完才落进转录。
     // 所以历史读转录、待答抓屏幕，两条路各司其职（见 Prompt 的类注释）。
-    LaunchedEffect(ssh) {
+    LaunchedEffect(ssh, sessionName) {
         val s = ssh ?: return@LaunchedEffect
         while (true) {
             if (!busy) runCatching { SessionProbe.pending(s, sessionName) }.onSuccess { pending = it }
             delay(2_500)
         }
     }
-    DisposableEffect(sessionName) { onDispose { ssh?.disconnect() } }
     LaunchedEffect(items.size) {
         if (items.isNotEmpty()) runCatching { listState.animateScrollToItem(items.size - 1) }
     }
 
     Column(modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(18.dp, 12.dp, 18.dp, 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(sessionName.removePrefix("cc-"), style = MaterialTheme.typography.titleLarge)
-                Text(
-                    status ?: "${items.size} 条",
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                    color = MaterialTheme.colorScheme.outline,
-                )
-            }
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainer, shape = Pill,
-                modifier = Modifier.height(40.dp).clickable(onClick = onOpenFiles),
-            ) {
-                Box(Modifier.padding(horizontal = 15.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
-                    Text("文件", style = MaterialTheme.typography.labelMedium)
-                }
-            }
+        // 标题和路径由 Workspace 的头部管，这里只在出问题时说一句
+        status?.let {
+            Text(
+                it,
+                Modifier.fillMaxWidth().padding(18.dp, 8.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.outline,
+            )
         }
 
         LazyColumn(

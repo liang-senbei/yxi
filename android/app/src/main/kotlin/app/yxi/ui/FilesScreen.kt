@@ -34,16 +34,12 @@ private val Mono = FontFamily.Monospace
  */
 @Composable
 fun FilesScreen(
-    store: HostStore,
-    keys: KeyManager,
-    host: Host,
+    /** ⚠️ 由 [Workspace] 持有 —— 切模式时不该重开通道 */
+    sftp: Sftp?,
     startDir: String,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
-    val connect = rememberSshConnector(store, keys, host)
-    var ssh by remember { mutableStateOf<SshSession?>(null) }
-    var sftp by remember { mutableStateOf<Sftp?>(null) }
     var dir by remember { mutableStateOf(startDir) }
     var entries by remember { mutableStateOf<List<Sftp.Entry>>(emptyList()) }
     var status by remember { mutableStateOf<String?>("连接中…") }
@@ -52,16 +48,13 @@ fun FilesScreen(
     // 最近去过的目录。⚠️ 只在内存里 —— 关掉就没了。要跨会话记住得落盘，那是另一件事
     val recent = remember { mutableStateListOf<String>() }
 
-    LaunchedEffect(host.id) {
-        val c = connect() ?: run { status = "这台主机还没有可用的认证方式"; return@LaunchedEffect }
-        runCatching { c.session.connect(); ssh = c.session; sftp = c.session.openSftp() }
-            .onFailure { status = c.explain(it); return@LaunchedEffect }
+    LaunchedEffect(sftp) {
+        val s = sftp ?: return@LaunchedEffect
         // 起点可能是 `~` 或不存在的路径 —— 解析失败就退到家目录，别把界面卡死
-        dir = runCatching { sftp!!.realpath(startDir) }.getOrElse {
-            runCatching { sftp!!.realpath(".") }.getOrDefault("/")
+        dir = runCatching { s.realpath(startDir) }.getOrElse {
+            runCatching { s.realpath(".") }.getOrDefault("/")
         }
     }
-    DisposableEffect(host.id) { onDispose { sftp?.close(); ssh?.disconnect() } }
 
     LaunchedEffect(dir, sftp) {
         val s = sftp ?: return@LaunchedEffect
@@ -82,8 +75,8 @@ fun FilesScreen(
     }
 
     Column(modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(18.dp, 12.dp, 18.dp, 6.dp)) {
-            Text(host.alias, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+        Row(Modifier.fillMaxWidth().padding(18.dp, 8.dp, 18.dp, 4.dp)) {
+            Spacer(Modifier.weight(1f))
             Text(
                 status ?: "${entries.size} 项",
                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = Mono),

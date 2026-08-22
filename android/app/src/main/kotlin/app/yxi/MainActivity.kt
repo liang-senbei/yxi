@@ -12,18 +12,23 @@ import androidx.compose.ui.Modifier
 import app.yxi.ssh.Host
 import app.yxi.ssh.HostStore
 import app.yxi.ssh.KeyManager
-import app.yxi.term.TerminalScreen
 import app.yxi.ui.HostsScreen
+import app.yxi.ui.Mode
 import app.yxi.ui.SessionsScreen
+import app.yxi.ui.Workspace
 import app.yxi.ui.theme.YxiTheme
 
-/** 主机列表 → 会话看板 → {终端 | 对话 | 文件}。返回键逐层退。G8 会把后三者做成同层切换。 */
+/**
+ * 三层：**主机列表 → 会话看板 → 工作区**。返回键逐层退。
+ *
+ * 终端 / 对话 / 文件不是三个页面，而是**工作区里的三种模式** —— 它们共用同一条
+ * SSH 连接，切换只换画面不断连（见 [Workspace]）。
+ */
 private sealed interface Nav {
     data object Hosts : Nav
     data class Sessions(val host: Host) : Nav
-    data class Terminal(val host: Host, val attachTo: String?) : Nav
-    data class Chat(val host: Host, val session: String, val cwd: String) : Nav
-    data class Files(val host: Host, val dir: String) : Nav
+    /** [session] 为 null = 不针对某个 tmux 会话（从主机层直接进终端或文件） */
+    data class Work(val host: Host, val session: String?, val cwd: String, val mode: Mode?) : Nav
 }
 
 class MainActivity : ComponentActivity() {
@@ -38,9 +43,7 @@ class MainActivity : ComponentActivity() {
                 var nav by remember { mutableStateOf<Nav>(Nav.Hosts) }
                 BackHandler(enabled = nav !is Nav.Hosts) {
                     nav = when (val n = nav) {
-                        is Nav.Terminal -> Nav.Sessions(n.host)
-                        is Nav.Chat -> Nav.Sessions(n.host)
-                        is Nav.Files -> Nav.Sessions(n.host)
+                        is Nav.Work -> Nav.Sessions(n.host)
                         else -> Nav.Hosts
                     }
                 }
@@ -50,18 +53,13 @@ class MainActivity : ComponentActivity() {
                         is Nav.Hosts -> HostsScreen(store, keys, onOpen = { nav = Nav.Sessions(it) }, modifier = m)
                         is Nav.Sessions -> SessionsScreen(
                             store, keys, n.host,
-                            onOpenTerminal = { target -> nav = Nav.Terminal(n.host, target) },
-                            onOpenChat = { name, cwd -> nav = Nav.Chat(n.host, name, cwd) },
-                            onOpenFiles = { nav = Nav.Files(n.host, ".") },
+                            onOpenTerminal = { target, cwd -> nav = Nav.Work(n.host, target, cwd, Mode.Terminal) },
+                            // 点卡片 = 「打开这个会话」，用它上次的偏好；不是「我要对话模式」
+                            onOpenChat = { name, cwd -> nav = Nav.Work(n.host, name, cwd, null) },
+                            onOpenFiles = { nav = Nav.Work(n.host, null, ".", Mode.Files) },
                             modifier = m,
                         )
-                        is Nav.Chat -> app.yxi.ui.ChatScreen(
-                            store, keys, n.host, n.session, n.cwd,
-                            onOpenFiles = { nav = Nav.Files(n.host, n.cwd) },   // 起点就是这个会话的 cwd
-                            modifier = m,
-                        )
-                        is Nav.Files -> app.yxi.ui.FilesScreen(store, keys, n.host, n.dir, modifier = m)
-                        is Nav.Terminal -> TerminalScreen(store, keys, n.host, n.attachTo, modifier = m)
+                        is Nav.Work -> Workspace(store, keys, n.host, n.session, n.cwd, n.mode, modifier = m)
                     }
                 }
             }

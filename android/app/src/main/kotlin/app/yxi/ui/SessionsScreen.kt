@@ -43,7 +43,8 @@ fun SessionsScreen(
     store: HostStore,
     keys: KeyManager,
     host: Host,
-    onOpenTerminal: (String?) -> Unit,
+    /** (会话名, cwd)。⚠️ **cwd 必须一起传** —— 对话模式靠它找转录文件 */
+    onOpenTerminal: (String?, String) -> Unit,
     onOpenChat: (String, String) -> Unit,
     onOpenFiles: () -> Unit,
     modifier: Modifier = Modifier,
@@ -85,7 +86,7 @@ fun SessionsScreen(
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("文件" to onOpenFiles, "终端" to { onOpenTerminal(null) }).forEach { (label, go) ->
+                listOf("文件" to onOpenFiles, "终端" to { onOpenTerminal(null, ".") }).forEach { (label, go) ->
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceContainer, shape = Pill,
                         modifier = Modifier.height(44.dp).clickable(onClick = go),
@@ -113,7 +114,7 @@ fun SessionsScreen(
                             group[i],
                             // 点卡片 = 对话模式（主界面）；「开终端」按钮才去终端
                             onOpen = { onOpenChat(group[i].name, group[i].cwd) },
-                            onTerminal = { onOpenTerminal(group[i].name) },
+                            onTerminal = { onOpenTerminal(group[i].name, group[i].cwd) },
                             onSend = { sendTo = group[i] },
                         )
                     }

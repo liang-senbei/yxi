@@ -136,8 +136,12 @@ object Transcript {
     }
 
     /**
-     * cwd → Claude Code 的项目目录名：**斜杠全部换成横杠**。
-     * 例：`/root/src/workspace/Yxi` → `-root-src-workspace-Yxi`（开头那个横杠来自根斜杠）
+     * cwd → Claude Code 的项目目录名：**凡不是 ASCII 字母或数字的字符，一律换成横杠**。
+     *
+     * ⚠️ 一开始只换了斜杠，中文路径就找不到转录了 —— 实测
+     * `/opt/workspace/日常对话` 对应的目录是 `-opt-workspace-----`（四个汉字四个横杠），
+     * 不是 `-opt-workspace-日常对话`。点号、空格同理。
      */
-    fun projectDirOf(cwd: String): String = cwd.replace('/', '-')
+    fun projectDirOf(cwd: String): String =
+        cwd.map { if (it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9') it else '-' }.joinToString("")
 }
