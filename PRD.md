@@ -174,6 +174,9 @@ Face ID 保护私钥、Bonjour 发现局域网 `_ssh._tcp` 主机。
 | 支持 6 家 agent（Codex/Cursor/Kimi…） | **先只做 Claude Code** | YAGNI。你机器上跑的就是 cc |
 | 从零写会话发现、状态跟踪 | **复用你已有的** `hub` / `cc-state` / `cloud-sesslist` / `cc-agents` / `cc-quota` | 这些已经在跑了，见 §5.2 |
 | 一次 SSH 往返 + marker 分段拿全部会话 | **照抄**（见 §1.2） | 这招是对的，手机网络下往返贵 |
+| 探测标记**带版本号**（`__MOSHI_MULTIPLEXER_SNAPSHOT_V1__`） | **照抄** | 附录 C.1。agent 和 App 版本不同步时能优雅降级 |
+| 往远端 shell 注入 `MOSHI_CLIENT=1` | **照抄**（`YXI_CLIENT=1`） | 附录 C.2。一行 export 换来主机侧脚本自适应 |
+| 通知的 approve/deny action（`MOSHI_APPROVE_ACTION`） | **照抄** | 附录 C.6。这就是「通知上直接批」的实现方式 |
 | 输入框只能发给**当前 attach 着**的会话（§1.6） | **`tmux send-keys` 发给任意会话** | 我们比他强的一点：不用先 attach 就能下指令 |
 | 手机端 SQLite 镜像 + 墓碑软删除同步（§1.4） | **服务端一个 JSON 文件** | 单设备不需要多端同步，墓碑表是为多设备付的税 |
 
@@ -646,3 +649,120 @@ Lucarne 不做 App，把通知和审批塞进**微信 / Telegram**——"引用�
 
 **不改变主方案**（你要的是 APK，且终端是刚需）。
 但 **Phase 4 的通知兜底**（国产 ROM 杀前台服务时）除了 ntfy，**微信也是一条候选**——记在这里备用。
+
+---
+
+## 附录 C · 深度反编译成果（第二轮，2026-08-22）
+
+> 第一轮只用 `strings` 硬抠（结果粘连）。第二轮上了真工具：
+> **`hermes-dec`** 解 Hermes 字节码 → **56,188 条干净分离的字符串**；**`jadx`** 反编译 7 个 dex。
+> 下面全是原文。
+
+### C.1 探测协议是**带版本号**的
+
+```
+__MOSHI_MULTIPLEXER_SNAPSHOT_V1__     ← 就是预检脚本里那个 $marker（§1.2）
+__MOSHI_HOOK_PROBE_V2__               ← 探 moshi-hook 是否就绪，已经迭代到 V2
+__MOSHI_RECENT_CWDS_V1__              ← 探最近工作目录
+```
+
+**值得抄**：探测输出用**带版本号的标记**分段，客户端按版本解析。
+主机侧 agent 升级了、客户端还是旧的，能优雅降级而不是解析崩掉。我们的 `yxi-agent` 照做。
+
+### C.2 `MOSHI_CLIENT=1` —— 让主机知道"这是手机在开"
+
+它会（可开关，设置项 `MOSHI_CLIENT_SSH_EXPORT`）在远端 shell 里注入：
+```
+export MOSHI_CLIENT=1
+```
+（也见 ` -l MOSHI_CLIENT=1` 形式）
+
+**这招很聪明，直接抄**。主机上的脚本 / `.bashrc` / agent 可以据此改变行为——
+比如手机连进来时自动用更窄的输出、跳过花哨的 TUI、把提示语写短。
+一行 export 换来整个主机侧的自适应能力。
+
+### C.3 OSC 777：把结构化消息塞进**终端字节流**
+
+```
+\x1b]777;moshi-snapshot=1\x07
+```
+
+这是 **OSC（Operating System Command）转义序列**——主机往 stdout 写一段特殊序列，
+**终端模拟器截获并解析**，而不显示出来。于是**不需要另开通道**，控制消息和终端输出走同一条流。
+
+> 我们的方案（PRD §2.3）是另开一个 SSH exec channel 跑 `yxi-agent`，**更干净**（结构化、双向、不污染终端流）。
+> 但 OSC 这招留作备用：如果哪天想给**没装 `yxi-agent` 的主机**也加一点点信号，
+> 让 shell 提示符里 `printf '\033]777;...\007'` 就行，零安装。
+
+### C.4 没有 hook 的 agent 怎么审批：**直接往 TTY 里打字节**
+
+```
+CODEX_APPROVE_BYTES
+CODEX_DENY_BYTES
+```
+
+Codex CLI 没有 Claude Code 那样的 hook API，所以 Moshi 的做法是：
+**把"批准/拒绝"对应的原始按键字节直接写进终端**，等于替你在键盘上按了那个键。
+
+**每个 agent 一套事件通道**（原文）：
+```
+claude-event-approval · claude-event-running · claude-event-done
+claude-hook-session-approval · claude-hook-session-running · claude-hook-session-done
+codex-event-working · codex-event-done · codex-hook-session-working · codex-hook-session-done
+```
+注意 Claude 有 `-approval` 通道而 Codex 没有——**因为只有 Claude Code 能真正阻塞住授权**（hook），
+Codex 那边只能"看到它在等"然后替你按键。这印证了 PRD §1.5 的判断：
+**远程审批的能力上限，取决于 agent 有没有可阻塞的 hook。**
+
+### C.5 Ghostty 终端模块暴露给 JS 的完整 API（jadx 从 Kotlin metadata 还原）
+
+```kotlin
+write(reactTag, data)              clear/reset/focus/blur/dispose(reactTag)
+requestPaste(reactTag)             fit(reactTag)
+scrollToBottom(reactTag)           scrollLines(reactTag, lines)
+paste(reactTag, data)              writeAndGetCursorPosition(reactTag, data, promise)
+getBuffer(reactTag, scrollback, promise)     getCursorPosition(reactTag, promise)
+readScreenRow(reactTag, row, promise)
+registerFontFile(filePath, promise)          resolveLoadedFontName(query, promise)
+```
+
+**这就是一个移动终端控件该有的接口清单**——我们用 `termux/terminal-view`（PRD §2.2）时，
+照着这张表核对功能覆盖即可。注意 `registerFontFile` / `resolveLoadedFontName`：
+**动态注册字体**是为 CJK 服务的（§1.8 它按需下载 NotoMonoCJK）。
+
+### C.6 其它零碎
+
+| 发现 | 说明 |
+|---|---|
+| `~/.moshi/uploads/`（`ABSPATH=$(cd ~/.moshi/uploads && pwd)/`） | 图片上传落在主机这个目录 |
+| `--moshi-diff-*` CSS 变量、`window.__moshiDiffFreeUseLimit` | **diff 查看器是个 WebView 网页**，不是原生。免费版有次数限制 |
+| `approval_delegation` / `approval_delegation_off` | 有"审批委派"功能 |
+| `MOSHI_APPROVAL_CATEGORY` / `MOSHI_APPROVE_ACTION` / `MOSHI_DENY_ACTION` | Android 通知的 category 和两个 action id ——**通知上直接批准就是靠这个** |
+| `app.getmoshi.liveactivity.MoshiFcmService` | **安卓侧推送走 FCM**，不是前台服务保活（见下） |
+| `MOSHI-XXXX-XXXX-XXXX` | License key 格式 |
+
+### C.7 一个要慎重对待的分歧：**它用 FCM，我们用前台服务**
+
+Moshi 安卓版靠 **FCM**（Firebase）收推送。我们（PRD §6）选前台服务常驻。对比：
+
+| | FCM（Moshi） | 前台服务（我们） |
+|---|---|---|
+| 被系统杀 | ✅ 不怕，系统级唤醒 | ⚠️ 国产 ROM 会杀 |
+| 依赖 | ❌ Google 服务 + Firebase 项目 | ✅ 零依赖 |
+| **国内手机没 GMS** | ❌ **直接不可用** | ✅ 照常工作 |
+| 内容过谁 | Google + Moshi 云 | **只过你自己的机器** |
+
+**结论：坚持前台服务**。国产 ROM 杀后台的风险，用「电池白名单 + `START_STICKY` + 开机广播 +
+`yxi-inbox` 保证事件不丢」来对冲（PLAN Phase 4）——**总比在没有 GMS 的手机上直接失灵强。**
+
+### C.8 复现方法
+
+```bash
+pip install --break-system-packages hermes-dec
+python3 -c "
+from hermes_dec.parsers.hbc_file_parser import HBCReader
+r=HBCReader(); r.read_whole_file(open('assets/index.android.bundle','rb'))
+open('strings_clean.txt','w').write('\n'.join(str(s).replace(chr(10),'\\n') for s in r.strings))"
+# ⚠️ 本仓环境里 `grep` 被包成 ugrep 且带 --ignore-files，会跳过这个文件 —— 用 python 过滤
+jadx -d out --no-res --deobf -j 8 base.apk     # Kotlin metadata 里有完整方法签名
+```
