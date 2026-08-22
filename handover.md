@@ -29,6 +29,7 @@
 - 🔄 **G2 进行中**：**SSH 层已跑通** —— 连接 / ed25519 公钥认证 / PTY / `tmux attach` / 双向读写全部验证成功
   （截图里能看到 `[cc-root] 0:claude*` 和 Claude Code 的 TUI）。
   `android/app/src/main/kotlin/app/yxi/ssh/`：`HostConfig.kt` + `SshSession.kt`（分层参考 ConnectBot 的 `transport/`）。
+  **双向已验证**：从 App 输入框敲 `touch /tmp/yxi-g2-typed`，经 SSH→PTY→tmux→shell 执行，服务器上文件真的出现。
   **剩终端控件选型**（临时用 ANSI 剥离显示，TUI 排版必然错乱 —— 正说明需要真 VT 状态机）。
   开发回路固化进 `dev/run.sh`（一条命令：保证模拟器在 → 构建 → 装 → 起 → 抓日志 → 截图）。目标清单见 [GOALS.md](./GOALS.md)
 - ⬜ **原待办**：Phase 0（Android 工具链 + 空壳 APK + AVD，**最大未知，先做**）→ 1（SSH 层+多主机+终端，2 天，**到这已可替代现有 SSH App**）→ 2（终端打磨：中文/方向键/重连）→ 3（yxi-agent + 会话看板）→ 4（事件+通知）→ 5（远程审批）→ 6（P1）。**P0 约 6.5 天**

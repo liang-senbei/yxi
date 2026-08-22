@@ -35,7 +35,7 @@ class MainActivity : ComponentActivity() {
                                 username = "root",
                                 auth = HostConfig.Auth.PrivateKey(keyFile.readText()),
                             ),
-                            attachTo = "cc-root",
+                            attachTo = "yxi-g2",   // 专用测试会话（纯 shell），不碰真实的 cc-* 会话
                             modifier = Modifier.padding(p),
                         )
                     } else {
