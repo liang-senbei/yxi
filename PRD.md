@@ -427,7 +427,8 @@ secure context，于是被迫去搞 Let's Encrypt / Tailscale funnel / 域名，
 | P0-9 | **⭐ 语音输入** | 系统 `SpeechRecognizer` 为主、输入法语音键兜底。⚠️ **命令行模式下必须先确认再发送**（识别错 = 在服务器上跑了没说过的命令）。**附录 E** |
 | P0-10 | **⭐ 附件与图片** | 上传到 `/root/src/tmp/<项目>/`，按项目分类、每条消息内编号（图片1/附件1）、**3 天自动清理**。**附录 F** |
 | P0-11 | **⭐ 文件浏览与阅读** | 第三个模式。**走 SFTP，不需要 `yxi-agent`**，任何 SSH 主机可用。md 支持「渲染 ⇄ 源码」切换、图片、JSON 折叠树、代码高亮。**只读**。**附录 G** |
-| P0-12 | **一键装公钥** | 用密码连上一次 → 一键把 App 公钥 append 进 `~/.ssh/authorized_keys` → 之后免密。相当于 `ssh-copy-id`（§2.4） |
+| P0-12 | **⭐ D-Pad 方向键盘** | 圆形四向 + 中央 Enter，两个上角可配置，长按连发、按住拖动持续导航。**顺手兜底 AskUserQuestion 的选项风险**。**附录 I** |
+| P0-13 | **一键装公钥** | 用密码连上一次 → 一键把 App 公钥 append 进 `~/.ssh/authorized_keys` → 之后免密。相当于 `ssh-copy-id`（§2.4） |
 
 ### 5.2 P0 能白捡的现成件（这就是为什么 P0 不大）
 
@@ -697,33 +698,91 @@ crypto_kem_dec/enc/keypair · crypto_sign* · ssh-ed25519/rsa/dss   →  libsodi
 
 ---
 
-## 附录 B · 开源参考项目（GitHub 实查，2026-08）
+## 附录 B · 开源参考项目（**已实读源码**，2026-08）
 
-### B.1 Android SSH 客户端 —— Phase 1 抄这些
+> ⚠️ 用户问「那些之前挖掘的 GitHub 项目你参考了吗」——**第一版只是书签清单（名字/许可/star），没读过代码。**
+> 下面是真读过之后的结论，**其中两条推翻了第一版的记录**。
 
-| 项目 | ★ | 许可 | 为什么看它 |
-|---|---|---|---|
-| **`GlassHaven/Haven`** | 1091 | AGPL-3.0 | **Kotlin 写的现代 Android SSH/VNC/RDP/SFTP 客户端，今天还在更新**。跟我们 Phase 1 要做的几乎一样，**最直接的参照** |
-| **`connectbot/connectbot`** | 3391 | **Apache-2.0** | Android 上第一个 SSH 客户端，仍在维护。许可最宽松→**可以直接抄代码**。自带 `sshlib`（Trilead SSH2 分支）和 vt320 终端 |
-| `electerm/electerm` | 14905 | MIT | 桌面端（Electron），但 UI/交互设计值得参考 |
+### B.1 ⭐ 两条更正
 
-### B.2 Android 终端控件 —— 替代 WebView+xterm.js（见 §2.2）
+**① `termux/terminal-view` 和 `terminal-emulator` 是 Apache-2.0，不是 GPL-3.0。**
 
-| 项目 | ★ | 许可 | 说明 |
-|---|---|---|---|
-| **`termux/termux-app`** | 59558 | GPL-3.0 | **`terminal-view` / `terminal-emulator` 已是独立 gradle 模块**（已核实目录存在），可直接依赖 |
-| `jackpal/Android-Terminal-Emulator` | 3188 | Apache-2.0 | Termux 的祖先，VT-100，许可宽松 |
+我第一版记成 GPL-3.0，那是**整个 `termux-app` 仓库**的许可。但它的 `LICENSE.md` 里有明确豁免：
 
-### B.3 Claude Code 远程控制 —— 别人怎么解这道题
+> "Terminal Emulator for Android code is used which is released under Apache 2.0 license.
+> Check **`terminal-view`** and **`terminal-emulator`**"
 
-| 项目 | ★ | 许可 | 做法 |
-|---|---|---|---|
-| **`tuchg/Lucarne`** | 332 | MIT | **最值得看的**。Rust 守护 `lucarned`，**通知和审批走微信 / Telegram**，**不做 App**。<br>⚠️ 它明确"**no hooks, no skills, no MCP**"（零侵入）→ 靠**监视 CLI 进程/终端输出**判断状态，而不是 Claude 的 hook。<br>**取舍相反**：它牺牲准确性换零配置；我们用 hook 换准确性和**能真正阻塞住授权** |
-| `voglster/lumbergh` | 32 | MIT | 自托管 web 看板，监督多个 Claude Code |
-| `1203Arya/Claude-control` | 0 | ? | "Control Claude Code from your phone. Every file write, bash command…" |
-| `devswha/chatmux` | 18 | AGPL-3.0 | tmux 聊天式 web 终端，agent 无关 |
-| `chrismccord/webtmux` | 136 | MIT | Phoenix 作者写的 tmux 专用 web 终端 |
-| `linwk20/tmux-kanban` | 11 | MIT | tmux 会话的 web 看板 |
+→ 这两个模块继承自 `jackpal/Android-Terminal-Emulator`（Apache-2.0）。
+**许可顾虑消失，可以放心用。**
+而且 `terminal-view/build.gradle` 里有 **`apply plugin: 'maven-publish'`**、`namespace "com.termux.view"`、
+`api project(":terminal-emulator")` ——**是按可发布的库模块组织的**，不是耦在 App 里。
+
+规模：`TerminalView.java` **68 KB** · `TerminalRenderer.java` 13 KB ·
+`GestureAndScaleRecognizer.java` · `TerminalViewClient.java` · `textselection/`——**成熟且完整**。
+
+**② ConnectBot 不「更老」，它是 Kotlin + Compose + DI。**
+
+我第一版写「成熟但更老」。实际读了它的 `app/build.gradle.kts`：
+
+```
+androidx.compose.bom · compose.material3 · navigation.compose
+lifecycle.viewmodel.compose · material.icons.extended · hilt 风格的 di/ 目录
+```
+
+源码结构：`data/ di/ logging/ service/ transport/ ui/ util/` + `ConnectBotApplication.kt`。
+**这是一个现代 Kotlin/Compose 应用**，参考价值比我以为的高得多。
+
+### B.2 ⭐ ConnectBot 的 transport 层——**Phase 1 直接照着这个结构写**
+
+```
+transport/
+├── AbsTransport.kt          6.8 KB   抽象基类
+├── Transport.kt             4.0 KB   接口
+├── TransportFactory.kt      4.1 KB   工厂
+├── SSH.kt                  60.3 KB   ⭐ SSH 传输全部实现
+├── Local.kt                 5.2 KB   本地 shell
+├── Telnet.kt               10.3 KB
+├── StreamSocket.kt          4.0 KB
+└── JumpHostProxyData.kt     2.3 KB   ⭐ 跳板机
+```
+
+**两个直接可用的收获：**
+1. **`SSH.kt` 60 KB 是我们要写的那部分的参考实现**（Apache-2.0，可直接抄）
+2. **`JumpHostProxyData.kt`——它支持跳板机（ProxyJump）**。我们没想到这个，
+   但你的 `laptop`（反向隧道）和 `han`（非标端口）说明这类需求是真实的 → **记为 P1**
+
+### B.3 ⭐ SSH 库的选择：**`mwiede/jsch` 保持不变，理由变硬了**
+
+ConnectBot 用的是 **`org.connectbot:sshlib:2.2.48`**（Maven Central，Apache-2.0，Trilead SSH2 分支）
++ **`org.connectbot:termlib:0.1.0`**。
+
+一度考虑改用 sshlib（许可更宽松、Android 专用）。但：
+
+> **代码搜索 `SFTPv3Client` 在 `connectbot/sshlib` 里 0 命中。**
+> ConnectBot 本身不做文件传输，Trilead 的 SFTP 客户端很可能在它的分支里被裁掉了。
+
+**而我们的文件模式（附录 G）刚需 SFTP** → **`mwiede/jsch` 胜出**（自带 SFTP）。
+> ⚠️ 代码搜索依赖索引，不是铁证。**Phase 1.1 拉下来实际验证一次**再定死。
+
+### B.4 ⭐ Lucarne 的 `agent-sessions`——**比我附录 D.2 想得更周到**
+
+`tuchg/Lucarne`（MIT，Rust）里有个独立 crate **`agent-sessions`**，
+专门解决**「读各家 agent 的会话转录」**——**跟我们 Chat View 要解决的是同一个问题**。
+它支持 **7 家**：`claude` `codex` `copilot` `cursor` `gemini` `grok` `pi`。
+
+它的 `AGENTS.md` 写了架构纪律，**三条我们该照抄**：
+
+| # | 它的规则（原文要点） | 对我们的意义 |
+|---|---|---|
+| 1 | **原始层与语义层严格分开**：`providers::<agent>::…` 是 agent 专属的强类型 schema；`agent_session::{Session, Event, Body}` 是共享语义层。**「不要让原始类型为了少写点代码去依赖共享类型」** | 我附录 D.2 把两层压成了一张映射表。**分开更好**：将来加 Codex 不用动渲染层 |
+| 2 | **`Unknown` 是兼容兜底，不是正常终点**。「在发明新的公开变体名之前，先扫真实的本地会话库，用观测到的键集和子类型计数确认这个形状真的稳定」；「真实样本里出现 `Unknown` 就在同一次改动里把它提升成强类型变体」 | **Claude Code 会不断加新的 content block 类型**（`thinking` 就是后加的）。渲染器必须优雅降级，**而且要有升级纪律**，否则 Unknown 会烂在那 |
+| 3 | **「如果一个稳定的原始字段本来就带 shell 语义，就在原始层把这部分解析掉；不要让下游重新打开 agent 专属的 JSON blob 去捞 `command`、`duration`」**（它有专门的 `bash.rs`） | 正对我们的 **Bash 卡片**（全项目 3177 次，最高频）。`command` / 退出码 / 耗时 应该在**解析层**就抽出来，不是让 UI 层再去翻 `tool_input` |
+
+它还有 `watch/`（文件监视）、`reader.rs`、`parse_selection.rs`——**结构值得整体参考**。
+
+> 💡 一个诚实的对比：**Lucarne 在「读转录」这件事上做得比我的设计细。**
+> 它不用 hook（零侵入），所以**必须**把转录解析做到极致；我们有 hook，
+> 所以状态判断更准，但**转录解析这块该虚心抄它的分层**。
 
 ### B.4 从 Lucarne 学到的一个备选思路：**微信当审批通道**
 
@@ -1320,3 +1379,68 @@ server/
   超时即 `"ask"`
 - **`~/.yxi/events.jsonl` 需要轮转**（别无限长）：hook 每次写前检查，超过 5 MB 就
   截断保留尾部 1000 行。一行代码的事，比守护进程可靠
+
+---
+
+## 附录 I · 方向键盘 D-Pad（P0，用户要求 D16）
+
+> 用户：「设计一个按键，就是方便我上下左右选择的」。
+> Moshi 有这个，下面是从 APK 字符串里挖出的它的完整设计（原文），加上我们的改动。
+
+### I.1 Moshi 的 D-Pad（逆向所得，原文）
+
+> **"Open the circular D-Pad with four arrow keys and a central Enter button"**
+> 「打开圆形 D-Pad，四个方向键 + 中央 Enter 按钮」
+
+**结构**：圆形 · 四向 · **中央 Enter**。由工具条上一个按钮唤出浮层
+（`ToolbarDPadTrigger` → `ToolbarDPadOverlay`，`onDPadTriggerPress`），不是常驻。
+
+**只有两个可配置槽位**——**左上角和右上角**（`dpadTopLeftSlot` / `dpadTopRightSlot`，
+"Upper-left/Upper-right D-Pad button"）。不是四个角。
+
+**每个槽位可选的动作**（`TERMINAL_DPAD_SLOT_ACTIONS`）：
+
+| 动作 | 原文 |
+|---|---|
+| Backspace | "Send Backspace from this D-Pad corner." |
+| Ctrl+C（中断） | "Send Ctrl+C from this D-Pad corner." |
+| 自定义快捷 | "Send a custom shortcut from this D-Pad corner." |
+| 隐藏 | "Hide this D-Pad corner button." |
+
+**可选图标**（`terminalDpad.icons.*`）：`delete` `enter` `history` `interrupt` `keyboard` `paste` `shortcuts`
+**位置可调**：`terminalDpadPosition` / `setTerminalDpadPosition`
+**长按体系**：`keyboardButtonLongPressAction` · `ctrlButtonLongPressAction` · `tabLongPress` · `onShortcutLongPress`
+**另一招**：`spaceBarArrowKeys`——**在空格键上横向滑动移动光标**（iOS 那招）
+
+### I.2 我们的设计
+
+**照抄的**：圆形 · 四向 · **中央 Enter** · 两个上角可配置槽位（Backspace / Ctrl+C / 自定义 / 隐藏） · 位置可拖。
+
+**我们加的三条：**
+
+| # | 加什么 | 为什么 |
+|---|---|---|
+| 1 | ⭐ **对话模式也能唤出** | Moshi 的是终端专属（`terminal-dpad`）。我们的对话模式里也可能要在 TUI 菜单里选——见 I.3 |
+| 2 | ⭐ **按住不放 = 连发** | 500 ms 后每 80 ms 一次。翻历史命令要按 20 次 ↓，一次次点是折磨 |
+| 3 | ⭐ **按住拖到方向 = 持续导航** | 不用抬手重按。手指压在中心，往哪边推就往哪边走，回中心即停 |
+
+**半透明**，不挡终端内容；拖动改位置后**记住左右手偏好**。
+
+### I.3 ⭐ 它顺手解掉了 Phase 3 的那个风险
+
+PLAN Phase 3 标了一个风险：**「点 `AskUserQuestion` 的选项时，要往 TUI 送什么按键？没实测，通不了就只能做成只读」**。
+
+**Claude Code 的 TUI 菜单（权限提示、计划批准、AskUserQuestion）本来就是 ↑↓ 选、Enter 确认。**
+所以 D-Pad 是这个风险的**兜底**：
+
+- **理想情况**：能把「点第 2 个选项」映射成确定的按键序列 → 卡片按钮直接可点
+- **兜底**：映射不可靠 → 卡片显示成只读，**你用 D-Pad 上下选 + 中央 Enter 确认**
+
+→ **无论哪种情况都能用**，风险从「可能做不了」降成「可能不够优雅」。
+
+### I.4 边界
+
+- ✗ **不做四个角**（Moshi 也只做两个上角）——下面两个角在拇指自然握持位之外，够不着
+- ✗ **不做自定义手势编辑器**（PRD §5.5 第 16 条已定简版）
+- ⚠️ `spaceBarArrowKeys`（空格键滑动移光标）**记为 P2**——很妙，但它依赖软键盘本身，
+  国内输入法行为不一，先不碰
