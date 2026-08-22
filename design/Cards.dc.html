@@ -1,0 +1,86 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
+  <style>
+    body { margin:0; font-family:'Space Grotesk', system-ui, sans-serif; }
+    a { color:#e08b57; } a:hover { color:#f0a473; }
+    * { box-sizing:border-box; }
+  </style>
+</helmet>
+
+<div style="width:390px; height:844px; background:#1a1917; color:#ece8e3; display:flex; flex-direction:column; overflow:hidden;">
+
+  <div style="display:flex; align-items:center; gap:12px; padding:10px 14px; background:#232120; border-bottom:1px solid #39352f; flex-shrink:0;">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9b938a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+    <div style="display:flex; flex-direction:column; gap:1px; flex-grow:1;">
+      <div style="font-size:15px; font-weight:600; letter-spacing:-0.01em;">cc-mail</div>
+      <div style="display:flex; align-items:center; gap:5px;">
+        <div style="width:6px; height:6px; border-radius:3px; background:#d5a244;"></div>
+        <div style="font-size:11px; color:#d5a244; font-family:'JetBrains Mono', monospace;">等你</div>
+      </div>
+    </div>
+    <div style="display:flex; background:#1a1917; border:1px solid #39352f; border-radius:9px; padding:2px;">
+      <div style="padding:11px 14px; font-size:12px; font-weight:500; color:#9b938a; border-radius:7px;">终端</div>
+      <div style="padding:11px 14px; font-size:12px; font-weight:600; color:#1a1917; background:#e08b57; border-radius:7px;">对话</div>
+    </div>
+  </div>
+
+  <div style="flex-grow:1; display:flex; flex-direction:column; gap:18px; padding:18px 14px; overflow:hidden;">
+
+    <!-- AskUserQuestion -->
+    <div style="border:1px solid #4a443d; border-radius:14px; overflow:hidden; background:#232120;">
+      <div style="display:flex; align-items:center; gap:8px; padding:10px 13px; background:#2b2826; border-bottom:1px solid #39352f;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#d5a244" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 015.8 1c0 2-3 3-3 3M12 17h.01"/></svg>
+        <div style="font-size:11.5px; font-weight:600; color:#d5a244; letter-spacing:0.03em;">等你回答</div>
+      </div>
+      <div style="padding:14px 13px 13px;">
+        <div style="font-size:11px; color:#6d665f; font-family:'JetBrains Mono', monospace; margin-bottom:7px;">存储方案</div>
+        <div style="font-size:14px; line-height:1.55; margin-bottom:14px;">收件箱事件用哪种存储？两种在崩溃恢复上差别很大。</div>
+        <div style="display:flex; flex-direction:column; gap:9px;">
+          <div style="border:1px solid #4a443d; border-radius:11px; padding:12px 13px; background:#2b2826;">
+            <div style="font-size:13.5px; font-weight:600; margin-bottom:3px;">SQLite（推荐）</div>
+            <div style="font-size:12px; line-height:1.5; color:#9b938a;">崩溃安全、支持墓碑软删除；多一个依赖</div>
+          </div>
+          <div style="border:1px solid #39352f; border-radius:11px; padding:12px 13px;">
+            <div style="font-size:13.5px; font-weight:600; margin-bottom:3px;">JSON 行文件</div>
+            <div style="font-size:12px; line-height:1.5; color:#9b938a;">零依赖、可直接读；并发写要自己加锁</div>
+          </div>
+          <div style="border:1px dashed #39352f; border-radius:11px; padding:12px 13px;">
+            <div style="font-size:13.5px; font-weight:500; color:#9b938a;">其它…</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ExitPlanMode -->
+    <div style="border:1px solid #4a443d; border-radius:14px; overflow:hidden; background:#232120;">
+      <div style="display:flex; align-items:center; gap:8px; padding:10px 13px; background:#2b2826; border-bottom:1px solid #39352f;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#35b1a1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+        <div style="font-size:11.5px; font-weight:600; color:#35b1a1; letter-spacing:0.03em;">计划</div>
+      </div>
+      <div style="padding:14px 13px 0;">
+        <div style="font-size:14.5px; font-weight:600; margin-bottom:9px; letter-spacing:-0.01em;">迁移收件箱到 SQLite</div>
+        <div style="display:flex; flex-direction:column; gap:7px; font-size:13px; line-height:1.5; color:#c9c2ba;">
+          <div style="display:flex; gap:9px;"><span style="color:#6d665f; font-family:'JetBrains Mono', monospace; font-size:11.5px; padding-top:1px;">1</span><span>建 <span style="font-family:'JetBrains Mono', monospace; font-size:12px; color:#ece8e3;">inbox_events</span> 与墓碑表</span></div>
+          <div style="display:flex; gap:9px;"><span style="color:#6d665f; font-family:'JetBrains Mono', monospace; font-size:11.5px; padding-top:1px;">2</span><span>把 yxi-inbox 的落盘换成事务写入</span></div>
+          <div style="display:flex; gap:9px;"><span style="color:#6d665f; font-family:'JetBrains Mono', monospace; font-size:11.5px; padding-top:1px;">3</span><span>加崩溃恢复自检</span></div>
+        </div>
+      </div>
+      <div style="display:flex; gap:9px; padding:14px 13px;">
+        <div style="flex-grow:1; height:44px; border-radius:11px; background:#e08b57; color:#1a1917; font-size:14px; font-weight:600; display:flex; align-items:center; justify-content:center;">批准并执行</div>
+        <div style="width:118px; height:44px; border-radius:11px; border:1px solid #4a443d; font-size:14px; font-weight:500; color:#ece8e3; display:flex; align-items:center; justify-content:center;">继续讨论</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

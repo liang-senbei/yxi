@@ -1,0 +1,101 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
+  <style>
+    body { margin:0; font-family:'Space Grotesk', system-ui, sans-serif; }
+    a { color:#e08b57; } a:hover { color:#f0a473; }
+    * { box-sizing:border-box; }
+  </style>
+</helmet>
+
+<div style="width:390px; height:844px; background:#1a1917; color:#ece8e3; display:flex; flex-direction:column; overflow:hidden;">
+
+  <div style="padding:16px 16px 12px; background:#232120; border-bottom:1px solid #39352f; flex-shrink:0;">
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:3px;">
+      <div style="font-size:21px; font-weight:700; letter-spacing:-0.02em; flex-grow:1;">ser8651</div>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9b938a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+    </div>
+    <div style="font-size:11.5px; color:#6d665f; font-family:'JetBrains Mono', monospace;">14 个会话 · yxi-agent v1</div>
+  </div>
+
+  <div style="flex-grow:1; display:flex; flex-direction:column; gap:20px; padding:16px 14px; overflow:hidden;">
+
+    <!-- 等你 -->
+    <div style="display:flex; flex-direction:column; gap:9px;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <div style="width:7px; height:7px; border-radius:4px; background:#d5a244;"></div>
+        <div style="font-size:11.5px; font-weight:600; color:#d5a244; letter-spacing:0.06em;">等你</div>
+        <div style="font-size:11px; color:#6d665f; font-family:'JetBrains Mono', monospace;">2</div>
+      </div>
+
+      <div style="border:1px solid #4a443d; border-left:3px solid #d5a244; border-radius:12px; background:#232120; padding:12px 13px; display:flex; flex-direction:column; gap:6px;">
+        <div style="display:flex; align-items:baseline; gap:8px;">
+          <div style="font-size:14.5px; font-weight:600; flex-grow:1;">cc-mail</div>
+          <div style="font-size:11px; color:#6d665f; font-family:'JetBrains Mono', monospace;">3 分钟</div>
+        </div>
+        <div style="font-size:12.5px; line-height:1.45; color:#c9c2ba;">要跑 <span style="font-family:'JetBrains Mono', monospace; font-size:11.5px; background:#33241f; color:#dd8a76; border-radius:4px; padding:1px 5px;">rm -rf build/</span></div>
+        <div style="display:flex; gap:8px; margin-top:3px;">
+          <div style="flex-grow:1; height:44px; border-radius:10px; background:#e08b57; color:#1a1917; font-size:13px; font-weight:600; display:flex; align-items:center; justify-content:center;">批准</div>
+          <div style="flex-grow:1; height:44px; border-radius:10px; border:1px solid #4a443d; font-size:13px; font-weight:500; display:flex; align-items:center; justify-content:center;">拒绝</div>
+        </div>
+      </div>
+
+      <div style="border:1px solid #39352f; border-left:3px solid #d5a244; border-radius:12px; background:#232120; padding:12px 13px; display:flex; flex-direction:column; gap:5px;">
+        <div style="display:flex; align-items:baseline; gap:8px;">
+          <div style="font-size:14.5px; font-weight:600; flex-grow:1;">cc-nanobanana</div>
+          <div style="font-size:11px; color:#6d665f; font-family:'JetBrains Mono', monospace;">12 分钟</div>
+        </div>
+        <div style="font-size:12.5px; line-height:1.45; color:#c9c2ba;">在问你选哪种存储方案</div>
+      </div>
+    </div>
+
+    <!-- 干活中 -->
+    <div style="display:flex; flex-direction:column; gap:9px;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <div style="width:7px; height:7px; border-radius:4px; background:#35b1a1;"></div>
+        <div style="font-size:11.5px; font-weight:600; color:#35b1a1; letter-spacing:0.06em;">干活中</div>
+        <div style="font-size:11px; color:#6d665f; font-family:'JetBrains Mono', monospace;">3</div>
+      </div>
+
+      <div style="border:1px solid #39352f; border-radius:12px; background:#232120; padding:12px 13px; display:flex; flex-direction:column; gap:5px;">
+        <div style="display:flex; align-items:baseline; gap:8px;">
+          <div style="font-size:14.5px; font-weight:600; flex-grow:1;">cc-Yxi</div>
+          <div style="font-size:11px; color:#35b1a1; font-family:'JetBrains Mono', monospace;">运行中</div>
+        </div>
+        <div style="font-size:12px; line-height:1.45; color:#9b938a; font-family:'JetBrains Mono', monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">./gradlew assembleDebug</div>
+      </div>
+
+      <div style="border:1px solid #39352f; border-radius:12px; background:#232120; padding:12px 13px; display:flex; flex-direction:column; gap:5px;">
+        <div style="display:flex; align-items:baseline; gap:8px;">
+          <div style="font-size:14.5px; font-weight:600; flex-grow:1;">cc-项目</div>
+          <div style="font-size:11px; color:#35b1a1; font-family:'JetBrains Mono', monospace;">运行中</div>
+        </div>
+        <div style="font-size:12px; line-height:1.45; color:#9b938a; font-family:'JetBrains Mono', monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Read src/main/kotlin/SshManager.kt</div>
+      </div>
+    </div>
+
+    <!-- 已完成 -->
+    <div style="display:flex; flex-direction:column; gap:9px;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <div style="width:7px; height:7px; border-radius:4px; background:#4a443d;"></div>
+        <div style="font-size:11.5px; font-weight:600; color:#6d665f; letter-spacing:0.06em;">已完成</div>
+        <div style="font-size:11px; color:#6d665f; font-family:'JetBrains Mono', monospace;">9</div>
+      </div>
+      <div style="border:1px solid #2f2b27; border-radius:12px; padding:11px 13px; display:flex; align-items:baseline; gap:8px;">
+        <div style="font-size:14px; font-weight:500; color:#9b938a; flex-grow:1;">cc-remote-dev-station</div>
+        <div style="font-size:11px; color:#6d665f; font-family:'JetBrains Mono', monospace;">1 小时</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

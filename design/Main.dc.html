@@ -1,0 +1,97 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
+  <style>
+    body { margin:0; font-family:'Space Grotesk', system-ui, sans-serif; }
+    a { color:#e08b57; } a:hover { color:#f0a473; }
+    * { box-sizing:border-box; }
+  </style>
+</helmet>
+
+<div style="width:390px; height:844px; background:#1a1917; color:#ece8e3; display:flex; flex-direction:column; overflow:hidden;">
+
+  <!-- header -->
+  <div style="display:flex; align-items:center; gap:12px; padding:10px 14px; background:#232120; border-bottom:1px solid #39352f; flex-shrink:0;">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9b938a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+    <div style="display:flex; flex-direction:column; gap:1px; flex-grow:1; min-width:0;">
+      <div style="font-size:15px; font-weight:600; letter-spacing:-0.01em;">cc-Yxi</div>
+      <div style="display:flex; align-items:center; gap:5px;">
+        <div style="width:6px; height:6px; border-radius:3px; background:#35b1a1;"></div>
+        <div style="font-size:11px; color:#9b938a; font-family:'JetBrains Mono', monospace;">ser8651 · 干活中</div>
+      </div>
+    </div>
+    <div style="display:flex; background:#1a1917; border:1px solid #39352f; border-radius:9px; padding:2px;">
+      <div style="padding:11px 14px; font-size:12px; font-weight:500; color:#9b938a; border-radius:7px;">终端</div>
+      <div style="padding:11px 14px; font-size:12px; font-weight:600; color:#1a1917; background:#e08b57; border-radius:7px;">对话</div>
+    </div>
+  </div>
+
+  <!-- conversation -->
+  <div style="flex-grow:1; overflow:hidden; display:flex; flex-direction:column; gap:16px; padding:18px 14px;">
+
+    <!-- user bubble -->
+    <div style="display:flex; justify-content:flex-end;">
+      <div style="max-width:80%; background:#332f2b; border:1px solid #4a443d; border-radius:16px 16px 4px 16px; padding:11px 14px; font-size:14px; line-height:1.5;">看一下部署脚本为什么在 ARM 上失败</div>
+    </div>
+
+    <!-- thinking, collapsed -->
+    <div style="display:flex; align-items:center; gap:8px; padding:8px 11px; background:#201e1c; border:1px solid #2f2b27; border-radius:10px; align-self:flex-start;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6d665f" stroke-width="2" stroke-linecap="round"><path d="M9 18h6M10 22h4M12 2a7 7 0 00-4 12.7V17h8v-2.3A7 7 0 0012 2z"/></svg>
+      <div style="font-size:12px; color:#6d665f;">思考了 8 秒</div>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6d665f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+    </div>
+
+    <!-- assistant text -->
+    <div style="font-size:14px; line-height:1.62; color:#ece8e3;">脚本里写死了 <span style="font-family:'JetBrains Mono', monospace; font-size:12.5px; background:#2b2826; border:1px solid #39352f; border-radius:4px; padding:1px 5px;">x86_64</span> 的下载路径。先确认一下架构：</div>
+
+    <!-- Bash tool card -->
+    <div style="border:1px solid #39352f; border-radius:12px; overflow:hidden; background:#232120;">
+      <div style="display:flex; align-items:center; gap:8px; padding:9px 12px; background:#2b2826; border-bottom:1px solid #39352f;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#e08b57" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6-6-6M12 19h8"/></svg>
+        <div style="font-size:11.5px; font-weight:600; color:#e08b57; letter-spacing:0.03em;">BASH</div>
+        <div style="flex-grow:1;"></div>
+        <div style="font-size:11px; font-family:'JetBrains Mono', monospace; color:#8fc47a;">exit 0</div>
+      </div>
+      <div style="padding:11px 12px; font-family:'JetBrains Mono', monospace; font-size:12px; line-height:1.55; color:#ece8e3;">uname -m &amp;&amp; file $(which node)</div>
+      <div style="padding:9px 12px; border-top:1px solid #2f2b27; background:#1e1c1a; font-family:'JetBrains Mono', monospace; font-size:11.5px; line-height:1.5; color:#9b938a;">aarch64<br>node: ELF 64-bit LSB, ARM aarch64</div>
+    </div>
+
+    <!-- Edit diff card -->
+    <div style="border:1px solid #39352f; border-radius:12px; overflow:hidden; background:#232120;">
+      <div style="display:flex; align-items:center; gap:8px; padding:9px 12px; background:#2b2826; border-bottom:1px solid #39352f;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#35b1a1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg>
+        <div style="font-size:11.5px; font-weight:600; color:#35b1a1; letter-spacing:0.03em;">EDIT</div>
+        <div style="flex-grow:1; font-family:'JetBrains Mono', monospace; font-size:11px; color:#6d665f; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">deploy.sh</div>
+      </div>
+      <div style="font-family:'JetBrains Mono', monospace; font-size:11.5px; line-height:1.7;">
+        <div style="display:flex; background:#33241f; padding:2px 12px; gap:9px;"><span style="color:#dd8a76; width:9px;">−</span><span style="color:#dd8a76;">ARCH=x86_64</span></div>
+        <div style="display:flex; background:#22322a; padding:2px 12px; gap:9px;"><span style="color:#8fc47a; width:9px;">+</span><span style="color:#8fc47a;">ARCH=$(uname -m)</span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- composer -->
+  <div style="flex-shrink:0; border-top:1px solid #39352f; background:#232120; padding:10px 12px 14px;">
+    <div style="display:flex; align-items:flex-end; gap:9px;">
+      <div style="width:44px; height:44px; border-radius:11px; border:1px solid #39352f; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#9b938a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.4 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.2-9.19a4 4 0 015.65 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+      </div>
+      <div style="flex-grow:1; min-height:44px; display:flex; align-items:center; background:#1a1917; border:1px solid #39352f; border-radius:11px; padding:0 13px; font-size:14px; color:#6d665f;">给 cc-Yxi 发消息…</div>
+      <div style="width:44px; height:44px; border-radius:11px; border:1px solid #39352f; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#9b938a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/></svg>
+      </div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

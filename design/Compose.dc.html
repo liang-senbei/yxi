@@ -1,0 +1,102 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
+  <style>
+    body { margin:0; font-family:'Space Grotesk', system-ui, sans-serif; }
+    a { color:#e08b57; } a:hover { color:#f0a473; }
+    * { box-sizing:border-box; }
+    .chip { display:flex; align-items:center; gap:6px; height:32px; padding:0 10px; border-radius:8px; background:#332f2b; border:1px solid #4a443d; font-size:12px; font-weight:500; }
+  </style>
+</helmet>
+
+<div style="width:390px; height:844px; background:#1a1917; color:#ece8e3; display:flex; flex-direction:column; overflow:hidden;">
+
+  <div style="padding:14px 16px 12px; background:#232120; border-bottom:1px solid #39352f; flex-shrink:0;">
+    <div style="font-size:12px; font-weight:600; color:#6d665f; letter-spacing:0.06em;">输入区状态</div>
+  </div>
+
+  <div style="flex-grow:1; display:flex; flex-direction:column; gap:22px; padding:18px 14px; overflow:hidden;">
+
+    <!-- A: attachments -->
+    <div style="display:flex; flex-direction:column; gap:9px;">
+      <div style="font-size:11px; color:#6d665f; font-family:'JetBrains Mono', monospace;">A · 带附件</div>
+      <div style="border:1px solid #39352f; border-radius:14px; background:#232120; padding:11px 12px 12px; display:flex; flex-direction:column; gap:10px;">
+        <div style="display:flex; flex-wrap:wrap; gap:7px;">
+          <div class="chip">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#e08b57" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+            <span>图片1</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6d665f" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </div>
+          <div class="chip">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#e08b57" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+            <span>图片2</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6d665f" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </div>
+          <div class="chip">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#35b1a1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
+            <span>附件1</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6d665f" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </div>
+        </div>
+        <div style="font-size:14px; line-height:1.5;">看下 <span style="background:#332f2b; border:1px solid #4a443d; border-radius:5px; padding:1px 6px; font-size:13px; font-weight:600;">图片1</span> 的报错，对照 <span style="background:#332f2b; border:1px solid #4a443d; border-radius:5px; padding:1px 6px; font-size:13px; font-weight:600;">附件1</span> 的日志<span style="display:inline-block; width:2px; height:15px; background:#e08b57; vertical-align:-2px; margin-left:1px;"></span></div>
+        <div style="display:flex; align-items:center; gap:9px;">
+          <div style="font-size:11px; color:#6d665f; font-family:'JetBrains Mono', monospace; flex-grow:1;">→ /root/src/tmp/Yxi/ · 保留 3 天</div>
+          <div style="width:44px; height:44px; border-radius:11px; background:#e08b57; display:flex; align-items:center; justify-content:center;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1a1917" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- B: listening -->
+    <div style="display:flex; flex-direction:column; gap:9px;">
+      <div style="font-size:11px; color:#6d665f; font-family:'JetBrains Mono', monospace;">B · 正在听</div>
+      <div style="border:1px solid #5c4536; border-radius:14px; background:#221e1b; padding:16px 14px; display:flex; align-items:center; gap:13px;">
+        <div style="width:44px; height:44px; border-radius:22px; background:#e08b57; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1a1917" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/></svg>
+        </div>
+        <div style="display:flex; align-items:center; gap:3px; flex-grow:1; height:32px;">
+          <div style="width:3px; height:10px; background:#5c4536; border-radius:2px;"></div>
+          <div style="width:3px; height:22px; background:#e08b57; border-radius:2px;"></div>
+          <div style="width:3px; height:32px; background:#e08b57; border-radius:2px;"></div>
+          <div style="width:3px; height:16px; background:#e08b57; border-radius:2px;"></div>
+          <div style="width:3px; height:26px; background:#e08b57; border-radius:2px;"></div>
+          <div style="width:3px; height:11px; background:#5c4536; border-radius:2px;"></div>
+          <div style="width:3px; height:19px; background:#5c4536; border-radius:2px;"></div>
+          <div style="width:3px; height:8px; background:#5c4536; border-radius:2px;"></div>
+        </div>
+        <div style="font-size:12px; color:#9b938a; font-family:'JetBrains Mono', monospace;">0:04</div>
+      </div>
+    </div>
+
+    <!-- C: confirm before send -->
+    <div style="display:flex; flex-direction:column; gap:9px;">
+      <div style="font-size:11px; color:#6d665f; font-family:'JetBrains Mono', monospace;">C · 识别完，等你确认</div>
+      <div style="border:1px solid #5c4536; border-radius:14px; background:#232120; overflow:hidden;">
+        <div style="display:flex; align-items:center; gap:7px; padding:9px 13px; background:#33241f; border-bottom:1px solid #5c4536;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#d5a244" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>
+          <div style="font-size:11.5px; font-weight:600; color:#d5a244;">终端模式 · 确认后才发送</div>
+        </div>
+        <div style="padding:13px; font-family:'JetBrains Mono', monospace; font-size:13px; line-height:1.5;">git checkout main &amp;&amp; git pull</div>
+        <div style="display:flex; gap:8px; padding:0 13px 13px;">
+          <div style="flex-grow:1; height:44px; border-radius:11px; background:#e08b57; color:#1a1917; font-size:13.5px; font-weight:600; display:flex; align-items:center; justify-content:center;">发送</div>
+          <div style="width:90px; height:44px; border-radius:11px; border:1px solid #4a443d; font-size:13.5px; display:flex; align-items:center; justify-content:center;">编辑</div>
+          <div style="width:44px; height:44px; border-radius:11px; border:1px solid #4a443d; display:flex; align-items:center; justify-content:center;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9b938a" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

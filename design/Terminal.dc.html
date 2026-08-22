@@ -1,0 +1,85 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
+  <style>
+    body { margin:0; font-family:'Space Grotesk', system-ui, sans-serif; }
+    a { color:#e08b57; } a:hover { color:#f0a473; }
+    * { box-sizing:border-box; }
+    .k { height:44px; border-radius:8px; border:1px solid #39352f; background:#2b2826; display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono', monospace; font-size:12px; color:#c9c2ba; }
+  </style>
+</helmet>
+
+<div style="width:390px; height:844px; background:#131211; color:#ece8e3; display:flex; flex-direction:column; overflow:hidden;">
+
+  <div style="display:flex; align-items:center; gap:12px; padding:10px 14px; background:#232120; border-bottom:1px solid #39352f; flex-shrink:0;">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9b938a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+    <div style="display:flex; flex-direction:column; gap:1px; flex-grow:1;">
+      <div style="font-size:15px; font-weight:600; letter-spacing:-0.01em;">cc-Yxi</div>
+      <div style="font-size:11px; color:#6d665f; font-family:'JetBrains Mono', monospace;">win 1/3 · 80×24</div>
+    </div>
+    <div style="display:flex; background:#1a1917; border:1px solid #39352f; border-radius:9px; padding:2px;">
+      <div style="padding:11px 14px; font-size:12px; font-weight:600; color:#1a1917; background:#e08b57; border-radius:7px;">终端</div>
+      <div style="padding:11px 14px; font-size:12px; font-weight:500; color:#9b938a; border-radius:7px;">对话</div>
+    </div>
+  </div>
+
+  <!-- terminal surface -->
+  <div style="flex-grow:1; padding:12px 12px; font-family:'JetBrains Mono', monospace; font-size:12px; line-height:1.62; overflow:hidden; color:#c9c2ba;">
+    <div><span style="color:#35b1a1;">root@ser8651</span>:<span style="color:#7fa8d8;">~/src/workspace/Yxi</span>$ ./gradlew assembleDebug</div>
+    <div style="color:#8d857c;">&gt; Task :app:compileDebugKotlin</div>
+    <div style="color:#8d857c;">&gt; Task :app:mergeDebugResources</div>
+    <div style="color:#8d857c;">&gt; Task :app:packageDebug</div>
+    <div style="height:9px;"></div>
+    <div style="color:#8fc47a;">BUILD SUCCESSFUL in 42s</div>
+    <div style="color:#8d857c;">31 actionable tasks: 29 executed, 2 up-to-date</div>
+    <div style="height:9px;"></div>
+    <div><span style="color:#35b1a1;">root@ser8651</span>:<span style="color:#7fa8d8;">~/src/workspace/Yxi</span>$ adb install -r app-debug.apk</div>
+    <div style="color:#8d857c;">Performing Streamed Install</div>
+    <div style="color:#8fc47a;">Success</div>
+    <div style="height:9px;"></div>
+    <div><span style="color:#35b1a1;">root@ser8651</span>:<span style="color:#7fa8d8;">~/src/workspace/Yxi</span>$ <span style="display:inline-block; width:7px; height:15px; background:#e08b57; vertical-align:-2px;"></span></div>
+  </div>
+
+  <!-- keyboard toolbar -->
+  <div style="flex-shrink:0; background:#1a1917; border-top:1px solid #39352f; padding:9px 10px 12px; display:flex; flex-direction:column; gap:8px;">
+    <div style="display:flex; gap:6px;">
+      <div class="k" style="flex-grow:1;">esc</div>
+      <div class="k" style="flex-grow:1;">tab</div>
+      <div class="k" style="flex-grow:1; color:#e08b57; border-color:#5c4536; background:#33241f;">ctrl</div>
+      <div class="k" style="flex-grow:1;">alt</div>
+      <div class="k" style="flex-grow:1;">^C</div>
+      <div class="k" style="flex-grow:1;">^B</div>
+    </div>
+    <div style="display:flex; gap:6px;">
+      <div class="k" style="width:56px;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#c9c2ba" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+      </div>
+      <div class="k" style="width:56px;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#c9c2ba" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+      </div>
+      <div class="k" style="width:56px;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#c9c2ba" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      </div>
+      <div class="k" style="width:56px;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#c9c2ba" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      </div>
+      <div class="k" style="flex-grow:1;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#c9c2ba" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/></svg>
+      </div>
+      <div class="k" style="flex-grow:1;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#c9c2ba" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+      </div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

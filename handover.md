@@ -30,6 +30,18 @@
 | Android Keystore 里的 SSH 私钥 | 【App 内·硬件保护】导不出来；撤销 = 服务器删 `authorized_keys` 一行 |
 | `/root/inbox/base.apk`、`/root/inbox/apk/` | 【参考】原版 Moshi Android 3.10.0 及其解包，逆向证据来源 |
 
+## 界面视觉稿
+
+七张安卓界面稿在 **[claude.ai/code/artifact/e2546d9f-3fb1-44b1-92d5-18736ade8d1e](https://claude.ai/code/artifact/e2546d9f-3fb1-44b1-92d5-18736ade8d1e)**（私有）。
+源文件在 `design/*.dc.html` + `design/canvas.json`，**改动要改源文件再重新生成**，成品页 `yxi-app-design.html` 已 gitignore。
+
+**视觉方向**（我定的，用户认可）：暖色深底 + 终端气质。`Space Grotesk`（界面）配 `JetBrains Mono`（代码/路径/时间）。
+两个强调色同亮度同彩度、只变色相：铜色 `#e08b57`（主操作、用户消息）、青色 `#35b1a1`（干活中、Edit）。
+**琥珀 `#d5a244` 专留给「等你」**——全 app 只有需要用户动手时才出现这个色。
+**没有克隆 Claude 的品牌**，Yxi 有自己的身份。
+
+七张：会话看板 · 对话模式（主界面）· 交互卡片（AskUserQuestion / ExitPlanMode）· 终端模式+键盘工具条 · 附件与语音三态 · 锁屏审批 · 主机管理。
+
 ## 决策记录（用户拍板过的，按时间倒序 —— 改动前先看这里，别推翻已定的）
 
 | # | 决定 | 理由 / 出处 |

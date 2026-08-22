@@ -20,3 +20,7 @@ __pycache__/
 # 参考资料（第三方 APK，不分发）
 inbox/
 apk/
+
+# 视觉稿的成品页（每次从 design/*.dc.html 重新生成，不入库）
+design/yxi-app-design.html
+design/_tokens.txt
