@@ -56,14 +56,16 @@
 
 要跑起来得拿到完整 split 集（`base` + `split_config.arm64_v8a` + `split_config.<dpi>` + `split_config.<语言>`）：
 
-| 办法 | 怎么做 |
-|---|---|
-| **A（推荐）** | 手机上装个 APK 提取工具，导出 Moshi 的**完整 `.apks` / `.xapk` 包**，微信发过来——**跟 `base.apk` 同一条路** |
-| B | 手机开无线调试 → `adb shell pm path app.getmoshi.android` 列出全部 split → `adb pull` 每一个（不用 root） |
+| 办法 | 怎么做 | 评价 |
+|---|---|---|
+| **A（最省事）** | 模拟器用**带 Play 商店的镜像**（`system-images;android-34;**google_apis_playstore**;x86_64`），登 Google 账号，**在 Play 里直接装 Moshi** | ✅ **推荐**。Play 自动处理 split 和 ABI，不用手工拼。<br>官网确认安卓版就是走 Play：`play.google.com/store/apps/details?id=app.getmoshi.android`，**没有直接 APK 下载** |
+| B | 手机上装 APK 提取工具导出完整 `.apks`，微信发过来 → `adb install-multiple` | 手工，但不依赖 Google 账号 |
+| C | 手机开无线调试 → `adb shell pm path app.getmoshi.android` → `adb pull` 每个 split（不用 root） | 同上 |
 
-拿到后：`adb install-multiple base.apk split_config.*.apk`。
-> 注意：模拟器是 **x86_64**，手机导出的是 **arm64** split → 需要带 ARM 转译的镜像，或直接用 `google_apis` x86_64 镜像配 ARM 兼容层。
-> **这条不是必需路径**——参照价值主要是抓它的网关流量（我们没拿到请求体 schema）。**优先级低于把我们自己的东西跑起来。**
+> ⚠️ 走 A 的两个前提：模拟器要能**连得上 Google**（本机有 sing-box 代理可用）；
+> Moshi 若只发 arm64，x86_64 模拟器可能显示"不兼容"——那就退 B/C 加 ARM 转译镜像。
+> **这条不是必需路径**——参照价值主要是抓它的网关请求体（唯一没挖到的东西）。
+> **优先级低于把我们自己的东西跑起来。**
 
 ---
 
@@ -73,13 +75,14 @@
 
 | # | 做什么 | 关键点 |
 |---|---|---|
-| 1.1 | gradle 加 `com.github.mwiede:jsch`（纯 Java，无 NDK） | 备选 `sshj`（拖 BouncyCastle，Android 上有冲突风险） |
+| 1.1 | gradle 加 `com.github.mwiede:jsch`（纯 Java，无 NDK） | 备选 `sshj`（拖 BouncyCastle，Android 上有冲突风险）或 `connectbot/sshlib`（Apache-2.0） |
+| 1.0 | **先读两个参照**：`GlassHaven/Haven`（Kotlin 现代 SSH 客户端，AGPL，今天还在更新）和 `connectbot/connectbot`（Apache-2.0，可直接抄） | 见 PRD 附录 B.1。**别从零想**，这道题有人做过 |
 | 1.2 | App 内生成 ed25519 密钥，私钥存 **Android Keystore**（硬件级，导不出来） | 比 Moshi 的二维码配对流程简单 |
 | 1.3 | 显示公钥（文本 + 二维码）→ 你贴进各机 `~/.ssh/authorized_keys` | 一次性 |
 | 1.4 | `HostListActivity`：**加/编辑主机的完整流程**——任意 IP / **任意端口** / 用户名 / **密码或密钥** | ⚠️ **不是预置列表**。要能连"以后才有的"服务器（PRD §2.4）。具体机器清单见 `/root/src/CLAUDE.md`（不入库） |
 | 1.4b | **一键装公钥**：密码连上一次 → append 到 `~/.ssh/authorized_keys` → 之后免密 | 相当于 `ssh-copy-id`，比 Moshi 的二维码配对还省事 |
 | 1.5 | **`known_hosts` 校验**：首次连接指纹显式确认，之后变了就拒 | ⚠️ **不能图省事 accept-any**，那等于关掉 SSH 的中间人防护 |
-| 1.6 | `TerminalActivity` = WebView + xterm.js，接 SSH **shell channel** | 前端 vendor 到 `assets/`，本机没 npm 用 curl 拉 |
+| 1.6 | `TerminalActivity` 接 SSH **shell channel**。终端控件**先试 `termux/terminal-view`**（原生，GPL-3.0，已核实是独立 gradle 模块） | 退路：WebView + xterm.js。见 PRD §2.2 / 附录 B.2 |
 | 1.7 | 连上后跑 `tmux list-sessions -F '#{session_name}\|#{session_windows}\|#{session_activity}\|#{session_attached}'` 让你选会话 | **抄 Moshi 的格式串**（PRD §1.2） |
 | 1.8 | attach 时照抄 Moshi 那行 tmux 设置 | `tmux set -g set-titles on \; set -g mouse on \; set -g status-right '' \; unbind -q -T root WheelUpStatus \; unbind -q -T root WheelDownStatus` |
 

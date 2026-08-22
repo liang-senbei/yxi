@@ -202,15 +202,23 @@ secure context，于是被迫去搞 Let's Encrypt / Tailscale funnel / 域名，
 
 | 原生包 | 是什么 | 我们的对应 |
 |---|---|---|
-| `app.getmoshi.**ghostty**`<br>`GhosttyTerminalManagerModule` / `ViewManager` | **嵌了 [Ghostty](https://ghostty.org) 的终端引擎**（Zig 写的 libghostty，C API） | **xterm.js**（见下方取舍） |
+| `app.getmoshi.**ghostty**`<br>`GhosttyTerminalManagerModule` / `ViewManager` | **嵌了 [Ghostty](https://ghostty.org) 的终端引擎**（Zig 写的 libghostty，C API） | **`termux/terminal-view`**（见下方取舍） |
 | `app.getmoshi.**nitro.transport**` | Nitro Modules 写的原生传输层（SSH / Mosh） | **`mwiede/jsch`**（纯 Java，够用） |
 | `app.getmoshi.**parakeet**` | NVIDIA Parakeet **端上语音识别模型** | Android `SpeechRecognizer`（系统自带） |
 | `liveactivity` / `pasteimage` / `audiofocus` | iOS 灵动岛、图片粘贴、音频焦点 | 前两个不做 / 简版 |
 | dex 里的 `crypto_kem_*` `crypto_sign_*` `ssh-ed25519` | libsodium 类 + 后量子 KEM（大概是 `sntrup761x25519`）+ SSH 主机密钥算法 | jsch 自带 |
 
-> ⚠️ **一个诚实的降级**：Moshi 的终端是 **libghostty**（原生 Zig 引擎），我们用 **xterm.js**（WebView 里的 JS）。
-> 性能和 VT 兼容性上 xterm.js 确实不如原生引擎——但它省掉整个 NDK / 交叉编译链，
-> 而且 xterm.js 是 VS Code 在用的东西，**成熟度足够**。这是我们**明确接受的一处不如原版**。
+**终端引擎怎么办**（Moshi 用的是原生 libghostty）——查过开源生态后，**我们不必退到 WebView**：
+
+| 方案 | 许可 | 取舍 |
+|---|---|---|
+| **`termux/terminal-view` + `terminal-emulator`** ← **首选** | GPL-3.0 | Termux（59k★）里**已经拆成独立 gradle 模块**的原生终端控件，被几百万台设备验证过。纯 Java/Kotlin，**不用 NDK**。自用不触发 GPL 分发义务 |
+| `connectbot` 的 `de.mud.terminal` vt320 | Apache-2.0 | 许可最宽松，ConnectBot（3.4k★）在用，成熟但更老 |
+| `jackpal/Android-Terminal-Emulator` | Apache-2.0 | 3.2k★ 的 VT-100 实现，Termux 的祖先 |
+| WebView + xterm.js | MIT | **退路**。VS Code 在用，成熟；但多一层 WebView，IME 和性能都吃亏 |
+
+→ **先试 Termux 的 `terminal-view`**（原生控件，中文输入这类坑它早趟过了），
+不行再退 WebView + xterm.js。**这样就没有"明确不如原版"这一条了。**
 
 **Mosh（UDP 协议）我们不做**——韧性由 tmux 提供（§5.5 第 19 条）。
 
@@ -474,7 +482,7 @@ TestFlight（也要账号）/ 免费证书自签但**每 7 天重签一次**。
 | App 内 Mosh | **不做** | 韧性由 tmux 提供；断线重连 attach 回去体感一样 |
 | 私钥存哪 | **Android Keystore**（硬件级） | 系统标准 API |
 | 密钥分发 | App 生成 ed25519 → 显示公钥 → 贴进 `authorized_keys` | 一次性；比 Moshi 的二维码流程更简单 |
-| 终端渲染 | **WebView + xterm.js** | ⚠️ 本机没 npm，需 curl vendor |
+| 终端渲染 | **`termux/terminal-view`**（原生控件，GPL-3.0）；退路 WebView + xterm.js | 见 §2.2。原生控件中文输入更稳 |
 | 事件常驻 | **前台服务 + exec channel** | 无 FCM、无 Firebase、无账号 |
 | 服务端形态 | `yxi-agent`（**不监听端口**）+ `yxi-inbox`（**只听 unix socket**） | 零新增网络攻击面 |
 | 终端桥 | Python stdlib `pty` | ✅ 在（其实走 SSH 后连它都可能不需要——直接 shell channel 跑 `tmux attach`） |
@@ -591,3 +599,50 @@ crypto_kem_dec/enc/keypair · crypto_sign* · ssh-ed25519/rsa/dss   →  libsodi
 
 > 这三样都不阻塞复刻——我们的实现本来就不同（§6）。列在这只是说明**证据边界在哪**：
 > §1 里凡是引了原文命令/SQL/路径的都是实证，其余（如云端 200/80/256 字截断）来自官方文档，未在 APK 中二次核实。
+
+---
+
+## 附录 B · 开源参考项目（GitHub 实查，2026-08）
+
+### B.1 Android SSH 客户端 —— Phase 1 抄这些
+
+| 项目 | ★ | 许可 | 为什么看它 |
+|---|---|---|---|
+| **`GlassHaven/Haven`** | 1091 | AGPL-3.0 | **Kotlin 写的现代 Android SSH/VNC/RDP/SFTP 客户端，今天还在更新**。跟我们 Phase 1 要做的几乎一样，**最直接的参照** |
+| **`connectbot/connectbot`** | 3391 | **Apache-2.0** | Android 上第一个 SSH 客户端，仍在维护。许可最宽松→**可以直接抄代码**。自带 `sshlib`（Trilead SSH2 分支）和 vt320 终端 |
+| `electerm/electerm` | 14905 | MIT | 桌面端（Electron），但 UI/交互设计值得参考 |
+
+### B.2 Android 终端控件 —— 替代 WebView+xterm.js（见 §2.2）
+
+| 项目 | ★ | 许可 | 说明 |
+|---|---|---|---|
+| **`termux/termux-app`** | 59558 | GPL-3.0 | **`terminal-view` / `terminal-emulator` 已是独立 gradle 模块**（已核实目录存在），可直接依赖 |
+| `jackpal/Android-Terminal-Emulator` | 3188 | Apache-2.0 | Termux 的祖先，VT-100，许可宽松 |
+
+### B.3 Claude Code 远程控制 —— 别人怎么解这道题
+
+| 项目 | ★ | 许可 | 做法 |
+|---|---|---|---|
+| **`tuchg/Lucarne`** | 332 | MIT | **最值得看的**。Rust 守护 `lucarned`，**通知和审批走微信 / Telegram**，**不做 App**。<br>⚠️ 它明确"**no hooks, no skills, no MCP**"（零侵入）→ 靠**监视 CLI 进程/终端输出**判断状态，而不是 Claude 的 hook。<br>**取舍相反**：它牺牲准确性换零配置；我们用 hook 换准确性和**能真正阻塞住授权** |
+| `voglster/lumbergh` | 32 | MIT | 自托管 web 看板，监督多个 Claude Code |
+| `1203Arya/Claude-control` | 0 | ? | "Control Claude Code from your phone. Every file write, bash command…" |
+| `devswha/chatmux` | 18 | AGPL-3.0 | tmux 聊天式 web 终端，agent 无关 |
+| `chrismccord/webtmux` | 136 | MIT | Phoenix 作者写的 tmux 专用 web 终端 |
+| `linwk20/tmux-kanban` | 11 | MIT | tmux 会话的 web 看板 |
+
+### B.4 从 Lucarne 学到的一个备选思路：**微信当审批通道**
+
+Lucarne 不做 App，把通知和审批塞进**微信 / Telegram**——"引用一条通知回复，它自动恢复对应的 agent 会话"。
+
+对你特别有意思，因为**你本来就重度用微信**（Moshi 的 APK 就是微信传过来的）。
+
+| | 我们的方案（APK） | 微信通道 |
+|---|---|---|
+| 手机装什么 | 侧载我们的 APK | **什么都不用装** |
+| 终端 | ✅ 有 | ❌ 没有 |
+| 审批 | ✅ 通知上点按钮 | ✅ 引用回复 |
+| 内容经过 | **只经过你自己的机器** | 命令内容**过腾讯服务器** |
+| 实现成本 | 中 | 低（但要接微信机器人，个人号有封号风险） |
+
+**不改变主方案**（你要的是 APK，且终端是刚需）。
+但 **Phase 4 的通知兜底**（国产 ROM 杀前台服务时）除了 ntfy，**微信也是一条候选**——记在这里备用。

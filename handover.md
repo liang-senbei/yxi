@@ -28,8 +28,13 @@
 | Android Keystore 里的 SSH 私钥 | 【App 内·硬件保护】导不出来；撤销 = 服务器删 `authorized_keys` 一行 |
 | `/root/inbox/base.apk`、`/root/inbox/apk/` | 【参考】原版 Moshi Android 3.10.0 及其解包，逆向证据来源 |
 
+## 开源参照（PRD 附录 B 有全表）
+- **Phase 1 直接抄**：`GlassHaven/Haven`（Kotlin 现代 Android SSH 客户端，AGPL，活跃）· `connectbot/connectbot`（Apache-2.0，可直接复用代码）
+- **终端控件**：`termux/terminal-view` + `terminal-emulator`（已是独立 gradle 模块）→ **可能不需要 WebView+xterm.js**
+- **同类思路**：`tuchg/Lucarne`（Rust，通知/审批走微信+Telegram，不做 App，零 hook）——取舍与我们相反，见 PRD 附录 B.3/B.4
+
 ## GitHub 耦合
-- 本项目暂无仓库。
+- 仓库：**`liang-senbei/yxi`（私有）**。⚠️ `/root/src/CLAUDE.md`（含明文密码，权限 600）**在父目录、不在本仓**，不会被提交。
 - **深耦合 `remote-dev-station`**（`/root/src/workspace/remote-dev-station`）：复用它的 `bin/cc-state`、`hub/`、`bin/cloud-sesslist`、`bin/cc-quota`；它的 `phone/README.md` 是**原版 Moshi** 的配置 runbook（本项目是它的替代品，不是补充）。
 - 端口需避开 `Anthropic-Inspector`（80/443/7800）。
 
