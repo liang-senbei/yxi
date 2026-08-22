@@ -1,0 +1,229 @@
+package app.yxi.ui
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.dp
+import app.yxi.agent.Session
+import app.yxi.agent.SessionProbe
+import app.yxi.agent.SessionState
+import app.yxi.ssh.Host
+import app.yxi.ssh.HostStore
+import app.yxi.ssh.KeyManager
+import app.yxi.ssh.KnownHosts
+import app.yxi.ssh.SshSession
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+private val Pill = RoundedCornerShape(100.dp)
+
+/**
+ * 会话看板：**等你 / 干活中 / 已完成** 三段。
+ *
+ * 只有「等你」那组带操作按钮，其余安静 —— 琥珀色是全 app 唯一
+ * 「需要你动手」的信号，别处不用（PRD 附录 J.1）。
+ *
+ * ⚠️ 这个界面**不需要在服务器上装任何东西**：`tmux list-sessions` 和
+ * `~/.cloud-status` 下的状态文件都是现成的（后者由 `cc-state` 写，早就在跑）。
+ * ⚠️ 注意：Kotlin 的块注释**可嵌套**，注释里别写含 `/` 紧跟 `*` 的路径（见 TROUBLESHOOTING #23）。
+ */
+@Composable
+fun SessionsScreen(
+    store: HostStore,
+    keys: KeyManager,
+    host: Host,
+    onOpenTerminal: (String?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val scope = rememberCoroutineScope()
+    var sessions by remember { mutableStateOf<List<Session>>(emptyList()) }
+    var status by remember { mutableStateOf("连接中…") }
+    var ssh by remember { mutableStateOf<SshSession?>(null) }
+    var sendTo by remember { mutableStateOf<Session?>(null) }
+
+    val connect = rememberSshConnector(store, keys, host)
+
+    LaunchedEffect(host.id) {
+        val c = connect()
+        if (c == null) { status = "这台主机还没有可用的认证方式"; return@LaunchedEffect }
+        val s = c.session
+        runCatching { s.connect(); ssh = s }.onFailure {
+            status = if (c.known.changedDetected) "⚠️ 主机指纹变了，已拒绝连接"
+                     else "连不上：${it.message}"
+            return@LaunchedEffect
+        }
+        // 每 5 秒刷一次。一次往返拿全部，不是一个会话一个请求
+        while (true) {
+            runCatching { SessionProbe.snapshot(s) }
+                .onSuccess { sessions = it; status = "" }
+                .onFailure { status = "刷新失败：${it.message}" }
+            delay(5_000)
+        }
+    }
+    DisposableEffect(host.id) { onDispose { ssh?.disconnect() } }
+
+    Column(modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(18.dp, 14.dp, 18.dp, 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(host.alias, style = MaterialTheme.typography.headlineSmall)
+                Text(
+                    if (status.isEmpty()) "${sessions.size} 个会话 · 点开终端 · 长按发消息" else status,
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.outline,
+                )
+            }
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainer, shape = Pill,
+                modifier = Modifier.height(44.dp).clickable { onOpenTerminal(null) },
+            ) {
+                Box(Modifier.padding(horizontal = 18.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                    Text("终端", style = MaterialTheme.typography.labelLarge)
+                }
+            }
+        }
+
+        LazyColumn(
+            Modifier.weight(1f),
+            contentPadding = PaddingValues(14.dp, 4.dp, 14.dp, 20.dp),
+            verticalArrangement = Arrangement.spacedBy(9.dp),
+        ) {
+            listOf(SessionState.NeedsYou, SessionState.Working, SessionState.Done, SessionState.Idle)
+                .forEach { st ->
+                    val group = sessions.filter { it.state == st }
+                    if (group.isEmpty()) return@forEach
+                    item(key = "h-${st.name}") { GroupHeader(st, group.size) }
+                    items(group.size, key = { group[it].name }) { i ->
+                        SessionCard(
+                            group[i],
+                            onOpen = { onOpenTerminal(group[i].name) },
+                            onSend = { sendTo = group[i] },
+                        )
+                    }
+                }
+        }
+    }
+
+    sendTo?.let { target ->
+        SendSheet(target, onSend = { text ->
+            scope.launch { ssh?.let { SessionProbe.send(it, target.name, text) } }
+            sendTo = null
+        }, onDismiss = { sendTo = null })
+    }
+}
+
+private fun dot(st: SessionState) = when (st) {
+    SessionState.NeedsYou -> Color(0xFFFFC46B)   // 琥珀：全 app 只在需要你动手时出现
+    SessionState.Working -> Color(0xFF8FD8C6)
+    else -> Color(0xFF4A443D)
+}
+
+@Composable
+private fun GroupHeader(st: SessionState, n: Int) {
+    Row(
+        Modifier.padding(4.dp, 12.dp, 0.dp, 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(Modifier.size(7.dp).background(dot(st), Pill))
+        Text(
+            st.label,
+            style = MaterialTheme.typography.labelMedium,
+            color = if (st == SessionState.NeedsYou) dot(st) else MaterialTheme.colorScheme.outline,
+        )
+        Text(
+            "$n",
+            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+            color = MaterialTheme.colorScheme.outline,
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun SessionCard(s: Session, onOpen: () -> Unit, onSend: () -> Unit) {
+    val needs = s.state == SessionState.NeedsYou
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = MaterialTheme.shapes.large,
+        // 点=开终端，**长按=发消息**。发消息对任意会话都可用，
+        // 不只是「等你」那组——只是那组把按钮摆出来了而已
+        modifier = Modifier.fillMaxWidth().combinedClickable(onClick = onOpen, onLongClick = onSend),
+    ) {
+        Column(Modifier.padding(16.dp, 14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(s.short, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                if (s.attached) {
+                    Text(
+                        "已连",
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+                }
+            }
+            if (s.detail.isNotEmpty()) {
+                Text(
+                    s.detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                )
+            }
+            Text(
+                s.cwd,
+                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                color = MaterialTheme.colorScheme.outline,
+                maxLines = 1,
+            )
+            // 只有「等你」那组带按钮 —— 其余安静
+            if (needs) {
+                Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onSend, shape = Pill, modifier = Modifier.weight(1f).height(44.dp)) { Text("回它一句") }
+                    OutlinedButton(onOpen, shape = Pill, modifier = Modifier.weight(1f).height(44.dp)) { Text("开终端") }
+                }
+            }
+        }
+    }
+}
+
+/** 不进终端就能给任意会话发一句话 —— 这是我们比 Moshi 强的地方（PRD §1.6）。 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SendSheet(target: Session, onSend: (String) -> Unit, onDismiss: () -> Unit) {
+    var text by remember { mutableStateOf("") }
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
+        Column(
+            Modifier.padding(18.dp, 0.dp, 18.dp, 28.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text("发给 ${target.short}", style = MaterialTheme.typography.titleLarge)
+            Text(
+                "不用先 attach —— 直接送进那个会话（tmux send-keys）。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.outline,
+            )
+            OutlinedTextField(
+                text, { text = it },
+                placeholder = { Text("说一句…") },
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 96.dp),
+            )
+            Button(
+                { if (text.isNotBlank()) onSend(text.trim()) },
+                enabled = text.isNotBlank(),
+                shape = Pill,
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+            ) { Text("发送") }
+        }
+    }
+}

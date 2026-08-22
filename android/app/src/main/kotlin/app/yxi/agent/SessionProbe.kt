@@ -1,0 +1,119 @@
+package app.yxi.agent
+
+import app.yxi.ssh.SshSession
+import org.json.JSONObject
+
+/** 会话状态。语义跟服务器上 `cc-state` 写的一致。 */
+enum class SessionState(val label: String) {
+    NeedsYou("等你"), Working("干活中"), Done("已完成"), Idle("空闲");
+
+    companion object {
+        fun of(raw: String?) = when (raw) {
+            "input" -> NeedsYou
+            "work" -> Working
+            "done" -> Done
+            else -> Idle
+        }
+    }
+}
+
+data class Session(
+    val name: String,
+    val windows: Int,
+    val attached: Boolean,
+    val cwd: String,
+    val lastActivity: Long,
+    val state: SessionState,
+    /** cc-state 写的一句话：「运行命令: …」「等待你(决策/输入)」之类 */
+    val detail: String,
+    val stateTs: Double,
+) {
+    /** 去掉 `cc-` 前缀的短名，界面上用 */
+    val short get() = name.removePrefix("cc-")
+}
+
+/**
+ * 一次 SSH 往返拿到全部会话信息。
+ *
+ * **抄 Moshi 的两个做法**（PRD §1.2 / 附录 C.1）：
+ *   1. **一次往返拿全部** —— 手机网络下往返成本高，不要一个命令一个连接
+ *   2. **带版本号的 marker 分段** —— 主机侧脚本以后改了、App 还是旧的，
+ *      能优雅降级而不是解析崩掉
+ *
+ * 还有第三个：**不假设主机上有 jq / python**，只用 `printf` 和 `cat`。
+ * 这是 Moshi 自己在脚本注释里写明的理由，很实在——目标机可能什么都没装。
+ */
+object SessionProbe {
+
+    private const val MARKER = "__YXI_SNAPSHOT_V1__"
+
+    private val SCRIPT = """
+        m=$MARKER
+        s(){ printf '%s\t%s\n' "${'$'}m" "${'$'}1"; }
+        s tmux_begin
+        tmux list-sessions -F '#{session_name}|#{session_windows}|#{session_activity}|#{session_attached}|#{pane_current_path}' 2>/dev/null || true
+        s tmux_end
+        s status_begin
+        for f in ${'$'}HOME/.cloud-status/*.json; do [ -f "${'$'}f" ] && cat "${'$'}f" && echo; done 2>/dev/null || true
+        s status_end
+    """.trimIndent()
+
+    suspend fun snapshot(session: SshSession): List<Session> {
+        val out = session.exec(SCRIPT)
+        val tmux = extract(out, "tmux")
+        val status = extract(out, "status")
+
+        // 状态先建索引：会话名 → (state, detail, ts)
+        val states = HashMap<String, Triple<String, String, Double>>()
+        status.lineSequence().filter { it.isNotBlank() }.forEach { line ->
+            runCatching {
+                val o = JSONObject(line)
+                val name = o.optString("session")
+                if (name.isNotEmpty()) {
+                    states[name] = Triple(
+                        o.optString("state"), o.optString("detail"), o.optDouble("ts", 0.0)
+                    )
+                }
+            }
+        }
+
+        return tmux.lineSequence().filter { it.contains('|') }.mapNotNull { line ->
+            val p = line.split('|')
+            if (p.size < 5) return@mapNotNull null
+            val name = p[0]
+            val st = states[name]
+            Session(
+                name = name,
+                windows = p[1].toIntOrNull() ?: 1,
+                lastActivity = p[2].toLongOrNull() ?: 0L,
+                attached = p[3] != "0",
+                cwd = p[4],
+                state = SessionState.of(st?.first),
+                detail = st?.second.orEmpty(),
+                stateTs = st?.third ?: 0.0,
+            )
+        }.toList()
+    }
+
+    /** 只要 `<marker>\tX_begin` 和 `<marker>\tX_end` 之间的内容。缺段就当空，不抛异常。 */
+    private fun extract(out: String, name: String): String {
+        val begin = "$MARKER\t${name}_begin"
+        val end = "$MARKER\t${name}_end"
+        val a = out.indexOf(begin).takeIf { it >= 0 } ?: return ""
+        val b = out.indexOf(end, a).takeIf { it >= 0 } ?: return ""
+        return out.substring(a + begin.length, b).trim('\n', '\r')
+    }
+
+    /** 给某个会话发一句话。`hub say` 已经验证过这条路走得通。 */
+    suspend fun send(session: SshSession, target: String, text: String) {
+        // 分两步：先送文本、再单独送回车。合成一条时，文本里若含特殊字符
+        // 会让 send-keys 把它当按键名解析（比如 "Enter" 三个字就会变成回车键）
+        val q = text.replace("'", "'\\''")
+        session.exec("tmux send-keys -t '$target' -l '$q'")
+        session.exec("tmux send-keys -t '$target' Enter")
+    }
+
+    /** 抓某个会话最近 n 行屏幕，看板上做预览。 */
+    suspend fun peek(session: SshSession, target: String, lines: Int = 40): String =
+        session.exec("tmux capture-pane -p -t '$target' 2>/dev/null | tail -$lines")
+}

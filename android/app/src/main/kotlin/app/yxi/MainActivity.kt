@@ -14,7 +14,15 @@ import app.yxi.ssh.HostStore
 import app.yxi.ssh.KeyManager
 import app.yxi.term.TerminalScreen
 import app.yxi.ui.HostsScreen
+import app.yxi.ui.SessionsScreen
 import app.yxi.ui.theme.YxiTheme
+
+/** 三层：主机列表 → 会话看板 → 终端。返回键逐层退。 */
+private sealed interface Nav {
+    data object Hosts : Nav
+    data class Sessions(val host: Host) : Nav
+    data class Terminal(val host: Host, val attachTo: String?) : Nav
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -25,17 +33,23 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             YxiTheme {
-                // 先用最朴素的状态导航。会话看板（G4）落地时再看要不要上 navigation
-                var open by remember { mutableStateOf<Host?>(null) }
-                BackHandler(enabled = open != null) { open = null }
-
+                var nav by remember { mutableStateOf<Nav>(Nav.Hosts) }
+                BackHandler(enabled = nav !is Nav.Hosts) {
+                    nav = when (val n = nav) {
+                        is Nav.Terminal -> Nav.Sessions(n.host)
+                        else -> Nav.Hosts
+                    }
+                }
                 Scaffold { p ->
                     val m = Modifier.padding(p)
-                    val h = open
-                    if (h == null) {
-                        HostsScreen(store, keys, onOpen = { open = it }, modifier = m)
-                    } else {
-                        TerminalScreen(store = store, keys = keys, host = h, attachTo = null, modifier = m)
+                    when (val n = nav) {
+                        is Nav.Hosts -> HostsScreen(store, keys, onOpen = { nav = Nav.Sessions(it) }, modifier = m)
+                        is Nav.Sessions -> SessionsScreen(
+                            store, keys, n.host,
+                            onOpenTerminal = { target -> nav = Nav.Terminal(n.host, target) },
+                            modifier = m,
+                        )
+                        is Nav.Terminal -> TerminalScreen(store, keys, n.host, n.attachTo, modifier = m)
                     }
                 }
             }

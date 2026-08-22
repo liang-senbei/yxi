@@ -36,6 +36,11 @@
   ③ **篡改指纹后直接拒绝，不给"仍然连接"的口子** ④ **连上真实远程机 `station`（公网、只装了公钥）**。
   ⚠️ 挖出**两个安全漏洞**：TROUBLESHOOTING #21（双重编码导致 CHANGED 永远检测不到）
   和 #22（jsch 在 CHANGED 时也会问，点一下就能绕过）。**两个都是「专门测反向用例」才发现的。**
+- ✅ **G4 完成**（实测通过）：会话看板三段分组（等你/干活中/已完成/空闲）+ 不进终端给**任意**会话发消息。
+  一次 SSH 往返拿全部（带版本号的 marker 分段，抄 Moshi）。**服务器上不用装任何东西** ——
+  `tmux list-sessions` 和 `~/.cloud-status` 都是现成的。
+  实测：本机 16 个会话、station 3 个会话（远程、公网）都正确分组；
+  长按会话发 `touch /tmp/yxi-g4-sent`，服务器上文件出现、tmux 有回显。
 - 🔄 **原 G2 进行中**：**SSH 层已跑通** —— 连接 / ed25519 公钥认证 / PTY / `tmux attach` / 双向读写全部验证成功
   （截图里能看到 `[cc-root] 0:claude*` 和 Claude Code 的 TUI）。
   `android/app/src/main/kotlin/app/yxi/ssh/`：`HostConfig.kt` + `SshSession.kt`（分层参考 ConnectBot 的 `transport/`）。
