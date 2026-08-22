@@ -31,7 +31,7 @@
 |---|---|
 | 0.1 | `apt install -y openjdk-17-jdk-headless`（本机**没有 java**，已查） |
 | 0.2 | 下 Android **cmdline-tools**，`sdkmanager` 装 `platform-tools` + `platforms;android-34` + `build-tools;34.0.0`（约 3 GB，磁盘 451 G 空闲） |
-| 0.3 | Gradle wrapper 建最小工程：一个 Activity 显示 "Yxi"，`minSdk 26` |
+| 0.3 | Gradle wrapper 建最小工程：一个 Activity 显示 "Yxi"。**`minSdk 26` + `compileSdk 36`**（compileSdk 36 是 Live Updates 的编译前提，minSdk 低保覆盖面） |
 | 0.4 | `./gradlew assembleDebug` |
 | 0.5 | `lapput` 或微信传手机 → 侧载安装 |
 | 0.6 | **建 Android 模拟器（AVD）** —— 见下方「开发回路」 |
@@ -208,6 +208,8 @@ Claude 要跑危险命令
 ### Phase 8 · P2（不排期）
 
 `#13 用量`（`cc-quota` 已有）· `#14 Diff 查看器` · `#15 硬件键盘`（基本白送）· `#16 手势简版` · **Chat View**（读 jsonl，对应 Moshi 的 `/v1/transcripts/blob`）
+
+**`#18 Live Updates`（安卓版「灵动岛」）** —— `Notification.ProgressStyle`（API 36）把前台服务那条通知提升成**状态栏胶囊**，显示**审批 570 秒倒计时**。需 `compileSdk 36`（`minSdk` 仍可 26，运行时判版本）。⚠️ 完整体验先在 Pixel 放出，其它厂商不一定有 → **渐进增强，不当核心功能**。详见 PRD §2.7
 
 **明确不做**：`#17 浏览器预览` · `#18 Live Activity`（iOS 独有） · `#19 Mosh` · `#20 主题字体图标` —— 理由见 PRD §5.5
 
