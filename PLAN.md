@@ -88,8 +88,13 @@
 | App | ⭐ **`ExitPlanMode` → 计划卡片**（markdown）+「批准 / 继续讨论」 |
 | App | markdown 渲染 + 代码块语法高亮 + 一键复制 |
 | App | 输入框 → `tmux send-keys` 打回同一个活着的会话 |
+| App+服务端 | ⭐ **附件/图片上传**（PRD 附录 F）：SFTP channel 传到 `/root/src/tmp/<项目>/`，<br>chip 显示「图片1/附件1」，发送时头部带路径映射 |
+| 服务端 | **3 天清理** systemd timer。⚠️ 路径写死、`-xdev`、不跟符号链接、删前记日志 |
 
-**验收**：打开 `cc-Yxi` 的对话模式，**能像原生 Claude App 那样读完整段对话**；打字回它，服务器上收到。
+**验收**：① 打开 `cc-Yxi` 的对话模式，**能像原生 Claude App 那样读完整段对话**；打字回它，服务器上收到
+② 从手机相册选 2 张图 + 1 个文件发出去，`/root/src/tmp/Yxi/` 里出现清洗过名字的文件，**Claude 能读到**
+**自检**：`test_yxi.py::test_tmp_cleanup` —— 造 3 个文件（1 天前/4 天前/带空格中文名），
+断言只有 4 天前的被删、名字清洗正确、符号链接不被跟随。
 **⚠️ 要实测的**：点 `AskUserQuestion` 的选项时，Claude Code 的 TUI 选择器**接受什么按键**（数字键？↑↓+Enter？）。
 备选路径：查 `Elicitation` / `ElicitationResult` hook 能否程序化应答。**这条不通的话选项卡片只能只读**。
 
