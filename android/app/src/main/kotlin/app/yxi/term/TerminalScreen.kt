@@ -9,6 +9,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import app.yxi.ssh.HostConfig
 import app.yxi.ssh.SshSession
+import app.yxi.ui.explain
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -126,11 +127,7 @@ fun TerminalScreen(
             pump.join()
             status = "连接已断开"
         }.onFailure {
-            status = if (known.changedDetected) {
-                "⚠️ 主机指纹变了，已拒绝连接。\n服务器可能被重装过——确认无误后请在主机列表里删掉这台再重加。"
-            } else {
-                "失败：${it::class.simpleName}: ${it.message}"
-            }
+            status = c.explain(it)
         }
     }
 

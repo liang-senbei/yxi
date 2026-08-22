@@ -15,6 +15,7 @@ android {
         targetSdk = 37
         versionCode = 1
         versionName = "0.1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
@@ -29,6 +30,7 @@ android {
     }
     buildFeatures { compose = true }
     sourceSets["main"].kotlin.directories.add("src/main/kotlin")
+    sourceSets["androidTest"].kotlin.directories.add("src/androidTest/kotlin")
 }
 
 dependencies {
@@ -46,4 +48,8 @@ dependencies {
     implementation(libs.markdown.m3)
     implementation(libs.bouncycastle)
     implementation(libs.kotlinx.coroutines.android)
+
+    // 仪器测试：KnownHosts 的分支表要在真机上跑，因为它依赖 android.util.Base64
+    androidTestImplementation(libs.androidx.test.junit)
+    androidTestImplementation(libs.androidx.test.runner)
 }

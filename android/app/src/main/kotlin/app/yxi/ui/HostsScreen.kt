@@ -2,6 +2,8 @@ package app.yxi.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -76,7 +78,11 @@ fun HostsScreen(
     if (showKey) {
         PublicKeySheet(keys) { showKey = false }
     }
-    installTarget?.let { h -> InstallKeySheet(store, keys, h) { installTarget = null } }
+    installTarget?.let { h ->
+        // 连接一律走共用的 connector —— 这里曾经自己 new 了个 SshSession 且 prompt 传 null，
+        // 结果「给没连过的新主机装公钥」永远失败（见 TROUBLESHOOTING #24 / #25）
+        InstallKeySheet(rememberSshConnector(store, keys, h), keys, store, h) { installTarget = null }
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -132,9 +138,11 @@ private fun AddHostSheet(store: HostStore, keys: KeyManager, onDone: () -> Unit)
         ) {
             Text("加新主机", style = MaterialTheme.typography.titleLarge)
 
-            Field(alias, { alias = it }, "名字（随便起，如 station）")
+            Field(alias, { alias = it }, "名字（随便起，只给你自己看）")
+            // ⚠️ 别名≠地址：手机上没有 ~/.ssh/config，「station」「天亮」这类 SSH 别名解析不了，
+            // 下面那栏必须是真地址。标签曾经写「主机名 / IP」，等于在邀请用户填别名。
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Box(Modifier.weight(1f)) { Field(hostname, { hostname = it }, "主机名 / IP", mono = true) }
+                Box(Modifier.weight(1f)) { Field(hostname, { hostname = it }, "IP 或域名，如 38.244.50.31", mono = true) }
                 // ⚠️ 端口不能写死 22 —— 客户那台 Windows 走 2222
                 Box(Modifier.width(96.dp)) {
                     Field(port, { port = it.filter(Char::isDigit).take(5) }, "端口", mono = true, number = true)
@@ -184,21 +192,46 @@ private fun AddHostSheet(store: HostStore, keys: KeyManager, onDone: () -> Unit)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PublicKeySheet(keys: KeyManager, onDone: () -> Unit) {
-    val line = remember { runCatching { keys.publicKeyLine() }.getOrElse { "生成失败：${it::class.simpleName}: ${it.message ?: "(无消息)"}" } }
-    val fp = remember { runCatching { keys.fingerprint() }.getOrDefault("") }
+    // 换钥匙之后要重刷，所以是 state 不是 remember 常量
+    var gen by remember { mutableStateOf(0) }
+    val line = remember(gen) {
+        runCatching { keys.publicKeyLine() }
+            .getOrElse { "生成失败：${it::class.simpleName}: ${it.message ?: "(无消息)"}" }
+    }
+    val fp = remember(gen) { runCatching { keys.fingerprint() }.getOrDefault("") }
+    var copied by remember { mutableStateOf(false) }
+    var confirmRegen by remember { mutableStateOf(false) }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+
+    fun copy() {
+        val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+            as android.content.ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("ssh public key", line))
+        copied = true
+    }
+
     ModalBottomSheet(onDismissRequest = onDone, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
         Column(
-            Modifier.padding(18.dp, 0.dp, 18.dp, 28.dp),
+            // ⚠️ 要能滚：矮屏（模拟器 720x1280）上底部两个按钮会被挤出屏幕，够不着
+            Modifier.verticalScroll(rememberScrollState()).padding(18.dp, 0.dp, 18.dp, 28.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text("这台手机的公钥", style = MaterialTheme.typography.titleLarge)
-            Hint("贴进目标机的 ~/.ssh/authorized_keys（一行）。撤销就删掉那一行，不用改 App 任何设置。")
-            Surface(color = MaterialTheme.colorScheme.surfaceContainerLowest, shape = MaterialTheme.shapes.medium) {
-                Text(
-                    line,
-                    Modifier.padding(14.dp),
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                )
+            Hint("点一下整块就复制。贴进目标机的 ~/.ssh/authorized_keys（一行）。撤销就删掉那一行，不用改 App 任何设置。")
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerLowest,
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier.fillMaxWidth().clickable { copy() },
+            ) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(line, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace))
+                    Text(
+                        if (copied) "✓ 已复制到剪贴板" else "点这里复制",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (copied) MaterialTheme.colorScheme.tertiary
+                        else MaterialTheme.colorScheme.outline,
+                    )
+                }
             }
             if (fp.isNotEmpty()) {
                 Text(
@@ -207,7 +240,40 @@ private fun PublicKeySheet(keys: KeyManager, onDone: () -> Unit) {
                     color = MaterialTheme.colorScheme.outline,
                 )
             }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button({ copy() }, shape = Pill, modifier = Modifier.weight(1f).height(48.dp)) {
+                    Text(if (copied) "已复制" else "复制公钥")
+                }
+                OutlinedButton(
+                    { confirmRegen = true }, shape = Pill,
+                    modifier = Modifier.weight(1f).height(48.dp),
+                ) { Text("换一把") }
+            }
         }
+    }
+
+    // ⚠️ 换钥匙是**不可逆**的：旧私钥直接丢，所有装过旧公钥的服务器立刻连不上。
+    // 所以必须先问一句，且把后果说清楚——不是「确定吗」这种没信息量的提示。
+    if (confirmRegen) {
+        AlertDialog(
+            onDismissRequest = { confirmRegen = false },
+            title = { Text("换一把新密钥？") },
+            text = {
+                Text(
+                    "旧私钥会被丢掉，换不回来。\n\n" +
+                        "所有已经装过旧公钥的服务器都会立刻连不上，" +
+                        "要么重新装一次新公钥，要么手工删掉 authorized_keys 里那行 yxi@android。\n\n" +
+                        "只有在怀疑私钥泄露、或想换台手机重来时才需要这么做。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            },
+            confirmButton = {
+                TextButton({
+                    keys.regenerate(); gen++; copied = false; confirmRegen = false
+                }) { Text("换") }
+            },
+            dismissButton = { TextButton({ confirmRegen = false }) { Text("算了") } },
+        )
     }
 }
 
@@ -279,7 +345,13 @@ private fun IconTextButton(text: String, primary: Boolean = false, onClick: () -
 /** 一键装公钥：用密码连一次，把 App 的公钥追加进 `authorized_keys`，之后免密。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun InstallKeySheet(store: HostStore, keys: KeyManager, host: Host, onDone: () -> Unit) {
+private fun InstallKeySheet(
+    connect: Connect,
+    keys: KeyManager,
+    store: HostStore,
+    host: Host,
+    onDone: () -> Unit,
+) {
     val scope = rememberCoroutineScope()
     var password by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
@@ -298,19 +370,15 @@ private fun InstallKeySheet(store: HostStore, keys: KeyManager, host: Host, onDo
                 onClick = {
                     busy = true; result = "连接中…"
                     scope.launch {
-                        val cfg = app.yxi.ssh.HostConfig(
-                            host.alias, host.hostname, host.port, host.username,
-                            app.yxi.ssh.HostConfig.Auth.Password(password),
-                        )
-                        val known = app.yxi.ssh.KnownHosts(store, host.id, null)
-                        val s = app.yxi.ssh.SshSession(cfg, known)
-                        result = runCatching {
-                            s.connect()
-                            val n = s.installPublicKey(keys.publicKeyLine()).trim()
-                            s.disconnect()
+                        // 用密码连一次，但指纹校验和别处完全一样（第一次会弹指纹确认）
+                        val c = connect(app.yxi.ssh.HostConfig.Auth.Password(password))
+                        result = if (c == null) "建不了连接" else runCatching {
+                            c.session.connect()
+                            val n = c.session.installPublicKey(keys.publicKeyLine()).trim()
+                            c.session.disconnect()
                             store.upsert(host.copy(useKey = true, sealedPassword = app.yxi.ssh.Vault.seal(password)))
                             "✅ 装好了（authorized_keys 里现有 $n 行 yxi 公钥），已切到密钥认证"
-                        }.getOrElse { "失败：${it::class.simpleName}: ${it.message}" }
+                        }.getOrElse { c.explain(it) }
                         busy = false
                     }
                 },

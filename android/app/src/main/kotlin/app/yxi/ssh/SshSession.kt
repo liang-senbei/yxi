@@ -26,6 +26,10 @@ class SshSession(
     private val jsch = JSch()
     private var session: Session? = null
 
+    /** `host:port`，报错文案里用。 */
+    val hostLabel: String get() = cfg.hostname + if (cfg.port != 22) ":${cfg.port}" else ""
+
+
     init {
         Crypto.ensureProviders()
         // 把 jsch 自己的日志接到 logcat —— 认证失败时光看异常消息什么也看不出来

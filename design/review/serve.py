@@ -2,7 +2,7 @@
 """Yxi 视觉稿批注页 —— 点任意位置钉一条批注，落 pins.json，Claude 直接读文件。
 只读画板 + 一个写 pins 的接口；不碰文件系统其它部分、不执行任何东西。
 token 在路径里，够一个没有敏感内容的评审页用。"""
-import json, os, re, pathlib, subprocess, threading
+import json, os, re, pathlib, shutil, subprocess, threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -222,6 +222,20 @@ class H(BaseHTTPRequestHandler):
             return self._send(200, page())
         if rest == "/pins":
             return self._send(200, json.dumps(load_pins(), ensure_ascii=False), "application/json")
+        if rest == "/apk":
+            # 手机直接下 APK —— 走的是同一个 token 路径，没 token 就 404。
+            # 加这条是因为到笔电的反向隧道会断，而手机装包不该被那条链路卡住。
+            apk = HERE.parent.parent / "Yxi-0.1.0-debug.apk"
+            if not apk.exists():
+                return self._send(404, "no apk", "text/plain")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/vnd.android.package-archive")
+            self.send_header("Content-Length", str(apk.stat().st_size))
+            self.send_header("Content-Disposition", 'attachment; filename="Yxi-0.1.0-debug.apk"')
+            self.end_headers()
+            with apk.open("rb") as f:
+                shutil.copyfileobj(f, self.wfile)
+            return
         self._send(404, "not found", "text/plain")
 
     def do_POST(self):

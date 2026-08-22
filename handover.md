@@ -47,13 +47,23 @@
   输入框走 `tmux send-keys` 打进活着的会话 —— **不重新实现 agent 协议**，
   所以 Claude Code 的配置、权限、MCP、skills 原样生效。
   解析分层抄 Lucarne 的 `agent-sessions`：原始层与语义层分开，`Unknown` 是兜底不是终点。
-- 🔄 **原 G2 进行中**：**SSH 层已跑通** —— 连接 / ed25519 公钥认证 / PTY / `tmux attach` / 双向读写全部验证成功
-  （截图里能看到 `[cc-root] 0:claude*` 和 Claude Code 的 TUI）。
-  `android/app/src/main/kotlin/app/yxi/ssh/`：`HostConfig.kt` + `SshSession.kt`（分层参考 ConnectBot 的 `transport/`）。
-  **双向已验证**：从 App 输入框敲 `touch /tmp/yxi-g2-typed`，经 SSH→PTY→tmux→shell 执行，服务器上文件真的出现。
-  **剩终端控件选型**（临时用 ANSI 剥离显示，TUI 排版必然错乱 —— 正说明需要真 VT 状态机）。
-  开发回路固化进 `dev/run.sh`（一条命令：保证模拟器在 → 构建 → 装 → 起 → 抓日志 → 截图）。目标清单见 [GOALS.md](./GOALS.md)
-- ⬜ **原待办**：Phase 0（Android 工具链 + 空壳 APK + AVD，**最大未知，先做**）→ 1（SSH 层+多主机+终端，2 天，**到这已可替代现有 SSH App**）→ 2（终端打磨：中文/方向键/重连）→ 3（yxi-agent + 会话看板）→ 4（事件+通知）→ 5（远程审批）→ 6（P1）。**P0 约 6.5 天**
+- ✅ **四个安全/正确性问题全部收口**（G1–G5 一程挖出来的）：
+  - jsch 的 Session 写包路径**不是线程安全**的 → `Shell.write/resize` 上 `Mutex`（#16）
+  - `HostKey.getKey()` 已经是 base64，重复编码让指纹校验失效（#21）
+  - `StrictHostKeyChecking=ask` 在 **CHANGED 时也弹窗**，用户点一下就连上 → 短路直接拒（#22）
+  - 共用连接件漏掉「装公钥」这个调用点 → 认证覆盖做成 `connect(auth)` 参数，
+    **`ui/` 和 `term/` 下再没有裸 `SshSession(`**（#24 / #25）
+  - `KnownHostsTest`（5 条仪器测试）钉住这几条分支，且**已用变异测试确认断言会红**（#26）
+  - 错误文案统一走 `Connector.explain()`：`UnknownHostException` 会直接告诉用户
+    「这栏要填 IP 或域名，SSH 别名在手机上不解析」（#27）
+- ✅ **公钥界面**：点整块复制到剪贴板 + 「换一把」（带不可逆后果说明的确认框）。
+- 📦 **APK 分发**：`Yxi-0.1.0-debug.apk`（33 MB）。手机直接下：
+  批注服务 `yxi-review` 的 token 路径下加了 `/apk`（没 token 返回 404）。
+  URL 里的 token 见 `design/review/.token`（**gitignore，不写进文档**）。
+  到笔电的反向隧道会断，所以装包不该依赖那条链路。
+- ⬜ **待办**：G6（工具卡片按工具定制 + AskUserQuestion/ExitPlanMode 交互卡）→ G7（文件模式/SFTP）
+  → G8（三模式切换 + D-Pad）→ G9（终端打磨：**软键盘 IME 通路真机才验得了**）
+  → G10（手机主动响）→ G11（锁屏批权限）→ G12（附件+语音+用量）。清单见 [GOALS.md](./GOALS.md)
 
 ## 读写信息在哪
 | 路径 | 性质 |

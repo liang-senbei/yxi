@@ -52,7 +52,7 @@ fun ChatScreen(
     LaunchedEffect(sessionName) {
         val c = connect() ?: run { status = "这台主机还没有可用的认证方式"; return@LaunchedEffect }
         runCatching { c.session.connect(); ssh = c.session }.onFailure {
-            status = if (c.known.changedDetected) "⚠️ 主机指纹变了，已拒绝连接" else "连不上：${it.message}"
+            status = c.explain(it)
             return@LaunchedEffect
         }
         val file = TranscriptStream.latestFor(c.session, cwd)
