@@ -63,15 +63,17 @@
 
 ---
 
-### Phase 2 · `yxi-agent` + 会话看板 + 发指令（~1 天）
+### Phase 2 · 会话看板 + 发指令（~1 天）
+
+> ⚠️ **服务器侧已按 PRD 附录 H 简化**：这一阶段**不需要在服务器上装任何东西**——全是 shell 命令。
 
 | 层 | 做什么 |
 |---|---|
-| 服务端 | `yxi-agent`（~250 行 Python）：**不监听端口**，被 SSH exec channel 拉起，stdin/stdout JSON 行协议 |
-| 服务端 | **带版本号的探测标记**（`__YXI_SNAPSHOT_V1__`），抄 Moshi（PRD 附录 C.1） |
-| 服务端 | `list` = 会话+状态（读 `~/.cloud-status/*.json`，`cc-state` 已在写）· `peek` = `capture-pane` · `send` = `send-keys` |
-| 服务端 | **探测每个会话里跑的是什么**（Claude Code？普通 shell？）→ 决定要不要给对话模式 |
+| App | `list` → `tmux list-sessions -F '…'` + 读 `~/.cloud-status/*.json`（`cc-state` 已在写） |
+| App | `peek` → `tmux capture-pane -p -t <会话>` · `send` → `tmux send-keys` |
+| App | **探测每个会话里跑的是什么**（Claude Code？普通 shell？）→ 决定要不要给对话模式 |
 | App | 会话看板三列（**等你 / 干活中 / 已完成**） |
+| 服务端（可选） | `yxi` 脚本（~60 行）：把上面几条打包成一次 SSH 调用、**带版本号的 marker 分段**返回（抄 Moshi，PRD §1.2 / 附录 C.1）。<br>**只为省往返，不是能不能用的前提** |
 
 **验收**：手机看到全部 14 个 `cc-*` 会话和状态；给 `cc-Yxi` 发一句话，服务器上能看到收到。
 
@@ -81,7 +83,7 @@
 
 | 层 | 做什么 |
 |---|---|
-| 服务端 | `yxi-agent` **`tail -f` 转录 jsonl**（`~/.claude/projects/<项目>/<uuid>.jsonl`），解析成结构化事件流 |
+| App | **`tail -f` 转录 jsonl** 直接经 SSH exec channel 流回来，App 侧解析。<br>⚠️ **不需要服务器上有任何东西**——`tail` 是系统自带的（PRD 附录 H.4） |
 | App | 渲染 `text` / `thinking`（默认折叠）/ `tool_use`+`tool_result` 工具卡片 |
 | App | **按工具定制卡片**：`Bash`（占 3177 次，先做它）· `Edit`/`Write` 渲染成 **diff** · `Read` · `Agent` |
 | App | ⭐ **`AskUserQuestion` → 可点选项按钮**（`questions[].options[]` 直接变按钮） |
@@ -146,12 +148,13 @@
 
 > 推送方式已定（PRD §2.7）：**前台服务默认 + ntfy 可选，不用 FCM**。
 
+> ⚠️ **已按 PRD 附录 H 简化：没有守护进程。** `yxi-hook` 是唯一要装的东西。
+
 | 层 | 做什么 |
 |---|---|
-| hook | `yxi-hook`（~60 行）挂 `Notification` / `Stop` / `SessionStart` / `SessionEnd`，投 `/run/yxi.sock` |
-| 服务端 | **`yxi-inbox`**（~80 行，systemd，**只监听 unix socket**）：收事件、落盘、积压。<br>手机没连着时 Claude 也在干活，得有人接着 |
-| 服务端 | 限流：`tool_running`/`tool_finished` 折叠 |
-| App | `EventService` 前台服务：常驻 exec channel，收事件 → 本地通知 |
+| hook | **`yxi-hook`**（~80 行）挂 `PermissionRequest` / `Notification` / `Stop` / `SessionStart` / `SessionEnd`，<br>**追加写 `~/.yxi/events.jsonl`**（顺手把 stdin 里的 `transcript_path` 写进去 → App 零映射逻辑） |
+| hook | 自己限流：`tool_running`/`tool_finished` 折叠；文件超 5 MB 自截断保留尾部 1000 行 |
+| App | `EventService` 前台服务：常驻一条 exec channel 跑 `tail -f ~/.yxi/events.jsonl`，收事件 → 本地通知 |
 
 **验收**：① 荣耀 Magic7 **锁屏**收到「cc-mail 干完了」，点开直达 ② **手机没连着时产生的事件，连上后能补收到**
 > ⚠️ **就在荣耀 Magic7 上验**（MagicOS 后台管控严 = 最恶劣环境）。要做：电池白名单引导 + `START_STICKY` + 开机广播。
@@ -161,10 +164,14 @@
 ### Phase 7 · 远程审批（~1 天）—— **整个项目的核心**
 
 ```
-Claude 要跑危险命令 → PermissionRequest hook → yxi-hook 投事件后【阻塞等，最多 570 秒】
-  → yxi-inbox → yxi-agent → SSH → 前台服务发通知（工具名 + 完整参数 + 三个按钮）
-  → 你在【通知上】直接点 批准/拒绝/转终端 → 原路回到还等着的 hook → Claude 继续
+Claude 要跑危险命令 → PermissionRequest hook 触发
+  → yxi-hook 往 ~/.yxi/events.jsonl 追加一行，然后【轮询 ~/.yxi/answers/<id>，最多 570 秒】
+  → App 的 tail -f 看到 → 前台服务发通知（工具名 + 完整参数 + 三个按钮）
+  → 你在【通知上】点 批准 → App 经 SSH 跑  printf 'allow' > ~/.yxi/answers/<id>
+  → hook 读到 → 打印 permissionDecision → Claude 继续
 ```
+
+**零守护进程**（PRD 附录 H）。失败模式只剩「文件没出现」一种 → 超时即 `"ask"`。
 
 **必须做对的三件事**：
 1. **fail-closed**：超时 570s / inbox 挂 / socket 连不上 / 解析失败 → **一律输出 `"ask"`**，退回终端。**任何分支都不能默认 allow。**
@@ -172,7 +179,7 @@ Claude 要跑危险命令 → PermissionRequest hook → yxi-hook 投事件后�
 3. **「转终端」按钮**：一键立刻返回 `ask`，别让 Claude 干等 9 分钟
 
 **验收（两条都要过）**：① 手机**通知上直接**批一次，Claude 继续跑
-② **`systemctl stop yxi-inbox` 后再触发 → Claude 退回终端问你**（不是自动放行）
+② **把 `~/.yxi/` 改成不可写后再触发 → Claude 退回终端问你**（不是自动放行）
 
 **自检**：`test_yxi.py::test_approval_fail_closed` —— socket 指到不存在的路径，断言输出 `permissionDecision == "ask"`。
 > **这条测试比其它所有加起来都重要。**
@@ -210,12 +217,10 @@ Claude 要跑危险命令 → PermissionRequest hook → yxi-hook 投事件后�
 /root/src/workspace/Yxi/
 ├── PRD.md / PLAN.md / handover.md      ✅ 已完成
 ├── TROUBLESHOOTING.md                  Phase 0 起边做边记
-├── server/
-│   ├── yxi-agent          ~200 行 Python · 不监听端口 · SSH 拉起
-│   ├── yxi-inbox          ~80 行 · systemd · 只听 unix socket
-│   ├── yxi-hook           ~60 行 · 挂 settings.json
-│   ├── yxi-inbox.service
-│   └── install.sh         注册 hook + 起服务（各台机跑一次）
+├── server/                ~140 行，无守护进程（PRD 附录 H）
+│   ├── yxi-hook           ~80 行 · 挂 settings.json · **唯一必须装的**
+│   ├── yxi                ~60 行 · **可选** · 打包探测省往返
+│   └── install.sh         注册 hook + 建 ~/.yxi/
 ├── web/                   塞进 WebView 的前端
 │   ├── term.html          xterm.js + 键盘工具条 · ~350 行
 │   └── xterm.js / xterm.css / CJK 字体   vendor（本机没 npm，curl 拉）
@@ -229,7 +234,7 @@ Claude 要跑危险命令 → PermissionRequest hook → yxi-hook 投事件后�
 └── test_yxi.py            自检 · ~80 行（4 个断言，见各 Phase）
 ```
 
-服务器侧 ~340 行，App 侧 ~1250 行（含前端）。**总量约 1600 行。**
+服务器侧 **~140 行**（原 ~340，见 PRD 附录 H），App 侧 ~1250 行。**总量约 1400 行。**
 
 > 注意：**没有 `certs/` 了**。改走 SSH 后不需要自建 CA（PRD §2.3）。
 

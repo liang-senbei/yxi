@@ -495,6 +495,11 @@ secure context，于是被迫去搞 Let's Encrypt / Tailscale funnel / 域名，
 
 ## 6. 架构
 
+> ⚠️ **本节的服务器侧设计已被 [附录 H](#附录-h--服务器侧到底需要什么推翻前面的过度设计) 修正**：
+> `yxi-inbox` 守护进程删掉了（换成一个追加写的文件），`yxi-agent` 降级成可选脚本。
+> **唯一必须装的是 `yxi-hook`。** 下面的图保留作为「原本设想」的记录，实施以附录 H 为准。
+
+
 ```
 ┌───────────────────────────────────────────────────┐
 │  Yxi.apk  ——  Android 原生（Kotlin）               │
@@ -1182,3 +1187,95 @@ find /root/src/tmp -xdev -mindepth 1 -type d -empty -delete
 - ✗ **在手机上编辑文件**（P0；见上）
 - ✗ 文件搜索 / grep（终端模式里 `rg` 更快更好）
 - ✗ 版本控制操作（同上）
+
+---
+
+## 附录 H · 服务器侧到底需要什么（**推翻前面的过度设计**）
+
+> 用户问：「为什么要 yxi-agent，加一个 agent 的作用是什么」——**问对了。**
+> 前面 §6 的设计里 `yxi-agent` + `yxi-inbox` 大部分是多余的。这里是修正后的版本，
+> **§6 的架构图以本附录为准**。
+
+### H.1 唯一**必须**装的：`yxi-hook`
+
+**因为 Claude Code 只调用注册在 `settings.json` 里的 hook。**
+SSH 做不到让 Claude 停下来问你手机——这是全项目唯一没有替代方案的一环。
+
+> ✅ **机制已被本机现成代码验证**：`/root/.claude/hooks/hub-gate.py` 是一个跑了很久的
+> `PreToolUse` 闸门，它的注释明确写着：
+> 「`--dangerously-skip-permissions`（bypass）模式下 `"ask"` 仍会强制弹窗——
+> bypass 只跳过提示，显式 ask 强制的除外。」
+> → **我们 fail-closed 到 `"ask"` 在 bypass 模式下依然有效。**
+
+### H.2 `yxi-inbox`（常驻守护）——**删掉**
+
+它的活是「手机不在时接住事件」。**一个追加写的文件就够了**：
+
+```
+~/.yxi/events.jsonl      hook 追加写；App 连上就 tail -f
+~/.yxi/answers/<id>      App 写；hook 轮询读
+```
+
+**没有守护进程、没有 systemd 单元、没有 unix socket、没有监听端口**——
+**也就不存在「守护进程挂了」这一整类失败模式**。文件天然持久，`tail -f` 天然流式。
+
+### H.3 `yxi-agent`——**降级成一个脚本，不是守护进程，而且不是必需品**
+
+它原本被安排的活，全是 shell 命令：
+
+| 原本说要 agent 做 | 其实就是 |
+|---|---|
+| `list` 会话 + 状态 | `tmux list-sessions -F '#{session_name}\|…'` + 读 `~/.cloud-status/*.json` |
+| `peek` 预览 | `tmux capture-pane -p -t <会话>` |
+| `send` 发指令 | `tmux send-keys` |
+| 文件浏览 | **SFTP**（SSH 自带，附录 G） |
+| 转录流（Chat View） | `tail -f <transcript_path>` |
+| 审批回答 | `printf 'allow' > ~/.yxi/answers/<id>` |
+
+**连我以为需要逻辑的那块也不需要**：原本担心「怎么知道哪个会话对应哪个转录文件」，
+但 **hook 的 stdin 里本来就带 `transcript_path`**（官方文档确认，§7）。
+hook 把它写进事件行，App 直接读——**零映射逻辑**。
+
+**那还留它做什么？** 只有一个理由：**省往返**——把多条探测打包成一次 SSH 调用、
+用带版本号的 marker 分段返回（Moshi 那招，§1.2）。手机网络下往返贵，这个优化实在。
+
+> ⚠️ **但它不是必需品。** 没有它，App 多跑几条命令一样能工作。
+> 这个区别很重要：「**装了 agent 才有的功能**」这句话现在只对「省往返」成立，
+> **不对「能不能用」成立**。
+
+### H.4 修正后的模式可用性
+
+| 模式 | 需要什么 |
+|---|---|
+| **终端** | 什么都不要（SSH shell channel） |
+| **文件** | 什么都不要（SFTP） |
+| **对话（Chat View）** | 只要能读到转录文件即可——`tail -f` 就行。**不需要装任何东西** |
+| **事件通知 + 远程审批** | **只需要 `yxi-hook`**（唯一必须装的） |
+
+> 也就是说：**没在某台机器上装任何东西，三个模式全都能用**——只是不会收到主动通知、
+> 也不能远程批权限（因为那两个功能的前提是 Claude 主动告诉你，而这只能靠 hook）。
+
+### H.5 修正后的服务器侧文件清单
+
+```
+server/
+├── yxi-hook          ~80 行 · 挂 settings.json · 唯一必须装的
+├── yxi               ~60 行 · 可选 · 打包探测省往返（marker 分段）
+└── install.sh        注册 hook、建 ~/.yxi/ 目录
+
+运行期产生：
+~/.yxi/events.jsonl   事件流（追加写，App tail -f）
+~/.yxi/answers/<id>   审批回答（App 写，hook 读完即删）
+```
+
+**从 ~340 行 + 一个 systemd 服务 + 一个 unix socket，变成 ~140 行 + 两个文件路径。**
+
+### H.6 顺带简化的地方
+
+- ~~`/run/yxi.sock`~~ → 不需要了
+- ~~`yxi-inbox.service`~~ → 不需要了
+- ~~事件限流要在 daemon 里做~~ → hook 自己按类型决定写不写就行
+- **审批的 fail-closed 更硬了**：没有守护进程可挂，失败模式只剩「文件没出现」一种，
+  超时即 `"ask"`
+- **`~/.yxi/events.jsonl` 需要轮转**（别无限长）：hook 每次写前检查，超过 5 MB 就
+  截断保留尾部 1000 行。一行代码的事，比守护进程可靠
