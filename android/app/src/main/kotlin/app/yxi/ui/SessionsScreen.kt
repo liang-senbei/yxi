@@ -45,6 +45,7 @@ fun SessionsScreen(
     host: Host,
     onOpenTerminal: (String?) -> Unit,
     onOpenChat: (String, String) -> Unit,
+    onOpenFiles: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -83,12 +84,16 @@ fun SessionsScreen(
                     color = MaterialTheme.colorScheme.outline,
                 )
             }
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainer, shape = Pill,
-                modifier = Modifier.height(44.dp).clickable { onOpenTerminal(null) },
-            ) {
-                Box(Modifier.padding(horizontal = 18.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
-                    Text("终端", style = MaterialTheme.typography.labelLarge)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("文件" to onOpenFiles, "终端" to { onOpenTerminal(null) }).forEach { (label, go) ->
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainer, shape = Pill,
+                        modifier = Modifier.height(44.dp).clickable(onClick = go),
+                    ) {
+                        Box(Modifier.padding(horizontal = 16.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                            Text(label, style = MaterialTheme.typography.labelLarge)
+                        }
+                    }
                 }
             }
         }

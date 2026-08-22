@@ -207,6 +207,16 @@ class SshSession(
     } }
 
     /** 跑一条命令拿输出就退（会话枚举、探测都走它）。G4 起大量使用。 */
+    /** 开一条 SFTP 通道给文件模式用。一条连接上开一次，反复用。 */
+    suspend fun openSftp(): Sftp = withContext(Dispatchers.IO) {
+        chanLock.withLock {
+            val s = requireNotNull(session) { "还没 connect()" }
+            val ch = s.openChannel("sftp") as com.jcraft.jsch.ChannelSftp
+            ch.connect(10_000)
+            Sftp(ch)
+        }
+    }
+
     suspend fun exec(command: String): String = withContext(Dispatchers.IO) { chanLock.withLock {
         val s = requireNotNull(session) { "还没 connect()" }
         val ch = s.openChannel("exec") as com.jcraft.jsch.ChannelExec

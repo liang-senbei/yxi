@@ -17,12 +17,13 @@ import app.yxi.ui.HostsScreen
 import app.yxi.ui.SessionsScreen
 import app.yxi.ui.theme.YxiTheme
 
-/** 三层：主机列表 → 会话看板 → 终端。返回键逐层退。 */
+/** 主机列表 → 会话看板 → {终端 | 对话 | 文件}。返回键逐层退。G8 会把后三者做成同层切换。 */
 private sealed interface Nav {
     data object Hosts : Nav
     data class Sessions(val host: Host) : Nav
     data class Terminal(val host: Host, val attachTo: String?) : Nav
     data class Chat(val host: Host, val session: String, val cwd: String) : Nav
+    data class Files(val host: Host, val dir: String) : Nav
 }
 
 class MainActivity : ComponentActivity() {
@@ -39,6 +40,7 @@ class MainActivity : ComponentActivity() {
                     nav = when (val n = nav) {
                         is Nav.Terminal -> Nav.Sessions(n.host)
                         is Nav.Chat -> Nav.Sessions(n.host)
+                        is Nav.Files -> Nav.Sessions(n.host)
                         else -> Nav.Hosts
                     }
                 }
@@ -50,9 +52,15 @@ class MainActivity : ComponentActivity() {
                             store, keys, n.host,
                             onOpenTerminal = { target -> nav = Nav.Terminal(n.host, target) },
                             onOpenChat = { name, cwd -> nav = Nav.Chat(n.host, name, cwd) },
+                            onOpenFiles = { nav = Nav.Files(n.host, ".") },
                             modifier = m,
                         )
-                        is Nav.Chat -> app.yxi.ui.ChatScreen(store, keys, n.host, n.session, n.cwd, modifier = m)
+                        is Nav.Chat -> app.yxi.ui.ChatScreen(
+                            store, keys, n.host, n.session, n.cwd,
+                            onOpenFiles = { nav = Nav.Files(n.host, n.cwd) },   // 起点就是这个会话的 cwd
+                            modifier = m,
+                        )
+                        is Nav.Files -> app.yxi.ui.FilesScreen(store, keys, n.host, n.dir, modifier = m)
                         is Nav.Terminal -> TerminalScreen(store, keys, n.host, n.attachTo, modifier = m)
                     }
                 }

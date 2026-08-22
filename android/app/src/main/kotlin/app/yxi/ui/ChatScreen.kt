@@ -41,6 +41,7 @@ fun ChatScreen(
     host: Host,
     sessionName: String,
     cwd: String,
+    onOpenFiles: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -100,6 +101,14 @@ fun ChatScreen(
                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                     color = MaterialTheme.colorScheme.outline,
                 )
+            }
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainer, shape = Pill,
+                modifier = Modifier.height(40.dp).clickable(onClick = onOpenFiles),
+            ) {
+                Box(Modifier.padding(horizontal = 15.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                    Text("文件", style = MaterialTheme.typography.labelMedium)
+                }
             }
         }
 
