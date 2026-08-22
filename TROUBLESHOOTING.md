@@ -110,3 +110,46 @@
 - **修法**：① `org.gradle.jvmargs=-Xmx2048m` + `org.gradle.parallel=false`（单模块并行无收益）
   ② 模拟器降到 `-memory 2048` ③ **先构建、构建完 `./gradlew --stop` 放掉守护进程内存，再拉模拟器**
   —— 已固化进 `dev/run.sh`。
+
+## 15. 模拟器的 `-http-proxy` 会打断 SSH
+- **症状**：SSH 握手和认证全部成功，数据流几百字节后
+  `java.net.SocketException: Connection reset`。
+- **根因**：当初为了登 Google Play 给模拟器加了 `-http-proxy http://10.0.2.2:1080`。
+  **模拟器会把所有 TCP 都塞进那个 HTTP 代理**，而 sing-box 处理不了长连的 SSH 隧道。
+- **修法**：`dev/avd.sh` 里 `PROXY` 默认留空，只有要登 Google 时才临时 `PROXY=... ./dev/avd.sh start`。
+
+## 16. ⭐⭐ jsch 的 Session 写包路径**不是线程安全的**
+- **症状**（两种表现，都极难定位）：
+  - 服务器 `journalctl -u ssh` 里 `ssh_dispatch_run_fatal: … message authentication code incorrect`，随即杀连接
+  - 或者通道**无声无息**关闭：客户端读到 EOF、`ch.connected=false`、没有任何异常、
+    服务器日志也干净
+- **诊断过程**（走了很多弯路，记下来省得重来）：
+  1. 以为是 tmux 问题 → `ssh -tt 'tmux attach'` 从服务器手工跑，完全正常
+  2. 以为是 `ChannelExec`+PTY 的问题 → 换 `ChannelShell`，还是断
+  3. 以为是写得太早被 tty 冲掉 → 加就绪检测，还是断
+  4. **把终端控件从数据通路上摘掉**（不调 `emulator.writeInput`）→ **通道稳如磐石**
+  5. 恢复控件 + 打全量回调日志 → `控件 onResize -> 55x42` 之后紧跟着 EOF
+- **根因**：终端控件的 `onResize` 从它自己的线程调 `setPtySize`，与读循环/`write`
+  **并发写同一条 SSH 连接**，把包流写坏。MAC 错误和静默关闭是同一个根因的两种表现。
+- **修法**：`Shell` 内部加 `Mutex`，`write` 和 `resize` 全部 `ioLock.withLock { … }` 串行化。
+- **教训**：**「摘掉一个组件看还坏不坏」比继续猜有效得多**。前四步都在猜，第五步一刀切开。
+
+## 17. jsch `ChannelExec` + `setPty(true)` 的输入流会提前 EOF
+- **症状**：跑 `sleep 25` 这种长时间无输出的命令，只读到 13 字节就 `read() == -1`，
+  而 `channel.isConnected` **仍然是 true**。
+- **修法**：终端通道用 **`ChannelShell`**，别用 `ChannelExec`+PTY。
+  `ChannelExec` 留给「跑一条命令拿输出就退」（`exec()`）。
+
+## 18. 往刚开的 shell 里写命令会被冲掉
+- **症状**：命令在终端里**回显了但没执行**，随后出现全新的提示符。
+- **根因**：登录 shell（starship 那种）初始化要时间。在它开始读 stdin 之前写进去的字节
+  被 tty 回显，然后被 shell 启动时的输入冲刷丢弃。
+- **修法**：等第一批输出到达（表示 shell 在跑了）+ 一个静默间隔再写。
+  更好的做法是根本别往终端里打配置命令——**开一条独立的 exec channel 去做**，
+  终端的输入通道留给用户。
+
+## 19. `run.sh` 里构建失败被管道吃掉
+- **症状**：改了代码但行为没变，反复查不出原因——其实是**构建早就失败了**，
+  脚本却拿着旧 APK 继续装。
+- **根因**：`./gradlew … | grep … | tail` 之后 `$?` 是 `tail` 的退出码，**永远 0**。
+- **修法**：`exit "${PIPESTATUS[0]}"`。

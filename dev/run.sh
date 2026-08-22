@@ -18,11 +18,14 @@ ensure_emu() {
 }
 
 case "${1:-all}" in
-build)  cd "$ROOT/android" && ./gradlew :app:assembleDebug -q 2>&1 | grep -vE '^\s*$|^w:' | tail -12 ;;
+build)  cd "$ROOT/android" && { ./gradlew :app:assembleDebug -q 2>&1 | grep -vE '^\s*$|^w:' | tail -12; exit "${PIPESTATUS[0]}"; } ;;
 all)
   # 先构建再拉模拟器：gradle 的 JVM 和模拟器抢内存，同时在会把模拟器挤掉
   echo "· 构建…"
-  ( cd "$ROOT/android" && ./gradlew :app:assembleDebug -q 2>&1 | grep -vE '^\s*$|^w:' | tail -12 ) || exit 1
+  # ⚠️ 退出码必须取 PIPESTATUS[0]：接了管道之后 $? 是 tail 的，永远 0，
+  # 构建失败会被静默吞掉，然后拿旧 APK 去装 —— 查半天查不出为什么改动没生效
+  ( cd "$ROOT/android" && ./gradlew :app:assembleDebug -q 2>&1 | grep -vE '^\s*$|^w:' | tail -12
+    exit "${PIPESTATUS[0]}" ) || { echo "✗ 构建失败"; exit 1; }
   ( cd "$ROOT/android" && ./gradlew --stop >/dev/null 2>&1 )   # 放掉 gradle 守护的内存
   ensure_emu || exit 1
   adb install -r "$ROOT/android/app/build/outputs/apk/debug/app-debug.apk" 2>&1 | tail -1

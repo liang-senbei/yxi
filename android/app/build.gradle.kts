@@ -41,6 +41,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     implementation(libs.jsch)
+    implementation(libs.termlib)
     implementation(libs.bouncycastle)
     implementation(libs.kotlinx.coroutines.android)
 }

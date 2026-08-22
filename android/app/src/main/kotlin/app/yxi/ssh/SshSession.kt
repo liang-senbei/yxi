@@ -5,6 +5,7 @@ import com.jcraft.jsch.ChannelShell
 import com.jcraft.jsch.JSch
 import com.jcraft.jsch.Session
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.InputStream
 import java.io.OutputStream
@@ -49,19 +50,51 @@ class SshSession(private val cfg: HostConfig) {
     private var session: Session? = null
 
     class Shell(
-        private val channel: ChannelShell,
+        private val channel: com.jcraft.jsch.Channel,
         val output: InputStream,
         private val input: OutputStream,
     ) {
-        // ⚠️ 必须 suspend + IO：安卓禁止主线程网络操作，
-        // 直接在 Compose 的 LaunchedEffect 里调会抛 NetworkOnMainThreadException
-        suspend fun write(bytes: ByteArray) = withContext(Dispatchers.IO) {
-            input.write(bytes); input.flush()
+        /**
+         * ⚠️ **jsch 的 Session 写包路径不是线程安全的。**
+         * 终端控件的 `onResize` 会从它自己的线程调 [resize]，而 [write] 从另一个协程来，
+         * 两者并发写同一条 SSH 连接就会把包流写坏 —— 表现有两种，都极难定位：
+         *   · 服务器报 `ssh_dispatch_run_fatal: message authentication code incorrect` 后杀连接
+         *   · 通道无声无息地关闭（`ch.connected=false`），客户端什么错都没有
+         * 实测：控件一发 `onResize -> 55x42`，通道立刻死。加锁串行化后正常。
+         */
+        private val ioLock = kotlinx.coroutines.sync.Mutex()
+        // ⚠️ 两条都必须 suspend + IO：安卓禁止主线程网络操作，
+        // 直接在 Compose 的回调里调会抛 NetworkOnMainThreadException。
+        //
+        // ⚠️ 而且必须吞掉 Broken pipe：终端控件的 resize 回调和连接建立/断开之间有竞态，
+        // 往已关闭的通道写会抛 IOException —— 从协程里逸出就是整个 app 崩掉。
+        // 通道断了不是异常情况，是常态（切网、远端退出、会话关闭），按「写失败」处理即可。
+        suspend fun write(bytes: ByteArray): Boolean = withContext(Dispatchers.IO) {
+            ioLock.withLock { runCatching { input.write(bytes); input.flush() } }
+                .onFailure { Log.w("YxiSSH", "写入失败（通道多半已关）: ${it.message}") }
+                .isSuccess
         }
-        suspend fun write(text: String) = write(text.toByteArray())
+        suspend fun write(text: String): Boolean = write(text.toByteArray())
         /** 横竖屏切换、软键盘弹出都要重发，不然远端还按老尺寸折行 */
-        suspend fun resize(cols: Int, rows: Int, widthPx: Int = 0, heightPx: Int = 0) =
-            withContext(Dispatchers.IO) { channel.setPtySize(cols, rows, widthPx, heightPx) }
+        suspend fun resize(cols: Int, rows: Int, widthPx: Int = 0, heightPx: Int = 0): Boolean =
+            withContext(Dispatchers.IO) {
+                // ⚠️ 非法尺寸会让远端的 tmux 直接退出（实测：控件首次测量可能给出 0）。
+                // 宁可不发也不能发 0 —— 断开一个 attach 比少一次 resize 贵得多。
+                if (cols <= 0 || rows <= 0) {
+                    Log.w("YxiSSH", "跳过非法 resize: ${cols}x${rows}")
+                    return@withContext false
+                }
+                Log.i("YxiSSH", "resize -> ${cols}x${rows}")
+                ioLock.withLock {
+                  runCatching {
+                    when (val c = channel) {
+                        is ChannelShell -> c.setPtySize(cols, rows, widthPx, heightPx)
+                        is com.jcraft.jsch.ChannelExec -> c.setPtySize(cols, rows, widthPx, heightPx)
+                        else -> Unit
+                    }
+                  }.isSuccess
+                }
+            }
         fun close() { runCatching { channel.disconnect() } }
         val isConnected: Boolean get() = channel.isConnected
     }
@@ -74,6 +107,16 @@ class SshSession(private val cfg: HostConfig) {
         }
         val s = jsch.getSession(cfg.username, cfg.hostname, cfg.port)
         (cfg.auth as? HostConfig.Auth.Password)?.let { s.setPassword(it.password) }
+
+        // ⚠️ 必须避开 AES-GCM。jsch 的 `aes*-gcm@openssh.com` 和 strict-KEX 一起用时
+        // 序列号会失步 —— 表现是握手认证全过、数据流几百字节后连接被服务器杀掉，
+        // sshd 日志里是 `ssh_dispatch_run_fatal: ... message authentication code incorrect`。
+        // 客户端这边只看到通道莫名关闭，完全定位不到（见 TROUBLESHOOTING #16）。
+        // CTR + HMAC 是最稳的组合。
+        s.setConfig("cipher.s2c", "aes256-ctr,aes192-ctr,aes128-ctr")
+        s.setConfig("cipher.c2s", "aes256-ctr,aes192-ctr,aes128-ctr")
+        s.setConfig("mac.s2c", "hmac-sha2-256-etm@openssh.com,hmac-sha2-256")
+        s.setConfig("mac.c2s", "hmac-sha2-256-etm@openssh.com,hmac-sha2-256")
 
         // ⚠️ G2 的临时口子：先不校验主机指纹，把 SSH 链路本身跑通。
         // G3 必须换成真正的 known_hosts 校验 —— 首次显式确认、之后变了就拒。
@@ -95,6 +138,43 @@ class SshSession(private val cfg: HostConfig) {
         ch.connect(10_000)
         Shell(ch, out, inp)
     }
+
+    /**
+     * 带 PTY 直接跑一条命令，返回可交互的 [Shell]。
+     *
+     * **比「开登录 shell 再打命令」干净得多**：
+     *   · 没有登录横幅（motd 一大堆，还得等它打完）
+     *   · **没有时序竞态** —— 往刚开的 shell 里写命令，如果 shell 还没开始读，
+     *     字节会被 tty 回显然后冲掉（实测踩过：命令回显了但没执行）
+     *   · 远端进程就是 tmux 本身，退出即通道结束，语义清楚
+     */
+    suspend fun openPtyCommand(command: String, cols: Int = 80, rows: Int = 24): Shell =
+        withContext(Dispatchers.IO) {
+            val s = requireNotNull(session) { "还没 connect()" }
+            val ch = s.openChannel("exec") as com.jcraft.jsch.ChannelExec
+            ch.setPty(true)
+            ch.setPtyType("xterm-256color")   // 要彩色就不能是 dumb
+            ch.setPtySize(cols, rows, 0, 0)
+            ch.setEnv("YXI_CLIENT", "1")      // 让主机侧知道是手机在开（抄 Moshi，附录 C.2）
+            ch.setCommand(command)
+            val out = ch.inputStream
+            val inp = ch.outputStream
+            // ⚠️ exec channel 的 stderr 是独立的一条流。不读它，远端进程的报错就
+            // 凭空消失 —— 实测踩过：tmux 的 `open terminal failed: not a terminal`
+            // 走 stderr，通道静默关闭，从表现上完全看不出原因。
+            val err = ch.errStream
+            ch.connect(10_000)
+            Thread {
+                runCatching {
+                    val b = ByteArray(4096)
+                    while (true) {
+                        val n = err.read(b); if (n < 0) break
+                        Log.w("YxiSSH", "远端 stderr: " + String(b, 0, n).trim())
+                    }
+                }
+            }.apply { isDaemon = true }.start()
+            Shell(ch, out, inp)
+        }
 
     /** 跑一条命令拿输出就退（会话枚举、探测都走它）。G4 起大量使用。 */
     suspend fun exec(command: String): String = withContext(Dispatchers.IO) {

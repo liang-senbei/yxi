@@ -6,9 +6,11 @@ export JAVA_HOME=${JAVA_HOME:-/usr/lib/jvm/java-17-openjdk-amd64}
 export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
 AVD=${AVD:-yxi}
 IMG="system-images;android-34;google_apis_playstore;x86_64"
-# 走本机 sing-box（inbound 是 mixed，HTTP+SOCKS 都收）。10.0.2.2 = 模拟器眼里的宿主机。
-# 必须挂：accounts.google.com 直连超时。
-PROXY=${PROXY:-http://10.0.2.2:1080}
+# ⚠️ 默认【不挂代理】。模拟器的 -http-proxy 会把**所有 TCP** 都塞进那个 HTTP 代理，
+# 而 sing-box 处理不了长连的 SSH 隧道 —— 表现是握手和认证都成功、传几百字节后
+# `SocketException: Connection reset`，极难定位（见 TROUBLESHOOTING #15）。
+# 只有需要登 Google 账号时才 PROXY=http://10.0.2.2:1080 临时开。
+PROXY=${PROXY:-}
 SHOT=${SHOT:-/tmp/avd-shot.png}
 
 case "${1:-}" in
@@ -26,7 +28,7 @@ start)
   pkill -f 'qemu-sys[t]em' 2>/dev/null; sleep 2; adb kill-server >/dev/null 2>&1
   nohup emulator -avd "$AVD" -no-window -no-audio -no-boot-anim -no-metrics \
       -gpu swiftshader_indirect -no-snapshot -skin 720x1280 \
-      -http-proxy "$PROXY" -memory 2048 -cores 4 > /tmp/emulator.log 2>&1 &
+      ${PROXY:+-http-proxy "$PROXY"} -memory 2048 -cores 4 > /tmp/emulator.log 2>&1 &
   adb wait-for-device
   n=0; until [ "$(adb shell getprop sys.boot_completed 2>/dev/null|tr -d '\r')" = "1" ] || [ $n -gt 90 ]; do sleep 4; n=$((n+1)); done
   echo "✅ 开机完成 Android $(adb shell getprop ro.build.version.release|tr -d '\r') · abilist=$(adb shell getprop ro.product.cpu.abilist|tr -d '\r')"

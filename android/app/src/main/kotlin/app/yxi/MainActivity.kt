@@ -12,7 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.yxi.ssh.HostConfig
-import app.yxi.term.G2Screen
+import app.yxi.term.TerminalScreen
 import app.yxi.ui.theme.YxiTheme
 import java.io.File
 
@@ -27,7 +27,7 @@ class MainActivity : ComponentActivity() {
             YxiTheme {
                 Scaffold { p ->
                     if (keyFile.exists()) {
-                        G2Screen(
+                        TerminalScreen(
                             cfg = HostConfig(
                                 alias = "本机",
                                 hostname = "10.0.2.2",   // 模拟器眼里的宿主机

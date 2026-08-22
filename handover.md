@@ -26,7 +26,11 @@
   `android/`（AGP 9.3.1 · Kotlin 2.4.10 · Gradle 9.7.1 · compose-bom 2026.08.00 · **compileSdk/targetSdk 37** · minSdk 26）。
   配色写在 `android/app/src/main/kotlin/app/yxi/ui/theme/Color.kt` —— **改配色只改这一个文件**。
   产物 `Yxi-0.1.0-debug.apk`（11 MB）。踩的 3 个坑见 TROUBLESHOOTING #9–#11。
-- 🔄 **G2 进行中**：**SSH 层已跑通** —— 连接 / ed25519 公钥认证 / PTY / `tmux attach` / 双向读写全部验证成功
+- ✅ **G2 基本完成**：**真终端跑起来了** —— `org.connectbot:termlib`（Compose 原生终端控件）
+  接上 SSH shell channel，tmux attach 成功、**彩色输出正常**、连接稳定、URL 自动检测。
+  ⬜ 剩：**IME 通路**（软键盘打字）——归到 G9 终端打磨一起做；真机上手指点才是真验证。
+  ⚠️ 这一段挖出 5 个坑，其中 **TROUBLESHOOTING #16（jsch 写包路径非线程安全）是全项目最阴的一个**。
+- 🔄 **原 G2 进行中**：**SSH 层已跑通** —— 连接 / ed25519 公钥认证 / PTY / `tmux attach` / 双向读写全部验证成功
   （截图里能看到 `[cc-root] 0:claude*` 和 Claude Code 的 TUI）。
   `android/app/src/main/kotlin/app/yxi/ssh/`：`HostConfig.kt` + `SshSession.kt`（分层参考 ConnectBot 的 `transport/`）。
   **双向已验证**：从 App 输入框敲 `touch /tmp/yxi-g2-typed`，经 SSH→PTY→tmux→shell 执行，服务器上文件真的出现。
