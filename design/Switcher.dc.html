@@ -27,17 +27,17 @@
   </div>
 
   <!-- 卡片轮播：左右各露一角，缩小并下沉 —— 视差就在这里 -->
-  <div style="flex-grow:1; position:relative; overflow:hidden;">
+  <div data-carousel="1" style="flex-grow:1; position:relative; overflow:hidden;">
 
     <!-- 左侧邻居：缩到 0.86，下沉，压暗 -->
-    <div style="position:absolute; left:-142px; top:96px; width:250px; height:492px; border-radius:28px; background:#1a1713; overflow:hidden; opacity:0.55; transform:scale(0.86);">
+    <div data-card="left" style="position:absolute; left:-142px; top:96px; width:250px; height:492px; border-radius:28px; background:#1a1713; overflow:hidden; opacity:0.55; transform:scale(0.86);">
       <div style="padding:13px 14px 0;">
         <div style="font-size:14px; font-weight:600; color:#a89b8f;">cc-mail</div>
       </div>
     </div>
 
     <!-- 中间焦点卡 -->
-    <div style="position:absolute; left:70px; top:56px; width:250px; height:562px; border-radius:28px; background:#1e1b17; overflow:hidden; box-shadow:0 18px 44px rgba(0,0,0,0.55);">
+    <div data-card="center" style="position:absolute; left:70px; top:56px; width:250px; height:562px; border-radius:28px; background:#1e1b17; overflow:hidden; box-shadow:0 18px 44px rgba(0,0,0,0.55);">
       <div style="display:flex; align-items:center; gap:8px; padding:14px 15px 11px;">
         <div style="width:8px; height:8px; border-radius:4px; background:#8fd8c6; flex-shrink:0;"></div>
         <div style="font-size:15px; font-weight:600; letter-spacing:-0.01em; flex-grow:1;">cc-Yxi</div>
@@ -66,7 +66,7 @@
     </div>
 
     <!-- 右侧邻居：等你（琥珀） -->
-    <div style="position:absolute; right:-142px; top:96px; width:250px; height:492px; border-radius:28px; background:#1a1713; overflow:hidden; opacity:0.55; transform:scale(0.86);">
+    <div data-card="right" style="position:absolute; right:-142px; top:96px; width:250px; height:492px; border-radius:28px; background:#1a1713; overflow:hidden; opacity:0.55; transform:scale(0.86);">
       <div style="display:flex; align-items:center; gap:8px; padding:13px 14px 0;">
         <div style="width:8px; height:8px; border-radius:4px; background:#ffc46b; flex-shrink:0;"></div>
         <div style="font-size:14px; font-weight:600; color:#a89b8f;">cc-nanob…</div>
