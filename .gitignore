@@ -24,3 +24,7 @@ apk/
 # 视觉稿的成品页（每次从 design/*.dc.html 重新生成，不入库）
 design/yxi-app-design.html
 design/_tokens.txt
+
+# 批注页的 token 和批注数据（token 是访问凭据，不入库）
+design/review/.token
+design/review/pins.json

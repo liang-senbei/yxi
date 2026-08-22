@@ -49,6 +49,20 @@
 
 十张：会话看板 · 对话模式（主界面）· 交互卡片（AskUserQuestion / ExitPlanMode）· 终端模式+键盘工具条 · **文件模式** · **Markdown 阅读视图** · **D-Pad 方向键盘** · 附件与语音三态 · 锁屏审批 · 主机管理。
 
+## 视觉稿批注页（评审用）
+
+**`http://<公网IP>:8899/<token>/`** —— 手机上点任意位置钉批注，落 `design/review/pins.json`，
+**Claude 直接读这个文件**就知道是哪张稿、哪个坐标、什么问题，不用用户描述位置。
+
+- `design/review/serve.py` —— stdlib http.server，只读画板 + 一个写 pins 的接口
+- `design/review/build.py` —— 把 `design/*.dc.html` 的画板抽出来拼成单页，
+  ⚠️ **各文件的 `<style>` 必须作用域隔离**（Terminal 和 DPad 都定义了 `.k`，不隔离会互相覆盖）
+- systemd `yxi-review.service`（开机自起）· ufw 放行 8899
+- ⚠️ **token 在 `design/review/.token`，已 gitignore**。页面无敏感内容、不执行任何东西、
+  路径穿越和越界 POST 都返回 404
+
+**改完稿要重新发布 Artifact，批注页会自动跟着更新**（它每次请求都重新抽取源文件）。
+
 ## 决策记录（用户拍板过的，按时间倒序 —— 改动前先看这里，别推翻已定的）
 
 | # | 决定 | 理由 / 出处 |
