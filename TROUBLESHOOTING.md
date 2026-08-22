@@ -26,3 +26,30 @@
 - **根因**：`.bundle` 是二进制，GNU grep 判定为 binary 后 `-o` 不输出。
 - **修法**：**必须加 `-a`**（`grep -aoE`）。另外 Hermes 字符串表是**拼接存储**的（无分隔符），
   `strings` 会把相邻字符串串成一行 —— 要读上下文得按 offset 取字节，见 `dev/dig.py`。
+
+## 5. 模拟器跑着跑着崩：`ERROR | Failed to find ColorBuffer: NN`
+- **症状**：无 GUI 模拟器开机正常，一打开图片多的界面（应用商店的图标墙）就整个 qemu 进程死掉，
+  `adb` 立刻变 `device offline` → `no devices/emulators found`。
+- **根因**：软件渲染（gfxstream / swiftshader / lavapipe）在 **1080x2400** 这种大分辨率下渲染压力过大。
+  **不是内存问题**（崩的时候还剩 11 G）。
+- **修法**：把 AVD 降到 **720x1280 / density 320**（`hw.lcd.*`）并加 `-skin 720x1280`。降完就稳了。
+
+## 6. `pkill -f 'qemu-system'` 把执行它的脚本自己杀了
+- **症状**：脚本跑到 `pkill` 那行就整个退出，退出码 144，**一行输出都没有**。
+- **根因**：`pkill -f` 匹配**完整命令行**，而当前 shell 的命令行里就含 `qemu-system` 这个字符串 → **自杀**。
+  `pgrep -f` 同理，会把自己算进匹配结果，导致 `until ! pgrep -f X` 永远不退出。
+- **修法**：模式里插方括号打断字面匹配：`pkill -f 'qemu-sys[t]em'`。
+
+## 7. `set -euo pipefail` 误杀模拟器启动脚本
+- **症状**：脚本直接退出，`/tmp/emulator.log` 内容还是上一次的（说明 nohup 那行压根没执行到）。
+- **根因**：`until` 轮询、`adb wait-for-device` 等语句的中间退出码非 0，被 `set -e` 当成失败。
+- **修法**：这类等待脚本**不要用 `set -e`**。
+
+## 8. Aurora Store 匿名会话装不了某些应用：`App not supported`
+- **症状**：Aurora 匿名登录成功、能打开应用页面，但点 Install 报 `App not supported`；
+  页面上版本号显示 **`v (0)`**。
+- **根因**：`v (0)` 是关键线索 —— **匿名会话拿不到该应用的完整元数据**（较新/受限的应用常见），
+  于是 Aurora 自己的兼容性检查判定不支持。**不是 ABI 问题**：
+  `ro.product.cpu.abilist` = `x86_64,arm64-v8a`，镜像自带 ARM 转译。
+- **修法**：改用 Aurora 的 **Google 账号登录**；或在真机上用 [SAI](https://github.com/Aefyr/SAI) 导出完整 `.apks`。
+  → 对本项目**价值不高**：原生库是 libghostty 和 Mosh 传输，两块我们都不抄（PRD §2.2）。
