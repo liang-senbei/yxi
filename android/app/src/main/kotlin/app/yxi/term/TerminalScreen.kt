@@ -3,8 +3,7 @@ package app.yxi.term
 import android.os.Looper
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -30,10 +29,13 @@ import org.connectbot.terminal.TerminalEmulatorFactory
  */
 @Composable
 fun TerminalScreen(
-    cfg: HostConfig,
+    store: app.yxi.ssh.HostStore,
+    keys: app.yxi.ssh.KeyManager,
+    host: app.yxi.ssh.Host,
     attachTo: String?,
     modifier: Modifier = Modifier,
 ) {
+    var trustAsk by remember { mutableStateOf<Triple<String, String, (Boolean) -> Unit>?>(null) }
     // 终端控件的回调在它自己的时机触发，异常不能逸出去崩 app
     val scope = rememberCoroutineScope()
     var status by remember { mutableStateOf<String?>("连接中…") }
@@ -62,7 +64,19 @@ fun TerminalScreen(
     }
 
     LaunchedEffect(Unit) {
-        val session = SshSession(cfg)
+        val cfg = store.configFor(host, keys)
+        if (cfg == null) {
+            status = "这台主机还没有可用的认证方式——去主机列表里补密码或装公钥"
+            return@LaunchedEffect
+        }
+        val known = app.yxi.ssh.KnownHosts(store, host.id, object : app.yxi.ssh.TrustPrompt {
+            override fun confirmNewHost(host: String, keyType: String, fingerprint: String): Boolean {
+                val done = kotlinx.coroutines.CompletableDeferred<Boolean>()
+                trustAsk = Triple(host, fingerprint) { ok -> done.complete(ok); trustAsk = null }
+                return kotlinx.coroutines.runBlocking { done.await() }
+            }
+        })
+        val session = SshSession(cfg, known)
         runCatching {
             session.connect()
             // tmux 的准备工作走独立的 exec channel，跟终端通道分开 ——
@@ -117,7 +131,13 @@ fun TerminalScreen(
 
             pump.join()
             status = "连接已断开"
-        }.onFailure { status = "失败：${it::class.simpleName}: ${it.message}" }
+        }.onFailure {
+            status = if (known.changedDetected) {
+                "⚠️ 主机指纹变了，已拒绝连接。\n服务器可能被重装过——确认无误后请在主机列表里删掉这台再重加。"
+            } else {
+                "失败：${it::class.simpleName}: ${it.message}"
+            }
+        }
     }
 
     LaunchedEffect(shell) { if (shell != null) runCatching { focus.requestFocus() } }
@@ -135,6 +155,23 @@ fun TerminalScreen(
             modifier = Modifier.fillMaxSize(),
             focusRequester = focus,
         )
+        val ask = trustAsk
+        if (ask != null) {
+            AlertDialog(
+                onDismissRequest = { ask.third(false) },
+                title = { Text("第一次连这台主机") },
+                text = {
+                    Text(
+                        ask.first + "\n\n指纹\n" + ask.second +
+                            "\n\n请核对它跟服务器上 ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub " +
+                            "的输出一致。不一致就别连。",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                },
+                confirmButton = { TextButton({ ask.third(true) }) { Text("指纹对得上，连") } },
+                dismissButton = { TextButton({ ask.third(false) }) { Text("取消") } },
+            )
+        }
         status?.let {
             Text(
                 it,

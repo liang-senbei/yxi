@@ -153,3 +153,32 @@
   脚本却拿着旧 APK 继续装。
 - **根因**：`./gradlew … | grep … | tail` 之后 `$?` 是 `tail` 的退出码，**永远 0**。
 - **修法**：`exit "${PIPESTATUS[0]}"`。
+
+## 20. ed25519 私钥必须用 `writeOpenSSHv1PrivateKey`，不是 `writePrivateKey`
+- **症状**：`KeyPair.genKeyPair(jsch, KeyPair.ED25519)` 之后调 `writePrivateKey()`
+  抛 `UnsupportedOperationException`，**而且 message 是 null**——异常本身毫无信息量。
+- **根因**：`writePrivateKey` 走的是传统 PEM 格式，**ed25519 只能用 OpenSSH v1 格式**。
+- **修法**：`kp.writeOpenSSHv1PrivateKey(outputStream, null)`。读回用 `KeyPair.load` 即可（它认这个格式）。
+- **另外**：`KeyPair.genKeyPair(…, ED25519)` **也需要先注册 BouncyCastle**（#12 只提到认证，
+  其实生成同样需要）。所以把注册抽成了 `Crypto.ensureProviders()`，`KeyManager` 和
+  `SshSession` 两边都调。
+
+## 21. ⭐ `HostKey.getKey()` 返回的已经是 base64——再编码一次会让指纹校验彻底失效
+- **症状**：每次连同一台主机都弹「第一次连这台主机」，**指纹变了却检测不出来**。
+- **根因**：`HostKeyRepository.check()` 拿到的是**原始字节**，而 `add()` 里的
+  `HostKey.getKey()` 返回的**已经是 base64 字符串**。我在 `add()` 里又 base64 了一次
+  → 存的是双重编码，跟 `check()` 的单次编码永远对不上 → 永远 `NOT_INCLUDED`。
+- **后果**：`CHANGED` 这条分支**永远走不到**。这不是显示瑕疵，**是中间人防护完全失效**。
+- **修法**：`add()` 里直接存 `hostkey.key`。
+- **怎么发现的**：故意篡改存下来的 hostKey 去试「应该被拒」，结果弹的是「第一次连」——
+  **如果不专门测这个反向用例，这个洞会一直躺在那**。
+
+## 22. ⭐ jsch 的 `StrictHostKeyChecking=ask` 在指纹**变了**时也会弹窗询问
+- **症状**：篡改 hostKey 后连接，弹的是普通的「要不要信任」对话框；
+  用户点「连」**就真连上了**。
+- **根因**：我以为 `ask` 模式下 `CHANGED` 会被 jsch 直接拒绝——**错的**。
+  它同样走 `UserInfo.promptYesNo()`。
+- **后果**：社工一句「服务器刚重装过」就能骗过这道防线。
+- **修法**：在 `promptYesNo()` 开头判断自己记的 `changedDetected` 标志，
+  **为真就直接 return false，连问都不问**。真是重装了，让用户去主机列表显式删掉再重加——
+  那是一个有意识的动作，不是随手点一下「确定」。

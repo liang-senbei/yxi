@@ -30,6 +30,12 @@
   接上 SSH shell channel，tmux attach 成功、**彩色输出正常**、连接稳定、URL 自动检测。
   ⬜ 剩：**IME 通路**（软键盘打字）——归到 G9 终端打磨一起做；真机上手指点才是真验证。
   ⚠️ 这一段挖出 5 个坑，其中 **TROUBLESHOOTING #16（jsch 写包路径非线程安全）是全项目最阴的一个**。
+- ✅ **G3 完成**（实测通过）：App 内生成 ed25519 密钥（Keystore 加密保存）· 主机列表与加主机 UI
+  （任意 IP / **任意端口** / 用户名 / 密码或密钥）· 一键装公钥 · **`known_hosts` 指纹校验**。
+  验收全过：① 指纹与服务器 `ssh-keygen -lf` 一致 ② 二次连接不再询问
+  ③ **篡改指纹后直接拒绝，不给"仍然连接"的口子** ④ **连上真实远程机 `station`（公网、只装了公钥）**。
+  ⚠️ 挖出**两个安全漏洞**：TROUBLESHOOTING #21（双重编码导致 CHANGED 永远检测不到）
+  和 #22（jsch 在 CHANGED 时也会问，点一下就能绕过）。**两个都是「专门测反向用例」才发现的。**
 - 🔄 **原 G2 进行中**：**SSH 层已跑通** —— 连接 / ed25519 公钥认证 / PTY / `tmux attach` / 双向读写全部验证成功
   （截图里能看到 `[cc-root] 0:claude*` 和 Claude Code 的 TUI）。
   `android/app/src/main/kotlin/app/yxi/ssh/`：`HostConfig.kt` + `SshSession.kt`（分层参考 ConnectBot 的 `transport/`）。

@@ -18,36 +18,22 @@ import java.io.OutputStream
  *   · sftp channel   → 文件模式（G7）
  * 三者共用同一条连接，不重复握手。
  */
-class SshSession(private val cfg: HostConfig) {
-
-    companion object {
-        /**
-         * Android 的 JCA **不提供 `Ed25519` 签名**（jsch 日志原文：
-         * `Signature algorithms unavailable for non-agent identities = [ssh-ed25519, ssh-ed448]`）。
-         * 注册 BouncyCastle 补上——它正好用 `Ed25519` 这个算法名，jsch 查得到。
-         * 不做这一步就只能退到 ECDSA/RSA 密钥，而 ed25519 才是现在的默认。
-         */
-        private fun registerBouncyCastle() {
-            if (java.security.Security.getProvider("BC") != null) return
-            // 安卓自带一个阉割版的 BC，要先摘掉再插完整版，否则算法查找会命中旧的
-            java.security.Security.removeProvider("BC")
-            java.security.Security.insertProviderAt(
-                org.bouncycastle.jce.provider.BouncyCastleProvider(), 1
-            )
-        }
-    }
+class SshSession(
+    private val cfg: HostConfig,
+    private val knownHosts: KnownHosts? = null,
+) {
 
     private val jsch = JSch()
+    private var session: Session? = null
 
     init {
-        registerBouncyCastle()
+        Crypto.ensureProviders()
         // 把 jsch 自己的日志接到 logcat —— 认证失败时光看异常消息什么也看不出来
         JSch.setLogger(object : com.jcraft.jsch.Logger {
             override fun isEnabled(level: Int) = true
             override fun log(level: Int, message: String) { Log.i("YxiSSH", "[$level] $message") }
         })
     }
-    private var session: Session? = null
 
     class Shell(
         private val channel: com.jcraft.jsch.Channel,
@@ -118,10 +104,16 @@ class SshSession(private val cfg: HostConfig) {
         s.setConfig("mac.s2c", "hmac-sha2-256-etm@openssh.com,hmac-sha2-256")
         s.setConfig("mac.c2s", "hmac-sha2-256-etm@openssh.com,hmac-sha2-256")
 
-        // ⚠️ G2 的临时口子：先不校验主机指纹，把 SSH 链路本身跑通。
-        // G3 必须换成真正的 known_hosts 校验 —— 首次显式确认、之后变了就拒。
-        // 图省事 accept-any 等于把 SSH 的中间人防护关掉（PRD §8 第 2 条）。
-        s.setConfig("StrictHostKeyChecking", "no")
+        // 主机指纹校验 —— SSH 抵御中间人的唯一防线（PRD §8 第 2 条）
+        if (knownHosts != null) {
+            s.hostKeyRepository = knownHosts
+            s.userInfo = knownHosts.userInfo()
+            // ask：没见过就问用户；**指纹变了 jsch 直接拒，不会问**
+            s.setConfig("StrictHostKeyChecking", "ask")
+        } else {
+            // 没传校验器 = 调用方明确不要校验（只应出现在测试里）
+            s.setConfig("StrictHostKeyChecking", "no")
+        }
         s.connect(timeoutMs)
         session = s
     }
@@ -186,6 +178,23 @@ class SshSession(private val cfg: HostConfig) {
         val text = out.readBytes().decodeToString()
         ch.disconnect()
         text
+    }
+
+    /**
+     * 把一行公钥装进远端的 `~/.ssh/authorized_keys`，相当于 `ssh-copy-id`。
+     *
+     * 幂等：已经有同一行就不重复追加。权限也一并修对——
+     * **`.ssh` 必须 700、`authorized_keys` 必须 600，否则 sshd 会拒绝使用它**
+     * （这是新手最常见的「装了公钥还是要密码」的原因）。
+     */
+    suspend fun installPublicKey(line: String): String {
+        val safe = line.trim().replace("'", "")   // 公钥里本不该有单引号，去掉防注入
+        return exec(
+            "mkdir -p ~/.ssh && chmod 700 ~/.ssh && " +
+                "touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && " +
+                "grep -qxF '$safe' ~/.ssh/authorized_keys || echo '$safe' >> ~/.ssh/authorized_keys; " +
+                "grep -c -F 'yxi@android' ~/.ssh/authorized_keys"
+        )
     }
 
     fun disconnect() { runCatching { session?.disconnect() }; session = null }

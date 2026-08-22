@@ -29,11 +29,6 @@ all)
   ( cd "$ROOT/android" && ./gradlew --stop >/dev/null 2>&1 )   # 放掉 gradle 守护的内存
   ensure_emu || exit 1
   adb install -r "$ROOT/android/app/build/outputs/apk/debug/app-debug.apk" 2>&1 | tail -1
-  # 测试私钥（G3 会换成 App 内生成 + Keystore）
-  if [ -f /root/.yxi/g2-ed ]; then
-    adb push /root/.yxi/g2-ed /data/local/tmp/k >/dev/null 2>&1
-    adb shell "run-as $PKG sh -c 'cat /data/local/tmp/k > files/g2-key; chmod 600 files/g2-key'" >/dev/null 2>&1
-  fi
   adb shell am force-stop $PKG; adb logcat -c
   adb shell am start -n $PKG/.MainActivity >/dev/null 2>&1
   sleep "${WAIT:-13}"
