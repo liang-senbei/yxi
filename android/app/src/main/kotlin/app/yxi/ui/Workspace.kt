@@ -74,8 +74,7 @@ fun Workspace(
     }
     var dpad by remember { mutableStateOf(false) }
     var bar by remember { mutableStateOf(true) }
-    /** 工具条上的 Ctrl 点亮了 —— 下一个字节按住 Ctrl 算 */
-    var ctrlArmed by remember { mutableStateOf(false) }
+
     /** 终端最后一次收到数据的时刻。用来判断「登录 shell 安静下来了没有」 */
     val lastOutput = remember { java.util.concurrent.atomic.AtomicLong(0) }
     /** 每重连一次 +1，用它作为「重建整条连接」的键。jsch 的 Session 不能复用，只能新建 */
@@ -84,6 +83,12 @@ fun Workspace(
     val fg = MaterialTheme.colorScheme.onSurface
     val bg = MaterialTheme.colorScheme.surfaceContainerLowest
     val focus = remember { FocusRequester() }
+    // 粘滞修饰键：工具条点了 Ctrl，下一个从软键盘来的字符带上 Ctrl（控件会自动清）
+    val stickies = remember { app.yxi.term.StickyModifiers() }
+    var kbVisible by remember { mutableStateOf(false) }
+    /** 中文输入的退路，见 [app.yxi.term.TerminalView] 的类注释 */
+    var composer by remember { mutableStateOf<org.connectbot.terminal.ComposeController?>(null) }
+    var composing by remember { mutableStateOf(false) }
 
     // 终端仿真器**先于连接建好** —— 这样连接过程中的报错也能直接写进终端显示出来
     val emulator: TerminalEmulator = remember(host.id, sessionName) {
@@ -91,15 +96,7 @@ fun Workspace(
             looper = Looper.getMainLooper(),
             initialCols = 80, initialRows = 24,
             defaultForeground = fg, defaultBackground = bg,
-            // ⚠️ 粘滞 Ctrl 就在这儿实现：工具条点了 Ctrl，下一个可见字符按 `and 0x1f` 转成控制码。
-            // 不碰 termlib 内部，所以**任何输入法都适用**。
-            onKeyboardInput = { bytes ->
-                val out = if (ctrlArmed && bytes.size == 1 && bytes[0] >= 0x40) {
-                    ctrlArmed = false
-                    byteArrayOf((bytes[0].toInt() and 0x1f).toByte())
-                } else bytes
-                scope.launch { shell?.write(out) }
-            },
+            onKeyboardInput = { bytes -> scope.launch { shell?.write(bytes) } },
             onResize = { dim -> scope.launch { shell?.resize(dim.columns, dim.rows) } },
             autoDetectUrls = true,
         )
@@ -246,7 +243,14 @@ fun Workspace(
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (mode) {
-                Mode.Terminal -> TerminalView(emulator, focus, Modifier.fillMaxSize())
+                Mode.Terminal -> TerminalView(
+                    emulator, focus, stickies,
+                    showKeyboard = kbVisible,
+                    onKeyboardVisible = { kbVisible = it },
+                    onComposeController = { composer = it },
+                    fg = fg, bg = bg,
+                    modifier = Modifier.fillMaxSize(),
+                )
                 Mode.Chat -> ChatScreen(ssh, sessionName.orEmpty(), cwd, Modifier.fillMaxSize())
                 Mode.Files -> FilesScreen(sftp, cwd, Modifier.fillMaxSize())
             }
@@ -260,8 +264,16 @@ fun Workspace(
 
         if (mode == Mode.Terminal && bar) {
             KeyBar(
-                ctrlArmed = ctrlArmed,
-                onCtrl = { ctrlArmed = !ctrlArmed },
+                // ⚠️ Ctrl 走 termlib 的 ModifierManager，不是自己改字节 ——
+                // 控件在每次输入之后会替我们 clearTransients()，「点一下只管一个键」白送
+                ctrlArmed = stickies.ctrl,
+                onCtrl = { stickies.ctrl = !stickies.ctrl },
+                onKeyboard = { kbVisible = !kbVisible },
+                composing = composing,
+                onCompose = {
+                    composer?.toggleComposeMode()
+                    composing = composer?.isComposeModeActive ?: false
+                },
                 send = { bytes -> scope.launch { shell?.write(bytes) } },
             )
         }

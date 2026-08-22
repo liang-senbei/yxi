@@ -25,6 +25,11 @@ data class Host(
     val sealedPassword: String? = null,
     /** 最后一次成功连接时看到的主机指纹，用于 [KnownHosts] 校验。 */
     val hostKey: String? = null,
+    /**
+     * 让手机为这台机器主动响（前台服务常驻一条通道 tail 事件流）。
+     * ⚠️ 需要这台机器上装了 `yxi-hook`；没装就一直静悄悄，不会报错。
+     */
+    val watch: Boolean = false,
 ) {
     val display get() = "$username@$hostname" + if (port != 22) ":$port" else ""
 }
@@ -77,6 +82,7 @@ class HostStore(ctx: Context) {
                 useKey = o.optBoolean("useKey", true),
                 sealedPassword = o.optString("sealedPassword").ifEmpty { null },
                 hostKey = o.optString("hostKey").ifEmpty { null },
+                watch = o.optBoolean("watch", false),
             )
         }
     }.getOrDefault(emptyList())
@@ -88,6 +94,7 @@ class HostStore(ctx: Context) {
                 JSONObject().apply {
                     put("id", h.id); put("alias", h.alias); put("hostname", h.hostname)
                     put("port", h.port); put("username", h.username); put("useKey", h.useKey)
+                    put("watch", h.watch)
                     h.sealedPassword?.let { put("sealedPassword", it) }
                     h.hostKey?.let { put("hostKey", it) }
                 }

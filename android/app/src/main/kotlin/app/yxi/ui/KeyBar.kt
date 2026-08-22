@@ -31,6 +31,11 @@ private val Pill = RoundedCornerShape(100.dp)
 fun KeyBar(
     ctrlArmed: Boolean,
     onCtrl: () -> Unit,
+    /** 软键盘开关。⚠️ 终端控件不会自己弹键盘 —— 得有人点 */
+    onKeyboard: () -> Unit,
+    /** compose mode（中文输入的退路，见 TerminalView 类注释） */
+    composing: Boolean,
+    onCompose: () -> Unit,
     send: (ByteArray) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -39,7 +44,10 @@ fun KeyBar(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        Cap("⌨", false, onKeyboard)
         Cap("Ctrl", ctrlArmed, onCtrl)
+        // 「中」= compose mode。直接打中文不出候选词时点它
+        Cap("中", composing, onCompose)
         listOf(
             "esc" to byteArrayOf(27),
             "tab" to byteArrayOf(9),

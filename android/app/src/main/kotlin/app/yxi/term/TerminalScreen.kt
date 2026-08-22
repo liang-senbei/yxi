@@ -5,31 +5,56 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.graphics.Color
+import org.connectbot.terminal.ComposeController
 import org.connectbot.terminal.Terminal
 import org.connectbot.terminal.TerminalEmulator
 
 /**
  * 真终端的**画面**：ConnectBot `termlib` 的 Compose 终端控件。
  *
- * ⚠️ **这里只负责画。** 连接、shell 通道、读循环、tmux attach 全都在
- * [app.yxi.ui.Workspace] 里 —— 因为切换到对话/文件模式时这个 composable 会被销毁，
- * 而**终端不能因此断线**（那是「切换不断连」的全部意义）。
- * 仿真器活在上层，切回来时原样还在：滚动位置、半行没敲完的命令都还在。
+ * ⚠️ **`keyboardEnabled` 必须显式传 `true`。** 它默认是 `false`，而控件内部
+ * `AndroidView { ImeInputView(...) }` 的创建就包在这个标志里 ——
+ * **默认配置下整条 IME 通路根本不存在**，软键盘不弹、中文更打不进去。
+ * 这不是模拟器的毛病，是我们一直漏了一个参数。
  *
- * 选 termlib 的理由（PRD 附录 B）：Maven Central 拿得到、Apache-2.0、Compose 原生、
- * 自带 IME 处理（中文输入那个坑）、无障碍、选区、URL 检测，四个 ABI 预编译好。
+ * ⚠️ **compose mode 是中文输入的退路。** 默认的 `EditorInfo.inputType` 是
+ * `NO_SUGGESTIONS | VISIBLE_PASSWORD`（不含 `TYPE_CLASS_TEXT`）—— 有些中文输入法
+ * 见到这种「像密码框」的输入类型就**不给候选词**。compose mode 会把 inputType 换成
+ * 正常的 `TYPE_CLASS_TEXT`，代价是变成「先在浮层里编辑一整段、再整段提交」。
+ * 所以它是**开关不是默认**：直接输入能用就别开。
+ *
+ * ⚠️ 「软键盘弹出时自动滚到底」**做不了**：滚动控制器只有 `TerminalWithAccessibility`
+ * 才给，而那个函数和 `ScrollController` 在 Kotlin 层都是 **internal**，外部拿不到。
+ * （从 JVM 字节码上看它们是 public —— 很容易误判，以 Kotlin 编译器为准。）
+ *
+ * ⚠️ 连接、shell 通道、读循环、tmux attach 全在 [app.yxi.ui.Workspace] 里：
+ * 切到对话/文件模式时这个 composable 会被销毁，而**终端不能因此断线**。
  */
 @Composable
 fun TerminalView(
     emulator: TerminalEmulator,
     focus: FocusRequester,
+    modifiers: StickyModifiers,
+    showKeyboard: Boolean,
+    onKeyboardVisible: (Boolean) -> Unit,
+    onComposeController: (ComposeController) -> Unit,
+    fg: Color,
+    bg: Color,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier.fillMaxSize()) {
         Terminal(
             terminalEmulator = emulator,
             modifier = Modifier.fillMaxSize(),
+            backgroundColor = bg,
+            foregroundColor = fg,
+            keyboardEnabled = true,          // ⚠️ 见上：不传 true 就没有 IME
+            showSoftKeyboard = showKeyboard,
             focusRequester = focus,
+            modifierManager = modifiers,
+            onImeVisibilityChanged = onKeyboardVisible,
+            onComposeControllerAvailable = onComposeController,
         )
     }
 }

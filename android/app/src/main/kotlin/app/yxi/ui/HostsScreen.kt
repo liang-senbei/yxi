@@ -35,6 +35,8 @@ fun HostsScreen(
     onOpen: (Host) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var batteryHint by remember { mutableStateOf(false) }
     val hosts by store.hosts.collectAsState()
     var adding by remember { mutableStateOf(false) }
     var showKey by remember { mutableStateOf(false) }
@@ -66,7 +68,18 @@ fun HostsScreen(
                 verticalArrangement = Arrangement.spacedBy(9.dp),
             ) {
                 items(hosts, key = { it.id }) { h ->
-                    HostRow(h, onClick = { onOpen(h) }, onLongClick = { installTarget = h })
+                    HostRow(
+                        h,
+                        onClick = { onOpen(h) },
+                        onLongClick = { installTarget = h },
+                        onWatch = {
+                            val on = !h.watch
+                            store.upsert(h.copy(watch = on))
+                            app.yxi.watch.EventService.sync(ctx, store.hosts.value.any { it.watch })
+                            // 第一次打开铃铛时提醒放行后台 —— 见 BatteryHint 的注释
+                            if (on && !ignoringBattery(ctx)) batteryHint = true
+                        },
+                    )
                 }
             }
         }
@@ -78,6 +91,7 @@ fun HostsScreen(
     if (showKey) {
         PublicKeySheet(keys) { showKey = false }
     }
+    if (batteryHint) BatteryHint(ctx) { batteryHint = false }
     installTarget?.let { h ->
         // 连接一律走共用的 connector —— 这里曾经自己 new 了个 SshSession 且 prompt 传 null，
         // 结果「给没连过的新主机装公钥」永远失败（见 TROUBLESHOOTING #24 / #25）
@@ -87,7 +101,7 @@ fun HostsScreen(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun HostRow(h: Host, onClick: () -> Unit, onLongClick: () -> Unit) {
+private fun HostRow(h: Host, onClick: () -> Unit, onLongClick: () -> Unit, onWatch: () -> Unit) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         shape = MaterialTheme.shapes.large,
@@ -101,6 +115,19 @@ private fun HostRow(h: Host, onClick: () -> Unit, onLongClick: () -> Unit) {
                     h.display,
                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                     color = MaterialTheme.colorScheme.outline,
+                )
+            }
+            // 铃铛：让手机为这台机器主动响。⚠️ 需要那台机器上装了 server/install.sh
+            Surface(
+                color = if (h.watch) MaterialTheme.colorScheme.tertiaryContainer
+                else MaterialTheme.colorScheme.surfaceContainerHigh,
+                shape = Pill,
+                modifier = Modifier.padding(end = 8.dp).clickable(onClick = onWatch),
+            ) {
+                Text(
+                    if (h.watch) "🔔" else "🔕",
+                    Modifier.padding(11.dp, 5.dp),
+                    style = MaterialTheme.typography.labelSmall,
                 )
             }
             Surface(
@@ -388,4 +415,49 @@ private fun InstallKeySheet(
             ) { Text(if (busy) "处理中…" else "连接并安装") }
         }
     }
+}
+
+/** 系统有没有把这个 app 从省电优化里放出来。 */
+private fun ignoringBattery(ctx: android.content.Context): Boolean = runCatching {
+    val pm = ctx.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+    pm.isIgnoringBatteryOptimizations(ctx.packageName)
+}.getOrDefault(true)   // 查不到就别烦用户
+
+/**
+ * ⚠️ **这是「手机主动响」唯一会静默失效的地方，所以必须当面说清楚。**
+ *
+ * 前台服务能扛住系统的低内存回收（`START_STICKY`，实测系统杀掉 15 秒后自己回来），
+ * 但**扛不住 force-stop** —— 而荣耀 MagicOS / 华为 EMUI 的后台管控就是 force-stop。
+ * 被那样杀掉之后 Android 不会再拉起它，通知就**无声无息地停了**：
+ * 用户不会收到任何错误，只会觉得「怎么最近不响了」。
+ *
+ * 所以放行后台不是「优化建议」，是这个功能能不能用的前提。
+ */
+@Composable
+private fun BatteryHint(ctx: android.content.Context, onDone: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDone,
+        title = { Text("还要放行后台运行") },
+        text = {
+            Text(
+                "这台机器上的 Claude 需要你时，手机靠一条常驻连接来响。\n\n" +
+                    "系统的省电优化会把它掐掉 —— 荣耀 / 华为 尤其狠，" +
+                    "而且掐掉之后不会有任何提示，你只会觉得「怎么不响了」。\n\n" +
+                    "去设置里把 Yxi 设成「允许后台活动 / 不受限制」。",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        },
+        confirmButton = {
+            TextButton({
+                runCatching {
+                    ctx.startActivity(
+                        android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                }
+                onDone()
+            }) { Text("去设置") }
+        },
+        dismissButton = { TextButton(onDone) { Text("知道了") } },
+    )
 }

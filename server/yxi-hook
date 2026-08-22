@@ -1,0 +1,112 @@
+#!/usr/bin/env python3
+"""yxi-hook —— **这是整个项目唯一需要装在服务器上的东西**。
+
+它只买「主动」两个字：把 Claude Code 的生命周期事件追加进 `~/.yxi/events.jsonl`，
+手机上的 App 常驻一条 SSH 通道 `tail -f` 它，收到就发本地通知。
+不装它，App 的其它功能（看板 / 对话 / 终端 / 文件）**照常全都能用** ——
+只是得你主动去看，它不会来找你。见 PRD 附录 H.0。
+
+设计上的三条硬纪律：
+
+1. **绝不失败、绝不阻塞。** 它挂在别人的 Claude Code 上，任何异常都可能干扰正事。
+   所以整个 main 包在 try 里，出什么事都静默 exit 0。
+   （注册时也带 `"async": true`，Claude Code 不等它。）
+2. **只写值得让手机响的事件。** `Stop`（干完了）和 `Notification`（需要你）两种。
+   `PreToolUse` 之类每秒好几次，写进去等于把手机变成骚扰源。
+3. **自己管好文件大小。** 超过 5 MB 就截掉前半段 —— 不需要 logrotate，
+   不需要 systemd，不需要任何守护进程。整个服务器侧就这一个文件。
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+HOME = os.path.expanduser("~")
+DIR = os.path.join(HOME, ".yxi")
+EVENTS = os.path.join(DIR, "events.jsonl")
+MAX_BYTES = 5 * 1024 * 1024
+
+# 值得让手机响的：干完了、需要你。其余（PreToolUse/PostToolUse/…）一律不写
+KINDS = {
+    "Stop": ("done", "干完了，等你说下一步"),
+    "Notification": ("needs", "需要你"),
+    "SessionEnd": ("end", "会话结束了"),
+}
+
+
+def tmux_session():
+    """会话名。手机上的看板和通知都按它来认。"""
+    pane = os.environ.get("TMUX_PANE", "")
+    if not pane:
+        return ""
+    try:
+        return subprocess.check_output(
+            ["tmux", "display", "-p", "-t", pane, "#{session_name}"],
+            text=True, stderr=subprocess.DEVNULL, timeout=3,
+        ).strip()
+    except Exception:
+        return ""
+
+
+def trim_if_huge():
+    """超了就砍掉前半段。就地重写，保持是同一个 inode —— App 那头 `tail -f` 不会掉线。"""
+    try:
+        if os.path.getsize(EVENTS) <= MAX_BYTES:
+            return
+        with open(EVENTS, "rb") as f:
+            data = f.read()
+        half = data[len(data) // 2:]
+        half = half[half.find(b"\n") + 1:]      # 从下一个完整行开始
+        with open(EVENTS, "wb") as f:
+            f.write(half)
+    except Exception:
+        pass
+
+
+def short(s, n=90):
+    return re.sub(r"\s+", " ", str(s)).strip()[:n]
+
+
+def main():
+    raw = ""
+    if not sys.stdin.isatty():
+        raw = sys.stdin.read()
+    data = json.loads(raw) if raw.strip() else {}
+
+    ev = data.get("hook_event_name") or (sys.argv[1] if len(sys.argv) > 1 else "")
+    if ev not in KINDS:
+        return
+
+    kind, detail = KINDS[ev]
+    # Notification 自带一句人话（"Claude needs your permission…"），比我们编的准
+    msg = data.get("message") or ""
+    if msg:
+        detail = short(msg)
+
+    line = {
+        "ts": round(time.time(), 3),
+        "session": tmux_session() or data.get("session_id", "") or "unknown",
+        "event": ev,
+        "kind": kind,
+        "detail": detail,
+        "cwd": data.get("cwd", ""),
+        # ⚠️ hook 的 stdin 里本来就带 transcript_path —— App 直接拿去渲染对话，
+        # 不用自己去 ~/.claude/projects 下按 cwd 反推目录名（那个映射规则有坑，见 #36）
+        "transcript": data.get("transcript_path", ""),
+    }
+
+    os.makedirs(DIR, exist_ok=True)
+    trim_if_huge()
+    # 单次写、带换行、O_APPEND —— 小于 PIPE_BUF 的写在 POSIX 上是原子的，
+    # 多个会话同时写也不会串行成半行
+    with open(EVENTS, "a", encoding="utf-8") as f:
+        f.write(json.dumps(line, ensure_ascii=False) + "\n")
+
+
+try:
+    main()
+except Exception:
+    pass          # ⚠️ 见文件头第 1 条纪律：绝不因为自己出错去影响别人的 Claude Code
+sys.exit(0)
