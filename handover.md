@@ -29,6 +29,31 @@
 | Android Keystore 里的 SSH 私钥 | 【App 内·硬件保护】导不出来；撤销 = 服务器删 `authorized_keys` 一行 |
 | `/root/inbox/base.apk`、`/root/inbox/apk/` | 【参考】原版 Moshi Android 3.10.0 及其解包，逆向证据来源 |
 
+## 决策记录（用户拍板过的，按时间倒序 —— 改动前先看这里，别推翻已定的）
+
+| # | 决定 | 理由 / 出处 |
+|---|---|---|
+| D9 | **灵动胶囊先不做**，但**不是做不了** | 荣耀确实开放第三方接入（小鹏 App 已接），但走开发者平台合作，已接入的都是大厂。主功能跑通后可再试 |
+| D8 | **推送用前台服务，不用 FCM** | FCM 会强制我们长期跑中转服务器；且用户主力机 **荣耀 Magic7** 的 GMS 默认关闭、需国际网络才可用 → FCM 不可靠。PRD §2.7 |
+| D7 | **只做 Android，iOS 第一期不做** | 苹果不允许从 GitHub Release 安装，与 D6 本质冲突。PRD §2.5 |
+| D6 | **分发走 GitHub Releases**，不上应用商店 | 省掉审核 / 隐私政策 / 合规追赶 |
+| D5 | **面向全球用户，但不跑任何后端** | 每个用户连自己的服务器。需补界面多语言（中/英）。PRD §2.6 |
+| D4 | **SSH 客户端不砍**，多主机提到 P0 | 要能连 `station`/`inst2`/… **以及以后才有的新服务器**。<br>⚠️ 早期一度错写成「App 内不实现 SSH」，**已纠正，别再退回**。PRD §2.4 |
+| D3 | **传输走 SSH**，不要 CA 证书 / mTLS / 新监听端口 | SSH 自带双向认证。PRD §2.3 |
+| D2 | **客户端做 Android 原生 APK**，不做 PWA | 浏览器强制 CA 证书；原生走 SSH 就没这限制。PRD §2.1 |
+| D1 | **不并行用原版 Moshi**（安卓侧） | 避免两套 hook 抢 `PermissionRequest` |
+
+> **纪律**：用户在对话里拍的每个板，**当场追加到这张表**，再去改 PRD/PLAN 对应章节。
+> 只改章节不记这里 → 三个月后没人知道「为什么当初这么定」。
+
+## 用户环境（影响技术选型）
+
+- **手机：荣耀 Magic7（MagicOS）** —— 项目的目标设备和主测试机
+  - GMS 默认关闭、需手动开且要国际网络 → **FCM 不可靠**（D8 的直接依据）
+  - MagicOS 后台管控严（自启动 / 关联启动 / 后台活动都要手动放行）
+    → **前台服务保活的最严苛测试场**。Phase 4 就在这台机上验，别用宽松环境自欺
+  - 有**灵动胶囊**（D9）
+
 ## 开源参照（PRD 附录 B 有全表）
 - **Phase 1 直接抄**：`GlassHaven/Haven`（Kotlin 现代 Android SSH 客户端，AGPL，活跃）· `connectbot/connectbot`（Apache-2.0，可直接复用代码）
 - **终端控件**：`termux/terminal-view` + `terminal-emulator`（已是独立 gradle 模块）→ **可能不需要 WebView+xterm.js**
