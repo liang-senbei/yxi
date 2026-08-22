@@ -1,7 +1,8 @@
 # handover · Yxi
 
 ## 基础信息
-- **是什么**：自建的手机指挥台 —— 复刻 Moshi（手机开终端、管 tmux、给 Claude Code 下指令和远程批权限），去掉它的云端和原生 App。
+- **是什么**：手机指挥台 —— 复刻 Moshi（手机开终端、管 tmux、给 Claude Code 下指令和远程批权限），**去掉它的整个云端层**。
+- **面向全球用户，但不跑任何后端**：每个用户连自己的服务器（PRD §2.6）。分发走 **GitHub Releases**，不上应用商店。**第一期只做 Android**（iOS 装不了 Release 的 APK，PRD §2.5）。
 - **技术栈**：客户端 = **Android 原生 APK**（Kotlin ~900 行，SSH 用纯 Java 的 `mwiede/jsch`，终端用 WebView + xterm.js）；服务器 = `yxi-agent`（**不监听端口**，由 SSH exec channel 拉起）+ `yxi-inbox`（只听 unix socket）+ `yxi-hook`。**传输走 SSH，不开任何新端口、不要证书。**
 - **部署在哪**：`yxi-agent` 装在任何想要完整功能的机器上（本机 / `station` / `inst2` / …）；没装的机器 App 也能当普通 SSH 终端连。**不占用任何网络端口。**
 - **开发回路**：本机 `/dev/kvm` 可用、嵌套虚拟化已开 → **AVD 模拟器硬件加速**，`adb install` 迭代（MuMuPlayer 无 Linux 版）。

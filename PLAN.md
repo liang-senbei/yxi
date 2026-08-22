@@ -10,7 +10,10 @@
 
 | # | 问题 | 结论 |
 |---|---|---|
-| 1 | 客户端形态 | ✅ **Android 原生 APK（侧载）**。iOS 继续用原版 Moshi——iOS 装不上自签 App |
+| 1 | 客户端形态 | ✅ **Android 原生 APK**。**第一期不做 iOS**——苹果不允许从 GitHub Release 安装（PRD §2.5） |
+| 1b | **分发** | ✅ **GitHub Releases**，不上应用商店。⚠️ 签名 keystore **一次定终身**，离线备份、绝不入 git |
+| 1c | **推送** | ✅ **前台服务默认 + ntfy 可选，明确不用 FCM**（FCM 会强制我们长期跑中转服务器，且国内无 GMS 即废。PRD §2.7） |
+| 1d | **面向全球用户** | ✅ 架构原样支持——**每个用户连自己的服务器，我们不跑任何后端**（PRD §2.6）。需补：界面多语言（中/英） |
 | 2 | 传输 | ✅ **SSH**。不要 CA 证书、不要 Tailscale、**不开任何新端口** |
 | 3 | **SSH 客户端** | ✅ **不砍**。`mwiede/jsch`（纯 Java，不用 NDK）。多主机从 P1 提到 **P0** |
 | 4 | Mosh | ✅ **不做**。韧性由 tmux 提供（PRD §5.5 第 19 条） |
@@ -133,6 +136,8 @@
 
 ### Phase 4 · 事件 + 通知（~1 天）
 
+> **推送方式已定**（PRD §2.7）：**前台服务**为默认，**ntfy** 为可选，**不用 FCM**。
+
 | 层 | 做什么 |
 |---|---|
 | hook | `yxi-hook`（~60 行）挂 `~/.claude/settings.json` 的 `Notification` / `Stop` / `SessionStart` / `SessionEnd`，投 `/run/yxi.sock` |
@@ -191,7 +196,16 @@ Claude 要跑危险命令
 | #12 | **粘贴图像**（不做标注） | 中 —— 传服务器 → 路径 send-keys 进去 |
 | #11 | 跳转到… | 待定 —— 先用一阵看用不用得上 |
 
-### Phase 7 · P2（不排期）
+### Phase 7 · 发布准备（P0 跑通后再做）
+
+| # | 做什么 | 注意 |
+|---|---|---|
+| 7.1 | 生成 **release keystore**，离线备份两份 | ⚠️ **一次定终身**，丢了 = 所有用户装不了更新 |
+| 7.2 | `assembleRelease` + 签名 + GitHub Release 挂 APK | 附 SHA256 供校验 |
+| 7.3 | 写面向用户的 README（安装 / 加主机 / 装 `yxi-agent` 三步） | 中英双语 |
+| 7.4 | **拆仓**：公开仓（代码 + 用户文档）/ 私有仓（PRD、PLAN、handover、逆向笔记） | ⚠️ 见 §5 |
+
+### Phase 8 · P2（不排期）
 
 `#13 用量`（`cc-quota` 已有）· `#14 Diff 查看器` · `#15 硬件键盘`（基本白送）· `#16 手势简版` · **Chat View**（读 jsonl，对应 Moshi 的 `/v1/transcripts/blob`）
 
@@ -278,3 +292,22 @@ Claude 要跑危险命令
 
 然后 Phase 1（2 天）你就有个能连所有服务器的 SSH 客户端了，这本身就有用。
 Moshi 独有的那部分（看板 / 通知 / 审批）从 Phase 3 才开始。
+
+---
+
+## 5. ⚠️ 发布前必须处理：仓库要拆
+
+GitHub Releases 要让人下载，**仓库必须是公开的**（私有仓的 Release 也是私有的）。
+
+但本仓现在含**你的基础设施信息**：服务器别名、`/root/src/CLAUDE.md` 的路径、
+以及 PRD §8 里那条 **「本机 sshd 同时开着 root 登录和密码认证」**——这条尤其不能公开。
+
+**发布时拆两个仓：**
+
+| 仓 | 内容 |
+|---|---|
+| **公开** | `android/` · `server/` · `web/` · 面向用户的 README · LICENSE |
+| **私有**（就是现在这个） | PRD · PLAN · handover · TROUBLESHOOTING · 逆向笔记 |
+
+**现在先不动**，但**从写第一行代码起就注意**：别把你的主机名 / IP / 路径 / 凭据写进
+`android/` `server/` `web/` 这三个目录里的任何文件——它们将来是要公开的。
