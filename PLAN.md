@@ -23,195 +23,169 @@
 
 ## 1. 阶段划分
 
-### Phase 0 · Android 工具链 + 一个能装上的空壳（~半天）
+> ⚠️ **顺序已按 D10/D11/D12 重排**：Chat View 是主界面，所以它提前；
+> 终端打磨（键盘条 / CJK / 手势）后移——**它不该挡在你看到成品之前**。
+> 但 Phase 1 的 SSH 层不能跳，它是一切的传输层。
 
-**全程最大的未知，所以放第一。先证明"这台机能编出你手机装得上的 APK"，再谈功能。**
+### Phase 0 · Android 工具链 + 空壳 APK（~半天，**大半已完成**）
 
-| # | 做什么 |
-|---|---|
-| 0.1 | `apt install -y openjdk-17-jdk-headless`（本机**没有 java**，已查） |
-| 0.2 | 下 Android **cmdline-tools**，`sdkmanager` 装 `platform-tools` + `platforms;android-34` + `build-tools;34.0.0`（约 3 GB，磁盘 451 G 空闲） |
-| 0.3 | Gradle wrapper 建最小工程：一个 Activity 显示 "Yxi"。**`minSdk 26` + `compileSdk 36`**（compileSdk 36 是 Live Updates 的编译前提，minSdk 低保覆盖面） |
-| 0.4 | `./gradlew assembleDebug` |
-| 0.5 | `lapput` 或微信传手机 → 侧载安装 |
-| 0.6 | **建 Android 模拟器（AVD）** —— 见下方「开发回路」 |
-
-**验收**：手机上装上了、点开有界面。
-> 到这一步**一行业务代码都没写**——纯粹验证路通不通。通不了就地掉头，不浪费后面六个阶段。
-
-#### 0.6 开发回路：本机跑 Android 模拟器（**这台机跑得动**）
-
-**已核实**：`/dev/kvm` 存在、CPU 有 `svm`、`systemd-detect-virt` = `kvm` → **嵌套虚拟化已开，模拟器能硬件加速**。
-另有图形环境（lightdm + VNC `:5901`）。
-
-> ❌ **MuMuPlayer 用不了**——它只有 Windows / macOS 版，Linux 上没有。
-> ✅ **但不需要它**：Android SDK 自带 **AVD 模拟器**，Phase 0.2 装 SDK 时顺手 `sdkmanager 'system-images;android-34;google_apis;x86_64'` 即可，对开发比 MuMu 更合适（有 `adb`、有 logcat）。
-
-**为什么值得花这半小时**：开发回路从
-`编译 → lapput/微信传手机 → 手动点安装 → 试` 变成 `编译 → adb install → 试`，
-**每一轮省几分钟**，几十轮下来省一整天。真机只在阶段验收时用（有些坑只有真机有：国产 ROM 杀后台、真实输入法、4G 切换）。
-
-#### 想在模拟器里跑**原版 Moshi** 做参照？要先补齐 split
-
-⚠️ 你给的 `base.apk` 是 **split APK 的 base 部分**，`unzip -l` 数出 **0 个 `.so`**。
-而 Moshi 恰恰**重度依赖原生**（libghostty 终端引擎 / Nitro 传输层 / Parakeet 语音模型，见 PRD §2.2）
-→ **单独装 base.apk 一启动就崩。**
-
-要跑起来得拿到完整 split 集（`base` + `split_config.arm64_v8a` + `split_config.<dpi>` + `split_config.<语言>`）：
-
-| 办法 | 怎么做 | 评价 |
+| # | 做什么 | 状态 |
 |---|---|---|
-| **A（最省事）** | 模拟器用**带 Play 商店的镜像**（`system-images;android-34;**google_apis_playstore**;x86_64`），登 Google 账号，**在 Play 里直接装 Moshi** | ✅ **推荐**。Play 自动处理 split 和 ABI，不用手工拼。<br>官网确认安卓版就是走 Play：`play.google.com/store/apps/details?id=app.getmoshi.android`，**没有直接 APK 下载** |
-| B | 手机上装 APK 提取工具导出完整 `.apks`，微信发过来 → `adb install-multiple` | 手工，但不依赖 Google 账号 |
-| C | 手机开无线调试 → `adb shell pm path app.getmoshi.android` → `adb pull` 每个 split（不用 root） | 同上 |
+| 0.1 | `openjdk-17-jdk-headless` | ✅ |
+| 0.2 | Android cmdline-tools + `platform-tools` / `platforms;android-34` / `build-tools;34.0.0` / `emulator` / `system-images;android-34;google_apis_playstore;x86_64` | ✅ |
+| 0.6 | **AVD 模拟器**（720x1280 + swiftshader + KVM，40 秒开机） | ✅ `dev/avd.sh` |
+| 0.3 | Gradle wrapper 最小工程，**`minSdk 26` + `compileSdk 36`** | ⬜ |
+| 0.4 | `./gradlew assembleDebug` | ⬜ |
+| 0.5 | `adb install` 进模拟器 → 再侧载到真机（荣耀 Magic7） | ⬜ |
 
-> ⚠️ 走 A 的两个前提：模拟器要能**连得上 Google**（本机有 sing-box 代理可用）；
-> Moshi 若只发 arm64，x86_64 模拟器可能显示"不兼容"——那就退 B/C 加 ARM 转译镜像。
-> **这条不是必需路径**——参照价值主要是抓它的网关请求体（唯一没挖到的东西）。
-> **优先级低于把我们自己的东西跑起来。**
+**验收**：模拟器和真机上都装上了、点开有界面。
 
 ---
 
-### Phase 1 · SSH 层 + 多主机 + 能开终端（~2 天）
+### Phase 1 · SSH 层 + 多主机 + 能出终端（~2 天）
 
-**做完这一阶段，它已经是个能用的 SSH 客户端了——可以替代你手机上现在那个。**
+**做完这阶段它已经是个能用的 SSH 客户端了。**
 
 | # | 做什么 | 关键点 |
 |---|---|---|
-| 1.1 | gradle 加 `com.github.mwiede:jsch`（纯 Java，无 NDK） | 备选 `sshj`（拖 BouncyCastle，Android 上有冲突风险）或 `connectbot/sshlib`（Apache-2.0） |
-| 1.0 | **先读两个参照**：`GlassHaven/Haven`（Kotlin 现代 SSH 客户端，AGPL，今天还在更新）和 `connectbot/connectbot`（Apache-2.0，可直接抄） | 见 PRD 附录 B.1。**别从零想**，这道题有人做过 |
-| 1.2 | App 内生成 ed25519 密钥，私钥存 **Android Keystore**（硬件级，导不出来） | 比 Moshi 的二维码配对流程简单 |
-| 1.3 | 显示公钥（文本 + 二维码）→ 你贴进各机 `~/.ssh/authorized_keys` | 一次性 |
-| 1.4 | `HostListActivity`：**加/编辑主机的完整流程**——任意 IP / **任意端口** / 用户名 / **密码或密钥** | ⚠️ **不是预置列表**。要能连"以后才有的"服务器（PRD §2.4）。具体机器清单见 `/root/src/CLAUDE.md`（不入库） |
-| 1.4b | **一键装公钥**：密码连上一次 → append 到 `~/.ssh/authorized_keys` → 之后免密 | 相当于 `ssh-copy-id`，比 Moshi 的二维码配对还省事 |
-| 1.5 | **`known_hosts` 校验**：首次连接指纹显式确认，之后变了就拒 | ⚠️ **不能图省事 accept-any**，那等于关掉 SSH 的中间人防护 |
-| 1.6 | `TerminalActivity` 接 SSH **shell channel**。终端控件**先试 `termux/terminal-view`**（原生，GPL-3.0，已核实是独立 gradle 模块） | 退路：WebView + xterm.js。见 PRD §2.2 / 附录 B.2 |
-| 1.7 | 连上后跑 `tmux list-sessions -F '#{session_name}\|#{session_windows}\|#{session_activity}\|#{session_attached}'` 让你选会话 | **抄 Moshi 的格式串**（PRD §1.2） |
-| 1.8 | attach 时照抄 Moshi 那行 tmux 设置 | `tmux set -g set-titles on \; set -g mouse on \; set -g status-right '' \; unbind -q -T root WheelUpStatus \; unbind -q -T root WheelDownStatus` |
+| 1.0 | **先读两个参照**：`GlassHaven/Haven`（Kotlin 现代 SSH 客户端，活跃）· `connectbot/connectbot`（Apache-2.0，可直接抄） | 别从零想（PRD 附录 B.1） |
+| 1.1 | gradle 加 `com.github.mwiede:jsch`（纯 Java，无 NDK） | 备选 `sshj` / `connectbot/sshlib` |
+| 1.2 | App 内生成 ed25519，私钥存 **Android Keystore** | 硬件级，导不出来 |
+| 1.3 | **加/编辑主机的完整流程**：任意 IP / **任意端口** / 用户名 / **密码或密钥** | ⚠️ **不是预置列表**，要能连"以后才有的"服务器（PRD §2.4） |
+| 1.4 | **一键装公钥**：密码连一次 → append 到 `authorized_keys` → 之后免密 | 相当于 `ssh-copy-id` |
+| 1.5 | **`known_hosts` 校验**：首次显式确认指纹，之后变了就拒 | ⚠️ **不能 accept-any** |
+| 1.6 | 终端控件先试 **`termux/terminal-view`**（原生，独立 gradle 模块） | 退路 WebView + xterm.js（PRD §2.2） |
+| 1.7 | 连上跑 `tmux list-sessions -F '#{session_name}\|#{session_windows}\|#{session_activity}\|#{session_attached}'` 选会话 | 抄 Moshi 的格式串（PRD §1.2） |
+| 1.8 | attach 时照抄 Moshi 那行 tmux 设置 + **注入 `YXI_CLIENT=1`** | PRD 附录 C.2 |
 
-**验收（三条）**：
-- ✅ 能连上**本机**，选会话，attach 进 `cc-root`，跑 `ls` 看到彩色输出
-- ✅ 能连上 **`station` 和 `inst2`**（这两台什么都没装）当普通 SSH 终端用
-- ✅ 故意改一台的 host key → **App 拒绝连接**，不是静默接受
-
-**自检**：`test_yxi.py::test_tmux_format` —— 断言那条 `-F` 命令的输出能被解析成会话列表。
+**验收**：① 连上本机 attach `cc-root` 跑 `ls` 有彩色输出 ② 连上 `station`/`inst2`（什么都没装）当普通 SSH 用
+③ 故意改 host key → **拒绝连接**
 
 ---
 
-### Phase 2 · 终端打磨（~1 天）
+### Phase 2 · `yxi-agent` + 会话看板 + 发指令（~1 天）
 
-**PRD §5.5 里的 P0 项，都在这一阶段。终端不好用，后面全是白搭。**
+| 层 | 做什么 |
+|---|---|
+| 服务端 | `yxi-agent`（~250 行 Python）：**不监听端口**，被 SSH exec channel 拉起，stdin/stdout JSON 行协议 |
+| 服务端 | **带版本号的探测标记**（`__YXI_SNAPSHOT_V1__`），抄 Moshi（PRD 附录 C.1） |
+| 服务端 | `list` = 会话+状态（读 `~/.cloud-status/*.json`，`cc-state` 已在写）· `peek` = `capture-pane` · `send` = `send-keys` |
+| 服务端 | **探测每个会话里跑的是什么**（Claude Code？普通 shell？）→ 决定要不要给对话模式 |
+| App | 会话看板三列（**等你 / 干活中 / 已完成**） |
+
+**验收**：手机看到全部 14 个 `cc-*` 会话和状态；给 `cc-Yxi` 发一句话，服务器上能看到收到。
+
+---
+
+### Phase 3 · ⭐ Chat View 渲染（~2 天）—— **这是主界面**
+
+| 层 | 做什么 |
+|---|---|
+| 服务端 | `yxi-agent` **`tail -f` 转录 jsonl**（`~/.claude/projects/<项目>/<uuid>.jsonl`），解析成结构化事件流 |
+| App | 渲染 `text` / `thinking`（默认折叠）/ `tool_use`+`tool_result` 工具卡片 |
+| App | **按工具定制卡片**：`Bash`（占 3177 次，先做它）· `Edit`/`Write` 渲染成 **diff** · `Read` · `Agent` |
+| App | ⭐ **`AskUserQuestion` → 可点选项按钮**（`questions[].options[]` 直接变按钮） |
+| App | ⭐ **`ExitPlanMode` → 计划卡片**（markdown）+「批准 / 继续讨论」 |
+| App | markdown 渲染 + 代码块语法高亮 + 一键复制 |
+| App | 输入框 → `tmux send-keys` 打回同一个活着的会话 |
+
+**验收**：打开 `cc-Yxi` 的对话模式，**能像原生 Claude App 那样读完整段对话**；打字回它，服务器上收到。
+**⚠️ 要实测的**：点 `AskUserQuestion` 的选项时，Claude Code 的 TUI 选择器**接受什么按键**（数字键？↑↓+Enter？）。
+备选路径：查 `Elicitation` / `ElicitationResult` hook 能否程序化应答。**这条不通的话选项卡片只能只读**。
+
+---
+
+### Phase 4 · ⭐ 双模式切换 + 语音输入（~1 天）
+
+**双模式**（PRD 附录 D.5）：顶部分段控件 `[终端│对话]`
+1. **切换不断连** —— 同一个会话的两种渲染，光标和滚动位置都不能丢
+2. **记住每个会话上次用的模式**
+3. **没装 `yxi-agent` 的主机：对话模式置灰 + 说清原因 + 给安装引导**
+4. **不是 Claude Code 的会话：不显示对话模式**
+5. 默认：探测到 Claude Code → 对话模式；其余 → 终端模式
+
+**语音输入**（PRD 附录 E）：
+- 主力 `SpeechRecognizer`，**运行时探测可用性**，不可用退到"请按输入法上的麦克风"
+- ⚠️ **命令行模式下永远先显示识别结果、确认才发送**——识别错 + 自动回车 = 在服务器上跑了没说过的命令
+- 对话模式默认也先确认；自动发送做成可选开关
+
+**验收**：两个模式来回切 5 次，会话不断、位置不丢；语音说一句中文能正确填进输入框。
+
+---
+
+### Phase 5 · 终端打磨（~1 天）
 
 | 对照表# | 做什么 |
 |---|---|
-| #2 | **键盘工具条**：Esc / Tab / Ctrl / ↑↓←→ / Ctrl-C（手机软键盘没这些键） |
-| #6 | **快捷面板简版**：tmux 前缀 `Ctrl-B` + 窗口 1~9。**不做自定义按钮编辑器** |
-| #3 | **CJK 输入**：内嵌一份等宽 CJK 字体（Moshi 专门下 NotoMonoCJK，说明这是真坑） |
-| #7 | **滚动**：xterm.js 自带，接上就行 |
-| — | **断线重连**：指数退避 → 重新 attach。**tmux 保住内容，不用自己存 scrollback** |
-| — | 尺寸同步：横竖屏切换 → 发 SSH window-change |
+| #2 | **键盘工具条**：Esc / Tab / Ctrl / ↑↓←→ / Ctrl-C |
+| #6 | **快捷面板简版**：tmux 前缀 `Ctrl-B` + 窗口 1~9（不做自定义编辑器） |
+| #3 | **CJK 输入**：内嵌等宽 CJK 字体 |
+| #7 | 滚动 · 断线重连（指数退避 → 重新 attach，**tmux 保住内容**）· 横竖屏尺寸同步 |
 
-**验收**：**打中文进终端** → WiFi 切 4G，2 秒内自动恢复且**光标位置没丢** → 用工具条按出 `Ctrl-C` 能中断命令。
-> ⚠️ 最可能翻车的是 **WebView 里的输入法**：中文候选、光标定位、选区。**早试，别拖到最后。**
+**验收**：**打中文进终端** → WiFi 切 4G 两秒内恢复且**光标位置没丢** → 工具条按出 `Ctrl-C` 能中断命令。
+> ⚠️ 最可能翻车的是**输入法**。虽然排在后面，**Phase 1 出终端时就顺手试一次中文**，别等到这里才发现。
 
 ---
 
-### Phase 3 · yxi-agent + 会话看板 + 发指令（~1 天）
+### Phase 6 · 事件 + 通知（~1 天）
 
-**从这里开始才是 Moshi 独有的部分——之前两阶段任何 SSH App 都有。**
+> 推送方式已定（PRD §2.7）：**前台服务默认 + ntfy 可选，不用 FCM**。
 
 | 层 | 做什么 |
 |---|---|
-| 服务端 | `yxi-agent`（~200 行 Python）：**不监听任何端口**，被 SSH exec channel 拉起，stdin/stdout 走 JSON 行协议（协议表见 PRD §6） |
-| 服务端 | `list` = 会话+状态（读 `~/.cloud-status/*.json`，`cc-state` 已经在写，白捡）<br>`peek` = `tmux capture-pane -p`<br>`send` = `tmux send-keys` |
-| App | `SessionsActivity` 三列看板（**等你 / 干活中 / 已完成**），点会话展开预览 + 输入框 |
+| hook | `yxi-hook`（~60 行）挂 `Notification` / `Stop` / `SessionStart` / `SessionEnd`，投 `/run/yxi.sock` |
+| 服务端 | **`yxi-inbox`**（~80 行，systemd，**只监听 unix socket**）：收事件、落盘、积压。<br>手机没连着时 Claude 也在干活，得有人接着 |
+| 服务端 | 限流：`tool_running`/`tool_finished` 折叠 |
+| App | `EventService` 前台服务：常驻 exec channel，收事件 → 本地通知 |
 
-> **这里我们比原版强**：Moshi 的输入框只能发给**当前 attach 着的会话**（PRD §1.6，APK 里搜不到 `send-keys`）。
-> 我们用 `send-keys`，**不用先 attach 就能给任意会话下指令**。
-
-**验收**：手机上看到全部 14 个 `cc-*` 会话和各自状态；给 `cc-Yxi` 发一句话，服务器终端里能看到它收到了。
-**自检**：`test_yxi.py::test_agent_list` —— 断言 `yxi-agent` 的 `list` 输出会话集合 == `tmux ls` 的集合。
+**验收**：① 荣耀 Magic7 **锁屏**收到「cc-mail 干完了」，点开直达 ② **手机没连着时产生的事件，连上后能补收到**
+> ⚠️ **就在荣耀 Magic7 上验**（MagicOS 后台管控严 = 最恶劣环境）。要做：电池白名单引导 + `START_STICKY` + 开机广播。
 
 ---
 
-### Phase 4 · 事件 + 通知（~1 天）
-
-> **推送方式已定**（PRD §2.7）：**前台服务**为默认，**ntfy** 为可选，**不用 FCM**。
-
-| 层 | 做什么 |
-|---|---|
-| hook | `yxi-hook`（~60 行）挂 `~/.claude/settings.json` 的 `Notification` / `Stop` / `SessionStart` / `SessionEnd`，投 `/run/yxi.sock` |
-| 服务端 | **`yxi-inbox`**（~80 行，systemd，**只监听 unix socket**）：收 hook 事件、落盘。<br>**必要性**：手机没连着的时候 Claude 也在干活，得有人接着；agent 连上时把积压一次性吐出去 |
-| 服务端 | 限流：按 Moshi 的做法把 `tool_running`/`tool_finished` 折叠，别把手机炸了 |
-| App | `EventService` 前台服务：常驻一条 exec channel，收事件 → `NotificationManager` 发**本地通知** |
-
-**没有 FCM、没有 Firebase、没有任何云、没有账号。**
-
-**验收（两条）**：
-- ✅ 手机**锁屏状态**收到「cc-mail 干完了」的通知，点开直达该会话
-- ✅ **手机没连着的时候产生的事件，连上后能补收到**（`yxi-inbox` 积压吐出）
-
-> ⚠️ **国产 ROM 杀后台**是这阶段最大风险。对策：电池优化白名单 + `START_STICKY` + 开机广播。
-> **`yxi-inbox` 保证事件不丢**，最坏情况只是延迟收到。再兜底可加 ntfy 作第二通道。
-
----
-
-### Phase 5 · 远程审批（~1 天）
-
-**整个项目的核心，也是唯一有真实风险的一段。**
+### Phase 7 · 远程审批（~1 天）—— **整个项目的核心**
 
 ```
-Claude 要跑危险命令
-  → PermissionRequest hook 触发
-  → yxi-hook 投事件到 /run/yxi.sock，然后【阻塞等回复，最多 570 秒】
+Claude 要跑危险命令 → PermissionRequest hook → yxi-hook 投事件后【阻塞等，最多 570 秒】
   → yxi-inbox → yxi-agent → SSH → 前台服务发通知（工具名 + 完整参数 + 三个按钮）
-  → 你在【通知上】直接点 批准 / 拒绝 / 转终端（不用打开 App）
-  → 原路回到还等着的 hook 进程
-  → hook 打印 permissionDecision JSON 退出 → Claude 继续
+  → 你在【通知上】直接点 批准/拒绝/转终端 → 原路回到还等着的 hook → Claude 继续
 ```
 
 **必须做对的三件事**：
-1. **fail-closed**：超时 570s / inbox 挂 / socket 连不上 / 解析失败 → 一律输出 `"ask"`，退回终端手动批。**任何分支都不能默认 allow。**
-2. **留余量**：570 < 600（hook 硬超时）。超了 Claude 那边当没决定，不如自己先退成 `ask`。
-3. **「转终端」按钮**：不想在手机上决定时一键立刻返回 `ask`，别让 Claude 干等 9 分钟。
+1. **fail-closed**：超时 570s / inbox 挂 / socket 连不上 / 解析失败 → **一律输出 `"ask"`**，退回终端。**任何分支都不能默认 allow。**
+2. **留余量**：570 < 600（hook 硬超时）
+3. **「转终端」按钮**：一键立刻返回 `ask`，别让 Claude 干等 9 分钟
 
-**验收（两条都要过）**：
-- ✅ 手机**通知上直接**批一次危险命令，Claude 继续跑
-- ✅ **`systemctl stop yxi-inbox` 后再触发一次 → Claude 退回终端问你**（不是自动放行）
+**验收（两条都要过）**：① 手机**通知上直接**批一次，Claude 继续跑
+② **`systemctl stop yxi-inbox` 后再触发 → Claude 退回终端问你**（不是自动放行）
 
-**自检**：`test_yxi.py::test_approval_fail_closed` —— socket 路径指到不存在的文件，断言 `yxi-hook` 输出的 `permissionDecision == "ask"`。
-> **这条测试比其它所有测试加起来都重要。** 它守的是"手机连不上时会不会自动放行"。
+**自检**：`test_yxi.py::test_approval_fail_closed` —— socket 指到不存在的路径，断言输出 `permissionDecision == "ask"`。
+> **这条测试比其它所有加起来都重要。**
 
 ---
 
-### Phase 6 · P1 功能（~1 天，按需）
+### Phase 8 · P1（按需）
 
-对照 PRD §5.5：
+**界面多语言（中/英）** · **ntfy 可选推送** · #8 远程剪贴板(OSC 52) · #10 最近目录(简版) · #12 粘贴图像(不做标注) · #11 跳转到…(待定)
+· **附录 E.3 服务器端 whisper 转写**（准确度明显好于系统 API，尤其中英混杂和技术词）
 
-| # | 功能 | 成本 |
-|---|---|---|
-| #8 | **远程剪贴板**（OSC 52） | 小 —— xterm.js 有现成 addon，几乎白送 |
-| #9 | **语音 → 终端** | 小 —— Android `SpeechRecognizer` 系统自带，**不用云** |
-| #10 | **最近的目录**（简版） | 小 —— 直接读 tmux 会话的 cwd |
-| #12 | **粘贴图像**（不做标注） | 中 —— 传服务器 → 路径 send-keys 进去 |
-| #11 | 跳转到… | 待定 —— 先用一阵看用不用得上 |
-
-### Phase 7 · 发布准备（P0 跑通后再做）
+### Phase 9 · 发布准备
 
 | # | 做什么 | 注意 |
 |---|---|---|
-| 7.1 | 生成 **release keystore**，离线备份两份 | ⚠️ **一次定终身**，丢了 = 所有用户装不了更新 |
-| 7.2 | `assembleRelease` + 签名 + GitHub Release 挂 APK | 附 SHA256 供校验 |
-| 7.3 | 写面向用户的 README（安装 / 加主机 / 装 `yxi-agent` 三步） | 中英双语 |
-| 7.4 | **拆仓**：公开仓（代码 + 用户文档）/ 私有仓（PRD、PLAN、handover、逆向笔记） | ⚠️ 见 §5 |
+| 9.1 | 生成 **release keystore**，离线备份两份 | ⚠️ **一次定终身** |
+| 9.2 | `assembleRelease` + 签名 + GitHub Release 挂 APK | 附 SHA256 |
+| 9.3 | 面向用户的 README（安装 / 加主机 / 装 `yxi-agent` 三步），中英双语 | |
+| 9.4 | **拆仓**：公开（代码+用户文档）/ 私有（PRD、PLAN、handover、逆向笔记） | ⚠️ 见 §5 |
 
-### Phase 8 · P2（不排期）
+### Phase 10 · P2（不排期）
 
-`#13 用量`（`cc-quota` 已有）· `#14 Diff 查看器` · `#15 硬件键盘`（基本白送）· `#16 手势简版` · **Chat View**（读 jsonl，对应 Moshi 的 `/v1/transcripts/blob`）
+`#13 用量`（`cc-quota` 已有）· `#14 Diff 查看器` · `#15 硬件键盘`（基本白送）· `#16 手势简版`
+· **`#18 Live Updates`（安卓版「灵动岛」）** —— `Notification.ProgressStyle`（API 36）把前台服务那条通知提升成
+**状态栏胶囊**，显示**审批 570 秒倒计时**。⚠️ 完整体验先在 Pixel 放出 → **渐进增强，不当核心功能**（PRD §2.7）
 
-**`#18 Live Updates`（安卓版「灵动岛」）** —— `Notification.ProgressStyle`（API 36）把前台服务那条通知提升成**状态栏胶囊**，显示**审批 570 秒倒计时**。需 `compileSdk 36`（`minSdk` 仍可 26，运行时判版本）。⚠️ 完整体验先在 Pixel 放出，其它厂商不一定有 → **渐进增强，不当核心功能**。详见 PRD §2.7
-
-**明确不做**：`#17 浏览器预览` · `#18 Live Activity`（iOS 独有） · `#19 Mosh` · `#20 主题字体图标` —— 理由见 PRD §5.5
+**明确不做**：`#17 浏览器预览` · `#19 Mosh` · `#20 主题字体图标` · **iOS**（PRD §2.5）
+**先不做但不是做不了**：`#3 厂商灵动胶囊`（荣耀等确实开放接入，走开发者平台合作，PRD §2.7）
 
 ---
 
@@ -250,19 +224,19 @@ Claude 要跑危险命令
 
 | 阶段 | 工作量 | 累计后你能干什么 |
 |---|---|---|
-| Phase 0 | 半天 | 手机上装上了空壳 ← **先证明路通** |
-| **Phase 1** | **2 天** | **能连所有服务器、开终端、选 tmux 会话** ← 已可替代现有 SSH App |
-| Phase 2 | 1 天 | 终端真正好用（中文、方向键、重连） |
-| Phase 3 | 1 天 | **会话看板 + 给任意会话发指令** ← Moshi 独有部分从这开始 |
-| Phase 4 | 1 天 | 手机会主动响 |
-| Phase 5 | 1 天 | **通知上直接批权限** ← P0 完成 |
-| Phase 6 | 1 天 | 剪贴板 / 语音 / 图片 / 最近目录 |
+| Phase 0 | 半天（**大半已完成**） | 手机上装上了空壳 |
+| Phase 1 | 2 天 | **能连所有服务器、开终端、选 tmux 会话** ← 已可替代现有 SSH App |
+| Phase 2 | 1 天 | 会话看板 + 给任意会话发指令 |
+| **Phase 3** | **2 天** | ⭐ **像原生 Claude App 一样读对话、回消息** ← 你要的主界面 |
+| Phase 4 | 1 天 | ⭐ 终端/对话一键切换 + 语音输入 |
+| Phase 5 | 1 天 | 终端真正好用（中文、方向键、重连） |
+| Phase 6 | 1 天 | 手机会主动响 |
+| Phase 7 | 1 天 | **通知上直接批权限** ← P0 完成 |
 
-**P0 合计约 6.5 天，含 P1 约 7.5 天。**
+**P0 合计约 9.5 天**（原为 6.5 天）。多出来的 3 天全在 **Chat View + 双模式 + 语音**——
+这三样是 D10/D11/D12 三条新要求，**也正是"像原生 App"和"裸终端"的分界线**。
 
-**三个自然停止点**：Phase 0（路不通就掉头）· **Phase 2**（当个好用的 SSH App 用着）· Phase 5（P0 完成）。
-
----
+**三个自然停止点**：Phase 1（当好用的 SSH App 用着）· **Phase 4**（主界面成型，最想看到的东西都有了）· Phase 7（P0 完成）
 
 ## 4. 已确认的前置条件
 
