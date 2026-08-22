@@ -1,0 +1,22 @@
+# 凭据 / 密钥 —— 绝不入库
+certs/
+*.pem
+*.key
+*.jks
+*.keystore
+local.properties
+.env
+
+# 构建产物
+*.apk
+*.aab
+build/
+.gradle/
+android/build/
+android/.gradle/
+__pycache__/
+*.pyc
+
+# 参考资料（第三方 APK，不分发）
+inbox/
+apk/
