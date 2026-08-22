@@ -61,8 +61,16 @@
   批注服务 `yxi-review` 的 token 路径下加了 `/apk`（没 token 返回 404）。
   URL 里的 token 见 `design/review/.token`（**gitignore，不写进文档**）。
   到笔电的反向隧道会断，所以装包不该依赖那条链路。
-- ⬜ **待办**：G6（工具卡片按工具定制 + AskUserQuestion/ExitPlanMode 交互卡）→ G7（文件模式/SFTP）
-  → G8（三模式切换 + D-Pad）→ G9（终端打磨：**软键盘 IME 通路真机才验得了**）
+- ✅ **G6 完成**（实测通过）：**工具卡片按工具定制 + 点选项**。
+  - 卡片：Bash（命令横滚不折行 / stdout·stderr 分开 / `Exit code N` 提取）、Edit（真 diff，
+    走 `toolUseResult.structuredPatch`）、Write（新建 vs 覆盖）、Read（行数 / 图片尺寸）、
+    Agent（同步 vs 后台）、AskUserQuestion（问题 + 你选了啥）、ExitPlanMode（计划 markdown）。
+  - **点选项**：手机上点第 2 项 → 服务器转录里落 `"先做哪一块？"="三模式切换"`。**闭环实测通过。**
+  - ⚠️ **关键发现**：待答的 `tool_use` **不落盘** —— Claude Code 要等工具跑完才写进 JSONL。
+    所以「此刻在等你」只能抓屏幕（`tmux capture-pane`）。**转录是权威的历史，屏幕是唯一的「此刻」。**
+  - 按键协议全部实测：单选送数字即确认；多选送数字是勾选、`Right`+`1` 才提交；ExitPlanMode 同一套。
+- ⬜ **待办**：G7（文件模式/SFTP）→ G8（三模式切换 + D-Pad）
+  → G9（终端打磨：**软键盘 IME 通路真机才验得了**）
   → G10（手机主动响）→ G11（锁屏批权限）→ G12（附件+语音+用量）。清单见 [GOALS.md](./GOALS.md)
 
 ## 读写信息在哪

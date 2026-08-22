@@ -113,6 +113,31 @@ object SessionProbe {
         session.exec("tmux send-keys -t '$target' Enter")
     }
 
+    /**
+     * 这个会话**此刻**是不是在等人选。
+     *
+     * ⚠️ **只有屏幕知道这件事。** 实测：Claude Code 的 `tool_use` 块要等工具跑完
+     * 才写进转录 JSONL —— 问题挂着等你的那段时间，转录里根本没有它。
+     * 所以：**转录是权威的历史，屏幕是唯一的「此刻」**（见 [Prompt] 的类注释）。
+     */
+    suspend fun pending(session: SshSession, target: String): Pending? =
+        Prompt.parse(peek(session, target, 60))
+
+    /** 允许送的按键。⚠️ 白名单，因为 [key] 最终会拼进 shell 命令。 */
+    private val SAFE_KEY = Regex("""^([0-9]{1,2}|Up|Down|Left|Right|Enter|Escape)$""")
+
+    /**
+     * 送**一个按键**（不带回车）—— 点选项就靠它。
+     *
+     * 协议是实测出来的：单选送数字即选中并确认；多选送数字是切换勾选，
+     * 要再送 `Right` 跳到 Submit 页、送 `1` 才算提交。
+     */
+    suspend fun sendKey(session: SshSession, target: String, key: String): Boolean {
+        if (!SAFE_KEY.matches(key)) return false
+        session.exec("tmux send-keys -t '$target' '$key'")
+        return true
+    }
+
     /** 抓某个会话最近 n 行屏幕，看板上做预览。 */
     suspend fun peek(session: SshSession, target: String, lines: Int = 40): String =
         session.exec("tmux capture-pane -p -t '$target' 2>/dev/null | tail -$lines")

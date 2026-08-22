@@ -24,6 +24,15 @@ sealed interface ChatItem {
         /** 对应的结果，来自后面某条 user 消息里的 `tool_result` */
         var result: String? = null,
         var isError: Boolean = false,
+        /**
+         * Claude Code 自己存的**结构化结果**（转录行顶层的 `toolUseResult`，不是 API 内容）。
+         * 富渲染基本都靠它：Edit 的 `structuredPatch`、Bash 分开的 stdout/stderr、
+         * Read 的 `file.numLines`、AskUserQuestion 的 `answers`、ExitPlanMode 的最终 `plan`。
+         *
+         * ⚠️ **它可能是字符串（用户拒绝时会退化）或 null（老转录、子 agent 转录里很常见）。**
+         * 这里只在它确实是对象时才存，别处就不用再判类型了。
+         */
+        var meta: JSONObject? = null,
     ) : ChatItem
     /** 解析不出来的东西。⚠️ 这是**兼容兜底不是正常终点**——见类注释 */
     data class Unknown(override val key: String, val raw: String) : ChatItem
@@ -58,7 +67,7 @@ object Transcript {
             val uuid = d.optString("uuid", d.optString("requestId", line.hashCode().toString()))
 
             when (type) {
-                "user" -> parseUser(msg, uuid, calls, out)
+                "user" -> parseUser(msg, d.optJSONObject("toolUseResult"), uuid, calls, out)
                 "assistant" -> parseAssistant(msg, uuid, calls, out)
                 else -> Unit
             }
@@ -67,7 +76,7 @@ object Transcript {
     }
 
     private fun parseUser(
-        msg: JSONObject, uuid: String,
+        msg: JSONObject, meta: JSONObject?, uuid: String,
         calls: MutableMap<String, ChatItem.ToolCall>, out: MutableList<ChatItem>,
     ) {
         when (val c = msg.opt("content")) {
@@ -83,6 +92,8 @@ object Transcript {
                         calls[id]?.apply {
                             result = flatten(b.opt("content"))
                             isError = b.optBoolean("is_error", false)
+                            // optJSONObject 在它是字符串/null 时自然返回 null —— 正合适
+                            this.meta = meta
                         }
                     }
                 }

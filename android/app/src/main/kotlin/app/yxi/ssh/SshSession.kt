@@ -26,6 +26,15 @@ class SshSession(
     private val jsch = JSch()
     private var session: Session? = null
 
+    /**
+     * ⚠️ **开通道要排队。**
+     * jsch 的 Session 写包路径不是线程安全的（TROUBLESHOOTING #16 —— 那次是终端控件的
+     * resize 和读循环并发写，把包流写坏，服务器报 MAC 错误）。开通道同样要往连接上写包，
+     * 所以只要有两个协程共用一条连接（对话界面就是这样：`tail -f` 跟着转录 +
+     * 每几秒抓一次屏幕看有没有在等你），就必须把开通道这件事串起来。
+     */
+    private val chanLock = kotlinx.coroutines.sync.Mutex()
+
     /** `host:port`，报错文案里用。 */
     val hostLabel: String get() = cfg.hostname + if (cfg.port != 22) ":${cfg.port}" else ""
 
@@ -122,7 +131,7 @@ class SshSession(
         session = s
     }
 
-    suspend fun openShell(cols: Int = 80, rows: Int = 24): Shell = withContext(Dispatchers.IO) {
+    suspend fun openShell(cols: Int = 80, rows: Int = 24): Shell = withContext(Dispatchers.IO) { chanLock.withLock {
         val s = requireNotNull(session) { "还没 connect()" }
         val ch = s.openChannel("shell") as ChannelShell
         ch.setPtyType("xterm-256color")   // 要彩色输出就得是 256color，不能是 dumb
@@ -133,7 +142,7 @@ class SshSession(
         val inp = ch.outputStream
         ch.connect(10_000)
         Shell(ch, out, inp)
-    }
+    } }
 
     /**
      * 带 PTY 直接跑一条命令，返回可交互的 [Shell]。
@@ -145,7 +154,7 @@ class SshSession(
      *   · 远端进程就是 tmux 本身，退出即通道结束，语义清楚
      */
     suspend fun openPtyCommand(command: String, cols: Int = 80, rows: Int = 24): Shell =
-        withContext(Dispatchers.IO) {
+        withContext(Dispatchers.IO) { chanLock.withLock {
             val s = requireNotNull(session) { "还没 connect()" }
             val ch = s.openChannel("exec") as com.jcraft.jsch.ChannelExec
             ch.setPty(true)
@@ -170,7 +179,7 @@ class SshSession(
                 }
             }.apply { isDaemon = true }.start()
             Shell(ch, out, inp)
-        }
+        } }
 
     /**
      * 开一条**不带 PTY** 的 exec 流，用来跟随长期输出（`tail -f` 之类）。
@@ -179,7 +188,7 @@ class SshSession(
      * （实测 `sleep 25` 只读到 13 字节，而通道还 connected）——见 TROUBLESHOOTING #17。
      * 不带 PTY 就没这问题，而且 `tail -f` 本来也不需要终端。
      */
-    suspend fun openExecStream(command: String): Shell = withContext(Dispatchers.IO) {
+    suspend fun openExecStream(command: String): Shell = withContext(Dispatchers.IO) { chanLock.withLock {
         val s = requireNotNull(session) { "还没 connect()" }
         val ch = s.openChannel("exec") as com.jcraft.jsch.ChannelExec
         ch.setCommand(command)
@@ -195,10 +204,10 @@ class SshSession(
             }
         }.apply { isDaemon = true }.start()
         Shell(ch, out, inp)
-    }
+    } }
 
     /** 跑一条命令拿输出就退（会话枚举、探测都走它）。G4 起大量使用。 */
-    suspend fun exec(command: String): String = withContext(Dispatchers.IO) {
+    suspend fun exec(command: String): String = withContext(Dispatchers.IO) { chanLock.withLock {
         val s = requireNotNull(session) { "还没 connect()" }
         val ch = s.openChannel("exec") as com.jcraft.jsch.ChannelExec
         ch.setCommand(command)
@@ -207,7 +216,7 @@ class SshSession(
         val text = out.readBytes().decodeToString()
         ch.disconnect()
         text
-    }
+    } }
 
     /**
      * 把一行公钥装进远端的 `~/.ssh/authorized_keys`，相当于 `ssh-copy-id`。

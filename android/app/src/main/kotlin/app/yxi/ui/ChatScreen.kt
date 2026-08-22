@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import app.yxi.agent.ChatItem
+import app.yxi.agent.Pending
 import app.yxi.agent.SessionProbe
 import app.yxi.agent.Transcript
 import app.yxi.agent.TranscriptStream
@@ -21,6 +22,7 @@ import app.yxi.ssh.HostStore
 import app.yxi.ssh.KeyManager
 import app.yxi.ssh.SshSession
 import com.mikepenz.markdown.m3.Markdown
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private val Pill = RoundedCornerShape(100.dp)
@@ -47,6 +49,8 @@ fun ChatScreen(
     var status by remember { mutableStateOf<String?>("连接中…") }
     var ssh by remember { mutableStateOf<SshSession?>(null) }
     var draft by remember { mutableStateOf("") }
+    var pending by remember { mutableStateOf<Pending?>(null) }
+    var busy by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     LaunchedEffect(sessionName) {
@@ -73,6 +77,15 @@ fun ChatScreen(
             }
         }
     }
+    // ⚠️ 「此刻在等你选」这件事**只有屏幕知道** —— tool_use 要等工具跑完才落进转录。
+    // 所以历史读转录、待答抓屏幕，两条路各司其职（见 Prompt 的类注释）。
+    LaunchedEffect(ssh) {
+        val s = ssh ?: return@LaunchedEffect
+        while (true) {
+            if (!busy) runCatching { SessionProbe.pending(s, sessionName) }.onSuccess { pending = it }
+            delay(2_500)
+        }
+    }
     DisposableEffect(sessionName) { onDispose { ssh?.disconnect() } }
     LaunchedEffect(items.size) {
         if (items.isNotEmpty()) runCatching { listState.animateScrollToItem(items.size - 1) }
@@ -97,6 +110,37 @@ fun ChatScreen(
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             items(items.size, key = { items[it].key }) { i -> Item(items[i]) }
+        }
+
+        pending?.let { p ->
+            Box(Modifier.padding(14.dp, 0.dp, 14.dp, 8.dp)) {
+                PendingCard(
+                    p, busy,
+                    onPick = { o ->
+                        scope.launch {
+                            busy = true
+                            // 送屏幕上写的那个数字本身，**不是列表下标**
+                            ssh?.let { SessionProbe.sendKey(it, sessionName, o.number.toString()) }
+                            delay(500)
+                            pending = ssh?.let { runCatching { SessionProbe.pending(it, sessionName) }.getOrNull() }
+                            busy = false
+                        }
+                    },
+                    onSubmit = {
+                        scope.launch {
+                            busy = true
+                            ssh?.let {
+                                SessionProbe.sendKey(it, sessionName, "Right")   // 跳到 Submit 页
+                                delay(300)
+                                SessionProbe.sendKey(it, sessionName, "1")       // 交卷
+                            }
+                            delay(500)
+                            pending = ssh?.let { runCatching { SessionProbe.pending(it, sessionName) }.getOrNull() }
+                            busy = false
+                        }
+                    },
+                )
+            }
         }
 
         // 输入框：打进那个活着的会话，不调任何 API
@@ -209,65 +253,4 @@ private fun ThinkingRow(text: String) {
             )
         }
     }
-}
-
-/** 工具卡片。G6 会按工具名做定制（Bash 占 3177 次，最该先做）。 */
-@Composable
-private fun ToolCard(c: ChatItem.ToolCall) {
-    var open by remember { mutableStateOf(false) }
-    val accent = when (c.name) {
-        "Bash" -> MaterialTheme.colorScheme.primary
-        "Edit", "Write" -> MaterialTheme.colorScheme.secondary
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = MaterialTheme.shapes.large) {
-        Column(Modifier.fillMaxWidth().clickable { open = !open }.padding(18.dp, 14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(c.name, style = MaterialTheme.typography.labelLarge, color = accent)
-                Spacer(Modifier.weight(1f))
-                c.result?.let {
-                    Text(
-                        if (c.isError) "出错" else "完成",
-                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                        color = if (c.isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline,
-                    )
-                }
-            }
-            summarize(c)?.let {
-                Text(
-                    it,
-                    Modifier.padding(top = 8.dp),
-                    style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-                    maxLines = if (open) 40 else 3,
-                )
-            }
-            AnimatedVisibility(open && c.result != null) {
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                    shape = MaterialTheme.shapes.medium,
-                    modifier = Modifier.padding(top = 10.dp).fillMaxWidth(),
-                ) {
-                    Text(
-                        c.result.orEmpty().take(4000),
-                        Modifier.padding(14.dp),
-                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                        color = MaterialTheme.colorScheme.outline,
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
- * 从工具参数里抽一行「这是在干嘛」。
- * **在解析层就抽好，别让界面再去翻 `tool_input`** —— 抄 Lucarne 的第 3 条纪律（PRD 附录 B.4）。
- */
-private fun summarize(c: ChatItem.ToolCall): String? = when (c.name) {
-    "Bash" -> c.input.optString("command").takeIf { it.isNotBlank() }
-    "Read", "Edit", "Write" -> c.input.optString("file_path").takeIf { it.isNotBlank() }
-    "WebFetch" -> c.input.optString("url").takeIf { it.isNotBlank() }
-    "WebSearch" -> c.input.optString("query").takeIf { it.isNotBlank() }
-    "Agent", "Task" -> c.input.optString("description").takeIf { it.isNotBlank() }
-    else -> c.input.toString().takeIf { it.length > 2 }?.take(200)
 }
