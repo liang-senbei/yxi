@@ -1,0 +1,104 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
+  <style>
+    body { margin:0; font-family:'Space Grotesk', system-ui, sans-serif; }
+    a { color:#e08b57; } a:hover { color:#f0a473; }
+    * { box-sizing:border-box; }
+    .mono { font-family:'JetBrains Mono', monospace; }
+  </style>
+</helmet>
+
+<div style="width:390px; height:844px; background:#1a1917; color:#ece8e3; display:flex; flex-direction:column; overflow:hidden;">
+
+  <div style="display:flex; align-items:center; gap:11px; padding:10px 14px; background:#232120; border-bottom:1px solid #39352f; flex-shrink:0;">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9b938a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M15 18l-6-6 6-6"/></svg>
+    <div style="flex-grow:1; min-width:0;">
+      <div style="font-size:14.5px; font-weight:600; letter-spacing:-0.01em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">PRD.md</div>
+      <div class="mono" style="font-size:11px; color:#6d665f; margin-top:1px;">48 KB · 1184 行</div>
+    </div>
+    <div style="display:flex; background:#1a1917; border:1px solid #39352f; border-radius:9px; padding:2px; flex-shrink:0;">
+      <div style="padding:11px 12px; font-size:12px; font-weight:600; color:#1a1917; background:#e08b57; border-radius:7px;">阅读</div>
+      <div style="padding:11px 12px; font-size:12px; font-weight:500; color:#9b938a; border-radius:7px;">源码</div>
+    </div>
+  </div>
+
+  <!-- rendered markdown -->
+  <div style="flex-grow:1; padding:20px 18px; overflow:hidden; display:flex; flex-direction:column;">
+
+    <div style="font-size:22px; font-weight:700; letter-spacing:-0.025em; line-height:1.25; margin-bottom:7px;">PRD · Yxi 手机指挥台</div>
+    <div style="font-size:13.5px; line-height:1.6; color:#9b938a; border-left:2px solid #4a443d; padding-left:12px; margin-bottom:20px;">复刻 Moshi，去掉它的整个云端层。</div>
+
+    <div style="font-size:16.5px; font-weight:600; letter-spacing:-0.015em; margin-bottom:10px; padding-bottom:7px; border-bottom:1px solid #2f2b27;">2.3 一切走 SSH</div>
+
+    <div style="font-size:14px; line-height:1.68; margin-bottom:14px;">终端走 shell channel，数据走 exec channel 跑 <span class="mono" style="font-size:12.5px; background:#2b2826; border:1px solid #39352f; border-radius:4px; padding:1px 5px;">yxi-agent</span>，文件走 SFTP。</div>
+
+    <!-- code block, horizontally scrollable -->
+    <div style="border:1px solid #39352f; border-radius:10px; background:#151413; overflow:hidden; margin-bottom:16px;">
+      <div style="display:flex; align-items:center; gap:7px; padding:7px 11px; border-bottom:1px solid #2f2b27; background:#1e1c1a;">
+        <div class="mono" style="font-size:10.5px; color:#6d665f; letter-spacing:0.04em; flex-grow:1;">BASH</div>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6d665f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+      </div>
+      <div class="mono" style="padding:11px; font-size:11.5px; line-height:1.6; white-space:nowrap; overflow:hidden;"><span style="color:#8fc47a;">tmux</span> list-sessions -F <span style="color:#d5a244;">'#{session_name}|…'</span></div>
+      <div style="height:3px; background:#2f2b27; margin:0 11px 8px; border-radius:2px; position:relative;"><div style="width:58%; height:3px; background:#4a443d; border-radius:2px;"></div></div>
+    </div>
+
+    <!-- image with relative path -->
+    <div style="border:1px solid #39352f; border-radius:10px; overflow:hidden; margin-bottom:9px;">
+      <div style="height:112px; background:linear-gradient(135deg,#26302f 0%,#2b2826 60%,#332622 100%); display:flex; align-items:center; justify-content:center; gap:12px;">
+        <div style="width:52px; height:34px; border:1.5px solid #35b1a1; border-radius:6px;"></div>
+        <div style="width:22px; height:1.5px; background:#4a443d;"></div>
+        <div style="width:52px; height:34px; border:1.5px solid #e08b57; border-radius:6px;"></div>
+        <div style="width:22px; height:1.5px; background:#4a443d;"></div>
+        <div style="width:52px; height:34px; border:1.5px solid #9b938a; border-radius:6px;"></div>
+      </div>
+    </div>
+    <div class="mono" style="font-size:10.5px; color:#6d665f; margin-bottom:18px; display:flex; align-items:center; gap:6px;">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#35b1a1" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+      ./design/arch.png · 相对路径已解析
+    </div>
+
+    <!-- table -->
+    <div style="border:1px solid #39352f; border-radius:10px; overflow:hidden;">
+      <div style="display:flex; background:#2b2826; border-bottom:1px solid #39352f;">
+        <div style="flex-grow:1; padding:9px 12px; font-size:12px; font-weight:600;">模式</div>
+        <div style="width:118px; padding:9px 12px; font-size:12px; font-weight:600;">要 agent</div>
+      </div>
+      <div style="display:flex; border-bottom:1px solid #2f2b27;">
+        <div style="flex-grow:1; padding:9px 12px; font-size:13px;">终端</div>
+        <div style="width:118px; padding:9px 12px; font-size:13px; color:#8fc47a;">不用</div>
+      </div>
+      <div style="display:flex; border-bottom:1px solid #2f2b27;">
+        <div style="flex-grow:1; padding:9px 12px; font-size:13px;">文件</div>
+        <div style="width:118px; padding:9px 12px; font-size:13px; color:#8fc47a;">不用</div>
+      </div>
+      <div style="display:flex;">
+        <div style="flex-grow:1; padding:9px 12px; font-size:13px;">对话</div>
+        <div style="width:118px; padding:9px 12px; font-size:13px; color:#d5a244;">需要</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- footer action -->
+  <div style="flex-shrink:0; border-top:1px solid #39352f; background:#232120; padding:10px 12px 14px; display:flex; gap:9px;">
+    <div style="flex-grow:1; height:44px; border-radius:11px; border:1px solid #4a443d; display:flex; align-items:center; justify-content:center; gap:8px; font-size:13.5px; font-weight:500;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e08b57" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg>
+      发给 Claude
+    </div>
+    <div style="width:44px; height:44px; border-radius:11px; border:1px solid #4a443d; display:flex; align-items:center; justify-content:center;">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#9b938a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6-6-6M12 19h8"/></svg>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>
