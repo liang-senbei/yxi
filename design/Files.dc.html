@@ -10,121 +10,121 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
   <style>
     body { margin:0; font-family:'Space Grotesk', system-ui, sans-serif; }
-    a { color:#e08b57; } a:hover { color:#f0a473; }
+    a { color:#ffb787; } a:hover { color:#ffd0ad; }
     * { box-sizing:border-box; }
-    .f { display:flex; align-items:center; gap:11px; height:52px; padding:0 13px; border-radius:10px; }
+    .f { display:flex; align-items:center; gap:11px; height:52px; padding:0 13px; border-radius:18px; }
     .fn { font-size:14px; font-weight:500; flex-grow:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .fm { font-size:11px; color:#6d665f; font-family:'JetBrains Mono', monospace; flex-shrink:0; }
+    .fm { font-size:11px; color:#8a7d72; font-family:'JetBrains Mono', monospace; flex-shrink:0; }
   </style>
 </helmet>
 
-<div style="width:390px; height:844px; background:#1a1917; color:#ece8e3; display:flex; flex-direction:column; overflow:hidden;">
+<div style="width:390px; height:844px; background:#16130f; color:#ebe1d9; display:flex; flex-direction:column; overflow:hidden;">
 
-  <div style="display:flex; align-items:center; gap:12px; padding:10px 14px; background:#232120; border-bottom:1px solid #39352f; flex-shrink:0;">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9b938a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+  <div style="display:flex; align-items:center; gap:12px; padding:10px 14px; background:#1e1b17; border-bottom:1px solid #2d2925; flex-shrink:0;">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#a89b8f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
     <div style="flex-grow:1; min-width:0;">
       <div style="font-size:15px; font-weight:600; letter-spacing:-0.01em;">cc-Yxi</div>
     </div>
-    <div style="display:flex; background:#1a1917; border:1px solid #39352f; border-radius:9px; padding:2px;">
-      <div style="padding:11px 11px; font-size:12px; font-weight:500; color:#9b938a; border-radius:7px;">终端</div>
-      <div style="padding:11px 11px; font-size:12px; font-weight:500; color:#9b938a; border-radius:7px;">对话</div>
-      <div style="padding:11px 11px; font-size:12px; font-weight:600; color:#1a1917; background:#e08b57; border-radius:7px;">文件</div>
+    <div style="display:flex; background:#16130f; border-radius:100px; padding:4px;">
+      <div style="padding:11px 11px; font-size:12px; font-weight:500; color:#a89b8f; border-radius:7px;">终端</div>
+      <div style="padding:11px 11px; font-size:12px; font-weight:500; color:#a89b8f; border-radius:7px;">对话</div>
+      <div style="padding:11px 11px; font-size:12px; font-weight:600; color:#4d2600; background:#ffb787; border-radius:7px;">文件</div>
     </div>
   </div>
 
   <!-- breadcrumb：点它唤出跳转面板（批注 #1） -->
-  <div style="display:flex; align-items:center; gap:7px; padding:11px 14px; background:#1e1c1a; border-bottom:1px solid #2f2b27; flex-shrink:0; font-family:'JetBrains Mono', monospace; font-size:11.5px; overflow:hidden;">
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6d665f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
-    <span style="color:#6d665f;">root / src / workspace /</span>
-    <span style="color:#e08b57; font-weight:500; flex-grow:1;">Yxi</span>
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#e08b57" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M6 9l6 6 6-6"/></svg>
+  <div style="display:flex; align-items:center; gap:7px; padding:11px 14px; background:#1a1713; border-bottom:1px solid #221f1b; flex-shrink:0; font-family:'JetBrains Mono', monospace; font-size:11.5px; overflow:hidden;">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8a7d72" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+    <span style="color:#8a7d72;">root / src / workspace /</span>
+    <span style="color:#ffb787; font-weight:500; flex-grow:1;">Yxi</span>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ffb787" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M6 9l6 6 6-6"/></svg>
   </div>
 
   <!-- 跳转面板 -->
-  <div style="flex-shrink:0; background:#232120; border-bottom:1px solid #39352f; padding:12px 12px 13px; display:flex; flex-direction:column; gap:9px;">
-    <div style="height:44px; border:1px solid #4a443d; border-radius:11px; background:#1a1917; display:flex; align-items:center; gap:9px; padding:0 12px;">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6d665f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6-6-6M12 19h8"/></svg>
-      <span style="font-family:'JetBrains Mono', monospace; font-size:12.5px; color:#6d665f;">直接输入路径…</span>
+  <div style="flex-shrink:0; background:#1e1b17; border-bottom:1px solid #2d2925; padding:12px 12px 13px; display:flex; flex-direction:column; gap:9px;">
+    <div style="height:48px; border-radius:100px; background:#16130f; display:flex; align-items:center; gap:9px; padding:0 12px;">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8a7d72" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6-6-6M12 19h8"/></svg>
+      <span style="font-family:'JetBrains Mono', monospace; font-size:12.5px; color:#8a7d72;">直接输入路径…</span>
     </div>
     <div style="display:flex; flex-wrap:wrap; gap:7px;">
-      <div style="display:flex; align-items:center; gap:6px; height:34px; padding:0 11px; border-radius:9px; background:#33241f; border:1px solid #5c4536; font-size:12px; font-weight:600; color:#e08b57;">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#e08b57" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+      <div style="display:flex; align-items:center; gap:6px; height:34px; padding:0 11px; border-radius:16px; background:#6d3a10; font-size:12px; font-weight:600; color:#ffb787;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#ffb787" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
         会话所在
       </div>
-      <div style="display:flex; align-items:center; gap:6px; height:34px; padding:0 11px; border-radius:9px; border:1px solid #39352f; font-size:12px; color:#c9c2ba;">最近 · mail</div>
-      <div style="display:flex; align-items:center; gap:6px; height:34px; padding:0 11px; border-radius:9px; border:1px solid #39352f; font-size:12px; color:#c9c2ba;">最近 · station</div>
-      <div style="display:flex; align-items:center; gap:6px; height:34px; padding:0 11px; border-radius:9px; border:1px solid #39352f; font-size:12px; color:#c9c2ba;">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#d5a244" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.9 21l1.2-6.8-5-4.9 6.9-1z"/></svg>
+      <div style="display:flex; align-items:center; gap:6px; height:34px; padding:0 11px; border-radius:16px; font-size:12px; color:#d0c4b8;">最近 · mail</div>
+      <div style="display:flex; align-items:center; gap:6px; height:34px; padding:0 11px; border-radius:16px; font-size:12px; color:#d0c4b8;">最近 · station</div>
+      <div style="display:flex; align-items:center; gap:6px; height:34px; padding:0 11px; border-radius:16px; font-size:12px; color:#d0c4b8;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#ffc46b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.9 21l1.2-6.8-5-4.9 6.9-1z"/></svg>
         ~
       </div>
-      <div style="display:flex; align-items:center; gap:6px; height:34px; padding:0 11px; border-radius:9px; border:1px solid #39352f; font-size:12px; color:#c9c2ba;">附件暂存区</div>
+      <div style="display:flex; align-items:center; gap:6px; height:34px; padding:0 11px; border-radius:16px; font-size:12px; color:#d0c4b8;">附件暂存区</div>
     </div>
   </div>
 
   <div style="flex-grow:1; padding:8px 10px; display:flex; flex-direction:column; gap:2px; overflow:hidden;">
 
-    <div class="f" style="background:#232120; border:1px solid #39352f;">
-      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#9b938a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+    <div class="f" style="background:#1e1b17; ">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#a89b8f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
       <div class="fn">design</div>
       <div class="fm">9 项</div>
     </div>
 
-    <div class="f" style="background:#232120; border:1px solid #39352f;">
-      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#9b938a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+    <div class="f" style="background:#1e1b17; ">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#a89b8f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
       <div class="fn">server</div>
       <div class="fm">5 项</div>
     </div>
 
     <div style="height:6px;"></div>
 
-    <div class="f" style="background:#2b2826; border:1px solid #4a443d;">
-      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#e08b57" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h4"/></svg>
+    <div class="f" style="background:#221f1b; ">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#ffb787" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h4"/></svg>
       <div class="fn">PRD.md</div>
       <div class="fm">48 KB</div>
     </div>
 
     <div class="f">
-      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#e08b57" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h4"/></svg>
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#ffb787" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h4"/></svg>
       <div class="fn">PLAN.md</div>
       <div class="fm">16 KB</div>
     </div>
 
     <div class="f">
-      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#e08b57" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h4"/></svg>
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#ffb787" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h4"/></svg>
       <div class="fn">handover.md</div>
       <div class="fm">6 KB</div>
     </div>
 
     <div class="f">
-      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#d5a244" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M6 3v12a3 3 0 003 3h1M18 21V9a3 3 0 00-3-3h-1"/><path d="M9 6L6 3 3 6M15 18l3 3 3-3"/></svg>
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#ffc46b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M6 3v12a3 3 0 003 3h1M18 21V9a3 3 0 00-3-3h-1"/><path d="M9 6L6 3 3 6M15 18l3 3 3-3"/></svg>
       <div class="fn">canvas.json</div>
       <div class="fm">3 KB</div>
     </div>
 
     <div class="f">
-      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#35b1a1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#8fd8c6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
       <div class="fn">arch.png</div>
       <div class="fm">142 KB</div>
     </div>
 
     <div class="f">
-      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#6d665f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M4 17l6-6-6-6M12 19h8"/></svg>
-      <div class="fn" style="color:#c9c2ba;">yxi-agent</div>
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#8a7d72" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M4 17l6-6-6-6M12 19h8"/></svg>
+      <div class="fn" style="color:#d0c4b8;">yxi-agent</div>
       <div class="fm">11 KB</div>
     </div>
 
     <div class="f">
-      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#6d665f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
-      <div class="fn" style="color:#9b938a;">app-debug.apk</div>
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#8a7d72" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
+      <div class="fn" style="color:#a89b8f;">app-debug.apk</div>
       <div class="fm">18 MB</div>
     </div>
 
   </div>
 
   <!-- SFTP hint -->
-  <div style="flex-shrink:0; padding:11px 14px 15px; border-top:1px solid #2f2b27; background:#1e1c1a; display:flex; align-items:center; gap:9px;">
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#35b1a1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-    <div style="font-size:11px; color:#6d665f; font-family:'JetBrains Mono', monospace; flex-grow:1;">SFTP · 只读 · 不需要 yxi-agent</div>
+  <div style="flex-shrink:0; padding:11px 14px 15px; border-top:1px solid #221f1b; background:#1a1713; display:flex; align-items:center; gap:9px;">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8fd8c6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+    <div style="font-size:11px; color:#8a7d72; font-family:'JetBrains Mono', monospace; flex-grow:1;">SFTP · 只读 · 不需要 yxi-agent</div>
   </div>
 
 </div>
