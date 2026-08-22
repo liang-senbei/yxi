@@ -23,6 +23,8 @@ import app.yxi.ssh.SshSession
 import app.yxi.term.TerminalView
 import app.yxi.ui.theme.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
 import org.connectbot.terminal.TerminalEmulator
 import org.connectbot.terminal.TerminalEmulatorFactory
@@ -71,6 +73,13 @@ fun Workspace(
         mutableStateOf(initial ?: Prefs.mode(ctx, host.id, sessionName) ?: Mode.Chat)
     }
     var dpad by remember { mutableStateOf(false) }
+    var bar by remember { mutableStateOf(true) }
+    /** 工具条上的 Ctrl 点亮了 —— 下一个字节按住 Ctrl 算 */
+    var ctrlArmed by remember { mutableStateOf(false) }
+    /** 终端最后一次收到数据的时刻。用来判断「登录 shell 安静下来了没有」 */
+    val lastOutput = remember { java.util.concurrent.atomic.AtomicLong(0) }
+    /** 每重连一次 +1，用它作为「重建整条连接」的键。jsch 的 Session 不能复用，只能新建 */
+    var generation by remember(host.id, sessionName) { mutableStateOf(0) }
 
     val fg = MaterialTheme.colorScheme.onSurface
     val bg = MaterialTheme.colorScheme.surfaceContainerLowest
@@ -82,21 +91,36 @@ fun Workspace(
             looper = Looper.getMainLooper(),
             initialCols = 80, initialRows = 24,
             defaultForeground = fg, defaultBackground = bg,
-            onKeyboardInput = { bytes -> scope.launch { shell?.write(bytes) } },
+            // ⚠️ 粘滞 Ctrl 就在这儿实现：工具条点了 Ctrl，下一个可见字符按 `and 0x1f` 转成控制码。
+            // 不碰 termlib 内部，所以**任何输入法都适用**。
+            onKeyboardInput = { bytes ->
+                val out = if (ctrlArmed && bytes.size == 1 && bytes[0] >= 0x40) {
+                    ctrlArmed = false
+                    byteArrayOf((bytes[0].toInt() and 0x1f).toByte())
+                } else bytes
+                scope.launch { shell?.write(out) }
+            },
             onResize = { dim -> scope.launch { shell?.resize(dim.columns, dim.rows) } },
             autoDetectUrls = true,
         )
     }
 
-    LaunchedEffect(host.id, sessionName) {
-        val c = connect() ?: run { status = "这台主机还没有可用的认证方式"; return@LaunchedEffect }
-        runCatching { c.session.connect(); ssh = c.session }
-            .onFailure { status = c.explain(it); return@LaunchedEffect }
+    LaunchedEffect(host.id, sessionName, generation) {
+        var wait = 700L
+        while (true) {
+            val c = connect() ?: run { status = "这台主机还没有可用的认证方式"; return@LaunchedEffect }
+            val err = runCatching { c.session.connect(); ssh = c.session }.exceptionOrNull()
+            if (err == null) break
+            // 指纹变了绝不重试 —— 那不是网络问题，重试只会一遍遍撞同一堵墙
+            if (c.known.changedDetected || generation == 0) { status = c.explain(err); return@LaunchedEffect }
+            status = "连接断了，正在重连…"
+            delay(wait); wait = (wait * 2).coerceAtMost(5_000)
+        }
         status = null
         // 对话模式要有转录才有内容可渲染。没有就置灰**并说明原因** —— 灰着不说话最气人
         chatBlocked = when {
             sessionName == null -> "没有指定会话"
-            TranscriptStream.latestFor(c.session, cwd) == null -> "这个会话里没跑过 Claude Code"
+            TranscriptStream.latestFor(ssh!!, cwd) == null -> "这个会话里没跑过 Claude Code"
             else -> ""
         }
     }
@@ -106,7 +130,8 @@ fun Workspace(
         if (mode != Mode.Terminal || shell != null) return@LaunchedEffect
         val s = ssh ?: return@LaunchedEffect
         runCatching {
-            if (sessionName != null) runCatching {
+            // 重连时会话早就建好、选项也设过了，省掉这一次往返
+            if (sessionName != null && generation == 0) runCatching {
                 s.exec(
                     "tmux has-session -t $sessionName 2>/dev/null || tmux new-session -d -s $sessionName; " +
                         "tmux set -g set-titles on \\; set -g mouse on \\; set -g status-right ''"
@@ -127,17 +152,45 @@ fun Workspace(
                     val n = runCatching { sh.output.read(buf) }.getOrElse { -1 }
                     if (n < 0) break
                     runCatching { emulator.writeInput(buf, 0, n) }
+                    lastOutput.set(System.currentTimeMillis())
                     if (!ready.isCompleted) ready.complete(Unit)
                 }
             }
             if (sessionName != null) {
-                // ⚠️ 不能连上就写：登录 shell 初始化时写进去的字节会被 tty 回显后冲掉
-                // （实测现象是命令回显了却没执行）。等第一批输出 + 一个静默间隔。
+                // ⚠️ 不能连上就写：登录 shell（starship 那种）初始化时写进去的字节
+                // 会被 tty 回显后冲掉 —— 实测现象是命令回显了却没执行（TROUBLESHOOTING #18）。
+                //
+                // 原来是等第一批输出 + 死等 900ms。现在改成**等它安静下来**：
+                // 输出停了 250ms 就认为 shell 就绪。快的机器 ~0.4s 走完（重连更快），
+                // 慢的机器也不会因为固定值太短而踩回 #18 —— 两头都更好。
                 runCatching { kotlinx.coroutines.withTimeout(8000) { ready.await() } }
-                kotlinx.coroutines.delay(900)
+                withTimeoutOrNull(3_000) {
+                    while (System.currentTimeMillis() - lastOutput.get() < 250) delay(60)
+                }
                 sh.write("tmux attach -t $sessionName\n")
             }
         }.onFailure { status = "终端起不来：${it.message}" }
+    }
+
+    /**
+     * 看门狗：连接「假活」了就重建。
+     *
+     * ⚠️ 手机切网（WiFi↔4G、进电梯）时 TCP 不会立刻报错，界面看着正常但敲什么都没反应。
+     * 靠 SSH 心跳（[SshSession] 里 4s×2）判死，这里每 1.5 秒查一次。
+     * **光标位置靠 tmux 保住** —— 重连后重新 `tmux attach`，那一屏原样回来。
+     * 没有 tmux 的裸终端（不针对会话时）就真的丢，这是 SSH 的性质，不是这里能补的。
+     */
+    LaunchedEffect(ssh) {
+        val s = ssh ?: return@LaunchedEffect
+        while (true) {
+            delay(600)
+            if (s.isAlive) continue
+            status = "连接断了，正在重连…"
+            runCatching { shell?.close() }; shell = null
+            runCatching { sftp?.close() }; sftp = null
+            generation++      // 触发上面那个 effect 重建
+            return@LaunchedEffect
+        }
     }
 
     LaunchedEffect(mode, ssh) {
@@ -172,16 +225,20 @@ fun Workspace(
                 )
             }
             if (mode == Mode.Terminal) {
-                Surface(
-                    color = if (dpad) SurfaceContainerHigh else SurfaceContainer, shape = Pill,
-                    modifier = Modifier.clickable { dpad = !dpad },
-                ) {
-                    Text(
-                        "✛", Modifier.padding(13.dp, 8.dp),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = if (dpad) Copper else Muted,
-                    )
-                }
+                listOf("⌨" to (bar to { bar = !bar }), "✛" to (dpad to { dpad = !dpad }))
+                    .forEach { (icon, st) ->
+                        val (on, toggle) = st
+                        Surface(
+                            color = if (on) SurfaceContainerHigh else SurfaceContainer, shape = Pill,
+                            modifier = Modifier.clickable(onClick = toggle),
+                        ) {
+                            Text(
+                                icon, Modifier.padding(12.dp, 8.dp),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = if (on) Copper else Muted,
+                            )
+                        }
+                    }
             }
         }
 
@@ -199,6 +256,14 @@ fun Workspace(
                     send = { bytes -> scope.launch { shell?.write(bytes) } },
                 )
             }
+        }
+
+        if (mode == Mode.Terminal && bar) {
+            KeyBar(
+                ctrlArmed = ctrlArmed,
+                onCtrl = { ctrlArmed = !ctrlArmed },
+                send = { bytes -> scope.launch { shell?.write(bytes) } },
+            )
         }
     }
 }

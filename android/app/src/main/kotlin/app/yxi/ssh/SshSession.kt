@@ -35,6 +35,9 @@ class SshSession(
      */
     private val chanLock = kotlinx.coroutines.sync.Mutex()
 
+    /** 连接还活着吗。切网之后靠它发现「假活」。 */
+    val isAlive: Boolean get() = session?.isConnected == true
+
     /** `host:port`，报错文案里用。 */
     val hostLabel: String get() = cfg.hostname + if (cfg.port != 22) ":${cfg.port}" else ""
 
@@ -127,6 +130,13 @@ class SshSession(
             // 没传校验器 = 调用方明确不要校验（只应出现在测试里）
             s.setConfig("StrictHostKeyChecking", "no")
         }
+        // ⚠️ **心跳必须开。** 手机切网（WiFi→4G、进电梯）时 TCP 不会立刻报错，
+        // 没有心跳的话这条连接会「假活」很久 —— 界面看着正常，敲什么都没反应。
+        // 2 秒一次、连丢 2 次判死 ≈ 4 秒内发现。
+        // ⚠️ 别再往下调：弱网下 RTT 抖一抖就会**误杀一条其实还活着的连接**，
+        // 那比慢几秒难受得多（正在跑的命令白跑）。
+        s.serverAliveInterval = 2_000
+        s.serverAliveCountMax = 2
         s.connect(timeoutMs)
         session = s
     }
