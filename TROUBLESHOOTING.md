@@ -53,3 +53,25 @@
   `ro.product.cpu.abilist` = `x86_64,arm64-v8a`，镜像自带 ARM 转译。
 - **修法**：改用 Aurora 的 **Google 账号登录**；或在真机上用 [SAI](https://github.com/Aefyr/SAI) 导出完整 `.apks`。
   → 对本项目**价值不高**：原生库是 libghostty 和 Mosh 传输，两块我们都不抄（PRD §2.2）。
+
+## 9. AGP 9 内置 Kotlin —— 再加 `kotlin.android` 插件会直接报错
+- **症状**：`Failed to apply plugin 'org.jetbrains.kotlin.android'` →
+  「The 'org.jetbrains.kotlin.android' plugin is no longer required for Kotlin support since AGP 9.0」
+- **根因**：AGP 9.0 起 Kotlin 支持内置，旧教程里那句 `alias(libs.plugins.kotlin.android)` 现在是冲突。
+- **修法**：删掉 `kotlin.android` 插件（根和 app 两处）。
+  **`kotlin.plugin.compose` 要留着**（Compose 编译器仍是独立 Kotlin 插件）。
+  同时 `kotlin { compilerOptions { jvmTarget … } }` 这个块也去掉，AGP 自己管。
+
+## 10. `sourceSets["main"].kotlin.srcDirs(...)` 已废弃
+- **症状**：先是 deprecation 警告，改成 `directories.add(file("..."))` 后报
+  `Argument type mismatch: actual type is 'File', but 'String' was expected`。
+- **修法**：`sourceSets["main"].kotlin.directories.add("src/main/kotlin")`——**收字符串，不是 `File`**。
+
+## 11. AndroidX 2026.08 起要求 compileSdk 37
+- **症状**：`checkDebugAarMetadata` 失败，一长串
+  「Dependency 'androidx.compose.…:1.12.0' requires libraries and applications that
+  depend on it to compile against version 37 or later」。
+- **根因**：compose-bom 2026.08.00 / core-ktx 1.19.0 这批的 AAR 元数据要求 compileSdk ≥ 37。
+- **修法**：`sdkmanager "platforms;android-37.0" "build-tools;37.0.0"`（⚠️ 包名是
+  **`android-37.0`** 带小数点，不是 `android-37`），然后 compileSdk/targetSdk 都调 37。
+  minSdk 保持 26 不受影响。

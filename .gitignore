@@ -28,3 +28,10 @@ design/_tokens.txt
 # 批注页的 token 和批注数据（token 是访问凭据，不入库）
 design/review/.token
 design/review/pins.json
+
+# Android 构建产物
+android/build/
+android/app/build/
+android/.gradle/
+android/local.properties
+*.apk

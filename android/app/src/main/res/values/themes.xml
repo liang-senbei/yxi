@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 只是启动窗口的底色，避免冷启动闪白；真正的主题在 Compose 里（Theme.kt） -->
+    <style name="Theme.Yxi" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#16130F</item>
+        <item name="android:statusBarColor">#16130F</item>
+        <item name="android:navigationBarColor">#16130F</item>
+    </style>
+</resources>
