@@ -913,3 +913,72 @@ FP=$(grep 'yxi@emulator' ~/.ssh/authorized_keys | ssh-keygen -lf - | awk '{print
 journalctl -u ssh --since "$T" | grep -F "$FP" | grep -c Accepted
 ```
 实测来回切 8 次 tab → **新增 0 次**。第一次没过滤时数出来是 2，差点以为没修好。
+
+## 76. ⭐⭐ 「排队中」的气泡永远不消失，而那些命令几小时前就跑完了
+
+**症状**：某个会话里挂着七八条「排队中」，实际上那些指令早就执行完了。
+（用户原话：「实际上我们的 mail 的 tmux 早就完成那些指令了…是没有同步做好吗」）
+
+**根因**：我把「出队」判据定成了 `queue-operation: remove`。实测一个真实会话：
+
+```
+enqueue 35 条  ·  remove 29 条  ·  有进无出 13 条
+那 13 条：queued_command=False，但**全部**后来以普通 `user` 消息出现过
+```
+
+也就是说它们**早就被处理了**，只是 Claude Code 走的不是 `remove` 那条路径
+（`remove` 只在「当前这一轮里出队」时才写）。跨轮次被消化掉的那些，
+转录里直接就是一条普通 `user` 消息。
+
+**修法**：出队的判据改成「**这句话有没有真的作为用户消息出现过**」——
+解析完之后拿所有 `UserText` 的原文过一遍，命中的就不再算排队。
+`remove` 仍然处理（同一轮内的快路径），但不再是唯一依据。
+
+**怎么避开**：**状态机不要只认「关」的那个事件。** 生产者可能有别的路径
+达到同一个终态，而你只订阅了其中一条。判据要挑**终态本身**
+（「它出现在对话里了」），不是「某个特定的转换事件」。
+
+## 77. ⭐ 终端画面整个是花的 —— 折行错位、边框断开
+
+**症状**：进终端模式，内容全乱，看着像连不上。
+
+**根因**：`openShell(80, 24)` 是写死的初始尺寸，真实尺寸靠控件的 `onResize` 回调补。
+但**控件量出自己多大发生在连接建好之前** —— 那一刻 `shell` 还是 null：
+
+```kotlin
+onResize = { dim -> scope.launch { shell?.resize(...) } }   // shell 还没有 → 静默丢掉
+```
+
+尺寸之后不再变，`onResize` 也不会再触发。于是 tmux 那头永远是 80x24，
+而控件其实只有 55 列 —— 服务器按 80 列排版，手机按 55 列折行，全乱。
+
+**修法**：把最后一次尺寸记在 `AtomicReference` 里，开通道时直接用它
+（量不到才退回 80x24），开完再补送一次。实测 `tmux list-clients` 从
+`80x24` 变成 `55x30`，画面立刻正常。
+
+**怎么避开**：**回调可能在接收方就绪之前就来，而且只来一次。**
+凡是「A 通知 B」但 A、B 生命周期不同步的地方，都要把最后一次通知**存下来**，
+B 就绪时自己取 —— 不能指望 A 再发一遍。
+
+## 78. ⭐⭐ `runCatching` 把 `CancellationException` 也吞了 → 界面上留一句永久的假错误
+
+**症状**：会话标题下挂着 `终端起不来: The coroutine scope left the composition`，
+而且再进来也不消失。
+
+**根因**：
+
+```kotlin
+runCatching { …开通道… }.onFailure { status = "终端起不来：${it.message}" }
+```
+
+切模式 / 退出工作区时 `LaunchedEffect` 被取消，挂起点抛 `CancellationException` ——
+**`runCatching` 连它一起捕获**，于是把一次正常的取消写成了用户可见的错误，
+而 `status` 是记住的状态，那句话就永远挂在那里了。
+
+**修法**：`if (it is CancellationException) throw it` 再处理其余。
+本项目里同一个写法有**四处**（终端开通道、切会话、连接重试、文件列目录、看板刷新）——
+一处发现就要全仓 grep `onFailure { status`，它们是同一个错。
+
+**怎么避开**：**`runCatching` 不是 try-catch 的等价物**，它捕获 `Throwable`，
+包括协程的取消信号。Kotlin 的铁律：**`CancellationException` 必须原样抛回去。**
+写「把失败显示给用户」的代码时，先问一句「取消算失败吗」——不算。

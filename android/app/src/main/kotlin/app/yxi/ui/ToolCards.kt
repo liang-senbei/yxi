@@ -293,7 +293,7 @@ private fun PlanBody(c: ChatItem.ToolCall, open: Boolean) {
     val plan = c.meta?.optString("plan").orEmpty().ifBlank { c.input.optString("plan") }
     Text(if (c.isError) "计划被否了" else "计划", Modifier.padding(top = 6.dp), style = MaterialTheme.typography.labelMedium, color = Amber)
     Block {
-        if (open) Markdown(plan, modifier = Modifier.fillMaxWidth())
+        if (open) Markdown(plan, typography = yxiMarkdown(), modifier = Modifier.fillMaxWidth())
         else Text(plan.lineSequence().filter { it.isNotBlank() }.take(4).joinToString("\n"), style = MaterialTheme.typography.bodySmall, color = Muted)
     }
 }

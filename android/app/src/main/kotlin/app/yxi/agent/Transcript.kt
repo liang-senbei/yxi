@@ -107,8 +107,17 @@ object Transcript {
                 else -> Unit
             }
         }
-        // 还排着队的挂在最后 —— 它们**还没进对话**，位置就在「此刻」
-        queued.forEachIndexed { i, t -> out += ChatItem.Queued("queued-$i-" + t.hashCode(), t) }
+        // ⚠️ **出队的判据是「这句话有没有真的作为用户消息出现过」，不是 remove。**
+        // 实测一个真实会话：35 个 enqueue 只有 29 个 remove，剩下 13 条全都后来
+        // 以普通 `user` 消息出现了 —— 它们**早就被处理完了**，只是 Claude Code
+        // 走的不是 remove 那条路径。只认 remove 的话，那 13 条会永远挂在
+        // 「排队中」，而对应的命令几小时前就跑完了。见 TROUBLESHOOTING #76。
+        val said = out.asSequence()
+            .filterIsInstance<ChatItem.UserText>()
+            .mapTo(HashSet()) { it.text.trim() }
+        queued.asSequence()
+            .filterNot { it.trim() in said }
+            .forEachIndexed { i, t -> out += ChatItem.Queued("queued-$i-" + t.hashCode(), t) }
         return out
     }
 

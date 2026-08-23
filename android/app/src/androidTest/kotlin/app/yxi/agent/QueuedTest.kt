@@ -42,10 +42,24 @@ class QueuedTest {
         assertTrue("处理后还看得见", 处理后.any { it is ChatItem.UserText && "时间复杂度" in it.text })
     }
 
+    @Test fun 后来以普通用户消息出现过的就不算排队() {
+        // ⚠️ **出队的判据不是 remove。** 实测一个真实会话：35 个 enqueue 只有
+        // 29 个 remove，剩下 13 条全都后来以普通 `user` 消息出现了 ——
+        // 命令几小时前就跑完了，界面上还挂着「排队中」。见 TROUBLESHOOTING #76。
+        val items = Transcript.parse(sequenceOf(ENQUEUE_A, USER_SAME_TEXT))
+        assertEquals("它已经作为用户消息出现过了，不该还挂着：" + items,
+            0, items.filterIsInstance<ChatItem.Queued>().size)
+        assertEquals(1, items.filterIsInstance<ChatItem.UserText>().size)
+    }
+
     private companion object {
         const val ENQUEUE1 = "{\"type\":\"queue-operation\",\"operation\":\"enqueue\",\"timestamp\":\"2026-08-23T08:17:48.663Z\",\"sessionId\":\"459efa19-5e8f-4894-8f9a-e07010d9e04c\",\"content\":\"排队的第一条：顺便说说时间复杂度\"}"
         const val ENQUEUE2 = "{\"type\":\"queue-operation\",\"operation\":\"enqueue\",\"timestamp\":\"2026-08-23T08:17:50.686Z\",\"sessionId\":\"459efa19-5e8f-4894-8f9a-e07010d9e04c\",\"content\":\"排队的第二条：再给个更快的写法\"}"
         const val REMOVE1 = "{\"type\":\"queue-operation\",\"operation\":\"remove\",\"timestamp\":\"2026-08-23T08:19:44.145Z\",\"sessionId\":\"459efa19-5e8f-4894-8f9a-e07010d9e04c\",\"content\":\"排队的第一条：顺便说说时间复杂度\"}"
         const val QUEUED_COMMAND = "{\"parentUuid\":\"f523fcb6-6205-4b64-be96-1c51655fc125\",\"isSidechain\":false,\"attachment\":{\"type\":\"queued_command\",\"prompt\":\"排队的第一条：顺便说说时间复杂度\",\"source_uuid\":\"4c2ad2d4-57f8-4a19-b4dd-bee24d3ee212\",\"commandMode\":\"prompt\",\"origin\":{\"kind\":\"human\"},\"timestamp\":\"2026-08-23T08:17:48.663Z\"},\"type\":\"attachment\",\"uuid\":\"c310cab2-4987-42df-aeb1-1e7f5d78744f\",\"timestamp\":\"2026-08-23T08:17:48.663Z\",\"session_id\":\"459efa19-5e8f-4894-8f9a-e07010d9e04c\",\"userType\":\"external\",\"entrypoint\":\"cli\",\"cwd\":\"/tmp/claude-0/-root-src-workspace-Yxi/d0ccc7db-ab52-458f-807f-39247666d0c2/scratchpad/livetest\",\"sessionId\":\"459efa19-5e8f-4894-8f9a-e07010d9e04c\",\"version\":\"2.1.241\",\"gitBranch\":\"HEAD\"}"
+
+        /** 同一句话的 enqueue，和它后来作为普通 user 消息出现的那一行（都是真实结构） */
+        const val ENQUEUE_A = "{\"type\":\"queue-operation\",\"operation\":\"enqueue\",\"timestamp\":\"2026-08-23T08:24:52.590Z\",\"sessionId\":\"12d150e1-4e72-4ef7-84ef-2836b5c816a9\",\"content\":\"排队甲：这条应该在手机上看得见\"}"
+        const val USER_SAME_TEXT = "{\"parentUuid\": \"518a2469-2c3e-45b6-ab47-0089928cd320\", \"isSidechain\": false, \"promptId\": \"e435973c-2837-4af3-b4a9-c3be339597ed\", \"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"排队甲：这条应该在手机上看得见\"}, \"uuid\": \"u-after-queue\", \"timestamp\": \"2026-08-23T08:24:43.578Z\", \"permissionMode\": \"bypassPermissions\", \"origin\": {\"kind\": \"human\"}, \"promptSource\": \"typed\", \"userType\": \"external\", \"entrypoint\": \"cli\", \"cwd\": \"/tmp/claude-0/-root-src-workspace-Yxi/d0ccc7db-ab52-458f-807f-39247666d0c2/scratchpad/livetest\", \"sessionId\": \"12d150e1-4e72-4ef7-84ef-2836b5c816a9\", \"version\": \"2.1.241\", \"gitBranch\": \"HEAD\"}"
     }
 }

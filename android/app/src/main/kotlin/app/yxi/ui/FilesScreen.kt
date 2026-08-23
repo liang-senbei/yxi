@@ -174,7 +174,10 @@ fun FilesScreen(
                     // 输错了要说清楚，不能默默不动
                     runCatching { s.realpath(target) }
                         .onSuccess { abs -> if (s.isDir(abs)) dir = abs else open = abs }
-                        .onFailure { status = "去不了 $target：" + Sftp.explain(it) }
+                        .onFailure {
+                            if (it is kotlinx.coroutines.CancellationException) throw it
+                            status = "去不了 $target：" + Sftp.explain(it)
+                        }
                 }
             },
             onDismiss = { jumping = false },

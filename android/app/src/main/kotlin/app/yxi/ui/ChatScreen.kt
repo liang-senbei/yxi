@@ -327,6 +327,8 @@ private fun Item(item: ChatItem) = when (item) {
     is ChatItem.Queued -> QueuedBubble(item.text)
     is ChatItem.AssistantText -> Markdown(
         item.markdown,
+        // ⚠️ 一定要传 —— 库默认把 `##` 渲染成 45sp（正文的 3 倍）。见 [yxiMarkdown]
+        typography = yxiMarkdown(),
         modifier = Modifier.fillMaxWidth(),
     )
     is ChatItem.Thinking -> ThinkingRow(item.text)

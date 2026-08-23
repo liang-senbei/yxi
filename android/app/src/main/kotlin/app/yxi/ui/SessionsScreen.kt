@@ -83,7 +83,10 @@ fun SessionsScreen(
             if (!listState.isScrollInProgress) {
                 runCatching { SessionProbe.snapshot(s) }
                     .onSuccess { sessions = it; status = "" }
-                    .onFailure { status = "刷新失败：${it.message}" }
+                    .onFailure {
+                        if (it is kotlinx.coroutines.CancellationException) throw it
+                        status = "刷新失败：${it.message}"
+                    }
             }
             delay(5_000)
         }

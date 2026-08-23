@@ -110,6 +110,13 @@ fun Workspace(
             ?.firstOrNull()?.takeIf { it.isNotBlank() }
     }
 
+    // ⚠️ 控件量出自己多大是在**连接建好之前**发生的，那一刻 shell 还是 null，
+    // 尺寸就丢了；而尺寸之后不再变，onResize 也不会再触发一次 ——
+    // 于是 tmux 那头永远停在写死的 80x24，而控件其实只有四十几列。
+    // 表现是**终端画面整个是花的**（折行错位、边框断开），看着像连不上。
+    // 所以把最后一次尺寸记下来，shell 一建好就补送。见 TROUBLESHOOTING #77。
+    val lastDim = remember { java.util.concurrent.atomic.AtomicReference<Pair<Int, Int>?>(null) }
+
     // 终端仿真器**先于连接建好** —— 这样连接过程中的报错也能直接写进终端显示出来
     val emulator: TerminalEmulator = remember(host.id) {
         TerminalEmulatorFactory.create(
@@ -117,7 +124,10 @@ fun Workspace(
             initialCols = 80, initialRows = 24,
             defaultForeground = fg, defaultBackground = bg,
             onKeyboardInput = { bytes -> scope.launch { shell?.write(bytes) } },
-            onResize = { dim -> scope.launch { shell?.resize(dim.columns, dim.rows) } },
+            onResize = { dim ->
+                lastDim.set(dim.columns to dim.rows)
+                scope.launch { shell?.resize(dim.columns, dim.rows) }
+            },
             autoDetectUrls = true,
         )
     }
@@ -127,6 +137,7 @@ fun Workspace(
         while (true) {
             val c = connect() ?: run { status = "这台主机还没有可用的认证方式"; return@LaunchedEffect }
             val err = runCatching { c.session.connect(); ssh = c.session }.exceptionOrNull()
+            if (err is kotlinx.coroutines.CancellationException) throw err   // 同上：取消不是连接失败
             if (err == null) break
             // 指纹变了绝不重试 —— 那不是网络问题，重试只会一遍遍撞同一堵墙
             if (c.known.changedDetected || generation == 0) { status = c.explain(err); return@LaunchedEffect }
@@ -154,8 +165,12 @@ fun Workspace(
                         "tmux set -g set-titles on \\; set -g mouse on \\; set -g status-right ''"
                 )
             }
-            val sh = s.openShell(80, 24)
+            // 开通道时就用控件的真实尺寸；量不到才退回 80x24
+            val (c0, r0) = lastDim.get() ?: (80 to 24)
+            val sh = s.openShell(c0, r0)
             shell = sh
+            // 万一 onResize 在这之后才来，上面那行已经对了；万一在这之前来过，这里补一次
+            lastDim.get()?.let { (c, r) -> runCatching { sh.resize(c, r) } }
             val ready = kotlinx.coroutines.CompletableDeferred<Unit>()
             // ⚠️⚠️ **读循环必须挂在 Workspace 的 scope 上，不能挂在这个 LaunchedEffect 上。**
             // 挂在 effect 上的话，切到对话/文件模式时 effect 被取消 → 读循环一起死，
@@ -187,7 +202,15 @@ fun Workspace(
                 sh.write("tmux attach -t $sessionName\n")
                 attached = sessionName
             }
-        }.onFailure { status = "终端起不来：${it.message}" }
+        }.onFailure {
+            // ⚠️ **取消不是失败。** 切模式 / 退出工作区时这个 effect 会被取消，
+            // 挂起点抛 CancellationException，被 runCatching 一并吞掉 ——
+            // 于是界面上留下一句「终端起不来：The coroutine scope left the composition」，
+            // 而且**再进来也不会消失**（status 是记住的）。用户看到的就是「终端起不来」。
+            // Kotlin 的铁律：CancellationException 必须原样抛回去。
+            if (it is kotlinx.coroutines.CancellationException) throw it
+            status = "终端起不来：${it.message}"
+        }
     }
 
     /**
@@ -208,7 +231,10 @@ fun Workspace(
             s.exec("tmux has-session -t '$target' 2>/dev/null || tmux new-session -d -s '$target'")
             s.exec("tmux switch-client -t '$target' 2>/dev/null")
             attached = target
-        }.onFailure { status = "切不过去：${it.message}" }
+        }.onFailure {
+            if (it is kotlinx.coroutines.CancellationException) throw it
+            status = "切不过去：${it.message}"
+        }
     }
 
     /**
