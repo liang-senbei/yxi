@@ -523,7 +523,7 @@ private fun InstallKeySheet(
                             c.session.disconnect()
                             store.upsert(host.copy(useKey = true, sealedPassword = app.yxi.ssh.Vault.seal(password)))
                             "✅ 装好了（authorized_keys 里现有 $n 行 yxi 公钥），已切到密钥认证"
-                        }.getOrElse { c.explain(it) }
+                        }.getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it; c.explain(it) }
                         busy = false
                     }
                 },

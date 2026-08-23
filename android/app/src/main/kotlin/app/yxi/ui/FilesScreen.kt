@@ -51,7 +51,7 @@ fun FilesScreen(
     LaunchedEffect(sftp) {
         val s = sftp ?: return@LaunchedEffect
         // 起点可能是 `~` 或不存在的路径 —— 解析失败就退到家目录，别把界面卡死
-        dir = runCatching { s.realpath(startDir) }.getOrElse {
+        dir = app.yxi.ssh.catching { s.realpath(startDir) }.getOrElse {
             runCatching { s.realpath(".") }.getOrDefault("/")
         }
     }
@@ -59,7 +59,7 @@ fun FilesScreen(
     LaunchedEffect(dir, sftp) {
         val s = sftp ?: return@LaunchedEffect
         status = null
-        runCatching { s.list(dir) }
+        app.yxi.ssh.catching { s.list(dir) }
             .onSuccess {
                 entries = it
                 recent.remove(dir); recent.add(0, dir)

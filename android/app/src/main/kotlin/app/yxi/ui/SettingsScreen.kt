@@ -45,6 +45,8 @@ fun SettingsScreen(
     host: Host?,
     /** 共用的连接（[app.yxi.ui.rememberHostSession]）。检查更新直接搭它，不再自己建一条 */
     ssh: SshSession?,
+    /** 界面此刻显示的连接错误 —— 诊断报告要带上它，见 [DevMode.diagnose] */
+    connectError: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val ctx = LocalContext.current
@@ -97,7 +99,7 @@ fun SettingsScreen(
                             // 排查因此往端口/防火墙上跑偏了好几轮。见 TROUBLESHOOTING #71。
                             result = if (f == null) Update.Result.Failed("连不上 ${host?.display}，没查成")
                             else runCatching { Update.checkVerbose(f, BuildConfig.VERSION_CODE) }
-                                .getOrElse { Update.Result.Failed("查的时候出错：${it.message}") }
+                                .getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it; Update.Result.Failed("查的时候出错：${it.message}") }
                             checking = false
                         }
                     },
@@ -158,7 +160,7 @@ fun SettingsScreen(
             }
         }
 
-        if (dev) DevCard(ctx, host, store, keys)
+        if (dev) DevCard(ctx, host, store, keys, connectError)
 
         Card("关于") {
             Hint2(
@@ -205,7 +207,7 @@ fun SettingsScreen(
  * 我在服务器上看不到手机的任何东西：包没飞到就等于什么都没发生。
  */
 @Composable
-private fun DevCard(ctx: Context, host: Host?, store: HostStore, keys: KeyManager) {
+private fun DevCard(ctx: Context, host: Host?, store: HostStore, keys: KeyManager, uiError: String?) {
     val scope = rememberCoroutineScope()
     var running by remember { mutableStateOf(false) }
     var report by remember { mutableStateOf("") }
@@ -223,7 +225,7 @@ private fun DevCard(ctx: Context, host: Host?, store: HostStore, keys: KeyManage
                 onClick = {
                     scope.launch {
                         running = true; copied = false
-                        report = DevMode.diagnose(ctx, host, store, keys)
+                        report = DevMode.diagnose(ctx, host, store, keys, uiError)
                         running = false
                     }
                 },

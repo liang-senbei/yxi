@@ -102,7 +102,21 @@ object DevMode {
      * 一眼就能看出「整个 IP 不通」还是「只有某个端口被掐」——
      * 这两件事的修法完全不同，而 App 平时给的错误信息区分不了。
      */
-    suspend fun diagnose(ctx: Context, host: Host?, store: HostStore, keys: KeyManager): String =
+    suspend fun diagnose(
+        ctx: Context,
+        host: Host?,
+        store: HostStore,
+        keys: KeyManager,
+        /**
+         * App **此刻**的连接状态（`null` = 已连上）。
+         *
+         * ⚠️ 没有这一行的话，报告只说明「现在新建一条连接能不能成」——
+         * 而用户抱怨的恰恰是「界面上写着连不上」。上一次就吃了这个亏：
+         * 诊断五项全绿，用户说「但是我们显示还是连不上」，
+         * 因为界面上那句话是更早一次失败留下的、再也不会自己清掉。
+         */
+        uiError: String? = null,
+    ): String =
         withContext(Dispatchers.IO) {
             val b = StringBuilder()
             fun line(s: String = "") = b.append(s).append('\n')
@@ -111,6 +125,7 @@ object DevMode {
             line("App    ${BuildConfig.VERSION_NAME} (versionCode ${BuildConfig.VERSION_CODE})")
             line("设备   ${Build.BRAND} ${Build.MODEL} · Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
             line("网络   ${network(ctx)}")
+            line("界面   " + (uiError?.let { "✗ 此刻显示：" + it.lineSequence().first() } ?: "已连上"))
             line("公钥   ${runCatching { keys.fingerprint() }.getOrElse { "读不出来: ${it.message}" }}")
             line()
 

@@ -52,7 +52,7 @@ fun FileViewer(sftp: Sftp?, path: String, onBack: () -> Unit, modifier: Modifier
     LaunchedEffect(path, sftp) {
         val s = sftp ?: return@LaunchedEffect
         val limit = if (ext in IMAGES) 8 shl 20 else 1 shl 20
-        runCatching { s.read(path, limit) }
+        app.yxi.ssh.catching { s.read(path, limit) }
             .onSuccess { bytes = it; truncated = it.size >= limit }
             .onFailure { error = Sftp.explain(it) }
     }

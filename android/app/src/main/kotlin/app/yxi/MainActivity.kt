@@ -146,7 +146,7 @@ class MainActivity : ComponentActivity() {
                             onOpen = { hostId = it.id; tab = Tab.Sessions },
                             modifier = m,
                         )
-                        Tab.Settings -> SettingsScreen(store, keys, host, shared.session, modifier = m)
+                        Tab.Settings -> SettingsScreen(store, keys, host, shared.session, shared.error, modifier = m)
                     }
                 }
             }

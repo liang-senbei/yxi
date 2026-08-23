@@ -152,11 +152,29 @@ fun rememberHostSession(store: HostStore, keys: KeyManager, host: Host?): HostSe
     var error by remember(host.id) { mutableStateOf<String?>(null) }
 
     LaunchedEffect(host.id) {
-        val c = connect()
-        if (c == null) { error = "这台主机还没有可用的认证方式"; return@LaunchedEffect }
-        runCatching { c.session.connect() }
-            .onSuccess { session = c.session; error = null }
-            .onFailure { error = c.explain(it) }
+        var wait = 1_000L
+        while (true) {
+            val c = connect()
+            if (c == null) { error = "这台主机还没有可用的认证方式"; return@LaunchedEffect }
+            val err = runCatching { c.session.connect() }.exceptionOrNull()
+            if (err == null) { session = c.session; error = null; return@LaunchedEffect }
+
+            // ⚠️ **取消不是失败。** 这是第五处同样的错（见 TROUBLESHOOTING #78）：
+            // 界面重组 / 换主机时这个 effect 被取消，挂起点抛 CancellationException，
+            // 被 runCatching 一起接住 → explain 兜底返回「连不上：JobCancellationException」，
+            // 而 error 是记住的状态，那句话就永远钉在界面上了。
+            if (err is kotlinx.coroutines.CancellationException) throw err
+
+            // ⚠️ **失败要自己重试。** 原来失败一次就把错误钉住、再也不动 ——
+            // 手机上网络本来就时断时续（切基站、锁屏、地铁），
+            // 「连一次不成就永久显示连不上」等于把一次抖动变成一次故障。
+            // 指纹变了不重试：那不是网络问题，重试只会一遍遍撞同一堵墙。
+            if (c.known.changedDetected) { error = c.explain(err); return@LaunchedEffect }
+            error = c.explain(err)
+            app.yxi.ui.DevMode.log("host", "连接失败，${wait}ms 后重试")
+            kotlinx.coroutines.delay(wait)
+            wait = (wait * 2).coerceAtMost(15_000)
+        }
     }
     // 换主机 / 界面销毁时收掉，别留着一条没人用的连接
     DisposableEffect(host.id) {
