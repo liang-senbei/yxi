@@ -27,6 +27,19 @@ data class Update(
 ) {
     val sizeText: String get() = "%.1f MB".format(sizeBytes / 1048576.0)
 
+    /**
+     * 主动查更新的结果。
+     *
+     * ⚠️ **「没查到」和「已是最新」必须分开。**
+     * 把连不上说成「已是最新」是在骗用户 —— 他会以为自己是最新版，
+     * 而实际上可能落后好几版、正带着已知的 bug 在用。
+     */
+    sealed interface Result {
+        data class Newer(val update: Update) : Result
+        data object UpToDate : Result
+        data class Failed(val why: String) : Result
+    }
+
     companion object {
         private const val DIR = "/root/.yxi"
 
@@ -46,5 +59,26 @@ data class Update(
             if (size <= 0) return null
             Update(code, o.optString("versionName", code.toString()), path, o.optString("notes"), size)
         }.getOrNull()
+
+        /**
+         * 设置页里主动点「检查更新」走这条 —— 它要把**三种**结果分清楚。
+         * [check] 那个把「没有更新」和「读不到」都返回 null，用在被动检查上没问题
+         * （安静即可），但主动点了按钮却告诉你「已是最新」就是骗人。
+         */
+        suspend fun checkVerbose(sftp: Sftp, currentCode: Int): Result {
+            val raw = runCatching { sftp.read("$DIR/latest.json", 64 * 1024).decodeToString() }
+                .getOrElse { return Result.Failed("这台机器上没放更新包（$DIR/latest.json 读不到）") }
+            val o = runCatching { JSONObject(raw) }
+                .getOrElse { return Result.Failed("更新清单格式不对") }
+            val code = o.optInt("versionCode", 0)
+            if (code <= currentCode) return Result.UpToDate
+            val file = o.optString("file").ifBlank { "Yxi.apk" }
+            val path = if (file.startsWith("/")) file else "$DIR/$file"
+            val size = sftp.size(path)
+            if (size <= 0) return Result.Failed("清单说有 " + o.optString("versionName") + "，但包不在（$path）")
+            return Result.Newer(
+                Update(code, o.optString("versionName", code.toString()), path, o.optString("notes"), size)
+            )
+        }
     }
 }

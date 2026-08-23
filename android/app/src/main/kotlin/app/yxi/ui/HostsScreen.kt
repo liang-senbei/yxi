@@ -90,7 +90,7 @@ fun HostsScreen(
         AddHostSheet(store, keys, onDone = { adding = false })
     }
     if (showKey) {
-        PublicKeySheet(keys) { showKey = false }
+        PublicKeySheetPublic(keys) { showKey = false }
     }
     if (batteryHint) BatteryHint(ctx) { batteryHint = false }
     installTarget?.let { h ->
@@ -266,7 +266,7 @@ private fun AddHostSheet(store: HostStore, keys: KeyManager, onDone: () -> Unit)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PublicKeySheet(keys: KeyManager, onDone: () -> Unit) {
+fun PublicKeySheetPublic(keys: KeyManager, onDone: () -> Unit) {
     // 换钥匙之后要重刷，所以是 state 不是 remember 常量
     var gen by remember { mutableStateOf(0) }
     val line = remember(gen) {

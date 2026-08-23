@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Looper
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -245,7 +246,9 @@ fun Workspace(
         onDispose { shell?.close(); sftp?.close(); ssh?.disconnect() }
     }
 
-    Column(modifier.fillMaxSize()) {
+    // ⚠️ `imePadding()` 不能省：`enableEdgeToEdge` 下窗口是铺满的，
+    // 软键盘弹起来会**盖住键盘工具条** —— 而 esc / tab / ^C 恰恰是打字时最需要的那几个键。
+    Column(modifier.fillMaxSize().imePadding()) {
         Row(
             Modifier.fillMaxWidth().padding(14.dp, 10.dp, 14.dp, 8.dp),
             verticalAlignment = Alignment.CenterVertically,

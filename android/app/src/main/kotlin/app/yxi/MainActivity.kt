@@ -5,48 +5,43 @@ import android.content.Intent as AndroidIntent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import app.yxi.ssh.Host
 import app.yxi.ssh.HostStore
 import app.yxi.ssh.KeyManager
 import app.yxi.ui.HostsScreen
 import app.yxi.ui.Mode
 import app.yxi.ui.SessionsScreen
+import app.yxi.ui.SettingsScreen
 import app.yxi.ui.Workspace
 import app.yxi.ui.theme.YxiTheme
 
-/**
- * 三层：**主机列表 → 会话看板 → 工作区**。返回键逐层退。
- *
- * 终端 / 对话 / 文件不是三个页面，而是**工作区里的三种模式** —— 它们共用同一条
- * SSH 连接，切换只换画面不断连（见 [Workspace]）。
- */
-private sealed interface Nav {
-    data object Hosts : Nav
-    data class Sessions(val host: Host) : Nav
-    /** [session] 为 null = 不针对某个 tmux 会话（从主机层直接进终端或文件） */
-    data class Work(val host: Host, val session: String?, val cwd: String, val mode: Mode?) : Nav
+/** 底部导航的三格。⚠️ 只有 app 级的平级目的地能进来（决策 D22）。 */
+private enum class Tab(val label: String, val icon: String) {
+    Sessions("会话", "◫"), Hosts("主机", "▤"), Settings("设置", "⚙")
 }
+
+/** 工作区。它是**盖在标签页之上的整屏**，不是第四个标签 —— 见 D22。 */
+private data class Work(val host: Host, val session: String?, val cwd: String, val mode: Mode?)
 
 class MainActivity : ComponentActivity() {
 
-    /** 点通知要跳到哪个会话。`singleTask` 下再次点通知走 [onNewIntent]，所以做成可变的 */
     private val jump = mutableStateOf<Triple<String, String, String>?>(null)
 
     private val askNotify =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* 拒了就静悄悄，不纠缠 */ }
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* 拒了就静悄悄 */ }
 
     override fun onNewIntent(intent: AndroidIntent) {
-        super.onNewIntent(intent)
-        readJump(intent)
+        super.onNewIntent(intent); readJump(intent)
     }
 
     private fun readJump(i: AndroidIntent?) {
@@ -59,9 +54,9 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         val store = HostStore(applicationContext)
         val keys = KeyManager(applicationContext)
+        val prefs = getSharedPreferences("yxi", MODE_PRIVATE)
         readJump(intent)
 
-        // ⚠️ 没有这个权限，前台服务照跑但**一条通知都发不出来** —— 而那正是它唯一的用处
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) askNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -70,38 +65,96 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             YxiTheme {
-                var nav by remember { mutableStateOf<Nav>(Nav.Hosts) }
+                val hosts by store.hosts.collectAsState()
+                var tab by remember { mutableStateOf(Tab.Sessions) }
+                var work by remember { mutableStateOf<Work?>(null) }
+                // 「当前主机」是 app 级状态 —— 换主机不用退出去（D22）
+                var hostId by remember { mutableStateOf(prefs.getString("host", null)) }
+                val host = hosts.firstOrNull { it.id == hostId } ?: hosts.firstOrNull()
+                LaunchedEffect(host?.id) { host?.id?.let { prefs.edit().putString("host", it).apply() } }
 
-                // 点通知 → 直达那个会话的对话界面
+                // 点通知 → 直达那个会话
                 val target by jump
                 LaunchedEffect(target) {
-                    val (hostId, session, cwd) = target ?: return@LaunchedEffect
-                    val h = store.hosts.value.firstOrNull { it.id == hostId } ?: return@LaunchedEffect
-                    nav = Nav.Work(h, session.ifBlank { null }, cwd.ifBlank { "." }, Mode.Chat)
+                    val (hid, session, cwd) = target ?: return@LaunchedEffect
+                    val h = hosts.firstOrNull { it.id == hid } ?: return@LaunchedEffect
+                    hostId = hid
+                    work = Work(h, session.ifBlank { null }, cwd.ifBlank { "." }, Mode.Chat)
                     jump.value = null
                 }
-                BackHandler(enabled = nav !is Nav.Hosts) {
-                    nav = when (val n = nav) {
-                        is Nav.Work -> Nav.Sessions(n.host)
-                        else -> Nav.Hosts
+
+                BackHandler(enabled = work != null || tab != Tab.Sessions) {
+                    when {
+                        work != null -> work = null      // 工作区 → 回标签页
+                        else -> tab = Tab.Sessions       // 非默认标签 → 回会话
                     }
                 }
-                Scaffold { p ->
+
+                // ⚠️ 工作区**整屏**，没有底部栏：终端最缺竖向空间，
+                // 而软键盘弹起时底部栏会和键盘工具条、系统手势条挤成四层（D22）
+                work?.let { w ->
+                    Scaffold { p ->
+                        Workspace(
+                            store, keys, w.host, w.session, w.cwd, w.mode,
+                            modifier = Modifier.padding(p),
+                        )
+                    }
+                    return@YxiTheme
+                }
+
+                Scaffold(
+                    bottomBar = {
+                        NavigationBar {
+                            Tab.entries.forEach { t ->
+                                NavigationBarItem(
+                                    selected = tab == t,
+                                    onClick = { tab = t },
+                                    icon = { Text(t.icon, style = MaterialTheme.typography.titleMedium) },
+                                    label = { Text(t.label, style = MaterialTheme.typography.labelMedium) },
+                                )
+                            }
+                        }
+                    },
+                ) { p ->
                     val m = Modifier.padding(p)
-                    when (val n = nav) {
-                        is Nav.Hosts -> HostsScreen(store, keys, onOpen = { nav = Nav.Sessions(it) }, modifier = m)
-                        is Nav.Sessions -> SessionsScreen(
-                            store, keys, n.host,
-                            onOpenTerminal = { target, cwd -> nav = Nav.Work(n.host, target, cwd, Mode.Terminal) },
-                            // 点卡片 = 「打开这个会话」，用它上次的偏好；不是「我要对话模式」
-                            onOpenChat = { name, cwd -> nav = Nav.Work(n.host, name, cwd, null) },
-                            onOpenFiles = { nav = Nav.Work(n.host, null, ".", Mode.Files) },
+                    when (tab) {
+                        Tab.Sessions -> if (host == null) {
+                            EmptyHint("还没有主机", "去「主机」那一栏加一台", m)
+                        } else {
+                            SessionsScreen(
+                                store, keys, host,
+                                hosts = hosts,
+                                onPickHost = { picked -> hostId = picked.id },
+                                onOpenTerminal = { sn, cwd -> work = Work(host, sn, cwd, Mode.Terminal) },
+                                onOpenChat = { sn, cwd -> work = Work(host, sn, cwd, null) },
+                                onOpenFiles = { work = Work(host, null, ".", Mode.Files) },
+                                modifier = m,
+                            )
+                        }
+                        Tab.Hosts -> HostsScreen(
+                            store, keys,
+                            onOpen = { hostId = it.id; tab = Tab.Sessions },
                             modifier = m,
                         )
-                        is Nav.Work -> Workspace(store, keys, n.host, n.session, n.cwd, n.mode, modifier = m)
+                        Tab.Settings -> SettingsScreen(store, keys, host, modifier = m)
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun EmptyHint(title: String, sub: String, modifier: Modifier) {
+    androidx.compose.foundation.layout.Box(
+        modifier.then(Modifier.padding(40.dp)),
+        contentAlignment = androidx.compose.ui.Alignment.Center,
+    ) {
+        androidx.compose.foundation.layout.Column(
+            horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+        ) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(sub, style = MaterialTheme.typography.bodySmall, color = app.yxi.ui.theme.Dim)
         }
     }
 }

@@ -43,6 +43,9 @@ fun SessionsScreen(
     store: HostStore,
     keys: KeyManager,
     host: Host,
+    /** 主机下拉：换主机不用退出去（D22）。只有一台时不显示箭头 */
+    hosts: List<Host> = listOf(host),
+    onPickHost: (Host) -> Unit = {},
     /** (会话名, cwd)。⚠️ **cwd 必须一起传** —— 对话模式靠它找转录文件 */
     onOpenTerminal: (String?, String) -> Unit,
     onOpenChat: (String, String) -> Unit,
@@ -107,8 +110,24 @@ fun SessionsScreen(
 
     Column(modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(18.dp, 14.dp, 18.dp, 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            var hostMenu by remember { mutableStateOf(false) }
             Column(Modifier.weight(1f)) {
-                Text(host.alias, style = MaterialTheme.typography.headlineSmall)
+                Row(
+                    Modifier.clickable(enabled = hosts.size > 1) { hostMenu = true },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(host.alias, style = MaterialTheme.typography.headlineSmall)
+                    if (hosts.size > 1) Text("▾", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.outline)
+                }
+                DropdownMenu(hostMenu, { hostMenu = false }) {
+                    hosts.forEach { h ->
+                        DropdownMenuItem(
+                            text = { Text(h.alias + if (h.id == host.id) "  ✓" else "") },
+                            onClick = { hostMenu = false; onPickHost(h) },
+                        )
+                    }
+                }
                 Text(
                     if (status.isEmpty()) "${sessions.size} 个会话 · 点读对话 · 长按发消息" else status,
                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),

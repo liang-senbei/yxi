@@ -18,6 +18,9 @@ import java.io.File
  */
 class KeyManager(private val ctx: Context) {
 
+    /** 进程级：公钥日志每次启动只打一行，别刷屏 */
+    private var announced = false
+
     private val file get() = File(ctx.filesDir, "id_ed25519.sealed")
 
     /** 公钥的 `ssh-ed25519 AAAA… comment` 形式，贴进 `authorized_keys` 用。 */
@@ -39,7 +42,22 @@ class KeyManager(private val ctx: Context) {
     /** 重新生成一把。⚠️ 旧公钥立刻失效——所有装过它的服务器都要重装。 */
     fun regenerate() { file.delete(); load() }
 
-    private fun load(): KeyPair {
+    private fun load(): KeyPair = loadRaw().also { announceOnce(it) }
+
+    /**
+     * 每个进程报一次「这次用的是哪把公钥」。
+     *
+     * ⚠️ 公钥不是秘密（它本来就要贴到服务器上去），但**它变了就是大事** ——
+     * 所有机器上那行 `authorized_keys` 会同时失效，而现象只是「突然连不上」。
+     * 有这一行日志，`adb logcat -s YxiKey` 一眼就能对上号。
+     */
+    private fun announceOnce(kp: KeyPair) {
+        if (announced) return
+        announced = true
+        android.util.Log.i("YxiKey", "本次使用 pub=" + Base64.encodeToString(kp.publicKeyBlob, Base64.NO_WRAP))
+    }
+
+    private fun loadRaw(): KeyPair {
         Crypto.ensureProviders()   // ⚠️ 没它 ED25519 生成会抛异常，且 message 为 null
         val jsch = JSch()
         if (file.exists()) {
@@ -51,6 +69,13 @@ class KeyManager(private val ctx: Context) {
         }
         val kp = KeyPair.genKeyPair(jsch, KeyPair.ED25519)
         file.writeText(Vault.seal(exportPem(kp)))
+        // ⚠️ **生成新密钥是件大事**：所有服务器上原来那行 authorized_keys 立刻失效。
+        // 它可能因为清数据、换机、Keystore 被重置而悄悄发生 ——
+        // 记一行日志，下次查「为什么突然连不上了」时一眼就看到。
+        android.util.Log.w(
+            "YxiKey",
+            "生成了新密钥（旧的已失效）pub=" + Base64.encodeToString(kp.publicKeyBlob, Base64.NO_WRAP),
+        )
         return kp
     }
 

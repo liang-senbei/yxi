@@ -28,13 +28,16 @@ fi
 # 表现是「拿不到公钥」，而真正的原因跟公钥一点关系都没有。
 adb shell pm grant app.yxi android.permission.POST_NOTIFICATIONS 2>/dev/null || true
 
+# 取 App 的公钥。
+# ⚠️ 不再靠「点公钥按钮」—— 那个入口搬进设置页了，追坐标太脆。
+# 现在是：先放一份 hosts.json 让它去连，连接会用到私钥 → 没有就现生成 → 生成时打日志。
 adb shell am force-stop app.yxi
-adb shell am start -n app.yxi/.MainActivity >/dev/null; sleep 4
-adb logcat -c; adb shell input tap 500 200; sleep 4          # 点「公钥」逼它生成
-adb shell input keyevent 4; sleep 1
-# ⚠️ `|| true` 不能省：`set -euo pipefail` 下 grep 没匹配会返回 1，
-# 整个脚本会在下一行那句检查**之前**就被 set -e 干掉 —— 什么都不报，
-# 只留一个「装完就结束了」的假象（跟 TROUBLESHOOTING #19 同一类）。
+adb shell am start -n app.yxi/.MainActivity >/dev/null; sleep 4      # 让它把 files/ 建出来
+adb logcat -c
+printf '[{"id":"seed","alias":"seed","hostname":"10.0.2.2","port":22,"username":"root","useKey":true}]' > /tmp/.seed.json
+adb push /tmp/.seed.json /data/local/tmp/hosts.json >/dev/null
+adb shell run-as app.yxi cp /data/local/tmp/hosts.json files/hosts.json
+adb shell am force-stop app.yxi; adb shell am start -n app.yxi/.MainActivity >/dev/null; sleep 8
 PUB=$(adb logcat -d -s YxiKey | grep -o 'pub=[A-Za-z0-9+/=]*' | tail -1 | cut -d= -f2- || true)
 [ -n "$PUB" ] || { echo "✗ 没从 logcat 里拿到公钥"; exit 1; }
 echo "· 公钥 ${PUB:0:24}…"
