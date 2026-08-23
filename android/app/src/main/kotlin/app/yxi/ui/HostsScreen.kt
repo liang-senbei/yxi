@@ -41,6 +41,7 @@ fun HostsScreen(
     var adding by remember { mutableStateOf(false) }
     var showKey by remember { mutableStateOf(false) }
     var installTarget by remember { mutableStateOf<Host?>(null) }
+    var editing by remember { mutableStateOf<Host?>(null) }
 
     Column(modifier.fillMaxSize()) {
         Row(
@@ -72,7 +73,7 @@ fun HostsScreen(
                         h,
                         ctx = ctx,
                         onClick = { onOpen(h) },
-                        onLongClick = { installTarget = h },
+                        onLongClick = { editing = h },
                         onWatch = {
                             val on = !h.watch
                             store.upsert(h.copy(watch = on))
@@ -87,7 +88,14 @@ fun HostsScreen(
     }
 
     if (adding) {
-        AddHostSheet(store, keys, onDone = { adding = false })
+        AddHostSheet(store, keys, ctx, onDone = { adding = false })
+    }
+    editing?.let { h ->
+        AddHostSheet(
+            store, keys, ctx, editing = h,
+            onInstallKey = { editing = null; installTarget = h },
+            onDone = { editing = null },
+        )
     }
     if (showKey) {
         PublicKeySheetPublic(keys) { showKey = false }
@@ -158,23 +166,42 @@ private fun HostRow(
     }
 }
 
-/** 加主机：任意 IP、**任意端口**、用户名、密码或密钥 —— 四样都不能写死。 */
+/**
+ * 加 / 改主机：任意 IP、**任意端口**、用户名、密码或密钥 —— 四样都不能写死。
+ *
+ * ⚠️ **必须能改、能删。** 早先只有「加」：点一下是连接、长按是装公钥，
+ * 于是地址打错、或者要换个端口，用户**一点办法都没有**（连删都删不掉，
+ * 只能卸载重装）。而「地址里混进全角字符」正是最常见的一种错 ——
+ * 我们既提示了「删掉重加」，就得真有地方能删。见 TROUBLESHOOTING #68。
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AddHostSheet(store: HostStore, keys: KeyManager, onDone: () -> Unit) {
-    var alias by remember { mutableStateOf("") }
-    var hostname by remember { mutableStateOf("") }
-    var port by remember { mutableStateOf("22") }
-    var username by remember { mutableStateOf("root") }
-    var usePassword by remember { mutableStateOf(false) }
+private fun AddHostSheet(
+    store: HostStore,
+    keys: KeyManager,
+    ctx: android.content.Context,
+    editing: Host? = null,
+    onInstallKey: () -> Unit = {},
+    onDone: () -> Unit,
+) {
+    var alias by remember { mutableStateOf(editing?.alias ?: "") }
+    var hostname by remember { mutableStateOf(editing?.hostname ?: "") }
+    var port by remember { mutableStateOf((editing?.port ?: 22).toString()) }
+    var username by remember { mutableStateOf(editing?.username ?: "root") }
+    var usePassword by remember { mutableStateOf(editing?.useKey == false) }
     var password by remember { mutableStateOf("") }
+    var confirmDelete by remember { mutableStateOf(false) }
 
     ModalBottomSheet(onDismissRequest = onDone, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
         Column(
-            Modifier.padding(18.dp, 0.dp, 18.dp, 28.dp),
+            // ⚠️ **表要能滚。** 半开的表放不下这么多字段，「保存」落在屏幕外 ——
+            // 用户得先把表往上拖才够得着，而没有任何东西提示他要拖。
+            // imePadding：软键盘弹起来时同样会盖住「保存」。见 TROUBLESHOOTING #68。
+            Modifier.verticalScroll(rememberScrollState()).imePadding()
+                .padding(18.dp, 0.dp, 18.dp, 28.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("加新主机", style = MaterialTheme.typography.titleLarge)
+            Text(if (editing != null) "改主机" else "加新主机", style = MaterialTheme.typography.titleLarge)
 
             Field(alias, { alias = it }, "名字（随便起，只给你自己看）")
             // ⚠️ 别名≠地址：手机上没有 ~/.ssh/config，「station」「天亮」这类 SSH 别名解析不了，
@@ -229,7 +256,7 @@ private fun AddHostSheet(store: HostStore, keys: KeyManager, onDone: () -> Unit)
             }
 
             if (usePassword) {
-                Field(password, { password = it }, "密码", password = true)
+                Field(password, { password = it }, if (editing?.sealedPassword != null) "密码（留空 = 不改）" else "密码", password = true)
                 Hint("密码用设备密钥加密后保存，不落明文。连上后可以一键装公钥，之后免密。")
             } else {
                 Hint("用 App 自己的 ed25519 密钥。先去右上角「公钥」把它贴进目标机的 authorized_keys。")
@@ -241,17 +268,30 @@ private fun AddHostSheet(store: HostStore, keys: KeyManager, onDone: () -> Unit)
                     val parsed = app.yxi.ssh.HostInput.parse(hostname)
                     val hn = parsed.host
                     if (hn.isEmpty()) return@Button
+                    // 地址栏里带的 `:port` / `root@` 优先于另外两栏里的值 ——
+                    // 用户刚敲进去的那一串才是他最新的意思
+                    val pt = parsed.port ?: port.toIntOrNull() ?: 22
                     store.upsert(
                         Host(
-                            id = UUID.randomUUID().toString(),
+                            id = editing?.id ?: UUID.randomUUID().toString(),
                             alias = alias.trim().ifEmpty { hn },
                             hostname = hn,
-                            // 地址栏里带的 `:port` / `root@` 优先于另外两栏里的值 ——
-                            // 用户刚敲进去的那一串才是他最新的意思
-                            port = parsed.port ?: port.toIntOrNull() ?: 22,
+                            port = pt,
                             username = (parsed.user ?: username).trim().ifEmpty { "root" },
                             useKey = !usePassword,
-                            sealedPassword = if (usePassword && password.isNotEmpty()) Vault.seal(password) else null,
+                            sealedPassword = when {
+                                !usePassword -> null
+                                password.isNotEmpty() -> Vault.seal(password)
+                                // 编辑时密码栏留空 = 不动原来那份密文
+                                else -> editing?.sealedPassword
+                            },
+                            // ⚠️ **改了地址或端口，存的主机指纹就必须作废。**
+                            // 那把指纹属于旧机器；留着的话下次连新机器会报「指纹变了」——
+                            // 那是中间人警告的措辞，会把一次正常的改配置说成攻击。
+                            hostKey = editing?.hostKey?.takeIf {
+                                editing.hostname == hn && editing.port == pt
+                            },
+                            watch = editing?.watch ?: false,
                         )
                     )
                     onDone()
@@ -260,6 +300,23 @@ private fun AddHostSheet(store: HostStore, keys: KeyManager, onDone: () -> Unit)
                 shape = Pill,
                 modifier = Modifier.fillMaxWidth().height(52.dp),
             ) { Text("保存") }
+
+            if (editing != null) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Box(Modifier.weight(1f)) { IconTextButton("装公钥", onClick = onInstallKey) }
+                    Box(Modifier.weight(1f)) {
+                        // 删除要两下 —— 手机上误触一下就没了，而主机记录里有密码密文
+                        IconTextButton(if (confirmDelete) "再点一次删除" else "删除") {
+                            if (!confirmDelete) { confirmDelete = true; return@IconTextButton }
+                            store.remove(editing.id)
+                            // 删的可能正是唯一开着铃铛的那台 —— 不同步，前台服务会继续盯一台不存在的机器
+                            app.yxi.watch.EventService.sync(ctx, store.hosts.value.any { it.watch })
+                            onDone()
+                        }
+                    }
+                }
+                Hint("长按主机就能回到这里。改地址或端口会作废已记住的指纹，下次连接重新确认一次。")
+            }
         }
     }
 }
