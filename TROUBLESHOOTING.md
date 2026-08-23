@@ -656,3 +656,44 @@ echo "ssh-ed25519 $PUB yxi@android" >> /tmp/.ak          # 只把模拟器的加
 **怎么避开**：手机在移动网络下 IP 还会变，封了换个基站可能就好了 ——
 这种「时好时坏」最容易误判成 App 的 bug。用户报「一开始报错、后来干脆连不上」，
 先去 `fail2ban-client status sshd` 看 banned 列表，别急着改代码。
+
+## 67. ⭐⭐ 改 `sshd_config` 的 `Port` 毫无反应 —— 而且 `sshd -T` 还骗你说生效了
+
+**症状**：给 sshd 加第二个端口，往 `/etc/ssh/sshd_config.d/` 里写 `Port 8443`，
+`sshd -t` 通过、`sshd -T | grep port` **明明列出了 8443**、`systemctl reload ssh` 也成功——
+但 `ss -lnt` 里只有 22，从外面连 8443 是 `Connection refused`。
+
+**根因**：这台机器的 sshd 是 **systemd socket 激活**：
+
+```
+$ systemctl show ssh.service -p TriggeredBy
+TriggeredBy=ssh.socket
+```
+
+端口由 `ssh.socket` 的 `ListenStream=` 绑好、把 fd 递给 sshd，**sshd 只用递过来的 fd，
+自己配置里的 `Port` 完全不看**。而 `sshd -T` 打印的是「配置解析结果」，不是「实际在听什么」——
+**它没有说谎，只是回答的不是你问的问题**。判断在不在听，唯一可信的是 `ss -lnt`。
+
+**修法**：写 `/etc/systemd/system/ssh.socket.d/*.conf`：
+
+```ini
+[Socket]
+ListenStream=0.0.0.0:8443
+ListenStream=[::]:8443
+```
+
+两个地址族都要写。只写 `ListenStream=8443` 时 systemd 只绑 `[::]:8443`，
+本机 `bindv6only=0` 按说该双栈通吃，实测 IPv4 仍然 `Connection refused` ——
+基础单元里 22 就是老老实实写两行，现在知道为什么了。
+
+**⚠️ 我在这上面把 SSH 搞挂了一分钟**：`sshd_config` 那份没删就又加了 socket 那份，
+两套机制同时抢 8443。`systemctl restart ssh.socket` 停掉 socket 后，
+`ssh.service` 自己以 standalone 方式起来、按 `sshd_config` 绑了 8443，
+于是 socket 单元 `Address already in use` 启动失败 —— **连 22 都没人听了**。
+
+**怎么避开**：
+- **只留一套机制**。要用 socket 激活就别碰 `sshd_config` 的 `Port`。
+- 改之前先问 `systemctl show ssh.service -p TriggeredBy`，别默认 sshd 是传统守护进程。
+- 这类改动**必须带自动回滚**：改完立刻 `ss -lnt` 验 22 还在，不在就自己回滚。
+  脚本见本次提交的做法（失败 → 删 drop-in → `daemon-reload` → 重起 socket → 复验 22）。
+- **验证要从外部机器发起**，本机 `ss` 只能证明在听，证明不了外面进得来。

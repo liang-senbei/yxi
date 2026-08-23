@@ -21,6 +21,15 @@
 - **怎么跑**：`dev/run.sh`（构建→模拟器→装→起→截图）；测试 `cd android && ./gradlew connectedDebugAndroidTest`（15 条）。
   APK 产物 `Yxi-0.1.0-debug.apk`，手机直接下的地址见下面「APK 分发」。
 
+### SSH 接入（App 连这台机器用）
+| 端口 | 用途 |
+|---|---|
+| **22** | 常规 |
+| **8443** | **备用** —— 手机在移动网络下 22 出站常被运营商屏蔽，症状是 App 报「连不上」(TCP 超时) 而服务器侧一切正常。两个端口是同一个 sshd、同一把主机密钥，App 里只改端口号即可 |
+
+⚠️ 端口由 `/etc/systemd/system/ssh.socket.d/yxi-altport.conf` 决定（**socket 激活**），
+往 `sshd_config` 写 `Port` 无效且会跟 socket 抢端口把 22 一起搞挂。见 TROUBLESHOOTING #67。
+
 ## 进度
 - ✅ **已完成**：**Moshi Android 3.10.0 APK 逆向**（`/root/inbox/base.apk`，解包 `/root/inbox/apk/`；Expo/RN + Hermes，字符串表可读 → 挖出会话枚举命令、云端+本地网关接口清单、Inbox SQLite 表结构，见 PRD §1 与附录 A）；[PRD.md](./PRD.md)；[PLAN.md](./PLAN.md)；全部技术前置在本机验证（PLAN §4）
 - ✅ **方案已定稿（客户端形态换过一次）**：PWA → **Android 原生 APK**。原因：浏览器强制 CA 证书，走 SSH 就没有这个限制 → 整个证书 / Tailscale / 公网暴露的问题链消失（PRD §2.1）
