@@ -64,12 +64,33 @@ object Prompt {
         "to cancel" in l || ("to navigate" in l && ("Enter to" in l || "to select" in l))
 
     /**
+     * **光标行** —— `❯ 1. Yes, and use auto mode` 这种。
+     *
+     * ⚠️ **这是比脚注更稳的锚。** 脚注的形态到现在已经变过**三次**了：
+     *   · `Enter to select · ↑/↓ to navigate · Esc to cancel`
+     *   · `Esc to cancel · Tab to amend · ctrl+e to explain`（权限提示，见 #46）
+     *   · `ctrl+g to edit in VS Code · ~/.claude/plans/xxx.md`（**计划批准**，两个锚都没有）
+     * 第三种是实测抓到的：脚注既没有 `to cancel` 也没有 `to navigate`，
+     * 于是**整个计划批准框在手机上是隐形的 —— 用户根本批不了计划**。见 #82。
+     *
+     * 而 `❯` + 编号这个形态，在我手上**全部五份真实抓屏里都在**（单选/多选/权限/计划）。
+     * 它语义上就是「此刻选中的那一项」，选择器活着它就在。
+     *
+     * ⚠️ 注意 `❯` 单独出现时是**输入框**（`❯ 用 AskUserQuestion 工具问我…`），
+     * 所以必须连编号一起要求，光看 `❯` 会把用户打的字当成选项。
+     */
+    private val CURSOR = Regex("""^\s*❯\s*\d+\.\s+\S.*$""")
+
+    /**
      * @param screen `tmux capture-pane -p` 的原样输出
      * @return 没有在等人选就返回 null
      */
     fun parse(screen: String): Pending? {
         val lines = screen.lines()
-        val footer = lines.indexOfLast(::isFooter)
+        // 先用脚注（四条测试盯着的老路子）；认不出来再退回光标锚。
+        // 退回而不是替换：老路子是实测钉住的，没必要拿新写法去赌它。
+        val footer = lines.indexOfLast(::isFooter).takeIf { it >= 0 }
+            ?: endOfOptionsAfterCursor(lines)
         if (footer < 0) return null
 
         // ⚠️ **从脚注往上收，编号必须连续递减到 1。**
@@ -135,6 +156,26 @@ object Prompt {
     }
 
     /** 分隔线、标签栏（`←  ☒ 配菜  ✔ Submit  →`）、提示脚注这些不是内容。 */
+    /**
+     * 找不到已知脚注时的退路：从**最后一个光标行**出发，往下走到选项块结束，
+     * 返回「脚注该在的位置」（第一行不再属于这个选项块的行号）。
+     *
+     * 往下走而不是就地返回：光标可能停在 2 号，下面还有 3 号、4 号。
+     */
+    private fun endOfOptionsAfterCursor(lines: List<String>): Int {
+        val cursor = lines.indexOfLast { CURSOR.matches(it) }
+        if (cursor < 0) return -1
+        var end = cursor + 1
+        while (end < lines.size) {
+            val l = lines[end]
+            // 选项、选项的说明行（缩进的非结构文本）都还算这一块
+            if (OPTION.matchEntire(l) != null || (l.isNotBlank() && l.first() == ' ' && !isNoise(l))) {
+                end++
+            } else break
+        }
+        return end
+    }
+
     private fun isNoise(l: String): Boolean {
         val t = l.trim()
         return t.isEmpty() ||

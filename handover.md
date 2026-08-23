@@ -267,6 +267,12 @@
   掉了自动重连。**实测从服务器 `kill -9` 掉那条 sshd，37 秒后自己回来，界面全程没报错。**
   下拉刷新兼作手动重连（没连上=重连，连上了=立刻刷）。见 TROUBLESHOOTING #81。
 
+- ✅ **0.5.6 —— 修「计划批准框认不出来」**：Claude Code 2.1.241 的计划批准框脚注是
+  `ctrl+g to edit in VS Code · ~/.claude/plans/xxx.md`，`to cancel` / `to navigate`
+  **两个已知锚全部落空** → `Prompt.parse` 返回 null → **整个框在手机上不存在，用户批不了计划**。
+  改用**光标行 `❯ N.`** 做退路锚（那个形态在全部五份真实抓屏里都在）。
+  是 iOS 那边的 ios-parsers 实测发现的，我在真机上复核并修的安卓。见 TROUBLESHOOTING #82。
+
 ## 读写信息在哪
 | 路径 | 性质 |
 |---|---|

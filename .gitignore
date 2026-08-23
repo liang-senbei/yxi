@@ -35,3 +35,9 @@ android/app/build/
 android/.gradle/
 android/local.properties
 *.apk
+
+# SwiftPM 的构建产物和依赖检出 —— 每个都是独立 git 仓库，
+# `git add -A` 会把它们当嵌套仓库吞进来（而且构建中的文件会让 add 直接报错）
+ios/.build/
+ios/**/.build/
+.swiftpm/

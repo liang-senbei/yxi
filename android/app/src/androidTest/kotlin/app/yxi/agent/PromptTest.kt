@@ -1,6 +1,8 @@
 package app.yxi.agent
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -12,6 +14,54 @@ import org.junit.Test
 class PromptTest {
 
     /** 单选：AskUserQuestion，两个真选项 + Type something + Chat about this。 */
+    /**
+     * ⚠️ **真实抓屏**（Claude Code 2.1.241 的计划批准框）。它的脚注是
+     * `ctrl+g to edit in VS Code · ~/.claude/plans/xxx.md` ——
+     * **`to cancel` 和 `to navigate` 两个已知锚全部落空**。
+     * 而且计划正文里本来就有一组 1./2./3.，就贴在真选项上面。
+     */
+    private val planReal = """
+
+  ⎿  /plan to preview
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   Ready to code?
+
+   Here is Claude's plan:
+  ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+   改进 README.md
+
+   Context
+
+   plantest/ 目录里只有一个文件 README.md，内容仅一行标题 # 一个很小的项目。没有代码、没有配置，所以 README
+   无法从代码里推断出内容——只能补上一个最基本的骨架，让它至少能说清"这是什么、怎么用"。
+
+   方案
+
+   只改 README.md 一个文件，加最小可用骨架：
+
+   1. 标题下加一句话描述（项目是什么）。
+   2. 用法 一节：如何跑起来 / 基本命令。
+   3. 结构 一节：目录里有什么（目前只有 README，直白写）。
+
+   不加：徽章、CI 说明、贡献指南、License、Changelog——目录里没有对应的东西，写了就是空话。等真有代码/依赖/发布流程了再补。
+
+   待确认
+
+   目录里没有代码，我不知道这个项目实际做什么。两种走法：
+   - 你告诉我一句话描述，我照着写实内容；                                                                                                                    ↓
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   Claude has written up a plan and is ready to execute. Would you like to proceed?
+
+   ❯ 1. Yes, and use auto mode
+     2. Yes, manually approve edits
+     3. Tell Claude what to change
+        shift+tab to approve with this feedback
+
+   ctrl+g to edit in VS Code · ~/.claude/plans/imperative-humming-aurora.md
+""".trimIndent()
+
     private val single = """
         ❯ 用 AskUserQuestion 工具问我一个问题：晚饭吃面还是吃饭。
         ────────────────────────────────────────────────────
@@ -176,4 +226,25 @@ class PromptTest {
         assertEquals(listOf(1, 2), p.options.map { it.number })
         assertEquals("好", p.options[0].label)
     }
+
+    @Test fun 计划批准框认得出来() {
+        // 老实现在这里直接返回 null：脚注两个锚都不匹配 →
+        // **整个计划批准框在手机上是隐形的，用户根本批不了计划**。见 #82
+        val p = Prompt.parse(planReal)
+        assertNotNull("计划批准框没认出来", p)
+        assertEquals(3, p!!.options.size)
+        assertTrue("标题不对：" + p.title, p.title.contains("Would you like to proceed"))
+        assertTrue("1 号该是 Yes：" + p.options[0].label, p.options[0].label.startsWith("Yes"))
+    }
+
+    @Test fun 计划正文的编号列表不会被当成选项() {
+        // 这份抓屏里计划正文自己就有 1./2./3.（"标题下加一句话描述…"），
+        // 认错的话用户点第 3 项会落到正文第 3 条上 —— 点 A 选中 B 且不报错。见 #30
+        val p = Prompt.parse(planReal)!!
+        assertFalse(
+            "认成了计划正文：" + p.options.map { it.label },
+            p.options.any { it.label.contains("一句话描述") || it.label.contains("用法") },
+        )
+    }
+
 }
