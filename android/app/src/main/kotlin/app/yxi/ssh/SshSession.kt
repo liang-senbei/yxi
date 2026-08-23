@@ -21,6 +21,15 @@ import java.io.OutputStream
 class SshSession(
     private val cfg: HostConfig,
     private val knownHosts: KnownHosts? = null,
+    /**
+     * 心跳间隔。默认 2 秒（× 2 次 = 4 秒判死）是给**终端**用的：
+     * 用户正盯着屏幕，掉线要立刻发现、立刻重连。
+     *
+     * ⚠️ **常驻的连接要给大得多的值。** 看板那条大多时候空闲，
+     * 手机被调度出去一下就丢两个心跳 → 会话被 jsch 干掉，
+     * 而上层如果没有存活检查，就再也回不来了。
+     */
+    private val aliveIntervalMs: Int = 2_000,
 ) {
 
     private val jsch = JSch()
@@ -159,7 +168,12 @@ class SshSession(
         // 2 秒一次、连丢 2 次判死 ≈ 4 秒内发现。
         // ⚠️ 别再往下调：弱网下 RTT 抖一抖就会**误杀一条其实还活着的连接**，
         // 那比慢几秒难受得多（正在跑的命令白跑）。
-        s.serverAliveInterval = 2_000
+        // ⚠️ **默认 2 秒 × 2 = 4 秒没响应就判死，对手机来说太狠。**
+        // 终端那条要这么灵敏（掉线要立刻重连，用户正盯着看）；
+        // 但看板那条是常驻的、大多时候空闲 —— 手机被调度出去一下
+        // （息屏、终端在猛刷、系统限流）就丢两个心跳，会话就被 jsch 干掉了。
+        // 表现是「进工作区再返回来就连不上，重启 App 才好」。见 TROUBLESHOOTING #81。
+        s.serverAliveInterval = aliveIntervalMs
         s.serverAliveCountMax = 2
         s.connect(timeoutMs)
         session = s

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,6 +72,7 @@ fun SessionsScreen(
     // 20 个会话的时候还是列表能一眼扫完（决策 D16b 里就写明了这个代价）
     var floating by remember(host.id) { mutableStateOf(false) }
     var pinned by remember(host.id) { mutableStateOf(Pinned.get(ctx, host.id)) }
+    var refreshing by remember { mutableStateOf(false) }
 
     LaunchedEffect(connectError) { connectError?.let { status = it } }
 
@@ -190,24 +192,36 @@ fun SessionsScreen(
                         modifier = Modifier.weight(1f),
                     )
                     Spacer(Modifier.width(10.dp))
-                    Surface(
-                        color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.12f),
-                        shape = Pill,
-                        modifier = Modifier.clickable(onClick = onRetry),
-                    ) {
-                        Text(
-                            "重连",
-                            Modifier.padding(16.dp, 7.dp),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                        )
-                    }
+                    // ⚠️ 不放按钮：下拉就是刷新/重连。多一个按钮 = 多一个要解释的东西，
+                    // 而下拉是这类列表上人人都会先试的手势。这里只负责**告诉他能拉**
+                    Text(
+                        "↓ 下拉重连",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                    )
                 }
             }
         }
 
+        // ⚠️ 下拉的两种含义合成一个手势：**没连上就是重连，连上了就是立刻刷一遍**。
+        // 分成两个入口（按钮 + 下拉）只会让人猜该按哪个。
+        PullToRefreshBox(
+            isRefreshing = refreshing,
+            onRefresh = {
+                refreshing = true
+                if (ssh == null) onRetry() else scope.launch {
+                    val s = ssh
+                    if (s != null) runCatching { SessionProbe.snapshot(s) }
+                        .onSuccess { sessions = it; status = "" }
+                    // 转一下让人看见它确实动了 —— 一闪而过的刷新等于没反馈
+                    delay(400)
+                }
+                scope.launch { delay(900); refreshing = false }
+            },
+            modifier = Modifier.weight(1f),
+        ) {
         LazyColumn(
-            Modifier.weight(1f),
+            Modifier.fillMaxSize(),
             state = listState,
             contentPadding = PaddingValues(14.dp, 4.dp, 14.dp, 20.dp),
             verticalArrangement = Arrangement.spacedBy(9.dp),
@@ -246,6 +260,7 @@ fun SessionsScreen(
                         )
                     }
                 }
+        }
         }
     }
 

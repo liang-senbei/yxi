@@ -54,6 +54,8 @@ fun rememberSshConnector(
     store: HostStore,
     keys: KeyManager,
     host: Host,
+    /** 心跳间隔，见 [SshSession] 的构造参数。常驻的连接要给大值 */
+    aliveIntervalMs: Int = 2_000,
 ): Connect {
     var ask by remember { mutableStateOf<Ask?>(null) }
 
@@ -89,7 +91,7 @@ fun rememberSshConnector(
                         return runBlocking { done.await() }
                     }
                 })
-                return Connector(SshSession(cfg, known), known)
+                return Connector(SshSession(cfg, known, aliveIntervalMs), known)
             }
         }
     }
@@ -159,7 +161,9 @@ class HostSession(
 @Composable
 fun rememberHostSession(store: HostStore, keys: KeyManager, host: Host?): HostSession {
     if (host == null) return HostSession(null, null)
-    val connect = rememberSshConnector(store, keys, host)
+    // 15 秒 × 2 = 30 秒才判死。这条是常驻的、大多时候空闲，
+    // 用终端那套 4 秒的标准会被手机的调度抖动打死
+    val connect = rememberSshConnector(store, keys, host, aliveIntervalMs = 15_000)
     var session by remember(host.id) { mutableStateOf<SshSession?>(null) }
     var error by remember(host.id) { mutableStateOf<String?>(null) }
     // 手动重连 = 换一代，让下面那个 effect 整个重来（退避也跟着归零）
@@ -171,7 +175,18 @@ fun rememberHostSession(store: HostStore, keys: KeyManager, host: Host?): HostSe
             val c = connect()
             if (c == null) { error = "这台主机还没有可用的认证方式"; return@LaunchedEffect }
             val err = runCatching { c.session.connect() }.exceptionOrNull()
-            if (err == null) { session = c.session; error = null; return@LaunchedEffect }
+            if (err == null) {
+                session = c.session; error = null; wait = 1_000L
+                // ⚠️ **连上不是终点。** 原来这里直接 return —— 之后连接掉了
+                // 就再也没人管：看板一直显示「刷新失败」，而 ssh 还非 null，
+                // 连重连按钮都不出现，用户只能杀掉 App 重开。
+                // 现在守着它，断了就回到上面重连。
+                while (c.session.isAlive) kotlinx.coroutines.delay(3_000)
+                session = null
+                error = "连接断了，正在重连…"
+                app.yxi.ui.DevMode.log("host", "连接掉了，自动重连")
+                continue
+            }
 
             // ⚠️ **取消不是失败。** 这是第五处同样的错（见 TROUBLESHOOTING #78）：
             // 界面重组 / 换主机时这个 effect 被取消，挂起点抛 CancellationException，
