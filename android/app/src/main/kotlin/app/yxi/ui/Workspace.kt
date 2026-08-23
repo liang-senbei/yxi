@@ -49,9 +49,10 @@ fun Workspace(
     store: HostStore,
     keys: KeyManager,
     host: Host,
-    /** tmux 会话名。null = 不针对某个会话（从主机层直接进终端/文件） */
-    sessionName: String?,
-    cwd: String,
+    /** 进来时看哪个 tmux 会话。null = 不针对某个会话（从主机层直接进终端/文件）。
+     *  ⚠️ **进来之后可以在工作区里直接换**（悬浮排列），所以它只是初值。 */
+    startSession: String?,
+    startCwd: String,
     /**
      * 想进哪个模式。**null = 用这个会话上次的偏好**（点会话卡片就是这种）。
      * 明确点了「开终端」「文件」就传具体值 —— 显式动作压过记忆，否则那两个按钮等于白设。
@@ -63,22 +64,32 @@ fun Workspace(
     val ctx = LocalContext.current
     val connect = rememberSshConnector(store, keys, host)
 
-    var ssh by remember(host.id, sessionName) { mutableStateOf<SshSession?>(null) }
-    var sftp by remember(host.id, sessionName) { mutableStateOf<Sftp?>(null) }
-    var shell by remember(host.id, sessionName) { mutableStateOf<SshSession.Shell?>(null) }
-    var status by remember(host.id, sessionName) { mutableStateOf<String?>("连接中…") }
+    // ⚠️ **看的是哪个会话，是这一层的状态，不是参数。**
+    // 悬浮排列切会话时只改这两个值 —— 下面那些连接状态是按 host 记的，**一个都不会重建**。
+    var sessionName by remember(host.id) { mutableStateOf(startSession) }
+    var cwd by remember(host.id) { mutableStateOf(startCwd) }
+
+    // ⚠️ 以下全部只按 host.id 记：换会话不该重连。
+    // 之前是按 (host, session) 记的，换个会话要重新握手 + 认证，模拟器上要两三秒。
+    var ssh by remember(host.id) { mutableStateOf<SshSession?>(null) }
+    var sftp by remember(host.id) { mutableStateOf<Sftp?>(null) }
+    var shell by remember(host.id) { mutableStateOf<SshSession.Shell?>(null) }
+    var status by remember(host.id) { mutableStateOf<String?>("连接中…") }
+    /** 终端当前 attach 在哪个会话上。跟 [sessionName] 不一致时要切过去 */
+    var attached by remember(host.id) { mutableStateOf<String?>(null) }
     /** null = 还没查；"" = 有转录；非空 = 没有的原因 */
     var chatBlocked by remember(host.id, sessionName) { mutableStateOf<String?>(null) }
-    var mode by remember(host.id, sessionName) {
-        mutableStateOf(initial ?: Prefs.mode(ctx, host.id, sessionName) ?: Mode.Chat)
+    var mode by remember(host.id) {
+        mutableStateOf(initial ?: Prefs.mode(ctx, host.id, startSession) ?: Mode.Chat)
     }
+    var switcher by remember { mutableStateOf(false) }
     var dpad by remember { mutableStateOf(false) }
     var bar by remember { mutableStateOf(true) }
 
     /** 终端最后一次收到数据的时刻。用来判断「登录 shell 安静下来了没有」 */
     val lastOutput = remember { java.util.concurrent.atomic.AtomicLong(0) }
     /** 每重连一次 +1，用它作为「重建整条连接」的键。jsch 的 Session 不能复用，只能新建 */
-    var generation by remember(host.id, sessionName) { mutableStateOf(0) }
+    var generation by remember(host.id) { mutableStateOf(0) }
 
     val fg = MaterialTheme.colorScheme.onSurface
     val bg = MaterialTheme.colorScheme.surfaceContainerLowest
@@ -99,7 +110,7 @@ fun Workspace(
     }
 
     // 终端仿真器**先于连接建好** —— 这样连接过程中的报错也能直接写进终端显示出来
-    val emulator: TerminalEmulator = remember(host.id, sessionName) {
+    val emulator: TerminalEmulator = remember(host.id) {
         TerminalEmulatorFactory.create(
             looper = Looper.getMainLooper(),
             initialCols = 80, initialRows = 24,
@@ -110,7 +121,7 @@ fun Workspace(
         )
     }
 
-    LaunchedEffect(host.id, sessionName, generation) {
+    LaunchedEffect(host.id, generation) {
         var wait = 700L
         while (true) {
             val c = connect() ?: run { status = "这台主机还没有可用的认证方式"; return@LaunchedEffect }
@@ -173,8 +184,30 @@ fun Workspace(
                     while (System.currentTimeMillis() - lastOutput.get() < 250) delay(60)
                 }
                 sh.write("tmux attach -t $sessionName\n")
+                attached = sessionName
             }
         }.onFailure { status = "终端起不来：${it.message}" }
+    }
+
+    /**
+     * 换会话：**不重连、不重开通道**。
+     *
+     * 已经 attach 着的时候，`tmux switch-client` 就是干这个的 —— 同一个 tmux 客户端换到
+     * 另一个会话，一次往返、几十毫秒。之前的做法是整个 [Workspace] 按 (host, session) 重建，
+     * 等于重新握手 + ed25519 认证 + 起登录 shell，模拟器上两三秒。
+     *
+     * ⚠️ 还没 attach（终端模式还没进过）就什么都不用做 —— 上面那个 effect 会用新的
+     * `sessionName` 直接 attach 过去。
+     */
+    LaunchedEffect(sessionName, shell) {
+        val target = sessionName ?: return@LaunchedEffect
+        val s = ssh ?: return@LaunchedEffect
+        if (shell == null || attached == null || attached == target) return@LaunchedEffect
+        runCatching {
+            s.exec("tmux has-session -t '$target' 2>/dev/null || tmux new-session -d -s '$target'")
+            s.exec("tmux switch-client -t '$target' 2>/dev/null")
+            attached = target
+        }.onFailure { status = "切不过去：${it.message}" }
     }
 
     /**
@@ -203,12 +236,12 @@ fun Workspace(
             sftp = ssh?.let { runCatching { it.openSftp() }.getOrNull() }
         }
     }
-    LaunchedEffect(mode) { Prefs.setMode(ctx, host.id, sessionName, mode) }
+    LaunchedEffect(mode, sessionName) { Prefs.setMode(ctx, host.id, sessionName, mode) }
     LaunchedEffect(shell, mode) {
         if (mode == Mode.Terminal && shell != null) runCatching { focus.requestFocus() }
     }
 
-    DisposableEffect(host.id, sessionName) {
+    DisposableEffect(host.id) {
         onDispose { shell?.close(); sftp?.close(); ssh?.disconnect() }
     }
 
@@ -218,11 +251,18 @@ fun Workspace(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    sessionName?.removePrefix("cc-") ?: host.alias,
-                    style = MaterialTheme.typography.titleMedium, maxLines = 1,
-                )
+            // 点会话名 = 唤出悬浮排列。换会话是这个 app 最高频的动作，
+            // 不该让人退回看板再滚一遍列表
+            Column(
+                Modifier.weight(1f).clickable(enabled = ssh != null) { switcher = true },
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        sessionName?.removePrefix("cc-") ?: host.alias,
+                        style = MaterialTheme.typography.titleMedium, maxLines = 1,
+                    )
+                    Text("▾", style = MaterialTheme.typography.labelMedium, color = Muted)
+                }
                 Text(
                     status ?: cwd,
                     style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
@@ -301,6 +341,21 @@ fun Workspace(
     // ⚠️ **终端模式下语音必须先确认。**
     // 识别错一个字，在服务器上就是**另一条命令**。对话模式还能在输入框里改，
     // 终端是直接打进 PTY 的 —— 没有反悔的机会。
+    if (switcher) {
+        Switcher(
+            ssh = ssh,
+            current = sessionName,
+            hostId = host.id,
+            onPick = { picked ->
+                // ⚠️ 只改这两个值 —— 连接、SFTP 通道、终端仿真器全都按 host 记，一个都不重建。
+                // 终端那边由 `tmux switch-client` 切过去，几十毫秒。
+                sessionName = picked.name
+                cwd = picked.cwd
+            },
+            onDismiss = { switcher = false },
+        )
+    }
+
     heard?.let { text ->
         AlertDialog(
             onDismissRequest = { heard = null },

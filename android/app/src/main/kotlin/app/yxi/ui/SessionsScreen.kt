@@ -60,6 +60,9 @@ fun SessionsScreen(
     var usage by remember(host.id) { mutableStateOf<app.yxi.agent.Usage?>(null) }
     var sftp by remember(host.id) { mutableStateOf<app.yxi.ssh.Sftp?>(null) }
     var update by remember(host.id) { mutableStateOf<app.yxi.agent.Update?>(null) }
+    // 列表 / 悬浮排列。⚠️ 两者**并存**不是替代 —— 悬浮好看但同屏信息量少三分之一，
+    // 20 个会话的时候还是列表能一眼扫完（决策 D16b 里就写明了这个代价）
+    var floating by remember(host.id) { mutableStateOf(false) }
 
     val connect = rememberSshConnector(store, keys, host)
 
@@ -115,6 +118,14 @@ fun SessionsScreen(
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainer, shape = Pill,
+                    modifier = Modifier.height(44.dp).clickable { floating = true },
+                ) {
+                    Box(Modifier.padding(horizontal = 14.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                        Text("悬浮", style = MaterialTheme.typography.labelLarge)
+                    }
+                }
                 listOf("文件" to onOpenFiles, "终端" to { onOpenTerminal(null, ".") }).forEach { (label, go) ->
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceContainer, shape = Pill,
@@ -163,6 +174,16 @@ fun SessionsScreen(
                     }
                 }
         }
+    }
+
+    if (floating) {
+        Switcher(
+            ssh = ssh,
+            current = null,
+            hostId = host.id,
+            onPick = { onOpenChat(it.name, it.cwd) },
+            onDismiss = { floating = false },
+        )
     }
 
     sendTo?.let { target ->
