@@ -225,9 +225,14 @@ class H(BaseHTTPRequestHandler):
         if rest == "/apk":
             # 手机直接下 APK —— 走的是同一个 token 路径，没 token 就 404。
             # 加这条是因为到笔电的反向隧道会断，而手机装包不该被那条链路卡住。
-            # 文件名固定，内容永远是最新构建 —— 版本号写在文件名里的话，
-            # 每发一版都要改这里和用户手上的链接，那个链接迟早会失效
-            apk = HERE.parent.parent / "Yxi-0.1.0-debug.apk"
+            #
+            # ⚠️ **必须读 ~/.yxi/Yxi.apk —— 就是 `install.sh --publish` 写的那个文件。**
+            # 这里原来指向仓库根目录的 `Yxi-0.1.0-debug.apk`（第一版留下的名字），
+            # 跟 --publish 完全是两个文件：发了新版，这个链接还在发旧包，
+            # 而且**从外面一点都看不出来** —— 设置页说「已是最新」，
+            # 因为它查的是 ~/.yxi/latest.json，跟这个链接根本不是一回事。
+            # 一个包只能有一个来源。见 TROUBLESHOOTING #69。
+            apk = pathlib.Path.home() / ".yxi" / "Yxi.apk"
             if not apk.exists():
                 return self._send(404, "no apk", "text/plain")
             self.send_response(200)
