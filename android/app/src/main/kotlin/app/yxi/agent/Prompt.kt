@@ -25,6 +25,16 @@ data class Pending(
     val options: List<Option>,
     /** 多选：数字是切换勾选，要 `Right` + `1` 才算提交。 */
     val multiSelect: Boolean,
+    /**
+     * 这一整块提示的指纹（问题正文 + 上面几行上下文 + 所有选项）。
+     *
+     * ⚠️ **只比「几号 + 选项文案」是不够的。** 两个不同的权限提示，选项**一模一样**：
+     * 都是 `1. Yes / 2. Yes, and always… / 3. No`，连标题都同样是 `Do you want to proceed?`。
+     * 你在终端里答掉了 A、屏幕上换成了 B，那种比对照样放行 ——
+     * **于是你以为在批 A，实际批的是 B。**
+     * 真正能区分两者的是上面那几行（命令本身），所以指纹要把它们算进去。
+     */
+    val fingerprint: String,
 ) {
     data class Option(
         /** 屏幕上那个数字，**送键就送它**。 */
@@ -113,7 +123,15 @@ object Prompt {
             .firstOrNull { !isNoise(it) && OPTION.matchEntire(it) == null }
             ?.trim().orEmpty()
 
-        return Pending(title, opts, multi)
+        // 指纹：从 1 号选项**往上 8 行**一直到脚注，去掉空白后哈希。
+        // 往上 8 行是为了把权限提示里的命令正文圈进来 —— 那才是区分两个提示的东西。
+        val from = (firstLine - 8).coerceAtLeast(0)
+        val fp = lines.subList(from, footer)
+            .joinToString("\n") { it.trim() }
+            .filter { !it.isWhitespace() }
+            .hashCode().toString(16)
+
+        return Pending(title, opts, multi, fp)
     }
 
     /** 分隔线、标签栏（`←  ☒ 配菜  ✔ Submit  →`）、提示脚注这些不是内容。 */

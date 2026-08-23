@@ -22,11 +22,19 @@ if [ -f "$APK" ]; then
   adb install -r "$APK" | tail -1     # ⚠️ 别把输出吞掉，就一行
 fi
 
+# ⚠️ 授权要在**第一次启动之前**：重装会撤销权限，首次启动时系统的授权对话框会
+# 盖住整个界面，后面那个「点公钥按钮」的坐标就点在对话框的遮罩上了 ——
+# 表现是「拿不到公钥」，而真正的原因跟公钥一点关系都没有。
+adb shell pm grant app.yxi android.permission.POST_NOTIFICATIONS 2>/dev/null || true
+
 adb shell am force-stop app.yxi
 adb shell am start -n app.yxi/.MainActivity >/dev/null; sleep 4
 adb logcat -c; adb shell input tap 500 200; sleep 4          # 点「公钥」逼它生成
 adb shell input keyevent 4; sleep 1
-PUB=$(adb logcat -d -s YxiKey | grep -o 'pub=[A-Za-z0-9+/=]*' | tail -1 | cut -d= -f2-)
+# ⚠️ `|| true` 不能省：`set -euo pipefail` 下 grep 没匹配会返回 1，
+# 整个脚本会在下一行那句检查**之前**就被 set -e 干掉 —— 什么都不报，
+# 只留一个「装完就结束了」的假象（跟 TROUBLESHOOTING #19 同一类）。
+PUB=$(adb logcat -d -s YxiKey | grep -o 'pub=[A-Za-z0-9+/=]*' | tail -1 | cut -d= -f2- || true)
 [ -n "$PUB" ] || { echo "✗ 没从 logcat 里拿到公钥"; exit 1; }
 echo "· 公钥 ${PUB:0:24}…"
 
@@ -51,10 +59,6 @@ adb push /tmp/.hosts.json /data/local/tmp/hosts.json >/dev/null
 adb shell run-as app.yxi cp /data/local/tmp/hosts.json files/hosts.json
 rm -f /tmp/.hosts.json
 echo "· hosts.json 写好（watch=$WATCH，指纹已预置，不会弹确认）"
-
-# ⚠️ 重装会连权限一起撤销 —— 没有它前台服务照跑但**一条通知都发不出来**
-adb shell pm grant app.yxi android.permission.POST_NOTIFICATIONS 2>/dev/null || true
-echo "· 通知权限已授予"
 
 adb shell am force-stop app.yxi; adb shell am start -n app.yxi/.MainActivity >/dev/null
 echo "· App 重启完毕"

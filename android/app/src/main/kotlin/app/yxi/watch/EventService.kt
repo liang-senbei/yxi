@@ -173,7 +173,7 @@ class EventService : Service() {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .also { b ->
                 pending?.options?.take(3)?.forEach { o ->
-                    b.addAction(0, "${o.number}. ${o.label.take(16)}", answerIntent(host, full, o))
+                    b.addAction(0, "${o.number}. ${o.label.take(16)}", answerIntent(host, full, o, pending.fingerprint))
                 }
                 pending?.title?.takeIf { it.isNotBlank() }?.let {
                     b.setStyle(NotificationCompat.BigTextStyle().bigText("${host.alias}\n$it"))
@@ -193,13 +193,14 @@ class EventService : Service() {
      * 会被**静默挡掉** —— 点了完全没反应，logcat 里也**一条日志都没有**，
      * 最难查的那种。广播才是通知动作的标准做法。
      */
-    private fun answerIntent(host: Host, session: String, o: Pending.Option): PendingIntent {
+    private fun answerIntent(host: Host, session: String, o: Pending.Option, fp: String): PendingIntent {
         val i = Intent(this, AnswerReceiver::class.java)
             .setAction(ACT_ANSWER)
             .putExtra("hostId", host.id)
             .putExtra("session", session)
             .putExtra("number", o.number)
             .putExtra("label", o.label)
+            .putExtra("fp", fp)
         return PendingIntent.getBroadcast(
             this, (host.id + session + o.number).hashCode().absoluteValue,
             i, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
@@ -219,11 +220,17 @@ class EventService : Service() {
         val session = i.getStringExtra("session") ?: return
         val number = i.getIntExtra("number", -1)
         val label = i.getStringExtra("label").orEmpty()
+        val fp = i.getStringExtra("fp").orEmpty()
         val s = live[hostId] ?: run { note("连接不在了，没送出去"); return }
 
         val now = runCatching { SessionProbe.pending(s, session) }.getOrNull()
-        val same = now?.options?.firstOrNull { it.number == number && it.label == label }
-        if (same == null) { note("提示变了，没有替你按 —— 点开看看"); return }
+        // ⚠️ **整块指纹必须一致，不能只比选项。** 两个不同的权限提示选项完全一样
+        // （都是 `1. Yes / 2. Yes, and always… / 3. No`），只比选项等于没比 ——
+        // 你以为在批 A，实际批的是屏幕上换成的 B。
+        val same = now != null &&
+            now.fingerprint == fp &&
+            now.options.any { it.number == number && it.label == label }
+        if (!same) { note("提示变了，没有替你按 —— 点开看看"); return }
 
         val ok = runCatching { SessionProbe.sendKey(s, session, number.toString()) }.getOrDefault(false)
         if (ok) runCatching {

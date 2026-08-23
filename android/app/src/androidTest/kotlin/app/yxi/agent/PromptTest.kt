@@ -99,6 +99,32 @@ class PromptTest {
         assertEquals(true, p.options[1].label.startsWith("Yes,"))
     }
 
+    /**
+     * ⚠️ **两个不同的权限提示，选项一模一样。**
+     * 只比「几号 + 选项文案」等于没比 —— 通知按钮上的那一下会落到**换上来的那个提示**上。
+     * 指纹必须把上面的命令正文算进去。
+     */
+    @Test fun 两个权限提示的指纹必须不同() {
+        val other = permission
+            .replace("pip install requests 2>&1 | tail -5", "rm -rf /var/log/old")
+            .replace("Install requests package", "Clean old logs")
+            .replace("pip install *", "rm *")
+        val a = Prompt.parse(permission)!!
+        val b = Prompt.parse(other)!!
+        // 选项确实一样 —— 所以只比选项挡不住
+        assertEquals(a.options[0].label, b.options[0].label)
+        assertEquals(a.options[2].label, b.options[2].label)
+        assertEquals(a.title, b.title)
+        // 指纹必须不一样
+        assertTrue("命令不同的两个提示，指纹却相同", a.fingerprint != b.fingerprint)
+    }
+
+    /** 同一个提示反复解析，指纹要稳定 —— 否则每次抓屏都「变了」，按钮永远按不动。 */
+    @Test fun 同一个提示指纹稳定() {
+        assertEquals(Prompt.parse(permission)!!.fingerprint, Prompt.parse(permission)!!.fingerprint)
+        assertEquals(Prompt.parse(single)!!.fingerprint, Prompt.parse(single)!!.fingerprint)
+    }
+
     @Test fun 单选() {
         val p = Prompt.parse(single)!!
         assertEquals("晚饭吃面还是吃饭？", p.title)
