@@ -1,6 +1,7 @@
 import Citadel
 import Foundation
 import NIOCore
+import NIOPosix
 
 /// 把异常翻译成**用户能照着做点什么**的话。
 ///
@@ -47,32 +48,65 @@ public enum Explain {
             """
         }
 
-        // 地址解析不了：多半是全角或零宽字符（#58）
-        let text = String(describing: error).lowercased()
-        if text.contains("nameresolution") || text.contains("unknownhost")
-            || text.contains("nodename") || text.contains("hostname") && text.contains("not") {
+        // ⚠️ **下面全部按类型判，不按 `String(describing:)` 里的字判。**
+        // 一开始是拿字符串匹配写的，`ExplainTests` 第一次跑就红了 ——
+        // NIO 真正抛的是 `SocketAddressError.unknown(host:port:)`，
+        // `String(describing:)` 出来是 `unknown(host: "天亮", port: 22)`，
+        // 里面**根本没有 "unknownHost" 这个词**。而这种失效是**静默**的：
+        // 所有精心写的文案退化成「连 xxx 失败：<一坨异常>」，没人会发现。
+        switch classify(error) {
+        case .dns:
             var msg = "解析不了这个地址：\(hostname)。这一栏要填 **IP 或真实域名**，"
                 + "SSH 别名（`~/.ssh/config` 里那种）在手机上不解析。"
             if let bad = HostInput.suspiciousCharacter(in: hostname) {
                 msg += "\n地址里有个连不上的字符：\(bad)"
             }
             return msg
-        }
 
-        // 超时 / 拒绝
-        if text.contains("timeout") || text.contains("timedout") {
+        case .timeout:
             return """
             连 \(target) 超时（包发出去了没人应）。常见的三种：
             · 移动网络下 22 端口出站被运营商挡了 —— 换到备用端口试试
             · 服务器上的 fail2ban 把这个 IP 封了（#66）
             · 那台机器不在线
             """
-        }
-        if text.contains("refused") {
-            return "\(target) 拒绝连接：端口通到了机器，但那个端口上没有 sshd 在听。端口号填对了吗？"
-        }
 
-        return "连 \(target) 失败：\(error)"
+        case .refused:
+            return "\(target) 拒绝连接：端口通到了机器，但那个端口上没有 sshd 在听。端口号填对了吗？"
+
+        case .other:
+            return "连 \(target) 失败：\(error)"
+        }
+    }
+
+    enum Kind: Equatable { case dns, timeout, refused, other }
+
+    /// 把 NIO / Citadel 抛的东西归成四类。
+    ///
+    /// ⚠️ `NIOConnectionError` 是 Happy Eyeballs 的**汇总**错误：它把 DNS 的失败
+    /// 和每个地址的连接失败都装在里面。只看它自己什么都看不出来，得拆开看。
+    static func classify(_ error: Error) -> Kind {
+        if let e = error as? SocketAddressError, case .unknown = e { return .dns }
+        if let e = error as? NIOConnectionError {
+            if e.dnsAError != nil || e.dnsAAAAError != nil,
+               e.connectionErrors.isEmpty { return .dns }
+            for failure in e.connectionErrors {
+                let kind = classify(failure.error)
+                if kind != .other { return kind }
+            }
+            return .other
+        }
+        if let e = error as? ChannelError, case .connectTimeout = e { return .timeout }
+        if let e = error as? IOError {
+            // ⚠️ errno 的数值**每个平台都不一样**（Linux 111 / Darwin 61），
+            // 所以只许跟符号常量比，绝不能写死数字。
+            switch e.errnoCode {
+            case ECONNREFUSED: return .refused
+            case ETIMEDOUT, EHOSTUNREACH, ENETUNREACH: return .timeout
+            default: return .other
+            }
+        }
+        return .other
     }
 
     /// 文件模式（SFTP）的失败。

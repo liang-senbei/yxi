@@ -173,7 +173,7 @@ public final class HostKeyGate: NIOSSHClientServerAuthenticationDelegate, @unche
     }
 }
 
-/// 超时就返回 nil。写在这里是因为只有这一处用得上，没必要单开一个文件。
+/// 超时就返回 nil。`HostKeyGate` 的首连确认和 `Shell.waitUntilSettled` 都用它。
 func withTimeout<T: Sendable>(
     _ duration: Duration,
     _ work: @escaping @Sendable () async -> T

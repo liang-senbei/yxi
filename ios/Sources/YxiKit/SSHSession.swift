@@ -122,6 +122,12 @@ public final class SSHSession: @unchecked Sendable {
             connectTimeout: timeout
         )
         lock.withLock { client = c }
+        // ponytail: 走的是 NIOPosix（BSD socket）—— Citadel 的这个 `connect` 里
+        // 写死了 `MultiThreadedEventLoopGroup.singleton`。iOS 上苹果推荐的是
+        // Network.framework（对应 NIOTransportServices），它才懂 WiFi↔蜂窝切换、
+        // VPN、以及后台被挂起时的连接状态。**升级路子是现成的**：
+        // Citadel 有 `SSHClient.connect(on channel:settings:)`，喂一个 NIOTS 建的
+        // channel 进去即可。等真的被切网折腾到了再换，别现在为它加一层。
     }
 
     /// 连接掉了通知上层。上层负责退避重连并把状态画出来（#79：指数退避 1s→15s，指纹变了才停）。
@@ -266,7 +272,6 @@ public final class SSHSession: @unchecked Sendable {
                 // 那种情况 shell 已经交出去了，错误走 output 流通知，别再动这个延续。
                 handoff.failIfPending(error)
             }
-            handoff.markClosed()
         }
         return try await handoff.wait(cancelling: task)
     }
@@ -338,9 +343,7 @@ extension SSHSession {
                     try? await Task.sleep(for: .milliseconds(20))
                 }
                 while state.isOpen {
-                    let idle = Date().timeIntervalSince(state.lastActivity)
-                    if idle >= Double(quietFor.components.seconds)
-                        + Double(quietFor.components.attoseconds) / 1e18 { return }
+                    if Date().timeIntervalSince(state.lastActivity) >= quietFor.seconds { return }
                     try? await Task.sleep(for: .milliseconds(20))
                 }
             }
@@ -377,13 +380,22 @@ extension SSHSession {
     final class Handoff: @unchecked Sendable {
         private let lock = NSLock()
         private var continuation: CheckedContinuation<Shell, Error>?
+        private var pending: Result<Shell, Error>?
         private var resumed = false
-        private let closeGate = ShellState()
 
+        /// ⚠️ **通道可能比调用方先到。** 那个 Task 是在 `wait()` 之前起的，
+        /// 于是 `serve` 完全可能在延续被装上之前就 `resume` —— 那一下会掉进地上，
+        /// 然后 `wait()` **永远挂着**（表现是「点开终端一直转圈，什么错都没有」）。
+        /// 所以先来的那个结果要存下来。
         func wait(cancelling task: Task<Void, Never>) async throws -> Shell {
             try await withTaskCancellationHandler {
                 try await withCheckedThrowingContinuation { cont in
-                    lock.withLock { continuation = cont }
+                    let ready: Result<Shell, Error>? = lock.withLock {
+                        if let pending { return pending }
+                        continuation = cont
+                        return nil
+                    }
+                    if let ready { cont.resume(with: ready) }
                 }
             } onCancel: {
                 task.cancel()
@@ -398,8 +410,12 @@ extension SSHSession {
             resume(.success(shell))
 
             // 关掉 shell 时把这个 closure 放行 —— 通道随之关闭。
-            let released = ShellState()
-            state.setOnClose { released.close() }
+            //
+            // ⚠️ **别用「每 100 毫秒醒一次看看关了没」那种写法。** 终端一开就是几小时，
+            // 那是每秒十次无谓唤醒 —— 手机上这种东西是真的会被用户看见（电量）。
+            // 一条只用来 finish 的流就够了，挂在上面**零唤醒**。
+            let (closed, closeSignal) = AsyncStream<Void>.makeStream()
+            state.setOnClose { closeSignal.finish() }
 
             let pump = Task {
                 do {
@@ -415,12 +431,10 @@ extension SSHSession {
                     // 对一条流来说这就是「结束了」，不是需要弹给用户的错误。
                 }
                 continuation.finish()
-                state.close()
+                state.close()   // 远端先挂断时，把上面那条挂着的路也放开
             }
 
-            while released.isOpen, !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(100))
-            }
+            for await _ in closed {}   // 挂到 close() 为止
             pump.cancel()
             continuation.finish()
         }
@@ -429,12 +443,11 @@ extension SSHSession {
             resume(.failure(SSHSession.Failure.shellSetupFailed(underlying: error)))
         }
 
-        func markClosed() { closeGate.close() }
-
         private func resume(_ result: Result<Shell, Error>) {
             let cont: CheckedContinuation<Shell, Error>? = lock.withLock {
                 guard !resumed else { return nil }
                 resumed = true
+                if continuation == nil { pending = result }
                 return continuation
             }
             cont?.resume(with: result)
@@ -470,9 +483,7 @@ public struct Liveness: Sendable {
     public static let background = Liveness(deadline: .seconds(45))
 
     public func isDead(lastActivity: Date, now: Date = Date()) -> Bool {
-        let idle = now.timeIntervalSince(lastActivity)
-        let limit = Double(deadline.components.seconds) + Double(deadline.components.attoseconds) / 1e18
-        return idle > limit
+        now.timeIntervalSince(lastActivity) > deadline.seconds
     }
 }
 
@@ -518,5 +529,13 @@ extension SSHSession {
                 + "grep -qxF '\(safe)' ~/.ssh/authorized_keys || echo '\(safe)' >> ~/.ssh/authorized_keys; "
                 + "grep -c -x -F '\(safe)' ~/.ssh/authorized_keys"
         )
+    }
+}
+
+
+extension Duration {
+    /// `Duration` 没有现成的秒数出口，而我们两处都要拿它跟 `Date` 的间隔比。
+    var seconds: TimeInterval {
+        TimeInterval(components.seconds) + TimeInterval(components.attoseconds) / 1e18
     }
 }
