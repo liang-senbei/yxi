@@ -127,11 +127,24 @@ private fun HostRow(
             Column(Modifier.weight(1f)) {
                 Text(h.alias, style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(3.dp))
+                // ⚠️ 地址栏里混进中文/全角字符是**最贵的一种错**：连不上，
+                // 而错误信息在别处，用户看着列表觉得一切正常。所以在列表里就标出来 ——
+                // 这台主机的地址是「天亮」（一个 SSH 别名），在列表里躺了好几天没人发现。
+                val bad = app.yxi.ssh.HostInput.suspiciousChar(h.hostname)
                 Text(
                     h.display,
                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                    color = MaterialTheme.colorScheme.outline,
+                    color = if (bad != null) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.outline,
                 )
+                if (bad != null) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        "⚠️ 地址里有 $bad —— 连不上。长按改。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
             }
             // 铃铛：让手机为这台机器主动响。⚠️ 需要那台机器上装了 server/install.sh
             Surface(

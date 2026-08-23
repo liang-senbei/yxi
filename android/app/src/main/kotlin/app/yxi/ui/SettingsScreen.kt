@@ -93,7 +93,11 @@ fun SettingsScreen(
                                 s?.openSftp()
                             }.getOrNull()
                             sftp = f
-                            result = if (f == null) Update.Result.Failed("连不上 ${host?.alias}，没查成")
+                            // ⚠️ 报的必须是**真正去连的地址**，不是用户起的名字。
+                            // 这里原来打印 alias —— 用户名字栏填的是 IP、地址栏填的是别名「天亮」，
+                            // 于是错误信息理直气壮地报了一个它压根没连过的 IP，
+                            // 排查因此往端口/防火墙上跑偏了好几轮。见 TROUBLESHOOTING #71。
+                            result = if (f == null) Update.Result.Failed("连不上 ${host?.display}，没查成")
                             else runCatching { Update.checkVerbose(f, BuildConfig.VERSION_CODE) }
                                 .getOrElse { Update.Result.Failed("查的时候出错：${it.message}") }
                             checking = false

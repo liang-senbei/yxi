@@ -89,7 +89,7 @@ class EventService : Service() {
                 wait = 2_000L
                 stream(s, host)
             }.onFailure {
-                Log.w("YxiWatch", "${host.alias} 断了：${it.message}")
+                Log.w("YxiWatch", "${host.alias}（${host.display}）断了：${it.message}")
             }
             live.remove(host.id)
             runCatching { ssh?.disconnect() }
