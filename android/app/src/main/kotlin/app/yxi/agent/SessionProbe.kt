@@ -123,6 +123,19 @@ object SessionProbe {
     suspend fun pending(session: SshSession, target: String): Pending? =
         Prompt.parse(peek(session, target, 60))
 
+    /**
+     * 一次抓屏，把「等你选」和「此刻在忙什么 / 排队的输入」一起解出来。
+     *
+     * ⚠️ 合成一次是有意的：两边都要抓屏，分两次不但多一个来回，
+     * 还会**看到两个不同时刻的屏幕** —— 状态和待答对不上，
+     * 表现成偶发的闪烁，非常难查。
+     *
+     */
+    suspend fun snapshot(session: SshSession, target: String): Pair<Pending?, Live> {
+        val screen = peek(session, target, 60)
+        return Prompt.parse(screen) to Live.parse(screen)
+    }
+
     /** 允许送的按键。⚠️ 白名单，因为 [key] 最终会拼进 shell 命令。 */
     private val SAFE_KEY = Regex("""^([0-9]{1,2}|Up|Down|Left|Right|Enter|Escape)$""")
 

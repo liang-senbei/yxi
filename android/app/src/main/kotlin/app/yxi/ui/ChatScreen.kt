@@ -8,6 +8,13 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -97,8 +104,13 @@ fun ChatScreen(
     var status by remember { mutableStateOf<String?>("连接中…") }
 
     var pending by remember { mutableStateOf<Pending?>(null) }
+    // ⚠️ 此刻在忙什么、有哪些输入还排着队 —— **只有屏幕知道**，转录里没有。
+    // 见 Live 的类注释和 TROUBLESHOOTING #72
+    var live by remember { mutableStateOf(app.yxi.agent.Live.IDLE) }
     var busy by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    // 历史灌完了没。灌的过程中一律瞬移到底，不做动画（见下面的 LaunchedEffect）
+    var settled by remember(sessionName) { mutableStateOf(false) }
 
     LaunchedEffect(sessionName, ssh) {
         val s = ssh ?: return@LaunchedEffect
@@ -120,7 +132,14 @@ fun ChatScreen(
         launch {
             while (true) {
                 delay(300)
-                if (!dirty) continue
+                if (!dirty) {
+                    // ⚠️ 一个空转的周期 = 历史灌完了。**这个标志是「不要跳」的关键**：
+                    // 在它之前每次刷新都瞬移到底（不做动画），之后才允许动画。
+                    // `tail -n 800` 是分批吐的，每批都动画一次滚到底 ——
+                    // 动画没走完下一批又来，看起来就是一闪一闪地跳。
+                    if (items.isNotEmpty()) settled = true
+                    continue
+                }
                 dirty = false
                 val snapshot = buf.toList()   // 在收行的同一个线程上拷一份，再拿去后台解析
                 items = withContext(Dispatchers.Default) { Transcript.parse(snapshot.asSequence()) }
@@ -133,12 +152,30 @@ fun ChatScreen(
     LaunchedEffect(ssh, sessionName) {
         val s = ssh ?: return@LaunchedEffect
         while (true) {
-            if (!busy) runCatching { SessionProbe.pending(s, sessionName) }.onSuccess { pending = it }
-            delay(2_500)
+            if (!busy) {
+                runCatching { SessionProbe.snapshot(s, sessionName) }.onSuccess { (p, l) ->
+                    pending = p
+                    live = l
+                }
+            }
+            // 忙的时候抓快一点 —— 状态行是给人看「它还活着」的，
+            // 2.5 秒一跳就不像在动了；闲的时候没必要这么勤
+            delay(if (live.busy) 900 else 2_500)
         }
     }
     LaunchedEffect(items.size) {
-        if (items.isNotEmpty()) runCatching { listState.animateScrollToItem(items.size - 1) }
+        if (items.isEmpty()) return@LaunchedEffect
+        val last = items.size - 1
+        runCatching {
+            if (!settled) {
+                // 还在灌历史：**瞬移**。用户看到的是「一进来就在最新的地方」
+                listState.scrollToItem(last)
+            } else if (listState.atBottom(items.size)) {
+                // ⚠️ 只有本来就在底部才跟着走。用户往上翻着看旧消息时，
+                // 新消息把他拽回底部比不滚更烦（跟 #61 是同一类错误）
+                listState.animateScrollToItem(last)
+            }
+        }
     }
 
     Column(modifier.fillMaxSize()) {
@@ -160,6 +197,8 @@ fun ChatScreen(
         ) {
             items(items.size, key = { items[it].key }) { i -> Item(items[i]) }
         }
+
+        if (live.busy) LiveStatus(live.status)
 
         pending?.let { p ->
             Box(Modifier.padding(14.dp, 0.dp, 14.dp, 8.dp)) {
@@ -284,6 +323,7 @@ private fun BasicTextFieldRow(value: String, onValue: (String) -> Unit) {
 @Composable
 private fun Item(item: ChatItem) = when (item) {
     is ChatItem.UserText -> UserBubble(item.text)
+    is ChatItem.Queued -> QueuedBubble(item.text)
     is ChatItem.AssistantText -> Markdown(
         item.markdown,
         modifier = Modifier.fillMaxWidth(),
@@ -291,6 +331,12 @@ private fun Item(item: ChatItem) = when (item) {
     is ChatItem.Thinking -> ThinkingRow(item.text)
     is ChatItem.ToolCall -> ToolCard(item)
     is ChatItem.Unknown -> Unit   // 兜底：不认识的块静默跳过，不要在界面上留垃圾
+}
+
+/** 视口最后一个可见项是不是就在列表末尾附近（差一条也算，避免边界抖）。 */
+private fun androidx.compose.foundation.lazy.LazyListState.atBottom(total: Int): Boolean {
+    val last = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return true
+    return last >= total - 2
 }
 
 @Composable
@@ -308,6 +354,70 @@ private fun UserBubble(text: String) {
                 color = MaterialTheme.colorScheme.onPrimaryContainer,
             )
         }
+    }
+}
+
+/**
+ * 排队中的输入 —— 已经送到那台机器上了，但 Claude 还在忙，还没轮到它。
+ *
+ * ⚠️ 长得像用户气泡但**必须一眼看出不一样**（半透明 + 虚线边 + 「排队中」）。
+ * 做成一模一样的话，用户以为已经在处理了；一点不显示的话，
+ * 用户以为压根没发出去，然后重复发一遍 —— 后者我们已经遇到了。
+ */
+@Composable
+private fun QueuedBubble(text: String) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        Surface(
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.30f),
+            shape = RoundedCornerShape(26.dp, 26.dp, 8.dp, 26.dp),
+            border = androidx.compose.foundation.BorderStroke(
+                1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f),
+            ),
+            modifier = Modifier.fillMaxWidth(0.85f),
+        ) {
+            Column(Modifier.padding(18.dp, 12.dp)) {
+                Text(
+                    "排队中 · 它忙完就轮到这条",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 「它正在忙」那一条。文案直接用 Claude Code 自己的状态词（Scampering… / Crafting… /
+ * Searching…），**不翻译也不归一** —— 那些词是它自己在屏幕上说的话，
+ * 换成「处理中…」反而丢了信息（词本身+耗时+token 数都在里面）。
+ */
+@Composable
+private fun LiveStatus(status: String?) {
+    val dots = rememberInfiniteTransition(label = "live")
+    val a by dots.animateFloat(
+        0.35f, 1f,
+        infiniteRepeatable(tween(750), RepeatMode.Reverse), label = "pulse",
+    )
+    Row(
+        Modifier.fillMaxWidth().padding(20.dp, 4.dp, 20.dp, 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(8.dp)
+                .background(MaterialTheme.colorScheme.tertiary.copy(alpha = a), CircleShape),
+        )
+        Spacer(Modifier.width(9.dp))
+        Text(
+            status ?: "在忙…",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.tertiary,
+        )
     }
 }
 

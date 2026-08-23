@@ -34,6 +34,14 @@ sealed interface ChatItem {
          */
         var meta: JSONObject? = null,
     ) : ChatItem
+    /**
+     * **已提交、还排着队**的用户输入 —— 你在它忙的时候打的字。
+     *
+     * ⚠️ 这个必须显示出来。转录里它的类型不是 `user` 而是 `queue-operation`，
+     * 老解析器当成不认识**静默丢掉**了，表现是「我连打了好几条，App 里一条都没有」，
+     * 用户会以为没发出去、然后重复发。见 TROUBLESHOOTING #72。
+     */
+    data class Queued(override val key: String, val text: String) : ChatItem
     /** 解析不出来的东西。⚠️ 这是**兼容兜底不是正常终点**——见类注释 */
     data class Unknown(override val key: String, val raw: String) : ChatItem
 }
@@ -52,6 +60,7 @@ object Transcript {
     fun parse(lines: Sequence<String>): List<ChatItem> {
         val out = ArrayList<ChatItem>()
         val calls = HashMap<String, ChatItem.ToolCall>()   // tool_use_id → 卡片
+        val queued = LinkedHashSet<String>()               // 还排着队的输入，出队就删
 
         lines.forEach { line ->
             if (line.isBlank()) return@forEach
@@ -60,6 +69,32 @@ object Transcript {
             if (d.optBoolean("isSidechain", false)) return@forEach
 
             val type = d.optString("type")
+
+            // ⚠️ **排队的输入没有 message 字段**，得在下面那个 return 之前接住。
+            //   {"type":"queue-operation","operation":"enqueue","content":"…"}  进队
+            //   {"type":"queue-operation","operation":"remove", "content":"…"}  出队
+            //   {"type":"attachment","attachment":{"type":"queued_command","prompt":"…"}}  真正被处理
+            // 处理之后才算进了对话，所以那时候才当普通用户消息发出去。
+            if (type == "queue-operation") {
+                val c = d.optString("content")
+                if (c.isNotBlank()) when (d.optString("operation")) {
+                    "enqueue" -> queued += c
+                    "remove" -> queued.remove(c)
+                }
+                return@forEach
+            }
+            if (type == "attachment") {
+                val a = d.optJSONObject("attachment")
+                if (a?.optString("type") == "queued_command") {
+                    val p = a.optString("prompt")
+                    // origin.kind 不是 human 的是系统注入的，不该显示成用户说的话
+                    if (p.isNotBlank() && a.optJSONObject("origin")?.optString("kind") == "human") {
+                        out += ChatItem.UserText(uuidOf(d, line), p)
+                    }
+                }
+                return@forEach
+            }
+
             val msg = d.optJSONObject("message") ?: run {
                 // 非消息行（mode / file-history-snapshot / ai-title 之类）静默跳过
                 return@forEach
@@ -72,8 +107,13 @@ object Transcript {
                 else -> Unit
             }
         }
+        // 还排着队的挂在最后 —— 它们**还没进对话**，位置就在「此刻」
+        queued.forEachIndexed { i, t -> out += ChatItem.Queued("queued-$i-" + t.hashCode(), t) }
         return out
     }
+
+    private fun uuidOf(d: JSONObject, line: String): String =
+        d.optString("uuid", d.optString("requestId", line.hashCode().toString()))
 
     private fun parseUser(
         msg: JSONObject, meta: JSONObject?, uuid: String,

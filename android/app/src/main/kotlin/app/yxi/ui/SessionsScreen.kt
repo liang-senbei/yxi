@@ -1,5 +1,6 @@
 package app.yxi.ui
 
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
@@ -66,6 +67,7 @@ fun SessionsScreen(
     // 列表 / 悬浮排列。⚠️ 两者**并存**不是替代 —— 悬浮好看但同屏信息量少三分之一，
     // 20 个会话的时候还是列表能一眼扫完（决策 D16b 里就写明了这个代价）
     var floating by remember(host.id) { mutableStateOf(false) }
+    var pinned by remember(host.id) { mutableStateOf(Pinned.get(ctx, host.id)) }
 
     val connect = rememberSshConnector(store, keys, host)
 
@@ -175,9 +177,25 @@ fun SessionsScreen(
             contentPadding = PaddingValues(14.dp, 4.dp, 14.dp, 20.dp),
             verticalArrangement = Arrangement.spacedBy(9.dp),
         ) {
+            // ⚠️ 置顶的**从原来的组里拿出来**单独放最上面。留在原组只加个图标的话，
+            // 会话一多（实测 22 个）照样要翻半天才找到 —— 那就等于没置顶
+            val tops = sessions.filter { it.name in pinned }
+            if (tops.isNotEmpty()) {
+                item(key = "h-pinned") { PinnedHeader(tops.size) }
+                items(tops.size, key = { "p-" + tops[it].name }) { i ->
+                    SessionCard(
+                        tops[i], pinned = true,
+                        modifier = Modifier.animateItem(),
+                        onOpen = { onOpenChat(tops[i].name, tops[i].cwd) },
+                        onTerminal = { onOpenTerminal(tops[i].name, tops[i].cwd) },
+                        onSend = { sendTo = tops[i] },
+                        onPin = { pinned = pinned - tops[i].name; Pinned.set(ctx, host.id, pinned) },
+                    )
+                }
+            }
             listOf(SessionState.NeedsYou, SessionState.Working, SessionState.Done, SessionState.Idle)
                 .forEach { st ->
-                    val group = sessions.filter { it.state == st }
+                    val group = sessions.filter { it.state == st && it.name !in pinned }
                     if (group.isEmpty()) return@forEach
                     item(key = "h-${st.name}") { GroupHeader(st, group.size) }
                     items(group.size, key = { group[it].name }) { i ->
@@ -189,6 +207,7 @@ fun SessionsScreen(
                             onOpen = { onOpenChat(group[i].name, group[i].cwd) },
                             onTerminal = { onOpenTerminal(group[i].name, group[i].cwd) },
                             onSend = { sendTo = group[i] },
+                            onPin = { pinned = pinned + group[i].name; Pinned.set(ctx, host.id, pinned) },
                         )
                     }
                 }
@@ -220,6 +239,23 @@ private fun dot(st: SessionState) = when (st) {
 }
 
 @Composable
+private fun PinnedHeader(n: Int) {
+    Row(
+        Modifier.padding(4.dp, 12.dp, 0.dp, 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text("📌", style = MaterialTheme.typography.labelMedium)
+        Text("置顶", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
+        Text(
+            "$n",
+            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+            color = MaterialTheme.colorScheme.outline,
+        )
+    }
+}
+
+@Composable
 private fun GroupHeader(st: SessionState, n: Int) {
     Row(
         Modifier.padding(4.dp, 12.dp, 0.dp, 2.dp),
@@ -247,6 +283,8 @@ private fun SessionCard(
     onOpen: () -> Unit,
     onTerminal: () -> Unit,
     onSend: () -> Unit,
+    pinned: Boolean = false,
+    onPin: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val needs = s.state == SessionState.NeedsYou
@@ -260,6 +298,22 @@ private fun SessionCard(
         Column(Modifier.padding(16.dp, 14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(s.short, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                // 图钉一直在（不是只在置顶时才出现）—— 只在置顶时显示的话，
+                // 用户根本不知道有这个功能
+                Surface(
+                    color = if (pinned) MaterialTheme.colorScheme.tertiaryContainer
+                    else MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shape = Pill,
+                    modifier = Modifier.padding(end = 8.dp).clickable(onClick = onPin),
+                ) {
+                    Text(
+                        "📌",
+                        Modifier.padding(10.dp, 5.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (pinned) MaterialTheme.colorScheme.onTertiaryContainer
+                        else MaterialTheme.colorScheme.outline,
+                    )
+                }
                 if (s.attached) {
                     Text(
                         "已连",
@@ -323,4 +377,18 @@ private fun SendSheet(target: Session, onSend: (String) -> Unit, onDismiss: () -
             ) { Text("发送") }
         }
     }
+}
+
+/**
+ * 置顶的会话名。**按主机分开存** —— 换台机器同名会话未必是同一件事。
+ *
+ * ⚠️ 只存在手机本地，不写进服务器。置顶是「我关心哪几个」，
+ * 是这台手机的偏好，不是那台机器的状态 —— 写过去会污染别人的视图。
+ */
+private object Pinned {
+    private fun p(ctx: Context) = ctx.getSharedPreferences("yxi", Context.MODE_PRIVATE)
+    fun get(ctx: Context, hostId: String): Set<String> =
+        p(ctx).getStringSet("pinned:$hostId", emptySet()) ?: emptySet()
+    fun set(ctx: Context, hostId: String, v: Set<String>) =
+        p(ctx).edit().putStringSet("pinned:$hostId", v).apply()
 }
