@@ -55,6 +55,9 @@ fun SessionsScreen(
     var ssh by remember { mutableStateOf<SshSession?>(null) }
     var sendTo by remember { mutableStateOf<Session?>(null) }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    // ⚠️ 探不到 ccusage 就一直是 null，界面上整块不出现（不显示 0、不显示「未知」）
+    var usage by remember(host.id) { mutableStateOf<app.yxi.agent.Usage?>(null) }
 
     val connect = rememberSshConnector(store, keys, host)
 
@@ -77,6 +80,14 @@ fun SessionsScreen(
                     .onFailure { status = "刷新失败：${it.message}" }
             }
             delay(5_000)
+        }
+    }
+    // 用量单独一条慢节奏 —— 它 5 小时才变一格，没必要跟着 5 秒刷
+    LaunchedEffect(ssh) {
+        val s = ssh ?: return@LaunchedEffect
+        while (true) {
+            app.yxi.agent.Usage.probe(s)?.let { usage = it; UsageCache.put(ctx, host.id, it) }
+            delay(120_000)
         }
     }
     DisposableEffect(host.id) { onDispose { ssh?.disconnect() } }
@@ -105,6 +116,12 @@ fun SessionsScreen(
                     }
                 }
             }
+        }
+
+        // 用量卡固定在列表上方 —— 它是「今天还能干多少」的背景信息，
+        // 不该跟着会话列表一起滚走
+        usage?.let {
+            Box(Modifier.padding(14.dp, 0.dp, 14.dp, 8.dp)) { UsageCard(it) }
         }
 
         LazyColumn(

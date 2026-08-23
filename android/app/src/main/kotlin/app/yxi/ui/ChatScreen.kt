@@ -2,6 +2,8 @@ package app.yxi.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -40,14 +42,60 @@ private val Pill = RoundedCornerShape(100.dp)
 fun ChatScreen(
     /** ⚠️ 连接由 [Workspace] 持有并传进来 —— 切模式时这个 composable 会销毁，连接不能跟着断 */
     ssh: SshSession?,
+    /** 附件上传要用。没有就把回形针按钮藏起来 */
+    sftp: app.yxi.ssh.Sftp?,
     sessionName: String,
     cwd: String,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
+    var draft by remember { mutableStateOf("") }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var staged by remember(sessionName) { mutableStateOf<List<app.yxi.agent.Attachments.Staged>>(emptyList()) }
+    var uploading by remember { mutableStateOf(false) }
+
+    // 选文件（图片和任意文件走同一个选择器，类型看 MIME）
+    val pick = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri ->
+        val u = uri ?: return@rememberLauncherForActivityResult
+        val s = sftp ?: return@rememberLauncherForActivityResult
+        scope.launch {
+            uploading = true
+            runCatching {
+                val cr = ctx.contentResolver
+                val bytes = withContext(Dispatchers.IO) {
+                    cr.openInputStream(u)?.use { it.readBytes() } ?: ByteArray(0)
+                }
+                val mime = cr.getType(u).orEmpty()
+                val isImage = mime.startsWith("image/")
+                val name = queryName(ctx, u) ?: (if (isImage) "image" else "file")
+                val idx = staged.count { it.isImage == isImage } + 1
+                val stamp = java.text.SimpleDateFormat("MMdd-HHmmss", java.util.Locale.US)
+                    .format(java.util.Date())
+                staged = staged + app.yxi.agent.Attachments.upload(
+                    s, sessionName, name, bytes, idx, isImage, stamp
+                )
+                // ⚠️ 顺手清一次 3 天前的 —— 不用 cron，不用守护进程
+                ssh?.let { app.yxi.agent.Attachments.sweep(it) }
+            }
+            uploading = false
+        }
+    }
+
+    // 语音：走系统的识别界面（`RecognizerIntent`）。国产 ROM 有自家实现，接口一样。
+    // ⚠️ **结果只填进输入框，绝不直接发** —— 识别错一个字，在服务器上就是另一条命令。
+    val listen = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { r ->
+        val said = r.data?.getStringArrayListExtra(
+            android.speech.RecognizerIntent.EXTRA_RESULTS
+        )?.firstOrNull().orEmpty()
+        if (said.isNotBlank()) draft = (draft.trimEnd() + " " + said).trim()
+    }
     var items by remember { mutableStateOf<List<ChatItem>>(emptyList()) }
     var status by remember { mutableStateOf<String?>("连接中…") }
-    var draft by remember { mutableStateOf("") }
+
     var pending by remember { mutableStateOf<Pending?>(null) }
     var busy by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
@@ -144,12 +192,49 @@ fun ChatScreen(
             }
         }
 
+        if (staged.isNotEmpty() || uploading) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(16.dp, 0.dp, 16.dp, 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                staged.forEach { a ->
+                    Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = Pill) {
+                        Row(Modifier.clickable { staged = staged - a }.padding(12.dp, 6.dp)) {
+                            Text(
+                                a.label + "  ✕",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+                if (uploading) Text(
+                    "传着…", Modifier.padding(8.dp, 8.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+            }
+        }
+
         // 输入框：打进那个活着的会话，不调任何 API
         Row(
             Modifier.fillMaxWidth().padding(14.dp, 6.dp, 14.dp, 18.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            if (sftp != null) RoundBtn("📎") { pick.launch("*/*") }
+            RoundBtn("🎤") {
+                runCatching {
+                    listen.launch(
+                        android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                            .putExtra(
+                                android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                                android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
+                            )
+                            .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "说吧")
+                    )
+                }
+            }
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainer, shape = Pill,
                 modifier = Modifier.weight(1f).heightIn(min = 52.dp),
@@ -157,11 +242,13 @@ fun ChatScreen(
                 BasicTextFieldRow(draft) { draft = it }
             }
             Surface(
-                color = if (draft.isBlank()) MaterialTheme.colorScheme.surfaceContainer
+                color = if (draft.isBlank() && staged.isEmpty()) MaterialTheme.colorScheme.surfaceContainer
                 else MaterialTheme.colorScheme.primary,
                 shape = Pill,
-                modifier = Modifier.size(52.dp).clickable(enabled = draft.isNotBlank()) {
-                    val t = draft.trim(); draft = ""
+                modifier = Modifier.size(52.dp).clickable(enabled = draft.isNotBlank() || staged.isNotEmpty()) {
+                    // 附件的路径映射贴在正文前面 —— Claude 自己去读那些文件
+                    val t = (app.yxi.agent.Attachments.header(staged) + draft.trim()).trim()
+                    draft = ""; staged = emptyList()
                     scope.launch { ssh?.let { SessionProbe.send(it, sessionName, t) } }
                 },
             ) {
@@ -169,7 +256,7 @@ fun ChatScreen(
                     Text(
                         "↑",
                         style = MaterialTheme.typography.titleMedium,
-                        color = if (draft.isBlank()) MaterialTheme.colorScheme.outline
+                        color = if (draft.isBlank() && staged.isEmpty()) MaterialTheme.colorScheme.outline
                         else MaterialTheme.colorScheme.onPrimary,
                     )
                 }
@@ -255,3 +342,23 @@ private fun ThinkingRow(text: String) {
         }
     }
 }
+
+@Composable
+private fun RoundBtn(icon: String, onTap: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer, shape = Pill,
+        modifier = Modifier.size(46.dp).clickable(onClick = onTap),
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(icon, style = MaterialTheme.typography.titleSmall)
+        }
+    }
+}
+
+/** 从 content:// 里问出原始文件名，问不到就返回 null。 */
+private fun queryName(ctx: android.content.Context, uri: android.net.Uri): String? = runCatching {
+    ctx.contentResolver.query(uri, null, null, null, null)?.use { c ->
+        val i = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+        if (i >= 0 && c.moveToFirst()) c.getString(i) else null
+    }
+}.getOrNull()

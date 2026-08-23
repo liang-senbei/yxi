@@ -70,6 +70,7 @@ fun HostsScreen(
                 items(hosts, key = { it.id }) { h ->
                     HostRow(
                         h,
+                        ctx = ctx,
                         onClick = { onOpen(h) },
                         onLongClick = { installTarget = h },
                         onWatch = {
@@ -101,13 +102,20 @@ fun HostsScreen(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun HostRow(h: Host, onClick: () -> Unit, onLongClick: () -> Unit, onWatch: () -> Unit) {
+private fun HostRow(
+    h: Host,
+    ctx: android.content.Context,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onWatch: () -> Unit,
+) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         shape = MaterialTheme.shapes.large,
         modifier = Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
-        Row(Modifier.padding(16.dp, 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.padding(16.dp, 14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(h.alias, style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(3.dp))
@@ -143,6 +151,9 @@ private fun HostRow(h: Host, onClick: () -> Unit, onLongClick: () -> Unit, onWat
                     else MaterialTheme.colorScheme.outline,
                 )
             }
+        }
+        // 用量细线。⚠️ 没缓存过就什么都不画 —— 不为了这条线去连每一台机器
+        UsageStrip(ctx, h.id)
         }
     }
 }

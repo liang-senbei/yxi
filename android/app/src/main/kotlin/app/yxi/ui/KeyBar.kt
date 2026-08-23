@@ -36,6 +36,8 @@ fun KeyBar(
     /** compose mode（中文输入的退路，见 TerminalView 类注释） */
     composing: Boolean,
     onCompose: () -> Unit,
+    /** 语音。⚠️ 终端模式下识别结果要先确认，见 Workspace 里那个对话框 */
+    onVoice: () -> Unit,
     send: (ByteArray) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -48,6 +50,7 @@ fun KeyBar(
         Cap("Ctrl", ctrlArmed, onCtrl)
         // 「中」= compose mode。直接打中文不出候选词时点它
         Cap("中", composing, onCompose)
+        Cap("🎤", false, onVoice)
         listOf(
             "esc" to byteArrayOf(27),
             "tab" to byteArrayOf(9),

@@ -89,6 +89,14 @@ fun Workspace(
     /** 中文输入的退路，见 [app.yxi.term.TerminalView] 的类注释 */
     var composer by remember { mutableStateOf<org.connectbot.terminal.ComposeController?>(null) }
     var composing by remember { mutableStateOf(false) }
+    /** 语音识别出来的话，**先摆在这儿等你确认**，绝不直接送进终端 */
+    var heard by remember { mutableStateOf<String?>(null) }
+    val listen = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { r ->
+        heard = r.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
+            ?.firstOrNull()?.takeIf { it.isNotBlank() }
+    }
 
     // 终端仿真器**先于连接建好** —— 这样连接过程中的报错也能直接写进终端显示出来
     val emulator: TerminalEmulator = remember(host.id, sessionName) {
@@ -191,7 +199,7 @@ fun Workspace(
     }
 
     LaunchedEffect(mode, ssh) {
-        if (mode == Mode.Files && sftp == null) {
+        if ((mode == Mode.Files || mode == Mode.Chat) && sftp == null) {
             sftp = ssh?.let { runCatching { it.openSftp() }.getOrNull() }
         }
     }
@@ -251,7 +259,7 @@ fun Workspace(
                     fg = fg, bg = bg,
                     modifier = Modifier.fillMaxSize(),
                 )
-                Mode.Chat -> ChatScreen(ssh, sessionName.orEmpty(), cwd, Modifier.fillMaxSize())
+                Mode.Chat -> ChatScreen(ssh, sftp, sessionName.orEmpty(), cwd, Modifier.fillMaxSize())
                 Mode.Files -> FilesScreen(sftp, cwd, Modifier.fillMaxSize())
             }
             if (mode == Mode.Terminal && dpad) {
@@ -270,6 +278,18 @@ fun Workspace(
                 onCtrl = { stickies.ctrl = !stickies.ctrl },
                 onKeyboard = { kbVisible = !kbVisible },
                 composing = composing,
+                onVoice = {
+                    runCatching {
+                        listen.launch(
+                            android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                                .putExtra(
+                                    android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                                    android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
+                                )
+                                .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "说吧")
+                        )
+                    }
+                },
                 onCompose = {
                     composer?.toggleComposeMode()
                     composing = composer?.isComposeModeActive ?: false
@@ -277,6 +297,36 @@ fun Workspace(
                 send = { bytes -> scope.launch { shell?.write(bytes) } },
             )
         }
+    }
+    // ⚠️ **终端模式下语音必须先确认。**
+    // 识别错一个字，在服务器上就是**另一条命令**。对话模式还能在输入框里改，
+    // 终端是直接打进 PTY 的 —— 没有反悔的机会。
+    heard?.let { text ->
+        AlertDialog(
+            onDismissRequest = { heard = null },
+            title = { Text("听到的是这句") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(color = SurfaceContainerLowest, shape = MaterialTheme.shapes.medium) {
+                        Text(
+                            text, Modifier.padding(14.dp),
+                            style = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
+                        )
+                    }
+                    Text(
+                        "确认后会原样打进终端并回车。识别错了就取消重说。",
+                        style = MaterialTheme.typography.labelSmall, color = Dim,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton({
+                    val t = text; heard = null
+                    scope.launch { shell?.write((t + "\n").toByteArray()) }
+                }) { Text("发进终端") }
+            },
+            dismissButton = { TextButton({ heard = null }) { Text("取消") } },
+        )
     }
 }
 

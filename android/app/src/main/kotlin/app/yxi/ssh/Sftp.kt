@@ -72,6 +72,22 @@ class Sftp internal constructor(private val ch: ChannelSftp) {
         }
     }
 
+    /** 写一个文件（目录要先存在）。附件上传用。 */
+    suspend fun write(path: String, bytes: ByteArray) = withContext(Dispatchers.IO) {
+        lock.withLock { ch.put(java.io.ByteArrayInputStream(bytes), path, ChannelSftp.OVERWRITE) }
+    }
+
+    suspend fun mkdirs(path: String) = withContext(Dispatchers.IO) {
+        lock.withLock {
+            val parts = path.trim('/').split('/')
+            var cur = ""
+            for (seg in parts) {
+                cur += "/$seg"
+                runCatching { ch.mkdir(cur) }   // 已存在就抛，忽略即可
+            }
+        }
+    }
+
     /** 把 `~`、`.`、`..` 这些解析成绝对路径。目标不存在会抛。 */
     suspend fun realpath(path: String): String = withContext(Dispatchers.IO) {
         lock.withLock { ch.realpath(path) }
