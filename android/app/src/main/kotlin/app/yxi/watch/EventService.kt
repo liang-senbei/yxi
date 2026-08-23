@@ -18,6 +18,8 @@ import app.yxi.ssh.Host
 import app.yxi.ssh.HostStore
 import app.yxi.ssh.KeyManager
 import app.yxi.ssh.KnownHosts
+import app.yxi.agent.Pending
+import app.yxi.agent.SessionProbe
 import app.yxi.ssh.SshSession
 import kotlinx.coroutines.*
 import org.json.JSONObject
@@ -36,7 +38,9 @@ import kotlin.math.absoluteValue
  */
 class EventService : Service() {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    internal val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    /** 活着的连接，按 hostId。点通知按钮时要用它送键，不能为此再连一次。 */
+    private val live = java.util.concurrent.ConcurrentHashMap<String, SshSession>()
     private lateinit var store: HostStore
     private lateinit var keys: KeyManager
 
@@ -44,6 +48,7 @@ class EventService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         store = HostStore(applicationContext)
         keys = KeyManager(applicationContext)
         channels()
@@ -63,7 +68,7 @@ class EventService : Service() {
         return START_STICKY
     }
 
-    override fun onDestroy() { scope.cancel(); super.onDestroy() }
+    override fun onDestroy() { instance = null; scope.cancel(); super.onDestroy() }
 
     /** 盯一台机器。断了就退避重连，**永远不放弃** —— 这条服务活着的意义就是别漏事。 */
     private suspend fun watch(host: Host) {
@@ -79,12 +84,14 @@ class EventService : Service() {
                 val known = KnownHosts(store, host.id, null)
                 val s = SshSession(cfg, known); ssh = s
                 s.connect()
+                live[host.id] = s
                 Log.i("YxiWatch", "${host.alias} 连上了，开始跟随事件流")
                 wait = 2_000L
                 stream(s, host)
             }.onFailure {
                 Log.w("YxiWatch", "${host.alias} 断了：${it.message}")
             }
+            live.remove(host.id)
             runCatching { ssh?.disconnect() }
             if (!currentCoroutineContext().isActive) return
             delay(wait); wait = (wait * 2).coerceAtMost(60_000)
@@ -107,7 +114,7 @@ class EventService : Service() {
             val reader = shell.output.bufferedReader()
             while (currentCoroutineContext().isActive) {
                 val line = reader.readLine() ?: break
-                runCatching { handle(JSONObject(line), host) }
+                runCatching { handle(JSONObject(line), host, s) }
             }
         } finally {
             onCancel?.dispose()
@@ -115,13 +122,14 @@ class EventService : Service() {
         }
     }
 
-    private fun handle(e: JSONObject, host: Host) {
+    private suspend fun handle(e: JSONObject, host: Host, ssh: SshSession) {
         val ts = e.optDouble("ts", 0.0)
         val seen = lastSeen(host.id)
         if (ts <= seen) return                       // 补历史时把看过的滤掉
         setLastSeen(host.id, ts)
 
-        val session = e.optString("session").removePrefix("cc-")
+        val full = e.optString("session")
+        val session = full.removePrefix("cc-")
         val kind = e.optString("kind")
         if (kind == "end") return                    // 会话结束不值得把手机点亮
 
@@ -141,6 +149,15 @@ class EventService : Service() {
             open, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
+        // ⚠️ **「需要你」的时候，按钮上的选项一律从屏幕上读，绝不预设。**
+        // 权限提示的三个选项是 `1. Yes` / `2. Yes, and don\u2019t ask again for: …` / `3. No` ——
+        // 把「拒绝」硬编码成 2 的话，点一下就是**永久放行这一类命令**。
+        // 读不出来（解析失败 / 抓屏失败）就**不给按钮**，只留「点开去看」。宁可多一步，不能点错。
+        val pending: Pending? =
+            if (kind == "needs" && full.isNotBlank())
+                runCatching { SessionProbe.pending(ssh, full) }.getOrNull()
+            else null
+
         val n = NotificationCompat.Builder(this, CH_EVENT)
             .setSmallIcon(R.drawable.ic_stat_yxi)
             .setContentTitle(title)
@@ -151,6 +168,17 @@ class EventService : Service() {
             // 「需要你」要把屏幕点亮（锁屏也看得见）；「干完了」安静一点
             .setPriority(if (kind == "needs") NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
             .setCategory(if (kind == "needs") Notification.CATEGORY_CALL else Notification.CATEGORY_STATUS)
+            // 锁屏上要看得见内容 —— 看不见就没法判断，「锁屏批权限」也就无从谈起。
+            // 代价是命令文本会显示在锁屏上，这是个自觉的取舍。
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .also { b ->
+                pending?.options?.take(3)?.forEach { o ->
+                    b.addAction(0, "${o.number}. ${o.label.take(16)}", answerIntent(host, full, o))
+                }
+                pending?.title?.takeIf { it.isNotBlank() }?.let {
+                    b.setStyle(NotificationCompat.BigTextStyle().bigText("${host.alias}\n$it"))
+                }
+            }
             .build()
 
         runCatching {
@@ -158,6 +186,62 @@ class EventService : Service() {
             NotificationManagerCompat.from(this).notify((host.id + session).hashCode(), n)
         }.onFailure { Log.w("YxiWatch", "发通知失败（多半是没给通知权限）：${it.message}") }
     }
+
+    /**
+     * ⚠️ **必须用 `getBroadcast`，不能用 `getService`。**
+     * targetSdk 34+ 之后从后台启动服务被限制，通知按钮上的 `PendingIntent.getService`
+     * 会被**静默挡掉** —— 点了完全没反应，logcat 里也**一条日志都没有**，
+     * 最难查的那种。广播才是通知动作的标准做法。
+     */
+    private fun answerIntent(host: Host, session: String, o: Pending.Option): PendingIntent {
+        val i = Intent(this, AnswerReceiver::class.java)
+            .setAction(ACT_ANSWER)
+            .putExtra("hostId", host.id)
+            .putExtra("session", session)
+            .putExtra("number", o.number)
+            .putExtra("label", o.label)
+        return PendingIntent.getBroadcast(
+            this, (host.id + session + o.number).hashCode().absoluteValue,
+            i, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    /**
+     * 在通知上点了某个选项。
+     *
+     * ⚠️ **送键之前必须重新抓一次屏确认。** 从发通知到你按下按钮，中间可能过了几分钟 ——
+     * 那个提示可能已经被别处答掉了，屏幕上换成了**另一个**提示。
+     * 那时候把当初那个号码送进去，就是在**回答一个你根本没看见的问题**。
+     * 所以号码和文案都得跟当初一致才送；对不上就什么都不做，只提示你去看看。
+     */
+    internal suspend fun answer(i: Intent) {
+        val hostId = i.getStringExtra("hostId") ?: return
+        val session = i.getStringExtra("session") ?: return
+        val number = i.getIntExtra("number", -1)
+        val label = i.getStringExtra("label").orEmpty()
+        val s = live[hostId] ?: run { note("连接不在了，没送出去"); return }
+
+        val now = runCatching { SessionProbe.pending(s, session) }.getOrNull()
+        val same = now?.options?.firstOrNull { it.number == number && it.label == label }
+        if (same == null) { note("提示变了，没有替你按 —— 点开看看"); return }
+
+        val ok = runCatching { SessionProbe.sendKey(s, session, number.toString()) }.getOrDefault(false)
+        if (ok) runCatching {
+            NotificationManagerCompat.from(this).cancel((hostId + session.removePrefix("cc-")).hashCode())
+        } else note("送不出去，没批")
+    }
+
+    /** 用一条通知代替 toast —— 服务里 toast 在新版安卓上不一定弹得出来。 */
+    private fun note(text: String) = runCatching {
+        NotificationManagerCompat.from(this).notify(
+            9_001,
+            NotificationCompat.Builder(this, CH_EVENT)
+                .setSmallIcon(R.drawable.ic_stat_yxi)
+                .setContentTitle(text)
+                .setAutoCancel(true)
+                .build(),
+        )
+    }.let { }
 
     private fun prefs() = getSharedPreferences("yxi", Context.MODE_PRIVATE)
     private fun lastSeen(hostId: String) = prefs().getFloat("seen:$hostId", 0f).toDouble()
@@ -195,6 +279,10 @@ class EventService : Service() {
         private const val CH_EVENT = "yxi.events"
         private const val CH_ONGOING = "yxi.ongoing"
         private const val ONGOING_ID = 1
+        internal const val ACT_ANSWER = "app.yxi.ANSWER"
+
+        /** 广播接收器要够到活着的这个服务实例。同进程单例，直接引用最省事。 */
+        @Volatile internal var instance: EventService? = null
 
         /** 有主机被勾选就起，全都取消就停。调用方不用自己判断。 */
         fun sync(ctx: Context, anyWatched: Boolean) {

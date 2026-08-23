@@ -34,6 +34,11 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- 通知按钮上选一项 → 送键。⚠️ 必须是广播：通知动作用 getService 会被静默挡掉 -->
+        <receiver
+            android:name=".watch.AnswerReceiver"
+            android:exported="false" />
+
         <receiver
             android:name=".watch.BootReceiver"
             android:exported="true"

@@ -65,6 +65,40 @@ class PromptTest {
            Enter to select · ↑/↓ to navigate · Esc to cancel
     """.trimIndent()
 
+    /**
+     * ⚠️ **真实的权限提示** —— 从真机屏幕原样抄的。
+     * 它的脚注**没有 `to navigate`**，一开始的实现完全认不出来 ——
+     * 而这是「手机上批权限」的全部前提，认不出来整个 G11 就无从谈起。
+     */
+    private val permission = """
+         Bash command
+
+           pip install requests 2>&1 | tail -5
+           Install requests package
+
+         This command requires approval
+
+         Do you want to proceed?
+         ❯ 1. Yes
+           2. Yes, and don't ask again for: pip install *
+           3. No
+
+         Esc to cancel · Tab to amend · ctrl+e to explain
+    """.trimIndent()
+
+    @Test fun 权限提示() {
+        val p = Prompt.parse(permission)!!
+        assertEquals("Do you want to proceed?", p.title)
+        assertEquals(false, p.multiSelect)
+        assertEquals(listOf(1, 2, 3), p.options.map { it.number })
+        assertEquals("Yes", p.options[0].label)
+        assertEquals("No", p.options[2].label)
+        // ⚠️ 「拒绝」是 3 不是 2 —— 2 是「以后都别问」。
+        // 通知按钮上要是把「拒绝」硬编码成 2，点一下就等于**永久放行这一类命令**。
+        // 所以按钮的号码必须从屏幕上读，不能猜。
+        assertEquals(true, p.options[1].label.startsWith("Yes,"))
+    }
+
     @Test fun 单选() {
         val p = Prompt.parse(single)!!
         assertEquals("晚饭吃面还是吃饭？", p.title)

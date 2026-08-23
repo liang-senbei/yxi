@@ -52,5 +52,9 @@ adb shell run-as app.yxi cp /data/local/tmp/hosts.json files/hosts.json
 rm -f /tmp/.hosts.json
 echo "· hosts.json 写好（watch=$WATCH，指纹已预置，不会弹确认）"
 
+# ⚠️ 重装会连权限一起撤销 —— 没有它前台服务照跑但**一条通知都发不出来**
+adb shell pm grant app.yxi android.permission.POST_NOTIFICATIONS 2>/dev/null || true
+echo "· 通知权限已授予"
+
 adb shell am force-stop app.yxi; adb shell am start -n app.yxi/.MainActivity >/dev/null
 echo "· App 重启完毕"

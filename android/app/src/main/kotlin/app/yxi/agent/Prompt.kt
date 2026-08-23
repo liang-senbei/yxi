@@ -41,9 +41,17 @@ object Prompt {
     private val OPTION = Regex("""^\s*[❯>]?\s*(\d+)\.\s+(.*\S)\s*$""")
     private val CHECKBOX = Regex("""^\[([ xX✔✓])]\s*(.*)$""")
 
-    /** 底部这行是选择器的标志。没有它就说明当前没在等人选。 */
+    /**
+     * 底部这行是选择器的标志。没有它就说明当前没在等人选。
+     *
+     * ⚠️ **脚注不止一种。** 一开始只认 `to navigate`，结果**权限提示完全认不出来** ——
+     * 而那恰恰是最该被认出来的一种。真机上抓到的两种：
+     *   · `Enter to select · ↑/↓ to navigate · Esc to cancel`（AskUserQuestion / 计划批准）
+     *   · `Esc to cancel · Tab to amend · ctrl+e to explain`（**权限提示**，没有 navigate）
+     * 共同点是 `to cancel`，就拿它当锚。
+     */
     private fun isFooter(l: String) =
-        "to navigate" in l && ("Enter to" in l || "to select" in l)
+        "to cancel" in l || ("to navigate" in l && ("Enter to" in l || "to select" in l))
 
     /**
      * @param screen `tmux capture-pane -p` 的原样输出
