@@ -35,6 +35,30 @@ class SshSession(
      */
     private val chanLock = kotlinx.coroutines.sync.Mutex()
 
+    /**
+     * 包一条**跟着通道一起死**的长期跟随命令。
+     *
+     * ⚠️ `tail -f` 只有在**写**的时候才会因为管道断掉收到 SIGPIPE。事件流大部分时间是空的，
+     * 它永远不写，于是通道关了它还活着 —— 每次重连都在服务器上留一个僵尸 `tail`。
+     *
+     * ⚠️ **靠 stdin EOF 判断也不行**（实测过：关掉通道之后远端的 `cat` 并没有 EOF，
+     * 进程照样活着）。所以改成**主动探活**：每 20 秒往 stdout 写一个空行，
+     * 通道断了这一写就会失败 → 外壳退出 → `trap` 把 tail 带走。
+     *
+     * 那个空行两边的解析器都会跳过（`Transcript.parse` 跳空行、事件流那边 `JSONObject("")`
+     * 抛异常被吞），所以它同时还是一条**心跳**，白送的。
+     */
+    companion object {
+        fun follow(command: String): String =
+            "$command & __p=\$!; " +
+                // ⚠️ 两个 trap 要分开写。合成一个 `trap 'kill …' EXIT PIPE …` 的话，
+                // 收到 SIGPIPE 会执行完 handler **继续跑循环** —— tail 是杀掉了，
+                // 外壳自己却永远不退，于是每次重连在服务器上留一个空壳进程。
+                "trap 'kill \$__p 2>/dev/null' EXIT; " +
+                "trap 'exit' PIPE HUP TERM INT; " +
+                "while :; do sleep 20; printf '\\n' || exit; done"
+    }
+
     /** 连接还活着吗。切网之后靠它发现「假活」。 */
     val isAlive: Boolean get() = session?.isConnected == true
 

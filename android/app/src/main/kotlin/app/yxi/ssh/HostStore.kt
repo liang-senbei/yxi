@@ -58,6 +58,16 @@ class HostStore(ctx: Context) {
 
     fun get(id: String): Host? = _hosts.value.firstOrNull { it.id == id }
 
+    /**
+     * 从磁盘重新读一遍。
+     *
+     * ⚠️ **前台服务和界面各有一个 [HostStore] 实例**（一个在 Service 里、一个在 Activity 里），
+     * 各自在构造时读一次文件就再也不读了。界面上改了开关，服务那份是**旧的** ——
+     * 表现是「把铃铛关掉，那台机器照样在被盯着」，而且不报任何错。
+     * 所以服务每次 `onStartCommand` 都要先 reload。
+     */
+    fun reload() { _hosts.value = read() }
+
     /** 认证方式：装过公钥就走密钥，否则用记住的密码。两条都没有 → null，UI 该提示补认证信息。 */
     fun authFor(h: Host, keys: KeyManager): HostConfig.Auth? = when {
         h.useKey -> HostConfig.Auth.PrivateKey(keys.privateKeyPem())

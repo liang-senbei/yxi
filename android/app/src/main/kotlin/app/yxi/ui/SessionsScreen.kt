@@ -54,6 +54,7 @@ fun SessionsScreen(
     var status by remember { mutableStateOf("连接中…") }
     var ssh by remember { mutableStateOf<SshSession?>(null) }
     var sendTo by remember { mutableStateOf<Session?>(null) }
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
 
     val connect = rememberSshConnector(store, keys, host)
 
@@ -67,9 +68,14 @@ fun SessionsScreen(
         }
         // 每 5 秒刷一次。一次往返拿全部，不是一个会话一个请求
         while (true) {
-            runCatching { SessionProbe.snapshot(s) }
-                .onSuccess { sessions = it; status = "" }
-                .onFailure { status = "刷新失败：${it.message}" }
+            // ⚠️ **手指在列表上的时候不要刷。** 会话换组（干活中 → 等你）会让下面的卡片整体上移，
+            // 而刷新和点击之间只有几十毫秒 —— 我自己就因此点进过别人的会话。
+            // 用户看到的位置和点下去的位置必须是同一个。
+            if (!listState.isScrollInProgress) {
+                runCatching { SessionProbe.snapshot(s) }
+                    .onSuccess { sessions = it; status = "" }
+                    .onFailure { status = "刷新失败：${it.message}" }
+            }
             delay(5_000)
         }
     }
@@ -83,6 +89,8 @@ fun SessionsScreen(
                     if (status.isEmpty()) "${sessions.size} 个会话 · 点读对话 · 长按发消息" else status,
                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                     color = MaterialTheme.colorScheme.outline,
+                    maxLines = 1,   // 窄屏上会折成两行把下面顶下去
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -101,6 +109,7 @@ fun SessionsScreen(
 
         LazyColumn(
             Modifier.weight(1f),
+            state = listState,
             contentPadding = PaddingValues(14.dp, 4.dp, 14.dp, 20.dp),
             verticalArrangement = Arrangement.spacedBy(9.dp),
         ) {
@@ -110,8 +119,10 @@ fun SessionsScreen(
                     if (group.isEmpty()) return@forEach
                     item(key = "h-${st.name}") { GroupHeader(st, group.size) }
                     items(group.size, key = { group[it].name }) { i ->
+                        // 换组时滑过去而不是瞬移 —— 至少让用户看见「它动了」
                         SessionCard(
                             group[i],
+                            modifier = Modifier.animateItem(),
                             // 点卡片 = 对话模式（主界面）；「开终端」按钮才去终端
                             onOpen = { onOpenChat(group[i].name, group[i].cwd) },
                             onTerminal = { onOpenTerminal(group[i].name, group[i].cwd) },
@@ -159,14 +170,20 @@ private fun GroupHeader(st: SessionState, n: Int) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SessionCard(s: Session, onOpen: () -> Unit, onTerminal: () -> Unit, onSend: () -> Unit) {
+private fun SessionCard(
+    s: Session,
+    onOpen: () -> Unit,
+    onTerminal: () -> Unit,
+    onSend: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val needs = s.state == SessionState.NeedsYou
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         shape = MaterialTheme.shapes.large,
         // 点=开终端，**长按=发消息**。发消息对任意会话都可用，
         // 不只是「等你」那组——只是那组把按钮摆出来了而已
-        modifier = Modifier.fillMaxWidth().combinedClickable(onClick = onOpen, onLongClick = onSend),
+        modifier = modifier.fillMaxWidth().combinedClickable(onClick = onOpen, onLongClick = onSend),
     ) {
         Column(Modifier.padding(16.dp, 14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

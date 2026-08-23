@@ -33,7 +33,11 @@ object TranscriptStream {
      * 不用等 Claude 下一次说话。
      */
     fun stream(ssh: SshSession, file: String, backlog: Int = 800): Flow<String> = flow {
-        val shell = ssh.openExecStream("tail -n $backlog -f '$file'")
+        val shell = ssh.openExecStream(SshSession.follow("tail -n $backlog -f '$file'"))
+        // ⚠️ **取消协程不会打断阻塞在 readLine() 上的线程** —— 它不是挂起点。
+        // 不主动关通道的话，`finally` 永远轮不到执行，线程和远端进程一起挂着。
+        val onCancel = kotlin.coroutines.coroutineContext[kotlinx.coroutines.Job]
+            ?.invokeOnCompletion { runCatching { shell.close() } }
         try {
             val reader = shell.output.bufferedReader()
             while (true) {
@@ -41,6 +45,7 @@ object TranscriptStream {
                 emit(line)
             }
         } finally {
+            onCancel?.dispose()
             shell.close()
         }
     }.flowOn(Dispatchers.IO)

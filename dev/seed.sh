@@ -11,6 +11,17 @@ export ANDROID_HOME=${ANDROID_HOME:-/opt/android-sdk}
 export PATH="$ANDROID_HOME/platform-tools:$PATH"
 WATCH="${1:-true}"      # hosts.json 里 watch 字段的值
 
+# ⚠️ **仓库根目录用脚本自己的位置算，绝不用相对路径。**
+# 我已经因为「`cd android` 之后 `adb install -r android/app/...`」白查过两次
+# （见 TROUBLESHOOTING #43，写完那条二十分钟后又踩了一遍）。
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+APK="$ROOT/android/app/build/outputs/apk/debug/app-debug.apk"
+
+# 顺手把装包也做了 —— 装包失败静默跑旧包是这个循环里最贵的一种错
+if [ -f "$APK" ]; then
+  adb install -r "$APK" | tail -1     # ⚠️ 别把输出吞掉，就一行
+fi
+
 adb shell am force-stop app.yxi
 adb shell am start -n app.yxi/.MainActivity >/dev/null; sleep 4
 adb logcat -c; adb shell input tap 500 200; sleep 4          # 点「公钥」逼它生成

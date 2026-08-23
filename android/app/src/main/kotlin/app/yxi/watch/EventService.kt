@@ -50,6 +50,8 @@ class EventService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // ⚠️ 必须先 reload：界面那份 HostStore 是另一个实例，改了开关这边不知道
+        store.reload()
         val watched = store.hosts.value.filter { it.watch }
         if (watched.isEmpty()) { stopSelf(); return START_NOT_STICKY }
 
@@ -95,14 +97,22 @@ class EventService : Service() {
         // ⚠️ `mkdir -p` 不能省：**没装 yxi-hook 的机器上根本没有 `~/.yxi/`**，
         // 那样 touch 会失败、tail 起不来、通道立刻 EOF → 无限重连（每次还要完整握手认证一遍）。
         // 建好目录之后它就只是**一条永远没有内容的流**——正是「没装就静悄悄」该有的样子。
-        val shell = s.openExecStream("mkdir -p \$HOME/.yxi 2>/dev/null; touch $f 2>/dev/null; tail -n 300 -f $f")
+        val prep = "mkdir -p \$HOME/.yxi 2>/dev/null; touch $f 2>/dev/null; "
+        val shell = s.openExecStream(prep + SshSession.follow("tail -n 300 -f $f"))
+        // ⚠️ 取消协程不会打断阻塞在 readLine() 上的线程（那不是挂起点）。
+        // 不主动关通道的话，关掉铃铛之后这条通道和远端的 tail 都还活着。
+        val onCancel = currentCoroutineContext()[kotlinx.coroutines.Job]
+            ?.invokeOnCompletion { runCatching { shell.close() } }
         try {
             val reader = shell.output.bufferedReader()
             while (currentCoroutineContext().isActive) {
                 val line = reader.readLine() ?: break
                 runCatching { handle(JSONObject(line), host) }
             }
-        } finally { shell.close() }
+        } finally {
+            onCancel?.dispose()
+            shell.close()
+        }
     }
 
     private fun handle(e: JSONObject, host: Host) {
