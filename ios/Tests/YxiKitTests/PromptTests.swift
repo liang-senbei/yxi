@@ -55,7 +55,7 @@ final class PromptTests: XCTestCase {
     /// （指纹算法本身要是有意改了，这条会红 —— 那是对的：改算法等于让所有
     /// 已经发出去的通知全部作废，本来就该是一次自觉的改动。）
     func test_指纹跨进程稳定() {
-        XCTAssertEqual(Prompt.parse(Fixture.permA)?.fingerprint, "3233993a70e99afb")
+        XCTAssertEqual(Prompt.parse(Fixture.permA)?.fingerprint, "def4c91f8dfb3238")
     }
 
     func test_单选() {
@@ -103,6 +103,36 @@ final class PromptTests: XCTestCase {
         XCTAssertEqual(p.options.map(\.number), [1, 2, 3])
         XCTAssertTrue(p.options[0].label.hasPrefix("Yes,"))
         XCTAssertFalse(p.options.contains { $0.label.contains("烧水") }, "计划正文不是选项")
+    }
+
+    /// ⚠️ **正文里随口提一句计划文件，不算「在等你选」。**
+    /// 真机上抓到的这一屏：正文是 `1. 烧水 / 2. 下锅 / 3. 出锅`，紧接着一行
+    /// 「计划已存到 ~/.claude/plans/lively-honking-widget.md」。那行路径长得跟
+    /// 计划批准框的脚注一模一样 —— 认成脚注的话，那三个步骤就变成三个可点的「选项」，
+    /// **点一下就往一个根本没在等人选的会话里送按键**。
+    ///
+    /// 挡住它的是：`.claude/plans/` 这条锚点额外要求「它是屏幕上最后一条非空行」。
+    /// 真的选择器一定占着屏幕最底下；随口一提的那行下面还有输入框和模式行。
+    func test_正文里提到计划文件不算提示() {
+        XCTAssertTrue(Fixture.plansPathMention.contains(".claude/plans/"), "样本得真的含那行路径")
+        XCTAssertNil(Prompt.parse(Fixture.plansPathMention))
+        // ⚠️ 这一屏才是真正要命的那种：三步是**缩进**的，跟真选项一模一样
+        // （上一屏第一步顶着 `● ` 所以碰巧不匹配选项的正则 —— 那是运气，不是规则）。
+        XCTAssertTrue(Fixture.plansPathWithList.contains("\n  1. 烧水"), "样本得真的有缩进的编号行")
+        XCTAssertNil(Prompt.parse(Fixture.plansPathWithList),
+                     "会话根本没在等人选，却给了三个可点的选项")
+    }
+
+    /// ⚠️ **用户在输入框里打了一句带编号的话，不算「在等你选」。**
+    /// 真机这一屏：输入框里是没发出去的 `1. 先做这个`，渲染成 `❯ 1. 先做这个` ——
+    /// 跟选择器的光标行一字不差（连 `❯` 后面那个不换行空格都一样）。
+    /// 认成选择器的话，用户每打一句带编号的话就冒一张「等你选」的卡片，
+    /// 点一下往 pty 里打个 `1` 进他正在写的句子里。
+    ///
+    /// 挡住它的是「光标锚的选项块至少两行」：输入框下面紧跟着就是那条横线。
+    func test_输入框里打了编号不算提示() {
+        XCTAssertTrue(Fixture.typedNumberedInInputBox.contains("❯\u{a0}1. 先做这个"), "样本得真有那行")
+        XCTAssertNil(Prompt.parse(Fixture.typedNumberedInInputBox))
     }
 
     /// 没在等人选的时候必须返回 nil，不能把普通输出当成选项。

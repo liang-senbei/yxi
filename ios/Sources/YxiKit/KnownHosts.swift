@@ -1,7 +1,7 @@
 import Crypto
 import Foundation
 import NIOCore
-import NIOSSH
+@preconcurrency import NIOSSH   // NIOSSHPublicKey 没标 Sendable，我们只读它
 
 /// 首次见到某台主机时要用户拍板。
 ///

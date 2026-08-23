@@ -64,6 +64,13 @@ public enum Transcript {
                         // 已经被处理」**，所以一律记进「已消化」。只认 human 那些的话，
                         // 系统注入的那条会永远挂在「排队中」—— 它永远不会以 `user` 消息
                         // 出现，于是 #76 那条终态规则也救不了它。
+                        //
+                        // ⚠️ 变异测试显示这一句去掉之后测试**不会红** —— 因为上面
+                        // 「`<task-notification>` 不进队」那条把当前版本已知的唯一一种
+                        // 系统注入挡在门外了。别据此删掉它：那条是**字符串白名单**，
+                        // 下一个版本换个标签名就失效；这一句是**结构性**的，
+                        // 任何「被处理过」的排队都会被它清掉。#76 的教训就是
+                        // 「别只认某一个转换事件」，留着这层兜底是有意的。
                         processed.insert(p.trimmingCharacters(in: .whitespacesAndNewlines))
                         // origin.kind 不是 human 的是系统注入的，不该显示成用户说的话
                         if a["origin"]["kind"].string == "human" {

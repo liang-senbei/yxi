@@ -69,6 +69,38 @@ final class HostStoreTests: XCTestCase {
         XCTAssertEqual(background.get("1")?.watch, true)
     }
 
+    // MARK: - 改了地址就得忘掉指纹（#68）
+
+    /// ⚠️ 不清的话下次连接会报「主机指纹变了」—— 那是中间人攻击的措辞，
+    /// 会把一次正常的编辑吓成一次安全事件。
+    func test_改地址会清掉存着的指纹() {
+        let url = tempURL()
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let s = HostStore(url: url)
+        s.upsert(Host(id: "1", alias: "a", hostname: "1.2.3.4", username: "root", hostKey: "ssh-ed25519 AAAA"))
+        s.upsert(Host(id: "1", alias: "a", hostname: "5.6.7.8", username: "root", hostKey: "ssh-ed25519 AAAA"))
+        XCTAssertNil(s.get("1")?.hostKey)
+    }
+
+    func test_改端口也清() {
+        let url = tempURL()
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let s = HostStore(url: url)
+        s.upsert(Host(id: "1", alias: "a", hostname: "1.2.3.4", username: "root", hostKey: "ssh-ed25519 AAAA"))
+        s.upsert(Host(id: "1", alias: "a", hostname: "1.2.3.4", port: 8443, username: "root", hostKey: "ssh-ed25519 AAAA"))
+        XCTAssertNil(s.get("1")?.hostKey)
+    }
+
+    /// 只改别名/用户名不该把指纹丢掉 —— 那会让用户下次连接白白再确认一遍。
+    func test_只改别名不清指纹() {
+        let url = tempURL()
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let s = HostStore(url: url)
+        s.upsert(Host(id: "1", alias: "旧", hostname: "1.2.3.4", username: "root", hostKey: "ssh-ed25519 AAAA"))
+        s.upsert(Host(id: "1", alias: "新", hostname: "1.2.3.4", username: "root", hostKey: "ssh-ed25519 AAAA"))
+        XCTAssertEqual(s.get("1")?.hostKey, "ssh-ed25519 AAAA")
+    }
+
     // MARK: - 认证方式的选择
 
     func test_装过公钥的走密钥() {

@@ -56,6 +56,10 @@ struct HostsScreen: View {
                                 onWatch: { onSetWatch(h.id, !h.watch) }
                             )
                         }
+                        // ⚠️ 铃铛在 iOS 上只有前台盯梢 —— 没有前台服务，进后台约 30 秒 socket 就被收走。
+                        // 文案必须**当面说清**，不能让用户以为锁屏了也会响（PRD §2.7 已否掉推送）。
+                        YxHint("🔔 只在 Yxi 开着的时候盯 —— iOS 不允许后台常驻连接，锁屏或切走就不会响了。")
+                            .padding(.horizontal, 4).padding(.top, 14)
                     }
                     .padding(.horizontal, 14).padding(.bottom, 18)
                 }

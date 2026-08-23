@@ -1,4 +1,4 @@
-import Crypto
+@preconcurrency import Crypto   // Curve25519 的私钥类型没标 Sendable
 import Foundation
 
 /// 一台主机的连接配置 —— 连接那一刻真正用到的东西。

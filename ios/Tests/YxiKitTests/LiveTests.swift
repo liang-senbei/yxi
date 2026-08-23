@@ -20,19 +20,22 @@ final class LiveTests: XCTestCase {
         XCTAssertNil(live.status)
     }
 
-    /// ⚠️ 这条测试**必须把真状态行去掉才有意义**。
-    /// 真状态行永远渲染在输出区最底下，而解析是倒着找第一条 ——
-    /// 留着它的话这条测试会「绿得没有理由」：它根本走不到要验的那条规则。
-    /// 去掉之后，屏幕上唯一还像状态行的就只剩带缩进的那些，
-    /// 于是「必须顶格」成了唯一挡住它们的东西。
-    func test_带缩进的不算状态行() {
-        let 去掉状态行 = Fixture.busyQueued
+    /// ⚠️ **屏幕上「提到」状态词的那几行不能当状态行。**
+    /// 真机样本里带缩进印着 `  · Scampering… (4m 48s · ↓ 10.2k tokens)` 和
+    /// `  ✽ Pondering… (12s)` —— 是我让它把这两行原样回给我，于是它们作为**正文**
+    /// 出现在转录区。它们跟真状态行的唯一区别就是**没顶格**。
+    ///
+    /// 跟下一条一样，**必须先把真状态行去掉**：真状态行永远在最底下，而解析是倒着找第一条，
+    /// 留着它这条测试就绿得没有理由 —— 它根本走不到「顶格」那条规则。
+    func test_正文里印着状态词不算状态行() {
+        let 去掉状态行 = Fixture.busyIndentedStatus
             .components(separatedBy: "\n")
-            .filter { !$0.hasPrefix("✶ ") && !$0.hasPrefix("✽ ") && !$0.hasPrefix("✢ ") && !$0.hasPrefix("· ") }
+            .filter { !$0.hasPrefix("✻ Reticulating…") }
             .joined(separator: "\n")
+        XCTAssertTrue(去掉状态行.contains("  · Scampering… (4m 48s"), "样本得真的还留着那两行缩进的")
         let live = Live.parse(去掉状态行)
-        XCTAssertTrue(live.busy, "这份样本里应该仍然是「在忙」")
-        XCTAssertNil(live.status, "缩进的那些不能当状态：\(live.status ?? "nil")")
+        XCTAssertTrue(live.busy)
+        XCTAssertNil(live.status, "缩进的那两行被当成状态词了：\(live.status ?? "nil")")
     }
 
     /// ⚠️ **中文不写空格 —— 于是一条顶格的中文排队输入长得跟状态行一模一样。**
@@ -60,6 +63,18 @@ final class LiveTests: XCTestCase {
     /// 真状态行还在的时候，认的是它，不是上面那条中文。
     func test_真状态行仍然认得出来() {
         XCTAssertEqual(Live.parse(Fixture.busyCJKEllipsis).status, "Gusting… (29s · ↓ 208 tokens)")
+    }
+
+    /// ⚠️ **不忙就不报状态词，哪怕屏幕上有一行完全符合状态行长相的。**
+    /// 真机这一屏是**空闲**的，但顶格印着 `● Reticulating… 这是正文不是状态行` ——
+    /// 顶格、拉丁词、带 `…`，三条规则全中，可它只是正文。
+    /// 报出来的话手机上会一直转着圈说「正在 Reticulating…」，
+    /// 而那个会话早就停下来等你了 —— **看起来永远在忙，等于看不出什么时候该你了**。
+    func test_空闲时哪怕有像状态行的正文也不报() {
+        XCTAssertTrue(Fixture.idleTopLevelEllipsis.contains("\n● Reticulating… "), "样本得真有那行")
+        let live = Live.parse(Fixture.idleTopLevelEllipsis)
+        XCTAssertFalse(live.busy)
+        XCTAssertNil(live.status, "空闲还报状态：\(live.status ?? "nil")")
     }
 
     /// 一次抓屏同时解出「等你选」和「在忙什么」。

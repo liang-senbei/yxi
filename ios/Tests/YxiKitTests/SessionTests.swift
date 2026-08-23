@@ -45,6 +45,25 @@ final class SessionTests: XCTestCase {
         XCTAssertTrue(s.contains(#"printf '\n' || exit"#))
     }
 
+    // MARK: - tmux
+
+    /// ⚠️ 漏了 `mouse on` 的现象是「终端里怎么划都不动」，
+    /// 而且完全看不出跟 tmux 配置有关 —— 所以钉住它。
+    func test_attach带上鼠标上报() {
+        let cmd = SSHSession.attach(session: "cc-mail")
+        XCTAssertTrue(cmd.contains("set -g mouse on"), "漏了 mouse on，tmux 里滚不动历史")
+        XCTAssertTrue(cmd.contains("has-session -t 'cc-mail'"))
+        XCTAssertTrue(cmd.contains("attach -t 'cc-mail'"))
+        // ⚠️ 分号要转义给 tmux，不是给 shell。漏了反斜杠的话 shell 自己吃掉分号，
+        // tmux 只收到第一条 set，后两条**静默丢掉** —— 包括 mouse on。
+        XCTAssertTrue(cmd.contains(#"on \; set -g mouse on \;"#), "分号没转义：\(cmd)")
+    }
+
+    func test_attach不带YXI_CLIENT那类假动作() {
+        // sshd 默认 PermitUserEnvironment no，setEnv 会被静默拒绝
+        XCTAssertFalse(SSHSession.attach(session: "x").contains("YXI_CLIENT"))
+    }
+
     // MARK: - 公钥行
 
     /// ⚠️⚠️ 全项目最贵的一次事故（#65）：安卓给**每台设备**写的注释都是 `yxi@android`，

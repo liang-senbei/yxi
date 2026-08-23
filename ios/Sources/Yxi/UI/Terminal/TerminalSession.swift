@@ -109,9 +109,10 @@ final class TerminalSession: ObservableObject, TerminalViewDelegate {
     ///   · 裸 shell → `TerminalView` 本身就是 `UIScrollView`，手势和回滚它自带
     ///   · tmux 里 → 靠**鼠标上报**（SwiftTerm 的 `allowMouseReporting` 默认 true），
     ///     拖拽被当成鼠标事件送给 tmux，tmux 滚自己的历史。
-    ///     ⚠️ 前提是服务器侧 `tmux set -g mouse on` —— 安卓版在 Workspace 里设过，
-    ///     iOS 这边同一条命令不能漏，漏了就是「怎么划都不动」。
-    ///     实在不行还有工具条上的 `^B`（进 copy-mode）。
+    ///     ⚠️ 前提是服务器侧 `tmux set -g mouse on`。**别自己拼那条命令** ——
+    ///     用 `YxiKit.SSHSession.attach(session:)`，它把 mouse on 和分号的反斜杠转义
+    ///     都带好了（漏了反斜杠 shell 会吃掉分号，后两条 set 静默丢掉，
+    ///     症状跟没写这行一模一样）。实在不行还有工具条上的 `^B`（进 copy-mode）。
     ///
     /// 这几个 API 在安卓那边**根本拿不到**：termlib 把 `ScrollController` 和
     /// `TerminalWithAccessibility` 都标成了 Kotlin `internal`（字节码上看是 public，

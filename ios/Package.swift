@@ -74,9 +74,14 @@ products.append(.library(name: "Yxi", targets: ["Yxi"]))
 let package = Package(
     name: "Yxi",
     platforms: [
-        // Citadel 的地板是 iOS 17 / macOS 14；
-        // 但 `withPTY` / `withTTY` / `withExec` 标了 `@available(macOS 15.0, *)`，
-        // 所以 macOS 这边只能是 15。iOS 那边没有额外标注，17 就够。
+        // iOS 17 有三个独立的理由，任何一个单拎出来都足够：
+        //   · **Citadel 的地板就是 iOS 17**，退不到 15/16
+        //   · 悬浮会话切换（D17/D18）要 iOS 17 的滚动 API
+        //     （`scrollTargetBehavior` / `scrollPosition(id:)` / `scrollTransition`）——
+        //     退回 `TabView(.page)` 邻居就完全看不见，那张稿子用户拍过板
+        //   · MarkdownUI 2.x 要 15+，被上面两条盖住了
+        // macOS 15 是因为 `withPTY` / `withTTY` / `withExec` 标了
+        // `@available(macOS 15.0, *)`；iOS 那边没有额外标注。
         .iOS(.v17),
         .macOS("15.0"),   // 字符串写法：`.v15` 要 swift-tools-version 6.0，而我们停在 5.9（见文件头）
     ],

@@ -1,4 +1,4 @@
-import Crypto
+@preconcurrency import Crypto   // Curve25519 的私钥类型没标 Sendable
 import Foundation
 
 /// 一台主机的持久化记录。
@@ -129,10 +129,25 @@ public final class HostStore: @unchecked Sendable {
         self.init(url: dir.appendingPathComponent("hosts.json"))
     }
 
+    /// ⚠️⚠️ **改了地址或端口，存着的主机指纹在这里自动清掉。**
+    ///
+    /// 安卓 #68：主机只能加不能改，于是文档里写着「删掉重加」。
+    /// 而一旦允许改，就冒出一个更阴的问题：`root@a:22` 改成 `root@b:22`
+    /// 之后指纹当然对不上 —— 用户看到的是**「主机指纹变了」**，
+    /// 那是中间人攻击的措辞，会把一次正常的编辑吓成一次安全事件。
+    ///
+    /// **不做成「调用方记得传一个 forgetHostKey 标志」** —— 那是一件会被忘的事，
+    /// 而忘了的代价是上面那句吓人的话。这里按「连的还是不是同一台机器」自己判，
+    /// 调用方什么都不用记。
     public func upsert(_ h: Host) {
         lock.withLock {
+            let previous = _hosts.first { $0.id == h.id }
+            var incoming = h
+            if let previous, previous.hostname != h.hostname || previous.port != h.port {
+                incoming.hostKey = nil
+            }
             _hosts.removeAll { $0.id == h.id }
-            _hosts.append(h)
+            _hosts.append(incoming)
         }
         write()
     }

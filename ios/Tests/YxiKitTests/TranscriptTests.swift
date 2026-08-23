@@ -85,6 +85,17 @@ final class TranscriptTests: XCTestCase {
         XCTAssertTrue(Transcript.parse([Fixture.modeLine]).isEmpty)
     }
 
+    /// ⚠️ **侧链（子 agent 的内部独白）不进主时间线**，否则主线会被淹掉。
+    /// 2.1.241 起子 agent 另存到 `<会话uuid>/subagents/*.jsonl`（这条样本就是从那儿抠的），
+    /// 主文件里已经没有 `isSidechain: true` 了 —— 但**老转录里有**，
+    /// 而用户的会话动辄跨好几个版本。
+    func test_侧链不进主时间线() {
+        XCTAssertTrue(Fixture.sidechainLine.contains("\"isSidechain\":true"), "样本得真是侧链")
+        XCTAssertTrue(Transcript.parse([Fixture.sidechainLine]).isEmpty)
+        // 混在正常行里也只丢它自己
+        XCTAssertEqual(Transcript.parse([Fixture.sidechainLine, Fixture.assistantText]).count, 1)
+    }
+
     /// ⚠️ `tail -f` 追一个正在写的文件时**一定会读到半行**。那不是错误，是常态：
     /// 半行必须只丢它自己，不能把这一批里其它的好行一起带走。
     func test_半行不会带垮整批() {

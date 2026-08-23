@@ -127,9 +127,8 @@ final class ChatModel: ObservableObject {
                 do {
                     // ⚠️ **一次抓屏解两件事。** 分两次抓会看到不一致的瞬间
                     // （比如「已经不忙了」但「还挂着一个待答」），界面会闪。
-                    let screen = try await backend.peek(session: session, lines: 200)
-                    pending = Prompt.parse(screen)
-                    live = Live.parse(screen)
+                    (pending, live) = SessionProbe.readScreen(
+                        try await backend.peek(session: session, lines: 200))
                 } catch {
                     // 抓屏失败不值得打扰用户：下一轮就重试了。
                     // ⚠️ 但取消要原样退出，别当成一次失败继续循环
@@ -189,9 +188,8 @@ final class ChatModel: ObservableObject {
                 try await work()
                 // 等 TUI 重绘完再抓，否则拿回来的还是刚才那一屏
                 try await Task.sleep(nanoseconds: 500_000_000)
-                let screen = try await backend.peek(session: session, lines: 200)
-                pending = Prompt.parse(screen)
-                live = Live.parse(screen)
+                (pending, live) = SessionProbe.readScreen(
+                    try await backend.peek(session: session, lines: 200))
             } catch {
                 if let m = reportable(error) { status = "送不过去：\(m)" }
             }

@@ -15,14 +15,38 @@ import Foundation
 // 换版本以后要重新抠：起一个 tmux 会话跑 claude，照上面两条路径重抓。
 enum Fixture {
 
-    /// 真机权限提示 A（`pip install requests`）。⚠️ 脚注是 `Esc to cancel · Tab to amend · ctrl+e to explain`，
+    /// 真机权限提示 A（`pip install requests`）**整屏**。⚠️ 脚注是 `Esc to cancel · Tab to amend · ctrl+e to explain`，
     /// **没有 `to navigate`** —— 只认 navigate 的规则会把最该认出来的一种整个漏掉（TROUBLESHOOTING #46）。
     static let permA = #"""
+
+
+✻ Sautéed for 2s
+
+❯ 运行 python3 -c "import time; [time.sleep(1) for _ in range(120)]" 然后回复 DONE。不要放后台。
+
+  Ran 1 shell command
+
+❯ 排队丁：省略号在这…后面还有字
+
+● Background command "Sleep 90 seconds in background" completed (exit code 0)
+
+● DONE
+
+  另外两件：
+  - 排队丁收到 —— 省略号在这…后面的字也在。
+  - 后台那条 sleep 90 已完成，退出码 0。
+
+✻ Cooked for 2m 7s
+
+❯ 用 Bash 跑：pip install requests
+
+● Installing requests via pip
+  ⎿  $ pip install requests
 
 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Bash command
 
-   pip install requests 2>&1 | tail -5
+   pip install requests
    Install requests via pip
 
  This command requires approval
@@ -35,23 +59,46 @@ enum Fixture {
  Esc to cancel · Tab to amend · ctrl+e to explain
 """#
 
-    /// 真机权限提示 B（`ls /tmp/...`）。跟 A **标题一样、三个选项的形状一样**，
-    /// 只有上面的命令正文不同 —— 这正是 #53 说的「只比选项等于没比」。
+    /// 真机权限提示 B（`pip install flask`）**整屏**。
+    /// ⚠️ 跟 A **标题和三个选项一字不差**（`1. Yes / 2. Yes, and don’t ask again for: pip install * / 3. No`），
+    /// 只有上面那行命令不同 —— 这正是 #53 说的「只比几号 + 选项文案等于没比」。
     static let permB = #"""
-❯ 用 Bash 跑一条：rm -rf /tmp/yxi-parse-scratch
 
-● Inspecting target dir before deleting
-  ⎿  $ ls -la /tmp/yxi-parse-scratch 2>&1 | head -30
+
+❯ 排队丁：省略号在这…后面还有字
+
+● Background command "Sleep 90 seconds in background" completed (exit code 0)
+
+● DONE
+
+  另外两件：
+  - 排队丁收到 —— 省略号在这…后面的字也在。
+  - 后台那条 sleep 90 已完成，退出码 0。
+
+✻ Cooked for 2m 7s
+
+❯ 用 Bash 跑：pip install requests
+
+  Ran 1 shell command
+
+✻ Crunched for 21s
+
+❯ 用 Bash 跑：pip install flask
+
+● Installing flask via pip
+  ⎿  $ pip install flask
 
 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Bash command
 
-   ls -la /tmp/yxi-parse-scratch 2>&1 | head -30
-   Inspect target dir before deleting
+   pip install flask
+   Install flask via pip
+
+ This command requires approval
 
  Do you want to proceed?
  ❯ 1. Yes
-   2. Yes, allow reading from /tmp from this project
+   2. Yes, and don’t ask again for: pip install *
    3. No
 
  Esc to cancel · Tab to amend · ctrl+e to explain
@@ -111,22 +158,35 @@ Enter to select · ↑/↓ to navigate · Esc to cancel
 Enter to select · ↑/↓ to navigate · Esc to cancel
 """#
 
-    /// 真机 ExitPlanMode 批准框。两个坑同时在这一屏上：
+    /// 真机 ExitPlanMode 批准框**整屏**。两个坑同时在这一屏上：
     /// ① 计划正文里就是 `1. 烧水 / 2. 下面 / 3. 出锅`，**紧贴在真选项上面**（#30）；
     /// ② 脚注是 `ctrl+g to edit in VS Code · ~/.claude/plans/….md`，
     ///    **`to cancel` 和 `to navigate` 一个都没有** —— 安卓那版认不出这一屏。
     static let planApproval = #"""
-   用户要一份煮泡面的步骤计划，分烧水 / 下面 / 出锅三步。
+  2. 计时 — 大火烧开后转中小火：溏心 6 分钟 / 半熟 8 分钟 / 全熟 10 分钟。
+  3. 过冷水 — 捞出立刻泡冷水 2 分钟，再剥壳。
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   Ready to code?
+
+   Here is Claude's plan:
+  ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+   煮鸡蛋
+
+   Context
+
+   用户要一份煮鸡蛋的步骤计划（替换掉之前的泡面计划）。
 
    步骤
 
-   1. 烧水 — 锅里加约 500ml 水，大火烧开。
-   2. 下面 — 水开后下面饼，煮 3 分钟；中途加调料包，要加蛋就在第 2 分钟磕进去。
-   3. 出锅 — 关火，连汤倒碗，撒葱花。
+   1. 下锅 — 鸡蛋放冷水锅里，水没过蛋一指，加半勺盐（防裂、好剥壳）。
+   2. 计时 — 大火烧开后转中小火：溏心 6 分钟 / 半熟 8 分钟 / 全熟 10 分钟。
+   3. 过冷水 — 捞出立刻泡冷水 2 分钟，再剥壳。
 
    验证
 
-   面条能用筷子夹断、无硬芯即可。
+   剥壳不粘、切开蛋黄状态符合所选时间即可。
   ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
 
@@ -278,6 +338,228 @@ Enter to select · ↑/↓ to navigate · Esc to cancel
 """#
 
 
+    /// 真机「正在忙」整屏，而且屏幕上**带缩进**地印着两行长得跟状态行一模一样的东西
+    /// （`  · Scampering… (4m 48s · ↓ 10.2k tokens)` / `  ✽ Pondering… (12s)`）——
+    /// 我让它把这两行原样回给我，于是它们作为**正文**出现在转录区里。
+    /// 真状态行是顶格的 `✻ Reticulating… (…)`。
+    static let busyIndentedStatus = #"""
+
+● DONE
+
+  另外两件：
+  - 排队丁收到 —— 省略号在这…后面的字也在。
+  - 后台那条 sleep 90 已完成，退出码 0。
+
+✻ Cooked for 2m 7s
+
+❯ 用 Bash 跑：pip install requests
+
+  Ran 1 shell command
+
+✻ Crunched for 21s
+
+❯ 用 Bash 跑：pip install flask
+
+  Ran 1 shell command
+
+✻ Baked for 32s
+
+❯ 照做：先原样回我三行（第一行写「样例如下」，第二行写 · Scampering… (4m 48s · ↓ 10.2k tokens)，第三行写 ✽ Pondering… (12s)），然后立刻用 Bash 前台跑 python3
+  -c "import time;[time.sleep(1) for _ in range(120)]"，不要放后台。
+
+● 样例如下
+  · Scampering… (4m 48s · ↓ 10.2k tokens)
+  ✽ Pondering… (12s)
+
+● Sleeping 120 seconds in foreground · 26s
+  ⎿  $ python3 -c "import time;[time.sleep(1) for _ in range(120)]" (25s)
+     (ctrl+b ctrl+b (twice) to run in background)
+
+✻ Reticulating… (29s · ↓ 177 tokens)
+  ⎿  Tip: Use /permissions to pre-approve and pre-deny bash, edit, and MCP tools
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt · ← for agents
+"""#
+
+    /// ⚠️ 真机整屏：正文里就是 `1. 烧水 / 2. 下锅 / 3. 出锅`，紧接着一行
+    /// 「计划已存到 ~/.claude/plans/lively-honking-widget.md」。
+    /// 这一屏**根本没在等人选**（输入框和模式行都在），但那行路径长得跟计划批准框的脚注一样。
+    /// 把它当脚注的话，那三个步骤会变成三个可点的「选项」。
+    static let plansPathMention = #"""
+● 煮鸡蛋：
+
+  1. 下锅 — 鸡蛋放冷水锅里，水没过蛋一指，加半勺盐（防裂、好剥壳）。
+  2. 计时 — 大火烧开后转中小火：溏心 6 分钟 / 半熟 8 分钟 / 全熟 10 分钟。
+  3. 过冷水 — 捞出立刻泡冷水 2 分钟，再剥壳。
+  ⎿  User rejected Claude's plan:
+     ╭──────────────────────────────────────────────────────────────────────────╮
+     │ 煮鸡蛋                                                                   │
+     │                                                                          │
+     │ Context                                                                  │
+     │                                                                          │
+     │ 用户要一份煮鸡蛋的步骤计划（替换掉之前的泡面计划）。                     │
+     │                                                                          │
+     │ 步骤                                                                     │
+     │                                                                          │
+     │ 1. 下锅 — 鸡蛋放冷水锅里，水没过蛋一指，加半勺盐（防裂、好剥壳）。       │
+     │ 2. 计时 — 大火烧开后转中小火：溏心 6 分钟 / 半熟 8 分钟 / 全熟 10 分钟。 │
+     │ 3. 过冷水 — 捞出立刻泡冷水 2 分钟，再剥壳。                              │
+     │                                                                          │
+     │ 验证                                                                     │
+     │                                                                          │
+     │ 剥壳不粘、切开蛋黄状态符合所选时间即可。                                 │
+     ╰──────────────────────────────────────────────────────────────────────────╯
+
+✻ Brewed for 39s
+
+❯ 原样回我四行，不要别的：第一行 1. 烧水  第二行 2. 下锅  第三行 3. 出锅  第四行 计划已存到 ~/.claude/plans/lively-honking-widget.md
+
+● 1. 烧水
+  2. 下锅
+  3. 出锅
+     计划已存到 ~/.claude/plans/lively-honking-widget.md
+
+✻ Crunched for 1s
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 再原样回我一行：✽ Pondering… (12s)
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+"""#
+
+    /// ⚠️ 真机整屏：`● 计划如下：` 下面**缩进**列着 `1. 烧水 / 2. 下锅 / 3. 出锅`，
+    /// 再下面一行「计划已存到 ~/.claude/plans/lively-honking-widget.md」。
+    ///
+    /// 这一屏跟 [plansPathMention] 的区别是**那三行是缩进的**，所以它们跟真选项长得
+    /// 一模一样（选项本来就缩进）。把那行路径当脚注的话，这三步就会变成三个可点的选项，
+    /// 而这个会话**根本没在等人选**。挡住它的只有「弱锚点必须是最后一条非空行」。
+    static let plansPathWithList = #"""
+     │                                                                          │
+     │ 用户要一份煮鸡蛋的步骤计划（替换掉之前的泡面计划）。                     │
+     │                                                                          │
+     │ 步骤                                                                     │
+     │                                                                          │
+     │ 1. 下锅 — 鸡蛋放冷水锅里，水没过蛋一指，加半勺盐（防裂、好剥壳）。       │
+     │ 2. 计时 — 大火烧开后转中小火：溏心 6 分钟 / 半熟 8 分钟 / 全熟 10 分钟。 │
+     │ 3. 过冷水 — 捞出立刻泡冷水 2 分钟，再剥壳。                              │
+     │                                                                          │
+     │ 验证                                                                     │
+     │                                                                          │
+     │ 剥壳不粘、切开蛋黄状态符合所选时间即可。                                 │
+     ╰──────────────────────────────────────────────────────────────────────────╯
+
+✻ Brewed for 39s
+
+❯ 原样回我四行，不要别的：第一行 1. 烧水  第二行 2. 下锅  第三行 3. 出锅  第四行 计划已存到 ~/.claude/plans/lively-honking-widget.md
+
+● 1. 烧水
+  2. 下锅
+  3. 出锅
+     计划已存到 ~/.claude/plans/lively-honking-widget.md
+
+✻ Crunched for 1s
+
+❯ 原样回我，第一行写「计划如下：」，然后换行缩进列三步 1. 烧水 / 2. 下锅 / 3. 出锅，最后一行写 计划已存到 ~/.claude/plans/lively-honking-widget.md
+
+● 计划如下：
+  1. 烧水
+  2. 下锅
+  3. 出锅
+     计划已存到 ~/.claude/plans/lively-honking-widget.md
+
+✻ Cooked for 2s
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+"""#
+
+    /// ⚠️ 真机整屏，**空闲**（模式行里没有 `esc to interrupt`），
+    /// 但顶格印着 `● Reticulating… 这是正文不是状态行` —— 一个拉丁词 + `…` + 顶格，
+    /// 三条规则全中，可它只是正文。**只有「不忙就不报状态」挡得住它。**
+    static let idleTopLevelEllipsis = #"""
+     │ 2. 计时 — 大火烧开后转中小火：溏心 6 分钟 / 半熟 8 分钟 / 全熟 10 分钟。 │
+     │ 3. 过冷水 — 捞出立刻泡冷水 2 分钟，再剥壳。                              │
+     │                                                                          │
+     │ 验证                                                                     │
+     │                                                                          │
+     │ 剥壳不粘、切开蛋黄状态符合所选时间即可。                                 │
+     ╰──────────────────────────────────────────────────────────────────────────╯
+
+✻ Brewed for 39s
+
+❯ 原样回我四行，不要别的：第一行 1. 烧水  第二行 2. 下锅  第三行 3. 出锅  第四行 计划已存到 ~/.claude/plans/lively-honking-widget.md
+
+● 1. 烧水
+  2. 下锅
+  3. 出锅
+     计划已存到 ~/.claude/plans/lively-honking-widget.md
+
+✻ Crunched for 1s
+
+❯ 原样回我，第一行写「计划如下：」，然后换行缩进列三步 1. 烧水 / 2. 下锅 / 3. 出锅，最后一行写 计划已存到 ~/.claude/plans/lively-honking-widget.md
+
+● 计划如下：
+  1. 烧水
+  2. 下锅
+  3. 出锅
+     计划已存到 ~/.claude/plans/lively-honking-widget.md
+
+✻ Cooked for 2s
+
+❯ 只回我一行，顶格，内容就是：Reticulating… 这是正文不是状态行
+
+● Reticulating… 这是正文不是状态行
+
+✻ Baked for 2s
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 现在原样回我一行：✽ Pondering… (12s)
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+"""#
+
+    /// ⚠️ 真机整屏：用户在**输入框**里打了 `1. 先做这个`，还没发。
+    /// 那一行渲染出来是 `❯ 1. 先做这个` —— 跟选择器的**光标行**一模一样
+    /// （真机上 `❯` 后面还是个不换行空格 U+00A0，`\s` 照样吃）。
+    /// 这个会话根本没在等人选。挡住它的是「选项块至少两行」：
+    /// 输入框下面紧跟着就是那条横线，块到此为止。
+    static let typedNumberedInInputBox = #"""
+
+╭─ Claude Code ───────────────────────────────────────╮
+│                                                     │
+│               Welcome back tianliang!               │
+│                                                     │
+│                       ▐▛███▛█                       │
+│                      ▝▜██████▀                      │
+│                        ▝▝ ▝▝                        │
+│                                                     │
+│                 Opus 5 (1M context)                 │
+│                     Claude Max                      │
+│               /…/scratchpad/iosparse2               │
+│                                                     │
+╰─────────────────────────────────────────────────────╯
+
+
+
+
+
+
+
+
+
+
+
+───────────────────────────────────────────────────────
+❯ 1. 先做这个
+───────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle)
+"""#
+
     // MARK: - 转录里的真实行（每行都是原样一行 JSONL）
 
     /// 排队进队。真机 2.1.241。
@@ -346,6 +628,12 @@ Enter to select · ↑/↓ to navigate · Esc to cancel
     /// 非消息行（`mode`），没有 `message` 字段，要安静跳过。
     static let modeLine = #"{"type":"mode","mode":"normal","sessionId":"eff0c425-ceb9-41de-b565-c14b6db2a226"}"#
 
+
+    /// ⚠️ 真实的**侧链**行（子 agent 的内部独白），`isSidechain: true`。
+    /// 2.1.241 起它们另存到 `<会话uuid>/subagents/*.jsonl`，主文件里已经没有了；
+    /// 这条就是从那个子目录里抠的。**老转录里它们混在主文件里** ——
+    /// 不过滤的话主线会被子 agent 的独白淹掉。
+    static let sidechainLine = #"{"parentUuid":"178bdf9c-1905-4ba1-9dec-768fa3c2278d","isSidechain":true,"agentId":"a7dd4f3b8ec5e486c","message":{"model":"claude-opus-5","id":"msg_011CeKjMdNSh3CKs1UrvPUKk","type":"message","role":"assistant","content":[{"type":"text","text":"I'll count the files."}],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":2,"cache_creation_input_tokens":11041,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":11041,"ephemeral_1h_input_tokens":0},"output_tokens":1,"service_tier":"standard","inference_geo":"not_available"},"diagnostics":null},"requestId":"req_011CeKjMcc49h1BU9hucmvvJ","attributionAgent":"Explore","type":"assistant","uuid":"086ab7af-cc59-456c-a2db-8363d44d11c1","timestamp":"2026-08-23T13:07:07.012Z","effort":"high","userType":"external","entrypoint":"cli","cwd":"/tmp/claude-0/-root-src-workspace-Yxi/d0ccc7db-ab52-458f-807f-39247666d0c2/scratchpad/iosparse","sessionId":"eff0c425-ceb9-41de-b565-c14b6db2a226","version":"2.1.241","gitBranch":"HEAD","slug":"lively-honking-widget"}"#
 
     // MARK: - 一次往返的快照、用量、更新清单（都是真机上跑出来的原样输出）
 

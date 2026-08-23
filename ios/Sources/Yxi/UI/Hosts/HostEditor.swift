@@ -5,7 +5,7 @@ import UIKit   // UIPasteboard：公钥要能一键复制
 /// 加 / 改主机：任意 IP、**任意端口**、用户名、密码或密钥 —— 四样都不能写死。
 ///
 /// ⚠️ 两个细节不能省（TROUBLESHOOTING #68）：
-///   · **改了地址或端口，存的主机指纹必须作废**（`hostKey = nil`）
+///   · **改了地址或端口，存的主机指纹必须作废** —— 由 `HostStore.upsert` 负责
 ///   · **删除要两下** —— 主机记录里存着密码密文，手机上误触一下就没了
 @MainActor
 struct HostEditor: View {
@@ -139,10 +139,6 @@ struct HostEditor: View {
         let pt = parsed.port ?? Int(port) ?? 22
         let un = (parsed.user ?? username).trimmingCharacters(in: .whitespaces)
         let a = alias.trimmingCharacters(in: .whitespaces)
-        // ⚠️ **改了地址或端口，存的主机指纹就必须作废。** 那把指纹属于旧机器；
-        // 留着的话下次连新机器会报「指纹变了」—— 那是中间人警告的措辞，
-        // 会把一次正常的改配置说成攻击（TROUBLESHOOTING #68）。
-        let keepHostKey = editing.map { $0.hostname == hn && $0.port == pt } ?? false
 
         // 密码有三种去向：换新的 / 不动原来那份密文 / 选了密钥就清掉
         var sealed = editing?.sealedPassword
@@ -165,7 +161,9 @@ struct HostEditor: View {
             username: un.isEmpty ? "root" : un,
             useKey: !usePassword,
             sealedPassword: sealed,
-            hostKey: keepHostKey ? editing?.hostKey : nil,
+            // 指纹原样带回。**改了地址/端口自动作废这件事归 `HostStore.upsert`**
+            // （它有测试钉着）—— 在这儿再判一遍就是两处规则慢慢漂开的开始。见 #68。
+            hostKey: editing?.hostKey,
             watch: editing?.watch ?? false
         ))
         dismiss()

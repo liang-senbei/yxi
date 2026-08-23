@@ -1,4 +1,4 @@
-import Crypto
+@preconcurrency import Crypto   // Curve25519 的私钥类型没标 Sendable
 import Foundation
 import NIOCore
 @preconcurrency import NIOSSH   // NIOSSHPublicKey 没标 Sendable，这里只是读它，加这个别让告警刷屏

@@ -3,7 +3,7 @@ import Crypto
 import Foundation
 import Logging
 import NIOCore
-import NIOSSH
+@preconcurrency import NIOSSH   // NIOSSHPublicKey 没标 Sendable，我们只读它
 
 /// 一条 SSH 连接。分层跟安卓那版一致：**连接本身**与**在上面开什么通道**分开 ——
 ///   · shell channel（带 PTY） → 终端（[openShell]）
@@ -508,6 +508,27 @@ extension SSHSession {
             + "trap 'kill $__p 2>/dev/null' EXIT; "
             + "trap 'exit' PIPE HUP TERM INT; "
             + "while :; do sleep 20; printf '\\n' || exit; done"
+    }
+
+    /// 建或接一个 tmux 会话，顺便把它调成适合手机的样子。
+    ///
+    /// ⚠️⚠️ **`set -g mouse on` 不能漏。** tmux 跑在 alternate screen 上，
+    /// 终端控件自己的回滚缓冲是空的 —— 在 tmux 里「上滑看历史输出」
+    /// **只能靠鼠标上报**（拖拽被当成鼠标事件送给 tmux，tmux 滚它自己的历史）。
+    /// 漏了这一个开关，用户的现象是「怎么划都不动」，
+    /// 而且**完全看不出跟 tmux 配置有关**。
+    ///
+    /// 其余几个抄 Moshi 逆向所得（PRD §1.2）：清掉右侧状态栏、开标题 —— 都是给手机窄屏让路。
+    ///
+    /// ⚠️ 没有 `setEnv("YXI_CLIENT", "1")`（安卓那边有）：**sshd 默认
+    /// `PermitUserEnvironment no`，这个请求会被静默拒绝**，
+    /// 也就是说安卓那行大概率一直没生效。要让主机侧知道是手机在开，
+    /// 得走别的路（比如命令里带标记），别再往这儿加一个看着有用其实没用的东西。
+    public static func attach(session name: String) -> String {
+        let safe = name.replacingOccurrences(of: "'", with: "")
+        return "tmux has-session -t '\(safe)' 2>/dev/null || tmux new-session -d -s '\(safe)'; "
+            + "tmux set -g set-titles on \\; set -g mouse on \\; set -g status-right '' ; "
+            + "tmux attach -t '\(safe)'"
     }
 
     /// 把一行公钥装进远端的 `~/.ssh/authorized_keys`，相当于 `ssh-copy-id`（PRD §2.4 P0-14）。

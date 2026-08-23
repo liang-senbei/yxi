@@ -44,25 +44,78 @@ public enum Prompt {
     /// 屏幕最底下那行模式提示（`⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt`）
     /// 也长这样，于是**每一屏都会被判成有选择器**。判错的代价是往别人的服务器上
     /// 送一个按键，所以这里宁可用白名单，加一种就补一条，也不放宽成启发式。
+    ///
+    /// ⚠️ **第 3 种不拿脚注当锚**，见 [cursor]：那行脚注里唯一稳定的东西是
+    /// `~/.claude/plans/…` 这个路径，而路径是 Claude **在正文里随口提一句**就会出现的东西。
+    /// 真机上抓到过这样一屏（`PromptTests.正文里提到计划文件不算提示`）：
+    /// 正文是缩进的 `1. 烧水 / 2. 下锅 / 3. 出锅`，紧接着一行「计划已存到 ~/.claude/plans/….md」。
+    /// 拿它当脚注的话，那三步就变成三个可点的选项，
+    /// **点一下就往一个根本没在等人选的会话里送按键**。所以第 3 种走另一条路。
     private static func isFooter(_ l: String) -> Bool {
         if l.contains("to cancel") { return true }
         if l.contains("to navigate") && (l.contains("Enter to") || l.contains("to select")) { return true }
-        // 计划批准框：`ctrl+g to edit in <IDE> · ~/.claude/plans/<slug>.md`
-        if l.contains(".claude/plans/") || l.contains("ctrl+g to edit") { return true }
         return false
+    }
+
+    /// **光标行** —— `❯ 1. Yes, and use auto mode` 这种。
+    ///
+    /// ⚠️ **这是比脚注更稳的锚。** 脚注的形态到现在已经变过**三次**：
+    ///   · `Enter to select · ↑/↓ to navigate · Esc to cancel`
+    ///   · `Esc to cancel · Tab to amend · ctrl+e to explain`（权限提示，#46）
+    ///   · `ctrl+g to edit in VS Code · ~/.claude/plans/xxx.md`（**计划批准**，两个锚都没有）
+    /// 而 `❯` + 编号这个形态，在手上**五份真实抓屏里全都在**（单选 / 多选 / 权限 / 计划）。
+    /// 它语义上就是「此刻选中的那一项」—— 选择器活着它就在。
+    ///
+    /// ⚠️ 注意 `❯` 单独出现时是**输入框**（`❯ 用 AskUserQuestion 工具问我…`），
+    /// 所以必须连编号一起要求，光看 `❯` 会把用户打的字当成选项。
+    ///
+    /// ⚠️ **它只是退路，不能拿来取代脚注。** 试过只留这一条：AskUserQuestion 的
+    /// 最后一个选项（`4. Chat about this` / `6. Chat about this`）在一条分隔线**下面**，
+    /// 而往下走到分隔线就得停（分隔线之后的东西不一定还属于这一组）—— 于是少一个选项，
+    /// 用户点不到「Chat about this」。两条路都得留。
+    private static let cursor = try! Regex(#"\s*❯\s*\d+\.\s+\S.*"#)
+
+    /// 找不到已知脚注时的退路：从**最后一个光标行**出发往下走到选项块结束，
+    /// 返回「脚注该在的位置」（第一行不再属于这个选项块的行号）。
+    /// 往下走而不是就地返回：光标可能停在 2 号，下面还有 3 号、4 号。
+    ///
+    /// ⚠️ **要求选项块至少两行**（`end > cursor + 1`）。
+    /// 用户在输入框里打 `1. 先做这个` 的时候，那一行长得跟光标行一模一样 ——
+    /// 而输入框下面紧跟着就是那条横线，选项块到此为止。真机上验过这一屏
+    /// （`PromptTests.输入框里打了编号不算提示`）。没这条的话，用户打一句
+    /// 带编号的话就会冒出一张「等你选」的卡片，点一下往 pty 里打个 `1`。
+    private static func endOfOptionsAfterCursor(_ lines: [String]) -> Int? {
+        guard let c = lines.indices.last(where: { lines[$0].wholeMatch(of: cursor) != nil }) else { return nil }
+        var end = c + 1
+        while end < lines.count {
+            let l = lines[end]
+            // 选项、选项的说明行（缩进的非结构文本）都还算这一块
+            if matchOption(l) != nil || (!l.isBlank && l.first == " " && !isNoise(l)) { end += 1 }
+            else { break }
+        }
+        return end > c + 1 ? end : nil
     }
 
     /// - Parameter screen: `tmux capture-pane -p` 的原样输出
     /// - Returns: 没有在等人选就返回 nil
     public static func parse(_ screen: String) -> Pending? {
         let lines = screen.components(separatedBy: "\n").map { $0.hasSuffix("\r") ? String($0.dropLast()) : $0 }
-        guard let footer = lines.lastIndex(where: isFooter) else { return nil }
+        // 先用脚注（真机钉住的老路子）；认不出来再退回光标锚。
+        // 退回而不是替换：老路子实测验过，没必要拿新写法去赌它。
+        guard let footer = lines.indices.last(where: { isFooter(lines[$0]) })
+            ?? endOfOptionsAfterCursor(lines)
+        else { return nil }
 
-        // ⚠️ **从脚注往上收，编号必须连续递减到 1。**
+        // ⚠️ **从脚注往上收，编号必须连续递减到 1，收到 1 号就停。**
         // 不能只按「脚注上面 N 行里的编号行」算 —— 计划正文本身就常常是
         // `1. 烧水 / 2. 下面 / 3. 出锅` 这种编号列表，**就贴在选择器上面**。
         // 把它当成选项，用户点第 3 项时送出去的 `3` 会落到真选项的第 3 个上，
-        // **点 A 选中 B，而且不报错**。连续性这条规则才挡得住（TROUBLESHOOTING #30）。
+        // **点 A 选中 B，而且不报错**（TROUBLESHOOTING #30）。
+        //
+        // ⚠️ 下面这三条（连续性、收到 1 号就停、必须收到 1 号）在真实样本上
+        // **互为冗余** —— 做过变异测试：单独去掉任何一条，`PromptTests` 全绿；
+        // 三条一起去掉才红。别看着「去掉也不红」就删其中一条：
+        // 它们各挡一种编号错位的形状，而这条路上出错是**不报错地选错**。
         var numbered: [Int: Int] = [:]          // 选项号 → 行号
         var expected = -1
         var i = footer - 1

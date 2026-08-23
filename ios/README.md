@@ -29,8 +29,12 @@ ios/
 │   │   ├── SSHSession     连接 / exec / 带 PTY 的 shell / 事件流 / SFTP
 │   │   ├── SFTP           文件模式 + Paths（纯字符串运算）
 │   │   ├── Errors         Explain：把异常翻译成「照着做点什么」
-│   │   └── Agent/         转录解析、屏幕解析（另一个人写的）
+│   │   └── Agent/         转录解析、屏幕解析（ios-parsers）
 │   └── Yxi/               全是 SwiftUI/UIKit，**只有 iOS 编得动**
+│       ├── RootView       App 的根：底部三栏 + 工作区整屏 + 首连确认弹窗
+│       ├── HostLink       ⭐ 那条活着的连接 + 服务适配器（连接挂在标签页之上）
+│       ├── SettingsScreen 版本 / 查更新 / 公钥 / 后台说明 / 诊断
+│       └── UI/            Board · Hosts · Chat · Terminal（ios-board / ios-chat）
 └── Tests/YxiKitTests/     XCTest。**在 Linux 上就能跑**（见下）
 ```
 
@@ -42,15 +46,19 @@ ios/
 这台服务器上是这么跑起来的：
 
 ```bash
-# 一次性：装 Swift（Ubuntu 24.04）
-curl -O https://download.swift.org/swift-6.0.3-release/ubuntu2404/swift-6.0.3-RELEASE/swift-6.0.3-RELEASE-ubuntu24.04.tar.gz
-tar xzf swift-6.0.3-RELEASE-ubuntu24.04.tar.gz
-export PATH="$PWD/swift-6.0.3-RELEASE-ubuntu24.04/usr/bin:$PATH"
+export PATH=/opt/swift/usr/bin:$PATH     # 本机已装 Swift 6.0.3
 
 cd ios
-swift build --target YxiKit
+swift build --target YxiKit   # ⚠️ 必须带 --target
 swift test
 ```
+
+⚠️ **`swift build`（不带 `--target`）在 Linux 上必然失败** —— 它会去编 `Yxi`
+那个 target，而那里满是 `import SwiftUI/UIKit`。
+Linux 上验逻辑层就这两条命令；完整 App 只能在 Mac 上用 Xcode 编（见下一节）。
+
+（换机器时重装：`curl -O https://download.swift.org/swift-6.0.3-release/ubuntu2404/swift-6.0.3-RELEASE/swift-6.0.3-RELEASE-ubuntu24.04.tar.gz`
+再解开，`usr/bin` 加进 PATH。）
 
 **这条路是这些代码唯一被验证过的地方，别让它断。**
 它靠的是 `Package.swift` 里那个 `#if os(macOS)` —— 界面那个 target
@@ -67,14 +75,12 @@ Xcode 工程在 Mac 上现建，一次性两分钟：
 1. **命令行先确认 package 是好的**（不进 Xcode 更容易看清楚问题）：
 
    ```bash
-   cd ios
-   swift build --target YxiKit
-   swift test
+   cd ios && swift build --target YxiKit && swift test
    ```
 
    ⚠️ **必须带 `--target YxiKit`。** 裸跑 `swift build` 会拿 macOS 当目标去编
    `Yxi` 那个 target，而它满是 `import UIKit`，必挂。那个 target 是给 Xcode
-   按 iOS 目标编的。
+   按 iOS 目标编的 —— 这一条 Mac 和 Linux 上一样。
 
 2. **Xcode → File → New → Project → iOS → App**
    - Product Name `Yxi`，Interface **SwiftUI**，Language **Swift**
@@ -96,9 +102,27 @@ Xcode 工程在 Mac 上现建，一次性两分钟：
 
 ### 界面那半边的约定
 
-`App/YxiApp.swift` 里只有一句 `RootView()`。
-`Sources/Yxi/` 需要导出 `public struct RootView: View` 作为根 ——
-入口保持在六行，别把装配逻辑塞进 app target，那是唯一一块 Linux 上编不到的地方。
+`App/YxiApp.swift` 里只有一句 `RootView()`（`Sources/Yxi/RootView.swift` 导出）。
+入口保持在六行，别把装配逻辑塞进 app target —— 那是唯一一块连解析器都跑不到的地方。
+
+**连接挂在 `HostLink` 上，按 `host.id` 缓存，活在标签页切换之上。**
+别把它挪进任何页面：安卓 #75 就是建在看板页里，切一次标签页重连一次
+（TCP + 握手 + ed25519，实测约 3 秒）。`TerminalSession` 同理挂在 `HostLink` 上 ——
+挂在页面上的话切到对话模式屏幕内容全丢，而且读循环死了通道还开着、
+缓冲塞满之后**整条连接上所有通道一起卡死**。
+
+### 编不了，但能过语法检查
+
+SwiftUI 那半边在 Linux 上编不了，可是**解析器跑得动** ——
+malformed 字符串、括号不配对这类错误当场就能抓出来（本仓写 `SettingsScreen`
+时就是这么抓到一个跨行断掉的字符串字面量的）：
+
+```bash
+for f in $(find Sources/Yxi App -name '*.swift'); do swiftc -parse "$f" || echo "✗ $f"; done
+```
+
+⚠️ 它**只查语法，不查类型**：方法名写错、参数对不上、协议没实现全，
+这条命令一个都发现不了。只是比什么都不做强。
 
 ---
 
@@ -170,8 +194,8 @@ libssh2 系（NMSSH / Shout）被排除：ObjC 且多年不维护，或者要给
 
 **已经真的跑过**（Linux / Swift 6.0.3）：
 
-- `swift build --target YxiKit` 通过
-- `swift test` 全绿
+- `swift build --target YxiKit` 通过，**0 warning**
+- `swift test` 全绿（111 条，含 `Agent/` 那半边的）
 - **指纹跟系统 `ssh-keygen -lf` 的输出逐字节对过**（黄金值来自 ssh-keygen，不是自己算的）
 - `Explain` 的错误分类 —— **测试第一次跑就把它照红了**：原来是按
   `String(describing: error)` 里的字匹配的，而 NIO 真正抛的是
@@ -192,6 +216,9 @@ libssh2 系（NMSSH / Shout）被排除：ObjC 且多年不维护，或者要给
 | `SSHSession.openShell` | 「等它先说话、再等它安静下来」那段时序（对应 #18） |
 | `SSHSession.open` | 把 Citadel 的作用域 API 适配成句柄的那套 continuation |
 | `App/YxiApp.swift` | 整个文件（没有 iOS SDK，从未编译过） |
+| `Sources/Yxi/RootView.swift` | 整个文件。只过了 `swiftc -parse`，**没有类型检查** |
+| `Sources/Yxi/HostLink.swift` | 同上。重连退避、`objectWillChange` 转发这些都没跑过 |
+| `Sources/Yxi/SettingsScreen.swift` | 同上 |
 | `Vault` / `KeyManager` 的 Keychain 部分 | 在 `#if canImport(Security)` 里，Linux 上编不到 |
 | `SFTP.list` 从 `permissions` 判目录 | SFTP v3 的属性位是可选的，兜底走 `ls -l` 那串文字，没见过真服务器 |
 
