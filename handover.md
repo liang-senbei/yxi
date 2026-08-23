@@ -273,6 +273,12 @@
   改用**光标行 `❯ N.`** 做退路锚（那个形态在全部五份真实抓屏里都在）。
   是 iOS 那边的 ios-parsers 实测发现的，我在真机上复核并修的安卓。见 TROUBLESHOOTING #82。
 
+- 🚧 **iOS 版第一版（2026-08-23，`ios/`，跟 `android/` 完全分开）**：五个子代理并行做的。
+  **能验证的部分验了**：`swift build --target YxiKit` → 430/430；`swift test` → **98 条全绿**
+  （这台 Linux 上装了 Swift 6.0.3，`/opt/swift/usr/bin`）。测试样例全部从真机抠。
+  **编不了的部分**（SwiftUI / 真机 SSH / 分发）共 **20 处标了「未验证」**。
+  ⚠️ **卡在没有 Mac** —— 完整 App 一行都没编过。见下面「## iOS 版」。
+
 ## 读写信息在哪
 | 路径 | 性质 |
 |---|---|
@@ -325,6 +331,40 @@
 悬浮排列是另一种视图而非替代。
 
 改样式请改 `design/*.dc.html` 源文件（`design/apply_m3.py` 是当初批量转换的脚本，留档）。
+
+## iOS 版（`ios/`）—— 状态与硬约束
+
+**目录**：`ios/`，与 `android/` 完全分开，互不引用。SwiftPM 双 target：
+- `YxiKit` —— 纯逻辑 + SSH（Citadel / swift-nio-ssh）。**不依赖 UIKit/SwiftUI，Linux 上能编能测**
+- `Yxi` —— SwiftUI app，**只有 Xcode 能编**
+
+**验证边界**（务必分清，这是这份交付最要紧的一件事）：
+
+| | 状态 |
+|---|---|
+| `YxiKit`（SSH / 密钥 / 主机存储 / 转录解析 / 屏幕解析） | ✅ **真编译真测试**：430/430 编译单元，98 条测试全绿 |
+| `Yxi`（SwiftUI 全部界面） | ❌ **一行都没编过** |
+| 真机 SSH / 终端 / 分发 / 推送 | ❌ 全部未验证，20 处显式标注 |
+
+在 Linux 上验逻辑层：
+```bash
+export PATH=/opt/swift/usr/bin:$PATH
+cd ios && swift build --target YxiKit && swift test
+```
+
+**三条硬约束（`ios/docs/` 里有完整论证和出处）**：
+
+1. **必须借一台 Mac** 才能编出 App。这是唯一的硬门槛，绕不过去。
+2. **分发**：免费 Apple ID 签名 **7 天失效**（要连 Mac 重刷）；¥688/年 的账号一年刷一次。
+   安卓那套「服务器放 APK 点一下就装」**没有等价物**；App 也**不能自己装更新**。
+3. **手机主动响能做，而且零成本** —— 自建 `bark-server`（MIT）→ Apple APNs → App Store 的
+   Bark App。**已复核**：`apns/apns_certs.go` 内嵌 Bark 自己的 APNs 私钥，所以不需要开发者账号。
+   两个代价：① 锁屏上是 **Bark 的图标和名字**，跟你别的告警混在一栏；
+   ② 那把私钥**全世界自建用户共用一把**，Apple 一旦吊销则所有自建 server 同时哑掉。
+   免费路线下**通知上不能直接批准**（Bark 没有自定义按钮），要「点通知 → 开 Yxi → 按」。
+
+⚠️ **服务器侧零改动**：`server/yxi-hook` / `install.sh` 一个字没动，安卓版不受影响。
+推送是一个**可选的独立脚本**，装不装都行。
 
 ## 决策记录（用户拍板过的，按时间倒序 —— 改动前先看这里，别推翻已定的）
 
