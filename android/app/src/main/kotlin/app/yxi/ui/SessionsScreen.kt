@@ -45,6 +45,9 @@ fun SessionsScreen(
     keys: KeyManager,
     host: Host,
     /** 主机下拉：换主机不用退出去（D22）。只有一台时不显示箭头 */
+    /** ⚠️ 连接由 [app.yxi.MainActivity] 持有 —— 切 tab 时这个 composable 会销毁，连接不能跟着断 */
+    ssh: SshSession?,
+    connectError: String? = null,
     hosts: List<Host> = listOf(host),
     onPickHost: (Host) -> Unit = {},
     /** (会话名, cwd)。⚠️ **cwd 必须一起传** —— 对话模式靠它找转录文件 */
@@ -56,7 +59,6 @@ fun SessionsScreen(
     val scope = rememberCoroutineScope()
     var sessions by remember { mutableStateOf<List<Session>>(emptyList()) }
     var status by remember { mutableStateOf("连接中…") }
-    var ssh by remember { mutableStateOf<SshSession?>(null) }
     var sendTo by remember { mutableStateOf<Session?>(null) }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -69,16 +71,10 @@ fun SessionsScreen(
     var floating by remember(host.id) { mutableStateOf(false) }
     var pinned by remember(host.id) { mutableStateOf(Pinned.get(ctx, host.id)) }
 
-    val connect = rememberSshConnector(store, keys, host)
+    LaunchedEffect(connectError) { connectError?.let { status = it } }
 
-    LaunchedEffect(host.id) {
-        val c = connect()
-        if (c == null) { status = "这台主机还没有可用的认证方式"; return@LaunchedEffect }
-        val s = c.session
-        runCatching { s.connect(); ssh = s }.onFailure {
-            status = c.explain(it)
-            return@LaunchedEffect
-        }
+    LaunchedEffect(ssh) {
+        val s = ssh ?: return@LaunchedEffect
         // 每 5 秒刷一次。一次往返拿全部，不是一个会话一个请求
         while (true) {
             // ⚠️ **手指在列表上的时候不要刷。** 会话换组（干活中 → 等你）会让下面的卡片整体上移，

@@ -130,3 +130,37 @@ fun Connector.explain(e: Throwable): String {
         else -> "连不上：${e::class.simpleName}: ${e.message}"
     }
 }
+
+/** 一台主机的共享连接。[session] 为 null 时看 [error]（null 表示还在连）。 */
+class HostSession(val session: SshSession?, val error: String?)
+
+/**
+ * 按**主机**持有一条连接，跨界面共用。
+ *
+ * ⚠️ **必须挂在 tab 切换之上。** 挂在某个页面里的话，切走再切回来
+ * 那个页面重建，连接就跟着重来一遍 —— TCP + 握手 + ed25519 认证实测 ~3 秒，
+ * 每切一次 tab 等三秒。连接要跟着**主机**活，不跟着界面活。
+ *
+ * 换主机时把旧的断掉；页面级的用法（工作区、装公钥）仍然各自建各自的，
+ * 那些是**要**独立生命周期的。
+ */
+@Composable
+fun rememberHostSession(store: HostStore, keys: KeyManager, host: Host?): HostSession {
+    if (host == null) return HostSession(null, null)
+    val connect = rememberSshConnector(store, keys, host)
+    var session by remember(host.id) { mutableStateOf<SshSession?>(null) }
+    var error by remember(host.id) { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(host.id) {
+        val c = connect()
+        if (c == null) { error = "这台主机还没有可用的认证方式"; return@LaunchedEffect }
+        runCatching { c.session.connect() }
+            .onSuccess { session = c.session; error = null }
+            .onFailure { error = c.explain(it) }
+    }
+    // 换主机 / 界面销毁时收掉，别留着一条没人用的连接
+    DisposableEffect(host.id) {
+        onDispose { session?.let { s -> runCatching { s.disconnect() } } }
+    }
+    return HostSession(session, error)
+}

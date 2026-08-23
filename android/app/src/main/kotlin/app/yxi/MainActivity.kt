@@ -21,6 +21,7 @@ import app.yxi.ssh.KeyManager
 import app.yxi.ui.HostsScreen
 import app.yxi.ui.Mode
 import app.yxi.ui.SessionsScreen
+import app.yxi.ui.rememberHostSession
 import app.yxi.ui.SettingsScreen
 import app.yxi.ui.Workspace
 import app.yxi.ui.theme.YxiTheme
@@ -83,6 +84,13 @@ class MainActivity : ComponentActivity() {
                     jump.value = null
                 }
 
+                // ⚠️ **连接放在 tab 切换之上。** 放在 SessionsScreen 里的话，
+                // 切到「设置」再切回「会话」时整个 composable 重建，
+                // 连接跟着从头来一遍（TCP + 握手 + ed25519 认证，实测 ~3 秒）——
+                // 用户的原话是「切一次就要重新连接一次，有一点麻烦」。
+                // 跟 D21 里「换会话不重连」是同一条原则：连接跟着**主机**活，不跟着界面活。
+                val shared = rememberHostSession(store, keys, host)
+
                 BackHandler(enabled = work != null || tab != Tab.Sessions) {
                     when {
                         work != null -> work = null      // 工作区 → 回标签页
@@ -123,6 +131,8 @@ class MainActivity : ComponentActivity() {
                         } else {
                             SessionsScreen(
                                 store, keys, host,
+                                ssh = shared.session,
+                                connectError = shared.error,
                                 hosts = hosts,
                                 onPickHost = { picked -> hostId = picked.id },
                                 onOpenTerminal = { sn, cwd -> work = Work(host, sn, cwd, Mode.Terminal) },
@@ -136,7 +146,7 @@ class MainActivity : ComponentActivity() {
                             onOpen = { hostId = it.id; tab = Tab.Sessions },
                             modifier = m,
                         )
-                        Tab.Settings -> SettingsScreen(store, keys, host, modifier = m)
+                        Tab.Settings -> SettingsScreen(store, keys, host, shared.session, modifier = m)
                     }
                 }
             }

@@ -23,6 +23,7 @@ import app.yxi.ssh.Host
 import app.yxi.ssh.HostStore
 import app.yxi.ssh.KeyManager
 import app.yxi.ssh.Sftp
+import app.yxi.ssh.SshSession
 import app.yxi.ui.theme.*
 import kotlinx.coroutines.launch
 
@@ -42,6 +43,8 @@ fun SettingsScreen(
     store: HostStore,
     keys: KeyManager,
     host: Host?,
+    /** 共用的连接（[app.yxi.ui.rememberHostSession]）。检查更新直接搭它，不再自己建一条 */
+    ssh: SshSession?,
     modifier: Modifier = Modifier,
 ) {
     val ctx = LocalContext.current
@@ -56,7 +59,6 @@ fun SettingsScreen(
     var lastTap by remember { mutableStateOf(0L) }
     var askPass by remember { mutableStateOf(false) }
     var dev by remember { mutableStateOf(DevMode.unlocked(ctx)) }
-    val connect = host?.let { rememberSshConnector(store, keys, it) }
 
     Column(
         modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp),
@@ -85,13 +87,9 @@ fun SettingsScreen(
                 }
                 Button(
                     onClick = {
-                        val c = connect ?: return@Button
                         scope.launch {
                             checking = true; result = null
-                            val f = sftp ?: runCatching {
-                                val s = c().also { it?.session?.connect() }?.session
-                                s?.openSftp()
-                            }.getOrNull()
+                            val f = sftp ?: runCatching { ssh?.openSftp() }.getOrNull()
                             sftp = f
                             // ⚠️ 报的必须是**真正去连的地址**，不是用户起的名字。
                             // 这里原来打印 alias —— 用户名字栏填的是 IP、地址栏填的是别名「天亮」，
@@ -103,7 +101,7 @@ fun SettingsScreen(
                             checking = false
                         }
                     },
-                    enabled = host != null && !checking,
+                    enabled = ssh != null && !checking,
                     shape = Pill, modifier = Modifier.height(42.dp),
                 ) { Text(if (checking) "查着…" else "检查更新") }
             }
@@ -143,13 +141,13 @@ fun SettingsScreen(
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
             }
-            StatusRow("后台不受限制", battery) {
-                runCatching {
-                    ctx.startActivity(
-                        Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    )
-                }
+            StatusRow("后台不受限制", battery) { askIgnoreBattery(ctx) }
+            if (!battery) {
+                // ⚠️ 荣耀/华为的「电池优化白名单」只是**其中一道**。真正掐后台的是
+                // 「应用启动管理」，那个 Android 没有标准 intent，只能告诉用户路径。
+                // 不写出来的话，用户按上面那个开关开完了、以为搞定了，实际还是不响。
+                Hint2("荣耀/华为还有一道单独的开关：设置 → 应用和服务 → 应用启动管理 → " +
+                    "找到 Yxi → 关掉「自动管理」，然后三项（自启动/关联启动/后台活动）全打开。")
             }
             if (!battery || !notif) {
                 // ⚠️ 这两项缺一个，「主动响」就是**静默失效** —— 不会报错，只是不响了
@@ -291,6 +289,30 @@ private fun StatusRow(label: String, ok: Boolean, onFix: () -> Unit) {
                 color = if (ok) Teal else OnCopperContainer,
             )
         }
+    }
+}
+
+/**
+ * 请求「后台不受限制」。
+ *
+ * ⚠️ **不能用 `ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS`** —— 那个打开的是
+ * 「**已经**被放行的应用」列表，而我们恰恰还没被放行，所以用户点进去
+ * **根本找不到这个 App**，看起来像是跳错了地方。（用户原话：「没有看见我们的 app」）
+ *
+ * 要的是带 `package:` 的 `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`：
+ * 它直接对本应用弹一个授权框。厂商 ROM 上可能被拿掉，所以留两级退路：
+ * 本应用的设置页 → 全局电池优化列表。
+ */
+private fun askIgnoreBattery(ctx: Context) {
+    val tries = listOf(
+        Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+            .setData(android.net.Uri.parse("package:" + ctx.packageName)),
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+            .setData(android.net.Uri.parse("package:" + ctx.packageName)),
+        Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+    )
+    for (i in tries) {
+        if (runCatching { ctx.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess) return
     }
 }
 

@@ -873,3 +873,43 @@ Update.Result.Failed("连不上 ${host?.alias}，没查成")   // ← alias 是�
 **怎么避开**：**「数据分批到达」+「每次到达都播动画」= 必然抖。**
 凡是数据流式进来的列表，先问一句「第一屏该不该有动画」——
 首屏定位要的是**结果**，不是过程。
+
+## 74. ⭐ 「去开启后台不受限制」跳过去，列表里找不到这个 App
+
+**症状**：用户点「去开启」，跳进了电池优化设置，但**列表里没有 Yxi**。
+（用户原话：「直接跳转到电池优化里面去了…但是没有看见我们的 app 这对吗」）
+
+**根因**：用的是 `ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS` ——
+它打开的是「**已经**被放行的应用」列表。而我们恰恰**还没被放行**，
+所以必然不在里面。intent 名字里有 `IGNORE_BATTERY_OPTIMIZATION`，
+很容易以为是「去设置它」，其实是「看谁已经被设置了」。
+
+**修法**：`ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` + `package:<自己>`，
+直接对本应用弹授权框（实测弹出 "Let app always run in background?"，点 Allow
+后 `dumpsys deviceidle whitelist` 里就有了）。需要 manifest 里加
+`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` 权限，否则会被拒。
+厂商 ROM 上可能被拿掉，所以留两级退路：本应用设置页 → 全局列表。
+
+**另外**：荣耀/华为的电池白名单只是**其中一道**。真正掐后台的是
+「应用启动管理」，那个没有标准 intent，只能把路径写在界面上告诉用户 ——
+不写的话用户开完上面那个开关以为搞定了，实际还是不会响。
+
+## 75. ⭐ 切一次标签页就重连一次 SSH
+
+**症状**：从底部栏「设置」切回「会话」，每次都要重新连接（~3 秒）。
+
+**根因**：连接建在 `SessionsScreen` 里的 `LaunchedEffect(host.id)`。
+底部栏是 `when (tab) { ... }` —— 切走时那个 composable **离开组合树**，
+协程被取消、状态丢失；切回来重新组合，于是 TCP + 握手 + ed25519 认证再来一遍。
+
+**修法**：把连接提到 tab 切换**之上**（`MainActivity` 里 `rememberHostSession`），
+各页面通过参数拿。跟 D21「换会话不重连」是同一条原则：
+**连接跟着「主机」活，不跟着界面活。**
+
+**怎么验**：别数 `Accepted publickey` 的总数 —— 那里面混着自己在服务器上敲的
+`ssh` 命令和前台服务的连接。**按 App 那把钥匙的指纹过滤**再数：
+```bash
+FP=$(grep 'yxi@emulator' ~/.ssh/authorized_keys | ssh-keygen -lf - | awk '{print $2}')
+journalctl -u ssh --since "$T" | grep -F "$FP" | grep -c Accepted
+```
+实测来回切 8 次 tab → **新增 0 次**。第一次没过滤时数出来是 2，差点以为没修好。

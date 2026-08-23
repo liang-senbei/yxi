@@ -38,22 +38,54 @@ private val Mono = FontFamily.Monospace
  */
 @Composable
 fun ToolCard(c: ChatItem.ToolCall) {
-    var open by remember { mutableStateOf(false) }
+    // ⚠️ **默认折叠成一行。** 一个回合里 Bash/Read 动辄十几条，全铺开的话
+    // 正文（Claude 到底说了什么）被挤得几乎看不见 —— 用户原话：
+    // 「全都是 bash 和 read 这些可读性太差」。
+    //
+    // 两个例外**不折叠**，它们不是噪音：
+    //   · 出错的 —— 失败才是你要看的那条
+    //   · 要你拿主意的（AskUserQuestion / ExitPlanMode）
+    val alwaysOpen = c.name == "AskUserQuestion" || c.name == "ExitPlanMode"
+    var open by remember(c.key) { mutableStateOf(alwaysOpen || c.isError) }
     Surface(color = SurfaceContainerLow, shape = MaterialTheme.shapes.large) {
-        Column(Modifier.fillMaxWidth().clickable { open = !open }.padding(16.dp, 13.dp)) {
-            Header(c)
+        Column(
+            Modifier.fillMaxWidth().clickable { open = !open }
+                // 折叠时收紧留白 —— 十几张卡片各多 6dp，加起来就是一屏
+                .padding(16.dp, if (open) 13.dp else 9.dp),
+        ) {
+            Header(c, open)
+            if (!open) return@Column
             when (c.name) {
-                "Bash" -> BashBody(c, open)
-                "Edit" -> EditBody(c, open)
-                "Write" -> WriteBody(c, open)
+                "Bash" -> BashBody(c, true)
+                "Edit" -> EditBody(c, true)
+                "Write" -> WriteBody(c, true)
                 "Read" -> ReadBody(c)
-                "Agent", "Task" -> AgentBody(c, open)
+                "Agent", "Task" -> AgentBody(c, true)
                 "AskUserQuestion" -> AskBody(c)
-                "ExitPlanMode" -> PlanBody(c, open)
-                else -> PlainBody(c, open)
+                "ExitPlanMode" -> PlanBody(c, true)
+                else -> PlainBody(c, true)
             }
         }
     }
+}
+
+/**
+ * 折叠时那一行摘要 —— **必须能认出「这是哪一条」**，否则折叠就等于全删了。
+ * 命令取第一行、文件取文件名（全路径在手机上一行也放不下）。
+ */
+private fun summary(c: ChatItem.ToolCall): String {
+    val i = c.input
+    val raw = when {
+        i.has("command") -> i.optString("command")
+        i.has("file_path") -> i.optString("file_path").substringAfterLast('/')
+        i.has("pattern") -> i.optString("pattern")
+        i.has("description") -> i.optString("description")
+        i.has("prompt") -> i.optString("prompt")
+        i.has("path") -> i.optString("path").substringAfterLast('/')
+        i.has("url") -> i.optString("url")
+        else -> i.keys().asSequence().firstOrNull()?.let { i.optString(it) }.orEmpty()
+    }
+    return raw.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty().trim()
 }
 
 private fun accent(name: String) = when (name) {
@@ -64,10 +96,21 @@ private fun accent(name: String) = when (name) {
 }
 
 @Composable
-private fun Header(c: ChatItem.ToolCall) {
+private fun Header(c: ChatItem.ToolCall, open: Boolean = true) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(c.name, style = MaterialTheme.typography.labelLarge, color = accent(c.name))
-        Spacer(Modifier.weight(1f))
+        if (!open) {
+            Text(
+                summary(c),
+                style = MaterialTheme.typography.labelSmall.copy(fontFamily = Mono),
+                color = Dim,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+        } else {
+            Spacer(Modifier.weight(1f))
+        }
         val code = c.result?.let { EXIT.find(it)?.groupValues?.get(1) }
         when {
             // ⚠️ 退出码只在**失败**的输出开头有 `Exit code N`；成功时压根没有这个字段，

@@ -21,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.yxi.agent.ChatItem
 import app.yxi.agent.Pending
 import app.yxi.agent.SessionProbe
@@ -405,18 +406,25 @@ private fun LiveStatus(status: String?) {
         infiniteRepeatable(tween(750), RepeatMode.Reverse), label = "pulse",
     )
     Row(
-        Modifier.fillMaxWidth().padding(20.dp, 4.dp, 20.dp, 8.dp),
+        Modifier.fillMaxWidth().padding(20.dp, 2.dp, 20.dp, 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
-            Modifier.size(8.dp)
+            Modifier.size(6.dp)
                 .background(MaterialTheme.colorScheme.tertiary.copy(alpha = a), CircleShape),
         )
-        Spacer(Modifier.width(9.dp))
+        Spacer(Modifier.width(8.dp))
         Text(
             status ?: "在忙…",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.tertiary,
+            // ⚠️ **它显得大不是因为字号大**（量过：12sp，比正文 16sp 还小），
+            // 是视觉重量：labelMedium 自带 Medium 字重 + 强调色 + 独占一行。
+            // 所以这里压的是字重和颜色，不是一味调小 —— 它还得看得见。
+            // 单行截断：状态里带 token 数，长的会折成两行，那时候才是真的一大块。
+            fontSize = 12.sp,
+            fontWeight = androidx.compose.ui.text.font.FontWeight.Normal,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.8f),
         )
     }
 }
