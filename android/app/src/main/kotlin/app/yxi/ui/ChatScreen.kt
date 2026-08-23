@@ -122,6 +122,19 @@ fun ChatScreen(
             return@LaunchedEffect
         }
         status = null
+
+        // ⚠️ **先画最新的一屏，再补历史。** `tail -n 800` 从最老那条开始吐、
+        // 最新的最后才到，所以完整那次要等 4.17 MB 传完你才看得见最新内容。
+        // 这里先要 60 行（0.58 MB，一个来回），立刻有东西看；
+        // 下面那条完整流回来之后整体替换。
+        runCatching { TranscriptStream.head(s, file) }
+            .onSuccess { head ->
+                if (head.isNotEmpty()) {
+                    items = withContext(Dispatchers.Default) { Transcript.parse(head.asSequence()) }
+                }
+            }
+            .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+
         // 攒一批再解析：tail 一上来就吐几百行，逐行重解会把 UI 卡住。
         //
         // ⚠️ **节流必须有「尾随刷新」。** 第一版写成「距上次解析超过 250ms 才解析」，

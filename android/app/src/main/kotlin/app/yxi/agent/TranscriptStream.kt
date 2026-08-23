@@ -27,6 +27,20 @@ object TranscriptStream {
     }
 
     /**
+     * **先只取最近这几条**，一个来回就回来，用来立刻画出「最新的那一屏」。
+     *
+     * ⚠️ **这是「进对话要等好久」的正解。** `tail -n N` 是**从这 N 行里最老的
+     * 那条开始吐**，最新的一条**最后才到** —— 所以完整那次要等整包传完才看得见
+     * 最新内容。实测同一个会话：`tail -n 800` 是 **4.17 MB**，
+     * 而 `tail -n 60` 只有 **0.58 MB**（大头全堆在 200 条以外的老行里，
+     * 工具输出动辄几十 KB）。手机上那是 7 倍的等待。
+     *
+     * 用户自己想到的：「我很久没点进去就先加载最新的会不会好一点」—— 对。
+     */
+    suspend fun head(ssh: SshSession, file: String, lines: Int = 60): List<String> =
+        ssh.exec("tail -n $lines '$file'").lineSequence().filter { it.isNotBlank() }.toList()
+
+    /**
      * `tail` 出最后 [backlog] 行然后持续跟随。每收到一行发一次。
      *
      * 用 `tail -n N -f`：**先给历史再跟随**，这样打开界面就有内容，
