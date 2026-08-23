@@ -90,6 +90,12 @@ class MainActivity : ComponentActivity() {
                 // 用户的原话是「切一次就要重新连接一次，有一点麻烦」。
                 // 跟 D21 里「换会话不重连」是同一条原则：连接跟着**主机**活，不跟着界面活。
                 val shared = rememberHostSession(store, keys, host)
+                // ⚠️ **第二条：给工作区预热。** 实测点开一个会话要新建 2 次 SSH 认证，
+                // 回环上就是「1 秒空屏、2 秒才出内容」，手机上更久（#86）。
+                // 提前建好，点进去直接用。
+                // **刻意不复用上面那条** —— 终端通道出事会把看板一起拖死（#16）。
+                // 代价是每台主机多一条闲着的连接，心跳 15 秒一次，可以接受。
+                val warm = rememberHostSession(store, keys, host)
 
                 BackHandler(enabled = work != null || tab != Tab.Sessions) {
                     when {
@@ -104,6 +110,7 @@ class MainActivity : ComponentActivity() {
                     Scaffold { p ->
                         Workspace(
                             store, keys, w.host, w.session, w.cwd, w.mode,
+                            preconnected = warm.session,
                             modifier = Modifier.padding(p),
                         )
                     }

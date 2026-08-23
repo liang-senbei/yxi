@@ -60,6 +60,17 @@ fun Workspace(
      * 明确点了「开终端」「文件」就传具体值 —— 显式动作压过记忆，否则那两个按钮等于白设。
      */
     initial: Mode?,
+    /**
+     * **预热好的连接**（[app.yxi.MainActivity] 在你还在看板时就建好了）。
+     *
+     * ⚠️ **这是「进对话要等两三秒」的解法，而且刻意不共用看板那条。**
+     * 共用一条的话，终端通道出事会把看板一起拖死 —— jsch 的会话读循环是全局一条，
+     * 一个通道的缓冲塞满，连接上所有通道都不动（见本文件里那段 ⚠️⚠️ 和 #16）。
+     * 所以这里是**另一条独立的连接**，只是提前建好了，不是共用。
+     *
+     * 它归 MainActivity 所有，**这里不许 disconnect** —— 断了下次又要重连。
+     */
+    preconnected: SshSession? = null,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -154,6 +165,17 @@ fun Workspace(
     }
 
     LaunchedEffect(host.id, generation) {
+        // 预热的那条还活着就直接用 —— 省掉 TCP + 握手 + ed25519（手机上 1~3 秒）
+        preconnected?.takeIf { it.isAlive && generation == 0 }?.let {
+            ssh = it
+            status = null
+            chatBlocked = when {
+                sessionName == null -> "没有指定会话"
+                TranscriptStream.latestFor(it, cwd) == null -> "这个会话里没跑过 Claude Code"
+                else -> ""
+            }
+            return@LaunchedEffect
+        }
         var wait = 700L
         while (true) {
             val c = connect() ?: run { status = "这台主机还没有可用的认证方式"; return@LaunchedEffect }
@@ -290,7 +312,11 @@ fun Workspace(
     }
 
     DisposableEffect(host.id) {
-        onDispose { shell?.close(); sftp?.close(); ssh?.disconnect() }
+        onDispose {
+            shell?.close(); sftp?.close()
+            // ⚠️ 预热那条归 MainActivity，断了下次进来又要重连 —— 只断自己建的
+            if (ssh !== preconnected) ssh?.disconnect()
+        }
     }
 
     // ⚠️ `imePadding()` 不能省：`enableEdgeToEdge` 下窗口是铺满的，

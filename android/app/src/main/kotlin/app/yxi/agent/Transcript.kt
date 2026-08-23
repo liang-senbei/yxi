@@ -35,6 +35,24 @@ sealed interface ChatItem {
         var meta: JSONObject? = null,
     ) : ChatItem
     /**
+     * **不是用户说的话**，但在转录里也是 `user` 类型的东西：队友/子 agent 的消息、
+     * 任务通知、系统提醒、斜杠命令的输出。
+     *
+     * ⚠️ 不单独认出来的话，它们会**原样当成用户气泡渲染** ——
+     * 屏幕上就是一坨 `<agent-message from="ios-parsers">` 的原始 XML，
+     * 而且长着「你说的话」的样子。实测一个真实会话里有 33 处这种东西。
+     * 用户的原话：「为什么对话里面在显示的是这样子的图片啊」。
+     */
+    data class Injected(
+        override val key: String,
+        /** 给人看的类别，如「队友消息」「任务通知」 */
+        val kind: String,
+        /** 谁发的，认得出就填（`from="xxx"`） */
+        val from: String?,
+        val text: String,
+    ) : ChatItem
+
+    /**
      * **已提交、还排着队**的用户输入 —— 你在它忙的时候打的字。
      *
      * ⚠️ 这个必须显示出来。转录里它的类型不是 `user` 而是 `queue-operation`，
@@ -56,12 +74,64 @@ sealed interface ChatItem {
  */
 object Transcript {
 
-    /** 解析若干行 JSONL，返回渲染用的条目。工具结果会就地合并进对应的 [ChatItem.ToolCall]。 */
-    fun parse(lines: Sequence<String>): List<ChatItem> {
-        val out = ArrayList<ChatItem>()
-        val calls = HashMap<String, ChatItem.ToolCall>()   // tool_use_id → 卡片
-        val queued = LinkedHashSet<String>()               // 还排着队的输入，出队就删
+    /**
+     * 解析若干行 JSONL，返回渲染用的条目。
+     *
+     * ⚠️ 这是 [Incremental] 的一次性包装 —— **现有的全部测试都走这条路**，
+     * 所以它们同时也在验增量引擎。
+     */
+    fun parse(lines: Sequence<String>): List<ChatItem> =
+        Incremental().apply { add(lines) }.snapshot()
 
+    /**
+     * **可续解析器：只吃新来的行。**
+     *
+     * ⚠️ 为什么必须增量：老做法是每 300ms 把整个缓冲从头解析一遍 ——
+     * 实测一个真实会话 `tail -n 800` 是 **4.17 MB**，也就是**每秒重嚼三次 4 MB**。
+     * 会话越长越慢，而终端那条链一个字节都不用解析。见 TROUBLESHOOTING #86。
+     *
+     * ⚠️ 不能简单「解析新行然后 append」，有两处**跨行状态**：
+     *   · `tool_result` 要回填**前面**那张工具卡
+     *   · 排队的输入要等它「作为用户消息出现过」才算出队（#76）
+     * 所以状态留在这个对象里。
+     *
+     * ⚠️⚠️ **回填时必须换成新实例，不能原地改。** `ChatItem.ToolCall` 里那几个
+     * 是 `var`，就地改 Compose **看不见** —— 列表里还是同一个对象，
+     * `key` 也没变，那张卡会永远停在「进行中」。所以存的是**下标**，回填时整条替换。
+     */
+    class Incremental {
+        private val out = ArrayList<ChatItem>()
+        private val calls = HashMap<String, Int>()          // tool_use_id → out 里的下标
+        private val queued = LinkedHashSet<String>()        // 还排着队的输入，出队就删
+        private val said = HashSet<String>()                // 已经作为用户消息出现过的原文
+
+        fun add(lines: Sequence<String>) = parseInto(lines, out, calls, queued, said)
+
+        /** 当前快照。排队的挂在最后 —— 它们还没进对话，位置就在「此刻」。 */
+        fun snapshot(): List<ChatItem> = out + queued.asSequence()
+            .filterNot { it.trim() in said }
+            .mapIndexed { i, t ->
+                // ⚠️ **排着队的也可能不是用户说的话。** 队友/子 agent 的消息是通过
+                // 队列注入的，落在 `queue-operation` 里 —— 只在 parseUser 里认注入
+                // 会漏掉它们，屏幕上就是一坨 `<agent-message from="…">` 顶着
+                // 「排队中·你说的话」的样子。这条是真机上看出来的。
+                val inj = injectedOf(t)
+                if (inj == null) ChatItem.Queued("queued-$i-" + t.hashCode(), t)
+                else ChatItem.Injected("queued-$i-" + t.hashCode(), inj.first + " · 排队中", inj.second, t)
+            }
+
+        /** 已经吃进去多少行 —— 上层拿它决定从哪儿接着喂。 */
+        var consumed: Int = 0
+            internal set
+    }
+
+    private fun parseInto(
+        lines: Sequence<String>,
+        out: ArrayList<ChatItem>,
+        calls: HashMap<String, Int>,
+        queued: LinkedHashSet<String>,
+        said: HashSet<String>,
+    ) {
         lines.forEach { line ->
             if (line.isBlank()) return@forEach
             val d = runCatching { JSONObject(line) }.getOrNull() ?: return@forEach
@@ -89,7 +159,12 @@ object Transcript {
                     val p = a.optString("prompt")
                     // origin.kind 不是 human 的是系统注入的，不该显示成用户说的话
                     if (p.isNotBlank() && a.optJSONObject("origin")?.optString("kind") == "human") {
-                        out += ChatItem.UserText(uuidOf(d, line), p)
+                        val key = uuidOf(d, line)
+                        val inj = injectedOf(p)
+                        out += if (inj == null) ChatItem.UserText(key, p)
+                        else ChatItem.Injected(key, inj.first, inj.second, p)
+                        // ⚠️ 不管是不是注入内容都要记 —— 出队判据看的是「这句话出现过没有」（#76）
+                        said += p.trim()
                     }
                 }
                 return@forEach
@@ -102,47 +177,86 @@ object Transcript {
             val uuid = d.optString("uuid", d.optString("requestId", line.hashCode().toString()))
 
             when (type) {
-                "user" -> parseUser(msg, d.optJSONObject("toolUseResult"), uuid, calls, out)
+                "user" -> parseUser(msg, d.optJSONObject("toolUseResult"), uuid, calls, out, said)
                 "assistant" -> parseAssistant(msg, uuid, calls, out)
                 else -> Unit
             }
         }
-        // ⚠️ **出队的判据是「这句话有没有真的作为用户消息出现过」，不是 remove。**
-        // 实测一个真实会话：35 个 enqueue 只有 29 个 remove，剩下 13 条全都后来
-        // 以普通 `user` 消息出现了 —— 它们**早就被处理完了**，只是 Claude Code
-        // 走的不是 remove 那条路径。只认 remove 的话，那 13 条会永远挂在
-        // 「排队中」，而对应的命令几小时前就跑完了。见 TROUBLESHOOTING #76。
-        val said = out.asSequence()
-            .filterIsInstance<ChatItem.UserText>()
-            .mapTo(HashSet()) { it.text.trim() }
-        queued.asSequence()
-            .filterNot { it.trim() in said }
-            .forEachIndexed { i, t -> out += ChatItem.Queued("queued-$i-" + t.hashCode(), t) }
-        return out
     }
 
     private fun uuidOf(d: JSONObject, line: String): String =
         d.optString("uuid", d.optString("requestId", line.hashCode().toString()))
 
+    /**
+     * 注入内容的标签 → 给人看的类别。
+     *
+     * ⚠️ 这些标签**不一定在开头** —— 前面常常还有一段引子
+     * （「Another Claude session sent a message:」之类），所以是**搜**不是 `startsWith`。
+     */
+    private val INJECTED = listOf(
+        "teammate-message" to "队友消息",
+        "agent-message" to "子 agent 消息",
+        "cross-session-message" to "跨会话消息",
+        "task-notification" to "任务通知",
+        "system-reminder" to "系统提醒",
+        "local-command-caveat" to "系统提醒",
+        "local-command-stdout" to "命令输出",
+        "command-name" to "斜杠命令",
+    )
+
+    /**
+     * 谁发的。⚠️ **属性名不止一个**：子 agent 用 `from="…"`，
+     * 队友消息用 `teammate_id="…"` —— 只认 `from` 的话队友那栏永远是空的
+     * （这条是测试抓出来的，我原本只写了 from）。
+     */
+    private val FROM = Regex("""(?:from|teammate_id|agent_id)="([^"]+)"""")
+
+    /** 认出来就返回（类别, 谁发的），否则 null。 */
+    private fun injectedOf(text: String): Pair<String, String?>? {
+        for ((tag, label) in INJECTED) {
+            val i = text.indexOf("<$tag")
+            if (i < 0) continue
+            val from = FROM.find(text, i)?.groupValues?.get(1)
+            return label to from
+        }
+        return null
+    }
+
     private fun parseUser(
         msg: JSONObject, meta: JSONObject?, uuid: String,
-        calls: MutableMap<String, ChatItem.ToolCall>, out: MutableList<ChatItem>,
+        calls: MutableMap<String, Int>, out: MutableList<ChatItem>,
+        said: MutableSet<String>,
     ) {
+        fun said(key: String, t: String) {
+            val inj = injectedOf(t)
+            if (inj == null) {
+                out += ChatItem.UserText(key, t)
+                said += t.trim()     // 出队判据要用（#76）
+            } else {
+                out += ChatItem.Injected(key, inj.first, inj.second, t)
+            }
+        }
         when (val c = msg.opt("content")) {
-            is String -> if (c.isNotBlank()) out += ChatItem.UserText(uuid, c)
+            is String -> if (c.isNotBlank()) said(uuid, c)
             is JSONArray -> for (i in 0 until c.length()) {
                 val b = c.optJSONObject(i) ?: continue
                 when (b.optString("type")) {
                     "text" -> b.optString("text").takeIf { it.isNotBlank() }
-                        ?.let { out += ChatItem.UserText("$uuid-$i", it) }
+                        ?.let { said("$uuid-$i", it) }
                     // 工具结果不单独成条，合并回它对应的工具卡片
                     "tool_result" -> {
-                        val id = b.optString("tool_use_id")
-                        calls[id]?.apply {
-                            result = flatten(b.opt("content"))
-                            isError = b.optBoolean("is_error", false)
-                            // optJSONObject 在它是字符串/null 时自然返回 null —— 正合适
-                            this.meta = meta
+                        // ⚠️ **整条替换，不能就地改。** ToolCall 里那几个是 var，
+                        // 就地改的话列表里还是同一个对象、key 也没变，
+                        // **Compose 看不见** —— 那张卡会永远停在「进行中」。
+                        val idx = calls[b.optString("tool_use_id")]
+                        val card = idx?.let { out.getOrNull(it) } as? ChatItem.ToolCall
+                        if (card != null && idx != null) {
+                            out[idx] = card.copy(
+                                result = flatten(b.opt("content")),
+                                isError = b.optBoolean("is_error", false),
+                                // optJSONObject 在它是字符串/null 时自然返回 null —— 正合适
+                                meta = meta,
+                            )
                         }
                     }
                 }
@@ -152,7 +266,7 @@ object Transcript {
 
     private fun parseAssistant(
         msg: JSONObject, uuid: String,
-        calls: MutableMap<String, ChatItem.ToolCall>, out: MutableList<ChatItem>,
+        calls: MutableMap<String, Int>, out: MutableList<ChatItem>,
     ) {
         val c = msg.optJSONArray("content") ?: return
         for (i in 0 until c.length()) {
@@ -167,7 +281,9 @@ object Transcript {
                     val call = ChatItem.ToolCall(
                         key, b.optString("name"), b.optJSONObject("input") ?: JSONObject()
                     )
-                    calls[b.optString("id")] = call
+                    // ⚠️ 记的是它**将要占**的下标 —— 写在 out += 之前，所以是 size 不是 size-1。
+                    // 写成 size-1 会指到前一条：回填时改错卡片，而且那张真正的卡永远停在「进行中」
+                    calls[b.optString("id")] = out.size
                     out += call
                 }
                 else -> out += ChatItem.Unknown(key, b.optString("type"))

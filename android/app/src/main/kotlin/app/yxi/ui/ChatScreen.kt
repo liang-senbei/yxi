@@ -142,12 +142,21 @@ fun ChatScreen(
         // 剩下的全被吞掉，然后 tail 阻塞等新内容 —— **界面永远停在第一行的解析结果**。
         // 现象是「忙的会话正常、闲的会话永远空白」，最容易被当成偶发问题。
         // 现在改成：收行的只管往 buf 里塞并标脏，另一个协程定时把脏的刷出来。
-        val buf = ArrayList<String>()
-        var dirty = false
+        // ⚠️ **只喂新行。** 老做法是每 300ms 把整个缓冲从头重解 ——
+        // 实测真实会话 `tail -n 800` 是 4.17 MB，等于**每秒重嚼三次 4 MB**，
+        // 会话越长越慢。见 TROUBLESHOOTING #86。
+        val inc = Transcript.Incremental()
+        val pending = ArrayList<String>()
+        // ⚠️ 收行和刷新是两个协程。`toList()` 和 `clear()` 之间来一行就会**丢**，
+        // 所以这两处都要在同一把锁里。老代码不清空所以没这个问题，现在清了就得管。
+        val lock = Any()
         launch {
             while (true) {
                 delay(300)
-                if (!dirty) {
+                val batch = synchronized(lock) {
+                    if (pending.isEmpty()) emptyList() else pending.toList().also { pending.clear() }
+                }
+                if (batch.isEmpty()) {
                     // ⚠️ 一个空转的周期 = 历史灌完了。**这个标志是「不要跳」的关键**：
                     // 在它之前每次刷新都瞬移到底（不做动画），之后才允许动画。
                     // `tail -n 800` 是分批吐的，每批都动画一次滚到底 ——
@@ -155,12 +164,13 @@ fun ChatScreen(
                     if (items.isNotEmpty()) settled = true
                     continue
                 }
-                dirty = false
-                val snapshot = buf.toList()   // 在收行的同一个线程上拷一份，再拿去后台解析
-                items = withContext(Dispatchers.Default) { Transcript.parse(snapshot.asSequence()) }
+                items = withContext(Dispatchers.Default) {
+                    inc.add(batch.asSequence())
+                    inc.snapshot()
+                }
             }
         }
-        TranscriptStream.stream(s, file).collect { line -> buf += line; dirty = true }
+        TranscriptStream.stream(s, file).collect { line -> synchronized(lock) { pending += line } }
     }
     // ⚠️ 「此刻在等你选」这件事**只有屏幕知道** —— tool_use 要等工具跑完才落进转录。
     // 所以历史读转录、待答抓屏幕，两条路各司其职（见 Prompt 的类注释）。
@@ -381,6 +391,7 @@ private fun BasicTextFieldRow(value: String, onValue: (String) -> Unit) {
 private fun Item(item: ChatItem) = when (item) {
     is ChatItem.UserText -> UserBubble(item.text)
     is ChatItem.Queued -> QueuedBubble(item.text)
+    is ChatItem.Injected -> InjectedCard(item)
     is ChatItem.AssistantText -> Markdown(
         item.markdown,
         // ⚠️ 一定要传 —— 库默认把 `##` 渲染成 45sp（正文的 3 倍）。见 [yxiMarkdown]
@@ -565,3 +576,62 @@ private fun queryName(ctx: android.content.Context, uri: android.net.Uri): Strin
         if (i >= 0 && c.moveToFirst()) c.getString(i) else null
     }
 }.getOrNull()
+
+/**
+ * 注入内容（队友消息 / 任务通知 / 系统提醒 / 命令输出）。
+ *
+ * ⚠️ **默认折叠，而且不能长得像用户气泡。** 它们在转录里也是 `user` 类型，
+ * 不单独渲染的话就是一坨原始 XML 顶着「你说的话」的样子出现在屏幕上。
+ * 折叠是因为它们通常又长又不是你要读的内容 —— 但也不能藏掉，
+ * 队友消息里常常有正事。
+ */
+@Composable
+private fun InjectedCard(item: ChatItem.Injected) {
+    var open by remember(item.key) { mutableStateOf(false) }
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier.fillMaxWidth().clickable { open = !open },
+    ) {
+        Column(Modifier.padding(16.dp, if (open) 13.dp else 9.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    item.kind,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.tertiary,
+                )
+                item.from?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+                }
+                if (!open) {
+                    Text(
+                        stripTags(item.text),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+            if (open) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    stripTags(item.text),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+/** 把 XML 标签抹掉 —— 屏幕上没人想看 `<teammate-message from="...">`。 */
+private fun stripTags(t: String): String =
+    t.replace(Regex("</?[a-z][a-z0-9-]*(\\s[^>]*)?>"), " ")
+        .lineSequence().map { it.trim() }.filter { it.isNotEmpty() }
+        .joinToString("\n").trim()
