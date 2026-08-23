@@ -153,11 +153,17 @@ private fun HostRow(
                 shape = Pill,
                 modifier = Modifier.padding(end = 8.dp).clickable(onClick = onWatch),
             ) {
-                Text(
-                    if (h.watch) "🔔" else "🔕",
-                    Modifier.padding(11.dp, 5.dp),
-                    style = MaterialTheme.typography.labelSmall,
-                )
+                // ⚠️ 开/关不能只靠换图形，**颜色也要变** —— 铃铛和静音铃铛在 18dp
+                // 下轮廓很像，光看形状容易看错。而这两个状态后果差很远：
+                // 关着 = Claude 需要你时手机不会响，且没有任何提示
+                Box(Modifier.padding(9.dp, 5.dp)) {
+                    GlyphIcon(
+                        if (h.watch) Glyph.Bell else Glyph.BellOff,
+                        if (h.watch) MaterialTheme.colorScheme.tertiary
+                        else MaterialTheme.colorScheme.outline,
+                        18.dp,
+                    )
+                }
             }
             Surface(
                 color = if (h.useKey) MaterialTheme.colorScheme.primaryContainer

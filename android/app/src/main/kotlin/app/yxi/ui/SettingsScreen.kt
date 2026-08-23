@@ -136,6 +136,20 @@ fun SettingsScreen(
         Card("手机主动响") {
             val battery = ignoringBattery(ctx)
             val notif = notificationsOn(ctx)
+            // ⚠️ **这一行是后加的，因为原来那两行在骗人。**
+            // 用户把通知权限和后台都放行了，看到两个绿勾 + 「缺任何一项都不会响」，
+            // 合理地以为搞定了 —— 但真正决定响不响的是**每台主机的铃铛**（`watch`），
+            // 它默认是关的，而且**这一页上根本没提过它**。
+            // 前台服务只在「有任意一台开了铃铛」时才启动，一台都没开 = 连那条常驻通知都没有，
+            // 现象就是「什么都不显示」。见 TROUBLESHOOTING #91。
+            val watching = store.hosts.collectAsState().value.count { it.watch }
+            StatusRow("盯着的机器", watching > 0, ok = "$watching 台") {
+                // 没法直接跳到主机页（这里拿不到导航），说清楚去哪点就行
+            }
+            if (watching == 0) Hint2(
+                "⚠️ 一台都没开 —— 前面两项放行了也不会响。" +
+                    "去「主机」那一栏，点每台机器右边的铃铛把它打开。"
+            )
             StatusRow("通知权限", notif) {
                 ctx.startActivity(
                     Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
@@ -277,18 +291,18 @@ private fun Hint2(text: String) =
     Text(text, style = MaterialTheme.typography.labelSmall, color = Dim)
 
 @Composable
-private fun StatusRow(label: String, ok: Boolean, onFix: () -> Unit) {
+private fun StatusRow(label: String, on: Boolean, ok: String = "已放行", onFix: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clickable(enabled = !ok, onClick = onFix),
+        Modifier.fillMaxWidth().clickable(enabled = !on, onClick = onFix),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-        Surface(color = if (ok) SurfaceContainerHigh else CopperContainer, shape = Pill) {
+        Surface(color = if (on) SurfaceContainerHigh else CopperContainer, shape = Pill) {
             Text(
-                if (ok) "已放行" else "去开启",
+                if (on) ok else "去开启",
                 Modifier.padding(12.dp, 5.dp),
                 style = MaterialTheme.typography.labelSmall,
-                color = if (ok) Teal else OnCopperContainer,
+                color = if (on) Teal else OnCopperContainer,
             )
         }
     }

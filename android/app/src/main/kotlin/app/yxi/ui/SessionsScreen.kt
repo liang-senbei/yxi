@@ -298,7 +298,7 @@ private fun PinnedHeader(n: Int) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        PinIcon(MaterialTheme.colorScheme.outline)
+        GlyphIcon(Glyph.Pin, MaterialTheme.colorScheme.outline, 16.dp)
         Text("置顶", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
         Text(
             "$n",
@@ -365,9 +365,11 @@ private fun SessionCard(
                         .clickable(onClick = onPin),
                     contentAlignment = Alignment.Center,
                 ) {
-                    PinIcon(
+                    GlyphIcon(
+                        Glyph.Pin,
                         if (pinned) MaterialTheme.colorScheme.onTertiaryContainer
-                        else MaterialTheme.colorScheme.outline
+                        else MaterialTheme.colorScheme.outline,
+                        18.dp,
                     )
                 }
                 Spacer(Modifier.width(4.dp))
@@ -437,16 +439,3 @@ private fun SendSheet(target: Session, onSend: (String) -> Unit, onDismiss: () -
 }
 
 
-/** 矢量图钉。跟 ChatScreen 里那几个图形同一路数：能跟着主题变色，各机型一个样。 */
-@Composable
-private fun PinIcon(tint: androidx.compose.ui.graphics.Color) {
-    androidx.compose.foundation.Canvas(Modifier.size(18.dp)) {
-        val p = androidx.compose.ui.graphics.vector.PathParser()
-            .parsePathString(
-                "M14,2l6,6l-2.2,0.6l-3.1,3.1l0.7,4.2l-1.6,1.6l-3.7,-3.7l-4.4,4.4l-1.1,-1.1" +
-                    "l4.4,-4.4l-3.7,-3.7l1.6,-1.6l4.2,0.7l3.1,-3.1z"
-            ).toPath()
-        val s = size.minDimension / 24f
-        scale(s, s, pivot = androidx.compose.ui.geometry.Offset.Zero) { drawPath(p, tint) }
-    }
-}

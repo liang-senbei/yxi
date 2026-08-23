@@ -341,12 +341,12 @@ fun ChatScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (sftp != null) {
-                    FlatIcon(Icons.Plus, "加附件") { pick.launch("*/*") }
+                    FlatIcon(Glyph.Plus, "加附件") { pick.launch("*/*") }
                 } else {
                     Spacer(Modifier.width(10.dp))
                 }
                 Box(Modifier.weight(1f)) { BasicTextFieldRow(draft) { draft = it } }
-                FlatIcon(Icons.Mic, "语音输入") {
+                FlatIcon(Glyph.Mic, "语音输入") {
                     runCatching {
                         listen.launch(
                             android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
@@ -371,8 +371,8 @@ fun ChatScreen(
                     },
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        VectorIcon(
-                            Icons.Send,
+                        GlyphIcon(
+                            Glyph.Send,
                             if (canSend) MaterialTheme.colorScheme.onPrimary
                             else MaterialTheme.colorScheme.outline,
                             20.dp,
@@ -384,33 +384,6 @@ fun ChatScreen(
     }
 }
 
-/**
- * 界面里用到的几个图形。
- *
- * ⚠️ **不用 emoji。** emoji 由系统字体渲染，各家手机长得不一样、粗细跟界面其余部分对不上，
- * 而且没法跟着主题变色 —— 📎 和 🎤 在深色界面里就是两块彩色贴纸。
- */
-private object Icons {
-    /** 加号（加附件） */
-    const val Plus = "M11,5h2v14h-2z M5,11h14v2H5z"
-    /** 话筒 */
-    const val Mic = "M12,3a3,3 0 0,1 3,3v6a3,3 0 0,1 -6,0V6a3,3 0 0,1 3,-3z " +
-        "M5.5,11.5h1.6a4.9,4.9 0 0,0 9.8,0h1.6a6.5,6.5 0 0,1 -5.7,6.4V21h-1.6v-3.1a6.5,6.5 0 0,1 -5.7,-6.4z"
-    /** 上箭头（发送） */
-    const val Send = "M12,4l7,7l-1.5,1.5L13,8v12h-2V8l-4.5,4.5L5,11z"
-    /** 图钉（置顶） */
-    const val Pin = "M14,2l6,6l-2.2,0.6l-3.1,3.1l0.7,4.2l-1.6,1.6l-3.7,-3.7l-4.4,4.4l-1.1,-1.1l4.4,-4.4l-3.7,-3.7l1.6,-1.6l4.2,0.7l3.1,-3.1z"
-}
-
-@Composable
-private fun VectorIcon(path: String, tint: androidx.compose.ui.graphics.Color, size: androidx.compose.ui.unit.Dp) {
-    androidx.compose.foundation.Canvas(Modifier.size(size)) {
-        val p = androidx.compose.ui.graphics.vector.PathParser().parsePathString(path).toPath()
-        val s = this.size.minDimension / 24f
-        scale(s, s, pivot = androidx.compose.ui.geometry.Offset.Zero) { drawPath(p, tint) }
-    }
-}
-
 /** 胶囊里那种「无底色、点得动」的图标按钮。 */
 @Composable
 private fun FlatIcon(path: String, label: String, onTap: () -> Unit) {
@@ -418,7 +391,7 @@ private fun FlatIcon(path: String, label: String, onTap: () -> Unit) {
         Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onTap),
         contentAlignment = Alignment.Center,
     ) {
-        VectorIcon(path, MaterialTheme.colorScheme.onSurfaceVariant, 22.dp)
+        GlyphIcon(path, MaterialTheme.colorScheme.onSurfaceVariant, 22.dp)
     }
 }
 

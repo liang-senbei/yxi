@@ -61,7 +61,7 @@ fun KeyBar(
         Cap("Ctrl", ctrlArmed, onCtrl)
         // 「中」= compose mode。直接打中文不出候选词时点它
         Cap("中", composing, onCompose)
-        Cap("🎤", false, onVoice)
+        CapIcon(Glyph.Mic, onVoice)
         Cap("历史", history, onHistory)
         listOf(
             "esc" to byteArrayOf(27),
@@ -101,6 +101,20 @@ private fun Cap(label: String, on: Boolean, onTap: () -> Unit) {
                 style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
                 color = if (on) OnCopperContainer else OnSurfaceVariant,
             )
+        }
+    }
+}
+
+/** 键盘条上的图标键 —— 跟 [Cap] 一个尺寸，只是画的是矢量不是文字。 */
+@Composable
+private fun CapIcon(path: String, onTap: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = Pill,
+        modifier = Modifier.height(44.dp).clickable(onClick = onTap),
+    ) {
+        Box(Modifier.padding(horizontal = 16.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
+            GlyphIcon(path, MaterialTheme.colorScheme.onSurface, 20.dp)
         }
     }
 }
