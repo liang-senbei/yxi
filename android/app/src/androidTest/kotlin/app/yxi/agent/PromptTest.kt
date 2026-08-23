@@ -247,4 +247,24 @@ class PromptTest {
         )
     }
 
+
+    @Test fun 输入框里打了编号不算等你选() {
+        // ⚠️ 用户在输入框里打「1. 先做这个」，那一行渲染出来就是 `❯ 1. 先做这个` ——
+        // **跟光标行长得一模一样**。认成选择器的话会冒出一张只有一个选项的卡片，
+        // 用户点一下就往他正在写的句子里打个 `1` 进去，还可能弹一条假通知。
+        //
+        // 实测说明：Android 上暂时撞不上 —— 真机抓下来输入框那行 `❯` 后面是
+        // **U+00A0**，而 Java 的 `\s` 只认 ASCII 空白（同样的正则在 Swift/ICU 上
+        // 就会命中，iOS 侧真机抓到了）。**但那是侥幸不是设计**，所以照样挡住：
+        // 真选择器至少两行，输入框下面紧跟着就是横线。
+        val 普通空格 = buildString {
+            appendLine("上一条输出")
+            appendLine("─".repeat(40))
+            appendLine("❯ 1. 先做这个")          // 注意：这里是**普通空格**，模拟最坏情况
+            appendLine("─".repeat(40))
+            appendLine("  ⏵⏵ bypass permissions on · ← for agents")
+        }
+        assertNull("把输入框当成选择器了", Prompt.parse(普通空格))
+    }
+
 }

@@ -40,6 +40,42 @@ class LiveTest {
         assertNull("引用里那行带缩进，不能当成状态：" + live.status, live.status)
     }
 
+    @Test fun 顶格的中文不会被当成状态词() {
+        // ⚠️ **这一屏是拼的，我如实说明**：真机上「顶格渲染的中文消息」和
+        // 「排在状态行下面」这两件事我都单独抓到过（用户消息就渲染在顶格），
+        // 但**没抓到两者同时出现的那一帧**。所以这里手工拼了一屏。
+        //
+        // 正则本身错了是**实测证明**的（JDK 17 跑同一条正则）：
+        //   "❯ 排队丙：这条带省略号…后面还有字".matches("^(\\S) (\\S*….*)$")  →  true
+        // 中文不写空格，所以 `\S*` 能一路吃到 `…`，整条命中。
+        // 结果是手机上显示「正在 排队丙：这条带省略号…」。
+        //
+        // 真状态词永远是拉丁词（Scampering… / Sautéing… / Crafting…），拿这个挡。
+        val 拼的 = buildString {
+            appendLine("● 上一条回复")
+            appendLine("❯ 排队丙：这条带省略号…后面还有字")
+            appendLine("─".repeat(40))
+            appendLine("❯ ")
+            appendLine("─".repeat(40))
+            appendLine("  ⏵⏵ bypass permissions on · esc to interrupt · ← for agents")
+        }
+        val live = Live.parse(拼的)
+        assertTrue("这一屏应该判定为在忙", live.busy)
+        assertNull("中文被当成状态词了：" + live.status, live.status)
+    }
+
+    @Test fun 带重音的拉丁状态词要认得() {
+        // Sautéing… 里的 é 是 U+00E9 —— 挡中文的范围别把它一起挡了
+        val 拼的 = buildString {
+            appendLine("✽ Sautéing… (12s · ↓ 3.4k tokens)")
+            appendLine("─".repeat(40))
+            appendLine("❯ ")
+            appendLine("─".repeat(40))
+            appendLine("  ⏵⏵ bypass permissions on · esc to interrupt")
+        }
+        assertTrue("é 被挡掉了：" + Live.parse(拼的).status, Live.parse(拼的).status.orEmpty().startsWith("Sautéing…"))
+    }
+
     private companion object {
         val BUSY_QUEUED = """
 
