@@ -42,21 +42,37 @@ PUB=$(adb logcat -d -s YxiKey | grep -o 'pub=[A-Za-z0-9+/=]*' | tail -1 | cut -d
 [ -n "$PUB" ] || { echo "✗ 没从 logcat 里拿到公钥"; exit 1; }
 echo "· 公钥 ${PUB:0:24}…"
 
+# ⚠️⚠️ **注释必须是 yxi@emulator，过滤也只能过滤 yxi@emulator。**
+# `KeyManager` 给**每一台** Android 设备生成的公钥注释都是 `yxi@android` ——
+# 模拟器是，用户的真手机也是。这里原来写的是 `grep -v yxi@android`，
+# 于是每跑一次这个脚本，就**把用户真手机的公钥从服务器上删掉一次**，
+# 换成模拟器的。症状是用户那头「连不上 / 检查更新失败」，而这台机器上
+# 一切正常、日志里连痕迹都没有（他的连接压根到不了 Accepted）。
+# 排查时极难往这边想：改的是开发脚本，坏的是生产授权。
+# 见 TROUBLESHOOTING #65。
+EMUTAG=yxi@emulator
 auth() {  # $1 = "" 表示本机
   if [ -z "$1" ]; then
-    grep -v yxi@android ~/.ssh/authorized_keys > /tmp/.ak && echo "ssh-ed25519 $PUB yxi@android" >> /tmp/.ak
+    grep -v "$EMUTAG" ~/.ssh/authorized_keys > /tmp/.ak && echo "ssh-ed25519 $PUB $EMUTAG" >> /tmp/.ak
     cat /tmp/.ak > ~/.ssh/authorized_keys; rm -f /tmp/.ak
   else
-    ssh "$1" "grep -v yxi@android ~/.ssh/authorized_keys > /tmp/.ak; echo 'ssh-ed25519 $PUB yxi@android' >> /tmp/.ak; cat /tmp/.ak > ~/.ssh/authorized_keys; rm -f /tmp/.ak"
+    ssh "$1" "grep -v '$EMUTAG' ~/.ssh/authorized_keys > /tmp/.ak; echo 'ssh-ed25519 $PUB $EMUTAG' >> /tmp/.ak; cat /tmp/.ak > ~/.ssh/authorized_keys; rm -f /tmp/.ak"
   fi
 }
 auth ""; echo "· 本机 authorized_keys 更新"
 auth station; echo "· station authorized_keys 更新"
 
+# ⚠️ **必须有一台走公网 IP。** 之前三台全是 10.0.2.2（模拟器→宿主机回环）和
+# station，结果本机 sshd 日志里手机公钥永远来自 127.0.0.1 ——
+# 「App 连这台服务器的公网地址」这条路一次都没跑过，用户装上就连不上。
+# 见 TROUBLESHOOTING #64。
+PUBIP=$(ip -4 -o addr show scope global | awk '{print $4}' | cut -d/ -f1 | grep -v '^100\.' | head -1)
 HKD=$(ssh-keyscan -t ed25519 127.0.0.1 2>/dev/null | awk '{print $3}' | head -1)
 HKS=$(ssh-keyscan -t ed25519 38.244.50.31 2>/dev/null | awk '{print $3}' | head -1)
+HKP=$(ssh-keyscan -t ed25519 "$PUBIP" 2>/dev/null | awk '{print $3}' | head -1)
 cat > /tmp/.hosts.json <<EOF
 [{"id":"dev","alias":"dev","hostname":"10.0.2.2","port":22,"username":"root","useKey":true,"watch":$WATCH,"hostKey":"$HKD"},
+ {"id":"pub","alias":"pub($PUBIP)","hostname":"$PUBIP","port":22,"username":"root","useKey":true,"watch":false,"hostKey":"$HKP"},
  {"id":"station","alias":"station","hostname":"38.244.50.31","port":22,"username":"root","useKey":true,"watch":$WATCH,"hostKey":"$HKS"}]
 EOF
 adb push /tmp/.hosts.json /data/local/tmp/hosts.json >/dev/null

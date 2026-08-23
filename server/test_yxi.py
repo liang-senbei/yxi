@@ -145,6 +145,27 @@ def test_approval_fail_closed():
             os.remove(MARKER)
 
 
+def test_seed_never_evicts_a_real_phone():
+    """`dev/seed.sh` 改 authorized_keys 时，过滤标记必须是**模拟器专属**的。
+
+    `KeyManager` 给每一台 Android 设备生成的公钥注释都是 `yxi@android` ——
+    模拟器是，用户的真手机也是。脚本里原来写 `grep -v yxi@android`，
+    于是每跑一次开发脚本，就把用户真手机的公钥从服务器上删一次。
+    症状出在用户那头（连不上、检查更新失败），服务器上一切正常、
+    日志里连痕迹都没有 —— 他的连接根本走不到认证。见 TROUBLESHOOTING #65。
+    """
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = open(os.path.join(root, "dev", "seed.sh")).read()
+    # 注释里可以提 yxi@android（就是上面那段解释），代码里不行
+    code = "\n".join(l.split("#")[0] for l in src.splitlines())
+    assert "authorized_keys" in code, "seed.sh 不动 authorized_keys 了？这条测试该删了"
+    assert "yxi@android" not in code, (
+        "seed.sh 的代码里出现了 yxi@android —— 真手机的公钥会被它删掉。"
+        "模拟器自己的钥匙要用 yxi@emulator 打标签，过滤也只过滤这个标签。"
+    )
+    print("✓ seed.sh 不会误删真手机的公钥")
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in list(globals().items()):

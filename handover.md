@@ -186,6 +186,17 @@
   - 清理：station 的 `~/.ssh/authorized_keys` 里那行**模拟器的** `yxi@android` 要删
   - 发布前：GitHub token 轮换、仓库拆公开/私有
 
+- ✅ **修好「用户真机连不上」（2026-08-23）**：根因**不在 App**，在 `dev/seed.sh` ——
+  它按注释 `yxi@android` 过滤 `authorized_keys`，而 **`KeyManager` 给每台安卓设备
+  写的注释都是 `yxi@android`**，模拟器和用户真手机撞了。于是每跑一次开发脚本，
+  就把用户手机的公钥从本机和 station 上删一次；症状是他那头「连不上 + 检查更新失败」，
+  服务器这头**查什么都正常**（端口通、外部机器 SSH 得通、fail2ban 没封他），
+  唯一线索是 sshd 日志里他那把钥匙的指纹**一次都没出现过**。
+  修法：模拟器专用标签 `yxi@emulator`，`server/test_yxi.py::test_seed_never_evicts_a_real_phone` 守住。
+  同时暴露出 **测试盲区**：seed 里预置的主机一直是 `10.0.2.2`（模拟器→宿主机回环），
+  「App 走公网 IP 连这台服务器」这条路一次都没跑过 —— 已在 seed 里补一台真公网 IP 的主机，
+  并实测通过（连接 + 检查更新）。见 TROUBLESHOOTING #64 / #65 / #66。
+
 ## 读写信息在哪
 | 路径 | 性质 |
 |---|---|
@@ -197,6 +208,7 @@
 | `~/.yxi/answers/<id>` | 【本项目自有】审批回答，App 写、hook 读完即删 |
 | `/root/src/tmp/<项目>/` | 【本项目自有·**会被自动删**】手机上传的附件暂存区，**保留 3 天**。`/root/src` 不是 git 仓库，安全 |
 | Android Keystore 里的 SSH 私钥 | 【App 内·硬件保护】导不出来；撤销 = 服务器删 `authorized_keys` 一行 |
+| `~/.ssh/authorized_keys`（本机 / station / inst2） | 【要改·**共享状态**】`yxi@android` = 用户真手机，`yxi@emulator` = 模拟器。**`dev/seed.sh` 只许动 `yxi@emulator`**，动了另一个就等于把用户踢下线，见 TROUBLESHOOTING #65 |
 | `/root/inbox/base.apk`、`/root/inbox/apk/` | 【参考】原版 Moshi Android 3.10.0 及其解包，逆向证据来源 |
 
 ## 界面视觉稿
