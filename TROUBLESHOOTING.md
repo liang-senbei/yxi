@@ -1117,3 +1117,49 @@ ctrl+g to edit in VS Code · ~/.claude/plans/xxx.md        计划批准（2.1.24
 **怎么避开**：**「我找到共同点了」这句话，在只有两个样本时不成立。**
 锚点要挑**语义上必然存在**的东西（选择器活着 → 必然有一项被选中 → 必然有光标），
 不是**恰好都有**的东西（这两种脚注恰好都写了 cancel）。
+
+## 83. ⭐⭐ 「看不到前面的输出」—— 那个「输出」到底在谁手里？先后猜错两次
+
+用户说终端模式不能上滑看之前的输入输出。**同一个需求，我连着走错两条路**，
+每条都走到"看起来快成了"才发现方向错。
+
+**① 让终端控件自己滚 —— 拿不到。**
+termlib 的 `ScrollController` 有完整的 `scrollToBottom / scrollToTop / scrollBy`，
+在字节码里还是 `public interface`。但**用编译器一验就露馅**：
+
+```
+e: Cannot access 'interface ScrollController : Any': it is internal in file.
+```
+
+Kotlin `internal` 编到 JVM 上就是 public —— **看字节码会得出完全相反的结论**。
+判断能不能用，唯一可信的是让编译器试一次。
+
+**② 驱动 tmux 的 copy-mode —— 进得去，但里面是空的。**
+这个错更隐蔽，因为**每一步都"成功"**：`tmux copy-mode` 返回 0、
+`pane_in_mode` 变成 1、界面上提示条正常显示……**但 tmux 右上角写着 `[0/0]`**。
+
+查出来是：
+
+```
+alternate_on=1   history_size=0     ← 本机所有 Claude Code 会话都是这样
+```
+
+Claude Code 是全屏 TUI，占着**备用屏**（alternate screen）。备用屏的输出
+**根本不进 tmux 的 scrollback** —— 那是 vim/less 一类程序的正常行为。
+tmux 那边压根没有东西可翻，copy-mode 进去也是空的。
+
+**③ 正解：翻的是那个全屏程序自己的视图。**
+Claude Code 认 PageUp/PageDown。实测送 3 个 PageUp，内容区指纹从
+`51c656fe` 变成 `4848c90b`；界面上还会出现它自己的 `Jump to bottom (ctrl+End) ↓`。
+
+所以「历史模式」做成：开着时在终端上盖一层，把上下滑动翻译成
+**PageUp/PageDown 字节**送进 shell。一屏一页，阈值给到 110px ——
+按行算的话手指划一下就翻十几页，直接飞出去。
+
+**怎么避开**：**「看不到 X」这类需求，第一步是搞清楚 X 存在谁手里。**
+我先假设在控件里、又假设在 tmux 里，两次都跳过了这一步直接开做。
+终端这条链上至少有四层缓冲（控件 / tmux / 备用屏 / 应用自己），
+**猜错一层，做出来的东西每一步都"成功"，就是不起作用**。
+
+⚠️ 另外：`if (history)` 那层遮罩**只在历史模式下才盖**。平时盖着的话，
+终端自己的选词、长按、URL 点击全被吃掉 —— 为了一个功能废掉三个。

@@ -38,6 +38,17 @@ fun KeyBar(
     onCompose: () -> Unit,
     /** 语音。⚠️ 终端模式下识别结果要先确认，见 Workspace 里那个对话框 */
     onVoice: () -> Unit,
+    /**
+     * 历史模式（tmux copy-mode）。开着的时候在终端上**上下滑动就是翻历史**。
+     *
+     * ⚠️ **为什么绕 tmux 而不是让控件自己滚**：termlib 的 `ScrollController`
+     * 在 Kotlin 层是 `internal`（拿编译器验过：`Cannot access 'interface
+     * ScrollController': it is internal in file`），外部一行都碰不到。
+     * 而 tmux 本来就有历史，`send-keys -X page-up` 就能驱动 ——
+     * **别跟控件较劲，去驱动它背后那个真正存着历史的东西。**
+     */
+    history: Boolean,
+    onHistory: () -> Unit,
     send: (ByteArray) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -51,6 +62,7 @@ fun KeyBar(
         // 「中」= compose mode。直接打中文不出候选词时点它
         Cap("中", composing, onCompose)
         Cap("🎤", false, onVoice)
+        Cap("历史", history, onHistory)
         listOf(
             "esc" to byteArrayOf(27),
             "tab" to byteArrayOf(9),

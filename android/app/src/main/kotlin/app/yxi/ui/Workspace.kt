@@ -3,6 +3,7 @@ package app.yxi.ui
 import android.content.Context
 import android.os.Looper
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -98,6 +99,26 @@ fun Workspace(
     // 粘滞修饰键：工具条点了 Ctrl，下一个从软键盘来的字符带上 Ctrl（控件会自动清）
     val stickies = remember { app.yxi.term.StickyModifiers() }
     var kbVisible by remember { mutableStateOf(false) }
+    /**
+     * 历史模式：开着时在终端上**上下滑动 = 给 Claude Code 送翻页键**。
+     *
+     * ⚠️ **前后错了两次方向，实测才定下来的**：
+     *
+     * ① 让终端控件自己滚 —— **不行**。termlib 的 `ScrollController` 在 Kotlin 层是
+     *    `internal`，拿编译器验过：`Cannot access 'interface ScrollController':
+     *    it is internal in file`，外部一行都碰不到。
+     * ② 驱动 tmux 的 copy-mode —— **也不行**，而且这个错更隐蔽：copy-mode 进得去，
+     *    界面一切正常，但 tmux 右上角显示 `[0/0]`。查出来是
+     *    **`alternate_on=1`** —— Claude Code 是全屏 TUI，占着**备用屏**，
+     *    输出**根本不进 tmux 的历史**（实测本机所有会话 `history_size` 全是 0）。
+     *    也就是说 tmux 那边压根没有东西可翻。
+     * ③ **正解**：往上翻的是 **Claude Code 自己的视图**，它认 PageUp/PageDown。
+     *    实测送 3 个 PageUp，内容区指纹从 `51c656fe` 变成 `4848c90b`。
+     *
+     * 教训：**「看不到前面的输出」这句话里的「输出」，得先搞清楚它存在谁手里。**
+     * 我先后假设是控件、是 tmux，都错了 —— 它在那个全屏程序自己的缓冲里。
+     */
+    var history by remember(sessionName) { mutableStateOf(false) }
     /** 中文输入的退路，见 [app.yxi.term.TerminalView] 的类注释 */
     var composer by remember { mutableStateOf<org.connectbot.terminal.ComposeController?>(null) }
     var composing by remember { mutableStateOf(false) }
@@ -320,14 +341,25 @@ fun Workspace(
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (mode) {
-                Mode.Terminal -> TerminalView(
-                    emulator, focus, stickies,
-                    showKeyboard = kbVisible,
-                    onKeyboardVisible = { kbVisible = it },
-                    onComposeController = { composer = it },
-                    fg = fg, bg = bg,
-                    modifier = Modifier.fillMaxSize(),
-                )
+                Mode.Terminal -> {
+                    TerminalView(
+                        emulator, focus, stickies,
+                        showKeyboard = kbVisible,
+                        onKeyboardVisible = { kbVisible = it },
+                        onComposeController = { composer = it },
+                        fg = fg, bg = bg,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    // ⚠️ **只在历史模式下才盖这一层。** 平时盖着的话，
+                    // 终端自己的选词、长按、URL 点击全被吃掉 —— 为了一个功能废掉三个
+                    if (history) HistoryScrim(
+                        onPage = { up ->
+                            // PageUp = 27 91 53 126 / PageDown = 27 91 54 126
+                            val b = if (up) byteArrayOf(27, 91, 53, 126) else byteArrayOf(27, 91, 54, 126)
+                            scope.launch { shell?.write(b) }
+                        },
+                    )
+                }
                 Mode.Chat -> ChatScreen(ssh, sftp, sessionName.orEmpty(), cwd, Modifier.fillMaxSize())
                 Mode.Files -> FilesScreen(sftp, cwd, Modifier.fillMaxSize())
             }
@@ -347,6 +379,8 @@ fun Workspace(
                 onCtrl = { stickies.ctrl = !stickies.ctrl },
                 onKeyboard = { kbVisible = !kbVisible },
                 composing = composing,
+                history = history,
+                onHistory = { history = !history },
                 onVoice = {
                     runCatching {
                         listen.launch(
@@ -465,4 +499,46 @@ private object Prefs {
         p(ctx).getString(key(hostId, session), null)?.let { n -> Mode.entries.firstOrNull { it.name == n } }
     fun setMode(ctx: Context, hostId: String, session: String?, m: Mode) =
         p(ctx).edit().putString(key(hostId, session), m.name).apply()
+}
+
+/**
+ * 历史模式下盖在终端上的那层：**把上下滑动翻译成翻页键**。
+ *
+ * ⚠️ 送的是给**那个全屏程序**的 PageUp/PageDown，不是 tmux 的 copy-mode ——
+ * Claude Code 占着备用屏，tmux 那边 `history_size` 是 0，没东西可翻。
+ *
+ * ⚠️ 方向：**手指往下 = 看更早**（跟所有列表一致）→ PageUp。写反了用户会觉得
+ * 「越滑越回不去」。
+ */
+@Composable
+private fun HistoryScrim(onPage: (up: Boolean) -> Unit) {
+    // 一屏就是一页，所以阈值要大 —— 按行算的话手指划一下就翻十几页，直接飞出去
+    val PAGE = 110f
+    var acc by remember { mutableFloatStateOf(0f) }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .draggable(
+                orientation = androidx.compose.foundation.gestures.Orientation.Vertical,
+                state = androidx.compose.foundation.gestures.rememberDraggableState { dy ->
+                    acc += dy
+                    while (acc >= PAGE) { acc -= PAGE; onPage(true) }
+                    while (acc <= -PAGE) { acc += PAGE; onPage(false) }
+                },
+                onDragStopped = { acc = 0f },
+            ),
+    ) {
+        Surface(
+            color = MaterialTheme.colorScheme.tertiaryContainer,
+            shape = MaterialTheme.shapes.small,
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = 6.dp),
+        ) {
+            Text(
+                "历史模式 · 上下滑动翻页 · 再点「历史」退出",
+                Modifier.padding(12.dp, 5.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onTertiaryContainer,
+            )
+        }
+    }
 }
