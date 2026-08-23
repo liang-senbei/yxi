@@ -50,6 +50,12 @@ fun SettingsScreen(
     var checking by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<Update.Result?>(null) }
     var sftp by remember { mutableStateOf<Sftp?>(null) }
+    // 开发者模式：连点三下版本号 → 输口令。藏起来是因为诊断文本里有主机地址、
+    // 用户名这些不该随手给旁人看的东西，不是因为它危险
+    var taps by remember { mutableStateOf(0) }
+    var lastTap by remember { mutableStateOf(0L) }
+    var askPass by remember { mutableStateOf(false) }
+    var dev by remember { mutableStateOf(DevMode.unlocked(ctx)) }
     val connect = host?.let { rememberSshConnector(store, keys, it) }
 
     Column(
@@ -61,7 +67,15 @@ fun SettingsScreen(
         // ── 版本 ───────────────────────────────────────────────────
         Card("这个 App") {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
+                Column(
+                    Modifier.weight(1f).clickable {
+                        val now = System.currentTimeMillis()
+                        // 超过 1.2 秒就重新数 —— 否则平时零星点几下也会攒够三下
+                        taps = if (now - lastTap < 1200) taps + 1 else 1
+                        lastTap = now
+                        if (taps >= 3) { taps = 0; if (dev) dev = false.also { DevMode.setUnlocked(ctx, false) } else askPass = true }
+                    },
+                ) {
                     Text("版本 ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyLarge)
                     Text(
                         // versionCode 才是更新比较用的那个数，写出来免得对不上号时抓瞎
@@ -142,6 +156,8 @@ fun SettingsScreen(
             }
         }
 
+        if (dev) DevCard(ctx, host, store, keys)
+
         Card("关于") {
             Hint2(
                 "Yxi —— 手机上的 Claude Code 指挥台。\n" +
@@ -152,6 +168,87 @@ fun SettingsScreen(
     }
 
     if (showKey) PublicKeySheetPublic(keys) { showKey = false }
+
+    if (askPass) {
+        var input by remember { mutableStateOf("") }
+        var wrong by remember { mutableStateOf(false) }
+        AlertDialog(
+            onDismissRequest = { askPass = false },
+            title = { Text("开发者模式") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        input, { input = it; wrong = false },
+                        singleLine = true,
+                        label = { Text("口令") },
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    )
+                    if (wrong) Line("口令不对", MaterialTheme.colorScheme.error)
+                }
+            },
+            confirmButton = {
+                TextButton({
+                    if (DevMode.check(input)) {
+                        DevMode.setUnlocked(ctx, true); dev = true; askPass = false
+                    } else wrong = true
+                }) { Text("进") }
+            },
+            dismissButton = { TextButton({ askPass = false }) { Text("算了") } },
+        )
+    }
+}
+
+/**
+ * 开发者卡片 —— **它存在的意义是让用户能把「手机那头到底怎么了」一键给我。**
+ * 我在服务器上看不到手机的任何东西：包没飞到就等于什么都没发生。
+ */
+@Composable
+private fun DevCard(ctx: Context, host: Host?, store: HostStore, keys: KeyManager) {
+    val scope = rememberCoroutineScope()
+    var running by remember { mutableStateOf(false) }
+    var report by remember { mutableStateOf("") }
+    var copied by remember { mutableStateOf(false) }
+
+    Card("开发者") {
+        Hint2(
+            "诊断会把整条连接路径一步步走一遍：解析地址 → 连 TCP → SSH 招呼 → 认证，" +
+                "再挨个试同一个 IP 上的几个端口。里面不含密码和私钥，可以直接贴出来。\n" +
+                "测的是 " + (host?.let { "${it.username}@${it.hostname}:${it.port}" } ?: "（还没有主机）") +
+                " —— 要换一台就去「会话」页顶部切换。"
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+            Button(
+                onClick = {
+                    scope.launch {
+                        running = true; copied = false
+                        report = DevMode.diagnose(ctx, host, store, keys)
+                        running = false
+                    }
+                },
+                enabled = !running, shape = Pill, modifier = Modifier.weight(1f).height(44.dp),
+            ) { Text(if (running) "测着…（约 30 秒）" else "跑一次诊断") }
+
+            if (report.isNotEmpty()) {
+                Button(
+                    onClick = { DevMode.copy(ctx, report); copied = true },
+                    shape = Pill, modifier = Modifier.height(44.dp),
+                ) { Text(if (copied) "已复制" else "复制") }
+            }
+        }
+        if (report.isNotEmpty()) {
+            Surface(color = SurfaceContainerHigh, shape = MaterialTheme.shapes.medium) {
+                // 诊断文本很长，给它自己的滚动区，别把整页撑成一条
+                Box(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState()).padding(10.dp)) {
+                    Text(
+                        report,
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = Mono),
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
+        }
+        Hint2("再连点三下版本号 = 退出开发者模式。")
+    }
 }
 
 @Composable

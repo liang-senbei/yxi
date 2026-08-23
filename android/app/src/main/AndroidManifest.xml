@@ -2,6 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 开发者模式的诊断要分清「WiFi 还是移动网络」——
+         运营商屏蔽端口只发生在移动网络上，「WiFi 能连、插卡不能连」本身就是答案 -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!-- 手机主动响：常驻一条 SSH 通道 tail 事件流。
          ⚠️ **不用 FCM** —— 用户的荣耀 Magic7 默认关着 GMS（PRD §2.5 / D8），

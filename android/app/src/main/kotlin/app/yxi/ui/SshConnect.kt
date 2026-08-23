@@ -100,6 +100,9 @@ fun rememberSshConnector(
  * jsch 把真正的原因裹在 `JSchException` 里，光看 `message` 常常只有个类名。
  */
 fun Connector.explain(e: Throwable): String {
+    // ⚠️ 所有界面的连接失败都汇到这一个函数 —— 记日志就记在这儿，
+    // 别处再记一遍只会漏。开发者模式靠它才有东西可看
+    DevMode.logError("connect ${session.hostLabel}", e)
     if (known.changedDetected) return "⚠️ 主机指纹变了，已拒绝连接。真是重装了就把这台主机删掉重加。"
     var c: Throwable? = e
     while (c != null) {
