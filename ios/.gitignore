@@ -1,0 +1,9 @@
+.build/
+.swiftpm/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+
+# ⚠️ Package.resolved **要入库**，别加进来。
+# 它钉的是每个依赖的 commit 哈希 —— 而我们的 NIOSSH 来自一个第三方 fork
+# （见 Package.swift 里那段说明），tag 是可以被挪的，commit 哈希不行。

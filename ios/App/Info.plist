@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ⚠️ 这份是**清单，不是成品** —— 在 Mac 上建 Xcode 工程时把这些键搬过去
+  （新工程默认用 Build Settings 里的 INFOPLIST_KEY_*，也可以直接指到这个文件）。
+
+  权限文案要写「为什么」，不是「要什么」——
+  iOS 会把这句话原样弹给用户看，写得含糊他就点拒绝，然后功能静默失效。
+-->
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key>
+  <string>Yxi</string>
+
+  <!-- P0-9 语音输入。⚠️ 两个都要：识别是 Speech，录音是 Microphone，缺一个就崩 -->
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>把你说的话转成文字发给服务器上的 Claude。命令行模式下会先让你确认再发送。</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>录下你说的话用于语音输入。</string>
+
+  <!-- P0-10 附件与图片：选好的图会上传到你自己的服务器，不经过任何第三方 -->
+  <key>NSPhotoLibraryUsageDescription</key>
+  <string>把你选的图片上传到你自己的服务器，供 Claude 读取。图片不会发给任何第三方。</string>
+
+  <key>UILaunchScreen</key>
+  <dict/>
+
+  <!--
+    ⚠️⚠️ **这里没有 UIBackgroundModes，是故意的。**
+    安卓版靠前台服务常驻一条 SSH 通道收事件（G10）。**iOS 没有对应的东西**：
+    App 进后台约 30 秒内 socket 就会被收走，而 `audio` / `voip` 这类后台模式
+    是拿来干别的的，用它们保活既不诚实也过不了审。
+    → 「手机主动响」这件事在 iOS 上是**没有解**的，除非引入推送；
+    而 PRD §2.7 / D8 已经否掉了那条路（会逼我们长期跑一台中转服务器）。
+    这是 iOS 版最大的一处功能落差，**要单独拍板，不是实现细节**。见 README。
+  -->
+</dict>
+</plist>
