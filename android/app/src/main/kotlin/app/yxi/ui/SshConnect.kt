@@ -131,8 +131,20 @@ fun Connector.explain(e: Throwable): String {
     }
 }
 
-/** 一台主机的共享连接。[session] 为 null 时看 [error]（null 表示还在连）。 */
-class HostSession(val session: SshSession?, val error: String?)
+/**
+ * 一台主机的共享连接。
+ *
+ * @param session 连上了就非 null
+ * @param error   连不上时的人话原因
+ * @param retry   **手动重连**。自动重连是指数退避的，最长要等 15 秒；
+ *                用户刚把 WiFi 切回来时不该干等 —— 给他一个按钮立刻重试，
+ *                顺便把退避重新从 1 秒算起。
+ */
+class HostSession(
+    val session: SshSession?,
+    val error: String?,
+    val retry: () -> Unit = {},
+)
 
 /**
  * 按**主机**持有一条连接，跨界面共用。
@@ -150,8 +162,10 @@ fun rememberHostSession(store: HostStore, keys: KeyManager, host: Host?): HostSe
     val connect = rememberSshConnector(store, keys, host)
     var session by remember(host.id) { mutableStateOf<SshSession?>(null) }
     var error by remember(host.id) { mutableStateOf<String?>(null) }
+    // 手动重连 = 换一代，让下面那个 effect 整个重来（退避也跟着归零）
+    var generation by remember(host.id) { mutableIntStateOf(0) }
 
-    LaunchedEffect(host.id) {
+    LaunchedEffect(host.id, generation) {
         var wait = 1_000L
         while (true) {
             val c = connect()
@@ -180,5 +194,5 @@ fun rememberHostSession(store: HostStore, keys: KeyManager, host: Host?): HostSe
     DisposableEffect(host.id) {
         onDispose { session?.let { s -> runCatching { s.disconnect() } } }
     }
-    return HostSession(session, error)
+    return HostSession(session, error, retry = { session = null; error = null; generation++ })
 }

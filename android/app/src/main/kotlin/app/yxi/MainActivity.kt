@@ -133,6 +133,7 @@ class MainActivity : ComponentActivity() {
                                 store, keys, host,
                                 ssh = shared.session,
                                 connectError = shared.error,
+                                onRetry = shared.retry,
                                 hosts = hosts,
                                 onPickHost = { picked -> hostId = picked.id },
                                 onOpenTerminal = { sn, cwd -> work = Work(host, sn, cwd, Mode.Terminal) },

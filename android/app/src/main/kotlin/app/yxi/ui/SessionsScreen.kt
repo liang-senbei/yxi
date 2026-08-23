@@ -48,6 +48,7 @@ fun SessionsScreen(
     /** ⚠️ 连接由 [app.yxi.MainActivity] 持有 —— 切 tab 时这个 composable 会销毁，连接不能跟着断 */
     ssh: SshSession?,
     connectError: String? = null,
+    onRetry: () -> Unit = {},
     hosts: List<Host> = listOf(host),
     onPickHost: (Host) -> Unit = {},
     /** (会话名, cwd)。⚠️ **cwd 必须一起传** —— 对话模式靠它找转录文件 */
@@ -168,6 +169,41 @@ fun SessionsScreen(
         }
         usage?.let {
             Box(Modifier.padding(14.dp, 0.dp, 14.dp, 8.dp)) { UsageCard(it) }
+        }
+
+        // ⚠️ 连不上的时候要给**一个能按的东西**。自动重连是指数退避的，
+        // 最长等 15 秒 —— 用户刚把网切回来时干等着，只会以为 App 坏了。
+        if (ssh == null && connectError != null) {
+            Surface(
+                color = MaterialTheme.colorScheme.errorContainer,
+                shape = MaterialTheme.shapes.large,
+                modifier = Modifier.fillMaxWidth().padding(14.dp, 0.dp, 14.dp, 8.dp),
+            ) {
+                Row(
+                    Modifier.padding(16.dp, 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        connectError.lineSequence().first(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Surface(
+                        color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.12f),
+                        shape = Pill,
+                        modifier = Modifier.clickable(onClick = onRetry),
+                    ) {
+                        Text(
+                            "重连",
+                            Modifier.padding(16.dp, 7.dp),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                    }
+                }
+            }
         }
 
         LazyColumn(

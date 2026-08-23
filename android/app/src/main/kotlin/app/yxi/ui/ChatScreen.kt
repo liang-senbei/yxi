@@ -14,6 +14,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -164,17 +165,21 @@ fun ChatScreen(
             delay(if (live.busy) 900 else 2_500)
         }
     }
-    LaunchedEffect(items.size) {
+    // ⚠️ **`settled` 也要当键。** 只用 items.size 的话，最后一次定位发生在
+    // 「历史还在灌、布局还在变」的时候，滚到一半列表又长高了 ——
+    // 结果永远差最后一屏（最后一条被切掉，↓ 按钮赖着不走）。
+    // 加上 settled：灌完那一刻**再定位一次**，这次布局是稳的。
+    LaunchedEffect(items.size, settled) {
         if (items.isEmpty()) return@LaunchedEffect
         val last = items.size - 1
         runCatching {
             if (!settled) {
                 // 还在灌历史：**瞬移**。用户看到的是「一进来就在最新的地方」
-                listState.scrollToItem(last)
-            } else if (listState.atBottom(items.size)) {
+                listState.scrollToEnd(last)
+            } else if (listState.atBottom) {
                 // ⚠️ 只有本来就在底部才跟着走。用户往上翻着看旧消息时，
                 // 新消息把他拽回底部比不滚更烦（跟 #61 是同一类错误）
-                listState.animateScrollToItem(last)
+                listState.scrollToEnd(last)
             }
         }
     }
@@ -190,13 +195,51 @@ fun ChatScreen(
             )
         }
 
-        LazyColumn(
-            Modifier.weight(1f),
-            state = listState,
-            contentPadding = PaddingValues(16.dp, 6.dp, 16.dp, 16.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
-        ) {
-            items(items.size, key = { items[it].key }) { i -> Item(items[i]) }
+        Box(Modifier.weight(1f)) {
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                state = listState,
+                contentPadding = PaddingValues(16.dp, 6.dp, 16.dp, 16.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp),
+            ) {
+                items(items.size, key = { items[it].key }) { i -> Item(items[i]) }
+            }
+
+            // ⚠️ **只在没在底部时才出现。** 一直挂着的话它就是块永久的遮挡 ——
+            // 而绝大多数时候你本来就在底部（新消息会自动跟着走），那时它毫无用处。
+            // derivedStateOf：不加的话每滚一帧都要重组整个 ChatScreen。
+            val away by remember {
+                derivedStateOf { items.isNotEmpty() && !listState.atBottom }
+            }
+            androidx.compose.animation.AnimatedVisibility(
+                visible = away,
+                enter = androidx.compose.animation.fadeIn(),
+                exit = androidx.compose.animation.fadeOut(),
+                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    shape = CircleShape,
+                    shadowElevation = 4.dp,
+                    modifier = Modifier.size(44.dp).clickable {
+                        // ⚠️ 瞬移不做动画：几百条的列表上 animateScrollToItem 要滚好几秒，
+                        // 而这个按钮的意思就是「立刻到底」
+                        // ⚠️ 第二个参数是**在那一条内部再往下滚多少像素**。
+                        // 不给的话是把最后一条的**顶部**对齐视口顶部 ——
+                        // 那条要是比一屏长，尾巴还在屏幕外，用户会觉得按了没用。
+                        // 给一个大数，Compose 会夹到列表真正的末尾。
+                        scope.launch { listState.scrollToEnd(items.size - 1) }
+                    },
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            "↓",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                    }
+                }
+            }
         }
 
         if (live.busy) LiveStatus(live.status)
@@ -336,11 +379,38 @@ private fun Item(item: ChatItem) = when (item) {
     is ChatItem.Unknown -> Unit   // 兜底：不认识的块静默跳过，不要在界面上留垃圾
 }
 
-/** 视口最后一个可见项是不是就在列表末尾附近（差一条也算，避免边界抖）。 */
-private fun androidx.compose.foundation.lazy.LazyListState.atBottom(total: Int): Boolean {
-    val last = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return true
-    return last >= total - 2
+/**
+ * 滚到**真正的末尾**。
+ *
+ * ⚠️ `scrollToItem(last)` 只是把最后一条的**顶部**对齐视口顶部 ——
+ * 那条要是比一屏长（长回复很常见），尾巴还在屏幕外。
+ * 传个巨大的 `scrollOffset` 也不可靠。老老实实滚到滚不动为止。
+ * 次数封顶，免得内容还在增长时转不出来。
+ */
+private suspend fun androidx.compose.foundation.lazy.LazyListState.scrollToEnd(lastIndex: Int) {
+    scrollToItem(lastIndex)
+    repeat(30) {
+        // ⚠️ **每次判之前先等一帧。** `canScrollForward` 是从 layoutInfo 算的，
+        // 刚 scrollToItem 完布局还没重新量，这里读到的是**上一帧**的答案 ——
+        // 读成 false 就会在第一次循环里直接 return，于是永远差最后一屏。
+        // 现象是「一进对话，最后一条被切掉一半，↓ 按钮赖着不走」。
+        androidx.compose.runtime.withFrameNanos { }
+        if (!canScrollForward) return
+        scroll { scrollBy(4000f) }
+    }
 }
+
+/**
+ * 真的到底了吗 —— 就问「还能不能往下滚」。
+ *
+ * ⚠️ 别自己拿 `visibleItemsInfo` 算像素。试过两版都不对：
+ * 「最后一条可见」漏掉了「那条比一屏长、尾巴还在屏幕外」；
+ * 算 `offset + size <= viewportEndOffset` 又要跟 `contentPadding` 较劲，
+ * 差几个像素就永远判不到底（按钮赖着不走）。
+ * `canScrollForward` 就是这个问题本身的答案，还是 State 支持的，能直接进 derivedStateOf。
+ */
+private val androidx.compose.foundation.lazy.LazyListState.atBottom: Boolean
+    get() = !canScrollForward
 
 @Composable
 private fun UserBubble(text: String) {
