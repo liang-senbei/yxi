@@ -3,6 +3,7 @@ package app.yxi.ui
 import android.content.Context
 import android.os.Looper
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.imePadding
@@ -96,6 +97,16 @@ fun Workspace(
         mutableStateOf(initial ?: Prefs.mode(ctx, host.id, startSession) ?: Mode.Chat)
     }
     var switcher by remember { mutableStateOf(false) }
+    /**
+     * 标题下拉：**只列置顶的会话**，一步换过去。
+     *
+     * ⚠️ 两级是有意的：置顶的那几个是你天天在切的，值得一次点击就到；
+     * 二十几个会话铺成卡片则是「找一个不常用的」，那是另一件事，
+     * 不该让高频动作陪着低频动作一起等。
+     * 下拉开着的时候**再点一次标题**就换成卡片墙。
+     */
+    var menu by remember { mutableStateOf(false) }
+    var quick by remember { mutableStateOf<List<app.yxi.agent.Session>>(emptyList()) }
     var dpad by remember { mutableStateOf(false) }
     var bar by remember { mutableStateOf(true) }
 
@@ -329,8 +340,18 @@ fun Workspace(
         ) {
             // 点会话名 = 唤出悬浮排列。换会话是这个 app 最高频的动作，
             // 不该让人退回看板再滚一遍列表
+            Box(Modifier.weight(1f)) {
             Column(
-                Modifier.weight(1f).clickable(enabled = ssh != null) { switcher = true },
+                // ⚠️ **「下拉开着时再点一次换成卡片墙」这条实测走不通** ——
+                // Android 的 DropdownMenu 会盖一层全屏透明遮罩，第二次点被它吃掉，
+                // 只会触发 onDismissRequest 关菜单，**根本碰不到标题**。
+                // 写了也是死代码，所以改成：点 = 下拉（置顶那几个），
+                // **长按 = 直接开卡片墙**，另外下拉里也留了「全部会话…」。
+                Modifier.combinedClickable(
+                    enabled = ssh != null,
+                    onClick = { menu = true },
+                    onLongClick = { switcher = true },
+                ),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
@@ -344,6 +365,41 @@ fun Workspace(
                     style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                     color = Dim, maxLines = 1,
                 )
+            }
+
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                if (quick.isEmpty()) {
+                    DropdownMenuItem(
+                        text = { Text("还没有置顶的会话", style = MaterialTheme.typography.bodySmall, color = Dim) },
+                        onClick = { menu = false; switcher = true },
+                    )
+                } else quick.forEach { sess ->
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text(sess.short, style = MaterialTheme.typography.bodyMedium)
+                                if (sess.detail.isNotEmpty()) Text(
+                                    sess.detail,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Dim, maxLines = 1,
+                                )
+                            }
+                        },
+                        trailingIcon = { if (sess.name == sessionName) Text("✓", color = Muted) },
+                        onClick = {
+                            menu = false
+                            // ⚠️ 只改这两个值 —— 跟卡片墙走同一条路，不重建连接
+                            sessionName = sess.name
+                            cwd = sess.cwd
+                        },
+                    )
+                }
+                HorizontalDivider()
+                DropdownMenuItem(
+                    text = { Text("全部会话…", style = MaterialTheme.typography.bodyMedium, color = Muted) },
+                    onClick = { menu = false; switcher = true },
+                )
+            }
             }
             if (mode == Mode.Terminal) {
                 listOf("⌨" to (bar to { bar = !bar }), "✛" to (dpad to { dpad = !dpad }))
@@ -430,6 +486,16 @@ fun Workspace(
     // ⚠️ **终端模式下语音必须先确认。**
     // 识别错一个字，在服务器上就是**另一条命令**。对话模式还能在输入框里改，
     // 终端是直接打进 PTY 的 —— 没有反悔的机会。
+    // 下拉打开时抓一次 —— 置顶的名字存在手机上，但状态和 cwd 得问服务器
+    LaunchedEffect(menu) {
+        if (!menu) return@LaunchedEffect
+        val s0 = ssh ?: return@LaunchedEffect
+        val names = Pinned.get(ctx, host.id)
+        if (names.isEmpty()) { quick = emptyList(); return@LaunchedEffect }
+        runCatching { app.yxi.agent.SessionProbe.snapshot(s0) }
+            .onSuccess { all -> quick = all.filter { it.name in names } }
+    }
+
     if (switcher) {
         Switcher(
             ssh = ssh,

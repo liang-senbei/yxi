@@ -16,6 +16,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.PathParser
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -323,51 +326,99 @@ fun ChatScreen(
         }
 
         // 输入框：打进那个活着的会话，不调任何 API
-        Row(
-            Modifier.fillMaxWidth().padding(14.dp, 6.dp, 14.dp, 18.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        //
+        // ⚠️ **整条是一个胶囊，不是四个圆按钮排排站。** 原来是 📎 🎤 输入框 ↑ 四块分开，
+        // 每块之间 10dp 空隙，视觉上是「一排控件」而不是「一个输入区」；
+        // 而且两个 emoji 图标跟界面里其余的线性图标不是一路。
+        // 现在按 Gemini 那种做法收成一条：+ · 文字 · 🎤 · 发送，边界一条，里面才分格。
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            shape = Pill,
+            modifier = Modifier.fillMaxWidth().padding(14.dp, 6.dp, 14.dp, 18.dp).heightIn(min = 56.dp),
         ) {
-            if (sftp != null) RoundBtn("📎") { pick.launch("*/*") }
-            RoundBtn("🎤") {
-                runCatching {
-                    listen.launch(
-                        android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-                            .putExtra(
-                                android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                                android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
-                            )
-                            .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "说吧")
-                    )
+            Row(
+                Modifier.padding(6.dp, 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (sftp != null) {
+                    FlatIcon(Icons.Plus, "加附件") { pick.launch("*/*") }
+                } else {
+                    Spacer(Modifier.width(10.dp))
                 }
-            }
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainer, shape = Pill,
-                modifier = Modifier.weight(1f).heightIn(min = 52.dp),
-            ) {
-                BasicTextFieldRow(draft) { draft = it }
-            }
-            Surface(
-                color = if (draft.isBlank() && staged.isEmpty()) MaterialTheme.colorScheme.surfaceContainer
-                else MaterialTheme.colorScheme.primary,
-                shape = Pill,
-                modifier = Modifier.size(52.dp).clickable(enabled = draft.isNotBlank() || staged.isNotEmpty()) {
-                    // 附件的路径映射贴在正文前面 —— Claude 自己去读那些文件
-                    val t = (app.yxi.agent.Attachments.header(staged) + draft.trim()).trim()
-                    draft = ""; staged = emptyList()
-                    scope.launch { ssh?.let { SessionProbe.send(it, sessionName, t) } }
-                },
-            ) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        "↑",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = if (draft.isBlank() && staged.isEmpty()) MaterialTheme.colorScheme.outline
-                        else MaterialTheme.colorScheme.onPrimary,
-                    )
+                Box(Modifier.weight(1f)) { BasicTextFieldRow(draft) { draft = it } }
+                FlatIcon(Icons.Mic, "语音输入") {
+                    runCatching {
+                        listen.launch(
+                            android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                                .putExtra(
+                                    android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                                    android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
+                                )
+                                .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "说吧")
+                        )
+                    }
+                }
+                val canSend = draft.isNotBlank() || staged.isNotEmpty()
+                Surface(
+                    color = if (canSend) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shape = CircleShape,
+                    modifier = Modifier.size(44.dp).clickable(enabled = canSend) {
+                        // 附件的路径映射贴在正文前面 —— Claude 自己去读那些文件
+                        val t = (app.yxi.agent.Attachments.header(staged) + draft.trim()).trim()
+                        draft = ""; staged = emptyList()
+                        scope.launch { ssh?.let { SessionProbe.send(it, sessionName, t) } }
+                    },
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        VectorIcon(
+                            Icons.Send,
+                            if (canSend) MaterialTheme.colorScheme.onPrimary
+                            else MaterialTheme.colorScheme.outline,
+                            20.dp,
+                        )
+                    }
                 }
             }
         }
+    }
+}
+
+/**
+ * 界面里用到的几个图形。
+ *
+ * ⚠️ **不用 emoji。** emoji 由系统字体渲染，各家手机长得不一样、粗细跟界面其余部分对不上，
+ * 而且没法跟着主题变色 —— 📎 和 🎤 在深色界面里就是两块彩色贴纸。
+ */
+private object Icons {
+    /** 加号（加附件） */
+    const val Plus = "M11,5h2v14h-2z M5,11h14v2H5z"
+    /** 话筒 */
+    const val Mic = "M12,3a3,3 0 0,1 3,3v6a3,3 0 0,1 -6,0V6a3,3 0 0,1 3,-3z " +
+        "M5.5,11.5h1.6a4.9,4.9 0 0,0 9.8,0h1.6a6.5,6.5 0 0,1 -5.7,6.4V21h-1.6v-3.1a6.5,6.5 0 0,1 -5.7,-6.4z"
+    /** 上箭头（发送） */
+    const val Send = "M12,4l7,7l-1.5,1.5L13,8v12h-2V8l-4.5,4.5L5,11z"
+    /** 图钉（置顶） */
+    const val Pin = "M14,2l6,6l-2.2,0.6l-3.1,3.1l0.7,4.2l-1.6,1.6l-3.7,-3.7l-4.4,4.4l-1.1,-1.1l4.4,-4.4l-3.7,-3.7l1.6,-1.6l4.2,0.7l3.1,-3.1z"
+}
+
+@Composable
+private fun VectorIcon(path: String, tint: androidx.compose.ui.graphics.Color, size: androidx.compose.ui.unit.Dp) {
+    androidx.compose.foundation.Canvas(Modifier.size(size)) {
+        val p = androidx.compose.ui.graphics.vector.PathParser().parsePathString(path).toPath()
+        val s = this.size.minDimension / 24f
+        scale(s, s, pivot = androidx.compose.ui.geometry.Offset.Zero) { drawPath(p, tint) }
+    }
+}
+
+/** 胶囊里那种「无底色、点得动」的图标按钮。 */
+@Composable
+private fun FlatIcon(path: String, label: String, onTap: () -> Unit) {
+    Box(
+        Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onTap),
+        contentAlignment = Alignment.Center,
+    ) {
+        VectorIcon(path, MaterialTheme.colorScheme.onSurfaceVariant, 22.dp)
     }
 }
 

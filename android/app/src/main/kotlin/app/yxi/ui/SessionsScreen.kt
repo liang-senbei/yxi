@@ -8,6 +8,9 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
@@ -295,7 +298,7 @@ private fun PinnedHeader(n: Int) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text("📌", style = MaterialTheme.typography.labelMedium)
+        PinIcon(MaterialTheme.colorScheme.outline)
         Text("置顶", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
         Text(
             "$n",
@@ -350,20 +353,24 @@ private fun SessionCard(
                 Text(s.short, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 // 图钉一直在（不是只在置顶时才出现）—— 只在置顶时显示的话，
                 // 用户根本不知道有这个功能
-                Surface(
-                    color = if (pinned) MaterialTheme.colorScheme.tertiaryContainer
-                    else MaterialTheme.colorScheme.surfaceContainerHigh,
-                    shape = Pill,
-                    modifier = Modifier.padding(end = 8.dp).clickable(onClick = onPin),
+                // ⚠️ **不用 emoji 📌。** emoji 由系统字体渲染，各家手机长得不一样、
+                // 粗细跟界面其余部分对不上，而且**没法跟着主题变色** ——
+                // 深色界面里就是一块彩色贴纸。这里画的是矢量图钉，置顶时才上色。
+                Box(
+                    Modifier.size(36.dp).clip(CircleShape)
+                        .background(
+                            if (pinned) MaterialTheme.colorScheme.tertiaryContainer
+                            else androidx.compose.ui.graphics.Color.Transparent
+                        )
+                        .clickable(onClick = onPin),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Text(
-                        "📌",
-                        Modifier.padding(10.dp, 5.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (pinned) MaterialTheme.colorScheme.onTertiaryContainer
-                        else MaterialTheme.colorScheme.outline,
+                    PinIcon(
+                        if (pinned) MaterialTheme.colorScheme.onTertiaryContainer
+                        else MaterialTheme.colorScheme.outline
                     )
                 }
+                Spacer(Modifier.width(4.dp))
                 if (s.attached) {
                     Text(
                         "已连",
@@ -429,16 +436,17 @@ private fun SendSheet(target: Session, onSend: (String) -> Unit, onDismiss: () -
     }
 }
 
-/**
- * 置顶的会话名。**按主机分开存** —— 换台机器同名会话未必是同一件事。
- *
- * ⚠️ 只存在手机本地，不写进服务器。置顶是「我关心哪几个」，
- * 是这台手机的偏好，不是那台机器的状态 —— 写过去会污染别人的视图。
- */
-private object Pinned {
-    private fun p(ctx: Context) = ctx.getSharedPreferences("yxi", Context.MODE_PRIVATE)
-    fun get(ctx: Context, hostId: String): Set<String> =
-        p(ctx).getStringSet("pinned:$hostId", emptySet()) ?: emptySet()
-    fun set(ctx: Context, hostId: String, v: Set<String>) =
-        p(ctx).edit().putStringSet("pinned:$hostId", v).apply()
+
+/** 矢量图钉。跟 ChatScreen 里那几个图形同一路数：能跟着主题变色，各机型一个样。 */
+@Composable
+private fun PinIcon(tint: androidx.compose.ui.graphics.Color) {
+    androidx.compose.foundation.Canvas(Modifier.size(18.dp)) {
+        val p = androidx.compose.ui.graphics.vector.PathParser()
+            .parsePathString(
+                "M14,2l6,6l-2.2,0.6l-3.1,3.1l0.7,4.2l-1.6,1.6l-3.7,-3.7l-4.4,4.4l-1.1,-1.1" +
+                    "l4.4,-4.4l-3.7,-3.7l1.6,-1.6l4.2,0.7l3.1,-3.1z"
+            ).toPath()
+        val s = size.minDimension / 24f
+        scale(s, s, pivot = androidx.compose.ui.geometry.Offset.Zero) { drawPath(p, tint) }
+    }
 }
