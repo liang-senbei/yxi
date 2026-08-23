@@ -104,10 +104,16 @@ fun Connector.explain(e: Throwable): String {
     var c: Throwable? = e
     while (c != null) {
         when (c) {
-            is java.net.UnknownHostException ->
-                return "地址解析不了：${c.message}\n" +
-                    "「地址」那栏要填 IP 或真实域名 —— 手机上没有 ~/.ssh/config，" +
-                    "SSH 别名（station、天亮之类）在这儿用不了。"
+            is java.net.UnknownHostException -> {
+                val h = c.message.orEmpty().substringBefore(':').trim()
+                val bad = app.yxi.ssh.HostInput.suspiciousChar(h)
+                return "地址解析不了：「$h」\n" +
+                    // ⚠️ 只说「解析不了」等于没说 —— 用户看着那个地址觉得它是对的。
+                    // 全角句点和半角句点长得几乎一样，必须把那个字符指出来。
+                    if (bad != null) "里面有个连不上的字符 $bad —— 多半是中文输入法打的，删掉用英文键盘重打。"
+                    else "这一栏要填 IP 或真实域名。手机上没有 ~/.ssh/config，" +
+                        "SSH 别名（station 之类）在这儿用不了；也别带 http:// 或路径。"
+            }
             is java.net.SocketTimeoutException, is java.net.ConnectException ->
                 return "连不上 ${session.hostLabel}：${c.message}\n检查 IP、端口，以及服务器是否开着。"
             else -> Unit

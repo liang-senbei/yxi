@@ -180,11 +180,44 @@ private fun AddHostSheet(store: HostStore, keys: KeyManager, onDone: () -> Unit)
             // ⚠️ 别名≠地址：手机上没有 ~/.ssh/config，「station」「天亮」这类 SSH 别名解析不了，
             // 下面那栏必须是真地址。标签曾经写「主机名 / IP」，等于在邀请用户填别名。
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Box(Modifier.weight(1f)) { Field(hostname, { hostname = it }, "IP 或域名，如 38.244.50.31", mono = true) }
+                Box(Modifier.weight(1f)) {
+                    Field(
+                        hostname,
+                        {
+                            // ⚠️ **打字的时候只做「全角→半角」这种安全归一，绝不动结构。**
+                            // 试过「一次进来一大段就当粘贴、顺手拆出 :port」——
+                            // 不成立：输入法整词上屏、adb 成块送，都会触发，
+                            // 结果是打到 `…147:22` 时端口被切走、剩下的 `22` 落回地址栏。
+                            // **在用户手指底下改他正在打的东西，跟「列表在手指下重排」是同一类错误。**
+                            // 拆分放到保存时做 —— 那时整串才是完整的。
+                            hostname = app.yxi.ssh.HostInput.normalize(it)
+                        },
+                        "IP 或域名，如 38.244.50.31", mono = true,
+                    )
+                }
                 // ⚠️ 端口不能写死 22 —— 客户那台 Windows 走 2222
                 Box(Modifier.width(96.dp)) {
                     Field(port, { port = it.filter(Char::isDigit).take(5) }, "端口", mono = true, number = true)
                 }
+            }
+            run {
+                val p = app.yxi.ssh.HostInput.parse(hostname)
+                if (p.user != null || p.port != null) {
+                    Text(
+                        "保存时会拆成：地址 ${p.host}" +
+                            (p.user?.let { " · 用户名 $it" } ?: "") +
+                            (p.port?.let { " · 端口 $it" } ?: ""),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                }
+            }
+            app.yxi.ssh.HostInput.suspiciousChar(hostname)?.let {
+                Text(
+                    "地址里有个连不上的字符：$it —— 多半是中文输入法打出来的，删掉重打",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
             Field(username, { username = it }, "用户名", mono = true)
 
@@ -204,15 +237,19 @@ private fun AddHostSheet(store: HostStore, keys: KeyManager, onDone: () -> Unit)
 
             Button(
                 onClick = {
-                    val hn = hostname.trim()
+                    // 保存时再拆一次 —— 手打的 `ip:2222` / `root@ip` 到这一刻才是完整的
+                    val parsed = app.yxi.ssh.HostInput.parse(hostname)
+                    val hn = parsed.host
                     if (hn.isEmpty()) return@Button
                     store.upsert(
                         Host(
                             id = UUID.randomUUID().toString(),
                             alias = alias.trim().ifEmpty { hn },
                             hostname = hn,
-                            port = port.toIntOrNull() ?: 22,
-                            username = username.trim().ifEmpty { "root" },
+                            // 地址栏里带的 `:port` / `root@` 优先于另外两栏里的值 ——
+                            // 用户刚敲进去的那一串才是他最新的意思
+                            port = parsed.port ?: port.toIntOrNull() ?: 22,
+                            username = (parsed.user ?: username).trim().ifEmpty { "root" },
                             useKey = !usePassword,
                             sealedPassword = if (usePassword && password.isNotEmpty()) Vault.seal(password) else null,
                         )
