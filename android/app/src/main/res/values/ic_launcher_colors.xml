@@ -1,0 +1,5 @@
+<resources>
+    <!-- 比 app 的页面底（#16130F）稍亮一点 —— 图标常常落在深色壁纸上，
+         一模一样的话整个图标会糊成一团看不见边 -->
+    <color name="ic_launcher_bg">#241C14</color>
+</resources>
