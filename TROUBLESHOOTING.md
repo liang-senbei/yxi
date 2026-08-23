@@ -514,3 +514,22 @@ Claude 自己去 Read 那个文件 —— 我们不把图片内容塞进对话�
 一度怀疑是自己 `adb shell input text` 打错了会话，还为此紧张过一次。
 **其实是 Claude Code 自己渲染的「建议下一句」（ghost text）。**
 —— 也就是说那次并没有往别人的会话里打字。记下来免得下次又白紧张。
+
+## 56. 自更新：模拟器的图形安装器装不上，但包是好的
+- **现象**：App 里点「下载并安装」→ 系统弹「App not installed.」。
+- **查证**：把 App 下载到 `cache/update/Yxi.apk` 的那个文件拉回服务器比对 ——
+  **sha256 和服务器上的完全一致**；而且同一个文件用 `adb pm install -r` **装得上**。
+  第一次失败时日志里还给了原因：`INSTALL_FAILED_VERIFICATION_FAILURE`。
+- **结论**：检测 / 下载 / 完整性校验 / 权限处理 / 拉起安装器**这几段都验过了**，
+  卡在模拟器自带的图形安装器上。真机上这是所有自更新 APK 的标准路径。
+  ⚠️ **但我没有在真机上验过最后那一下** —— 别把它当已验证的功能。
+- 顺带：`REQUEST_INSTALL_PACKAGES` 没授权时不能直接 `startActivity`（会被静默拒），
+  要先判 `canRequestPackageInstalls()` 再把用户送去设置页。这条已经实测过。
+
+## 57. 更新走 SFTP 不走 HTTP —— 为什么
+- 仓库是私有的，GitHub Release 的 API 要 token，**把 token 塞进 APK 等于公开它**。
+- 这个 App 到目前为止**除了那一条 SSH 连接之外没有任何网络面**。
+  为了「查个版本号」引入 HTTP 客户端、证书校验、代理处理，不划算。
+- 服务器是用户自己的，公司内网 / 防火墙后面照样能用。
+- 代价：得自己 `./server/install.sh --publish <apk> <code> <name> [说明]` 把包摆上去。
+  仓库将来转公开的话，再加一条 GitHub Release 的路子也不冲突。

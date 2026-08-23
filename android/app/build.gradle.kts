@@ -13,8 +13,10 @@ android {
         applicationId = "app.yxi"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        // ⚠️ versionCode 是**更新检查唯一比较的东西**，每次发包必须 +1。
+        // versionName 只给人看。
+        versionCode = 2
+        versionName = "0.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -28,7 +30,7 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }   // buildConfig：更新检查要读 VERSION_CODE
     sourceSets["main"].kotlin.directories.add("src/main/kotlin")
     sourceSets["androidTest"].kotlin.directories.add("src/androidTest/kotlin")
 }

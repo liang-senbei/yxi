@@ -15,7 +15,8 @@ WATCH="${1:-true}"      # hosts.json 里 watch 字段的值
 # 我已经因为「`cd android` 之后 `adb install -r android/app/...`」白查过两次
 # （见 TROUBLESHOOTING #43，写完那条二十分钟后又踩了一遍）。
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APK="$ROOT/android/app/build/outputs/apk/debug/app-debug.apk"
+# 可以用 YXI_APK 指定装哪个包（测自更新时要先装旧版）
+APK="${YXI_APK:-$ROOT/android/app/build/outputs/apk/debug/app-debug.apk}"
 
 # 顺手把装包也做了 —— 装包失败静默跑旧包是这个循环里最贵的一种错
 if [ -f "$APK" ]; then

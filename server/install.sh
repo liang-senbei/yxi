@@ -39,6 +39,24 @@ PY
   echo "（$EVENTS 留着没删 —— 里面是历史事件，要删自己动手）"
 }
 
+# åå¸ä¸ä¸ªæ°çæ¬ç»ææºèªæ´æ°ç¨ï¼æ APK åæ¸åæè¿ ~/.yxi/
+#   ./install.sh --publish <apk> <versionCode> <versionName> [è¯´æ]
+# ææºè¿ä¸è¿å°æºå¨æ¶ä¼çå°ãææ°çæ¬ãï¼èµ° SFTP ä¸è½½ ââ
+# ä¸ç¨ GitHubãä¸ç¨ tokenãä¸ç¨å¬ç½ HTTPï¼é²ç«å¢åé¢ç§æ ·è½ç¨ã
+if [ "${1:-}" = "--publish" ]; then
+  APK="${2:?用法: $0 --publish <apk> <versionCode> <versionName> [说明]}"
+  CODE="${3:?缺 versionCode}"; NAME="${4:?缺 versionName}"; NOTES="${5:-}"
+  [ -f "$APK" ] || { echo "找不到 $APK"; exit 1; }
+  mkdir -p "$EVENTS_DIR"
+  install -m 644 "$APK" "$EVENTS_DIR/Yxi.apk"
+  python3 -c 'import json,sys,pathlib; pathlib.Path(sys.argv[1]).write_text(json.dumps({"versionCode":int(sys.argv[2]),"versionName":sys.argv[3],"file":"Yxi.apk","notes":sys.argv[4]},ensure_ascii=False,indent=1))' \
+    "$EVENTS_DIR/latest.json" "$CODE" "$NAME" "$NOTES"
+  echo "· 发布好了：$EVENTS_DIR/Yxi.apk（$(du -h "$EVENTS_DIR/Yxi.apk" | cut -f1)）"
+  echo "  清单 → versionCode $CODE / $NAME"
+  echo "  ⚠️ versionCode 必须比上一版大 —— 手机只比这个数，versionName 只给人看。"
+  exit 0
+fi
+
 if [ "${1:-}" = "--uninstall" ]; then uninstall; exit 0; fi
 
 mkdir -p "$BIN_DIR" "$EVENTS_DIR"

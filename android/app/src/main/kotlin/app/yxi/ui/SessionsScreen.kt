@@ -58,6 +58,8 @@ fun SessionsScreen(
     val ctx = androidx.compose.ui.platform.LocalContext.current
     // ⚠️ 探不到 ccusage 就一直是 null，界面上整块不出现（不显示 0、不显示「未知」）
     var usage by remember(host.id) { mutableStateOf<app.yxi.agent.Usage?>(null) }
+    var sftp by remember(host.id) { mutableStateOf<app.yxi.ssh.Sftp?>(null) }
+    var update by remember(host.id) { mutableStateOf<app.yxi.agent.Update?>(null) }
 
     val connect = rememberSshConnector(store, keys, host)
 
@@ -82,6 +84,14 @@ fun SessionsScreen(
             delay(5_000)
         }
     }
+    // 更新检查：连上之后看一眼就完事，不轮询
+    LaunchedEffect(ssh) {
+        val s = ssh ?: return@LaunchedEffect
+        val f = runCatching { s.openSftp() }.getOrNull() ?: return@LaunchedEffect
+        sftp = f
+        update = app.yxi.agent.Update.check(f, app.yxi.BuildConfig.VERSION_CODE)
+    }
+
     // 用量单独一条慢节奏 —— 它 5 小时才变一格，没必要跟着 5 秒刷
     LaunchedEffect(ssh) {
         val s = ssh ?: return@LaunchedEffect
@@ -90,7 +100,7 @@ fun SessionsScreen(
             delay(120_000)
         }
     }
-    DisposableEffect(host.id) { onDispose { ssh?.disconnect() } }
+    DisposableEffect(host.id) { onDispose { sftp?.close(); ssh?.disconnect() } }
 
     Column(modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(18.dp, 14.dp, 18.dp, 10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -120,6 +130,11 @@ fun SessionsScreen(
 
         // 用量卡固定在列表上方 —— 它是「今天还能干多少」的背景信息，
         // 不该跟着会话列表一起滚走
+        update?.let {
+            Box(Modifier.padding(14.dp, 0.dp, 14.dp, 8.dp)) {
+                UpdateBanner(sftp, it) { update = null }
+            }
+        }
         usage?.let {
             Box(Modifier.padding(14.dp, 0.dp, 14.dp, 8.dp)) { UsageCard(it) }
         }

@@ -11,6 +11,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 开机自起：手机重启后不用手动打开 App 才恢复盯梢 -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- 自更新：从自己的服务器上取新包并拉起系统安装器。
+         ⚠️ 只是「拉起安装器」，装不装还是系统和用户说了算 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:label="@string/app_name"
@@ -28,6 +31,17 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 把下载到私有目录的 APK 交给系统安装器 —— 不经过任何共享存储 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="app.yxi.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
         <service
             android:name=".watch.EventService"

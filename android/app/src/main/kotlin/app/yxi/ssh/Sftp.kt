@@ -72,6 +72,30 @@ class Sftp internal constructor(private val ch: ChannelSftp) {
         }
     }
 
+    /**
+     * 把远端文件**流式**写到本地文件。更新包 30 多 MB，没必要整个读进内存。
+     * @return 实际字节数
+     */
+    suspend fun download(path: String, into: java.io.File, onProgress: (Long) -> Unit = {}): Long =
+        withContext(Dispatchers.IO) {
+            lock.withLock {
+                into.parentFile?.mkdirs()
+                var n = 0L
+                ch.get(path).use { input ->
+                    into.outputStream().use { out ->
+                        val buf = ByteArray(64 * 1024)
+                        while (true) {
+                            val r = input.read(buf)
+                            if (r < 0) break
+                            out.write(buf, 0, r); n += r
+                            onProgress(n)
+                        }
+                    }
+                }
+                n
+            }
+        }
+
     /** 写一个文件（目录要先存在）。附件上传用。 */
     suspend fun write(path: String, bytes: ByteArray) = withContext(Dispatchers.IO) {
         lock.withLock { ch.put(java.io.ByteArrayInputStream(bytes), path, ChannelSftp.OVERWRITE) }
