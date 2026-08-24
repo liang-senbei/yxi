@@ -142,6 +142,8 @@ fun Workspace(
      */
     var history by remember(sessionName) { mutableStateOf(false) }
     /** 中文输入的退路，见 [app.yxi.term.TerminalView] 的类注释 */
+    /** 对话里点了个文件路径要跳过去看。用完即清，见 [FilesScreen] 的 `onJumped` */
+    var jumpTo by remember { mutableStateOf<String?>(null) }
     var composer by remember { mutableStateOf<org.connectbot.terminal.ComposeController?>(null) }
     var composing by remember { mutableStateOf(false) }
 
@@ -461,8 +463,14 @@ fun Workspace(
                         },
                     )
                 }
-                Mode.Chat -> ChatScreen(ssh, sftp, sessionName.orEmpty(), cwd, Modifier.fillMaxSize())
-                Mode.Files -> FilesScreen(sftp, cwd, Modifier.fillMaxSize())
+                Mode.Chat -> ChatScreen(
+                    ssh, sftp, sessionName.orEmpty(), cwd,
+                    onOpenPath = { p -> jumpTo = p; mode = Mode.Files },
+                    modifier = Modifier.fillMaxSize(),
+                )
+                Mode.Files -> FilesScreen(
+                    sftp, cwd, jumpTo, onJumped = { jumpTo = null }, Modifier.fillMaxSize(),
+                )
             }
             if (mode == Mode.Terminal && dpad) {
                 DPad(

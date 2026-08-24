@@ -60,6 +60,8 @@ fun ChatScreen(
     sftp: app.yxi.ssh.Sftp?,
     sessionName: String,
     cwd: String,
+    /** 点了 AI 回复里的文件路径。见 [app.yxi.agent.Linkify] */
+    onOpenPath: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -225,6 +227,22 @@ fun ChatScreen(
             )
         }
 
+        // ⚠️ 库把链接点击交给 `LocalUriHandler`，所以在这儿换一个自己的。
+        // 认出 [Linkify.SCHEME] 就转成「跳去看这个文件」，其余的（http 之类）
+        // 原样交回系统 —— **别把外链也吞掉**，那就没法点开真正的网址了。
+        val sysUri = androidx.compose.ui.platform.LocalUriHandler.current
+        val uri = remember(sysUri, onOpenPath) {
+            object : androidx.compose.ui.platform.UriHandler {
+                override fun openUri(uri: String) {
+                    if (uri.startsWith(app.yxi.agent.Linkify.SCHEME))
+                        onOpenPath(uri.removePrefix(app.yxi.agent.Linkify.SCHEME))
+                    else runCatching { sysUri.openUri(uri) }
+                }
+            }
+        }
+        androidx.compose.runtime.CompositionLocalProvider(
+            androidx.compose.ui.platform.LocalUriHandler provides uri,
+        ) {
         Box(Modifier.weight(1f)) {
             LazyColumn(
                 Modifier.fillMaxSize(),
@@ -291,6 +309,7 @@ fun ChatScreen(
                 }
             }
         }
+        }   // CompositionLocalProvider(LocalUriHandler)
 
         if (live.busy) LiveStatus(live.status)
 
@@ -547,8 +566,10 @@ private fun Item(item: ChatItem, onCopy: (String) -> Unit, onPopQueue: () -> Uni
     // 选择手柄 + 复制条，长按即起，双击选词。
     // （代价：长按被选择消费掉了，所以这一支不能再挂 combinedClickable。）
     is ChatItem.AssistantText -> androidx.compose.foundation.text.selection.SelectionContainer {
+        // ⚠️ `remember`：一条长回复每次重组都重扫一遍正则不划算，而它只跟原文有关
+        val md = remember(item.markdown) { app.yxi.agent.Linkify.apply(item.markdown) }
         Markdown(
-            item.markdown,
+            md,
             // ⚠️ 一定要传 —— 库默认把 `##` 渲染成 45sp（正文的 3 倍）。见 [yxiMarkdown]
             typography = yxiMarkdown(),
             modifier = Modifier.fillMaxWidth(),

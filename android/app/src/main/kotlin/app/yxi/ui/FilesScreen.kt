@@ -37,6 +37,13 @@ fun FilesScreen(
     /** ⚠️ 由 [Workspace] 持有 —— 切模式时不该重开通道 */
     sftp: Sftp?,
     startDir: String,
+    /**
+     * 从对话里点过来要看的那个路径（[app.yxi.agent.Linkify]）。
+     * 目录就进目录，文件就直接打开。处理完调 [onJumped] 清掉，否则退出文件后
+     * 再切回来会**又跳一次**，人就出不去了。
+     */
+    jumpTo: String? = null,
+    onJumped: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -54,6 +61,20 @@ fun FilesScreen(
         dir = app.yxi.ssh.catching { s.realpath(startDir) }.getOrElse {
             runCatching { s.realpath(".") }.getOrDefault("/")
         }
+    }
+
+    LaunchedEffect(jumpTo, sftp) {
+        val target = jumpTo ?: return@LaunchedEffect
+        val s = sftp ?: return@LaunchedEffect
+        // ⚠️ `~` 手机这边展不开，交给服务器的 realpath
+        val abs = app.yxi.ssh.catching { s.realpath(target) }.getOrNull()
+        if (abs == null) { status = "找不到 $target"; onJumped(); return@LaunchedEffect }
+        if (app.yxi.ssh.catching { s.isDir(abs) }.getOrDefault(false)) {
+            dir = abs; open = null
+        } else {
+            dir = Paths.dirOf(abs); open = abs
+        }
+        onJumped()
     }
 
     LaunchedEffect(dir, sftp) {

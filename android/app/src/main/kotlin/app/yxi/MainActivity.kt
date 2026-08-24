@@ -113,11 +113,18 @@ class MainActivity : ComponentActivity() {
                 // 而软键盘弹起时底部栏会和键盘工具条、系统手势条挤成四层（D22）
                 work?.let { w ->
                     Scaffold { p ->
-                        Workspace(
-                            store, keys, w.host, w.session, w.cwd, w.mode,
-                            preconnected = warm.session,
-                            modifier = Modifier.padding(p),
-                        )
+                        // ⚠️ **必须按目标 key 一下。** [Workspace] 里的 `sessionName` / `mode`
+                        // 都是 `remember(host.id)` —— 同一台主机上换个会话，key 没变，
+                        // 那两个状态原样留着。后果：**工作区已经开着的时候点通知跳会话，
+                        // 界面纹丝不动**（还停在上一个会话、上一个模式）。
+                        // 只有从标签页进去（work 从 null 变过来）才碰巧是对的。
+                        androidx.compose.runtime.key(w.host.id, w.session, w.mode) {
+                            Workspace(
+                                store, keys, w.host, w.session, w.cwd, w.mode,
+                                preconnected = warm.session,
+                                modifier = Modifier.padding(p),
+                            )
+                        }
                     }
                     return@YxiTheme
                 }
