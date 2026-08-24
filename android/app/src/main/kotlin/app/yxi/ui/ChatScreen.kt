@@ -2,6 +2,7 @@ package app.yxi.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
@@ -66,6 +67,8 @@ fun ChatScreen(
     val ctx = androidx.compose.ui.platform.LocalContext.current
     var staged by remember(sessionName) { mutableStateOf<List<app.yxi.agent.Attachments.Staged>>(emptyList()) }
     var uploading by remember { mutableStateOf(false) }
+    /** 正在放大看的那张附件图。null = 没在看 */
+    var preview by remember { mutableStateOf<app.yxi.agent.Attachments.Staged?>(null) }
 
     // 选文件（图片和任意文件走同一个选择器，类型看 MIME）
     val pick = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -88,7 +91,7 @@ fun ChatScreen(
                     .format(java.util.Date())
                 staged = staged + app.yxi.agent.Attachments.upload(
                     s, sessionName, name, bytes, idx, isImage, stamp
-                )
+                ).copy(localUri = u.toString())
                 // ⚠️ 顺手清一次 3 天前的 —— 不用 cron，不用守护进程
                 ssh?.let { app.yxi.agent.Attachments.sweep(it) }
             }
@@ -229,7 +232,27 @@ fun ChatScreen(
                 contentPadding = PaddingValues(16.dp, 6.dp, 16.dp, 16.dp),
                 verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
-                items(items.size, key = { items[it].key }) { i -> Item(items[i]) }
+                items(items.size, key = { items[it].key }) { i ->
+                    Item(
+                        items[i],
+                        onCopy = { copy(ctx, it) },
+                        onPopQueue = {
+                            // ⚠️ 原文取**转录里的**，不是屏幕上刮的（[SessionProbe.popQueue] 的注释）
+                            val all = items.filterIsInstance<ChatItem.Queued>().map(ChatItem.Queued::text)
+                            scope.launch {
+                                val s = ssh ?: return@launch
+                                app.yxi.ssh.catching { app.yxi.agent.SessionProbe.popQueue(s, sessionName) }
+                                    .onSuccess {
+                                        // 收回来的接在草稿后面，不覆盖用户可能已经打了一半的东西
+                                        draft = (draft.trimEnd() + "\n" + all.joinToString("\n")).trim()
+                                    }
+                                    .onFailure {
+                                        android.widget.Toast.makeText(ctx, "收不回来：" + it.message, android.widget.Toast.LENGTH_LONG).show()
+                                    }
+                            }
+                        },
+                    )
+                }
             }
 
             // ⚠️ **只在没在底部时才出现。** 一直挂着的话它就是块永久的遮挡 ——
@@ -348,10 +371,24 @@ fun ChatScreen(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 staged.forEach { a ->
+                    // ⚠️ **点名字预览、点 ✕ 删除，两个热区必须分开。**
+                    // 原来整块都是「删掉」—— 想确认自己传的是不是那张图，一点就没了，
+                    // 还得重新去相册翻一遍。
                     Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = Pill) {
-                        Row(Modifier.clickable { staged = staged - a }.padding(12.dp, 6.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                a.label + "  ✕",
+                                a.label,
+                                Modifier
+                                    // 只有图片点得开；别的文件点名字不该有反应
+                                    .clickable(enabled = a.isImage && a.localUri != null) { preview = a }
+                                    .padding(12.dp, 6.dp, 6.dp, 6.dp),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (a.isImage && a.localUri != null) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Text(
+                                "✕",
+                                Modifier.clickable { staged = staged - a }.padding(6.dp, 6.dp, 12.dp, 6.dp),
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -423,6 +460,39 @@ fun ChatScreen(
             }
         }
     }
+
+    // 附件图片放大看。⚠️ 读的是**手机本地**那份（[Attachments.Staged.localUri]）——
+    // 文件是刚从这台手机传上去的，再从服务器拉回来是白跑一趟。
+    preview?.let { a ->
+        val uri = a.localUri
+        val bytes by androidx.compose.runtime.produceState<ByteArray?>(null, uri) {
+            value = uri?.let {
+                withContext(Dispatchers.IO) {
+                    app.yxi.ssh.catching {
+                        ctx.contentResolver.openInputStream(android.net.Uri.parse(it))?.use { s -> s.readBytes() }
+                    }.getOrNull()
+                }
+            }
+        }
+        androidx.compose.ui.window.Dialog(onDismissRequest = { preview = null }) {
+            Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.clickable { preview = null }.padding(6.dp)) {
+                    Text(
+                        a.label + " · " + a.remotePath,
+                        Modifier.padding(14.dp, 10.dp, 14.dp, 6.dp),
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+                    bytes?.let { ImageBody(it) } ?: Text(
+                        "读不出来了 —— 这张图的授权可能已经失效",
+                        Modifier.padding(14.dp, 10.dp, 14.dp, 16.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+                }
+            }
+        }
+    }
 }
 
 /** 胶囊里那种「无底色、点得动」的图标按钮。 */
@@ -452,17 +522,38 @@ private fun BasicTextFieldRow(value: String, onValue: (String) -> Unit) {
     )
 }
 
+/**
+ * 复制到剪贴板 + 吱一声。
+ *
+ * ⚠️ 用 `android.content.ClipboardManager` 而不是 Compose 的 `LocalClipboardManager` ——
+ * 项目里另外两处（[HostsScreen] 的公钥、[DevMode] 的诊断）已经是这个写法，统一。
+ */
+private fun copy(ctx: android.content.Context, text: String) {
+    val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+    cm.setPrimaryClip(android.content.ClipData.newPlainText("yxi", text))
+    // Android 13+ 系统自己会弹「已复制」的浮层，再 Toast 一次就是两层，所以只在旧系统上吱
+    if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) {
+        android.widget.Toast.makeText(ctx, "已复制", android.widget.Toast.LENGTH_SHORT).show()
+    }
+}
+
 @Composable
-private fun Item(item: ChatItem) = when (item) {
-    is ChatItem.UserText -> UserBubble(item.text)
-    is ChatItem.Queued -> QueuedBubble(item.text)
+private fun Item(item: ChatItem, onCopy: (String) -> Unit, onPopQueue: () -> Unit) = when (item) {
+    is ChatItem.UserText -> UserBubble(item.text, onCopy)
+    is ChatItem.Queued -> QueuedBubble(item.text, onCopy, onPopQueue)
     is ChatItem.Injected -> InjectedCard(item)
-    is ChatItem.AssistantText -> Markdown(
-        item.markdown,
-        // ⚠️ 一定要传 —— 库默认把 `##` 渲染成 45sp（正文的 3 倍）。见 [yxiMarkdown]
-        typography = yxiMarkdown(),
-        modifier = Modifier.fillMaxWidth(),
-    )
+    // ⚠️ AI 的输出**不做长按菜单，做原生文本选择** —— 想要的多半是里面的一个 URL
+    // 或者一段命令，整段复制反而要回头再删。SelectionContainer 给的是系统那套
+    // 选择手柄 + 复制条，长按即起，双击选词。
+    // （代价：长按被选择消费掉了，所以这一支不能再挂 combinedClickable。）
+    is ChatItem.AssistantText -> androidx.compose.foundation.text.selection.SelectionContainer {
+        Markdown(
+            item.markdown,
+            // ⚠️ 一定要传 —— 库默认把 `##` 渲染成 45sp（正文的 3 倍）。见 [yxiMarkdown]
+            typography = yxiMarkdown(),
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
     is ChatItem.Thinking -> ThinkingRow(item.text)
     is ChatItem.ToolCall -> ToolCard(item)
     is ChatItem.Unknown -> Unit   // 兜底：不认识的块静默跳过，不要在界面上留垃圾
@@ -501,20 +592,33 @@ private suspend fun androidx.compose.foundation.lazy.LazyListState.scrollToEnd(l
 private val androidx.compose.foundation.lazy.LazyListState.atBottom: Boolean
     get() = !canScrollForward
 
+/** 你说过的话。长按 → 复制整段。 */
 @Composable
-private fun UserBubble(text: String) {
+private fun UserBubble(text: String, onCopy: (String) -> Unit) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-        Surface(
-            color = MaterialTheme.colorScheme.primaryContainer,
-            shape = RoundedCornerShape(26.dp, 26.dp, 8.dp, 26.dp),
-            modifier = Modifier.fillMaxWidth(0.85f),
-        ) {
-            Text(
-                text,
-                Modifier.padding(18.dp, 14.dp),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
+        var menu by remember { mutableStateOf(false) }
+        Box(Modifier.fillMaxWidth(0.85f)) {
+            Surface(
+                color = MaterialTheme.colorScheme.primaryContainer,
+                shape = RoundedCornerShape(26.dp, 26.dp, 8.dp, 26.dp),
+                modifier = Modifier.fillMaxWidth().combinedClickable(
+                    onClick = {},
+                    onLongClick = { menu = true },
+                ),
+            ) {
+                Text(
+                    text,
+                    Modifier.padding(18.dp, 14.dp),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
+            DropdownMenu(menu, { menu = false }) {
+                DropdownMenuItem(
+                    text = { Text("复制整段") },
+                    onClick = { onCopy(text); menu = false },
+                )
+            }
         }
     }
 }
@@ -527,15 +631,20 @@ private fun UserBubble(text: String) {
  * 用户以为压根没发出去，然后重复发一遍 —— 后者我们已经遇到了。
  */
 @Composable
-private fun QueuedBubble(text: String) {
+private fun QueuedBubble(text: String, onCopy: (String) -> Unit, onPopQueue: () -> Unit) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        var menu by remember { mutableStateOf(false) }
+        Box(Modifier.fillMaxWidth(0.85f)) {
         Surface(
             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.30f),
             shape = RoundedCornerShape(26.dp, 26.dp, 8.dp, 26.dp),
             border = androidx.compose.foundation.BorderStroke(
                 1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f),
             ),
-            modifier = Modifier.fillMaxWidth(0.85f),
+            modifier = Modifier.fillMaxWidth().combinedClickable(
+                onClick = {},
+                onLongClick = { menu = true },
+            ),
         ) {
             Column(Modifier.padding(18.dp, 12.dp)) {
                 Text(
@@ -550,6 +659,19 @@ private fun QueuedBubble(text: String) {
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
                 )
             }
+        }
+        DropdownMenu(menu, { menu = false }) {
+            DropdownMenuItem(
+                text = { Text("复制整段") },
+                onClick = { onCopy(text); menu = false },
+            )
+            // ⚠️ 文案必须说「都收回来」。TUI 的 `Up` 是全有全无的，
+            // 排了三条按一次就三条一起回来 —— 写成「撤回这一条」是骗人的。
+            DropdownMenuItem(
+                text = { Text("收回改一改") },
+                onClick = { onPopQueue(); menu = false },
+            )
+        }
         }
     }
 }

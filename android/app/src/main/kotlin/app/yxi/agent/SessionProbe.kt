@@ -151,6 +151,28 @@ object SessionProbe {
         return true
     }
 
+    /**
+     * 把**排队中还没轮到**的输入全部收回来，让人在手机上改了再发。
+     *
+     * 协议是在真会话上实测出来的（TUI 的脚注自己写着 `Press up to edit queued messages`）：
+     *   · `Up`   —— 把排队的**全部**弹回输入框，拼成一段多行文本
+     *   · `C-u`  —— 把输入框清空（脚注变成 `Ctrl+Y to paste deleted text`，说明是 kill 不是删）
+     *
+     * ⚠️ **`Up` 是全有全无的，收不了单独一条。** 排了三条按一次 `Up`，三条一起回来。
+     * 所以界面上不能做成「撤回这一条」—— 得说清楚是把排队的都收回来。
+     *
+     * ⚠️ **文本不要从屏幕上刮。** 输入框会按宽度折行，拼回原文要处理折行、
+     * 还要跟提示行区分（[Live] 的类注释记着当初就是在这儿栽的）。
+     * 转录里的 `queue-operation` 有原文，调用方拿那个。
+     *
+     * ⚠️ 收回之后转录里落的是 **`popAll`**，不是 `remove` —— [Transcript] 那边认这个词，
+     * 认错了气泡就永远挂着。
+     */
+    suspend fun popQueue(session: SshSession, target: String) {
+        session.exec("tmux send-keys -t '$target' Up")
+        session.exec("tmux send-keys -t '$target' C-u")
+    }
+
     /** 抓某个会话最近 n 行屏幕，看板上做预览。 */
     suspend fun peek(session: SshSession, target: String, lines: Int = 40): String =
         session.exec("tmux capture-pane -p -t '$target' 2>/dev/null | tail -$lines")

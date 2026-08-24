@@ -119,8 +119,9 @@ fun FileViewer(sftp: Sftp?, path: String, onBack: () -> Unit, modifier: Modifier
 private fun looksTextual(b: ByteArray): Boolean =
     b.take(4000).none { it == 0.toByte() }
 
+/** ⚠️ `internal` 不是 `private`：聊天里的附件预览([ChatScreen])也用这一份，别再抄一遍。 */
 @Composable
-private fun ImageBody(b: ByteArray) {
+internal fun ImageBody(b: ByteArray) {
     val bmp = remember(b) { runCatching { BitmapFactory.decodeByteArray(b, 0, b.size) }.getOrNull() }
     if (bmp == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

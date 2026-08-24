@@ -20,6 +20,21 @@ class QueuedTest {
         assertTrue(q[0].text.contains("时间复杂度"))
     }
 
+    @Test fun 被收回输入框之后就不再是排队中() {
+        // ⚠️ `popAll` 是在真会话上按 `Up` 实测出来的第四种 operation
+        //（TUI 脚注：Press up to edit queued messages）。手机上的「收回改一改」走的就是它。
+        // 漏认这个词的后果：撤回之后那几条气泡**永远挂着** ——
+        // 转录里没有 remove，而它们再也不会被处理，`said` 那条路也兜不住。
+        val items = Transcript.parse(sequenceOf(ENQUEUE1, POPALL1))
+        assertEquals("收回去了就不该还挂着：" + items, 0, items.filterIsInstance<ChatItem.Queued>().size)
+    }
+
+    @Test fun 收回是全有全无所以多条要一起消失() {
+        // 按一次 Up 会把排队的全部弹回输入框，每弹一条写一条 popAll
+        val items = Transcript.parse(sequenceOf(ENQUEUE1, ENQUEUE2, POPALL1, POPALL2))
+        assertEquals("两条都该消失：" + items, 0, items.filterIsInstance<ChatItem.Queued>().size)
+    }
+
     @Test fun 出队之后就不再是排队中() {
         val items = Transcript.parse(sequenceOf(ENQUEUE1, REMOVE1))
         assertEquals("出队了就不该还挂着：" + items, 0, items.filterIsInstance<ChatItem.Queued>().size)
@@ -56,6 +71,9 @@ class QueuedTest {
         const val ENQUEUE1 = "{\"type\":\"queue-operation\",\"operation\":\"enqueue\",\"timestamp\":\"2026-08-23T08:17:48.663Z\",\"sessionId\":\"459efa19-5e8f-4894-8f9a-e07010d9e04c\",\"content\":\"排队的第一条：顺便说说时间复杂度\"}"
         const val ENQUEUE2 = "{\"type\":\"queue-operation\",\"operation\":\"enqueue\",\"timestamp\":\"2026-08-23T08:17:50.686Z\",\"sessionId\":\"459efa19-5e8f-4894-8f9a-e07010d9e04c\",\"content\":\"排队的第二条：再给个更快的写法\"}"
         const val REMOVE1 = "{\"type\":\"queue-operation\",\"operation\":\"remove\",\"timestamp\":\"2026-08-23T08:19:44.145Z\",\"sessionId\":\"459efa19-5e8f-4894-8f9a-e07010d9e04c\",\"content\":\"排队的第一条：顺便说说时间复杂度\"}"
+        // ⚠️ 下面两条是 2026-08-24 在真会话上按 `Up` 抓下来的原样，不是编的
+        const val POPALL1 = "{\"type\":\"queue-operation\",\"operation\":\"popAll\",\"timestamp\":\"2026-08-24T01:45:50.000Z\",\"sessionId\":\"12d150e1-4e72-4ef7-84ef-2836b5c816a9\",\"content\":\"排队的第一条：顺便说说时间复杂度\"}"
+        const val POPALL2 = "{\"type\":\"queue-operation\",\"operation\":\"popAll\",\"timestamp\":\"2026-08-24T01:45:50.000Z\",\"sessionId\":\"12d150e1-4e72-4ef7-84ef-2836b5c816a9\",\"content\":\"排队的第二条：再给个更快的写法\"}"
         const val QUEUED_COMMAND = "{\"parentUuid\":\"f523fcb6-6205-4b64-be96-1c51655fc125\",\"isSidechain\":false,\"attachment\":{\"type\":\"queued_command\",\"prompt\":\"排队的第一条：顺便说说时间复杂度\",\"source_uuid\":\"4c2ad2d4-57f8-4a19-b4dd-bee24d3ee212\",\"commandMode\":\"prompt\",\"origin\":{\"kind\":\"human\"},\"timestamp\":\"2026-08-23T08:17:48.663Z\"},\"type\":\"attachment\",\"uuid\":\"c310cab2-4987-42df-aeb1-1e7f5d78744f\",\"timestamp\":\"2026-08-23T08:17:48.663Z\",\"session_id\":\"459efa19-5e8f-4894-8f9a-e07010d9e04c\",\"userType\":\"external\",\"entrypoint\":\"cli\",\"cwd\":\"/tmp/claude-0/-root-src-workspace-Yxi/d0ccc7db-ab52-458f-807f-39247666d0c2/scratchpad/livetest\",\"sessionId\":\"459efa19-5e8f-4894-8f9a-e07010d9e04c\",\"version\":\"2.1.241\",\"gitBranch\":\"HEAD\"}"
 
         /** 同一句话的 enqueue，和它后来作为普通 user 消息出现的那一行（都是真实结构） */

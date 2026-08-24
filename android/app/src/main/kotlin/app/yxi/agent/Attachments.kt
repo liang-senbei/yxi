@@ -20,7 +20,18 @@ object Attachments {
     /** 项目目录名 = tmux 会话名去掉 `cc-` 前缀。跟看板上显示的名字一致，找起来不用猜。 */
     fun dirFor(session: String): String = ROOT + "/" + session.removePrefix("cc-").ifBlank { "misc" }
 
-    data class Staged(val label: String, val remotePath: String, val isImage: Boolean)
+    /**
+     * @param localUri 手机上那份的 content Uri（字符串形式）。**只为预览用。**
+     * 预览读本地不读远端：文件刚从这台手机传上去的，再从服务器拉回来纯属白跑一趟，
+     * 而且慢。⚠️ 这个授权只在当前 Activity 活着的时候有效，所以 [Staged] 也只该活这么久
+     * （它本来就是 `remember` 的，发出去就清）。
+     */
+    data class Staged(
+        val label: String,
+        val remotePath: String,
+        val isImage: Boolean,
+        val localUri: String? = null,
+    )
 
     /**
      * 传一个文件上去。[name] 是原始文件名，只用来取扩展名和给人看。

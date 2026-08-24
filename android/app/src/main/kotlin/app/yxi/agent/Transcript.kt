@@ -143,13 +143,20 @@ object Transcript {
             // ⚠️ **排队的输入没有 message 字段**，得在下面那个 return 之前接住。
             //   {"type":"queue-operation","operation":"enqueue","content":"…"}  进队
             //   {"type":"queue-operation","operation":"remove", "content":"…"}  出队
+            //   {"type":"queue-operation","operation":"popAll", "content":"…"}  被收回输入框
+            //
+            // ⚠️ **`popAll` 是实测才发现的第四种。** 在 TUI 里按 `Up`（脚注写着
+            // "Press up to edit queued messages"）会把**排队的全部**收回输入框，
+            // 每收一条写一条 `popAll`。漏掉它的后果：用户在手机上撤回之后，
+            // 那几条「排队中」气泡**再也不会消失** —— 转录里没有 remove，
+            // 而它们永远不会被处理，所以 `said` 那条路也兜不住。
             //   {"type":"attachment","attachment":{"type":"queued_command","prompt":"…"}}  真正被处理
             // 处理之后才算进了对话，所以那时候才当普通用户消息发出去。
             if (type == "queue-operation") {
                 val c = d.optString("content")
                 if (c.isNotBlank()) when (d.optString("operation")) {
                     "enqueue" -> queued += c
-                    "remove" -> queued.remove(c)
+                    "remove", "popAll" -> queued.remove(c)
                 }
                 return@forEach
             }
