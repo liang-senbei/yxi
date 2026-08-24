@@ -68,7 +68,7 @@ fun SessionsScreen(
     // ⚠️ **别在这儿 `remember` 会话列表。** 它跟连接一样得活得比这个界面久 ——
     // 存在这里的话，切回来是空列表，要等一次往返才有内容，
     // 中间那一下就是用户说的「骨架屏闪光」。现在由 [app.yxi.MainActivity] 持有。
-    var status by remember { mutableStateOf(if (sessions.isEmpty()) "连接中…" else "") }
+    var status by remember { mutableStateOf(if (sessions.isEmpty()) t("连接中…") else "") }
     var sendTo by remember { mutableStateOf<Session?>(null) }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -96,7 +96,7 @@ fun SessionsScreen(
                     .onSuccess { onSessions(it); status = "" }
                     .onFailure {
                         if (it is kotlinx.coroutines.CancellationException) throw it
-                        status = "刷新失败：${it.message}"
+                        status = t("刷新失败：%s").format(it.message)
                     }
             }
             delay(5_000)
@@ -149,7 +149,7 @@ fun SessionsScreen(
                     }
                 }
                 Text(
-                    if (status.isEmpty()) "${sessions.size} 个会话 · 点读对话 · 长按发消息" else status,
+                    if (status.isEmpty()) t("%d 个会话 · 点读对话 · 长按发消息").format(sessions.size) else status,
                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                     color = MaterialTheme.colorScheme.outline,
                     maxLines = 1,   // 窄屏上会折成两行把下面顶下去
@@ -162,10 +162,10 @@ fun SessionsScreen(
                     modifier = Modifier.height(44.dp).clickable { floating = true },
                 ) {
                     Box(Modifier.padding(horizontal = 14.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
-                        Text("悬浮", style = MaterialTheme.typography.labelLarge)
+                        Text(t("悬浮"), style = MaterialTheme.typography.labelLarge)
                     }
                 }
-                listOf("文件" to onOpenFiles, "终端" to { onOpenTerminal(null, ".") }).forEach { (label, go) ->
+                listOf(t("文件") to onOpenFiles, t("终端") to { onOpenTerminal(null, ".") }).forEach { (label, go) ->
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceContainer, shape = Pill,
                         modifier = Modifier.height(44.dp).clickable(onClick = go),
@@ -211,7 +211,7 @@ fun SessionsScreen(
                     // ⚠️ 不放按钮：下拉就是刷新/重连。多一个按钮 = 多一个要解释的东西，
                     // 而下拉是这类列表上人人都会先试的手势。这里只负责**告诉他能拉**
                     Text(
-                        "↓ 下拉重连",
+                        t("↓ 下拉重连"),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onErrorContainer,
                     )
@@ -312,7 +312,7 @@ private fun PinnedHeader(n: Int) {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         GlyphIcon(Glyph.Pin, MaterialTheme.colorScheme.outline, 16.dp)
-        Text("置顶", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
+        Text(t("置顶"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
         Text(
             "$n",
             style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
@@ -388,7 +388,7 @@ private fun SessionCard(
                 Spacer(Modifier.width(4.dp))
                 if (s.attached) {
                     Text(
-                        "已连",
+                        t("已连"),
                         style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                         color = MaterialTheme.colorScheme.outline,
                     )
@@ -411,8 +411,8 @@ private fun SessionCard(
             // 只有「等你」那组带按钮 —— 其余安静
             if (needs) {
                 Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onSend, shape = Pill, modifier = Modifier.weight(1f).height(44.dp)) { Text("回它一句") }
-                    OutlinedButton(onTerminal, shape = Pill, modifier = Modifier.weight(1f).height(44.dp)) { Text("开终端") }
+                    Button(onSend, shape = Pill, modifier = Modifier.weight(1f).height(44.dp)) { Text(t("回它一句")) }
+                    OutlinedButton(onTerminal, shape = Pill, modifier = Modifier.weight(1f).height(44.dp)) { Text(t("开终端")) }
                 }
             }
         }
@@ -429,15 +429,15 @@ private fun SendSheet(target: Session, onSend: (String) -> Unit, onDismiss: () -
             Modifier.padding(18.dp, 0.dp, 18.dp, 28.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("发给 ${target.short}", style = MaterialTheme.typography.titleLarge)
+            Text(t("发给 %s").format(target.short), style = MaterialTheme.typography.titleLarge)
             Text(
-                "不用先 attach —— 直接送进那个会话（tmux send-keys）。",
+                t("不用先 attach —— 直接送进那个会话（tmux send-keys）。"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.outline,
             )
             OutlinedTextField(
                 text, { text = it },
-                placeholder = { Text("说一句…") },
+                placeholder = { Text(t("说一句…")) },
                 shape = MaterialTheme.shapes.medium,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 96.dp),
             )
@@ -446,7 +446,7 @@ private fun SendSheet(target: Session, onSend: (String) -> Unit, onDismiss: () -
                 enabled = text.isNotBlank(),
                 shape = Pill,
                 modifier = Modifier.fillMaxWidth().height(52.dp),
-            ) { Text("发送") }
+            ) { Text(t("发送")) }
         }
     }
 }

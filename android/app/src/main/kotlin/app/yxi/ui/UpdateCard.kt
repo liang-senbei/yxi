@@ -37,7 +37,7 @@ fun UpdateBanner(sftp: Sftp?, update: Update?, onDone: () -> Unit) {
     Surface(color = SurfaceContainerLow, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp, 13.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("有新版本 ${update.versionName}", style = MaterialTheme.typography.labelLarge, color = Copper)
+                Text(t("有新版本 %s").format(update.versionName), style = MaterialTheme.typography.labelLarge, color = Copper)
                 Spacer(Modifier.weight(1f))
                 Text(
                     update.sizeText,
@@ -64,18 +64,18 @@ fun UpdateBanner(sftp: Sftp?, update: Update?, onDone: () -> Unit) {
                                     s.download(update.remotePath, f) { n ->
                                         progress = (n.toFloat() / update.sizeBytes).coerceIn(0f, 1f)
                                     }
-                                }.getOrElse { progress = -1f; err = "下载失败：${it.message}"; return@launch }
+                                }.getOrElse { progress = -1f; err = t("下载失败：%s").format(it.message); return@launch }
                                 // ⚠️ 大小对不上就别装 —— 半个 APK 装上去的后果比不更新糟得多
                                 if (got != update.sizeBytes) {
-                                    progress = -1f; err = "下载不完整（$got/${update.sizeBytes}），没装"; return@launch
+                                    progress = -1f; err = t("下载不完整（%d/%d），没装").format(got, update.sizeBytes); return@launch
                                 }
                                 progress = -1f
                                 install(ctx, f)?.let { err = it }
                             }
                         },
                         shape = Pill, modifier = Modifier.weight(1f).height(44.dp),
-                    ) { Text("下载并安装") }
-                    OutlinedButton(onDone, shape = Pill, modifier = Modifier.height(44.dp)) { Text("以后") }
+                    ) { Text(t("下载并安装")) }
+                    OutlinedButton(onDone, shape = Pill, modifier = Modifier.height(44.dp)) { Text(t("以后")) }
                 }
             }
         }
@@ -93,7 +93,7 @@ private fun install(ctx: Context, apk: File): String? {
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
         }
-        return "先在设置里允许本应用安装，然后再点一次"
+        return t("先在设置里允许本应用安装，然后再点一次")
     }
     return runCatching {
         val uri = FileProvider.getUriForFile(ctx, "app.yxi.files", apk)
@@ -103,5 +103,5 @@ private fun install(ctx: Context, apk: File): String? {
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
         )
         null
-    }.getOrElse { "拉不起安装器：${it.message}" }
+    }.getOrElse { t("拉不起安装器：%s").format(it.message) }
 }

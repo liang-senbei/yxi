@@ -1,5 +1,7 @@
 package app.yxi.agent
 
+import app.yxi.ui.t
+
 /**
  * 对话输入框里的**斜杠命令提示**。
  *
@@ -15,28 +17,30 @@ package app.yxi.agent
 object Slash {
     data class Cmd(val name: String, val hint: String)
 
-    val ALL = listOf(
-        Cmd("compact", "压掉上下文，留个摘要接着聊"),
-        Cmd("context", "现在上下文占了多少"),
-        Cmd("usage", "用量和额度还剩多少"),
-        Cmd("cost", "这段会话花了多少"),
-        Cmd("clear", "清空重开（⚠️ 当前对话就没了）"),
-        Cmd("model", "换模型"),
-        Cmd("status", "版本、账号、连接状态"),
-        Cmd("todos", "看它手头的待办"),
-        Cmd("rewind", "退回之前的检查点"),
-        Cmd("resume", "挑一段历史会话接着聊"),
-        Cmd("agents", "管子代理"),
-        Cmd("export", "导出这段对话"),
-        Cmd("memory", "改记忆文件"),
-        Cmd("permissions", "权限规则"),
-        Cmd("mcp", "看 MCP 服务器"),
-        Cmd("config", "设置"),
-        Cmd("init", "给这个项目生成 CLAUDE.md"),
-        Cmd("review", "审代码"),
-        Cmd("doctor", "自检安装"),
-        Cmd("bug", "报 bug"),
-        Cmd("help", "全部命令"),
+    // ⚠️ `get()` 不是 `=`：`val ALL = listOf(...)` 只在**对象初始化时求值一次**，
+    // 换语言之后提示还是旧语言。二十来条重建一次的开销可以忽略。
+    val ALL: List<Cmd> get() = listOf(
+        Cmd("compact", t("压掉上下文，留个摘要接着聊")),
+        Cmd("context", t("现在上下文占了多少")),
+        Cmd("usage", t("用量和额度还剩多少")),
+        Cmd("cost", t("这段会话花了多少")),
+        Cmd("clear", t("清空重开（⚠️ 当前对话就没了）")),
+        Cmd("model", t("换模型")),
+        Cmd("status", t("版本、账号、连接状态")),
+        Cmd("todos", t("看它手头的待办")),
+        Cmd("rewind", t("退回之前的检查点")),
+        Cmd("resume", t("挑一段历史会话接着聊")),
+        Cmd("agents", t("管子代理")),
+        Cmd("export", t("导出这段对话")),
+        Cmd("memory", t("改记忆文件")),
+        Cmd("permissions", t("权限规则")),
+        Cmd("mcp", t("看 MCP 服务器")),
+        Cmd("config", t("设置")),
+        Cmd("init", t("给这个项目生成 CLAUDE.md")),
+        Cmd("review", t("审代码")),
+        Cmd("doctor", t("自检安装")),
+        Cmd("bug", t("报 bug")),
+        Cmd("help", t("全部命令")),
     )
 
     /**

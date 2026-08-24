@@ -62,17 +62,17 @@ fun rememberSshConnector(
     ask?.let { a ->
         AlertDialog(
             onDismissRequest = { a.answer(false); ask = null },
-            title = { Text("第一次连这台主机") },
+            title = { Text(t("第一次连这台主机")) },
             text = {
                 Text(
-                    a.host + "\n\n指纹\n" + a.fingerprint +
-                        "\n\n请核对它跟服务器上 ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub " +
-                        "的输出一致。不一致就别连。",
+                    a.host + t("\n\n指纹\n") + a.fingerprint +
+                        t("\n\n请核对它跟服务器上 ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub ") +
+                        t("的输出一致。不一致就别连。"),
                     style = MaterialTheme.typography.bodySmall,
                 )
             },
-            confirmButton = { TextButton({ a.answer(true); ask = null }) { Text("指纹对得上，连") } },
-            dismissButton = { TextButton({ a.answer(false); ask = null }) { Text("取消") } },
+            confirmButton = { TextButton({ a.answer(true); ask = null }) { Text(t("指纹对得上，连")) } },
+            dismissButton = { TextButton({ a.answer(false); ask = null }) { Text(t("取消")) } },
         )
     }
 
@@ -105,31 +105,31 @@ fun Connector.explain(e: Throwable): String {
     // ⚠️ 所有界面的连接失败都汇到这一个函数 —— 记日志就记在这儿，
     // 别处再记一遍只会漏。开发者模式靠它才有东西可看
     DevMode.logError("connect ${session.hostLabel}", e)
-    if (known.changedDetected) return "⚠️ 主机指纹变了，已拒绝连接。真是重装了就把这台主机删掉重加。"
+    if (known.changedDetected) return t("⚠️ 主机指纹变了，已拒绝连接。真是重装了就把这台主机删掉重加。")
     var c: Throwable? = e
     while (c != null) {
         when (c) {
             is java.net.UnknownHostException -> {
                 val h = c.message.orEmpty().substringBefore(':').trim()
                 val bad = app.yxi.ssh.HostInput.suspiciousChar(h)
-                return "地址解析不了：「$h」\n" +
+                return t("地址解析不了：「%s」\n").format(h) +
                     // ⚠️ 只说「解析不了」等于没说 —— 用户看着那个地址觉得它是对的。
                     // 全角句点和半角句点长得几乎一样，必须把那个字符指出来。
-                    if (bad != null) "里面有个连不上的字符 $bad —— 多半是中文输入法打的，删掉用英文键盘重打。"
-                    else "这一栏要填 IP 或真实域名。手机上没有 ~/.ssh/config，" +
-                        "SSH 别名（station 之类）在这儿用不了；也别带 http:// 或路径。"
+                    if (bad != null) t("里面有个连不上的字符 %s —— 多半是中文输入法打的，删掉用英文键盘重打。").format(bad)
+                    else t("这一栏要填 IP 或真实域名。手机上没有 ~/.ssh/config，") +
+                        t("SSH 别名（station 之类）在这儿用不了；也别带 http:// 或路径。")
             }
             is java.net.SocketTimeoutException, is java.net.ConnectException ->
-                return "连不上 ${session.hostLabel}：${c.message}\n检查 IP、端口，以及服务器是否开着。"
+                return t("连不上 %s：%s\n检查 IP、端口，以及服务器是否开着。").format(session.hostLabel, c.message)
             else -> Unit
         }
         c = c.cause.takeIf { it !== c }
     }
     val m = e.message.orEmpty()
     return when {
-        "Auth fail" in m || "Auth cancel" in m -> "认证被拒：密码不对，或这台机器的 authorized_keys 里没有这把公钥。"
-        "reject HostKey" in m -> "你取消了指纹确认，所以没连。"
-        else -> "连不上：${e::class.simpleName}: ${e.message}"
+        "Auth fail" in m || "Auth cancel" in m -> t("认证被拒：密码不对，或这台机器的 authorized_keys 里没有这把公钥。")
+        "reject HostKey" in m -> t("你取消了指纹确认，所以没连。")
+        else -> t("连不上：%s: %s").format(e::class.simpleName, e.message)
     }
 }
 
@@ -173,7 +173,7 @@ fun rememberHostSession(store: HostStore, keys: KeyManager, host: Host?): HostSe
         var wait = 1_000L
         while (true) {
             val c = connect()
-            if (c == null) { error = "这台主机还没有可用的认证方式"; return@LaunchedEffect }
+            if (c == null) { error = t("这台主机还没有可用的认证方式"); return@LaunchedEffect }
             val err = runCatching { c.session.connect() }.exceptionOrNull()
             if (err == null) {
                 session = c.session; error = null; wait = 1_000L
@@ -183,8 +183,8 @@ fun rememberHostSession(store: HostStore, keys: KeyManager, host: Host?): HostSe
                 // 现在守着它，断了就回到上面重连。
                 while (c.session.isAlive) kotlinx.coroutines.delay(3_000)
                 session = null
-                error = "连接断了，正在重连…"
-                app.yxi.ui.DevMode.log("host", "连接掉了，自动重连")
+                error = t("连接断了，正在重连…")
+                app.yxi.ui.DevMode.log("host", t("连接掉了，自动重连"))
                 continue
             }
 

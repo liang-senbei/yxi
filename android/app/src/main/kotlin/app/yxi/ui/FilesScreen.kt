@@ -49,7 +49,7 @@ fun FilesScreen(
     val scope = rememberCoroutineScope()
     var dir by remember { mutableStateOf(startDir) }
     var entries by remember { mutableStateOf<List<Sftp.Entry>>(emptyList()) }
-    var status by remember { mutableStateOf<String?>("连接中…") }
+    var status by remember { mutableStateOf<String?>(t("连接中…")) }
     var open by remember { mutableStateOf<String?>(null) }   // 正在看的文件
     var jumping by remember { mutableStateOf(false) }
     // 最近去过的目录。⚠️ 只在内存里 —— 关掉就没了。要跨会话记住得落盘，那是另一件事
@@ -68,7 +68,7 @@ fun FilesScreen(
         val s = sftp ?: return@LaunchedEffect
         // ⚠️ `~` 手机这边展不开，交给服务器的 realpath
         val abs = app.yxi.ssh.catching { s.realpath(target) }.getOrNull()
-        if (abs == null) { status = "找不到 $target"; onJumped(); return@LaunchedEffect }
+        if (abs == null) { status = t("找不到 %s").format(target); onJumped(); return@LaunchedEffect }
         if (app.yxi.ssh.catching { s.isDir(abs) }.getOrDefault(false)) {
             dir = abs; open = null
         } else {
@@ -99,7 +99,7 @@ fun FilesScreen(
         Row(Modifier.fillMaxWidth().padding(18.dp, 8.dp, 18.dp, 4.dp)) {
             Spacer(Modifier.weight(1f))
             Text(
-                status ?: "${entries.size} 项",
+                status ?: t("%d 项").format(entries.size),
                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = Mono),
                 color = Dim,
             )
@@ -141,7 +141,7 @@ fun FilesScreen(
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
                     Text("↰", style = MaterialTheme.typography.titleMedium, color = Copper)
-                    Text("上一级", style = MaterialTheme.typography.bodyLarge, color = Muted)
+                    Text(t("上一级"), style = MaterialTheme.typography.bodyLarge, color = Muted)
                 }
             }
             items(entries.size, key = { entries[it].name }) { i ->
@@ -179,7 +179,7 @@ fun FilesScreen(
             }
             if (entries.isEmpty() && status == null) item("empty") {
                 Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) {
-                    Text("空目录", style = MaterialTheme.typography.bodyMedium, color = Dim)
+                    Text(t("空目录"), style = MaterialTheme.typography.bodyMedium, color = Dim)
                 }
             }
         }
@@ -197,7 +197,7 @@ fun FilesScreen(
                         .onSuccess { abs -> if (s.isDir(abs)) dir = abs else open = abs }
                         .onFailure {
                             if (it is kotlinx.coroutines.CancellationException) throw it
-                            status = "去不了 $target：" + Sftp.explain(it)
+                            status = t("去不了 %s：").format(target) + Sftp.explain(it)
                         }
                 }
             },
@@ -224,19 +224,19 @@ private fun JumpDialog(
     var text by remember { mutableStateOf(current) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("去哪儿") },
+        title = { Text(t("去哪儿")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(
                     text, { text = it },
-                    placeholder = { Text("/opt/workspace 或 ~/src") },
+                    placeholder = { Text(t("/opt/workspace 或 ~/src")) },
                     textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = Mono),
                     shape = MaterialTheme.shapes.medium,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 if (recent.size > 1) {
-                    Text("最近", style = MaterialTheme.typography.labelSmall, color = Dim)
+                    Text(t("最近"), style = MaterialTheme.typography.labelSmall, color = Dim)
                     recent.drop(1).take(5).forEach { r ->
                         Text(
                             r,
@@ -248,7 +248,7 @@ private fun JumpDialog(
                 }
             }
         },
-        confirmButton = { TextButton({ onGo(text.trim()) }) { Text("去") } },
-        dismissButton = { TextButton(onDismiss) { Text("取消") } },
+        confirmButton = { TextButton({ onGo(text.trim()) }) { Text(t("去")) } },
+        dismissButton = { TextButton(onDismiss) { Text(t("取消")) } },
     )
 }

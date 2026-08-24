@@ -63,9 +63,9 @@ fun KeyBar(
         Cap("⌨", false, onKeyboard)
         Cap("Ctrl", ctrlArmed, onCtrl)
         // 整行 ⇄ 逐键。默认「整行」（有候选词），vim/less/y-n 这种要逐键的点掉它
-        Cap(if (composing) "整行" else "逐键", composing, onCompose)
+        Cap(if (composing) t("整行") else t("逐键"), composing, onCompose)
         CapIcon(Glyph.Mic, onVoice)
-        Cap("历史", history, onHistory)
+        Cap(t("历史"), history, onHistory)
         listOf(
             "esc" to byteArrayOf(27),
             "tab" to byteArrayOf(9),

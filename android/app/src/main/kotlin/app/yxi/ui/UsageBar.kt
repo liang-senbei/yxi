@@ -66,7 +66,7 @@ fun UsageStrip(ctx: Context, hostId: String) {
             )
         }
         Text(
-            "剩 ${u.remainText}" + if (age > 30) " · ${age / 60}h 前" else "",
+            t("剩 %s").format(u.remainText) + if (age > 30) t(" · %dh 前").format(age / 60) else "",
             style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
             color = Dim,
         )
@@ -81,13 +81,13 @@ fun UsageCard(u: Usage?) {
         Column(Modifier.padding(16.dp, 13.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "5 小时窗口",
+                    t("5 小时窗口"),
                     style = MaterialTheme.typography.labelMedium,
                     color = if (u.elapsedPercent > 85) Amber else Muted,
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    "距重置 ${u.remainText}",
+                    t("距重置 %s").format(u.remainText),
                     style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
                     color = OnSurface,
                 )
@@ -100,7 +100,7 @@ fun UsageCard(u: Usage?) {
             }
             Text(
                 "${u.tokenText} token · $${"%.2f".format(u.costUSD)}" +
-                    if (u.tokensPerMinute > 0) " · ${u.tokensPerMinute.toInt()}/分" else "",
+                    if (u.tokensPerMinute > 0) t(" · %d/分").format(u.tokensPerMinute.toInt()) else "",
                 style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                 color = Dim,
             )

@@ -1,5 +1,6 @@
 package app.yxi.agent
 
+import app.yxi.ui.t
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -117,7 +118,7 @@ object Transcript {
                 // 「排队中·你说的话」的样子。这条是真机上看出来的。
                 val inj = injectedOf(t)
                 if (inj == null) ChatItem.Queued("queued-$i-" + t.hashCode(), t)
-                else ChatItem.Injected("queued-$i-" + t.hashCode(), inj.first + " · 排队中", inj.second, t)
+                else ChatItem.Injected("queued-$i-" + t.hashCode(), inj.first + t(" · 排队中"), inj.second, t)
             }
 
         /** 已经吃进去多少行 —— 上层拿它决定从哪儿接着喂。 */
@@ -200,15 +201,16 @@ object Transcript {
      * ⚠️ 这些标签**不一定在开头** —— 前面常常还有一段引子
      * （「Another Claude session sent a message:」之类），所以是**搜**不是 `startsWith`。
      */
-    private val INJECTED = listOf(
-        "teammate-message" to "队友消息",
-        "agent-message" to "子 agent 消息",
-        "cross-session-message" to "跨会话消息",
-        "task-notification" to "任务通知",
-        "system-reminder" to "系统提醒",
-        "local-command-caveat" to "系统提醒",
-        "local-command-stdout" to "命令输出",
-        "command-name" to "斜杠命令",
+    // ⚠️ `get()` 不是 `=`：一次性求值的话，换语言后这些卡片标题不跟着变
+    private val INJECTED: List<Pair<String, String>> get() = listOf(
+        "teammate-message" to t("队友消息"),
+        "agent-message" to t("子 agent 消息"),
+        "cross-session-message" to t("跨会话消息"),
+        "task-notification" to t("任务通知"),
+        "system-reminder" to t("系统提醒"),
+        "local-command-caveat" to t("系统提醒"),
+        "local-command-stdout" to t("命令输出"),
+        "command-name" to t("斜杠命令"),
     )
 
     /**

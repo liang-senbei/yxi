@@ -72,7 +72,7 @@ fun FileViewer(sftp: Sftp?, path: String, onBack: () -> Unit, modifier: Modifier
             Column(Modifier.weight(1f)) {
                 Text(Paths.nameOf(path), style = MaterialTheme.typography.titleSmall, maxLines = 1)
                 Text(
-                    error ?: bytes?.let { human(it.size.toLong()) + if (truncated) " · 已截断" else "" } ?: "读取中…",
+                    error ?: bytes?.let { human(it.size.toLong()) + if (truncated) t(" · 已截断") else "" } ?: t("读取中…"),
                     style = MaterialTheme.typography.labelSmall.copy(fontFamily = Mono),
                     color = if (error != null) MaterialTheme.colorScheme.error else Dim,
                 )
@@ -83,7 +83,7 @@ fun FileViewer(sftp: Sftp?, path: String, onBack: () -> Unit, modifier: Modifier
                     modifier = Modifier.clickable { source = !source },
                 ) {
                     Text(
-                        if (source) "源码" else "阅读",
+                        if (source) t("源码") else t("阅读"),
                         Modifier.padding(14.dp, 8.dp),
                         style = MaterialTheme.typography.labelMedium,
                         color = if (source) Copper else Muted,
@@ -108,7 +108,7 @@ fun FileViewer(sftp: Sftp?, path: String, onBack: () -> Unit, modifier: Modifier
                 ext == "json" -> JsonBody(b.decodeToString())
                 ext in TEXTISH || looksTextual(b) -> CodeBody(b.decodeToString(), ext)
                 else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("二进制文件，不显示", style = MaterialTheme.typography.bodyMedium, color = Dim)
+                    Text(t("二进制文件，不显示"), style = MaterialTheme.typography.bodyMedium, color = Dim)
                 }
             }
         }
@@ -125,7 +125,7 @@ internal fun ImageBody(b: ByteArray) {
     val bmp = remember(b) { runCatching { BitmapFactory.decodeByteArray(b, 0, b.size) }.getOrNull() }
     if (bmp == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("这张图解不开", style = MaterialTheme.typography.bodyMedium, color = Dim)
+            Text(t("这张图解不开"), style = MaterialTheme.typography.bodyMedium, color = Dim)
         }
         return
     }

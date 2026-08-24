@@ -1,5 +1,6 @@
 package app.yxi.watch
 
+import app.yxi.ui.t
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -50,6 +51,9 @@ class EventService : Service() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        // ⚠️ 服务可能比界面先起来（开机自启、被系统拉起）。不在这儿读一次的话，
+        // 通知会**先弹几条中文**再跟上 —— 那种不一致比全中文更让人困惑。
+        app.yxi.ui.I18n.load(applicationContext)
         store = HostStore(applicationContext)
         keys = KeyManager(applicationContext)
         channels()
@@ -78,7 +82,7 @@ class EventService : Service() {
             var ssh: SshSession? = null
             runCatching {
                 Log.i("YxiWatch", "连 ${host.alias} …")
-                val cfg = store.configFor(host, keys) ?: error("没有可用的认证方式")
+                val cfg = store.configFor(host, keys) ?: error(t("没有可用的认证方式"))
                 // ⚠️ 后台服务里没有 UI 可以弹「第一次连这台主机」，所以 prompt 传 null =
                 // 没记过指纹的主机**连不上**。这是有意的：先在前台连一次、核对过指纹，
                 // 后台才盯得住。安全上不能因为「后台没界面」就把校验放松掉。
@@ -144,10 +148,10 @@ class EventService : Service() {
         // ⚠️ **一条都没置顶时不生效**，见 [Pinned.onlyPinned] 的注释。
         if (!Pinned.shouldNotify(Pinned.onlyPinned(this), Pinned.get(this, host.id), full)) return
 
-        val title = if (kind == "needs") "$session 需要你" else "$session 干完了"
+        val title = if (kind == "needs") t("%s 需要你").format(session) else t("%s 干完了").format(session)
         // 「需要你」的 detail 是 Claude 自己给的一句人话（"needs your permission to use Bash"），有信息量；
         // 「干完了」的 detail 是我们编的通用句，跟标题重复 —— 那就换成机器名，至少告诉你是哪台
-        val text = if (kind == "needs") e.optString("detail").ifBlank { "等你决定" } else host.alias
+        val text = if (kind == "needs") e.optString("detail").ifBlank { t("等你决定") } else host.alias
 
         val open = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -232,7 +236,7 @@ class EventService : Service() {
         val number = i.getIntExtra("number", -1)
         val label = i.getStringExtra("label").orEmpty()
         val fp = i.getStringExtra("fp").orEmpty()
-        val s = live[hostId] ?: run { note("连接不在了，没送出去"); return }
+        val s = live[hostId] ?: run { note(t("连接不在了，没送出去")); return }
 
         val now = runCatching { SessionProbe.pending(s, session) }.getOrNull()
         // ⚠️ **整块指纹必须一致，不能只比选项。** 两个不同的权限提示选项完全一样
@@ -241,12 +245,12 @@ class EventService : Service() {
         val same = now != null &&
             now.fingerprint == fp &&
             now.options.any { it.number == number && it.label == label }
-        if (!same) { note("提示变了，没有替你按 —— 点开看看"); return }
+        if (!same) { note(t("提示变了，没有替你按 —— 点开看看")); return }
 
         val ok = runCatching { SessionProbe.sendKey(s, session, number.toString()) }.getOrDefault(false)
         if (ok) runCatching {
             NotificationManagerCompat.from(this).cancel((hostId + session.removePrefix("cc-")).hashCode())
-        } else note("送不出去，没批")
+        } else note(t("送不出去，没批"))
     }
 
     /** 用一条通知代替 toast —— 服务里 toast 在新版安卓上不一定弹得出来。 */
@@ -268,8 +272,8 @@ class EventService : Service() {
 
     private fun ongoing(n: Int) = NotificationCompat.Builder(this, CH_ONGOING)
         .setSmallIcon(R.drawable.ic_stat_yxi)
-        .setContentTitle("盯着 $n 台机器")
-        .setContentText("Claude 需要你时会响")
+        .setContentTitle(t("盯着 %d 台机器").format(n))
+        .setContentText(t("Claude 需要你时会响"))
         .setOngoing(true)
         .setPriority(NotificationCompat.PRIORITY_MIN)
         .setContentIntent(
@@ -284,12 +288,12 @@ class EventService : Service() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(
-            NotificationChannel(CH_EVENT, "Claude 找你", NotificationManager.IMPORTANCE_HIGH)
-                .apply { description = "干完了 / 需要你决定" }
+            NotificationChannel(CH_EVENT, t("Claude 找你"), NotificationManager.IMPORTANCE_HIGH)
+                .apply { description = t("干完了 / 需要你决定") }
         )
         nm.createNotificationChannel(
             // MIN：常驻那条不该占用户的注意力，它只是系统要求的「我在后台跑」的凭证
-            NotificationChannel(CH_ONGOING, "后台盯梢", NotificationManager.IMPORTANCE_MIN)
+            NotificationChannel(CH_ONGOING, t("后台盯梢"), NotificationManager.IMPORTANCE_MIN)
         )
     }
 

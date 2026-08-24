@@ -1,5 +1,7 @@
 package app.yxi.agent
 
+import app.yxi.ui.t
+
 import app.yxi.ssh.Sftp
 import app.yxi.ssh.SshSession
 
@@ -46,7 +48,7 @@ object Attachments {
         val safe = name.replace(Regex("""[^A-Za-z0-9._-]"""), "_").takeLast(60).ifBlank { "file" }
         val path = "$dir/$stamp-$safe"
         sftp.write(path, bytes)
-        return Staged(if (isImage) "图片$index" else "附件$index", path, isImage)
+        return Staged(if (isImage) t("图片%d").format(index) else t("附件%d").format(index), path, isImage)
     }
 
     /** 发送时贴在正文前面的路径映射。没有附件就返回空串。 */

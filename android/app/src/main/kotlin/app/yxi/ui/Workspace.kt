@@ -34,7 +34,14 @@ import org.connectbot.terminal.TerminalEmulatorFactory
 
 private val Pill = RoundedCornerShape(100.dp)
 
-enum class Mode(val label: String) { Terminal("终端"), Chat("对话"), Files("文件") }
+enum class Mode(private val zh: String) {
+    Terminal("终端"), Chat("对话"), Files("文件");
+
+    // ⚠️ **label 必须是 get() 而不是构造参数。** enum 常量的参数在**类初始化时求值一次**，
+    // 之后换语言它不会跟着变 —— 现象是底部导航栏 / 模式切换条永远停在启动时那种语言，
+    // 而同一屏别的字都变了。get() 每次读都重新查表，还能被 Compose 当成状态读取。
+    val label: String get() = t(zh)
+}
 
 /**
  * 一台主机 + 一个会话的**工作区**：终端 / 对话 / 文件 三种模式共用**同一条 SSH 连接**。
@@ -88,7 +95,7 @@ fun Workspace(
     var ssh by remember(host.id) { mutableStateOf<SshSession?>(null) }
     var sftp by remember(host.id) { mutableStateOf<Sftp?>(null) }
     var shell by remember(host.id) { mutableStateOf<SshSession.Shell?>(null) }
-    var status by remember(host.id) { mutableStateOf<String?>("连接中…") }
+    var status by remember(host.id) { mutableStateOf<String?>(t("连接中…")) }
     /** 终端当前 attach 在哪个会话上。跟 [sessionName] 不一致时要切过去 */
     var attached by remember(host.id) { mutableStateOf<String?>(null) }
     /** null = 还没查；"" = 有转录；非空 = 没有的原因 */
@@ -202,28 +209,28 @@ fun Workspace(
             ssh = it
             status = null
             chatBlocked = when {
-                sessionName == null -> "没有指定会话"
-                TranscriptStream.latestFor(it, cwd) == null -> "这个会话里没跑过 Claude Code"
+                sessionName == null -> t("没有指定会话")
+                TranscriptStream.latestFor(it, cwd) == null -> t("这个会话里没跑过 Claude Code")
                 else -> ""
             }
             return@LaunchedEffect
         }
         var wait = 700L
         while (true) {
-            val c = connect() ?: run { status = "这台主机还没有可用的认证方式"; return@LaunchedEffect }
+            val c = connect() ?: run { status = t("这台主机还没有可用的认证方式"); return@LaunchedEffect }
             val err = runCatching { c.session.connect(); ssh = c.session }.exceptionOrNull()
             if (err is kotlinx.coroutines.CancellationException) throw err   // 同上：取消不是连接失败
             if (err == null) break
             // 指纹变了绝不重试 —— 那不是网络问题，重试只会一遍遍撞同一堵墙
             if (c.known.changedDetected || generation == 0) { status = c.explain(err); return@LaunchedEffect }
-            status = "连接断了，正在重连…"
+            status = t("连接断了，正在重连…")
             delay(wait); wait = (wait * 2).coerceAtMost(5_000)
         }
         status = null
         // 对话模式要有转录才有内容可渲染。没有就置灰**并说明原因** —— 灰着不说话最气人
         chatBlocked = when {
-            sessionName == null -> "没有指定会话"
-            TranscriptStream.latestFor(ssh!!, cwd) == null -> "这个会话里没跑过 Claude Code"
+            sessionName == null -> t("没有指定会话")
+            TranscriptStream.latestFor(ssh!!, cwd) == null -> t("这个会话里没跑过 Claude Code")
             else -> ""
         }
     }
@@ -284,7 +291,7 @@ fun Workspace(
             // 而且**再进来也不会消失**（status 是记住的）。用户看到的就是「终端起不来」。
             // Kotlin 的铁律：CancellationException 必须原样抛回去。
             if (it is kotlinx.coroutines.CancellationException) throw it
-            status = "终端起不来：${it.message}"
+            status = t("终端起不来：%s").format(it.message)
         }
     }
 
@@ -308,7 +315,7 @@ fun Workspace(
             attached = target
         }.onFailure {
             if (it is kotlinx.coroutines.CancellationException) throw it
-            status = "切不过去：${it.message}"
+            status = t("切不过去：%s").format(it.message)
         }
     }
 
@@ -325,7 +332,7 @@ fun Workspace(
         while (true) {
             delay(600)
             if (s.isAlive) continue
-            status = "连接断了，正在重连…"
+            status = t("连接断了，正在重连…")
             runCatching { shell?.close() }; shell = null
             runCatching { sftp?.close() }; sftp = null
             generation++      // 触发上面那个 effect 重建
@@ -391,7 +398,7 @@ fun Workspace(
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 if (quick.isEmpty()) {
                     DropdownMenuItem(
-                        text = { Text("还没有置顶的会话", style = MaterialTheme.typography.bodySmall, color = Dim) },
+                        text = { Text(t("还没有置顶的会话"), style = MaterialTheme.typography.bodySmall, color = Dim) },
                         onClick = { menu = false; switcher = true },
                     )
                 } else quick.forEach { sess ->
@@ -417,7 +424,7 @@ fun Workspace(
                 }
                 HorizontalDivider()
                 DropdownMenuItem(
-                    text = { Text("全部会话…", style = MaterialTheme.typography.bodyMedium, color = Muted) },
+                    text = { Text(t("全部会话…"), style = MaterialTheme.typography.bodyMedium, color = Muted) },
                     onClick = { menu = false; switcher = true },
                 )
             }
@@ -498,7 +505,7 @@ fun Workspace(
                                     android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                                     android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
                                 )
-                                .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "说吧")
+                                .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, t("说吧"))
                         )
                     }
                 },
@@ -541,7 +548,7 @@ fun Workspace(
     heard?.let { text ->
         AlertDialog(
             onDismissRequest = { heard = null },
-            title = { Text("听到的是这句") },
+            title = { Text(t("听到的是这句")) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Surface(color = SurfaceContainerLowest, shape = MaterialTheme.shapes.medium) {
@@ -551,7 +558,7 @@ fun Workspace(
                         )
                     }
                     Text(
-                        "确认后会原样打进终端并回车。识别错了就取消重说。",
+                        t("确认后会原样打进终端并回车。识别错了就取消重说。"),
                         style = MaterialTheme.typography.labelSmall, color = Dim,
                     )
                 }
@@ -560,9 +567,9 @@ fun Workspace(
                 TextButton({
                     val t = text; heard = null
                     scope.launch { shell?.write((t + "\n").toByteArray()) }
-                }) { Text("发进终端") }
+                }) { Text(t("发进终端")) }
             },
-            dismissButton = { TextButton({ heard = null }) { Text("取消") } },
+            dismissButton = { TextButton({ heard = null }) { Text(t("取消")) } },
         )
     }
 }
@@ -603,9 +610,9 @@ private fun ModeSwitcher(mode: Mode, chatBlocked: String?, onPick: (Mode) -> Uni
     why?.let {
         AlertDialog(
             onDismissRequest = { why = null },
-            title = { Text("对话模式用不了") },
-            text = { Text("$it。\n\n对话模式渲染的是 Claude Code 的转录文件；这个会话里没有，所以没东西可显示。终端和文件模式照常可用。") },
-            confirmButton = { TextButton({ why = null }) { Text("知道了") } },
+            title = { Text(t("对话模式用不了")) },
+            text = { Text(it + t("。\n\n对话模式渲染的是 Claude Code 的转录文件；这个会话里没有，所以没东西可显示。终端和文件模式照常可用。")) },
+            confirmButton = { TextButton({ why = null }) { Text(t("知道了")) } },
         )
     }
 }
@@ -653,7 +660,7 @@ private fun HistoryScrim(onPage: (up: Boolean) -> Unit) {
             modifier = Modifier.align(Alignment.TopCenter).padding(top = 6.dp),
         ) {
             Text(
-                "历史模式 · 上下滑动翻页 · 再点「历史」退出",
+                t("历史模式 · 上下滑动翻页 · 再点「历史」退出"),
                 Modifier.padding(12.dp, 5.dp),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onTertiaryContainer,

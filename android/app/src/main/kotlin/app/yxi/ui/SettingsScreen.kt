@@ -66,10 +66,10 @@ fun SettingsScreen(
         modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text("设置", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(18.dp, 14.dp, 18.dp, 4.dp))
+        Text(t("设置"), style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(18.dp, 14.dp, 18.dp, 4.dp))
 
         // ── 版本 ───────────────────────────────────────────────────
-        Card("这个 App") {
+        Card(t("这个 App")) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(
                     Modifier.weight(1f).clickable {
@@ -80,7 +80,7 @@ fun SettingsScreen(
                         if (taps >= 3) { taps = 0; if (dev) dev = false.also { DevMode.setUnlocked(ctx, false) } else askPass = true }
                     },
                 ) {
-                    Text("版本 ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyLarge)
+                    Text(t("版本 %s").format(BuildConfig.VERSION_NAME), style = MaterialTheme.typography.bodyLarge)
                     Text(
                         // versionCode 才是更新比较用的那个数，写出来免得对不上号时抓瞎
                         "versionCode ${BuildConfig.VERSION_CODE}",
@@ -97,43 +97,43 @@ fun SettingsScreen(
                             // 这里原来打印 alias —— 用户名字栏填的是 IP、地址栏填的是别名「天亮」，
                             // 于是错误信息理直气壮地报了一个它压根没连过的 IP，
                             // 排查因此往端口/防火墙上跑偏了好几轮。见 TROUBLESHOOTING #71。
-                            result = if (f == null) Update.Result.Failed("连不上 ${host?.display}，没查成")
+                            result = if (f == null) Update.Result.Failed(t("连不上 %s，没查成").format(host?.display))
                             else runCatching { Update.checkVerbose(f, BuildConfig.VERSION_CODE) }
-                                .getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it; Update.Result.Failed("查的时候出错：${it.message}") }
+                                .getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it; Update.Result.Failed(t("查的时候出错：%s").format(it.message)) }
                             checking = false
                         }
                     },
                     enabled = ssh != null && !checking,
                     shape = Pill, modifier = Modifier.height(42.dp),
-                ) { Text(if (checking) "查着…" else "检查更新") }
+                ) { Text(if (checking) t("查着…") else t("检查更新")) }
             }
             if (host == null) {
-                Hint2("还没有主机 —— 更新包放在你自己的服务器上，得先加一台才能查。")
+                Hint2(t("还没有主机 —— 更新包放在你自己的服务器上，得先加一台才能查。"))
             }
             when (val r = result) {
                 null -> Unit
                 is Update.Result.UpToDate ->
-                    Line("✓ 已是最新（服务器上就是 ${BuildConfig.VERSION_NAME}）", Teal)
+                    Line(t("✓ 已是最新（服务器上就是 %s）").format(BuildConfig.VERSION_NAME), Teal)
                 is Update.Result.Failed ->
                     // ⚠️ 明确说「没查到」，不能含糊成「已是最新」
-                    Line("✗ 没查到：${r.why}", MaterialTheme.colorScheme.error)
+                    Line(t("✗ 没查到：%s").format(r.why), MaterialTheme.colorScheme.error)
                 is Update.Result.Newer -> {
-                    Line("有新版本 ${r.update.versionName} · ${r.update.sizeText}", Copper)
+                    Line(t("有新版本 %s · %s").format(r.update.versionName, r.update.sizeText), Copper)
                     UpdateBanner(sftp, r.update) { result = null }
                 }
             }
         }
 
         // ── 公钥 ───────────────────────────────────────────────────
-        Card("这台手机的公钥") {
-            Hint2("贴进目标机的 ~/.ssh/authorized_keys 就能免密连。撤销 = 删掉那一行。")
+        Card(t("这台手机的公钥")) {
+            Hint2(t("贴进目标机的 ~/.ssh/authorized_keys 就能免密连。撤销 = 删掉那一行。"))
             Button({ showKey = true }, shape = Pill, modifier = Modifier.fillMaxWidth().height(44.dp)) {
-                Text("查看 / 复制 / 换一把")
+                Text(t("查看 / 复制 / 换一把"))
             }
         }
 
         // ── 后台放行 ────────────────────────────────────────────────
-        Card("手机主动响") {
+        Card(t("手机主动响")) {
             val battery = ignoringBattery(ctx)
             val notif = notificationsOn(ctx)
             // ⚠️ **这一行是后加的，因为原来那两行在骗人。**
@@ -143,12 +143,12 @@ fun SettingsScreen(
             // 前台服务只在「有任意一台开了铃铛」时才启动，一台都没开 = 连那条常驻通知都没有，
             // 现象就是「什么都不显示」。见 TROUBLESHOOTING #91。
             val watching = store.hosts.collectAsState().value.count { it.watch }
-            StatusRow("盯着的机器", watching > 0, ok = "$watching 台") {
+            StatusRow(t("盯着的机器"), watching > 0, ok = t("%d 台").format(watching)) {
                 // 没法直接跳到主机页（这里拿不到导航），说清楚去哪点就行
             }
             if (watching == 0) Hint2(
-                "⚠️ 一台都没开 —— 前面两项放行了也不会响。" +
-                    "去「主机」那一栏，点每台机器右边的铃铛把它打开。"
+                t("⚠️ 一台都没开 —— 前面两项放行了也不会响。") +
+                    t("去「主机」那一栏，点每台机器右边的铃铛把它打开。")
             )
             // ⚠️ 这一条也得摆出来。它同样能让手机「明明设置好了却不响」——
             // 开着 + 置顶了几个 = 其余会话一律不响。不写在这页上，
@@ -157,49 +157,71 @@ fun SettingsScreen(
             val pinCount = store.hosts.collectAsState().value
                 .sumOf { Pinned.get(ctx, it.id).size }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("只通知置顶的会话", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                Text(t("只通知置顶的会话"), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                 Switch(onlyPinned, { onlyPinned = it; Pinned.setOnlyPinned(ctx, it) })
             }
             Hint2(
                 when {
-                    !onlyPinned -> "现在是**每个**会话都会响。会话多的时候通知栏会很吵。"
-                    pinCount == 0 -> "⚠️ 一条都没置顶 —— 现在等于全部通知。" +
-                        "去会话列表点卡片右上角的图钉，置顶几个你真正在等的。"
-                    else -> "只有置顶的 $pinCount 个会响，其余的静悄悄干活。" +
-                        "置顶在会话列表里点卡片右上角的图钉。"
+                    !onlyPinned -> t("现在是**每个**会话都会响。会话多的时候通知栏会很吵。")
+                    pinCount == 0 -> t("⚠️ 一条都没置顶 —— 现在等于全部通知。") +
+                        t("去会话列表点卡片右上角的图钉，置顶几个你真正在等的。")
+                    else -> t("只有置顶的 %d 个会响，其余的静悄悄干活。").format(pinCount) +
+                        t("置顶在会话列表里点卡片右上角的图钉。")
                 }
             )
-            StatusRow("通知权限", notif) {
+            StatusRow(t("通知权限"), notif) {
                 ctx.startActivity(
                     Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
                         .putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
             }
-            StatusRow("后台不受限制", battery) { askIgnoreBattery(ctx) }
+            StatusRow(t("后台不受限制"), battery) { askIgnoreBattery(ctx) }
             if (!battery) {
                 // ⚠️ 荣耀/华为的「电池优化白名单」只是**其中一道**。真正掐后台的是
                 // 「应用启动管理」，那个 Android 没有标准 intent，只能告诉用户路径。
                 // 不写出来的话，用户按上面那个开关开完了、以为搞定了，实际还是不响。
-                Hint2("荣耀/华为还有一道单独的开关：设置 → 应用和服务 → 应用启动管理 → " +
-                    "找到 Yxi → 关掉「自动管理」，然后三项（自启动/关联启动/后台活动）全打开。")
+                Hint2(t("荣耀/华为还有一道单独的开关：设置 → 应用和服务 → 应用启动管理 → ") +
+                    t("找到 Yxi → 关掉「自动管理」，然后三项（自启动/关联启动/后台活动）全打开。"))
             }
             if (!battery || !notif) {
                 // ⚠️ 这两项缺一个，「主动响」就是**静默失效** —— 不会报错，只是不响了
                 Hint2(
-                    "缺任何一项，Claude 需要你时手机都不会响，而且不会有任何提示。" +
-                        "荣耀 / 华为 的后台管控尤其狠。"
+                    t("缺任何一项，Claude 需要你时手机都不会响，而且不会有任何提示。") +
+                        t("荣耀 / 华为 的后台管控尤其狠。")
                 )
+            }
+        }
+
+        // ⚠️ 这一栏**不翻译**：正在看不懂当前语言的人，得能认出另一个选项。
+        // 「简体中文 / English」两个名字都用它们自己的语言写，谁都找得到自己那个。
+        Card(t("语言")) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                I18n.Lang.entries.forEach { l ->
+                    val on = I18n.lang == l
+                    Surface(
+                        color = if (on) CopperContainer else SurfaceContainerHigh,
+                        shape = Pill,
+                        modifier = Modifier.clickable { I18n.set(ctx, l) },
+                    ) {
+                        Text(
+                            l.label,
+                            Modifier.padding(16.dp, 9.dp),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = if (on) MaterialTheme.colorScheme.onTertiaryContainer else Muted,
+                        )
+                    }
+                }
             }
         }
 
         if (dev) DevCard(ctx, host, store, keys, connectError)
 
-        Card("关于") {
+        Card(t("关于")) {
             Hint2(
-                "Yxi —— 手机上的 Claude Code 指挥台。\n" +
-                    "全部走 SSH：不开新端口、不要证书、不经过任何第三方服务器。\n" +
-                    "服务器上唯一需要装的是 yxi-hook（就为了让手机能主动响）。"
+                t("Yxi —— 手机上的 Claude Code 指挥台。\n") +
+                    t("全部走 SSH：不开新端口、不要证书、不经过任何第三方服务器。\n") +
+                    t("服务器上唯一需要装的是 yxi-hook（就为了让手机能主动响）。")
             )
         }
     }
@@ -211,16 +233,16 @@ fun SettingsScreen(
         var wrong by remember { mutableStateOf(false) }
         AlertDialog(
             onDismissRequest = { askPass = false },
-            title = { Text("开发者模式") },
+            title = { Text(t("开发者模式")) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         input, { input = it; wrong = false },
                         singleLine = true,
-                        label = { Text("口令") },
+                        label = { Text(t("口令")) },
                         visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
                     )
-                    if (wrong) Line("口令不对", MaterialTheme.colorScheme.error)
+                    if (wrong) Line(t("口令不对"), MaterialTheme.colorScheme.error)
                 }
             },
             confirmButton = {
@@ -228,9 +250,9 @@ fun SettingsScreen(
                     if (DevMode.check(input)) {
                         DevMode.setUnlocked(ctx, true); dev = true; askPass = false
                     } else wrong = true
-                }) { Text("进") }
+                }) { Text(t("进")) }
             },
-            dismissButton = { TextButton({ askPass = false }) { Text("算了") } },
+            dismissButton = { TextButton({ askPass = false }) { Text(t("算了")) } },
         )
     }
 }
@@ -246,12 +268,12 @@ private fun DevCard(ctx: Context, host: Host?, store: HostStore, keys: KeyManage
     var report by remember { mutableStateOf("") }
     var copied by remember { mutableStateOf(false) }
 
-    Card("开发者") {
+    Card(t("开发者")) {
         Hint2(
-            "诊断会把整条连接路径一步步走一遍：解析地址 → 连 TCP → SSH 招呼 → 认证，" +
-                "再挨个试同一个 IP 上的几个端口。里面不含密码和私钥，可以直接贴出来。\n" +
-                "测的是 " + (host?.let { "${it.username}@${it.hostname}:${it.port}" } ?: "（还没有主机）") +
-                " —— 要换一台就去「会话」页顶部切换。"
+            t("诊断会把整条连接路径一步步走一遍：解析地址 → 连 TCP → SSH 招呼 → 认证，") +
+                t("再挨个试同一个 IP 上的几个端口。里面不含密码和私钥，可以直接贴出来。\n") +
+                t("测的是 ") + (host?.let { "${it.username}@${it.hostname}:${it.port}" } ?: t("（还没有主机）")) +
+                t(" —— 要换一台就去「会话」页顶部切换。")
         )
         Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
             Button(
@@ -263,13 +285,13 @@ private fun DevCard(ctx: Context, host: Host?, store: HostStore, keys: KeyManage
                     }
                 },
                 enabled = !running, shape = Pill, modifier = Modifier.weight(1f).height(44.dp),
-            ) { Text(if (running) "测着…（约 30 秒）" else "跑一次诊断") }
+            ) { Text(if (running) t("测着…（约 30 秒）") else t("跑一次诊断")) }
 
             if (report.isNotEmpty()) {
                 Button(
                     onClick = { DevMode.copy(ctx, report); copied = true },
                     shape = Pill, modifier = Modifier.height(44.dp),
-                ) { Text(if (copied) "已复制" else "复制") }
+                ) { Text(if (copied) t("已复制") else t("复制")) }
             }
         }
         if (report.isNotEmpty()) {
@@ -284,7 +306,7 @@ private fun DevCard(ctx: Context, host: Host?, store: HostStore, keys: KeyManage
                 }
             }
         }
-        Hint2("再连点三下版本号 = 退出开发者模式。")
+        Hint2(t("再连点三下版本号 = 退出开发者模式。"))
     }
 }
 
@@ -310,7 +332,7 @@ private fun Hint2(text: String) =
     Text(text, style = MaterialTheme.typography.labelSmall, color = Dim)
 
 @Composable
-private fun StatusRow(label: String, on: Boolean, ok: String = "已放行", onFix: () -> Unit) {
+private fun StatusRow(label: String, on: Boolean, ok: String = t("已放行"), onFix: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clickable(enabled = !on, onClick = onFix),
         verticalAlignment = Alignment.CenterVertically,
@@ -318,7 +340,7 @@ private fun StatusRow(label: String, on: Boolean, ok: String = "已放行", onFi
         Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
         Surface(color = if (on) SurfaceContainerHigh else CopperContainer, shape = Pill) {
             Text(
-                if (on) ok else "去开启",
+                if (on) ok else t("去开启"),
                 Modifier.padding(12.dp, 5.dp),
                 style = MaterialTheme.typography.labelSmall,
                 color = if (on) Teal else OnCopperContainer,

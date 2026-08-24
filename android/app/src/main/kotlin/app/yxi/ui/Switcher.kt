@@ -119,7 +119,7 @@ fun Switcher(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    if (showArchived) "归档的会话" else "会话",
+                    if (showArchived) t("归档的会话") else t("会话"),
                     style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f),
                 )
                 if (archived.isNotEmpty()) {
@@ -128,7 +128,7 @@ fun Switcher(
                         modifier = Modifier.combinedClickable { showArchived = !showArchived },
                     ) {
                         Text(
-                            "归档 ${archived.size}", Modifier.padding(13.dp, 7.dp),
+                            t("归档 %d").format(archived.size), Modifier.padding(13.dp, 7.dp),
                             style = MaterialTheme.typography.labelMedium,
                             color = if (showArchived) Copper else Muted,
                         )
@@ -143,7 +143,7 @@ fun Switcher(
             if (list.isEmpty()) {
                 Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                     Text(
-                        if (showArchived) "没有归档的会话" else "没有会话",
+                        if (showArchived) t("没有归档的会话") else t("没有会话"),
                         style = MaterialTheme.typography.bodyMedium, color = Dim,
                     )
                 }
@@ -176,7 +176,7 @@ fun Switcher(
                     )
                 }
                 Text(
-                    if (showArchived) "上滑取消归档 · 长按结束会话" else "上滑归档（不杀会话）· 长按结束会话",
+                    if (showArchived) t("上滑取消归档 · 长按结束会话") else t("上滑归档（不杀会话）· 长按结束会话"),
                     Modifier.fillMaxWidth().padding(bottom = 20.dp),
                     style = MaterialTheme.typography.labelSmall,
                     color = Dim,
@@ -190,12 +190,12 @@ fun Switcher(
     killing?.let { s ->
         AlertDialog(
             onDismissRequest = { killing = null },
-            title = { Text("结束会话 ${s.short}？") },
+            title = { Text(t("结束会话 %s？").format(s.short)) },
             text = {
                 Text(
-                    "会执行 tmux kill-session —— 那个会话里正在跑的东西**会被中断**，" +
-                        "没保存的内容没了，取消不了。\n\n" +
-                        "只是不想在列表里看见它的话，上滑归档就行，那个不动服务器。",
+                    t("会执行 tmux kill-session —— 那个会话里正在跑的东西**会被中断**，") +
+                        t("没保存的内容没了，取消不了。\n\n") +
+                        t("只是不想在列表里看见它的话，上滑归档就行，那个不动服务器。"),
                     style = MaterialTheme.typography.bodySmall,
                 )
             },
@@ -203,9 +203,9 @@ fun Switcher(
                 TextButton({
                     val n = s.name; killing = null
                     scope.launch { ssh?.let { runCatching { it.exec("tmux kill-session -t '$n'") } } }
-                }) { Text("结束") }
+                }) { Text(t("结束")) }
             },
-            dismissButton = { TextButton({ killing = null }) { Text("取消") } },
+            dismissButton = { TextButton({ killing = null }) { Text(t("取消")) } },
         )
     }
 }
@@ -259,8 +259,8 @@ private fun SwitcherCard(
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Box(Modifier.size(7.dp).background(dotColor(s.state), Pill))
                     Text(s.short, style = MaterialTheme.typography.titleMedium, maxLines = 1, modifier = Modifier.weight(1f))
-                    if (isCurrent) Text("当前", style = MaterialTheme.typography.labelSmall, color = Copper)
-                    else if (archivedView) Text("已归档", style = MaterialTheme.typography.labelSmall, color = Dim)
+                    if (isCurrent) Text(t("当前"), style = MaterialTheme.typography.labelSmall, color = Copper)
+                    else if (archivedView) Text(t("已归档"), style = MaterialTheme.typography.labelSmall, color = Dim)
                 }
                 Text(
                     s.detail.ifBlank { s.cwd },

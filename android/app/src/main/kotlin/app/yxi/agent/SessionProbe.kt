@@ -1,11 +1,18 @@
 package app.yxi.agent
 
+import app.yxi.ui.t
 import app.yxi.ssh.SshSession
 import org.json.JSONObject
 
 /** 会话状态。语义跟服务器上 `cc-state` 写的一致。 */
-enum class SessionState(val label: String) {
+enum class SessionState(private val zh: String) {
     NeedsYou("等你"), Working("干活中"), Done("已完成"), Idle("空闲");
+
+    // ⚠️ **label 必须是 get() 而不是构造参数。** enum 常量的参数在**类初始化时求值一次**，
+    // 之后换语言它不会跟着变 —— 现象是底部导航栏 / 模式切换条永远停在启动时那种语言，
+    // 而同一屏别的字都变了。get() 每次读都重新查表，还能被 Compose 当成状态读取。
+    val label: String get() = t(zh)
+
 
     companion object {
         fun of(raw: String?) = when (raw) {

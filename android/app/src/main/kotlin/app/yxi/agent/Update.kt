@@ -1,5 +1,6 @@
 package app.yxi.agent
 
+import app.yxi.ui.t
 import app.yxi.ssh.Sftp
 import org.json.JSONObject
 
@@ -67,15 +68,15 @@ data class Update(
          */
         suspend fun checkVerbose(sftp: Sftp, currentCode: Int): Result {
             val raw = runCatching { sftp.read("$DIR/latest.json", 64 * 1024).decodeToString() }
-                .getOrElse { return Result.Failed("这台机器上没放更新包（$DIR/latest.json 读不到）") }
+                .getOrElse { return Result.Failed(t("这台机器上没放更新包（%s/latest.json 读不到）").format(DIR)) }
             val o = runCatching { JSONObject(raw) }
-                .getOrElse { return Result.Failed("更新清单格式不对") }
+                .getOrElse { return Result.Failed(t("更新清单格式不对")) }
             val code = o.optInt("versionCode", 0)
             if (code <= currentCode) return Result.UpToDate
             val file = o.optString("file").ifBlank { "Yxi.apk" }
             val path = if (file.startsWith("/")) file else "$DIR/$file"
             val size = sftp.size(path)
-            if (size <= 0) return Result.Failed("清单说有 " + o.optString("versionName") + "，但包不在（$path）")
+            if (size <= 0) return Result.Failed(t("清单说有 %s，但包不在（%s）").format(o.optString("versionName"), path))
             return Result.Newer(
                 Update(code, o.optString("versionName", code.toString()), path, o.optString("notes"), size)
             )

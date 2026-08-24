@@ -23,12 +23,18 @@ import app.yxi.ui.Mode
 import app.yxi.ui.SessionsScreen
 import app.yxi.ui.rememberHostSession
 import app.yxi.ui.SettingsScreen
+import app.yxi.ui.t
 import app.yxi.ui.Workspace
 import app.yxi.ui.theme.YxiTheme
 
 /** 底部导航的三格。⚠️ 只有 app 级的平级目的地能进来（决策 D22）。 */
-private enum class Tab(val label: String, val icon: String) {
-    Sessions("会话", "◫"), Hosts("主机", "▤"), Settings("设置", "⚙")
+private enum class Tab(private val zh: String, val icon: String) {
+    Sessions("会话", "◫"), Hosts("主机", "▤"), Settings("设置", "⚙");
+
+    // ⚠️ **label 必须是 get() 而不是构造参数。** enum 常量的参数在**类初始化时求值一次**，
+    // 之后换语言它不会跟着变 —— 现象是底部导航栏 / 模式切换条永远停在启动时那种语言，
+    // 而同一屏别的字都变了。get() 每次读都重新查表，还能被 Compose 当成状态读取。
+    val label: String get() = t(zh)
 }
 
 /** 工作区。它是**盖在标签页之上的整屏**，不是第四个标签 —— 见 D22。 */
@@ -56,6 +62,7 @@ class MainActivity : ComponentActivity() {
         val store = HostStore(applicationContext)
         val keys = KeyManager(applicationContext)
         val prefs = getSharedPreferences("yxi", MODE_PRIVATE)
+        app.yxi.ui.I18n.load(this)
         readJump(intent)
 
         if (Build.VERSION.SDK_INT >= 33 &&
@@ -146,7 +153,7 @@ class MainActivity : ComponentActivity() {
                     val m = Modifier.padding(p)
                     when (tab) {
                         Tab.Sessions -> if (host == null) {
-                            EmptyHint("还没有主机", "去「主机」那一栏加一台", m)
+                            EmptyHint(t("还没有主机"), t("去「主机」那一栏加一台"), m)
                         } else {
                             SessionsScreen(
                                 store, keys, host,

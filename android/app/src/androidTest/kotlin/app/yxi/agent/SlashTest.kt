@@ -52,8 +52,12 @@ class SlashTest {
     @Test fun 没有命令名是另一个的前缀() {
         // 「打全了就收起来」全靠这一条：真出现 /log 和 /login 这种一对，
         // 打到 /log 就再也补不出 /login 了
-        for (a in Slash.ALL) for (b in Slash.ALL) {
-            if (a !== b) assertTrue(
+        // ⚠️ 比 name 不比引用：`ALL` 现在是 `get()`（为了换语言时提示跟着变），
+        // 每次读都是**新对象**，`a !== b` 连「同一条命令」都拦不住，
+        // 于是 compact 跟自己比，一测就红。
+        val all = Slash.ALL
+        for (a in all) for (b in all) {
+            if (a.name != b.name) assertTrue(
                 "${'$'}{b.name} 是 ${'$'}{a.name} 的前缀 —— suggest() 的收起规则会吃掉它",
                 !b.name.startsWith(a.name),
             )

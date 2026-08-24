@@ -116,9 +116,9 @@ private fun Header(c: ChatItem.ToolCall, open: Boolean = true) {
             // ⚠️ 退出码只在**失败**的输出开头有 `Exit code N`；成功时压根没有这个字段，
             // 隐含是 0。所以别指望能显示「exit 0」——那是编出来的。
             code != null -> Chip("exit $code", MaterialTheme.colorScheme.error)
-            c.isError -> Chip("出错", MaterialTheme.colorScheme.error)
-            c.result != null -> Text("完成", style = MaterialTheme.typography.labelSmall.copy(fontFamily = Mono), color = Dim)
-            else -> Chip("进行中", Amber)
+            c.isError -> Chip(t("出错"), MaterialTheme.colorScheme.error)
+            c.result != null -> Text(t("完成"), style = MaterialTheme.typography.labelSmall.copy(fontFamily = Mono), color = Dim)
+            else -> Chip(t("进行中"), Amber)
         }
     }
 }
@@ -181,7 +181,7 @@ private fun EditBody(c: ChatItem.ToolCall, open: Boolean) {
     if (patch != null && patch.length() > 0) {
         val lines = hunkLines(patch)
         Diff(if (open) lines else lines.take(6))
-        if (!open && lines.size > 6) Text("…还有 ${lines.size - 6} 行", Modifier.padding(top = 4.dp), style = MaterialTheme.typography.labelSmall, color = Dim)
+        if (!open && lines.size > 6) Text(t("…还有 %d 行").format(lines.size - 6), Modifier.padding(top = 4.dp), style = MaterialTheme.typography.labelSmall, color = Dim)
     } else {
         // meta 没有（老转录）→ 退回原始的 old/new 两段，照样能看出改了什么
         AnimatedVisibility(open) {
@@ -225,7 +225,7 @@ private fun Diff(lines: List<String>) = Block {
 private fun WriteBody(c: ChatItem.ToolCall, open: Boolean) {
     Path(c.input.optString("file_path"))
     val kind = c.meta?.optString("type")
-    if (kind == "update") Text("覆盖已有文件", Modifier.padding(top = 4.dp), style = MaterialTheme.typography.labelSmall, color = Amber)
+    if (kind == "update") Text(t("覆盖已有文件"), Modifier.padding(top = 4.dp), style = MaterialTheme.typography.labelSmall, color = Amber)
     AnimatedVisibility(open) { Block { Code(c.input.optString("content").take(3000), Muted) } }
 }
 
@@ -234,7 +234,7 @@ private fun ReadBody(c: ChatItem.ToolCall) {
     Path(c.input.optString("file_path"))
     val f = c.meta?.optJSONObject("file")
     val note = when {
-        c.meta?.optString("type") == "image" -> "图片 " + (f?.optJSONObject("dimensions")?.let { "${it.optInt("originalWidth")}×${it.optInt("originalHeight")}" } ?: "")
+        c.meta?.optString("type") == "image" -> t("图片 ") + (f?.optJSONObject("dimensions")?.let { "${it.optInt("originalWidth")}×${it.optInt("originalHeight")}" } ?: "")
         f != null -> "${f.optInt("numLines")} 行 / 共 ${f.optInt("totalLines")} 行"
         else -> null
     }
@@ -247,7 +247,7 @@ private fun AgentBody(c: ChatItem.ToolCall, open: Boolean) {
     val t = c.input.optString("subagent_type")
     val async = c.meta?.optBoolean("isAsync") == true
     Text(
-        listOfNotNull(t.takeIf { it.isNotBlank() }, if (async) "后台跑" else null).joinToString(" · "),
+        listOfNotNull(t.takeIf { it.isNotBlank() }, if (async) t("后台跑") else null).joinToString(" · "),
         Modifier.padding(top = 3.dp), style = MaterialTheme.typography.labelSmall.copy(fontFamily = Mono), color = Dim,
     )
     // 异步启动时 result 只是句「已启动」的元数据，展开也没内容可看，别浪费一次点击
@@ -282,7 +282,7 @@ private fun AskBody(c: ChatItem.ToolCall) {
                 Text(a, Modifier.padding(12.dp, 5.dp), style = MaterialTheme.typography.labelMedium, color = OnCopperContainer)
             }
         } else if (c.isError) {
-            Text("你拒绝了", Modifier.padding(top = 6.dp), style = MaterialTheme.typography.labelSmall, color = Dim)
+            Text(t("你拒绝了"), Modifier.padding(top = 6.dp), style = MaterialTheme.typography.labelSmall, color = Dim)
         }
     }
 }
@@ -291,7 +291,7 @@ private fun AskBody(c: ChatItem.ToolCall) {
 private fun PlanBody(c: ChatItem.ToolCall, open: Boolean) {
     // ⚠️ 用户可能在批准前**改过计划**，所以最终版在 result 里不在 input 里
     val plan = c.meta?.optString("plan").orEmpty().ifBlank { c.input.optString("plan") }
-    Text(if (c.isError) "计划被否了" else "计划", Modifier.padding(top = 6.dp), style = MaterialTheme.typography.labelMedium, color = Amber)
+    Text(if (c.isError) t("计划被否了") else t("计划"), Modifier.padding(top = 6.dp), style = MaterialTheme.typography.labelMedium, color = Amber)
     Block {
         if (open) Markdown(plan, typography = yxiMarkdown(), modifier = Modifier.fillMaxWidth())
         else Text(plan.lineSequence().filter { it.isNotBlank() }.take(4).joinToString("\n"), style = MaterialTheme.typography.bodySmall, color = Muted)
@@ -326,7 +326,7 @@ fun PendingCard(p: Pending, busy: Boolean, onPick: (Pending.Option) -> Unit, onS
         Column(Modifier.fillMaxWidth().padding(16.dp, 14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Box(Modifier.size(7.dp).background(Amber, Pill))
-                Text(if (p.multiSelect) "等你选（可多选）" else "等你选", style = MaterialTheme.typography.labelMedium, color = Amber)
+                Text(if (p.multiSelect) t("等你选（可多选）") else t("等你选"), style = MaterialTheme.typography.labelMedium, color = Amber)
             }
             if (p.title.isNotBlank()) Text(p.title, style = MaterialTheme.typography.titleSmall, color = OnSurface)
             p.options.forEach { o ->
@@ -352,7 +352,7 @@ fun PendingCard(p: Pending, busy: Boolean, onPick: (Pending.Option) -> Unit, onS
             }
             if (p.multiSelect) {
                 Button(onSubmit, enabled = !busy, shape = Pill, modifier = Modifier.fillMaxWidth().height(48.dp)) {
-                    Text("提交")   // 多选时数字只是勾选，要 Right + 1 才算交卷
+                    Text(t("提交"))   // 多选时数字只是勾选，要 Right + 1 才算交卷
                 }
             }
         }

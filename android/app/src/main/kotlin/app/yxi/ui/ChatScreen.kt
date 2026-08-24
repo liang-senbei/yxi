@@ -112,7 +112,7 @@ fun ChatScreen(
         if (said.isNotBlank()) draft = (draft.trimEnd() + " " + said).trim()
     }
     var items by remember { mutableStateOf<List<ChatItem>>(emptyList()) }
-    var status by remember { mutableStateOf<String?>("连接中…") }
+    var status by remember { mutableStateOf<String?>(t("连接中…")) }
 
     var pending by remember { mutableStateOf<Pending?>(null) }
     // ⚠️ 此刻在忙什么、有哪些输入还排着队 —— **只有屏幕知道**，转录里没有。
@@ -127,7 +127,7 @@ fun ChatScreen(
         val s = ssh ?: return@LaunchedEffect
         val file = TranscriptStream.latestFor(s, cwd)
         if (file == null) {
-            status = "这个会话里没找到 Claude Code 的转录\n（$cwd）"
+            status = t("这个会话里没找到 Claude Code 的转录\n（%s）").format(cwd)
             return@LaunchedEffect
         }
         status = null
@@ -265,7 +265,7 @@ fun ChatScreen(
                                         draft = (draft.trimEnd() + "\n" + all.joinToString("\n")).trim()
                                     }
                                     .onFailure {
-                                        android.widget.Toast.makeText(ctx, "收不回来：" + it.message, android.widget.Toast.LENGTH_LONG).show()
+                                        android.widget.Toast.makeText(ctx, t("收不回来：") + it.message, android.widget.Toast.LENGTH_LONG).show()
                                     }
                             }
                         },
@@ -415,7 +415,7 @@ fun ChatScreen(
                     }
                 }
                 if (uploading) Text(
-                    "传着…", Modifier.padding(8.dp, 8.dp),
+                    t("传着…"), Modifier.padding(8.dp, 8.dp),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.outline,
                 )
@@ -438,12 +438,12 @@ fun ChatScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (sftp != null) {
-                    FlatIcon(Glyph.Plus, "加附件") { pick.launch("*/*") }
+                    FlatIcon(Glyph.Plus, t("加附件")) { pick.launch("*/*") }
                 } else {
                     Spacer(Modifier.width(10.dp))
                 }
                 Box(Modifier.weight(1f)) { BasicTextFieldRow(draft) { draft = it } }
-                FlatIcon(Glyph.Mic, "语音输入") {
+                FlatIcon(Glyph.Mic, t("语音输入")) {
                     runCatching {
                         listen.launch(
                             android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
@@ -451,7 +451,7 @@ fun ChatScreen(
                                     android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                                     android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
                                 )
-                                .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "说吧")
+                                .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, t("说吧"))
                         )
                     }
                 }
@@ -503,7 +503,7 @@ fun ChatScreen(
                         color = MaterialTheme.colorScheme.outline,
                     )
                     bytes?.let { ImageBody(it) } ?: Text(
-                        "读不出来了 —— 这张图的授权可能已经失效",
+                        t("读不出来了 —— 这张图的授权可能已经失效"),
                         Modifier.padding(14.dp, 10.dp, 14.dp, 16.dp),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.outline,
@@ -534,7 +534,7 @@ private fun BasicTextFieldRow(value: String, onValue: (String) -> Unit) {
         cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
         decorationBox = { inner ->
             if (value.isEmpty()) {
-                Text("说一句…", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.outline)
+                Text(t("说一句…"), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.outline)
             }
             inner()
         },
@@ -552,7 +552,7 @@ private fun copy(ctx: android.content.Context, text: String) {
     cm.setPrimaryClip(android.content.ClipData.newPlainText("yxi", text))
     // Android 13+ 系统自己会弹「已复制」的浮层，再 Toast 一次就是两层，所以只在旧系统上吱
     if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) {
-        android.widget.Toast.makeText(ctx, "已复制", android.widget.Toast.LENGTH_SHORT).show()
+        android.widget.Toast.makeText(ctx, t("已复制"), android.widget.Toast.LENGTH_SHORT).show()
     }
 }
 
@@ -636,7 +636,7 @@ private fun UserBubble(text: String, onCopy: (String) -> Unit) {
             }
             DropdownMenu(menu, { menu = false }) {
                 DropdownMenuItem(
-                    text = { Text("复制整段") },
+                    text = { Text(t("复制整段")) },
                     onClick = { onCopy(text); menu = false },
                 )
             }
@@ -669,7 +669,7 @@ private fun QueuedBubble(text: String, onCopy: (String) -> Unit, onPopQueue: () 
         ) {
             Column(Modifier.padding(18.dp, 12.dp)) {
                 Text(
-                    "排队中 · 它忙完就轮到这条",
+                    t("排队中 · 它忙完就轮到这条"),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -683,13 +683,13 @@ private fun QueuedBubble(text: String, onCopy: (String) -> Unit, onPopQueue: () 
         }
         DropdownMenu(menu, { menu = false }) {
             DropdownMenuItem(
-                text = { Text("复制整段") },
+                text = { Text(t("复制整段")) },
                 onClick = { onCopy(text); menu = false },
             )
             // ⚠️ 文案必须说「都收回来」。TUI 的 `Up` 是全有全无的，
             // 排了三条按一次就三条一起回来 —— 写成「撤回这一条」是骗人的。
             DropdownMenuItem(
-                text = { Text("收回改一改") },
+                text = { Text(t("收回改一改")) },
                 onClick = { onPopQueue(); menu = false },
             )
         }
@@ -719,7 +719,7 @@ private fun LiveStatus(status: String?) {
         )
         Spacer(Modifier.width(8.dp))
         Text(
-            status ?: "在忙…",
+            status ?: t("在忙…"),
             // ⚠️ **它显得大不是因为字号大**（量过：12sp，比正文 16sp 还小），
             // 是视觉重量：labelMedium 自带 Medium 字重 + 强调色 + 独占一行。
             // 所以这里压的是字重和颜色，不是一味调小 —— 它还得看得见。
@@ -748,7 +748,7 @@ private fun ThinkingRow(text: String) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    if (open) "思考 ▾" else "思考 ▸",
+                    if (open) t("思考 ▾") else t("思考 ▸"),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.outline,
                 )

@@ -78,7 +78,7 @@ fun DPad(modifier: Modifier = Modifier, send: (ByteArray) -> Unit) {
     picking?.let { left ->
         AlertDialog(
             onDismissRequest = { picking = null },
-            title = { Text(if (left) "左上角送什么键" else "右上角送什么键") },
+            title = { Text(if (left) t("左上角送什么键") else t("右上角送什么键")) },
             text = {
                 Column {
                     Key.CORNER.forEach { k ->
@@ -92,7 +92,7 @@ fun DPad(modifier: Modifier = Modifier, send: (ByteArray) -> Unit) {
                     }
                 }
             },
-            confirmButton = { TextButton({ picking = null }) { Text("取消") } },
+            confirmButton = { TextButton({ picking = null }) { Text(t("取消")) } },
         )
     }
 }

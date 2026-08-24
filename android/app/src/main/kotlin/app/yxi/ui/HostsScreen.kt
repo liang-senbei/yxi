@@ -48,8 +48,8 @@ fun HostsScreen(
             Modifier.fillMaxWidth().padding(18.dp, 14.dp, 18.dp, 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("主机", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
-            IconTextButton("公钥") { showKey = true }
+            Text(t("主机"), style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
+            IconTextButton(t("公钥")) { showKey = true }
             Spacer(Modifier.width(8.dp))
             IconTextButton("＋", primary = true) { adding = true }
         }
@@ -57,7 +57,7 @@ fun HostsScreen(
         if (hosts.isEmpty()) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Text(
-                    "还没有主机\n点右上角 ＋ 加一台",
+                    t("还没有主机\n点右上角 ＋ 加一台"),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.outline,
                 )
@@ -140,7 +140,7 @@ private fun HostRow(
                 if (bad != null) {
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        "⚠️ 地址里有 $bad —— 连不上。长按改。",
+                        t("⚠️ 地址里有 %s —— 连不上。长按改。").format(bad),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.error,
                     )
@@ -171,7 +171,7 @@ private fun HostRow(
                 shape = Pill,
             ) {
                 Text(
-                    if (h.useKey) "密钥" else "密码",
+                    if (h.useKey) t("密钥") else t("密码"),
                     Modifier.padding(11.dp, 5.dp),
                     style = MaterialTheme.typography.labelSmall,
                     color = if (h.useKey) MaterialTheme.colorScheme.onPrimaryContainer
@@ -220,9 +220,9 @@ private fun AddHostSheet(
                 .padding(18.dp, 0.dp, 18.dp, 28.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(if (editing != null) "改主机" else "加新主机", style = MaterialTheme.typography.titleLarge)
+            Text(if (editing != null) t("改主机") else t("加新主机"), style = MaterialTheme.typography.titleLarge)
 
-            Field(alias, { alias = it }, "名字（随便起，只给你自己看）")
+            Field(alias, { alias = it }, t("名字（随便起，只给你自己看）"))
             // ⚠️ 别名≠地址：手机上没有 ~/.ssh/config，「station」「天亮」这类 SSH 别名解析不了，
             // 下面那栏必须是真地址。标签曾经写「主机名 / IP」，等于在邀请用户填别名。
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -238,21 +238,21 @@ private fun AddHostSheet(
                             // 拆分放到保存时做 —— 那时整串才是完整的。
                             hostname = app.yxi.ssh.HostInput.normalize(it)
                         },
-                        "IP 或域名，如 38.244.50.31", mono = true,
+                        t("IP 或域名，如 38.244.50.31"), mono = true,
                     )
                 }
                 // ⚠️ 端口不能写死 22 —— 客户那台 Windows 走 2222
                 Box(Modifier.width(96.dp)) {
-                    Field(port, { port = it.filter(Char::isDigit).take(5) }, "端口", mono = true, number = true)
+                    Field(port, { port = it.filter(Char::isDigit).take(5) }, t("端口"), mono = true, number = true)
                 }
             }
             run {
                 val p = app.yxi.ssh.HostInput.parse(hostname)
                 if (p.user != null || p.port != null) {
                     Text(
-                        "保存时会拆成：地址 ${p.host}" +
-                            (p.user?.let { " · 用户名 $it" } ?: "") +
-                            (p.port?.let { " · 端口 $it" } ?: ""),
+                        t("保存时会拆成：地址 %s").format(p.host) +
+                            (p.user?.let { t(" · 用户名 %s").format(it) } ?: "") +
+                            (p.port?.let { t(" · 端口 %s").format(it) } ?: ""),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.tertiary,
                     )
@@ -260,25 +260,25 @@ private fun AddHostSheet(
             }
             app.yxi.ssh.HostInput.suspiciousChar(hostname)?.let {
                 Text(
-                    "地址里有个连不上的字符：$it —— 多半是中文输入法打出来的，删掉重打",
+                    t("地址里有个连不上的字符：%s —— 多半是中文输入法打出来的，删掉重打").format(it),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.error,
                 )
             }
-            Field(username, { username = it }, "用户名", mono = true)
+            Field(username, { username = it }, t("用户名"), mono = true)
 
             Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = Pill) {
                 Row(Modifier.padding(4.dp)) {
-                    SegItem("密钥", !usePassword, Modifier.weight(1f)) { usePassword = false }
-                    SegItem("密码", usePassword, Modifier.weight(1f)) { usePassword = true }
+                    SegItem(t("密钥"), !usePassword, Modifier.weight(1f)) { usePassword = false }
+                    SegItem(t("密码"), usePassword, Modifier.weight(1f)) { usePassword = true }
                 }
             }
 
             if (usePassword) {
-                Field(password, { password = it }, if (editing?.sealedPassword != null) "密码（留空 = 不改）" else "密码", password = true)
-                Hint("密码用设备密钥加密后保存，不落明文。连上后可以一键装公钥，之后免密。")
+                Field(password, { password = it }, if (editing?.sealedPassword != null) t("密码（留空 = 不改）") else t("密码"), password = true)
+                Hint(t("密码用设备密钥加密后保存，不落明文。连上后可以一键装公钥，之后免密。"))
             } else {
-                Hint("用 App 自己的 ed25519 密钥。先去右上角「公钥」把它贴进目标机的 authorized_keys。")
+                Hint(t("用 App 自己的 ed25519 密钥。先去右上角「公钥」把它贴进目标机的 authorized_keys。"))
             }
 
             Button(
@@ -318,14 +318,14 @@ private fun AddHostSheet(
                 enabled = hostname.isNotBlank(),
                 shape = Pill,
                 modifier = Modifier.fillMaxWidth().height(52.dp),
-            ) { Text("保存") }
+            ) { Text(t("保存")) }
 
             if (editing != null) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Box(Modifier.weight(1f)) { IconTextButton("装公钥", onClick = onInstallKey) }
+                    Box(Modifier.weight(1f)) { IconTextButton(t("装公钥"), onClick = onInstallKey) }
                     Box(Modifier.weight(1f)) {
                         // 删除要两下 —— 手机上误触一下就没了，而主机记录里有密码密文
-                        IconTextButton(if (confirmDelete) "再点一次删除" else "删除") {
+                        IconTextButton(if (confirmDelete) t("再点一次删除") else t("删除")) {
                             if (!confirmDelete) { confirmDelete = true; return@IconTextButton }
                             store.remove(editing.id)
                             // 删的可能正是唯一开着铃铛的那台 —— 不同步，前台服务会继续盯一台不存在的机器
@@ -334,7 +334,7 @@ private fun AddHostSheet(
                         }
                     }
                 }
-                Hint("长按主机就能回到这里。改地址或端口会作废已记住的指纹，下次连接重新确认一次。")
+                Hint(t("长按主机就能回到这里。改地址或端口会作废已记住的指纹，下次连接重新确认一次。"))
             }
         }
     }
@@ -347,7 +347,7 @@ fun PublicKeySheetPublic(keys: KeyManager, onDone: () -> Unit) {
     var gen by remember { mutableStateOf(0) }
     val line = remember(gen) {
         runCatching { keys.publicKeyLine() }
-            .getOrElse { "生成失败：${it::class.simpleName}: ${it.message ?: "(无消息)"}" }
+            .getOrElse { t("生成失败：%s: %s").format(it::class.simpleName, it.message ?: "(no message)") }
     }
     val fp = remember(gen) { runCatching { keys.fingerprint() }.getOrDefault("") }
     var copied by remember { mutableStateOf(false) }
@@ -367,8 +367,8 @@ fun PublicKeySheetPublic(keys: KeyManager, onDone: () -> Unit) {
             Modifier.verticalScroll(rememberScrollState()).padding(18.dp, 0.dp, 18.dp, 28.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("这台手机的公钥", style = MaterialTheme.typography.titleLarge)
-            Hint("点一下整块就复制。贴进目标机的 ~/.ssh/authorized_keys（一行）。撤销就删掉那一行，不用改 App 任何设置。")
+            Text(t("这台手机的公钥"), style = MaterialTheme.typography.titleLarge)
+            Hint(t("点一下整块就复制。贴进目标机的 ~/.ssh/authorized_keys（一行）。撤销就删掉那一行，不用改 App 任何设置。"))
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainerLowest,
                 shape = MaterialTheme.shapes.medium,
@@ -377,7 +377,7 @@ fun PublicKeySheetPublic(keys: KeyManager, onDone: () -> Unit) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(line, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace))
                     Text(
-                        if (copied) "✓ 已复制到剪贴板" else "点这里复制",
+                        if (copied) t("✓ 已复制到剪贴板") else t("点这里复制"),
                         style = MaterialTheme.typography.labelSmall,
                         color = if (copied) MaterialTheme.colorScheme.tertiary
                         else MaterialTheme.colorScheme.outline,
@@ -386,19 +386,19 @@ fun PublicKeySheetPublic(keys: KeyManager, onDone: () -> Unit) {
             }
             if (fp.isNotEmpty()) {
                 Text(
-                    "指纹 $fp",
+                    t("指纹 %s").format(fp),
                     style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                     color = MaterialTheme.colorScheme.outline,
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button({ copy() }, shape = Pill, modifier = Modifier.weight(1f).height(48.dp)) {
-                    Text(if (copied) "已复制" else "复制公钥")
+                    Text(if (copied) t("已复制") else t("复制公钥"))
                 }
                 OutlinedButton(
                     { confirmRegen = true }, shape = Pill,
                     modifier = Modifier.weight(1f).height(48.dp),
-                ) { Text("换一把") }
+                ) { Text(t("换一把")) }
             }
         }
     }
@@ -408,22 +408,22 @@ fun PublicKeySheetPublic(keys: KeyManager, onDone: () -> Unit) {
     if (confirmRegen) {
         AlertDialog(
             onDismissRequest = { confirmRegen = false },
-            title = { Text("换一把新密钥？") },
+            title = { Text(t("换一把新密钥？")) },
             text = {
                 Text(
-                    "旧私钥会被丢掉，换不回来。\n\n" +
-                        "所有已经装过旧公钥的服务器都会立刻连不上，" +
-                        "要么重新装一次新公钥，要么手工删掉 authorized_keys 里那行 yxi@android。\n\n" +
-                        "只有在怀疑私钥泄露、或想换台手机重来时才需要这么做。",
+                    t("旧私钥会被丢掉，换不回来。\n\n") +
+                        t("所有已经装过旧公钥的服务器都会立刻连不上，") +
+                        t("要么重新装一次新公钥，要么手工删掉 authorized_keys 里那行 yxi@android。\n\n") +
+                        t("只有在怀疑私钥泄露、或想换台手机重来时才需要这么做。"),
                     style = MaterialTheme.typography.bodySmall,
                 )
             },
             confirmButton = {
                 TextButton({
                     keys.regenerate(); gen++; copied = false; confirmRegen = false
-                }) { Text("换") }
+                }) { Text(t("换")) }
             },
-            dismissButton = { TextButton({ confirmRegen = false }) { Text("算了") } },
+            dismissButton = { TextButton({ confirmRegen = false }) { Text(t("算了")) } },
         )
     }
 }
@@ -513,22 +513,22 @@ private fun InstallKeySheet(
             Modifier.padding(18.dp, 0.dp, 18.dp, 28.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("给 ${host.alias} 装公钥", style = MaterialTheme.typography.titleLarge)
-            Hint("用密码连一次，把这台手机的公钥追加进 ~/.ssh/authorized_keys，之后就免密了。相当于 ssh-copy-id。")
-            Field(password, { password = it }, "密码", password = true)
+            Text(t("给 %s 装公钥").format(host.alias), style = MaterialTheme.typography.titleLarge)
+            Hint(t("用密码连一次，把这台手机的公钥追加进 ~/.ssh/authorized_keys，之后就免密了。相当于 ssh-copy-id。"))
+            Field(password, { password = it }, t("密码"), password = true)
             result?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary) }
             Button(
                 onClick = {
-                    busy = true; result = "连接中…"
+                    busy = true; result = t("连接中…")
                     scope.launch {
                         // 用密码连一次，但指纹校验和别处完全一样（第一次会弹指纹确认）
                         val c = connect(app.yxi.ssh.HostConfig.Auth.Password(password))
-                        result = if (c == null) "建不了连接" else runCatching {
+                        result = if (c == null) t("建不了连接") else runCatching {
                             c.session.connect()
                             val n = c.session.installPublicKey(keys.publicKeyLine()).trim()
                             c.session.disconnect()
                             store.upsert(host.copy(useKey = true, sealedPassword = app.yxi.ssh.Vault.seal(password)))
-                            "✅ 装好了（authorized_keys 里现有 $n 行 yxi 公钥），已切到密钥认证"
+                            t("✅ 装好了（authorized_keys 里现有 %s 行 yxi 公钥），已切到密钥认证").format(n)
                         }.getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it; c.explain(it) }
                         busy = false
                     }
@@ -536,7 +536,7 @@ private fun InstallKeySheet(
                 enabled = password.isNotEmpty() && !busy,
                 shape = Pill,
                 modifier = Modifier.fillMaxWidth().height(52.dp),
-            ) { Text(if (busy) "处理中…" else "连接并安装") }
+            ) { Text(if (busy) t("处理中…") else t("连接并安装")) }
         }
     }
 }
@@ -561,13 +561,13 @@ private fun ignoringBattery(ctx: android.content.Context): Boolean = runCatching
 private fun BatteryHint(ctx: android.content.Context, onDone: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDone,
-        title = { Text("还要放行后台运行") },
+        title = { Text(t("还要放行后台运行")) },
         text = {
             Text(
-                "这台机器上的 Claude 需要你时，手机靠一条常驻连接来响。\n\n" +
-                    "系统的省电优化会把它掐掉 —— 荣耀 / 华为 尤其狠，" +
-                    "而且掐掉之后不会有任何提示，你只会觉得「怎么不响了」。\n\n" +
-                    "去设置里把 Yxi 设成「允许后台活动 / 不受限制」。",
+                t("这台机器上的 Claude 需要你时，手机靠一条常驻连接来响。\n\n") +
+                    t("系统的省电优化会把它掐掉 —— 荣耀 / 华为 尤其狠，") +
+                    t("而且掐掉之后不会有任何提示，你只会觉得「怎么不响了」。\n\n") +
+                    t("去设置里把 Yxi 设成「允许后台活动 / 不受限制」。"),
                 style = MaterialTheme.typography.bodySmall,
             )
         },
@@ -580,8 +580,8 @@ private fun BatteryHint(ctx: android.content.Context, onDone: () -> Unit) {
                     )
                 }
                 onDone()
-            }) { Text("去设置") }
+            }) { Text(t("去设置")) }
         },
-        dismissButton = { TextButton(onDone) { Text("知道了") } },
+        dismissButton = { TextButton(onDone) { Text(t("知道了")) } },
     )
 }

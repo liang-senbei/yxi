@@ -1,5 +1,6 @@
 package app.yxi.ssh
 
+import app.yxi.ui.t
 import com.jcraft.jsch.ChannelSftp
 import com.jcraft.jsch.SftpException
 import kotlinx.coroutines.Dispatchers
@@ -130,8 +131,8 @@ class Sftp internal constructor(private val ch: ChannelSftp) {
     companion object {
         /** 报错文案：SFTP 的异常消息经常只有个错误码。 */
         fun explain(e: Throwable): String = when {
-            e is SftpException && e.id == ChannelSftp.SSH_FX_NO_SUCH_FILE -> "没有这个文件或目录"
-            e is SftpException && e.id == ChannelSftp.SSH_FX_PERMISSION_DENIED -> "没有权限"
+            e is SftpException && e.id == ChannelSftp.SSH_FX_NO_SUCH_FILE -> t("没有这个文件或目录")
+            e is SftpException && e.id == ChannelSftp.SSH_FX_PERMISSION_DENIED -> t("没有权限")
             else -> e.message ?: e::class.simpleName.orEmpty()
         }
     }
