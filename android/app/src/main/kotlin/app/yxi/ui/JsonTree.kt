@@ -70,6 +70,8 @@ private fun CodeFallback(text: String) = LazyColumn(
     }
 }
 
+/** ⚠️ `@Composable`：配色跟着风格走，要读当前 Palette。 */
+@androidx.compose.runtime.Composable
 private fun valueColor(v: String) = when {
     v.startsWith("\"") -> DiffAddFg
     v == "true" || v == "false" || v == "null" -> Teal

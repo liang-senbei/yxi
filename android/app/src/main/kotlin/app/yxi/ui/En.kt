@@ -302,5 +302,7 @@ internal object En {
         "它正忙着，或者输入框里有没发完的字 —— 等一下再点" to "It's busy, or there's unsent text in its input box — try again in a moment",
         "同时设为默认（以后新开的会话都用它）" to "Also set as default (every new session will use it)",
         "不勾的话只换这个会话，别的会话和默认都不动。" to "Unchecked, this changes only this session — other sessions and the default stay put.",
+        "界面风格" to "Look",
+        "⚠️ 终端永远是深底 —— 彩色输出在浅底上读不了。所以浅色风格下切到终端会亮暗跳一下。" to "⚠️ The terminal stays dark — coloured output is unreadable on a light background. So on the light look, switching to the terminal jumps in brightness.",
     )
 }

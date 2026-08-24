@@ -160,9 +160,11 @@ private fun Wheel(held: Key?, send: (ByteArray) -> Unit, onHeld: (Key?) -> Unit)
             },
         contentAlignment = Alignment.Center,
     ) {
+        // ⚠️ `Canvas {}` 的 lambda 是 DrawScope 不是 composable —— 颜色得先在外面取
+        val ring = SurfaceContainerHigh
         Canvas(Modifier.fillMaxSize()) {
-            drawCircle(SurfaceContainerHigh, radius = size.toPx() * 0.5f, style = Stroke(1.5f))
-            drawCircle(SurfaceContainerHigh, radius = deadZone, style = Stroke(1.5f))
+            drawCircle(ring, radius = size.toPx() * 0.5f, style = Stroke(1.5f))
+            drawCircle(ring, radius = deadZone, style = Stroke(1.5f))
         }
         listOf(
             Key.Up to Alignment.TopCenter, Key.Down to Alignment.BottomCenter,

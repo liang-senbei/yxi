@@ -193,6 +193,27 @@ fun SettingsScreen(
             }
         }
 
+        Card(t("界面风格")) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Skin.Style.entries.forEach { st ->
+                    val on = Skin.style == st
+                    Surface(
+                        color = if (on) CopperContainer else SurfaceContainerHigh,
+                        shape = Pill,
+                        modifier = Modifier.clickable { Skin.set(ctx, st) },
+                    ) {
+                        Text(
+                            st.label,
+                            Modifier.padding(16.dp, 9.dp),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = if (on) MaterialTheme.colorScheme.onPrimaryContainer else Muted,
+                        )
+                    }
+                }
+            }
+            Hint2(t("⚠️ 终端永远是深底 —— 彩色输出在浅底上读不了。所以浅色风格下切到终端会亮暗跳一下。"))
+        }
+
         // ⚠️ 这一栏**不翻译**：正在看不懂当前语言的人，得能认出另一个选项。
         // 「简体中文 / English」两个名字都用它们自己的语言写，谁都找得到自己那个。
         Card(t("语言")) {

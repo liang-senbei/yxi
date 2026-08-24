@@ -1067,7 +1067,14 @@ private fun InjectedCard(item: ChatItem.Injected) {
 }
 
 /** 把 XML 标签抹掉 —— 屏幕上没人想看 `<teammate-message from="...">`。 */
+/**
+ * 把注入内容洗成能看的纯文本。
+ *
+ * ⚠️ **ANSI 也要洗掉。** 命令输出里原样带着转义序列（`/model` 的回显就是），
+ * 卡片是纯文本渲染，不洗的话屏幕上直接冒出 `[1m…[22m` 这种。
+ */
 private fun stripTags(t: String): String =
-    t.replace(Regex("</?[a-z][a-z0-9-]*(\\s[^>]*)?>"), " ")
+    app.yxi.agent.Transcript.clean(t)
+        .replace(Regex("</?[a-z][a-z0-9-]*(\\s[^>]*)?>"), " ")
         .lineSequence().map { it.trim() }.filter { it.isNotEmpty() }
         .joinToString("\n").trim()

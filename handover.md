@@ -391,6 +391,14 @@
   连 `~/.claude/settings.json` 的 `model` 都会被改写。见 TROUBLESHOOTING #108。
   实测：选 Fable → 会话里显示 `for this session only`，账号默认仍是 `opus[1m]`。
   窄窗口下会折行 + 截断（`… +2 models`，行首是 `↓`），已按方向键滚动收集并滚回原位。
+- ✅ **0.8.0 —— 界面风格可切换，先来一套 Gemini 浅色（2026-08-24）**：
+  设置页「界面风格」里切，立刻生效、落盘。
+  实现的关键不是配色本身，是**把 `Color.kt` 里的顶层常量改成读 `LocalPalette` 的取值器** ——
+  全 app 250+ 处 `Copper` / `Dim` / `SurfaceContainerLow` **一个字都不用改**。
+  编译器会替你找出 5 处非 composable 的用法（`Highlight.of` 等），标注一下就行。
+  ⚠️ **终端永远深底**（ANSI 彩色在浅底上读不了），浅色下切终端会亮暗跳一下，设置页写明了。
+  顺带发现并修掉：命令输出里的 ANSI 转义被纯文本卡片原样画出来。
+  见 TROUBLESHOOTING #109 / #110。
 
 ## 读写信息在哪
 | 路径 | 性质 |

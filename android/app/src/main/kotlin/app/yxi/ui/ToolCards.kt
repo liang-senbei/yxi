@@ -88,6 +88,8 @@ private fun summary(c: ChatItem.ToolCall): String {
     return raw.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty().trim()
 }
 
+/** ⚠️ `@Composable`：配色跟着风格走（[app.yxi.ui.Skin]），要读当前 Palette。 */
+@androidx.compose.runtime.Composable
 private fun accent(name: String) = when (name) {
     "Bash" -> Copper
     "Edit", "Write" -> Teal

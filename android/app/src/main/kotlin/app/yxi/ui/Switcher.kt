@@ -292,10 +292,13 @@ private fun SwitcherCard(
     }
 }
 
+/** ⚠️ `@Composable`：配色跟着风格走（[app.yxi.ui.Skin]），要读当前 Palette。 */
+@androidx.compose.runtime.Composable
 private fun dotColor(st: SessionState) = when (st) {
     SessionState.NeedsYou -> Amber
     SessionState.Working -> Teal
-    else -> Color(0xFF4A443D)
+    // ⚠️ 原来这里是写死的深灰 —— 浅色风格下它会糊在白底上看不见
+    else -> SurfaceContainerHighest
 }
 
 /**

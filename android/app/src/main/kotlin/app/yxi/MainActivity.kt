@@ -63,6 +63,7 @@ class MainActivity : ComponentActivity() {
         val keys = KeyManager(applicationContext)
         val prefs = getSharedPreferences("yxi", MODE_PRIVATE)
         app.yxi.ui.I18n.load(this)
+        app.yxi.ui.Skin.load(this)
         readJump(intent)
 
         if (Build.VERSION.SDK_INT >= 33 &&

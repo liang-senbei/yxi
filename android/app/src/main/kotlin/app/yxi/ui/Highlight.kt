@@ -45,6 +45,8 @@ object Highlight {
 
     private val TOKEN = Regex("""[A-Za-z_][A-Za-z0-9_]*|\d+(\.\d+)?""")
 
+    /** ⚠️ `@Composable` 是因为配色现在跟着风格走（[app.yxi.ui.Skin]），要读当前 Palette。 */
+    @androidx.compose.runtime.Composable
     fun of(text: String, ext: String): AnnotatedString {
         val marks = lineComment(ext)
         val kw = SpanStyle(color = Copper, fontWeight = FontWeight.Medium)

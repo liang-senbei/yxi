@@ -122,8 +122,12 @@ fun Workspace(
     /** 每重连一次 +1，用它作为「重建整条连接」的键。jsch 的 Session 不能复用，只能新建 */
     var generation by remember(host.id) { mutableStateOf(0) }
 
-    val fg = MaterialTheme.colorScheme.onSurface
-    val bg = MaterialTheme.colorScheme.surfaceContainerLowest
+    // ⚠️ **终端永远深底，不跟着界面风格走。**
+    // ANSI 彩色输出是按深底配的：浅底上黄色、亮绿几乎看不见，而那恰恰是
+    // 警告和 diff 用的颜色。代价是浅色风格下切到终端有一下明暗跳变 ——
+    // 自觉的取舍，见 [app.yxi.ui.theme.GeminiPalette] 的注释。
+    val fg = app.yxi.ui.theme.TerminalFg
+    val bg = app.yxi.ui.theme.TerminalBg
     val focus = remember { FocusRequester() }
     // 粘滞修饰键：工具条点了 Ctrl，下一个从软键盘来的字符带上 Ctrl（控件会自动清）
     val stickies = remember { app.yxi.term.StickyModifiers() }

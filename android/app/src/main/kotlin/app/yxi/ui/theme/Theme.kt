@@ -1,12 +1,16 @@
 package app.yxi.ui.theme
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import app.yxi.ui.Skin
 
 // 圆角：卡片 28 / 内嵌 22 / 小件 16。控件的药丸形状在组件里单独用 100.dp
 private val YxiShapes = Shapes(
@@ -17,29 +21,72 @@ private val YxiShapes = Shapes(
     extraLarge = RoundedCornerShape(28.dp),
 )
 
-private val YxiDark = darkColorScheme(
-    primary = Copper, onPrimary = OnCopper,
-    primaryContainer = CopperContainer, onPrimaryContainer = OnCopperContainer,
-    secondary = Teal, onSecondary = OnCopper,
-    tertiary = Amber, onTertiary = OnCopper,
-    background = Surface, onBackground = OnSurface,
-    surface = Surface, onSurface = OnSurface,
-    surfaceVariant = SurfaceContainerHigh, onSurfaceVariant = OnSurfaceVariant,
-    surfaceContainerLowest = SurfaceContainerLowest,
-    surfaceContainerLow = SurfaceContainerLow,
-    surfaceContainer = SurfaceContainer,
-    surfaceContainerHigh = SurfaceContainerHigh,
-    surfaceContainerHighest = SurfaceContainerHighest,
-    outline = Dim, outlineVariant = SurfaceContainerHigh,
-    error = DiffDelFg, onError = OnCopper,
-)
+private fun schemeOf(p: Palette) = if (p.light) {
+    lightColorScheme(
+        primary = p.Copper, onPrimary = p.OnCopper,
+        primaryContainer = p.CopperContainer, onPrimaryContainer = p.OnCopperContainer,
+        secondary = p.Teal, onSecondary = p.OnCopper,
+        tertiary = p.Amber, onTertiary = p.OnCopper,
+        tertiaryContainer = p.SurfaceContainerHigh, onTertiaryContainer = p.OnSurface,
+        background = p.Surface, onBackground = p.OnSurface,
+        surface = p.Surface, onSurface = p.OnSurface,
+        surfaceVariant = p.SurfaceContainerHigh, onSurfaceVariant = p.OnSurfaceVariant,
+        surfaceContainerLowest = p.SurfaceContainerLowest,
+        surfaceContainerLow = p.SurfaceContainerLow,
+        surfaceContainer = p.SurfaceContainer,
+        surfaceContainerHigh = p.SurfaceContainerHigh,
+        surfaceContainerHighest = p.SurfaceContainerHighest,
+        outline = p.Dim, outlineVariant = p.SurfaceContainerHigh,
+        error = p.DiffDelFg, onError = p.OnCopper,
+        errorContainer = p.DiffDelBg, onErrorContainer = p.DiffDelFg,
+    )
+} else {
+    darkColorScheme(
+        primary = p.Copper, onPrimary = p.OnCopper,
+        primaryContainer = p.CopperContainer, onPrimaryContainer = p.OnCopperContainer,
+        secondary = p.Teal, onSecondary = p.OnCopper,
+        tertiary = p.Amber, onTertiary = p.OnCopper,
+        tertiaryContainer = p.CopperContainer, onTertiaryContainer = p.OnCopperContainer,
+        background = p.Surface, onBackground = p.OnSurface,
+        surface = p.Surface, onSurface = p.OnSurface,
+        surfaceVariant = p.SurfaceContainerHigh, onSurfaceVariant = p.OnSurfaceVariant,
+        surfaceContainerLowest = p.SurfaceContainerLowest,
+        surfaceContainerLow = p.SurfaceContainerLow,
+        surfaceContainer = p.SurfaceContainer,
+        surfaceContainerHigh = p.SurfaceContainerHigh,
+        surfaceContainerHighest = p.SurfaceContainerHighest,
+        outline = p.Dim, outlineVariant = p.SurfaceContainerHigh,
+        error = p.DiffDelFg, onError = p.OnCopper,
+        errorContainer = p.DiffDelBg, onErrorContainer = p.DiffDelFg,
+    )
+}
 
 /**
- * 只有深色。终端必然是深色（浅底读 ANSI 彩色输出很吃力），
- * 做浅色对话 + 深色终端来回切会闪眼 —— 见 PRD 附录 J.1。
- * [darkTheme] 参数留着是为了将来真要做浅色时不用改签名。
+ * Gemini 那套的排版：**正文更大、行距更松**。
+ *
+ * ⚠️ 只有配色像还不够 —— 截图里最直观的差别其实是**呼吸感**：
+ * 正文 16sp 但行高给到 26sp。照抄颜色不改行距，看着还是「另一个 app」。
+ */
+private val AiryType = Typography().let { d ->
+    d.copy(
+        bodyLarge = d.bodyLarge.copy(fontSize = 16.sp, lineHeight = 26.sp),
+        bodyMedium = d.bodyMedium.copy(lineHeight = 22.sp),
+    )
+}
+
+/**
+ * ⚠️ **终端不跟着变浅。** ANSI 彩色输出按深底配的，浅底上黄/亮绿几乎看不见。
+ * 所以浅色风格下切到终端会有一下明暗跳变 —— 自觉的取舍（见 [GeminiPalette]）。
  */
 @Composable
-fun YxiTheme(darkTheme: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = YxiDark, shapes = YxiShapes, content = content)
+fun YxiTheme(content: @Composable () -> Unit) {
+    val p = Skin.style.palette
+    CompositionLocalProvider(LocalPalette provides p) {
+        MaterialTheme(
+            colorScheme = schemeOf(p),
+            shapes = YxiShapes,
+            typography = if (p.light) AiryType else Typography(),
+            content = content,
+        )
+    }
 }

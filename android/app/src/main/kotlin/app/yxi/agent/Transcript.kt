@@ -282,6 +282,22 @@ object Transcript {
      * 队友消息用 `teammate_id="…"` —— 只认 `from` 的话队友那栏永远是空的
      * （这条是测试抓出来的，我原本只写了 from）。
      */
+    /**
+     * ANSI 转义序列。**命令输出里会原样带着它们。**
+     *
+     * ⚠️ 真实例子：`Set model to \u001b[1mFable 5\u001b[22m for this session only`
+     * —— `[1m` / `[22m` 是加粗开关。终端会解释它们，而对话卡片是纯文本渲染，
+     * 于是屏幕上直接冒出 `[1mFable 5[22m`。浅色主题下尤其扎眼（我就是这么发现的）。
+     *
+     * ⚠️ **`\u001b` 有时会被吃掉只剩 `[1m`**（转录里两种都见过），所以 ESC 是可选的。
+     * 代价是理论上会误伤正文里真的写着 `[1m` 的情况 —— 那种极少，
+     * 而漏掉的话每条命令输出都带着乱码。
+     */
+    private val ANSI = Regex("""\u001B?\[[0-9;]*[A-Za-z]""")
+
+    /** 去掉 ANSI 控制序列。⚠️ 只在**展示**前用，别改动原文用于比对的地方（去重靠原文）。 */
+    internal fun clean(s: String): String = ANSI.replace(s, "")
+
     private val FROM = Regex("""(?:from|teammate_id|agent_id)="([^"]+)"""")
 
     /** 认出来就返回（类别, 谁发的），否则 null。 */
