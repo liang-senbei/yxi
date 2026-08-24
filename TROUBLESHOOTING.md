@@ -1504,3 +1504,41 @@ Kotlin 的块注释**是可嵌套的**（跟 C/Java 不一样），`/*` 在注�
 **怎么避开**：这类「枚举型字段」不要只按见过的值写 `when` ——
 先把真转录里的值统计一遍（`grep -o '"operation":"[a-z]*"' … | sort | uniq -c`），
 三种里有一种是我从来没见过的。
+
+## 96. ⭐⭐ 界面销毁时断了一条**不归它管**的连接（注释和代码互相打脸）
+
+**症状**：用户说「从导航栏的设置切换到会话就要重连一次，点进会话退出来还要再重连一次」。
+
+**根因**：`SessionsScreen` 的收尾是
+
+```kotlin
+DisposableEffect(host.id) { onDispose { sftp?.close(); ssh?.disconnect() } }
+```
+
+而这个 `ssh` 是**参数传进来的**，属于 `MainActivity` 里那个跨 tab 共用的
+`rememberHostSession`。切 tab / 进工作区都会销毁 `SessionsScreen`，
+于是每次都把共用连接掐掉，`rememberHostSession` 的看门狗在 3 秒内发现「死了」
+再连一遍 —— 用户看到的就是「切一次重连一次」。
+
+**最刺眼的地方**：同一个文件里，这个参数的 KDoc 写着
+
+> ⚠️ 连接由 MainActivity 持有 —— 切 tab 时这个 composable 会销毁，**连接不能跟着断**
+
+注释是对的，代码在做相反的事。**注释写对了不代表代码做对了**，
+写完注释要回头看一眼这个文件里有没有跟它矛盾的行。
+
+**判据：谁建的谁收。** 排查时把 `disconnect()` 的调用点全 grep 一遍，逐个问
+「这条连接是它自己建的吗」：
+- `EventService` / `HostsScreen`(装公钥) / `DevMode`(诊断) —— 自己建的，该收 ✓
+- `Workspace` —— 自己建的才收（`if (ssh !== preconnected)`）✓
+- `SessionsScreen` —— **参数拿到的，不该收** ✗ ← 只有这一处错
+
+**顺带修掉「骨架屏闪光」**：会话列表原本也 `remember` 在 `SessionsScreen` 里，
+切回来是空列表，要等一次往返才有内容。跟连接同一个道理 ——
+**活得比界面久的数据，就不能存在界面里**。现在一起挂到 `MainActivity`。
+
+**怎么验**：别看界面，看 TCP。`ss -tn state established '( sport = :22 )'`
+盯**源端口**：端口没变 = 这条连接从头到尾就没断过。
+修完跑「设置→会话→进会话→退出来」四个来回，三条连接的源端口一个没变。
+⚠️ 测的时候机器要空着：`isAlive` 就是 jsch 的心跳判定（15s × 2），
+gradle 在编译的时候模拟器会漏心跳，看起来像是切 tab 导致的重连，其实不是。

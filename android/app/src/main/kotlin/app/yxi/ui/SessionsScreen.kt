@@ -51,6 +51,9 @@ fun SessionsScreen(
     /** 主机下拉：换主机不用退出去（D22）。只有一台时不显示箭头 */
     /** ⚠️ 连接由 [app.yxi.MainActivity] 持有 —— 切 tab 时这个 composable 会销毁，连接不能跟着断 */
     ssh: SshSession?,
+    /** 会话列表。⚠️ 同样由 [app.yxi.MainActivity] 持有，理由见下面 `status` 那段注释 */
+    sessions: List<Session>,
+    onSessions: (List<Session>) -> Unit,
     connectError: String? = null,
     onRetry: () -> Unit = {},
     hosts: List<Host> = listOf(host),
@@ -62,8 +65,10 @@ fun SessionsScreen(
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
-    var sessions by remember { mutableStateOf<List<Session>>(emptyList()) }
-    var status by remember { mutableStateOf("连接中…") }
+    // ⚠️ **别在这儿 `remember` 会话列表。** 它跟连接一样得活得比这个界面久 ——
+    // 存在这里的话，切回来是空列表，要等一次往返才有内容，
+    // 中间那一下就是用户说的「骨架屏闪光」。现在由 [app.yxi.MainActivity] 持有。
+    var status by remember { mutableStateOf(if (sessions.isEmpty()) "连接中…" else "") }
     var sendTo by remember { mutableStateOf<Session?>(null) }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -88,7 +93,7 @@ fun SessionsScreen(
             // 用户看到的位置和点下去的位置必须是同一个。
             if (!listState.isScrollInProgress) {
                 runCatching { SessionProbe.snapshot(s) }
-                    .onSuccess { sessions = it; status = "" }
+                    .onSuccess { onSessions(it); status = "" }
                     .onFailure {
                         if (it is kotlinx.coroutines.CancellationException) throw it
                         status = "刷新失败：${it.message}"
@@ -113,7 +118,15 @@ fun SessionsScreen(
             delay(120_000)
         }
     }
-    DisposableEffect(host.id) { onDispose { sftp?.close(); ssh?.disconnect() } }
+    // ⚠️ **只收自己开的 sftp 通道，绝不碰 ssh。**
+    // 这里原来写的是 `ssh?.disconnect()` —— 而这条连接是 [app.yxi.MainActivity] 建的、
+    // 跨 tab 共用的（这个函数的参数注释上就写着「连接不能跟着断」，代码却在断它）。
+    // 后果：切去「设置」再切回来、进一个会话再退出来，都会把共用连接掐掉，
+    // 然后 [rememberHostSession] 的看门狗在 3 秒内发现「死了」再连一遍 ——
+    // 用户看到的就是「切一次重连一次」。
+    //
+    // **判据：谁建的谁收。** 这个界面是拿参数拿到的 ssh，那就不归它收。
+    DisposableEffect(host.id) { onDispose { sftp?.close() } }
 
     Column(modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(18.dp, 14.dp, 18.dp, 10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -215,7 +228,7 @@ fun SessionsScreen(
                 if (ssh == null) onRetry() else scope.launch {
                     val s = ssh
                     if (s != null) runCatching { SessionProbe.snapshot(s) }
-                        .onSuccess { sessions = it; status = "" }
+                        .onSuccess { onSessions(it); status = "" }
                     // 转一下让人看见它确实动了 —— 一闪而过的刷新等于没反馈
                     delay(400)
                 }

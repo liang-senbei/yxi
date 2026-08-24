@@ -96,6 +96,11 @@ class MainActivity : ComponentActivity() {
                 // **刻意不复用上面那条** —— 终端通道出事会把看板一起拖死（#16）。
                 // 代价是每台主机多一条闲着的连接，心跳 15 秒一次，可以接受。
                 val warm = rememberHostSession(store, keys, host)
+                // ⚠️ **会话列表也挂在这一层。** 跟连接同一个理由：存在 SessionsScreen 里的话，
+                // 切走再切回来是空列表，要等一次往返才有内容 —— 那一下就是「骨架屏闪光」。
+                var sessionList by remember(host?.id) {
+                    mutableStateOf<List<app.yxi.agent.Session>>(emptyList())
+                }
 
                 BackHandler(enabled = work != null || tab != Tab.Sessions) {
                     when {
@@ -139,6 +144,8 @@ class MainActivity : ComponentActivity() {
                             SessionsScreen(
                                 store, keys, host,
                                 ssh = shared.session,
+                                sessions = sessionList,
+                                onSessions = { sessionList = it },
                                 connectError = shared.error,
                                 onRetry = shared.retry,
                                 hosts = hosts,
