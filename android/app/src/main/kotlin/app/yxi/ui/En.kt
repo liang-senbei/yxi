@@ -290,5 +290,13 @@ internal object En {
         "%d 个会话等你" to "%d session(s) waiting on you",
         "上下文 %s" to "context %s",
         "今日 %s · %s" to "today %s · %s",
+        "没有闲着的会话可以借来查额度 —— 等它忙完再点" to "No idle session to borrow for the quota check — try again when one frees up",
+        " 重置" to " reset",
+        "额度" to "Quota",
+        "问一下这台机器…" to "asking this host…",
+        "5 小时额度" to "5-hour quota",
+        "本周额度" to "This week",
+        "点一下查" to "tap to check",
+        "窗口已过" to "Window elapsed",
     )
 }

@@ -74,6 +74,9 @@ fun SessionsScreen(
     val ctx = androidx.compose.ui.platform.LocalContext.current
     // ⚠️ 探不到 ccusage 就一直是 null，界面上整块不出现（不显示 0、不显示「未知」）
     var usage by remember(host.id) { mutableStateOf<app.yxi.agent.Usage?>(null) }
+    /** 真订阅额度。⚠️ 只在**点一下**的时候去问 —— 见下面 `askQuota` 的注释 */
+    var quota by remember(host.id) { mutableStateOf<app.yxi.agent.Quota.Q?>(null) }
+    var quotaBusy by remember(host.id) { mutableStateOf(false) }
     var sftp by remember(host.id) { mutableStateOf<app.yxi.ssh.Sftp?>(null) }
     var update by remember(host.id) { mutableStateOf<app.yxi.agent.Update?>(null) }
     // 列表 / 悬浮排列。⚠️ 两者**并存**不是替代 —— 悬浮好看但同屏信息量少三分之一，
@@ -185,8 +188,26 @@ fun SessionsScreen(
                 UpdateBanner(sftp, it) { update = null }
             }
         }
-        usage?.let {
-            Box(Modifier.padding(14.dp, 0.dp, 14.dp, 8.dp)) { UsageCard(it) }
+        // ⚠️ **额度只在点的时候查，不轮询。**
+        // 查一次要借用户的一个会话跑 `/usage`（面板会闪一下、抓屏会看到面板），
+        // 后台每隔几分钟自己来一遍的话，用户会莫名其妙看到会话在抽搐。
+        // 而且额度是给人做决策看的，人想知道的时候点一下就好。
+        Box(Modifier.padding(14.dp, 0.dp, 14.dp, 8.dp)) {
+            UsageCard(usage, quota, quotaBusy, onRefresh = {
+                val s0 = ssh
+                if (s0 != null && !quotaBusy) scope.launch {
+                    quotaBusy = true
+                    // ⚠️ **挑闲着的会话借**，而且 `Quota.probe` 自己还会再确认一次
+                    // 输入框是空的（借不到就返回 null，绝不硬来）。
+                    // 忙的排最后：万一闲的都借不到，忙的也大概率借不到，但试试无妨。
+                    val order = sessions.sortedBy { if (it.state == SessionState.Idle) 0 else 1 }
+                    quota = order.firstNotNullOfOrNull { sess ->
+                        app.yxi.ssh.catching { app.yxi.agent.Quota.probe(s0, sess.name) }.getOrNull()
+                    }
+                    if (quota == null) status = t("没有闲着的会话可以借来查额度 —— 等它忙完再点")
+                    quotaBusy = false
+                }
+            })
         }
 
         // ⚠️ 连不上的时候要给**一个能按的东西**。自动重连是指数退避的，

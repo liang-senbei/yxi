@@ -2,6 +2,7 @@ package app.yxi.ui
 
 import android.content.Context
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -47,6 +48,36 @@ object UsageCache {
     }.getOrNull()
 }
 
+/**
+ * 额度一行：`5 小时额度   ████░░  10%   4:59am (UTC) 重置`。
+ * [pct] 为 null 表示还没拿到，这时只画提示文字。
+ */
+@Composable
+private fun QuotaLine(label: String, pct: Int?, note: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = Muted)
+        if (pct != null) {
+            Box(Modifier.weight(1f).height(6.dp).background(SurfaceContainerHigh, Pill)) {
+                Box(
+                    Modifier.fillMaxWidth(pct / 100f).height(6.dp)
+                        // ⚠️ 85% 以上变琥珀：这个色在全 app 只表示「要你动手了」
+                        .background(if (pct > 85) Amber else Teal, Pill)
+                )
+            }
+            Text(
+                "$pct%",
+                style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                color = if (pct > 85) Amber else OnSurface,
+            )
+        } else {
+            Text(note, style = MaterialTheme.typography.labelSmall, color = Dim, modifier = Modifier.weight(1f))
+        }
+    }
+    if (pct != null && note.isNotBlank()) {
+        Text(note + t(" 重置"), style = MaterialTheme.typography.labelSmall, color = Dim)
+    }
+}
+
 /** 主机列表上的一条细线。**没有数据就返回不画任何东西** —— 调用方不用判断。 */
 @Composable
 fun UsageStrip(ctx: Context, hostId: String) {
@@ -73,15 +104,47 @@ fun UsageStrip(ctx: Context, hostId: String) {
     }
 }
 
-/** 会话看板顶上的详情卡。同样：没数据就什么都不画。 */
+/**
+ * 会话看板顶上的详情卡。同样：没数据就什么都不画。
+ *
+ * ⚠️ **这里有两种完全不同的「百分比」，别混：**
+ *   · `u.elapsedPercent` —— **5 小时窗口过去了多少时间**，跟你烧了多少额度**无关**。
+ *     它只回答「离下次重置还有多久」。原来的标题只写「5 小时窗口」，
+ *     很容易被读成额度（用户就是这么问的：「为什么只有五小时额度」）。
+ *   · [quota] —— **真正的订阅额度**，来自 `/usage`（[app.yxi.agent.Quota]）。
+ *     ccusage 算不出这个，它只看本地日志，不知道你的订阅用掉了几成。
+ *
+ * @param onRefresh 点一下就去那台机器上跑一次 `/usage`。
+ *   ⚠️ 它会借一个**闲着且输入框是空的**会话来跑，借不到就什么都不做（见 [Quota.borrowable]）。
+ */
 @Composable
-fun UsageCard(u: Usage?) {
-    if (u == null) return
-    Surface(color = SurfaceContainerLow, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth()) {
+fun UsageCard(
+    u: Usage?,
+    quota: app.yxi.agent.Quota.Q? = null,
+    quotaBusy: Boolean = false,
+    onRefresh: () -> Unit = {},
+) {
+    if (u == null && quota == null) return
+    Surface(
+        color = SurfaceContainerLow, shape = MaterialTheme.shapes.large,
+        modifier = Modifier.fillMaxWidth()
+            .clickable(enabled = !quotaBusy, onClick = onRefresh),
+    ) {
         Column(Modifier.padding(16.dp, 13.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // 真额度：拿到了就摆在最上面，它比下面那条时间进度重要得多
+            when {
+                quotaBusy -> QuotaLine(t("额度"), null, t("问一下这台机器…"))
+                quota != null -> {
+                    QuotaLine(t("5 小时额度"), quota.sessionPct, quota.sessionResets)
+                    QuotaLine(t("本周额度"), quota.weekPct, quota.weekResets)
+                }
+                else -> QuotaLine(t("额度"), null, t("点一下查"))
+            }
+            if (u == null) return@Column
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    t("5 小时窗口"),
+                    // ⚠️ 不能只写「5 小时窗口」—— 下面那条是**时间**进度不是额度
+                    t("窗口已过"),
                     style = MaterialTheme.typography.labelMedium,
                     color = if (u.elapsedPercent > 85) Amber else Muted,
                     modifier = Modifier.weight(1f),
