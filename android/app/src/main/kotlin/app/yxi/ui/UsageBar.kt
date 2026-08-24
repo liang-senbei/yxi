@@ -18,6 +18,7 @@ object QuotaCache {
         val o = JSONObject()
             .put("s", q.sessionPct).put("sr", q.sessionResets)
             .put("w", q.weekPct).put("wr", q.weekResets)
+            .put("plan", q.plan)
             .put("at", System.currentTimeMillis())
         p(ctx).edit().putString("quota:$hostId", o.toString()).apply()
     }
@@ -27,7 +28,7 @@ object QuotaCache {
         val o = JSONObject(p(ctx).getString("quota:$hostId", null) ?: return null)
         val age = (System.currentTimeMillis() - o.optLong("at")) / 60_000
         app.yxi.agent.Quota.Q(
-            o.optInt("s"), o.optString("sr"), o.optInt("w"), o.optString("wr"),
+            o.optInt("s"), o.optString("sr"), o.optInt("w"), o.optString("wr"), o.optString("plan"),
         ) to age
     }.getOrNull()
 }

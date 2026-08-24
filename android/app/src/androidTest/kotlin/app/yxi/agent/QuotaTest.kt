@@ -41,6 +41,26 @@ Last 24h · 1492 requests · 11 sessions
         assertEquals(12, q.sessionPct); assertEquals(11, q.weekPct)
     }
 
+    @Test fun 读得出订阅档位() {
+        // 真 credentials + /usage 拼在一起的样子（fetch 就是这么组合的）
+        val real = """
+"subscriptionType":"max"
+"rateLimitTier":"default_claude_max_20x"
+Current session: 16% used · resets Aug 24, 3:10pm (UTC)
+Current week (all models): 12% used · resets Aug 30, 12:59pm (UTC)
+""".trimIndent()
+        assertEquals("Max 20x", Quota.parse(real)!!.plan)
+    }
+
+    @Test fun 档位各档都认() {
+        assertEquals("Max 5x", Quota.planOf("\"rateLimitTier\":\"default_claude_max_5x\""))
+        assertEquals("Max 20x", Quota.planOf("\"rateLimitTier\":\"default_claude_max_20x\""))
+        assertEquals("Pro", Quota.planOf("\"rateLimitTier\":\"claude_pro\""))
+        // 只有 subscriptionType 时兜底
+        assertEquals("Max", Quota.planOf("\"subscriptionType\":\"max\""))
+        assertEquals("", Quota.planOf("没有相关字段"))
+    }
+
     @Test fun 没有额度信息就返回空() {
         assertNull(Quota.parse("bash: claude: command not found"))
         assertNull(Quota.parse(""))

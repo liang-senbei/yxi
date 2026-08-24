@@ -2183,3 +2183,40 @@ Current week (all models): 11% used · resets Aug 30, 12:59pm (UTC)
 
 **顺带删掉**的死代码：`SendSheet`（回复弹层）、`sendTo` 状态、卡片的 `onSend`/`onTerminal`。
 头部副标题从「点读对话 · 长按发消息」改成「点一下进对话」。
+
+## 122. ⭐ 订阅档位（Max 5x/20x/Pro）读得出来 —— 在 credentials 里，不在 /usage
+
+**需求**：用户看到 Moshi 的用量卡显示「Max 5x · Claude Code」，问档位读不读得到、
+ChatGPT/Codex 能不能分开。
+
+**Claude 档位：读得到，但不在 /usage**。`claude -p "/usage"` 只说「using your subscription」，
+不给档位。档位在 `~/.claude/.credentials.json`：
+```
+"subscriptionType":"max"
+"rateLimitTier":"default_claude_max_20x"
+```
+`default_claude_max_20x` → `Max 20x`，`_5x` → `Max 5x`，含 `pro` → `Pro`，
+兜底用 `subscriptionType`。fetch 时顺手 grep 这两个字段跟 /usage 拼一起解析。
+
+⚠️ **只 grep 那两个字段，绝不整个 `cat` credentials** —— 那文件里还有
+access/refresh token，不能出现在任何日志、抓屏、缓存里。
+
+**ChatGPT/Codex：只能读这台机器上装了的**。Moshi 那张图有 Codex 是因为那台 Mac 装了 codex。
+本机 `command -v codex` 没有。真要支持，得等某台服务器上真有 codex CLI、
+且先看清它的用量输出长什么样再接（教训：别 ship 没验过的格式）。所以现在只做 Claude 这一路。
+
+## 123. Cloudflare 令牌：能读 zone ≠ 能改 DNS
+
+**用户问**：这个 CF 令牌能用吗（想加 `dl.keuury.com`）。
+
+**实测三步**：
+- `tokens/verify` → success（令牌有效，而且**IP 封锁没了**，从本机能过了）
+- `zones?name=keuury.com` → success（能**列** zone）
+- `POST dns_records` → `9109 Valid user-level authentication not found`（**不能改 DNS**）
+
+这是那个 **R2 存储令牌**：范围是 R2 + Zone:Read，**没有 Zone:DNS:Edit**。
+「能验证、能列 zone」很容易让人以为能改 DNS —— 不是。加 A 记录要的是
+**Zone → DNS → Edit** 权限的令牌，或者直接在 CF 面板手加一条。
+
+**判据**：CF 令牌能不能干某件事，别看 verify，**直接拿那个具体的写操作试**。
+verify 只说令牌活着，不说它有你要的那条权限。

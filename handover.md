@@ -427,6 +427,12 @@
   删掉卡片上的 `开终端`/`回它一句` 按钮 + 长按回复。改成 **轻点=进对话（在里面回它），长按=拖动排序**。
   Pinned 从 Set 改成**有序 List**（次序即数据）。拖动只在置顶组内，`rememberUpdatedState` 修了
   「拖再远只动一格」（协程闭包捕获旧 tops）。实测单格/多格拖都对、重装后次序还在。见 #121。
+- ✅ **0.8.6 —— 额度显示订阅档位（Max 20x/5x/Pro）（2026-08-24）**：
+  额度卡顶上加「档位 · Claude Code」头（学 Moshi）。档位在 `~/.claude/.credentials.json` 的
+  `rateLimitTier`，不在 /usage —— fetch 时**只 grep 那两个字段**（绝不 cat，里面有 token）跟 /usage 拼一起解析。
+  ChatGPT/Codex：只能读本机装了的，本机没 codex，不做。见 TROUBLESHOOTING #122。
+  ⚠️ **DNS 还是加不了**：用户给的 CF 令牌是 R2 的，能读 zone 但没 DNS:Edit（#123），
+  `dl.keuury.com` 仍差一条 A 记录（要 Zone:DNS:Edit 令牌，或面板手加 → 64.90.25.56，DNS only）。
 
 ## 读写信息在哪
 | 路径 | 性质 |

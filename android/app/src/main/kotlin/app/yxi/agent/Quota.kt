@@ -25,6 +25,8 @@ object Quota {
         /** 本周（所有模型）用掉的百分比 */
         val weekPct: Int,
         val weekResets: String,
+        /** 订阅档位，如 `Max 20x` / `Max 5x` / `Pro`。读不到就空串。 */
+        val plan: String = "",
     )
 
     /** `Current session: 12% used · resets Aug 24, 3:10pm (UTC)` */
@@ -37,6 +39,21 @@ object Quota {
      * ⚠️ **锚点是两行标题的文字**，不是行号也不是「第几个 %」——
      * 输出里还有 `Current week (Fable)` 之类的分项，也带 `% used`。
      */
+    /** `default_claude_max_20x` → `Max 20x`；含 pro → `Pro`；否则拿 subscriptionType 兜底。 */
+    private val TIER = Regex(""""rateLimitTier"\s*:\s*"([^"]*)"""")
+    private val SUBTYPE = Regex(""""subscriptionType"\s*:\s*"([^"]*)"""")
+    private val MAXN = Regex("""max_?(\d+)x""")
+
+    internal fun planOf(credsJson: String): String {
+        val tier = TIER.find(credsJson)?.groupValues?.get(1).orEmpty()
+        MAXN.find(tier)?.let { return "Max ${it.groupValues[1]}x" }
+        if ("pro" in tier) return "Pro"
+        // 兜底：subscriptionType（max / pro）
+        return when (SUBTYPE.find(credsJson)?.groupValues?.get(1)) {
+            "max" -> "Max"; "pro" -> "Pro"; else -> ""
+        }
+    }
+
     fun parse(text: String): Q? {
         val s = SESSION.find(text) ?: return null
         val w = WEEK.find(text) ?: return null
@@ -45,6 +62,8 @@ object Quota {
             sessionResets = s.groupValues.getOrNull(2)?.trim().orEmpty(),
             weekPct = w.groupValues[1].toIntOrNull() ?: return null,
             weekResets = w.groupValues.getOrNull(2)?.trim().orEmpty(),
+            // 档位藏在同一段输出里（fetch 把 credentials 一起 cat 出来了）
+            plan = planOf(text),
         )
     }
 
@@ -62,7 +81,10 @@ object Quota {
                 "export PATH=\$HOME/.local/bin:\$HOME/.npm-global/bin:/usr/local/bin:\$PATH; " +
                     "for d in /opt/node*/bin; do [ -d \"\$d\" ] && PATH=\$PATH:\$d; done; " +
                     "command -v claude >/dev/null 2>&1 || exit 0; " +
-                    // ⚠️ 30 秒够它连服务端拿额度了；再久多半是卡住，别让界面上那个「查着…」转到天荒地老
+                    // ⚠️ 顺手把档位读出来（Max 5x/20x/Pro 藏在 credentials 里，/usage 不给）。
+                    // 只 grep rateLimitTier/subscriptionType 两个字段，**绝不整个 cat**——
+                    // 那文件里还有 access/refresh token，不该出现在任何日志或抓屏里。
+                    "grep -oE '\"(rateLimitTier|subscriptionType)\":\"[^\"]*\"' \$HOME/.claude/.credentials.json 2>/dev/null; " +
                     "timeout 30 claude -p '/usage' 2>/dev/null"
             )
         }.getOrNull().orEmpty()

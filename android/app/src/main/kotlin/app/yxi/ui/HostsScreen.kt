@@ -235,6 +235,19 @@ private fun HostQuota(h: Host, ctx: android.content.Context, store: HostStore, k
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         q?.let {
+            // 档位 + 工具，学 Moshi 那个「Max 20x · Claude Code」的头。读不到档位就只写工具名。
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (it.plan.isNotBlank()) Surface(
+                    color = MaterialTheme.colorScheme.tertiaryContainer, shape = Pill,
+                ) {
+                    Text(
+                        it.plan, Modifier.padding(9.dp, 3.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    )
+                }
+                Text("Claude Code", style = MaterialTheme.typography.labelMedium, color = Muted)
+            }
             QuotaBar(t("5 小时"), it.sessionPct, it.sessionResets)
             QuotaBar(t("本周"), it.weekPct, it.weekResets)
         }
