@@ -86,6 +86,11 @@ object Prompt {
      * @return 没有在等人选就返回 null
      */
     fun parse(screen: String): Pending? {
+        // ⚠️ **模型选单不走这里。** 它也是个编号列表，会被这套通用解析当成「等你选」，
+        // 于是界面上同时冒出两个入口；而这条路点一下是**送数字** ——
+        // 实测那等于「saved as your default for new sessions」，
+        // 在手机上顺手一点就把账号默认改了。模型有自己的入口（[Model]），语义安全得多。
+        if (Model.parse(screen) != null) return null
         val lines = screen.lines()
         // 先用脚注（四条测试盯着的老路子）；认不出来再退回光标锚。
         // 退回而不是替换：老路子是实测钉住的，没必要拿新写法去赌它。

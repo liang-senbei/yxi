@@ -298,5 +298,9 @@ internal object En {
         "本周额度" to "This week",
         "点一下查" to "tap to check",
         "窗口已过" to "Window elapsed",
+        "开选单…" to "opening…",
+        "它正忙着，或者输入框里有没发完的字 —— 等一下再点" to "It's busy, or there's unsent text in its input box — try again in a moment",
+        "同时设为默认（以后新开的会话都用它）" to "Also set as default (every new session will use it)",
+        "不勾的话只换这个会话，别的会话和默认都不动。" to "Unchecked, this changes only this session — other sessions and the default stay put.",
     )
 }

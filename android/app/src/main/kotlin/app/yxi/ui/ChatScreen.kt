@@ -92,6 +92,9 @@ fun ChatScreen(
     var ctxUse by remember(sessionName) { mutableStateOf<app.yxi.agent.Transcript.Ctx?>(null) }
     /** 这台机器**今天**烧了多少。⚠️ 拿不到就是 null，整块藏掉（[app.yxi.agent.Usage] 的规矩） */
     var todayUse by remember(sessionName) { mutableStateOf<app.yxi.agent.Today?>(null) }
+    /** `/model` 选单开着的时候放这儿。null = 没开 */
+    var models by remember(sessionName) { mutableStateOf<List<app.yxi.agent.Model.Choice>?>(null) }
+    var modelBusy by remember(sessionName) { mutableStateOf(false) }
     /** 正在放大看的那张附件图。null = 没在看 */
     var preview by remember { mutableStateOf<app.yxi.agent.Attachments.Staged?>(null) }
 
@@ -283,6 +286,33 @@ fun ChatScreen(
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // 模型名单独一格，**可点** —— 点开就是 `/model` 那个选单
+                ctxUse?.model?.takeIf { it.isNotBlank() }?.let { m ->
+                    Text(
+                        if (modelBusy) t("开选单…") else m.removePrefix("claude-"),
+                        Modifier
+                            .clickable(enabled = ssh != null && !modelBusy) {
+                                val s0 = ssh ?: return@clickable
+                                scope.launch {
+                                    modelBusy = true
+                                    models = app.yxi.ssh.catching {
+                                        app.yxi.agent.Model.open(s0, sessionName)
+                                    }.getOrNull()
+                                    if (models == null) {
+                                        android.widget.Toast.makeText(
+                                            ctx, t("它正忙着，或者输入框里有没发完的字 —— 等一下再点"),
+                                            android.widget.Toast.LENGTH_LONG,
+                                        ).show()
+                                    }
+                                    modelBusy = false
+                                }
+                            }
+                            .padding(end = 10.dp),
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                    )
+                }
                 val bits = buildList {
                     // ⚠️ 只给绝对值，不给百分比 —— 见 [Transcript.Ctx] 的注释
                     ctxUse?.let { add(t("上下文 %s").format(tokenText(it.tokens))) }
@@ -551,6 +581,88 @@ fun ChatScreen(
                 }
             }
         }
+    }
+
+    // `/model` 选单。
+    //
+    // ⚠️ **点一下 = 只换这个会话**，不碰账号默认。
+    // 实测：直接送数字 = 「saved as your default for new sessions」——
+    // 在手机上顺手一点就把以后每个新会话的模型都改了，那是事后想不起来为什么的坑。
+    // 想改默认得单独点那一行，文案里写明白。
+    models?.let { list ->
+        val cur = list.firstOrNull { it.current }?.number ?: 1
+        var asDefault by remember(list) { mutableStateOf(false) }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = {
+                // ⚠️ 关掉也要发 Esc —— 面板留在屏幕上，看板抓屏会一直看到它
+                val s0 = ssh
+                scope.launch { s0?.let { app.yxi.agent.Model.cancel(it, sessionName) } }
+                models = null
+            },
+            title = { Text(t("换模型")) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    list.forEach { c ->
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clickable {
+                                    val s0 = ssh ?: return@clickable
+                                    scope.launch {
+                                        app.yxi.ssh.catching {
+                                            app.yxi.agent.Model.pick(s0, sessionName, cur, c.number, asDefault)
+                                        }
+                                        models = null
+                                    }
+                                }
+                                .padding(4.dp, 9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    c.name,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (c.current) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurface,
+                                )
+                                Text(
+                                    c.desc,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.outline,
+                                    maxLines = 2,
+                                )
+                            }
+                            if (c.current) Text("✓", color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Row(
+                        Modifier.fillMaxWidth().clickable { asDefault = !asDefault }.padding(4.dp, 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(if (asDefault) "☑" else "☐", color = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            t("同时设为默认（以后新开的会话都用它）"),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text(
+                        t("不勾的话只换这个会话，别的会话和默认都不动。"),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                androidx.compose.material3.TextButton({
+                    val s0 = ssh
+                    scope.launch { s0?.let { app.yxi.agent.Model.cancel(it, sessionName) } }
+                    models = null
+                }) { Text(t("算了")) }
+            },
+        )
     }
 
     // 附件图片放大看。⚠️ 读的是**手机本地**那份（[Attachments.Staged.localUri]）——
