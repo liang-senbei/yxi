@@ -20,6 +20,32 @@ class QueuedTest {
         assertTrue(q[0].text.contains("时间复杂度"))
     }
 
+    @Test fun 斜杠命令出队之后气泡要消失() {
+        // ⚠️ 真事：用户打错成 `/modle` 排进队里，气泡**永远挂着**。
+        // 转录里它只有 enqueue + dequeue：
+        //   · 没有 remove
+        //   · dequeue **不带 content**（实测 1094 条一条都没有）
+        //   · 而且斜杠命令被本地消化，**永远不会作为 user 消息出现**
+        //     → #76 那个「出现过就算说过」的兜底也救不了它
+        // 所以必须按先进先出弹队头。
+        val items = Transcript.parse(sequenceOf(ENQUEUE_SLASH, DEQUEUE))
+        assertEquals("出队了就不该还挂着：" + items, 0, items.filterIsInstance<ChatItem.Queued>().size)
+    }
+
+    @Test fun 出队是先进先出() {
+        // 排两条，只出一条 —— 走的必须是**队头**那条
+        val items = Transcript.parse(sequenceOf(ENQUEUE1, ENQUEUE2, DEQUEUE))
+        val q = items.filterIsInstance<ChatItem.Queued>()
+        assertEquals(1, q.size)
+        assertTrue("留下的应该是后排那条：" + q[0].text, q[0].text.contains("更快的写法"))
+    }
+
+    @Test fun 同一句话排两次不能被合成一条() {
+        // ⚠️ 原来用的是 Set，两条一模一样的排队会被去重掉 —— 那是真的丢消息
+        val items = Transcript.parse(sequenceOf(ENQUEUE1, ENQUEUE1))
+        assertEquals("两条都得在：" + items, 2, items.filterIsInstance<ChatItem.Queued>().size)
+    }
+
     @Test fun 被收回输入框之后就不再是排队中() {
         // ⚠️ `popAll` 是在真会话上按 `Up` 实测出来的第四种 operation
         //（TUI 脚注：Press up to edit queued messages）。手机上的「收回改一改」走的就是它。
@@ -70,6 +96,9 @@ class QueuedTest {
     private companion object {
         const val ENQUEUE1 = "{\"type\":\"queue-operation\",\"operation\":\"enqueue\",\"timestamp\":\"2026-08-23T08:17:48.663Z\",\"sessionId\":\"459efa19-5e8f-4894-8f9a-e07010d9e04c\",\"content\":\"排队的第一条：顺便说说时间复杂度\"}"
         const val ENQUEUE2 = "{\"type\":\"queue-operation\",\"operation\":\"enqueue\",\"timestamp\":\"2026-08-23T08:17:50.686Z\",\"sessionId\":\"459efa19-5e8f-4894-8f9a-e07010d9e04c\",\"content\":\"排队的第二条：再给个更快的写法\"}"
+        // ⚠️ 下面两条是 2026-08-24 从真转录里原样抠的（打错的 `/modle` 那次）
+        const val ENQUEUE_SLASH = "{\"type\":\"queue-operation\",\"operation\":\"enqueue\",\"timestamp\":\"2026-08-24T09:12:00.000Z\",\"sessionId\":\"x\",\"content\":\"/modle\"}"
+        const val DEQUEUE = "{\"type\":\"queue-operation\",\"operation\":\"dequeue\",\"timestamp\":\"2026-08-24T09:12:01.000Z\",\"sessionId\":\"x\"}"
         const val REMOVE1 = "{\"type\":\"queue-operation\",\"operation\":\"remove\",\"timestamp\":\"2026-08-23T08:19:44.145Z\",\"sessionId\":\"459efa19-5e8f-4894-8f9a-e07010d9e04c\",\"content\":\"排队的第一条：顺便说说时间复杂度\"}"
         // ⚠️ 下面两条是 2026-08-24 在真会话上按 `Up` 抓下来的原样，不是编的
         const val POPALL1 = "{\"type\":\"queue-operation\",\"operation\":\"popAll\",\"timestamp\":\"2026-08-24T01:45:50.000Z\",\"sessionId\":\"12d150e1-4e72-4ef7-84ef-2836b5c816a9\",\"content\":\"排队的第一条：顺便说说时间复杂度\"}"

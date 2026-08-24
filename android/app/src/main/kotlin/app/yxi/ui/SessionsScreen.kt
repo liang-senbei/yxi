@@ -77,6 +77,8 @@ fun SessionsScreen(
     /** 真订阅额度。⚠️ 只在**点一下**的时候去问 —— 见下面 `askQuota` 的注释 */
     var quota by remember(host.id) { mutableStateOf<app.yxi.agent.Quota.Q?>(null) }
     var quotaBusy by remember(host.id) { mutableStateOf(false) }
+    // 先把上次查到的画出来 —— 点之前也有东西看，右边会写着「几小时前」
+    LaunchedEffect(host.id) { quota = QuotaCache.get(ctx, host.id)?.first }
     var sftp by remember(host.id) { mutableStateOf<app.yxi.ssh.Sftp?>(null) }
     var update by remember(host.id) { mutableStateOf<app.yxi.agent.Update?>(null) }
     // 列表 / 悬浮排列。⚠️ 两者**并存**不是替代 —— 悬浮好看但同屏信息量少三分之一，
@@ -204,6 +206,9 @@ fun SessionsScreen(
                     quota = order.firstNotNullOfOrNull { sess ->
                         app.yxi.ssh.catching { app.yxi.agent.Quota.probe(s0, sess.name) }.getOrNull()
                     }
+                    // ⚠️ **查到就落盘**：额度是「点一下才查」的，不缓存的话
+                    // 主机页永远是空的（用户的原话：「主机里面的服务器还是没有标清楚」）
+                    quota?.let { QuotaCache.put(ctx, host.id, it) }
                     if (quota == null) status = t("没有闲着的会话可以借来查额度 —— 等它忙完再点")
                     quotaBusy = false
                 }

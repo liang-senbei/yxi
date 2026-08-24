@@ -64,8 +64,11 @@ private fun QuotaLine(label: String, pct: Int?, note: String) {
                         .background(if (pct > 85) Amber else Teal, Pill)
                 )
             }
+            // ⚠️ **「已用」和「剩」都要写出来。** 只给一个百分比的话，
+            // 读的人得自己在脑子里做减法 —— 而这个数是用来决定「今天还能不能开大活」的，
+            // 别让人算。用户的原话：「没有标清楚用了多少还剩多少」。
             Text(
-                "$pct%",
+                t("已用 %d%% · 剩 %d%%").format(pct, 100 - pct),
                 style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
                 color = if (pct > 85) Amber else OnSurface,
             )
@@ -78,9 +81,78 @@ private fun QuotaLine(label: String, pct: Int?, note: String) {
     }
 }
 
+/**
+ * 主机行上的一档额度：`5 小时  ██░░░░  已用 10% · 剩 90%   6:50pm 重置`。
+ *
+ * ⚠️ **「已用」和「剩」都写出来。** 这个数是用来决定「今天还能不能开大活」的，
+ * 只给一个百分比等于让人自己做减法。
+ */
+@Composable
+private fun MiniQuota(label: String, pct: Int, resets: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = Muted, modifier = Modifier.width(52.dp))
+        Box(Modifier.weight(1f).height(4.dp).background(SurfaceContainerHigh, Pill)) {
+            Box(
+                Modifier.fillMaxWidth(pct / 100f).height(4.dp)
+                    .background(if (pct > 85) Amber else Teal, Pill)
+            )
+        }
+        Text(
+            t("已用 %d%% · 剩 %d%%").format(pct, 100 - pct),
+            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+            color = if (pct > 85) Amber else OnSurfaceVariant,
+        )
+    }
+    if (resets.isNotBlank()) {
+        Text(
+            "        " + resets + t(" 重置"),
+            style = MaterialTheme.typography.labelSmall, color = Dim, maxLines = 1,
+        )
+    }
+}
+
+/**
+ * 真额度的缓存。**跟 [UsageCache] 一个套路，但存的是完全不同的东西**
+ * （那个是本地日志算出来的花费，这个是订阅配额，见 [app.yxi.agent.Quota]）。
+ *
+ * ⚠️ **必须落盘。** 额度是「点一下才去查」的，不缓存的话主机页永远是空的 ——
+ * 用户的原话就是「主机里面的服务器还是没有标清楚」。
+ */
+object QuotaCache {
+    private fun p(ctx: Context) = ctx.getSharedPreferences("yxi", Context.MODE_PRIVATE)
+
+    fun put(ctx: Context, hostId: String, q: app.yxi.agent.Quota.Q) {
+        val o = JSONObject()
+            .put("s", q.sessionPct).put("sr", q.sessionResets)
+            .put("w", q.weekPct).put("wr", q.weekResets)
+            .put("at", System.currentTimeMillis())
+        p(ctx).edit().putString("quota:$hostId", o.toString()).apply()
+    }
+
+    /** @return (额度, 距今多少分钟)；没缓存返回 null */
+    fun get(ctx: Context, hostId: String): Pair<app.yxi.agent.Quota.Q, Long>? = runCatching {
+        val o = JSONObject(p(ctx).getString("quota:$hostId", null) ?: return null)
+        val age = (System.currentTimeMillis() - o.optLong("at")) / 60_000
+        app.yxi.agent.Quota.Q(
+            o.optInt("s"), o.optString("sr"), o.optInt("w"), o.optString("wr"),
+        ) to age
+    }.getOrNull()
+}
+
 /** 主机列表上的一条细线。**没有数据就返回不画任何东西** —— 调用方不用判断。 */
 @Composable
 fun UsageStrip(ctx: Context, hostId: String) {
+    // 额度两档先画 —— 这是用户真正想在主机列表上看到的东西
+    QuotaCache.get(ctx, hostId)?.let { (q, qage) ->
+        Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            MiniQuota(t("5 小时"), q.sessionPct, q.sessionResets)
+            MiniQuota(t("本周"), q.weekPct, q.weekResets)
+            Text(
+                if (qage < 60) t("%d 分钟前查的").format(qage) else t("%d 小时前查的").format(qage / 60),
+                style = MaterialTheme.typography.labelSmall, color = Dim,
+            )
+        }
+    }
     val (u, age) = UsageCache.get(ctx, hostId) ?: return
     Row(
         Modifier.fillMaxWidth().padding(top = 8.dp),

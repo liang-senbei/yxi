@@ -131,7 +131,10 @@ object Transcript {
     class Incremental {
         private val out = ArrayList<ChatItem>()
         private val calls = HashMap<String, Int>()          // tool_use_id → out 里的下标
-        private val queued = LinkedHashSet<String>()        // 还排着队的输入，出队就删
+        // ⚠️ **有序 List 不是 Set。** 队列就是队列：`dequeue` 不带 content，
+        // 只能按**先进先出**弹队头，所以顺序是判据的一部分。
+        // 用 Set 还会把「同一句话排了两次」合成一条，那是真的丢消息。
+        private val queued = ArrayList<String>()
         private val said = HashSet<String>()                // 已经作为用户消息出现过的原文
 
         /** 最后一条 assistant 消息报的上下文用量。⚠️ 顺带解析，**不额外跑一趟服务器**。 */
@@ -145,6 +148,7 @@ object Transcript {
 
         /** 当前快照。排队的挂在最后 —— 它们还没进对话，位置就在「此刻」。 */
         fun snapshot(): List<ChatItem> = out + queued.asSequence()
+            .filter { it.isNotBlank() }              // 老格式的空占位不显示
             .filterNot { it.trim() in said }
             .mapIndexed { i, t ->
                 // ⚠️ **排着队的也可能不是用户说的话。** 队友/子 agent 的消息是通过
@@ -165,7 +169,7 @@ object Transcript {
         lines: Sequence<String>,
         out: ArrayList<ChatItem>,
         calls: HashMap<String, Int>,
-        queued: LinkedHashSet<String>,
+        queued: ArrayList<String>,
         said: HashSet<String>,
         onCtx: (Ctx) -> Unit = {},
     ) {
@@ -191,9 +195,20 @@ object Transcript {
             // 处理之后才算进了对话，所以那时候才当普通用户消息发出去。
             if (type == "queue-operation") {
                 val c = d.optString("content")
-                if (c.isNotBlank()) when (d.optString("operation")) {
+                when (d.optString("operation")) {
+                    // ⚠️ **空 content 也要占个位**（老格式的 enqueue 就没有 content）——
+                    // 不占位的话下面 dequeue 弹队头会弹错人。展示时再把空的滤掉。
                     "enqueue" -> queued += c
-                    "remove", "popAll" -> queued.remove(c)
+                    // 带 content 的，按内容精确删
+                    "remove", "popAll" -> if (c.isNotBlank()) queued.remove(c) else queued.removeFirstOrNull()
+                    // ⚠️ **`dequeue` 从来不带 content**（实测 1094 条，一条都没有）。
+                    // 所以只能按先进先出弹队头 —— 这也正是队列本来的语义。
+                    //
+                    // ⚠️ 漏掉这一支的后果是**排队气泡永远不消失**：
+                    // 斜杠命令（比如打错的 `/modle`）被本地消化掉，
+                    // 既不写 remove、也**永远不会作为 user 消息出现**，
+                    // 于是 #76 那个「出现过就算说过」的兜底也救不了它。
+                    "dequeue" -> queued.removeFirstOrNull()
                 }
                 return@forEach
             }

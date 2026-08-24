@@ -304,5 +304,10 @@ internal object En {
         "不勾的话只换这个会话，别的会话和默认都不动。" to "Unchecked, this changes only this session — other sessions and the default stay put.",
         "界面风格" to "Look",
         "⚠️ 终端永远是深底 —— 彩色输出在浅底上读不了。所以浅色风格下切到终端会亮暗跳一下。" to "⚠️ The terminal stays dark — coloured output is unreadable on a light background. So on the light look, switching to the terminal jumps in brightness.",
+        "已用 %d%% · 剩 %d%%" to "%d%% used · %d%% left",
+        "5 小时" to "5-hour",
+        "本周" to "Week",
+        "%d 分钟前查的" to "checked %dm ago",
+        "%d 小时前查的" to "checked %dh ago",
     )
 }
