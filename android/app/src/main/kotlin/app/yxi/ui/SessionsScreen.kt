@@ -5,6 +5,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -69,7 +73,6 @@ fun SessionsScreen(
     // 存在这里的话，切回来是空列表，要等一次往返才有内容，
     // 中间那一下就是用户说的「骨架屏闪光」。现在由 [app.yxi.MainActivity] 持有。
     var status by remember { mutableStateOf(if (sessions.isEmpty()) t("连接中…") else "") }
-    var sendTo by remember { mutableStateOf<Session?>(null) }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val ctx = androidx.compose.ui.platform.LocalContext.current
     var sftp by remember(host.id) { mutableStateOf<app.yxi.ssh.Sftp?>(null) }
@@ -139,7 +142,7 @@ fun SessionsScreen(
                     }
                 }
                 Text(
-                    if (status.isEmpty()) t("%d 个会话 · 点读对话 · 长按发消息").format(sessions.size) else status,
+                    if (status.isEmpty()) t("%d 个会话 · 点一下进对话").format(sessions.size) else status,
                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                     color = MaterialTheme.colorScheme.outline,
                     maxLines = 1,   // 窄屏上会折成两行把下面顶下去
@@ -233,17 +236,30 @@ fun SessionsScreen(
         ) {
             // ⚠️ 置顶的**从原来的组里拿出来**单独放最上面。留在原组只加个图标的话，
             // 会话一多（实测 22 个）照样要翻半天才找到 —— 那就等于没置顶
-            val tops = sessions.filter { it.name in pinned }
+            // ⚠️ 置顶按**保存的次序**排（不是 sessions 的顺序）—— 拖动排的就是它。
+            // 会话没了（被杀）的置顶名跳过，但保留在存储里，回来还在原位。
+            val byName = sessions.associateBy { it.name }
+            val tops = pinned.mapNotNull { byName[it] }
             if (tops.isNotEmpty()) {
                 item(key = "h-pinned") { PinnedHeader(tops.size) }
-                items(tops.size, key = { "p-" + tops[it].name }) { i ->
-                    SessionCard(
-                        tops[i], pinned = true,
-                        modifier = Modifier.animateItem(),
-                        onOpen = { onOpenChat(tops[i].name, tops[i].cwd) },
-                        onTerminal = { onOpenTerminal(tops[i].name, tops[i].cwd) },
-                        onSend = { sendTo = tops[i] },
-                        onPin = { pinned = pinned - tops[i].name; Pinned.set(ctx, host.id, pinned) },
+                item(key = "pinned-group") {
+                    ReorderablePinned(
+                        tops = tops,
+                        onOpen = { onOpenChat(it.name, it.cwd) },
+                        onUnpin = { pinned = pinned - it.name; Pinned.set(ctx, host.id, pinned) },
+                        onReorder = { from, to ->
+                            // 在**完整的 pinned 列表**里挪（tops 可能因为会话被杀而比 pinned 短）
+                            val names = tops.map { it.name }
+                            val moved = names[from]
+                            val rest = pinned.toMutableList()
+                            rest.remove(moved)
+                            // 放到目标那张卡在完整列表里的位置
+                            val anchor = names[to]
+                            val at = rest.indexOf(anchor).coerceAtLeast(0)
+                            rest.add(if (to > from) at + 1 else at, moved)
+                            pinned = rest
+                            Pinned.set(ctx, host.id, pinned)
+                        },
                     )
                 }
             }
@@ -257,10 +273,8 @@ fun SessionsScreen(
                         SessionCard(
                             group[i],
                             modifier = Modifier.animateItem(),
-                            // 点卡片 = 对话模式（主界面）；「开终端」按钮才去终端
+                            // 点卡片 = 进对话（在里面回它一句）
                             onOpen = { onOpenChat(group[i].name, group[i].cwd) },
-                            onTerminal = { onOpenTerminal(group[i].name, group[i].cwd) },
-                            onSend = { sendTo = group[i] },
                             onPin = { pinned = pinned + group[i].name; Pinned.set(ctx, host.id, pinned) },
                         )
                     }
@@ -279,12 +293,6 @@ fun SessionsScreen(
         )
     }
 
-    sendTo?.let { target ->
-        SendSheet(target, onSend = { text ->
-            scope.launch { ssh?.let { SessionProbe.send(it, target.name, text) } }
-            sendTo = null
-        }, onDismiss = { sendTo = null })
-    }
 }
 
 private fun dot(st: SessionState) = when (st) {
@@ -332,23 +340,111 @@ private fun GroupHeader(st: SessionState, n: Int) {
 }
 
 @OptIn(ExperimentalFoundationApi::class)
+/**
+ * 置顶组 —— **长按拎起来、上下拖动改次序**。
+ *
+ * ⚠️ 为什么不塞进外面那个 `LazyColumn` 直接拖：跨 lazy item 拖动要自己算每项的
+ * 屏幕位置、还要处理边缘自动滚动，很脆。置顶通常就三五个、固定在最上面，
+ * 用一个**普通 Column** 装，拖动只在这几张卡之间发生，简单又稳。
+ *
+ * ⚠️ **轻点 = 进对话（去回它），长按 = 拖排序** —— 这就是「回复」和「排序」的区分。
+ * `detectDragGesturesAfterLongPress` 只在长按之后才接管手势，轻点漏给底下的
+ * `clickable`，两者不打架。
+ *
+ * 换位靠**累计位移 / 卡高**：拖过一张卡的高度就跟邻居换一次，边拖边换、松手落定。
+ */
+@Composable
+private fun ReorderablePinned(
+    tops: List<Session>,
+    onOpen: (Session) -> Unit,
+    onUnpin: (Session) -> Unit,
+    onReorder: (from: Int, to: Int) -> Unit,
+) {
+    // 拖动中：哪一张被拎着、当前累计的竖直位移
+    var dragIndex by remember { mutableStateOf(-1) }
+    var dragBy by remember { mutableFloatStateOf(0f) }
+    // 卡高（含卡间距）——换位阈值。测量到就更新，测不到用个合理默认
+    var slot by remember { mutableFloatStateOf(0f) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    // ⚠️ **拖动的手势协程活得比一次重组久**（`pointerInput(Unit)` 只启一次）。
+    // 每换一次位，父层重组、tops 变成新列表 —— 但协程闭包捕获的是**旧的** tops/回调，
+    // 于是第二次换位用的还是旧数据，拖再远也只动一格（实测踩过）。
+    // `rememberUpdatedState` 让闭包每次都读到最新的，多格连拖才对。
+    val curTops by rememberUpdatedState(tops)
+    val curReorder by rememberUpdatedState(onReorder)
+
+    Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+        tops.forEachIndexed { i, sess ->
+            val isDragged = i == dragIndex
+            SessionCard(
+                sess, pinned = true,
+                dragging = isDragged,
+                onOpen = { onOpen(sess) },
+                onPin = { onUnpin(sess) },
+                modifier = Modifier
+                    .onSizeChanged { with(density) { slot = it.height.toFloat() + 9.dp.toPx() } }
+                    // 被拎起来的那张跟着手指走
+                    .then(
+                        if (isDragged)
+                            Modifier.graphicsLayer {
+                                translationY = dragBy
+                                alpha = 0.92f
+                            }
+                        else Modifier
+                    )
+                    // ⚠️ key 用 `i` 不用 `tops.size`：换位不该重启手势（会打断拖动），
+                    // 但每张卡要绑到自己那一格的 onDragStart。用 cur* 读最新数据，见上面注释。
+                    .pointerInput(i) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = { dragIndex = i; dragBy = 0f },
+                            onDragEnd = { dragIndex = -1; dragBy = 0f },
+                            onDragCancel = { dragIndex = -1; dragBy = 0f },
+                        ) { change, delta ->
+                            change.consume()
+                            if (dragIndex >= 0 && slot > 0f) {
+                                dragBy += delta.y
+                                // 拖过一整格 → 跟那个方向的邻居换位。while 允许一次回调跨多格。
+                                while (dragBy >= slot && dragIndex < curTops.lastIndex) {
+                                    curReorder(dragIndex, dragIndex + 1)
+                                    dragIndex += 1; dragBy -= slot
+                                }
+                                while (dragBy <= -slot && dragIndex > 0) {
+                                    curReorder(dragIndex, dragIndex - 1)
+                                    dragIndex -= 1; dragBy += slot
+                                }
+                            }
+                        }
+                    },
+            )
+        }
+        Text(
+            t("长按卡片拖动可以改置顶次序"),
+            Modifier.padding(6.dp, 2.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.outline,
+        )
+    }
+}
+
 @Composable
 private fun SessionCard(
     s: Session,
+    /** 点一下 = 进对话（在里面回它）。**回复不再有单独按钮/长按**（用户要求，0.8.5）。 */
     onOpen: () -> Unit,
-    onTerminal: () -> Unit,
-    onSend: () -> Unit,
     pinned: Boolean = false,
     onPin: () -> Unit = {},
+    /** 拖动排序时给卡片加一层「被拎起来」的样子（抬高 + 微微透明）。 */
+    dragging: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
-    val needs = s.state == SessionState.NeedsYou
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         shape = MaterialTheme.shapes.large,
-        // 点=开终端，**长按=发消息**。发消息对任意会话都可用，
-        // 不只是「等你」那组——只是那组把按钮摆出来了而已
-        modifier = modifier.fillMaxWidth().combinedClickable(onClick = onOpen, onLongClick = onSend),
+        shadowElevation = if (dragging) 8.dp else 0.dp,
+        // ⚠️ **长按不再在这里绑发消息** —— 长按现在归「拖动排序」，由外面的 Modifier 接管。
+        // 点一下还是进对话（在里面回它一句），这就是「回复」和「排序」的区分：
+        // 轻点开对话去回，长按拎起来拖排序。
+        modifier = modifier.fillMaxWidth().clickable(onClick = onOpen),
     ) {
         Column(Modifier.padding(16.dp, 14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -397,47 +493,10 @@ private fun SessionCard(
                 color = MaterialTheme.colorScheme.outline,
                 maxLines = 1,
             )
-            // 只有「等你」那组带按钮 —— 其余安静
-            if (needs) {
-                Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onSend, shape = Pill, modifier = Modifier.weight(1f).height(44.dp)) { Text(t("回它一句")) }
-                    OutlinedButton(onTerminal, shape = Pill, modifier = Modifier.weight(1f).height(44.dp)) { Text(t("开终端")) }
-                }
-            }
         }
     }
 }
 
-/** 不进终端就能给任意会话发一句话 —— 这是我们比 Moshi 强的地方（PRD §1.6）。 */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun SendSheet(target: Session, onSend: (String) -> Unit, onDismiss: () -> Unit) {
-    var text by remember { mutableStateOf("") }
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
-        Column(
-            Modifier.padding(18.dp, 0.dp, 18.dp, 28.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(t("发给 %s").format(target.short), style = MaterialTheme.typography.titleLarge)
-            Text(
-                t("不用先 attach —— 直接送进那个会话（tmux send-keys）。"),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.outline,
-            )
-            OutlinedTextField(
-                text, { text = it },
-                placeholder = { Text(t("说一句…")) },
-                shape = MaterialTheme.shapes.medium,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 96.dp),
-            )
-            Button(
-                { if (text.isNotBlank()) onSend(text.trim()) },
-                enabled = text.isNotBlank(),
-                shape = Pill,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-            ) { Text(t("发送")) }
-        }
-    }
-}
+
 
 

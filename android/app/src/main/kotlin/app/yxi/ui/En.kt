@@ -321,5 +321,7 @@ internal object En {
         "%s（versionCode %d）" to "%s (versionCode %d)",
         "没有空闲会话可借来查额度" to "No idle session to borrow for the quota check",
         "查不到额度 —— 这台机器上可能没有 claude" to "No quota — this host may not have claude",
+        "%d 个会话 · 点一下进对话" to "%d sessions · tap to open",
+        "长按卡片拖动可以改置顶次序" to "Long-press and drag to reorder pins",
     )
 }

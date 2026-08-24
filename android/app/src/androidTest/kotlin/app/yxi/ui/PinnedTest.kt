@@ -16,18 +16,18 @@ import org.junit.Test
 class PinnedTest {
 
     @Test fun 开着的时候只有置顶的会响() {
-        val pins = setOf("cc-Yxi", "cc-mail")
+        val pins = listOf("cc-Yxi", "cc-mail")
         assertTrue(Pinned.shouldNotify(true, pins, "cc-Yxi"))
         assertFalse(Pinned.shouldNotify(true, pins, "cc-anchor"))
     }
 
     @Test fun 关掉之后全都响() {
-        assertTrue(Pinned.shouldNotify(false, setOf("cc-Yxi"), "cc-anchor"))
+        assertTrue(Pinned.shouldNotify(false, listOf("cc-Yxi"), "cc-anchor"))
     }
 
     @Test fun 一条都没置顶时不生效() {
         // ⚠️ 故意的：否则新装的人什么通知都收不到，而设置页两个绿勾都亮着（#91）
-        assertTrue(Pinned.shouldNotify(true, emptySet(), "cc-anchor"))
+        assertTrue(Pinned.shouldNotify(true, emptyList(), "cc-anchor"))
     }
 
     @Test fun 置顶存的和事件里的必须是同一种形式() {
@@ -48,7 +48,7 @@ class PinnedTest {
 
         assertTrue(
             "置顶了 cc-Yxi，cc-Yxi 的事件就必须响 —— 对不上说明两边前缀形式不一致",
-            Pinned.shouldNotify(true, setOf(s.name), eventSession),
+            Pinned.shouldNotify(true, listOf(s.name), eventSession),
         )
     }
 }
