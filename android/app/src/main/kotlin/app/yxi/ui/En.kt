@@ -309,5 +309,8 @@ internal object En {
         "本周" to "Week",
         "%d 分钟前查的" to "checked %dm ago",
         "%d 小时前查的" to "checked %dh ago",
+        "这个文件读不出来 —— 换一张试试" to "Can't read this file — try another",
+        "开不了 SFTP 通道" to "Couldn't open an SFTP channel",
+        "传失败：%s" to "Upload failed: %s",
     )
 }

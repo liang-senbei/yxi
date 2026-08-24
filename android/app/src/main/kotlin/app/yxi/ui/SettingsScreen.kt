@@ -66,10 +66,10 @@ fun SettingsScreen(
         modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text(t("设置"), style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(18.dp, 14.dp, 18.dp, 4.dp))
+        Text(t("设置"), style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(18.dp, 14.dp, 18.dp, 4.dp))
 
         // ── 版本 ───────────────────────────────────────────────────
-        Card(t("这个 App")) {
+        Card(t("这个 App"), Glyph.Info) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(
                     Modifier.weight(1f).clickable {
@@ -125,7 +125,7 @@ fun SettingsScreen(
         }
 
         // ── 公钥 ───────────────────────────────────────────────────
-        Card(t("这台手机的公钥")) {
+        Card(t("这台手机的公钥"), Glyph.Key) {
             Hint2(t("贴进目标机的 ~/.ssh/authorized_keys 就能免密连。撤销 = 删掉那一行。"))
             Button({ showKey = true }, shape = Pill, modifier = Modifier.fillMaxWidth().height(44.dp)) {
                 Text(t("查看 / 复制 / 换一把"))
@@ -133,7 +133,7 @@ fun SettingsScreen(
         }
 
         // ── 后台放行 ────────────────────────────────────────────────
-        Card(t("手机主动响")) {
+        Card(t("手机主动响"), Glyph.Bell) {
             val battery = ignoringBattery(ctx)
             val notif = notificationsOn(ctx)
             // ⚠️ **这一行是后加的，因为原来那两行在骗人。**
@@ -193,7 +193,7 @@ fun SettingsScreen(
             }
         }
 
-        Card(t("界面风格")) {
+        Card(t("界面风格"), Glyph.Palette) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Skin.Style.entries.forEach { st ->
                     val on = Skin.style == st
@@ -216,7 +216,7 @@ fun SettingsScreen(
 
         // ⚠️ 这一栏**不翻译**：正在看不懂当前语言的人，得能认出另一个选项。
         // 「简体中文 / English」两个名字都用它们自己的语言写，谁都找得到自己那个。
-        Card(t("语言")) {
+        Card(t("语言"), Glyph.Globe) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 I18n.Lang.entries.forEach { l ->
                     val on = I18n.lang == l
@@ -238,7 +238,7 @@ fun SettingsScreen(
 
         if (dev) DevCard(ctx, host, store, keys, connectError)
 
-        Card(t("关于")) {
+        Card(t("关于"), Glyph.Info) {
             Hint2(
                 t("Yxi —— 手机上的 Claude Code 指挥台。\n") +
                     t("全部走 SSH：不开新端口、不要证书、不经过任何第三方服务器。\n") +
@@ -289,7 +289,7 @@ private fun DevCard(ctx: Context, host: Host?, store: HostStore, keys: KeyManage
     var report by remember { mutableStateOf("") }
     var copied by remember { mutableStateOf(false) }
 
-    Card(t("开发者")) {
+    Card(t("开发者"), Glyph.Wrench) {
         Hint2(
             t("诊断会把整条连接路径一步步走一遍：解析地址 → 连 TCP → SSH 招呼 → 认证，") +
                 t("再挨个试同一个 IP 上的几个端口。里面不含密码和私钥，可以直接贴出来。\n") +
@@ -331,15 +331,29 @@ private fun DevCard(ctx: Context, host: Host?, store: HostStore, keys: KeyManage
     }
 }
 
+/**
+ * 设置里的一节。**照 Gemini 的样子做**：左边一个线性引导图标，右边一段内容，
+ * 标题更粗、留白更松。
+ *
+ * ⚠️ 卡片底色用得很淡（`SurfaceContainerLow`）—— Gemini 靠留白和图标分节，
+ * 不靠重描边。深色主题下它就是比页面底稍亮一点的一块，浅色主题下是白卡。
+ */
 @Composable
-private fun Card(title: String, content: @Composable ColumnScope.() -> Unit) {
+private fun Card(title: String, icon: String? = null, content: @Composable ColumnScope.() -> Unit) {
     Surface(
         color = SurfaceContainerLow, shape = MaterialTheme.shapes.large,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp),
     ) {
-        Column(Modifier.padding(16.dp, 14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-            Text(title, style = MaterialTheme.typography.labelLarge, color = Muted)
-            content()
+        Row(Modifier.padding(18.dp, 16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            if (icon != null) {
+                GlyphIcon(icon, Muted, 22.dp)
+            } else {
+                Spacer(Modifier.width(22.dp))
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(title, style = MaterialTheme.typography.titleSmall, color = OnSurface)
+                content()
+            }
         }
     }
 }

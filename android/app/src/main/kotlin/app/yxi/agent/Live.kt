@@ -45,6 +45,18 @@ data class Live(
          */
         private val STATUS = Regex("""^(\S) ([A-Za-z\u00C0-\u024F]+….*)$""")
 
+        /**
+         * **任何**一条状态行 —— 进行中和收尾两种形态都算。
+         *
+         * 进行中：`✽ Gusting… (1m 2s · ↓ 1.7k tokens)`
+         * 收尾了：`✻ Baked for 13s`
+         *
+         * ⚠️ 分组 2 是分隔符：`…` 表示还在跑，` for ` 表示跑完了。
+         * **屏幕上最后一条状态行属于哪种，就是此刻的状态** —— 这是最直接的判据。
+         */
+        private val STATUS_ANY =
+            Regex("""^(\S) ([A-Za-z\u00C0-\u024F]+)(…| for )(.*)$""")
+
         /** @param screen `tmux capture-pane -p` 的原样输出 */
         fun parse(screen: String): Live {
             val lines = screen.split('\n').map { it.trimEnd() }
@@ -55,13 +67,24 @@ data class Live(
             val boxTop = dividers.getOrNull(dividers.size - 2) ?: -1
             val boxBottom = dividers.lastOrNull() ?: lines.size
 
-            val busy = "esc to interrupt" in lines.drop(boxBottom + 1).joinToString("\n")
             val above = if (boxTop >= 0) lines.take(boxTop) else lines
 
-            // 取**最后一条**：屏幕上留着历次的 `✻ Baked for 13s`，只有最后那条是此刻的
-            val status = above.asReversed().firstNotNullOfOrNull { l ->
-                STATUS.matchEntire(l)?.groupValues?.get(2)?.trim()
-            }?.takeIf { busy }
+            // ⚠️ **不能只看脚注里有没有 `esc to interrupt`。**
+            // 手机上的终端很窄，脚注会被截断成 `… · e…` —— 那几个字根本没露出来，
+            // 于是「在忙」永远判成 false，对话里的状态条整个消失
+            // （而终端里明明写着 `Cogitating…`）。用户报的就是这个。
+            //
+            // **真正的判据是屏幕上最后一条状态行属于哪种形态**：
+            // `Gusting…` = 还在跑，`Baked for 13s` = 跑完了。
+            // 脚注仍然认 —— 宽屏时它是个额外的确证，但不再是唯一依据。
+            val footerBusy = "esc to interrupt" in lines.drop(boxBottom + 1).joinToString("\n")
+            val last = above.asReversed().firstNotNullOfOrNull { STATUS_ANY.matchEntire(it) }
+            val running = last != null && last.groupValues[3] == "…"
+            val busy = footerBusy || running
+
+            // ⚠️ 只有「还在跑」那一条才给文案。收尾那条（`Baked for 13s`）不是状态，是结果。
+            val status = last?.takeIf { running }
+                ?.let { (it.groupValues[2] + it.groupValues[3] + it.groupValues[4]).trim() }
 
             return Live(busy, status)
         }

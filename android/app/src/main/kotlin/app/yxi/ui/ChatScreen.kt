@@ -103,25 +103,60 @@ fun ChatScreen(
         androidx.activity.result.contract.ActivityResultContracts.GetContent()
     ) { uri ->
         val u = uri ?: return@rememberLauncherForActivityResult
-        val s = sftp ?: return@rememberLauncherForActivityResult
+        val s0 = ssh ?: return@rememberLauncherForActivityResult
         scope.launch {
             uploading = true
-            runCatching {
-                val cr = ctx.contentResolver
-                val bytes = withContext(Dispatchers.IO) {
-                    cr.openInputStream(u)?.use { it.readBytes() } ?: ByteArray(0)
+            // ⚠️ **先把字节读进内存，再谈传。** 读文件本身可能失败（授权过期、文件没了），
+            // 那跟「传失败」是两码事，要分开报，否则用户不知道是手机侧还是网络侧的问题。
+            val bytes = withContext(Dispatchers.IO) {
+                app.yxi.ssh.catching {
+                    ctx.contentResolver.openInputStream(u)?.use { it.readBytes() }
+                }.getOrNull()
+            }
+            if (bytes == null || bytes.isEmpty()) {
+                android.widget.Toast.makeText(ctx, t("这个文件读不出来 —— 换一张试试"), android.widget.Toast.LENGTH_LONG).show()
+                uploading = false; return@launch
+            }
+            val cr = ctx.contentResolver
+            val mime = cr.getType(u).orEmpty()
+            val isImage = mime.startsWith("image/")
+            val name = queryName(ctx, u) ?: (if (isImage) "image" else "file")
+            val idx = staged.count { it.isImage == isImage } + 1
+            val stamp = java.text.SimpleDateFormat("MMdd-HHmmss", java.util.Locale.US)
+                .format(java.util.Date())
+
+            // ⚠️ **每次开一条新 SFTP 通道，别复用共享那条。**
+            // 病根就在复用：那条通道空闲久了会被服务器关掉、或上一次操作出错后进了坏状态，
+            // 之后每次 `put` 都失败 —— 而原来的代码**没有 onFailure，失败是静默的**，
+            // 用户只看到「没反应」，于是一点再点（原话：附件上传要好几次才能成功）。
+            // 新通道保证是好的；开一条就一个来回，比起传一整张图可以忽略。
+            //
+            // ⚠️ 还是**试两次**：新通道也可能撞上网络抖动，重开再来一次，
+            // 两次都不行才报错 —— 报出真原因，不再让人瞎点。
+            var lastErr: Throwable? = null
+            var ok: app.yxi.agent.Attachments.Staged? = null
+            repeat(2) { attempt ->
+                if (ok != null) return@repeat
+                val fresh = app.yxi.ssh.catching { s0.openSftp() }.getOrNull()
+                if (fresh == null) { lastErr = IllegalStateException(t("开不了 SFTP 通道")); return@repeat }
+                try {
+                    ok = app.yxi.agent.Attachments.upload(fresh, sessionName, name, bytes, idx, isImage, stamp)
+                        .copy(localUri = u.toString())
+                } catch (e: Throwable) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    lastErr = e
+                } finally {
+                    runCatching { fresh.close() }
                 }
-                val mime = cr.getType(u).orEmpty()
-                val isImage = mime.startsWith("image/")
-                val name = queryName(ctx, u) ?: (if (isImage) "image" else "file")
-                val idx = staged.count { it.isImage == isImage } + 1
-                val stamp = java.text.SimpleDateFormat("MMdd-HHmmss", java.util.Locale.US)
-                    .format(java.util.Date())
-                staged = staged + app.yxi.agent.Attachments.upload(
-                    s, sessionName, name, bytes, idx, isImage, stamp
-                ).copy(localUri = u.toString())
-                // ⚠️ 顺手清一次 3 天前的 —— 不用 cron，不用守护进程
-                ssh?.let { app.yxi.agent.Attachments.sweep(it) }
+            }
+            if (ok != null) {
+                staged = staged + ok!!
+                runCatching { app.yxi.agent.Attachments.sweep(s0) }   // 顺手清 3 天前的
+            } else {
+                android.widget.Toast.makeText(
+                    ctx, t("传失败：%s").format(app.yxi.ssh.Sftp.explain(lastErr ?: RuntimeException())),
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
             }
             uploading = false
         }

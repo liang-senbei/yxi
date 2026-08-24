@@ -1,5 +1,6 @@
 package app.yxi.agent
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -186,5 +187,58 @@ class LiveTest {
 ❯ 用 run_in_background 跑 sleep 45
 ──────────────────────────────────────────────────────
   ⏵⏵ bypass permissions on (shift+tab to cycle) · ←…"""
+    }
+
+    // ── 窄屏脚注被截断（2026-08-24 真机上报的） ──────────────────────
+
+    /** 手机上的终端很窄，脚注被砍成 `· e…` —— `esc to interrupt` 根本没露出来 */
+    private fun narrow(status: String) = listOf(
+        "● 上一条回复",
+        status,
+        "  ◎  Tip: Use /btw to ask a quick side question",
+        "─".repeat(60),
+        "❯ ",
+        "─".repeat(60),
+        "  ⏵⏵ bypass permissions on (shift+tab to cycle) · e…",
+    ).joinToString("\n")
+
+    @Test fun 脚注被截断时也要认出在忙() {
+        // ⚠️ 用户报的就是这个：终端里明明写着 Cogitating…，对话里状态条整个消失。
+        // 病根是「在忙」只认脚注里的 esc to interrupt，而窄屏上那几个字被截掉了。
+        val live = Live.parse(narrow("✽ Gusting… (1m 2s · ↓ 1.7k tokens)"))
+        assertTrue("窄屏也得判成在忙", live.busy)
+        assertEquals("Gusting… (1m 2s · ↓ 1.7k tokens)", live.status)
+    }
+
+    @Test fun 收尾那条不算在忙() {
+        // `Baked for 13s` 是过去式 —— 跑完了，不是状态
+        val live = Live.parse(narrow("✻ Baked for 13s"))
+        assertFalse("跑完了不该还显示在忙", live.busy)
+        assertNull(live.status)
+    }
+
+    @Test fun 只看最后一条状态行() {
+        // ⚠️ 屏幕上留着历次的记录：上面是老的「在跑」，下面是新的「跑完」。
+        // 从后往前找第一条 —— 拿到的必须是「跑完」那条，否则永远显示在忙。
+        val screen = listOf(
+            "✽ Cogitating… (2m 30s · ↓ 9.1k tokens)",
+            "● 中间的回复",
+            "✻ Baked for 13s",
+            "─".repeat(60), "❯ ", "─".repeat(60),
+            "  ⏵⏵ bypass permissions on (shift+tab to cycle) · e…",
+        ).joinToString("\n")
+        assertFalse("最后一条是跑完，就该是不忙", Live.parse(screen).busy)
+    }
+
+    @Test fun 宽屏脚注完整时照样认() {
+        // 宽屏上 esc to interrupt 是露着的，两条判据都成立，结果得一致
+        val wide = listOf(
+            "✶ Quantumizing… (3m 54s · ↓ 1.0k tokens)",
+            "─".repeat(90), "❯ ", "─".repeat(90),
+            "  ⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interrupt · ← for agents",
+        ).joinToString("\n")
+        val live = Live.parse(wide)
+        assertTrue(live.busy)
+        assertEquals("Quantumizing… (3m 54s · ↓ 1.0k tokens)", live.status)
     }
 }

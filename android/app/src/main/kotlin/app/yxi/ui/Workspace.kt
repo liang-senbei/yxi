@@ -248,6 +248,13 @@ fun Workspace(
             if (sessionName != null && generation == 0) runCatching {
                 s.exec(
                     "tmux has-session -t $sessionName 2>/dev/null || tmux new-session -d -s $sessionName; " +
+                        // ⚠️ **关掉这个会话的状态栏。** 手机上它白占一行，而会话名我们顶栏已有
+                        // （那条 `[cc-mail] 0:claude*` 是重复）。用 `-t 会话` 只关 Yxi 开的，别动桌面别的会话。
+                        //
+                        // ⚠️ 这里用**shell 的 `; `** 收尾，起一个**独立的 tmux 调用** ——
+                        // 不能用 tmux 的 `\;` 串进后面那串，否则后面那个 `tmux` 会变成
+                        // set-option 的参数，整条命令失效（状态栏关不掉，实测踩过）。
+                        "tmux set -t $sessionName status off; " +
                         "tmux set -g set-titles on \\; set -g mouse on \\; set -g status-right ''"
                 )
             }
@@ -285,7 +292,10 @@ fun Workspace(
                 withTimeoutOrNull(3_000) {
                     while (System.currentTimeMillis() - lastOutput.get() < 250) delay(60)
                 }
-                sh.write("tmux attach -t $sessionName\n")
+                // ⚠️ **`-d` 不能省。** 用户在桌面也 attach 着同一会话时，tmux 把窗口撑到那个
+                // 宽客户端的尺寸，手机 46 列塞不下 → 整屏折行、状态栏堆成一条条绿条（用户截图）。
+                // `-d` 踢掉别的客户端，手机成唯一客户端 → 窗口缩到手机尺寸 → 不花屏。这正合遥控器定位。
+                sh.write("tmux attach -d -t $sessionName\n")
                 attached = sessionName
             }
         }.onFailure {
