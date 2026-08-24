@@ -59,6 +59,29 @@ class QuotaTest {
         assertNull(Quota.parse(""))
     }
 
+    private fun screen(box: String, footer: String = "  ⏵⏵ bypass permissions on (shift+tab to cycle)") =
+        "● 上一条回复\n\n" + "─".repeat(80) + "\n" + box + "\n" + "─".repeat(80) + "\n" + footer
+
+    @Test fun 输入框空着才肯借来跑() {
+        assertEquals(true, Quota.borrowable(screen("❯ ")))
+    }
+
+    @Test fun 输入框里有草稿就绝不碰() {
+        // ⚠️ 这是唯一会造成真实损失的一步：/usage 接在草稿后面，
+        // 回车就把用户没写完的话连带发出去了
+        assertEquals(false, Quota.borrowable(screen("❯ 我正在写一半的话")))
+    }
+
+    @Test fun 忙着的时候不碰() {
+        // 忙的时候打字会进队列，/usage 会变成一条排队消息
+        assertEquals(false, Quota.borrowable(screen("❯ ", "  ⏵⏵ bypass permissions on · esc to interrupt")))
+    }
+
+    @Test fun 有排队提示也不碰() {
+        // 「Press up to edit queued messages」不是用户打的字，但它出现就说明有排队
+        assertEquals(false, Quota.borrowable(screen("❯ Press up to edit queued messages")))
+    }
+
     @Test fun 只有一半也不认() {
         // 面板还没画完就抓屏了 —— 这时候两段缺一段，整条判为拿不到
         val half = "   Current session\n   █████     10% used\n   Resets 4:59am (UTC)\n"

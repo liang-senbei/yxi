@@ -125,7 +125,7 @@ class MainActivity : ComponentActivity() {
                         // 那两个状态原样留着。后果：**工作区已经开着的时候点通知跳会话，
                         // 界面纹丝不动**（还停在上一个会话、上一个模式）。
                         // 只有从标签页进去（work 从 null 变过来）才碰巧是对的。
-                        androidx.compose.runtime.key(w.host.id, w.session, w.mode) {
+                        androidx.compose.runtime.key(w.host.id, w.session, w.cwd, w.mode) {
                             Workspace(
                                 store, keys, w.host, w.session, w.cwd, w.mode,
                                 preconnected = warm.session,

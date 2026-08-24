@@ -73,7 +73,35 @@ object Quota {
      * 下一次抓屏（看板每 5 秒一次）看到的就是面板，
      * 会话状态会被判错 —— 表现成列表里那台机器无缘无故变「空闲」。
      */
+    /**
+     * 这个会话现在能不能安全地借来跑一次 `/usage`。
+     *
+     * ⚠️ **判据只认一种情况：输入框里除了提示符什么都没有。**
+     * 里面有半截草稿的话，`/usage` 会接在后面，回车就把
+     * 「用户没写完的话 + /usage」整条发出去 —— 那是唯一会造成真实损失的一步。
+     *
+     * ⚠️ **忙着的时候也不碰**：忙的时候打字会进队列，`/usage` 会变成一条排队消息。
+     * 忙的判据里包含「❯ Press up to edit queued messages」这类提示 ——
+     * 那不是用户打的字，但它出现就说明有排队，一样不能碰。
+     * 所以这里**只放行提示符后面完全空白**这一种，宁可少跑一次。
+     */
+    fun borrowable(screen: String): Boolean {
+        if (app.yxi.agent.Live.parse(screen).busy) return false
+        val lines = screen.split('\n').map { it.trimEnd() }
+        // 输入框 = 最后两条横线之间。取里面那条提示符行
+        val dividers = lines.indices.filter { l -> lines[l].trim().let { it.length >= 8 && it.all { c -> c == '─' } } }
+        if (dividers.size < 2) return false
+        val top = dividers[dividers.size - 2]
+        val bottom = dividers.last()
+        val body = lines.subList(top + 1, bottom)
+        if (body.isEmpty()) return false
+        // 只有一行、且是 `❯` 后面全空 —— 多一行都说明里面有东西
+        return body.size == 1 && body[0].trimStart().removePrefix("❯").isBlank()
+    }
+
     suspend fun probe(ssh: SshSession, target: String): Q? {
+        // ⚠️ **动手之前先看一眼**，别把用户没发完的话连带发出去
+        if (!borrowable(ssh.exec("tmux capture-pane -p -t '$target'"))) return null
         ssh.exec("tmux send-keys -t '$target' -l '/usage'")
         ssh.exec("tmux send-keys -t '$target' Enter")
         kotlinx.coroutines.delay(2_500)

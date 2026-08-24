@@ -471,7 +471,7 @@ fun Workspace(
                     )
                 }
                 Mode.Chat -> ChatScreen(
-                    ssh, sftp, sessionName.orEmpty(), cwd,
+                    ssh, sftp, sessionName.orEmpty(), cwd, host.id,
                     onOpenPath = { p -> jumpTo = p; mode = Mode.Files },
                     modifier = Modifier.fillMaxSize(),
                 )

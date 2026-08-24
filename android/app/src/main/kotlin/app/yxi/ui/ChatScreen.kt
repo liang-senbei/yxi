@@ -60,14 +60,30 @@ fun ChatScreen(
     sftp: app.yxi.ssh.Sftp?,
     sessionName: String,
     cwd: String,
+    /** 草稿按主机分开存要用它。见 [Drafts] */
+    hostId: String,
     /** 点了 AI 回复里的文件路径。见 [app.yxi.agent.Linkify] */
     onOpenPath: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
-    var draft by remember { mutableStateOf("") }
     val ctx = androidx.compose.ui.platform.LocalContext.current
+    // ⚠️ **草稿从盘上读回来，不是空串。** 切模式 / 退出去 / App 被杀，打的字都还在。
+    // 这行原来是 `remember { mutableStateOf("") }` —— 切一次终端字就没了（[Drafts] 的注释）。
+    var draft by remember(sessionName) { mutableStateOf(Drafts.get(ctx, hostId, sessionName)) }
     var staged by remember(sessionName) { mutableStateOf<List<app.yxi.agent.Attachments.Staged>>(emptyList()) }
+
+    // ⚠️ **两处都要存**：
+    //   · 打字时防抖存一次 —— 管「App 被系统杀掉」
+    //   · 销毁时立刻存一次 —— 管「切模式 / 退出去」，那一下防抖还没到点
+    // 只写其中一处都会在某种走法下丢字。
+    LaunchedEffect(draft) {
+        delay(600)
+        Drafts.set(ctx, hostId, sessionName, draft)
+    }
+    DisposableEffect(sessionName) {
+        onDispose { Drafts.set(ctx, hostId, sessionName, draft) }
+    }
     var uploading by remember { mutableStateOf(false) }
     /**
      * 这个会话此刻占多少上下文。⚠️ 顺着转录一起解出来的，**不额外跑一趟服务器**。
@@ -518,6 +534,9 @@ fun ChatScreen(
                         // 附件的路径映射贴在正文前面 —— Claude 自己去读那些文件
                         val t = (app.yxi.agent.Attachments.header(staged) + draft.trim()).trim()
                         draft = ""; staged = emptyList()
+                        // ⚠️ 立刻清盘上那份 —— 只清内存的话，防抖那 600ms 里退出去，
+                        // 下次进来发过的话又冒出来一遍
+                        Drafts.set(ctx, hostId, sessionName, "")
                         scope.launch { ssh?.let { SessionProbe.send(it, sessionName, t) } }
                     },
                 ) {
@@ -622,6 +641,7 @@ private fun Item(item: ChatItem, onCopy: (String) -> Unit, onPopQueue: () -> Uni
     is ChatItem.UserText -> UserBubble(item.text, onCopy)
     is ChatItem.Queued -> QueuedBubble(item.text, onCopy, onPopQueue)
     is ChatItem.Injected -> InjectedCard(item)
+    is ChatItem.ApiError -> ApiErrorCard(item.text)
     // ⚠️ AI 的输出**不做长按菜单，做原生文本选择** —— 想要的多半是里面的一个 URL
     // 或者一段命令，整段复制反而要回头再删。SelectionContainer 给的是系统那套
     // 选择手柄 + 复制条，长按即起，双击选词。
@@ -673,6 +693,41 @@ private suspend fun androidx.compose.foundation.lazy.LazyListState.scrollToEnd(l
  */
 private val androidx.compose.foundation.lazy.LazyListState.atBottom: Boolean
     get() = !canScrollForward
+
+/**
+ * API 报错。**故意长得跟正文完全不一样。**
+ *
+ * ⚠️ 不走 markdown：它在转录里是一条 assistant 消息，用正文渲染的话
+ * 屏幕上就像 Claude 一本正经地在跟你解释「服务器过载」——
+ * 而这其实是**根本没轮到它说话**。红底 + 感叹号 + 等宽，一眼就知道是机器故障不是回答。
+ *
+ * ⚠️ 不占满宽度、不居中：它是时间线上的一个「这里断了一下」的标记，
+ * 做得太抢眼反而会盖过真正的对话。
+ */
+@Composable
+private fun ApiErrorCard(text: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f),
+        shape = RoundedCornerShape(14.dp),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.45f),
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(Modifier.padding(14.dp, 11.dp), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+            Text(
+                "!",
+                style = MaterialTheme.typography.labelLarge.copy(fontFamily = FontFamily.Monospace),
+                color = MaterialTheme.colorScheme.error,
+            )
+            Text(
+                text.trim(),
+                style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
 
 /** 你说过的话。长按 → 复制整段。 */
 @Composable

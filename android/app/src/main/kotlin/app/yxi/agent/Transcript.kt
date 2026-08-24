@@ -61,6 +61,19 @@ sealed interface ChatItem {
      * 用户会以为没发出去、然后重复发。见 TROUBLESHOOTING #72。
      */
     data class Queued(override val key: String, val text: String) : ChatItem
+
+    /**
+     * API 报错（`API Error: 529 Overloaded…`）。
+     *
+     * ⚠️ **它在转录里是一条正常的 assistant 消息**，不加处理就会被当成
+     * Claude 说的话，用 markdown 正文渲染 —— 屏幕上看起来就像它一本正经地
+     * 跟你解释「服务器过载」。用户的原话是「这些报错不要用正文来渲染」。
+     *
+     * ⚠️ **判据用转录自己的 `isApiErrorMessage` 标志，不要去匹配文本。**
+     * 匹配 "API Error" 会误伤真正在讨论这个错误的对话
+     * （比如你问「API Error 529 是什么意思」，它的回答里也有这几个字）。
+     */
+    data class ApiError(override val key: String, val text: String) : ChatItem
     /** 解析不出来的东西。⚠️ 这是**兼容兜底不是正常终点**——见类注释 */
     data class Unknown(override val key: String, val raw: String) : ChatItem
 }
@@ -198,6 +211,15 @@ object Transcript {
                         said += p.trim()
                     }
                 }
+                return@forEach
+            }
+
+            // ⚠️ 在 `when (type)` 之前拦下来 —— 它的 type 就是 "assistant"，
+            // 放过去就会走进正文渲染
+            if (d.optBoolean("isApiErrorMessage", false)) {
+                val txt = d.optJSONObject("message")?.optJSONArray("content")
+                    ?.optJSONObject(0)?.optString("text").orEmpty()
+                if (txt.isNotBlank()) out += ChatItem.ApiError(uuidOf(d, line), txt)
                 return@forEach
             }
 
