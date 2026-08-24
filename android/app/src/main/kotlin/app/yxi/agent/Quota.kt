@@ -5,18 +5,16 @@ import app.yxi.ssh.SshSession
 /**
  * 真正的**订阅额度**：5 小时窗口用了几成、这一周用了几成、什么时候重置。
  *
- * ⚠️ **这个数只有 Claude Code 自己拿得到，转录里没有、本地日志也算不出来。**
- * 它是账号级的订阅配额，来自 Anthropic 服务端。
- * [Usage]（走 ccusage）算的是**另一回事** —— 从本地日志算出的 token 数和花的钱，
- * 那个不知道你的订阅用掉了百分之几。两个数都要，别混。
+ * ⚠️ **这个数只有 Claude Code 自己拿得到**，转录里没有、本地日志也算不出来 ——
+ * 它是账号级的订阅配额，来自 Anthropic 服务端。[Usage]（走 ccusage）算的是
+ * **另一回事**：本地日志算出的 token 数和花的钱，不知道订阅用掉了几成。两个都要，别混。
  *
- * ⚠️ `/usage` 的输出**只在 TUI 上**，不落转录。所以只能刮屏。
- *
- * **代价小到出乎意料**（实测确认过，不是猜的）：
- *   · `/usage` 是本地命令，**不调模型** —— 跑一次 `Total cost: $0.0000`
- *   · **不写转录** —— 临时会话跑完，`~/.claude/projects` 下压根没建目录
- *   · 面板是个浮层，`Esc` 一按就没
- * 所以「点一下就去跑一次」这条路是干净的。
+ * ⚠️ **拿法是 `claude -p "/usage"`**（非交互打印模式），不是去某个会话里刮屏。
+ * 这条路好在三点，实测确认过：
+ *   · **不用借会话** —— 早先的做法要借一个空闲会话跑 `/usage`，
+ *     可用户机器上会话全忙 / 输入框都有草稿时借不到，额度就查不了（用户真撞上了）。
+ *   · **不打扰任何东西** —— 不往任何会话发键、不动任何 tmux 面板。
+ *   · **不花钱** —— `/usage` 是本地命令，`-p` 模式打印完就退，不调模型。
  */
 object Quota {
 
@@ -29,84 +27,45 @@ object Quota {
         val weekResets: String,
     )
 
-    /** `   █████                       10% used` → 10 */
-    private val PCT = Regex("""(\d{1,3})%\s+used""")
-    private val RESETS = Regex("""^\s*Resets\s+(.+?)\s*$""")
+    /** `Current session: 12% used · resets Aug 24, 3:10pm (UTC)` */
+    private val SESSION = Regex("""Current session:\s*(\d{1,3})%\s*used(?:\s*·\s*resets\s*(.+))?""")
+    private val WEEK = Regex("""Current week \(all models\):\s*(\d{1,3})%\s*used(?:\s*·\s*resets\s*(.+))?""")
 
     /**
-     * 从 `/usage` 面板的屏幕文本里解出额度。
+     * 从 `claude -p "/usage"` 的输出里解出额度。**格式不对就返回 null。**
      *
-     * ⚠️ **锚点是「Current session」「Current week (all models)」这两行标题，
-     * 不是行号。** 面板上还有 `Current week (Fable)` 之类的分项，也带 `% used`；
-     * 按顺序数第几个 `% used` 的话，账号一开新模型就全错位。
-     *
-     * ⚠️ 百分比和重置时间在标题**下面几行**，中间隔着进度条。
-     * 所以从标题往下找最近的一个，而不是取标题同一行。
+     * ⚠️ **锚点是两行标题的文字**，不是行号也不是「第几个 %」——
+     * 输出里还有 `Current week (Fable)` 之类的分项，也带 `% used`。
      */
-    fun parse(screen: String): Q? {
-        val lines = screen.split('\n')
-        fun after(title: String): Pair<Int, String>? {
-            val i = lines.indexOfFirst { it.trim() == title }
-            if (i < 0) return null
-            var pct: Int? = null
-            var resets = ""
-            // 往下最多看 4 行 —— 再远就是下一段了
-            for (j in i + 1..minOf(i + 4, lines.lastIndex)) {
-                if (pct == null) PCT.find(lines[j])?.let { pct = it.groupValues[1].toIntOrNull() }
-                if (resets.isEmpty()) RESETS.find(lines[j])?.let { resets = it.groupValues[1] }
-            }
-            return pct?.let { it to resets }
-        }
-        val s = after("Current session") ?: return null
-        val w = after("Current week (all models)") ?: return null
-        return Q(s.first, s.second, w.first, w.second)
+    fun parse(text: String): Q? {
+        val s = SESSION.find(text) ?: return null
+        val w = WEEK.find(text) ?: return null
+        return Q(
+            sessionPct = s.groupValues[1].toIntOrNull() ?: return null,
+            sessionResets = s.groupValues.getOrNull(2)?.trim().orEmpty(),
+            weekPct = w.groupValues[1].toIntOrNull() ?: return null,
+            weekResets = w.groupValues.getOrNull(2)?.trim().orEmpty(),
+        )
     }
 
     /**
-     * 在一个**已经在跑、而且闲着**的会话里跑一次 `/usage`，把额度刮回来。
+     * 跑一次 `claude -p "/usage"` 把额度拿回来。**不碰任何会话。**
      *
-     * ⚠️ **必须先确认输入框是空的。** 输入框里有半截草稿的话，`/usage` 会接在后面，
-     * 回车就把「用户没写完的话 + /usage」整条发出去了 —— 那是真正会造成损失的一步。
-     * 判据交给调用方（[Live] 能看出忙不忙，输入框内容看屏幕）。
-     *
-     * ⚠️ 跑完**一定要 Esc**，否则那个面板一直盖在会话上，
-     * 下一次抓屏（看板每 5 秒一次）看到的就是面板，
-     * 会话状态会被判错 —— 表现成列表里那台机器无缘无故变「空闲」。
+     * ⚠️ PATH 要补上 `~/.local/bin`（claude 在那儿）和 node ——
+     * 非交互 SSH 的 PATH 常常是残的，而 `claude` 是个 node 脚本。
+     * ⚠️ **别加 `IS_SANDBOX`**：那是给交互式 `--dangerously-skip-permissions` 用的，
+     * `-p` 打印模式不需要，加了反而可能改变行为。
      */
-    /**
-     * 这个会话现在能不能安全地借来跑一次 `/usage`。
-     *
-     * ⚠️ **判据只认一种情况：输入框里除了提示符什么都没有。**
-     * 里面有半截草稿的话，`/usage` 会接在后面，回车就把
-     * 「用户没写完的话 + /usage」整条发出去 —— 那是唯一会造成真实损失的一步。
-     *
-     * ⚠️ **忙着的时候也不碰**：忙的时候打字会进队列，`/usage` 会变成一条排队消息。
-     * 忙的判据里包含「❯ Press up to edit queued messages」这类提示 ——
-     * 那不是用户打的字，但它出现就说明有排队，一样不能碰。
-     * 所以这里**只放行提示符后面完全空白**这一种，宁可少跑一次。
-     */
-    fun borrowable(screen: String): Boolean {
-        if (app.yxi.agent.Live.parse(screen).busy) return false
-        val lines = screen.split('\n').map { it.trimEnd() }
-        // 输入框 = 最后两条横线之间。取里面那条提示符行
-        val dividers = lines.indices.filter { l -> lines[l].trim().let { it.length >= 8 && it.all { c -> c == '─' } } }
-        if (dividers.size < 2) return false
-        val top = dividers[dividers.size - 2]
-        val bottom = dividers.last()
-        val body = lines.subList(top + 1, bottom)
-        if (body.isEmpty()) return false
-        // 只有一行、且是 `❯` 后面全空 —— 多一行都说明里面有东西
-        return body.size == 1 && body[0].trimStart().removePrefix("❯").isBlank()
-    }
-
-    suspend fun probe(ssh: SshSession, target: String): Q? {
-        // ⚠️ **动手之前先看一眼**，别把用户没发完的话连带发出去
-        if (!borrowable(ssh.exec("tmux capture-pane -p -t '$target'"))) return null
-        ssh.exec("tmux send-keys -t '$target' -l '/usage'")
-        ssh.exec("tmux send-keys -t '$target' Enter")
-        kotlinx.coroutines.delay(2_500)
-        val screen = ssh.exec("tmux capture-pane -p -t '$target'")
-        ssh.exec("tmux send-keys -t '$target' Escape")
-        return parse(screen)
+    suspend fun fetch(ssh: SshSession): Q? {
+        val out = runCatching {
+            ssh.exec(
+                "export PATH=\$HOME/.local/bin:\$HOME/.npm-global/bin:/usr/local/bin:\$PATH; " +
+                    "for d in /opt/node*/bin; do [ -d \"\$d\" ] && PATH=\$PATH:\$d; done; " +
+                    "command -v claude >/dev/null 2>&1 || exit 0; " +
+                    // ⚠️ 30 秒够它连服务端拿额度了；再久多半是卡住，别让界面上那个「查着…」转到天荒地老
+                    "timeout 30 claude -p '/usage' 2>/dev/null"
+            )
+        }.getOrNull().orEmpty()
+        return parse(out)
     }
 }

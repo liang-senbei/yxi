@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -62,6 +63,10 @@ fun SettingsScreen(
     var askPass by remember { mutableStateOf(false) }
     var dev by remember { mutableStateOf(DevMode.unlocked(ctx)) }
 
+    // 铃铛那节收起时的副标题：一眼看出盯着几台
+    val watchN = store.hosts.collectAsState().value.count { it.watch }
+    val watchSummary = if (watchN > 0) t("盯着 %d 台").format(watchN) else t("一台都没开")
+
     Column(
         modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -69,7 +74,7 @@ fun SettingsScreen(
         Text(t("设置"), style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(18.dp, 14.dp, 18.dp, 4.dp))
 
         // ── 版本 ───────────────────────────────────────────────────
-        Card(t("这个 App"), Glyph.Info) {
+        Card(t("版本"), Glyph.Info, subtitle = t("%s（versionCode %d）").format(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(
                     Modifier.weight(1f).clickable {
@@ -125,7 +130,7 @@ fun SettingsScreen(
         }
 
         // ── 公钥 ───────────────────────────────────────────────────
-        Card(t("这台手机的公钥"), Glyph.Key) {
+        Card(t("这台手机的公钥"), Glyph.Key, subtitle = t("贴进目标机就能免密连")) {
             Hint2(t("贴进目标机的 ~/.ssh/authorized_keys 就能免密连。撤销 = 删掉那一行。"))
             Button({ showKey = true }, shape = Pill, modifier = Modifier.fillMaxWidth().height(44.dp)) {
                 Text(t("查看 / 复制 / 换一把"))
@@ -133,7 +138,7 @@ fun SettingsScreen(
         }
 
         // ── 后台放行 ────────────────────────────────────────────────
-        Card(t("手机主动响"), Glyph.Bell) {
+        Card(t("手机主动响"), Glyph.Bell, subtitle = watchSummary) {
             val battery = ignoringBattery(ctx)
             val notif = notificationsOn(ctx)
             // ⚠️ **这一行是后加的，因为原来那两行在骗人。**
@@ -193,7 +198,7 @@ fun SettingsScreen(
             }
         }
 
-        Card(t("界面风格"), Glyph.Palette) {
+        Card(t("界面风格"), Glyph.Palette, subtitle = Skin.style.label) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Skin.Style.entries.forEach { st ->
                     val on = Skin.style == st
@@ -216,7 +221,7 @@ fun SettingsScreen(
 
         // ⚠️ 这一栏**不翻译**：正在看不懂当前语言的人，得能认出另一个选项。
         // 「简体中文 / English」两个名字都用它们自己的语言写，谁都找得到自己那个。
-        Card(t("语言"), Glyph.Globe) {
+        Card(t("语言"), Glyph.Globe, subtitle = I18n.lang.label) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 I18n.Lang.entries.forEach { l ->
                     val on = I18n.lang == l
@@ -238,7 +243,7 @@ fun SettingsScreen(
 
         if (dev) DevCard(ctx, host, store, keys, connectError)
 
-        Card(t("关于"), Glyph.Info) {
+        Card(t("关于"), Glyph.Info, subtitle = t("Yxi —— 手机上的 Claude Code 指挥台")) {
             Hint2(
                 t("Yxi —— 手机上的 Claude Code 指挥台。\n") +
                     t("全部走 SSH：不开新端口、不要证书、不经过任何第三方服务器。\n") +
@@ -289,7 +294,7 @@ private fun DevCard(ctx: Context, host: Host?, store: HostStore, keys: KeyManage
     var report by remember { mutableStateOf("") }
     var copied by remember { mutableStateOf(false) }
 
-    Card(t("开发者"), Glyph.Wrench) {
+    Card(t("开发者"), Glyph.Wrench, subtitle = t("诊断连接、复制报告")) {
         Hint2(
             t("诊断会把整条连接路径一步步走一遍：解析地址 → 连 TCP → SSH 招呼 → 认证，") +
                 t("再挨个试同一个 IP 上的几个端口。里面不含密码和私钥，可以直接贴出来。\n") +
@@ -339,20 +344,49 @@ private fun DevCard(ctx: Context, host: Host?, store: HostStore, keys: KeyManage
  * 不靠重描边。深色主题下它就是比页面底稍亮一点的一块，浅色主题下是白卡。
  */
 @Composable
-private fun Card(title: String, icon: String? = null, content: @Composable ColumnScope.() -> Unit) {
+private fun Card(
+    title: String,
+    icon: String? = null,
+    /** 收起时标题下面那行灰字，一眼看出这节是干嘛的。可空。 */
+    subtitle: String? = null,
+    /** 默认收起。个别想一进来就摊开的（比如版本）传 true。 */
+    startExpanded: Boolean = false,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    // ⚠️ **默认收起，点一下才展开。** 用户要的是「一条条排列，点对应的才展开」——
+    // 全摊开的话一屏放不下两节，得一直滚。收起后一屏能看全，想改哪项点哪项。
+    var open by rememberSaveable(title) { mutableStateOf(startExpanded) }
     Surface(
         color = SurfaceContainerLow, shape = MaterialTheme.shapes.large,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp),
     ) {
-        Row(Modifier.padding(18.dp, 16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            if (icon != null) {
-                GlyphIcon(icon, Muted, 22.dp)
-            } else {
-                Spacer(Modifier.width(22.dp))
+        Column {
+            // 标题行：整行可点，右边一个会转的箭头
+            Row(
+                Modifier.fillMaxWidth().clickable { open = !open }.padding(18.dp, 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (icon != null) GlyphIcon(icon, Muted, 22.dp) else Spacer(Modifier.width(22.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(title, style = MaterialTheme.typography.titleSmall, color = OnSurface)
+                    // 收起时才显示副标题 —— 展开后内容自己会说话，副标题就多余了
+                    if (subtitle != null && !open) {
+                        Text(subtitle, style = MaterialTheme.typography.labelSmall, color = Dim, maxLines = 1)
+                    }
+                }
+                // 箭头：收起时朝下 ▾，展开时朝上 ▴。⚠️ 用几何符号不用 emoji（Glyph 的规矩）
+                Text(
+                    if (open) "▴" else "▾",
+                    style = MaterialTheme.typography.titleSmall, color = Muted,
+                )
             }
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(title, style = MaterialTheme.typography.titleSmall, color = OnSurface)
-                content()
+            // 展开区：带个淡入淡出，别硬生生蹦出来
+            androidx.compose.animation.AnimatedVisibility(visible = open) {
+                Column(
+                    Modifier.padding(start = 54.dp, end = 18.dp, bottom = 18.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) { content() }
             }
         }
     }

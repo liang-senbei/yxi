@@ -312,5 +312,14 @@ internal object En {
         "这个文件读不出来 —— 换一张试试" to "Can't read this file — try another",
         "开不了 SFTP 通道" to "Couldn't open an SFTP channel",
         "传失败：%s" to "Upload failed: %s",
+        "盯着 %d 台" to "watching %d",
+        "一台都没开" to "none on",
+        "贴进目标机就能免密连" to "paste into a host for passwordless login",
+        "Yxi —— 手机上的 Claude Code 指挥台" to "Yxi — a Claude Code console on your phone",
+        "诊断连接、复制报告" to "diagnose the connection, copy the report",
+        "版本" to "Version",
+        "%s（versionCode %d）" to "%s (versionCode %d)",
+        "没有空闲会话可借来查额度" to "No idle session to borrow for the quota check",
+        "查不到额度 —— 这台机器上可能没有 claude" to "No quota — this host may not have claude",
     )
 }

@@ -70,7 +70,26 @@ object Model {
     private val MORE = Regex("""\+\s*(\d+)\s+models?""")
 
     /**
-     * 打开选单并把它读回来。⚠️ 借会话的规矩跟 [Quota] 一样：忙着 / 输入框有字就不碰。
+     * 这个会话现在能不能安全地借来送键（打开 `/model` 选单）。
+     *
+     * ⚠️ **只放行「输入框里除了提示符什么都没有」**。里面有半截草稿的话，
+     * 送进去的东西会接在后面，回车就把用户没写完的话连带发出去 —— 唯一会造成真实损失的一步。
+     * 忙着的时候也不碰（打字会进队列）。
+     *
+     * ⚠️ 额度查询早先也用它，现在改走 `claude -p "/usage"`（[Quota]）不借会话了；
+     * 只剩 `/model` 这种**必须在活会话里操作**的还用得着。
+     */
+    fun borrowable(screen: String): Boolean {
+        if (Live.parse(screen).busy) return false
+        val lines = screen.split('\n').map { it.trimEnd() }
+        val dividers = lines.indices.filter { l -> lines[l].trim().let { it.length >= 8 && it.all { c -> c == '─' } } }
+        if (dividers.size < 2) return false
+        val body = lines.subList(dividers[dividers.size - 2] + 1, dividers.last())
+        return body.size == 1 && body[0].trimStart().removePrefix("❯").isBlank()
+    }
+
+    /**
+     * 打开选单并把它读回来。⚠️ 借会话的规矩：忙着 / 输入框有字就不碰。
      *
      * ⚠️ **要重试着抓。** 面板不是一瞬间画完的，抓早了拿到半个 ——
      * 表现是「点了没反应，然后过一会儿会话里冒出个选单」。一次 1.8 秒不够，实测过。
@@ -81,7 +100,7 @@ object Model {
      * **必须滚回去**，否则下面 [pick] 按相对步数算光标就全错了。
      */
     suspend fun open(ssh: SshSession, target: String): List<Choice>? {
-        if (!Quota.borrowable(ssh.exec("tmux capture-pane -p -t '$target'"))) return null
+        if (!borrowable(ssh.exec("tmux capture-pane -p -t '$target'"))) return null
         ssh.exec("tmux send-keys -t '$target' -l '/model'")
         ssh.exec("tmux send-keys -t '$target' Enter")
 

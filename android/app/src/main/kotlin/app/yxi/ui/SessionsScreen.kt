@@ -199,17 +199,13 @@ fun SessionsScreen(
                 val s0 = ssh
                 if (s0 != null && !quotaBusy) scope.launch {
                     quotaBusy = true
-                    // ⚠️ **挑闲着的会话借**，而且 `Quota.probe` 自己还会再确认一次
-                    // 输入框是空的（借不到就返回 null，绝不硬来）。
-                    // 忙的排最后：万一闲的都借不到，忙的也大概率借不到，但试试无妨。
-                    val order = sessions.sortedBy { if (it.state == SessionState.Idle) 0 else 1 }
-                    quota = order.firstNotNullOfOrNull { sess ->
-                        app.yxi.ssh.catching { app.yxi.agent.Quota.probe(s0, sess.name) }.getOrNull()
-                    }
+                    // ⚠️ 走 `claude -p "/usage"`（[Quota.fetch]）—— **不借会话**，
+                    // 不管会话忙不忙、输入框有没有草稿都能查。
+                    quota = app.yxi.ssh.catching { app.yxi.agent.Quota.fetch(s0) }.getOrNull()
                     // ⚠️ **查到就落盘**：额度是「点一下才查」的，不缓存的话
                     // 主机页永远是空的（用户的原话：「主机里面的服务器还是没有标清楚」）
                     quota?.let { QuotaCache.put(ctx, host.id, it) }
-                    if (quota == null) status = t("没有闲着的会话可以借来查额度 —— 等它忙完再点")
+                    if (quota == null) status = t("查不到额度 —— 这台机器上可能没有 claude")
                     quotaBusy = false
                 }
             })

@@ -3,12 +3,31 @@ package app.yxi.agent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 /**
  * `/model` 选单的解析。**下面是真面板原样抠出来的**（2026-08-24 实测）。
  */
 class ModelTest {
+
+    // ── borrowable：能不能借这个会话送键 ──────────────────────────
+    private fun box(inner: String, footer: String = "  ⏵⏵ bypass permissions on (shift+tab to cycle)") =
+        "● 上一条回复\n\n" + "─".repeat(80) + "\n" + inner + "\n" + "─".repeat(80) + "\n" + footer
+
+    @Test fun 输入框空着才肯借() {
+        assertTrue(Model.borrowable(box("❯ ")))
+    }
+
+    @Test fun 输入框有草稿绝不借() {
+        // ⚠️ 唯一会造成真实损失的一步：送的键接在草稿后面，回车连带发出去
+        assertFalse(Model.borrowable(box("❯ 我正在写一半的话")))
+    }
+
+    @Test fun 忙着不借() {
+        assertFalse(Model.borrowable(box("❯ ", "  ⏵⏵ bypass permissions on · esc to interrupt")))
+    }
+
 
     private val REAL = """
    Select model

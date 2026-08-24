@@ -2,6 +2,8 @@ package app.yxi.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import app.yxi.ui.theme.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.combinedClickable
@@ -72,8 +74,10 @@ fun HostsScreen(
                     HostRow(
                         h,
                         ctx = ctx,
+                        store = store,
+                        keys = keys,
                         onClick = { onOpen(h) },
-                        onLongClick = { editing = h },
+                        onEdit = { editing = h },
                         onWatch = {
                             val on = !h.watch
                             store.upsert(h.copy(watch = on))
@@ -113,14 +117,21 @@ fun HostsScreen(
 private fun HostRow(
     h: Host,
     ctx: android.content.Context,
+    store: HostStore,
+    keys: KeyManager,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
+    onEdit: () -> Unit,
     onWatch: () -> Unit,
 ) {
+    // ⚠️ **长按 = 展开额度**（用户要的）。原来长按是「改主机」，挪进展开区里那个按钮。
+    var expanded by remember(h.id) { mutableStateOf(false) }
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         shape = MaterialTheme.shapes.large,
-        modifier = Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        modifier = Modifier.fillMaxWidth().combinedClickable(
+            onClick = onClick,
+            onLongClick = { expanded = !expanded },
+        ),
     ) {
         Column(Modifier.padding(16.dp, 14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -179,11 +190,93 @@ private fun HostRow(
                 )
             }
         }
-        // 用量细线。⚠️ 没缓存过就什么都不画 —— 不为了这条线去连每一台机器
-        UsageStrip(ctx, h.id)
+        // ⚠️ **默认什么都不画**（用户要的）。长按展开才显示 5h / 7d 两档额度。
+        androidx.compose.animation.AnimatedVisibility(visible = expanded) {
+            HostQuota(h, ctx, store, keys, onEdit)
+        }
         }
     }
 }
+
+/**
+ * 长按主机后展开的那块：5 小时 / 本周两档额度 + 「改主机」。
+ *
+ * ⚠️ **额度是现连现查的**：主机页平时不为每台机器保一条连接（那太重）。
+ * 展开的这一下才连一次、借个空闲会话跑 `/usage`。先把上次缓存的画出来（如果有），
+ * 再在后台刷新 —— 不让人对着空白等。查不到就说清楚原因，别干等。
+ */
+@Composable
+private fun HostQuota(h: Host, ctx: android.content.Context, store: HostStore, keys: KeyManager, onEdit: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    val connect = rememberSshConnector(store, keys, h, aliveIntervalMs = 15_000)
+    var q by remember(h.id) { mutableStateOf(QuotaCache.get(ctx, h.id)?.first) }
+    var busy by remember(h.id) { mutableStateOf(false) }
+    var note by remember(h.id) { mutableStateOf<String?>(null) }
+
+    // 展开就查一次（缓存有就先显示着，这里刷新它）
+    LaunchedEffect(h.id) {
+        busy = true; note = null
+        val c = connect()
+        if (c == null) { note = t("这台主机还没有可用的认证方式"); busy = false; return@LaunchedEffect }
+        val err = runCatching { c.session.connect() }.exceptionOrNull()
+        if (err != null) {
+            if (err is kotlinx.coroutines.CancellationException) throw err
+            note = c.explain(err); busy = false; return@LaunchedEffect
+        }
+        val got = app.yxi.ssh.catching { app.yxi.agent.Quota.fetch(c.session) }.getOrNull()
+        runCatching { c.session.disconnect() }
+        if (got != null) { q = got; QuotaCache.put(ctx, h.id, got) }
+        else if (q == null) note = t("没有空闲会话可借来查额度")
+        busy = false
+    }
+
+    Column(
+        Modifier.fillMaxWidth().padding(top = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        q?.let {
+            QuotaBar(t("5 小时"), it.sessionPct, it.sessionResets)
+            QuotaBar(t("本周"), it.weekPct, it.weekResets)
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (busy) Text(t("查着…"), style = MaterialTheme.typography.labelSmall, color = Dim)
+            else if (note != null) Text(note!!, style = MaterialTheme.typography.labelSmall, color = Dim, modifier = Modifier.weight(1f))
+            else Spacer(Modifier.weight(1f))
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = Pill,
+                modifier = Modifier.clickable(onClick = onEdit),
+            ) {
+                Text(t("改主机"), Modifier.padding(14.dp, 7.dp), style = MaterialTheme.typography.labelMedium, color = Muted)
+            }
+        }
+    }
+}
+
+/** 展开区的一档额度条：`5 小时  ██░░░░  已用 10% · 剩 90%   6:50pm 重置`。 */
+@Composable
+private fun QuotaBar(label: String, pct: Int, resets: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = Muted, modifier = Modifier.width(48.dp))
+        androidx.compose.foundation.layout.Box(
+            Modifier.weight(1f).height(5.dp)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh, Pill),
+        ) {
+            androidx.compose.foundation.layout.Box(
+                Modifier.fillMaxWidth(pct / 100f).height(5.dp)
+                    .background(if (pct > 85) Amber else Teal, Pill),
+            )
+        }
+        Text(
+            t("已用 %d%% · 剩 %d%%").format(pct, 100 - pct),
+            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+            color = if (pct > 85) Amber else OnSurfaceVariant,
+        )
+    }
+    if (resets.isNotBlank()) {
+        Text("      " + resets + t(" 重置"), style = MaterialTheme.typography.labelSmall, color = Dim, maxLines = 1)
+    }
+}
+
 
 /**
  * 加 / 改主机：任意 IP、**任意端口**、用户名、密码或密钥 —— 四样都不能写死。
