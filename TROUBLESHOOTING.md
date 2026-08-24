@@ -1659,3 +1659,50 @@ private enum class Tab(val label: String, …) {
 **怎么避开**：判据是「这句话是在**什么时候**算出来的」。
 类初始化、object 初始化、顶层 `val` —— 全是一次性的，翻译放进去就冻住。
 翻译只能出现在**每次读都会重新执行**的位置（函数体、`get()`、composable）。
+
+## 101. 灵动胶囊：系统「不给」是静默的，所以让 App 自己去问系统要答案
+
+**问题**：荣耀的灵动胶囊（别家叫灵动岛 / 实况窗 / 焦点通知）能不能联动？
+
+**先查清楚有没有标准入口**（不猜，拆 SDK 看）：
+
+```
+$ javap -constants android.app.Notification | grep -i promot
+  public static final String EXTRA_REQUEST_PROMOTED_ONGOING = "android.requestPromotedOngoing";
+  public static final int    FLAG_PROMOTED_ONGOING = 262144;
+  public boolean hasPromotableCharacteristics();
+  public boolean isRequestPromotedOngoing();
+$ javap 'android.app.Notification$Builder' | grep -i promot
+  public Notification$Builder setRequestPromotedOngoing(boolean);
+```
+
+有。Android 16 起 AOSP 给「实时活动」定了标准通路，各家 ROM 的胶囊都在往这上面靠。
+
+**真正的坑是：这是「请求」不是「命令」。** 系统觉得不够格就**当没看见** ——
+不报错、不抛异常、什么都不发生。于是「做了没生效」和「压根没做」现象一模一样，
+而我手上没有荣耀手机，模拟器又是 Android 14（连这个判定都没有）。
+
+**做法：不猜，让 App 去问系统要答案。** 发完之后回头从
+`NotificationManager.getActiveNotifications()` 把那条捞出来，看系统有没有真的盖上
+`FLAG_PROMOTED_ONGOING`（0x40000），再反射调一次 `hasPromotableCharacteristics()`，
+把结果打进开发者模式的诊断报告里：
+
+```
+胶囊   ✗ 系统没有提升 · 够格? 这个系统没有这个判定（Android 16 以下） · Android 14
+```
+
+用户在自己手机上跑一次，这一行就把问题回答了。
+
+**两个实现细节**：
+- `EXTRA_REQUEST_PROMOTED_ONGOING` / `FLAG_PROMOTED_ONGOING` 都是**编译期常量**
+  （`javap -constants` 确认过），会被内联，所以老系统上不会因为找不到符号而崩。
+  而 `hasPromotableCharacteristics()` 是**方法**，直接调在老系统上会 `NoSuchMethodError`
+  —— 用反射，「有就调、没有就说没有」。
+  ⚠️ 别用版本号判断：国产 ROM 改版本号的多得是，反射问「你有没有这个方法」才是真的。
+- 常驻通知从此**跟着状态变**（没人等你 = 安静一行；有人等 = 变铜色 + 列出会话名），
+  更新用**同一个 id `notify()`** 就行，别重新 `startForeground()` ——
+  后者在新版安卓上有一堆前台服务类型的限制。
+
+**怎么避开**：凡是「向系统请求某种特殊待遇」的 API（快捷方式置顶、画中画、
+免打扰豁免、实时活动），**成功与否都要能在设备上读回来**。
+读不回来的功能等于没做 —— 你永远只能说「应该行吧」。

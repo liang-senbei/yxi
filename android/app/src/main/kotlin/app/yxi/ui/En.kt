@@ -287,5 +287,6 @@ internal object En {
         " · %d/分" to " · %d/min",
         "终端起不来：%s" to "Terminal won't start: %s",
         "切不过去：%s" to "Couldn't switch: %s",
+        "%d 个会话等你" to "%d session(s) waiting on you",
     )
 }

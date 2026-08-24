@@ -102,6 +102,35 @@ object DevMode {
      * 一眼就能看出「整个 IP 不通」还是「只有某个端口被掐」——
      * 这两件事的修法完全不同，而 App 平时给的错误信息区分不了。
      */
+    /**
+     * 「灵动岛 / 灵动胶囊」到底认不认我们那条常驻通知。
+     *
+     * ⚠️ **这件事只能问手机，问不了代码。** `setRequestPromotedOngoing` 是**请求**：
+     * 系统不给就当没看见 —— 不报错、不抛异常、什么都不发生。
+     * 所以这里不猜，直接去 `getActiveNotifications()` 里把那条捞出来，
+     * 看系统有没有真的盖上 `FLAG_PROMOTED_ONGOING`（0x40000）这个章。
+     *
+     * ⚠️ `hasPromotableCharacteristics()` 是新系统才有的方法，用反射调 ——
+     * 版本号判断在国产 ROM 上不一定可靠（改过版本号的多得是），
+     * 而反射「有就调、没有就说没有」，任何系统上都不会崩。
+     */
+    private fun capsule(ctx: Context): String = runCatching {
+        val nm = ctx.getSystemService(android.app.NotificationManager::class.java)
+        val n = nm.activeNotifications.firstOrNull { it.id == 1 }?.notification
+            ?: return "常驻通知不在（铃铛一台都没开？）"
+        val promoted = (n.flags and 0x40000) != 0
+        val can = runCatching {
+            android.app.Notification::class.java.getMethod("hasPromotableCharacteristics")
+                .invoke(n) as Boolean
+        }.getOrNull()
+        buildString {
+            append(if (promoted) "✓ 系统已提升（胶囊里应该看得见）" else "✗ 系统没有提升")
+            append(" · 够格? ")
+            append(when (can) { true -> "是"; false -> "否"; null -> "这个系统没有这个判定（Android 16 以下）" })
+            append(" · Android ${Build.VERSION.RELEASE}")
+        }
+    }.getOrElse { "查不了：${it.message}" }
+
     suspend fun diagnose(
         ctx: Context,
         host: Host?,
@@ -127,6 +156,7 @@ object DevMode {
             line("网络   ${network(ctx)}")
             line("界面   " + (uiError?.let { "✗ 此刻显示：" + it.lineSequence().first() } ?: "已连上"))
             line("公钥   ${runCatching { keys.fingerprint() }.getOrElse { "读不出来: ${it.message}" }}")
+            line("胶囊   ${capsule(ctx)}")
             line()
 
             if (host == null) {

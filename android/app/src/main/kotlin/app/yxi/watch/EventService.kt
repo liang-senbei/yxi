@@ -9,6 +9,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Bundle
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -148,6 +149,10 @@ class EventService : Service() {
         // ⚠️ **一条都没置顶时不生效**，见 [Pinned.onlyPinned] 的注释。
         if (!Pinned.shouldNotify(Pinned.onlyPinned(this), Pinned.get(this, host.id), full)) return
 
+        // 常驻通知要跟着变 —— 胶囊上显示的就是它
+        if (kind == "needs") waiting += session else waiting -= session
+        refreshOngoing()
+
         val title = if (kind == "needs") t("%s 需要你").format(session) else t("%s 干完了").format(session)
         // 「需要你」的 detail 是 Claude 自己给的一句人话（"needs your permission to use Bash"），有信息量；
         // 「干完了」的 detail 是我们编的通用句，跟标题重复 —— 那就换成机器名，至少告诉你是哪台
@@ -249,6 +254,8 @@ class EventService : Service() {
 
         val ok = runCatching { SessionProbe.sendKey(s, session, number.toString()) }.getOrDefault(false)
         if (ok) runCatching {
+            waiting -= session.removePrefix("cc-")
+            refreshOngoing()
             NotificationManagerCompat.from(this).cancel((hostId + session.removePrefix("cc-")).hashCode())
         } else note(t("送不出去，没批"))
     }
@@ -265,24 +272,78 @@ class EventService : Service() {
         )
     }.let { }
 
+    /**
+     * 此刻有哪些会话在等你。**常驻通知（也就是灵动胶囊要显示的那条）靠它。**
+     *
+     * ⚠️ 用并发集合：`handle()` 在事件流协程里写，通知按钮的广播在主线程写。
+     */
+    private val waiting = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    /**
+     * 把常驻那条重画一遍。
+     *
+     * ⚠️ **用同一个 id `notify()` 就能改前台通知**，不用重新 `startForeground()` ——
+     * 后者在新版安卓上有一堆前台服务类型的限制，能不碰就别碰。
+     */
+    private fun refreshOngoing() = runCatching {
+        NotificationManagerCompat.from(this).notify(ONGOING_ID, ongoing(store.hosts.value.count { it.watch }))
+    }.let { }
+
     private fun prefs() = getSharedPreferences("yxi", Context.MODE_PRIVATE)
     private fun lastSeen(hostId: String) = prefs().getFloat("seen:$hostId", 0f).toDouble()
     private fun setLastSeen(hostId: String, ts: Double) =
         prefs().edit().putFloat("seen:$hostId", ts.toFloat()).apply()
 
-    private fun ongoing(n: Int) = NotificationCompat.Builder(this, CH_ONGOING)
-        .setSmallIcon(R.drawable.ic_stat_yxi)
-        .setContentTitle(t("盯着 %d 台机器").format(n))
-        .setContentText(t("Claude 需要你时会响"))
-        .setOngoing(true)
-        .setPriority(NotificationCompat.PRIORITY_MIN)
-        .setContentIntent(
-            PendingIntent.getActivity(
-                this, 0, Intent(this, MainActivity::class.java),
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    /**
+     * 常驻那条通知。**它同时是「灵动岛 / 灵动胶囊」上显示的那条**（见 [promote]）。
+     *
+     * 内容跟着 [waiting] 变：没人等你时它就安静地说「盯着 N 台机器」；
+     * 一旦有会话在等，就换成「N 个会话等你」并请求提升 ——
+     * 胶囊的价值全在这一下：**不用解锁、不用点开，扫一眼就知道要不要管。**
+     */
+    private fun ongoing(n: Int): Notification {
+        val who = waiting.toList().sorted()
+        val b = NotificationCompat.Builder(this, CH_ONGOING)
+            .setSmallIcon(R.drawable.ic_stat_yxi)
+            .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setContentIntent(
+                PendingIntent.getActivity(
+                    this, 0, Intent(this, MainActivity::class.java),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                )
             )
-        )
-        .build()
+        if (who.isEmpty()) {
+            b.setContentTitle(t("盯着 %d 台机器").format(n)).setContentText(t("Claude 需要你时会响"))
+        } else {
+            b.setContentTitle(t("%d 个会话等你").format(who.size))
+                .setContentText(who.joinToString("、"))
+                // 有事的时候才上色：颜色是提示，天天亮着就不是提示了
+                .setColorized(true)
+                .setColor(0xFFE08B57.toInt())
+            promote(b)
+        }
+        return b.build()
+    }
+
+    /**
+     * 请系统把这条常驻通知提升成「实时活动」——
+     * 原生安卓显示成状态栏胶囊，各家 ROM 的灵动岛 / 灵动胶囊也吃这一套。
+     *
+     * ⚠️ **这是「请求」不是「命令」。** 系统会自己判断够不够格
+     * （`Notification.hasPromotableCharacteristics()`），不够就当没看见 ——
+     * 不报错、不抛异常、什么都不发生。所以 [app.yxi.ui.DevMode] 里加了一项，
+     * **发完之后回头去查系统有没有真的给** `FLAG_PROMOTED_ONGOING`。
+     * 光看代码永远不知道这事成没成。
+     *
+     * ⚠️ 常量是编译期内联的 `String` / `Int`，所以老系统上也不会因为找不到类而崩；
+     * 老系统只是不认识这个 extra，忽略掉而已。
+     */
+    private fun promote(b: NotificationCompat.Builder) {
+        b.addExtras(Bundle().apply {
+            putBoolean(Notification.EXTRA_REQUEST_PROMOTED_ONGOING, true)
+        })
+    }
 
     private fun channels() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
