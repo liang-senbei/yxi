@@ -145,8 +145,10 @@ fun Workspace(
      *    **`alternate_on=1`** —— Claude Code 是全屏 TUI，占着**备用屏**，
      *    输出**根本不进 tmux 的历史**（实测本机所有会话 `history_size` 全是 0）。
      *    也就是说 tmux 那边压根没有东西可翻。
-     * ③ **正解**：往上翻的是 **Claude Code 自己的视图**，它认 PageUp/PageDown。
-     *    实测送 3 个 PageUp，内容区指纹从 `51c656fe` 变成 `4848c90b`。
+     * ③ **正解**：往上翻的是 **Claude Code 自己的视图**。它认 PageUp/PageDown，
+     *    也认**鼠标滚轮**（它为点选项本来就开了鼠标追踪）。
+     *    最后用滚轮：PageUp 一下 8 行，划一下就蹦过一整屏（用户说「像有档位」）；
+     *    滚轮一下 1 行，映射到手指位移就平滑了。见 [HistoryScrim]。
      *
      * 教训：**「看不到前面的输出」这句话里的「输出」，得先搞清楚它存在谁手里。**
      * 我先后假设是控件、是 tmux，都错了 —— 它在那个全屏程序自己的缓冲里。
@@ -477,9 +479,18 @@ fun Workspace(
                     // ⚠️ **只在历史模式下才盖这一层。** 平时盖着的话，
                     // 终端自己的选词、长按、URL 点击全被吃掉 —— 为了一个功能废掉三个
                     if (history) HistoryScrim(
-                        onPage = { up ->
-                            // PageUp = 27 91 53 126 / PageDown = 27 91 54 126
-                            val b = if (up) byteArrayOf(27, 91, 53, 126) else byteArrayOf(27, 91, 54, 126)
+                        onScroll = { up ->
+                            // ⚠️ **送鼠标滚轮，不送 PageUp。** 实测 PageUp 一下翻 8 行，
+                            // 手指划一下就蹦过去一整屏 —— 就是用户说的「像有档位一样」。
+                            // 滚轮（SGR 1006）一下**只滚 1 行**，映射到手指位移就是平滑滚动。
+                            // 上滚 `ESC[<64;1;1M`，下滚 `ESC[<65;1;1M`（坐标用 1,1 永远合法）。
+                            //
+                            // ⚠️ 能用的前提是 Claude Code 开着鼠标追踪（它为点选项本来就开了），
+                            // 所以滚轮字节能被它接住。实测在真会话上滚一下顶行 44→43。
+                            val b = if (up)
+                                byteArrayOf(27, 91, 60, 54, 52, 59, 49, 59, 49, 77)   // ESC[<64;1;1M
+                            else
+                                byteArrayOf(27, 91, 60, 54, 53, 59, 49, 59, 49, 77)   // ESC[<65;1;1M
                             scope.launch { shell?.write(b) }
                         },
                     )
@@ -642,18 +653,22 @@ private object Prefs {
 }
 
 /**
- * 历史模式下盖在终端上的那层：**把上下滑动翻译成翻页键**。
+ * 历史模式下盖在终端上的那层：**把上下滑动翻译成鼠标滚轮**。
  *
- * ⚠️ 送的是给**那个全屏程序**的 PageUp/PageDown，不是 tmux 的 copy-mode ——
+ * ⚠️ 送的是给**那个全屏程序**的滚轮事件（SGR 1006），不是 tmux 的 copy-mode ——
  * Claude Code 占着备用屏，tmux 那边 `history_size` 是 0，没东西可翻。
+ * ⚠️ **早先送的是 PageUp/PageDown，一下 8 行**，手感像有档位（用户反馈）。
+ * 滚轮一下 1 行，映射到手指位移就平滑了。
  *
  * ⚠️ 方向：**手指往下 = 看更早**（跟所有列表一致）→ PageUp。写反了用户会觉得
  * 「越滑越回不去」。
  */
 @Composable
-private fun HistoryScrim(onPage: (up: Boolean) -> Unit) {
-    // 一屏就是一页，所以阈值要大 —— 按行算的话手指划一下就翻十几页，直接飞出去
-    val PAGE = 110f
+private fun HistoryScrim(onScroll: (up: Boolean) -> Unit) {
+    // ⚠️ **每滚一「行」的手指位移。** 滚轮一下滚 1 行，这里定「手指走多少像素算一行」。
+    // 太小（跟着像素走）会送出几十个滚轮事件、每个都要 SSH 一个来回，反而卡；
+    // 太大又回到「档位」感。18dp 上下实测手感接近原生滚动 —— 一次快划送十来个事件，能跟上。
+    val LINE = with(androidx.compose.ui.platform.LocalDensity.current) { 18.dp.toPx() }
     var acc by remember { mutableFloatStateOf(0f) }
     Box(
         Modifier
@@ -662,8 +677,9 @@ private fun HistoryScrim(onPage: (up: Boolean) -> Unit) {
                 orientation = androidx.compose.foundation.gestures.Orientation.Vertical,
                 state = androidx.compose.foundation.gestures.rememberDraggableState { dy ->
                     acc += dy
-                    while (acc >= PAGE) { acc -= PAGE; onPage(true) }
-                    while (acc <= -PAGE) { acc += PAGE; onPage(false) }
+                    // 手指往下 = 看更早 = 上滚
+                    while (acc >= LINE) { acc -= LINE; onScroll(true) }
+                    while (acc <= -LINE) { acc += LINE; onScroll(false) }
                 },
                 onDragStopped = { acc = 0f },
             ),

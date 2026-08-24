@@ -72,13 +72,6 @@ fun SessionsScreen(
     var sendTo by remember { mutableStateOf<Session?>(null) }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    // ⚠️ 探不到 ccusage 就一直是 null，界面上整块不出现（不显示 0、不显示「未知」）
-    var usage by remember(host.id) { mutableStateOf<app.yxi.agent.Usage?>(null) }
-    /** 真订阅额度。⚠️ 只在**点一下**的时候去问 —— 见下面 `askQuota` 的注释 */
-    var quota by remember(host.id) { mutableStateOf<app.yxi.agent.Quota.Q?>(null) }
-    var quotaBusy by remember(host.id) { mutableStateOf(false) }
-    // 先把上次查到的画出来 —— 点之前也有东西看，右边会写着「几小时前」
-    LaunchedEffect(host.id) { quota = QuotaCache.get(ctx, host.id)?.first }
     var sftp by remember(host.id) { mutableStateOf<app.yxi.ssh.Sftp?>(null) }
     var update by remember(host.id) { mutableStateOf<app.yxi.agent.Update?>(null) }
     // 列表 / 悬浮排列。⚠️ 两者**并存**不是替代 —— 悬浮好看但同屏信息量少三分之一，
@@ -115,14 +108,6 @@ fun SessionsScreen(
         update = app.yxi.agent.Update.check(f, app.yxi.BuildConfig.VERSION_CODE)
     }
 
-    // 用量单独一条慢节奏 —— 它 5 小时才变一格，没必要跟着 5 秒刷
-    LaunchedEffect(ssh) {
-        val s = ssh ?: return@LaunchedEffect
-        while (true) {
-            app.yxi.agent.Usage.probe(s)?.let { usage = it; UsageCache.put(ctx, host.id, it) }
-            delay(120_000)
-        }
-    }
     // ⚠️ **只收自己开的 sftp 通道，绝不碰 ssh。**
     // 这里原来写的是 `ssh?.disconnect()` —— 而这条连接是 [app.yxi.MainActivity] 建的、
     // 跨 tab 共用的（这个函数的参数注释上就写着「连接不能跟着断」，代码却在断它）。
@@ -190,26 +175,8 @@ fun SessionsScreen(
                 UpdateBanner(sftp, it) { update = null }
             }
         }
-        // ⚠️ **额度只在点的时候查，不轮询。**
-        // 查一次要借用户的一个会话跑 `/usage`（面板会闪一下、抓屏会看到面板），
-        // 后台每隔几分钟自己来一遍的话，用户会莫名其妙看到会话在抽搐。
-        // 而且额度是给人做决策看的，人想知道的时候点一下就好。
-        Box(Modifier.padding(14.dp, 0.dp, 14.dp, 8.dp)) {
-            UsageCard(usage, quota, quotaBusy, onRefresh = {
-                val s0 = ssh
-                if (s0 != null && !quotaBusy) scope.launch {
-                    quotaBusy = true
-                    // ⚠️ 走 `claude -p "/usage"`（[Quota.fetch]）—— **不借会话**，
-                    // 不管会话忙不忙、输入框有没有草稿都能查。
-                    quota = app.yxi.ssh.catching { app.yxi.agent.Quota.fetch(s0) }.getOrNull()
-                    // ⚠️ **查到就落盘**：额度是「点一下才查」的，不缓存的话
-                    // 主机页永远是空的（用户的原话：「主机里面的服务器还是没有标清楚」）
-                    quota?.let { QuotaCache.put(ctx, host.id, it) }
-                    if (quota == null) status = t("查不到额度 —— 这台机器上可能没有 claude")
-                    quotaBusy = false
-                }
-            })
-        }
+        // ⚠️ **会话页顶上不再显示额度**（用户要求）。额度只在主机页长按那台机器时查。
+        // 保留 usage/quota 变量是因为下面别的地方（连不上提示、用量缓存）还用得着。
 
         // ⚠️ 连不上的时候要给**一个能按的东西**。自动重连是指数退避的，
         // 最长等 15 秒 —— 用户刚把网切回来时干等着，只会以为 App 坏了。
