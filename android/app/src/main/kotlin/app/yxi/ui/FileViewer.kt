@@ -29,24 +29,27 @@ private val Pill = RoundedCornerShape(100.dp)
 private val Mono = FontFamily.Monospace
 
 private val IMAGES = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp")
+
+/** 有两副面孔的：排好版的「阅读」和原文「源码」。 */
+private val RENDERABLE = setOf("md", "html", "htm")
 private val TEXTISH = setOf(
     "md", "txt", "json", "kt", "java", "py", "js", "ts", "tsx", "jsx", "sh", "bash", "zsh",
-    "yml", "yaml", "toml", "ini", "conf", "cfg", "xml", "html", "css", "sql", "go", "rs",
+    "yml", "yaml", "toml", "ini", "conf", "cfg", "xml", "html", "htm", "css", "sql", "go", "rs",
     "c", "h", "cpp", "hpp", "rb", "php", "gradle", "kts", "properties", "env", "log", "csv",
 )
 
 /**
  * 看一个远端文件。**只读。**
  *
- * markdown 默认走**阅读模式**，可以切到源码 —— 手机上看 README 就该是排好版的，
- * 但改动之前你总想看一眼原文（PRD 附录 G）。
+ * markdown 和 html 默认走**阅读模式**，可以切到源码 —— 手机上看 README 就该是排好版的，
+ * 但改动之前你总想看一眼原文（PRD 附录 G）。html 的「阅读」= 真的按 CSS 渲染出来。
  */
 @Composable
 fun FileViewer(sftp: Sftp?, path: String, onBack: () -> Unit, modifier: Modifier = Modifier) {
     val ext = Paths.extOf(path)
     var bytes by remember(path) { mutableStateOf<ByteArray?>(null) }
     var error by remember(path) { mutableStateOf<String?>(null) }
-    var source by remember(path) { mutableStateOf(false) }   // md 的「源码」开关
+    var source by remember(path) { mutableStateOf(false) }   // [RENDERABLE] 的「源码」开关
     var truncated by remember(path) { mutableStateOf(false) }
 
     LaunchedEffect(path, sftp) {
@@ -74,7 +77,7 @@ fun FileViewer(sftp: Sftp?, path: String, onBack: () -> Unit, modifier: Modifier
                     color = if (error != null) MaterialTheme.colorScheme.error else Dim,
                 )
             }
-            if (ext == "md" && bytes != null) {
+            if (ext in RENDERABLE && bytes != null) {
                 Surface(
                     color = if (source) SurfaceContainerHigh else SurfaceContainer, shape = Pill,
                     modifier = Modifier.clickable { source = !source },
@@ -101,6 +104,7 @@ fun FileViewer(sftp: Sftp?, path: String, onBack: () -> Unit, modifier: Modifier
                         imageTransformer = remember(sftp, path) { SftpImages(sftp, Paths.dirOf(path)) },
                     )
                 }
+                (ext == "html" || ext == "htm") && !source -> HtmlBody(b.decodeToString())
                 ext == "json" -> JsonBody(b.decodeToString())
                 ext in TEXTISH || looksTextual(b) -> CodeBody(b.decodeToString(), ext)
                 else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -128,6 +132,41 @@ private fun ImageBody(b: ByteArray) {
         bmp.asImageBitmap(), null,
         modifier = Modifier.fillMaxWidth().padding(12.dp),
         contentScale = ContentScale.FillWidth,
+    )
+}
+
+/**
+ * 按 CSS 渲染的 html。用系统自带的 WebView —— 手机上本来就有一个浏览器引擎，
+ * 没必要自己实现排版。
+ *
+ * ⚠️ **JS 关着，而且不能开。** 这是从服务器上拉回来的任意文件，
+ * 在 WebView 里跑它的脚本 = 让远端文件在 app 的进程里执行。
+ * `javaScriptEnabled` 默认就是 false，这里再显式写一次是怕以后有人「顺手」打开。
+ * 同理 `allowFileAccess` / `allowContentAccess` 都按死 —— 否则页面能读手机本地文件。
+ *
+ * ⚠️ **baseUrl 传 null**：这样页面落在一个不透明源上，既加载不了外链，
+ * 也没有同源可言。代价是**外部的 `<link rel=stylesheet>` / `<img src>` 不会加载**
+ * —— 这条路上根本没有网络，只有一条 SSH 连接（跟 [SftpImages] 那条注释同一个道理）。
+ * 内联的 `<style>` 完全正常，Claude 生成的那种单文件 html 就是内联的。
+ * ponytail: 真要外链，照 [SftpImages] 的样子加个 shouldInterceptRequest 走 SFTP 取。
+ */
+@Composable
+private fun HtmlBody(html: String) {
+    androidx.compose.ui.viewinterop.AndroidView(
+        factory = { ctx ->
+            android.webkit.WebView(ctx).apply {
+                settings.javaScriptEnabled = false
+                settings.allowFileAccess = false
+                settings.allowContentAccess = false
+                settings.builtInZoomControls = true      // 手机上看桌面宽度的页面，得能捏
+                settings.displayZoomControls = false
+                settings.useWideViewPort = true
+                settings.loadWithOverviewMode = true
+                setBackgroundColor(android.graphics.Color.WHITE)  // 网页自己多半假设白底
+            }
+        },
+        update = { it.loadDataWithBaseURL(null, html, "text/html", "utf-8", null) },
+        modifier = Modifier.fillMaxSize(),
     )
 }
 

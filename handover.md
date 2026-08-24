@@ -71,10 +71,16 @@
   - 错误文案统一走 `Connector.explain()`：`UnknownHostException` 会直接告诉用户
     「这栏要填 IP 或域名，SSH 别名在手机上不解析」（#27）
 - ✅ **公钥界面**：点整块复制到剪贴板 + 「换一把」（带不可逆后果说明的确认框）。
-- 📦 **APK 分发**：`Yxi-0.1.0-debug.apk`（33 MB）。手机直接下：
-  批注服务 `yxi-review` 的 token 路径下加了 `/apk`（没 token 返回 404）。
-  URL 里的 token 见 `design/review/.token`（**gitignore，不写进文档**）。
-  到笔电的反向隧道会断，所以装包不该依赖那条链路。
+- 📦 **APK 分发**：手机上「检查更新」走的是**公网 HTTP**，不是这台开发机。
+  - **公网下载点在 hk13（服务集群机 `64.90.25.56`）**，nginx **:8899**，
+    包在 `/var/www/yxi/<token>/Yxi.apk`。token 见 `/root/.yxi/dl-token`（600，**仓库外**）。
+    `dl.keuury.com` 的 vhost 已经备好，只差 A 记录（CF token 有 IP 白名单，本机加不了）。
+  - ⚠️ **hk13 上还跑着别人的东西**（human_register / api.omggrow.com / inbox.omggrow.com …），
+    动它的 nginx 前先读 `sites-enabled`，**绝不能加 `default_server`**，见 TROUBLESHOOTING #90。
+  - **`server/install.sh --publish` 会自动推过去并比对 sha256**，推不动会吼。
+    别再手动 scp —— 手动那次就出过「本地新、公网旧」（#69）。
+  - 另一条路是 **App 内自更新走 SFTP** 读开发机的 `~/.yxi/Yxi.apk` + `latest.json`，
+    不过公网、不用 token，防火墙后面照样能用。两条路的包由 `--publish` 保证是同一个。
 - ✅ **G6 完成**（实测通过）：**工具卡片按工具定制 + 点选项**。
   - 卡片：Bash（命令横滚不折行 / stdout·stderr 分开 / `Exit code N` 提取）、Edit（真 diff，
     走 `toolUseResult.structuredPatch`）、Write（新建 vs 覆盖）、Read（行数 / 图片尺寸）、
@@ -296,6 +302,20 @@
   做法是 MainActivity **预热第二条**连接，而**不是共用看板那条** ——
   共用的话终端通道出事会把看板一起拖死（#16）。代价是每台主机多一条闲连接。
   见 TROUBLESHOOTING #86 / #87。
+- ✅ **0.6.4 —— 输入这一块的三件（2026-08-24）**：
+  ① **终端用回手机原生输入法**。根因不是「中文支持没做」，是 termlib 把 `inputType` 报成
+  `VISIBLE_PASSWORD | NO_SUGGESTIONS`，输入法当密码框处理**直接不给候选词**。
+  那个值写死在库里没有参数（`javap` 翻遍了），**唯一的拨杆是 compose mode，而它默认是关的**。
+  现在拿到 `ComposeController` 就开。代价：回车整行提交（`Key.Enter → commit()`），
+  vim/less/y-n 这种逐键交互要点掉工具条上的 `整行`。见 TROUBLESHOOTING #93。
+  ② **对话里的斜杠命令提示**（`agent/Slash.kt`）。打 `/` 弹候选，点一下填进草稿。
+  **不拦任何输入** —— 送出去的还是 `tmux send-keys`，自己写的斜杠命令照打照样能用。
+  已实测 `send-keys -l '/context'` + Enter 能真的在 TUI 里跑起来。
+  打全了就收起提示条（否则点完候选它还挂着挡输入框），这条**依赖「没有命令名是另一个的前缀」**，
+  有测试盯着。
+  ③ **html 文件能看渲染后的样子**，跟 md 共用同一个「阅读 / 源码」开关。
+  用系统 WebView，**JS 关死、baseUrl 传 null**（远端任意文件，不能让它的脚本在 app 里跑）。
+  代价是外链 CSS/图片不加载 —— 这条路上只有一条 SSH 连接，没有网络。内联 `<style>` 正常。
 
 ## 读写信息在哪
 | 路径 | 性质 |

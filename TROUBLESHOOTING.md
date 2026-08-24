@@ -1407,3 +1407,65 @@ res/mipmap-anydpi-v26/ic_launcher.xml + ic_launcher_round.xml
 少列一项比列错更糟：用户会据此停止排查，然后带着「我明明设置好了」的困惑
 去怀疑别的地方。这一页原本的措辞（「缺任何一项」）还强化了这个误导 ——
 它承诺了自己没有覆盖的完整性。
+
+## 92. Kotlin 的块注释会嵌套，KDoc 里一个 `/*` 就吞掉整个文件
+
+**症状**：新加的 `Slash.kt` 编译报
+
+```
+e: Slash.kt:57:1 Syntax error: Unclosed comment.
+```
+
+57 行是**文件最后一行**，那儿什么都没有。同时另一个文件报了一串
+`Unresolved reference 'Slash'` —— 看起来像是「新文件没被 include 进来」。
+
+**根因**：KDoc 里写了一句「你自己写的 `~/.claude/commands/*.md`」。
+Kotlin 的块注释**是可嵌套的**（跟 C/Java 不一样），`/*` 在注释里照样开一层，
+于是从那个 `/*` 起，剩下**整个文件**都成了注释 —— `object Slash` 根本不存在，
+所以引用它的地方全是 unresolved。
+
+**修法**：注释里别写含 `/*` 的字面量。想写 glob 就写 `~/.claude/commands` 下的。
+
+**怎么避开**：报错行号指向**文件末尾**、且伴随「这个文件里的东西全都找不到」，
+先怀疑注释没闭合，别去查 import 和构建配置 —— 我先查的是后者，白花了一轮。
+`*/` 同理：路径里出现 `*/` 会**提前关掉**注释，症状是中间冒出一堆语法错。
+
+## 93. ⭐ 终端打不出中文：inputType 写死在库里，唯一的拨杆是 compose mode
+
+**症状**：用户说「终端模式的键盘只能输入英文，打不了中文」。
+
+**根因**：termlib 的 `ImeInputView.onCreateInputConnection` 把 `EditorInfo.inputType`
+报成 `NO_SUGGESTIONS | VISIBLE_PASSWORD`（不含 `TYPE_CLASS_TEXT`）。
+输入法一看这是「密码框」，**直接不给候选词** —— 中文没法上屏，英文也没联想。
+
+**这个值没有参数可以传。** 把 AAR 拆开 `javap` 翻遍 `Terminal()` 的全部形参和
+`ImeInputView` 的公开方法，能拨动它的只有 `ComposeController` 那一组
+（`startComposeMode` / `toggleComposeMode`）—— 而它默认是**关的**。
+所以原来那个叫「中文输入的退路」的开关，其实是**唯一的正路**。
+
+**修法**：拿到 `ComposeController` 就 `startComposeMode()`，默认开。
+工具条那个键从「中」改成 `整行 ⇄ 逐键`，因为它现在默认亮着，
+标签得说清楚「点一下会变成什么」。
+
+**代价**（`javap -c` 读出来的，不是猜的）：compose mode 下 `Key.Enter` 触发
+`ComposeMode.commit()`，Esc 触发 `cancel()` —— 也就是「攒一行、回车整行提交」。
+敲命令时这正好是行编辑；**vim / less / y-n 这种逐键交互要手动关掉**。
+工具条上那些键（esc/tab/^C/方向键）不受影响，它们直接 `shell.write()`，不过 IME。
+
+**怎么避开**：三方控件「行为不对」时，先把 AAR 拆开看**那个行为是不是可配的**。
+不可配的话，找它**唯一能拨的那个开关**，别去猜别的参数组合，也别自己重写一个输入层。
+⚠️ 判断可见性以 **Kotlin 编译器**为准，不是字节码 —— 见 #83。
+
+## 94. install.sh 的注释是双重编码的，而文件整体仍是合法 UTF-8
+
+**症状**：`sed -n '35,60p' server/install.sh` 里，42–45 行的中文注释显示成
+`# åå¸ä¸ä¸ªæ°çæ¬…`，而**同一个文件里**代码行的中文完全正常。
+
+**根因**：那几行被「按 UTF-8 读出来 → 当成 latin-1 → 再编一次 UTF-8」处理过
+（多半是某次跨机复制/粘贴）。关键是：**双重编码的结果仍然是合法的 UTF-8**，
+所以 `d.decode('utf-8')` 不报错、任何编码校验都发现不了 —— 只有人眼看得出来。
+
+**修法**：`line.encode('latin-1').decode('utf-8')` 还原。
+
+**怎么避开**：判据是**同一个文件里有的中文正常有的乱码**（整文件乱码 = 读法不对，
+局部乱码 = 内容本身坏了）。特征字符串 `å` `ä¸` `æ` 一抓一个准。

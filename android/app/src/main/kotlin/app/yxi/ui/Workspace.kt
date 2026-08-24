@@ -144,6 +144,25 @@ fun Workspace(
     /** 中文输入的退路，见 [app.yxi.term.TerminalView] 的类注释 */
     var composer by remember { mutableStateOf<org.connectbot.terminal.ComposeController?>(null) }
     var composing by remember { mutableStateOf(false) }
+
+    // ⚠️ **compose mode 默认就开。** 它名字叫「退路」，实际是**唯一**能让手机原生输入法
+    // 好好干活的路：termlib 的 `ImeInputView.onCreateInputConnection` 把 inputType 报成
+    // `NO_SUGGESTIONS | VISIBLE_PASSWORD`（不含 `TYPE_CLASS_TEXT`）—— 输入法一看「像密码框」，
+    // 中文不给候选词、英文不给联想。那个值**写死在库里，没有参数可传**
+    // （javap 翻过 `Terminal()` 和 `ImeInputView` 的全部签名），
+    // 能拨的开关只有 compose mode 一个。
+    //
+    // 代价：变成「先攒一行、回车整行提交」（`Key.Enter → ComposeMode.commit()`，Esc 取消）。
+    // 对**敲命令**来说这正好就是行编辑；只有 vim / less / y-n 这种**逐键**交互要关掉，
+    // 工具条上的「中」就是干这个的。
+    //
+    // ⚠️ 工具条那些键（esc/tab/^C/方向键）不受影响 —— 它们直接 `shell.write()`，
+    // 根本不过 IME，所以 compose 开着照样能打断。
+    LaunchedEffect(composer) {
+        val c = composer ?: return@LaunchedEffect
+        c.startComposeMode()
+        composing = c.isComposeModeActive
+    }
     /** 语音识别出来的话，**先摆在这儿等你确认**，绝不直接送进终端 */
     var heard by remember { mutableStateOf<String?>(null) }
     val listen = androidx.activity.compose.rememberLauncherForActivityResult(

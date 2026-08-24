@@ -18,11 +18,12 @@ import org.connectbot.terminal.TerminalEmulator
  * **默认配置下整条 IME 通路根本不存在**，软键盘不弹、中文更打不进去。
  * 这不是模拟器的毛病，是我们一直漏了一个参数。
  *
- * ⚠️ **compose mode 是中文输入的退路。** 默认的 `EditorInfo.inputType` 是
- * `NO_SUGGESTIONS | VISIBLE_PASSWORD`（不含 `TYPE_CLASS_TEXT`）—— 有些中文输入法
- * 见到这种「像密码框」的输入类型就**不给候选词**。compose mode 会把 inputType 换成
- * 正常的 `TYPE_CLASS_TEXT`，代价是变成「先在浮层里编辑一整段、再整段提交」。
- * 所以它是**开关不是默认**：直接输入能用就别开。
+ * ⚠️ **compose mode 现在默认开着**（在 [app.yxi.ui.Workspace] 里启的）。
+ * 非 compose 时 `EditorInfo.inputType` 是 `NO_SUGGESTIONS | VISIBLE_PASSWORD`
+ * （不含 `TYPE_CLASS_TEXT`）—— 输入法见到这种「像密码框」的类型就**不给候选词**，
+ * 中文根本打不出来。那个值写死在 `ImeInputView.onCreateInputConnection` 里，
+ * 库没有参数能改，**compose mode 是唯一的拨杆**。
+ * 代价是「攒一行、回车整行提交」；要逐键交互（vim / less / y-n）用工具条上那个键关掉。
  *
  * ⚠️ 「软键盘弹出时自动滚到底」**做不了**：滚动控制器只有 `TerminalWithAccessibility`
  * 才给，而那个函数和 `ScrollController` 在 Kotlin 层都是 **internal**，外部拿不到。

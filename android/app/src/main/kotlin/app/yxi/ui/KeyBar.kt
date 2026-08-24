@@ -33,7 +33,10 @@ fun KeyBar(
     onCtrl: () -> Unit,
     /** 软键盘开关。⚠️ 终端控件不会自己弹键盘 —— 得有人点 */
     onKeyboard: () -> Unit,
-    /** compose mode（中文输入的退路，见 TerminalView 类注释） */
+    /**
+     * compose mode = **整行输入**，**默认开着**（见 [app.yxi.ui.Workspace] 里那段注释）。
+     * 开着才有输入法候选词 —— 中文、英文联想都靠它。关掉是逐键直发，给 vim / y-n 用。
+     */
     composing: Boolean,
     onCompose: () -> Unit,
     /** 语音。⚠️ 终端模式下识别结果要先确认，见 Workspace 里那个对话框 */
@@ -59,8 +62,8 @@ fun KeyBar(
     ) {
         Cap("⌨", false, onKeyboard)
         Cap("Ctrl", ctrlArmed, onCtrl)
-        // 「中」= compose mode。直接打中文不出候选词时点它
-        Cap("中", composing, onCompose)
+        // 整行 ⇄ 逐键。默认「整行」（有候选词），vim/less/y-n 这种要逐键的点掉它
+        Cap(if (composing) "整行" else "逐键", composing, onCompose)
         CapIcon(Glyph.Mic, onVoice)
         Cap("历史", history, onHistory)
         listOf(

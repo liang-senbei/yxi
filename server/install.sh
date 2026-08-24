@@ -39,10 +39,10 @@ PY
   echo "（$EVENTS 留着没删 —— 里面是历史事件，要删自己动手）"
 }
 
-# åå¸ä¸ä¸ªæ°çæ¬ç»ææºèªæ´æ°ç¨ï¼æ APK åæ¸åæè¿ ~/.yxi/
-#   ./install.sh --publish <apk> <versionCode> <versionName> [è¯´æ]
-# ææºè¿ä¸è¿å°æºå¨æ¶ä¼çå°ãææ°çæ¬ãï¼èµ° SFTP ä¸è½½ ââ
-# ä¸ç¨ GitHubãä¸ç¨ tokenãä¸ç¨å¬ç½ HTTPï¼é²ç«å¢åé¢ç§æ ·è½ç¨ã
+# 发布一个新版本给手机自更新用：把 APK 和清单摆进 ~/.yxi/
+#   ./install.sh --publish <apk> <versionCode> <versionName> [说明]
+# 手机连上这台机器时会看到「有新版本」，走 SFTP 下载 ——
+# 不用 GitHub、不用 token、不用公网 HTTP，防火墙后面照样能用。
 if [ "${1:-}" = "--publish" ]; then
   APK="${2:?用法: $0 --publish <apk> <versionCode> <versionName> [说明]}"
   CODE="${3:?缺 versionCode}"; NAME="${4:?缺 versionName}"; NOTES="${5:-}"
@@ -54,6 +54,32 @@ if [ "${1:-}" = "--publish" ]; then
   echo "· 发布好了：$EVENTS_DIR/Yxi.apk（$(du -h "$EVENTS_DIR/Yxi.apk" | cut -f1)）"
   echo "  清单 → versionCode $CODE / $NAME"
   echo "  ⚠️ versionCode 必须比上一版大 —— 手机只比这个数，versionName 只给人看。"
+
+  # 顺手推到公网下载机（hk13）。手机点「检查更新」走的是**那台的 HTTP**，
+  # 不是这台的 SFTP —— 只发本地等于没发。
+  #
+  # ⚠️ **必须比对 sha256。** 踩过一次（TROUBLESHOOTING #69）：三处路径各自
+  #    「看起来都成功了」，用户手机上下到的还是旧包。传完不校验 = 没传。
+  # ⚠️ 推失败不回滚本地发布（SFTP 自更新照样能用），但要**吼**，
+  #    否则静悄悄留下一个「本地新、公网旧」的裂口。
+  TOKEN="$EVENTS_DIR/dl-token"
+  if [ ! -r "$TOKEN" ]; then
+    echo "  ⚠️ 没有 $TOKEN，跳过公网同步 —— 手机上还是旧包。"
+  elif ! ssh -o BatchMode=yes -o ConnectTimeout=8 hk13 true 2>/dev/null; then
+    echo "  ⚠️ 连不上 hk13，跳过公网同步 —— 手机上还是旧包。"
+  else
+    DST="/var/www/yxi/$(cat "$TOKEN")"
+    scp -q "$EVENTS_DIR/Yxi.apk" "$EVENTS_DIR/latest.json" "hk13:$DST/"
+    HERE=$(sha256sum "$EVENTS_DIR/Yxi.apk" | cut -d" " -f1)
+    THERE=$(ssh hk13 "sha256sum $DST/Yxi.apk" | cut -d" " -f1)
+    if [ "$HERE" = "$THERE" ]; then
+      echo "  · 已同步到 hk13，sha256 一致：${HERE:0:12}…"
+    else
+      echo "  ❌ hk13 上的包对不上！本地 ${HERE:0:12}… ≠ 远端 ${THERE:0:12}…"
+      echo "     手机会下到错的东西，手动查一下 $DST"
+      exit 1
+    fi
+  fi
   exit 0
 fi
 

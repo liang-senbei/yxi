@@ -6,6 +6,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.core.RepeatMode
@@ -298,6 +299,46 @@ fun ChatScreen(
                         }
                     },
                 )
+            }
+        }
+
+        // 斜杠命令提示。手机上把 `/compact` 一个字母一个字母敲出来太痛苦了 —— 点一下就好。
+        //
+        // ⚠️ **不拦任何输入。** 这只是个填字条，选中就是把名字塞进草稿，
+        // 送出去的还是 `tmux send-keys`，由 Claude Code 自己的命令面板处理。
+        // 所以你自己写的斜杠命令照打照样能用，只是没提示。
+        val hints = app.yxi.agent.Slash.suggest(draft)
+        if (hints.isNotEmpty()) {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                shape = RoundedCornerShape(22.dp),
+                modifier = Modifier.fillMaxWidth().padding(14.dp, 0.dp, 14.dp, 8.dp),
+            ) {
+                // ⚠️ 高度必须封顶：只打一个 `/` 时候选是全部二十来条，
+                // 不封顶会把整个对话区顶出屏幕。
+                LazyColumn(Modifier.heightIn(max = 232.dp)) {
+                    items(hints, key = { it.name }) { c ->
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clickable { draft = "/" + c.name }
+                                .padding(18.dp, 11.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "/" + c.name,
+                                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                c.hint,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.outline,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                }
             }
         }
 
