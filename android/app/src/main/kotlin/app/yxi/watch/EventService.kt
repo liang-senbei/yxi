@@ -20,6 +20,7 @@ import app.yxi.ssh.KeyManager
 import app.yxi.ssh.KnownHosts
 import app.yxi.agent.Pending
 import app.yxi.agent.SessionProbe
+import app.yxi.ui.Pinned
 import app.yxi.ssh.SshSession
 import kotlinx.coroutines.*
 import org.json.JSONObject
@@ -132,6 +133,16 @@ class EventService : Service() {
         val session = full.removePrefix("cc-")
         val kind = e.optString("kind")
         if (kind == "end") return                    // 会话结束不值得把手机点亮
+
+        // 只通知置顶的会话。
+        //
+        // ⚠️ **比的是带 `cc-` 前缀的全名。** 置顶存的是 `Session.name`（`cc-Yxi`），
+        // 事件里的 `session` 字段也是全名；而上面那个 `session` 变量是**去了前缀的短名**，
+        // 拿它来比会一条都对不上 —— 表现是「打开这个开关之后彻底没通知了」，
+        // 而且没有任何报错。用 [full]。
+        //
+        // ⚠️ **一条都没置顶时不生效**，见 [Pinned.onlyPinned] 的注释。
+        if (!Pinned.shouldNotify(Pinned.onlyPinned(this), Pinned.get(this, host.id), full)) return
 
         val title = if (kind == "needs") "$session 需要你" else "$session 干完了"
         // 「需要你」的 detail 是 Claude 自己给的一句人话（"needs your permission to use Bash"），有信息量；

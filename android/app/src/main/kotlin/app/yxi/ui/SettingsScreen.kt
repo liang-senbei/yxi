@@ -150,6 +150,25 @@ fun SettingsScreen(
                 "⚠️ 一台都没开 —— 前面两项放行了也不会响。" +
                     "去「主机」那一栏，点每台机器右边的铃铛把它打开。"
             )
+            // ⚠️ 这一条也得摆出来。它同样能让手机「明明设置好了却不响」——
+            // 开着 + 置顶了几个 = 其余会话一律不响。不写在这页上，
+            // 下次又是「我明明放行了」的排查（#91）。
+            var onlyPinned by remember { mutableStateOf(Pinned.onlyPinned(ctx)) }
+            val pinCount = store.hosts.collectAsState().value
+                .sumOf { Pinned.get(ctx, it.id).size }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("只通知置顶的会话", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                Switch(onlyPinned, { onlyPinned = it; Pinned.setOnlyPinned(ctx, it) })
+            }
+            Hint2(
+                when {
+                    !onlyPinned -> "现在是**每个**会话都会响。会话多的时候通知栏会很吵。"
+                    pinCount == 0 -> "⚠️ 一条都没置顶 —— 现在等于全部通知。" +
+                        "去会话列表点卡片右上角的图钉，置顶几个你真正在等的。"
+                    else -> "只有置顶的 $pinCount 个会响，其余的静悄悄干活。" +
+                        "置顶在会话列表里点卡片右上角的图钉。"
+                }
+            )
             StatusRow("通知权限", notif) {
                 ctx.startActivity(
                     Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
