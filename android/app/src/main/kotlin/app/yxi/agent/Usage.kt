@@ -39,6 +39,10 @@ data class Usage(
             val out = runCatching {
                 ssh.exec(
                     "export PATH=\$HOME/.local/bin:\$HOME/.npm-global/bin:/usr/local/bin:\$PATH; " +
+                        // ⚠️ node 常常装在 /opt/node-*/bin 这种地方，既不在 PATH 里也不在 npm 的全局目录下。
+                        // 本机实测就是这样：`command -v ccusage` 找不到，于是用量整块**默默不显示** ——
+                        // 「探不到就藏起来」是对的，但**探得不够狠**就变成了功能形同虚设。
+                        "for d in /opt/node*/bin /usr/lib/node_modules/.bin; do [ -d \"\$d\" ] && PATH=\$PATH:\$d; done; " +
                         "command -v ccusage >/dev/null 2>&1 || exit 0; " +
                         "ccusage blocks --active --json 2>/dev/null"
                 )
@@ -63,5 +67,49 @@ data class Usage(
                 )
             }.getOrNull()
         }
+
+        /**
+         * **今天**烧了多少（那台机器自己的当天，按它的时区算）。
+         *
+         * ⚠️ **日期在服务器上算**（`$(date +%Y%m%d)`），不是手机上算。
+         * 手机和服务器不在同一个时区是常态 —— 用手机的日期会在跨零点前后
+         * 取到隔壁那一天，数字忽大忽小，还查不出为什么。
+         *
+         * ⚠️ 跟 [probe] 一样：**探不到 ccusage 就返回 null，调用方整块藏掉**。
+         * 额度和花费显示一个假的比不显示危险得多。
+         *
+         * ⚠️ 为什么不自己数转录：token 数好数，**钱不好算** ——
+         * 要一张随时在变的模型价目表，抄进 app 里就会过期，
+         * 然后你照着一个过时的价格决定今天要不要开大活。ccusage 自己维护那张表。
+         */
+        suspend fun today(ssh: SshSession): Today? {
+            val out = runCatching {
+                ssh.exec(
+                    "export PATH=\$HOME/.local/bin:\$HOME/.npm-global/bin:/usr/local/bin:\$PATH; " +
+                        // ⚠️ node 常常装在 /opt/node-*/bin 这种地方，既不在 PATH 里也不在 npm 的全局目录下。
+                        // 本机实测就是这样：`command -v ccusage` 找不到，于是用量整块**默默不显示** ——
+                        // 「探不到就藏起来」是对的，但**探得不够狠**就变成了功能形同虚设。
+                        "for d in /opt/node*/bin /usr/lib/node_modules/.bin; do [ -d \"\$d\" ] && PATH=\$PATH:\$d; done; " +
+                        "command -v ccusage >/dev/null 2>&1 || exit 0; " +
+                        "ccusage daily --json --since \$(date +%Y%m%d) 2>/dev/null"
+                )
+            }.getOrNull().orEmpty().trim()
+            if (!out.startsWith("{")) return null
+            return runCatching {
+                val tot = JSONObject(out).optJSONObject("totals") ?: return null
+                Today(tot.optLong("totalTokens"), tot.optDouble("totalCost"))
+            }.getOrNull()?.takeIf { it.tokens > 0 }
+        }
     }
+}
+
+/** 今天的总量。⚠️ 拿不到就是 null —— 见 [Usage.today]。 */
+data class Today(val tokens: Long, val costUSD: Double) {
+    val tokenText: String get() = when {
+        tokens >= 1_000_000 -> "%.1fM".format(tokens / 1e6)
+        tokens >= 1_000 -> "%.0fK".format(tokens / 1e3)
+        else -> tokens.toString()
+    }
+    /** ⚠️ 两位小数：一天烧掉个位数美元是常态，只显示整数会看见一串 `$0`。 */
+    val costText: String get() = "$" + "%.2f".format(costUSD)
 }

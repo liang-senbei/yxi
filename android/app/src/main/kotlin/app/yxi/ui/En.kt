@@ -288,5 +288,7 @@ internal object En {
         "终端起不来：%s" to "Terminal won't start: %s",
         "切不过去：%s" to "Couldn't switch: %s",
         "%d 个会话等你" to "%d session(s) waiting on you",
+        "上下文 %s" to "context %s",
+        "今日 %s · %s" to "today %s · %s",
     )
 }

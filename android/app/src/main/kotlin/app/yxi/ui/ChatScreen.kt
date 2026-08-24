@@ -69,6 +69,13 @@ fun ChatScreen(
     val ctx = androidx.compose.ui.platform.LocalContext.current
     var staged by remember(sessionName) { mutableStateOf<List<app.yxi.agent.Attachments.Staged>>(emptyList()) }
     var uploading by remember { mutableStateOf(false) }
+    /**
+     * 这个会话此刻占多少上下文。⚠️ 顺着转录一起解出来的，**不额外跑一趟服务器**。
+     * 名字不叫 `ctx` —— 这个文件里 `ctx` 已经是 `LocalContext`。
+     */
+    var ctxUse by remember(sessionName) { mutableStateOf<app.yxi.agent.Transcript.Ctx?>(null) }
+    /** 这台机器**今天**烧了多少。⚠️ 拿不到就是 null，整块藏掉（[app.yxi.agent.Usage] 的规矩） */
+    var todayUse by remember(sessionName) { mutableStateOf<app.yxi.agent.Today?>(null) }
     /** 正在放大看的那张附件图。null = 没在看 */
     var preview by remember { mutableStateOf<app.yxi.agent.Attachments.Staged?>(null) }
 
@@ -98,6 +105,16 @@ fun ChatScreen(
                 ssh?.let { app.yxi.agent.Attachments.sweep(it) }
             }
             uploading = false
+        }
+    }
+
+    // 今日用量。⚠️ **不跟着对话刷**：它两分钟才有意义地变一次，
+    // 而 `ccusage` 要扫整个 `~/.claude/projects`，跟着 300ms 的刷新节奏跑会把机器拖死。
+    LaunchedEffect(ssh) {
+        val s0 = ssh ?: return@LaunchedEffect
+        while (true) {
+            todayUse = app.yxi.ssh.catching { app.yxi.agent.Usage.today(s0) }.getOrNull()
+            delay(120_000)
         }
     }
 
@@ -139,7 +156,14 @@ fun ChatScreen(
         runCatching { TranscriptStream.head(s, file) }
             .onSuccess { head ->
                 if (head.isNotEmpty()) {
-                    items = withContext(Dispatchers.Default) { Transcript.parse(head.asSequence()) }
+                    // ⚠️ 用 `Incremental` 而不是 `Transcript.parse` —— 后者不给 ctx。
+                    // 只靠下面那条流的话，**会话闲着时上下文永远显示不出来**：
+                    // `tail -f` 只送新行，没有新的 assistant 消息就没有 usage。
+                    val inc0 = Transcript.Incremental()
+                    items = withContext(Dispatchers.Default) {
+                        inc0.add(head.asSequence()); inc0.snapshot()
+                    }
+                    inc0.ctx?.let { ctxUse = it }
                 }
             }
             .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
@@ -177,6 +201,7 @@ fun ChatScreen(
                     inc.add(batch.asSequence())
                     inc.snapshot()
                 }
+                inc.ctx?.let { ctxUse = it }
             }
         }
         TranscriptStream.stream(s, file).collect { line -> synchronized(lock) { pending += line } }
@@ -225,6 +250,35 @@ fun ChatScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.outline,
             )
+        }
+
+        // 右上角那条细字：这个会话占了多少上下文 · 这台机器今天烧了多少。
+        //
+        // ⚠️ **为什么不是把 `/usage` 的输出搬过来**：`/usage` 只画在 TUI 上，
+        // 转录里一个字都没有（用户自己也发现了「只有终端里面有」）。
+        // 而这两个数是**现成的**：上下文来自最后一条 assistant 消息的 usage（顺着转录解出来），
+        // 今日用量来自那台机器上的 ccusage。都不用动用户的会话。
+        //
+        // ⚠️ **拿不到就整行不画**，不显示 0、不显示「未知」——
+        // 额度和花费显示一个假的比不显示危险得多，你会照着它决定今天开不开大活。
+        if (ctxUse != null || todayUse != null) {
+            Row(
+                Modifier.fillMaxWidth().padding(18.dp, 0.dp, 18.dp, 2.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val bits = buildList {
+                    // ⚠️ 只给绝对值，不给百分比 —— 见 [Transcript.Ctx] 的注释
+                    ctxUse?.let { add(t("上下文 %s").format(tokenText(it.tokens))) }
+                    todayUse?.let { add(t("今日 %s · %s").format(it.tokenText, it.costText)) }
+                }
+                Text(
+                    bits.joinToString("   "),
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.outline,
+                    maxLines = 1,
+                )
+            }
         }
 
         // ⚠️ 库把链接点击交给 `LocalUriHandler`，所以在这儿换一个自己的。
@@ -547,6 +601,13 @@ private fun BasicTextFieldRow(value: String, onValue: (String) -> Unit) {
  * ⚠️ 用 `android.content.ClipboardManager` 而不是 Compose 的 `LocalClipboardManager` ——
  * 项目里另外两处（[HostsScreen] 的公钥、[DevMode] 的诊断）已经是这个写法，统一。
  */
+/** `656203` → `656K`。⚠️ 跟 [app.yxi.agent.Today.tokenText] 同一套写法，别两处不一样。 */
+private fun tokenText(n: Long): String = when {
+    n >= 1_000_000 -> "%.1fM".format(n / 1e6)
+    n >= 1_000 -> "%.0fK".format(n / 1e3)
+    else -> n.toString()
+}
+
 private fun copy(ctx: android.content.Context, text: String) {
     val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
     cm.setPrimaryClip(android.content.ClipData.newPlainText("yxi", text))

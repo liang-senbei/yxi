@@ -100,13 +100,35 @@ object Transcript {
      * 是 `var`，就地改 Compose **看不见** —— 列表里还是同一个对象，
      * `key` 也没变，那张卡会永远停在「进行中」。所以存的是**下标**，回填时整条替换。
      */
+    /**
+     * 这个会话**此刻**占了多少上下文，以及跑在哪个模型上。
+     *
+     * ⚠️ **来源是最后一条 assistant 消息的 `usage`，不是自己数字数。**
+     * 那一条记的是这一轮真正发给模型的量：
+     * `input_tokens + cache_creation_input_tokens + cache_read_input_tokens`。
+     * 实测同一个会话连着四轮是 654665 → 655610 → 655751 → 656203，跟着涨，正是我们要的。
+     *
+     * ⚠️ **不给百分比。** 算百分比要知道这个模型的上下文窗口，而转录里没有 ——
+     * 实测 `claude-opus-4-6` 的会话上下文已经 656K，远超常说的 200K，
+     * 说明同一个模型名下有不同窗口。按 200K 算会显示成 328%，
+     * 那比不显示危险得多（跟 [Usage] 那条「宁可不显示也不显示假的」是同一条规矩）。
+     */
+    data class Ctx(val tokens: Long, val model: String)
+
     class Incremental {
         private val out = ArrayList<ChatItem>()
         private val calls = HashMap<String, Int>()          // tool_use_id → out 里的下标
         private val queued = LinkedHashSet<String>()        // 还排着队的输入，出队就删
         private val said = HashSet<String>()                // 已经作为用户消息出现过的原文
 
-        fun add(lines: Sequence<String>) = parseInto(lines, out, calls, queued, said)
+        /** 最后一条 assistant 消息报的上下文用量。⚠️ 顺带解析，**不额外跑一趟服务器**。 */
+        var ctx: Ctx? = null
+            private set
+
+        // ⚠️ 最后那个 lambda 不能省。`onCtx` 有默认值 `{}`，漏了它**编译照样通过**，
+        // 只是 [ctx] 永远是 null —— 界面上表现为「上下文那一格永远不出现」，不报错。
+        fun add(lines: Sequence<String>) =
+            parseInto(lines, out, calls, queued, said) { ctx = it }
 
         /** 当前快照。排队的挂在最后 —— 它们还没进对话，位置就在「此刻」。 */
         fun snapshot(): List<ChatItem> = out + queued.asSequence()
@@ -132,6 +154,7 @@ object Transcript {
         calls: HashMap<String, Int>,
         queued: LinkedHashSet<String>,
         said: HashSet<String>,
+        onCtx: (Ctx) -> Unit = {},
     ) {
         lines.forEach { line ->
             if (line.isBlank()) return@forEach
@@ -186,10 +209,29 @@ object Transcript {
 
             when (type) {
                 "user" -> parseUser(msg, d.optJSONObject("toolUseResult"), uuid, calls, out, said)
-                "assistant" -> parseAssistant(msg, uuid, calls, out)
+                "assistant" -> {
+                    // ⚠️ 顺路取，不额外跑一趟服务器 —— 这些行本来就在手上
+                    ctxOf(msg)?.let(onCtx)
+                    parseAssistant(msg, uuid, calls, out)
+                }
                 else -> Unit
             }
         }
+    }
+
+    /**
+     * 从一条 assistant 消息里读出「这一轮发给模型多少上下文」。
+     *
+     * ⚠️ 三项都要加：`input_tokens` 是这轮新增的、`cache_creation` 是这轮写进缓存的、
+     * `cache_read` 是命中缓存复用的 —— **合起来才是模型这轮实际看到的量**。
+     * 只看 `input_tokens` 的话，一个 65 万 token 的会话会显示成「1」（真的，实测就是 1）。
+     */
+    private fun ctxOf(msg: JSONObject): Ctx? {
+        val u = msg.optJSONObject("usage") ?: return null
+        val n = u.optLong("input_tokens") +
+            u.optLong("cache_creation_input_tokens") +
+            u.optLong("cache_read_input_tokens")
+        return if (n > 0) Ctx(n, msg.optString("model")) else null
     }
 
     private fun uuidOf(d: JSONObject, line: String): String =
