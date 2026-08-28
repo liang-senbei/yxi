@@ -136,6 +136,19 @@ final class HostLink: ObservableObject {
                 } catch {
                     // ⚠️ 指纹变了**不重试** —— 那不是网络抖动，是要用户拿主意的事。
                     // 一直重试只会把那句吓人的话每秒刷一遍。
+                    // ⚠️ **指纹框还挂着的时候，别把失败说成「网络超时」。**
+                    // 首连要停下来等人核对指纹，那段时间连接可能先超时 ——
+                    // 报「包发出去了没人应」会把用户支去查网络和防火墙，
+                    // 而真实原因只是「那个框还没点」。真机上逮到的。
+                    if await MainActor.run(body: { self.gate.pending != nil }) {
+                        self.publish(.init(
+                            id: UUID(), service: nil,
+                            error: "还在等你确认主机指纹 —— 上面那个框点「信任并连接」就好。",
+                            retry: { [weak self] in self?.retry() }
+                        ))
+                        try? await Task.sleep(for: .seconds(2))
+                        continue
+                    }
                     let fatal = (error as? KnownHosts.Rejection).map {
                         if case .fingerprintChanged = $0 { return true } else { return false }
                     } ?? false

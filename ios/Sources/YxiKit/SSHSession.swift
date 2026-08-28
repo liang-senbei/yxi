@@ -103,7 +103,17 @@ public final class SSHSession: @unchecked Sendable {
 
     // MARK: - 连接
 
-    public func connect(timeout: TimeAmount = .seconds(15)) async throws {
+    /// ⚠️⚠️ **默认 15 秒不够，因为首连要停下来等人核对指纹。**
+    ///
+    /// 第一次连一台机器时，握手中途会弹出「主机指纹是这个，信任吗」——
+    /// 人得读完那串 SHA256、切去服务器上跑 `ssh-keygen -lf` 对一遍，再回来点。
+    /// 15 秒**必然**不够。而超时之后报的是「连接超时（包发出去了没人应）」，
+    /// 把用户支去查网络和防火墙 —— 真实原因只是「框还没点」。
+    /// （真机上逮到的：网络通、密码对、指纹也对，就是连不上。）
+    ///
+    /// 90 秒是**给人读字的时间**，不是给网络的：网络真不通时 TCP 自己会先失败，
+    /// 不会白等满 90 秒。
+    public func connect(timeout: TimeAmount = .seconds(90)) async throws {
         let auth: SSHAuthenticationMethod = switch config.auth {
         case .password(let pw): .passwordBased(username: config.username, password: pw)
         case .privateKey(let key): .ed25519(username: config.username, privateKey: key)
