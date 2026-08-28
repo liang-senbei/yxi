@@ -48,29 +48,9 @@ struct ChatScreen: View {
 
             transcript
 
-            if model.live.busy {
-                HStack(spacing: 10) {
-                    LiveStatusRow(status: model.live.status)
-                    Spacer(minLength: 0)
-                    // 跑飞了一键掐断（送 Esc），不用进终端
-                    Button { model.interrupt() } label: {
-                        Text("■ 停").font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Yx.error)
-                            .padding(.horizontal, 12).padding(.vertical, 5)
-                            .background(Yx.errorBox, in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.trailing, 16)
-                }
-            }
+            if model.live.busy { busyRow }
 
-            if let p = model.pending {
-                PendingCard(pending: p, busy: model.answering,
-                            onPick: model.pick, onSubmit: model.submitMultiSelect,
-                            onPrev: p.tabs.count > 1 ? model.goPrevQuestion : nil,
-                            onNext: p.tabs.count > 1 ? model.goNextQuestion : nil)
-                    .padding(.horizontal, 14).padding(.bottom, 8)
-            }
+            pendingRow
 
             if !model.staged.isEmpty || model.uploading { stagedRow }
 
@@ -275,6 +255,37 @@ struct ChatScreen: View {
         .padding(.horizontal, 14).padding(.top, 6).padding(.bottom, 12)
         .sheet(isPresented: $showModes) {
             ModeSheet { cmd in model.sendMode(cmd) }
+        }
+    }
+
+    /// 忙的时候那条状态 + 一键「停」。
+    ///
+    /// ⚠️ **单独抽出来不是为了好看** —— 全塞在 `body` 里会让 SwiftUI 的类型检查器
+    /// 直接放弃（CI 报 `failed to produce diagnostic for expression`）。
+    /// 这类「一个 body 里堆七八个条件分支」的写法在 SwiftUI 里必须拆。
+    private var busyRow: some View {
+        HStack(spacing: 10) {
+            LiveStatusRow(status: model.live.status)
+            Spacer(minLength: 0)
+            Button { model.interrupt() } label: {
+                Text("■ 停").font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Yx.error)
+                    .padding(.horizontal, 12).padding(.vertical, 5)
+                    .background(Yx.errorBox, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 16)
+        }
+    }
+
+    @ViewBuilder
+    private var pendingRow: some View {
+        if let p = model.pending {
+            PendingCard(pending: p, busy: model.answering,
+                        onPick: model.pick, onSubmit: model.submitMultiSelect,
+                        onPrev: p.tabs.count > 1 ? model.goPrevQuestion : nil,
+                        onNext: p.tabs.count > 1 ? model.goNextQuestion : nil)
+                .padding(.horizontal, 14).padding(.bottom, 8)
         }
     }
 
