@@ -2592,3 +2592,34 @@ raw.replacingOccurrences(of: "\u{1B}?\\[[0-9;]*m", with: "", options: .regularEx
 先想清楚是让 **Swift** 转义还是让**正则引擎**转义 —— raw string 会把这个决定
 默默交给引擎。另：这条是靠「用真回执做测试样本」照出来的，自己编一个
 `Set model to Opus 5` 的干净字符串永远碰不到（没有 ANSI）。
+
+## #137 端到端连不上：「主机指纹变了，已拒绝连接」—— 服务器给的不是我们钉的那把
+
+**症状**　CI 里让模拟器连 runner 上现起的 sshd，App 弹
+「`runner@127.0.0.1` 的主机指纹变了，已拒绝连接」。端口是通的
+（`nc -z` 成功），公钥也装进 `authorized_keys` 了。
+
+**根因**　macOS 的 sshd **默认同时提供 ed25519 / ecdsa / rsa 三把主机密钥**，
+最终用哪一把由客户端和服务端协商决定。CI 里只把 **ed25519** 那把的指纹
+提前塞进了 App（为了跳过首次连接的信任弹窗），而实际协商出来的是另一把 ——
+于是 App 认为指纹对不上。
+
+⚠️ **这是 App 该有的行为，不是 bug。** 指纹对不上就拒连，正是中间人防护。
+错的是测试环境：钉了一把，却让服务器随便给。
+
+**修法**　让服务器只提供那一把。OpenSSH 里只要显式写过 `HostKey`，
+默认的几把就不再启用：
+
+```bash
+echo "HostKey /etc/ssh/ssh_host_ed25519_key" | sudo tee -a /etc/ssh/sshd_config
+sudo launchctl kickstart -k system/com.openssh.sshd
+ssh-keyscan -p 22 127.0.0.1        # 核一遍到底提供了哪几把
+```
+
+**顺带一个假警报**　同一轮里「本机自测 ssh 没通」是测试自己写错了：
+`ssh $(whoami)@127.0.0.1` 用的是 **runner 自己的**密钥，而
+`authorized_keys` 里装的是 **App 的**公钥。自测要另生成一把专用密钥。
+
+**怎么避开**　凡是「提前钉指纹」的自动化，都要同时**把服务器锁到那一把**，
+并在日志里 `ssh-keyscan` 打出实际提供的算法 —— 否则失败信息只会说
+「指纹变了」，看不出是环境给错了。

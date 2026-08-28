@@ -78,10 +78,18 @@ jobs:
           sudo systemsetup -setremotelogin on
           mkdir -p ~/.ssh && touch ~/.ssh/authorized_keys
           chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys
-          # 主机公钥提前交给 App，省掉首次连接的信任弹窗（它会挡住要截的界面）
+          # ⚠️ **只留 ed25519 这一把主机密钥。** 上一轮就栽在这儿：
+          # macOS 的 sshd 默认同时提供 ed25519 / ecdsa / rsa，谈判出来的是哪一把不一定；
+          # 我们只把 ed25519 那把提前交给 App，于是 App 认为「指纹对不上」，
+          # 弹出「主机指纹变了，已拒绝连接」并拒连 —— 那是**它该有的行为**，不是 bug。
+          # OpenSSH 里只要显式写了 HostKey，默认的几把就不再用。
+          echo "HostKey /etc/ssh/ssh_host_ed25519_key" | sudo tee -a /etc/ssh/sshd_config >/dev/null
+          sudo launchctl kickstart -k system/com.openssh.sshd || true
           echo "hostkey=$(sudo awk '{print $1" "$2}' /etc/ssh/ssh_host_ed25519_key.pub)" >> "$GITHUB_OUTPUT"
           for i in $(seq 1 30); do nc -z 127.0.0.1 22 && break; sleep 1; done
           nc -z 127.0.0.1 22 && echo "sshd 已就绪"
+          # 服务器实际提供哪几把 —— 对不上就是上面那个错，先打出来省得瞎猜
+          ssh-keyscan -p 22 127.0.0.1 2>/dev/null | awk '{print "提供：" $2}'
 
       - name: 摆一份样本工作区（会话 + 文件）
         run: |
@@ -142,9 +150,13 @@ jobs:
           else
             cat "$PUB" >> ~/.ssh/authorized_keys
             echo "公钥已装： $(cut -c1-40 "$PUB")…"
-            # 自己先验一把：连不上就别指望 App 能连上
-            ssh -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=8 \
-                "$(whoami)@127.0.0.1" 'echo SSH_OK; tmux ls' || echo "⚠️ 本机自测 ssh 就没通"
+            # 自己先验一把 sshd 是否真的能用。⚠️ 要**另生成一把 CI 专用密钥**：
+            # runner 自己那把并不在 authorized_keys 里，拿它测必然失败（上一轮的假警报）
+            ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/ci_probe <<< y >/dev/null 2>&1 || true
+            cat ~/.ssh/ci_probe.pub >> ~/.ssh/authorized_keys
+            ssh -i ~/.ssh/ci_probe -o StrictHostKeyChecking=no -o BatchMode=yes \
+                -o ConnectTimeout=8 "$(whoami)@127.0.0.1" 'echo SSH_OK; tmux ls' \
+                || echo "⚠️ sshd 自测没通 —— App 大概率也连不上"
           fi
 
           SEED="-yxiSeedHost 127.0.0.1:22 -yxiSeedUser $(whoami) \
