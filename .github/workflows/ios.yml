@@ -26,6 +26,14 @@ jobs:
   sim:
     name: iOS 编译 + 模拟器截图
     runs-on: macos-15
+    # ⚠️ **macOS runner 是 10 倍计费**（私有仓要花额度）。一天跑了 42 轮之后
+    # 额度用光，**连便宜的 Linux job 也一起起不来了**（两个 job 都是 3 秒零步骤就挂）。
+    # 所以默认不跑：只有手动触发、或者 commit message 里带 `[sim]` 时才跑。
+    # 平时每次推送只跑 Linux 那半（逻辑层 257 个测试），够挡住绝大多数错；
+    # 攒一批再跑一次带截图的完整验证。
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.head_commit.message, '[sim]')
     steps:
       - uses: actions/checkout@v4
 

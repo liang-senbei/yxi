@@ -64,7 +64,16 @@ struct LabScreen: View {
                                     .tint(Yx.teal)
                                 }
                             if expanded.contains(cat.key) {
-                                ForEach(cat.items) { item in row(item) }
+                                ForEach(cat.items) { item in
+                                    row(item)
+                                        // 单条删除。整栏删太重了 —— 一栏里通常
+                                        // 只有一两张是废的
+                                        .swipeActions(edge: .trailing) {
+                                            Button(role: .destructive) {
+                                                Task { await deleteItems([item]) }
+                                            } label: { Label("删除", systemImage: "trash") }
+                                        }
+                                }
                             }
                         }
                     }
@@ -169,11 +178,15 @@ struct LabScreen: View {
         pinsRaw = cur.sorted().joined(separator: "\n")
     }
 
-    /// 删掉整栏。⚠️ **服务器上真删**，所以先从界面拿掉再发命令 ——
-    /// 命令失败的话下一次 reload 会把它们带回来，比「删了却还在」诚实。
     private func deleteCat(_ cat: (key: String, items: [Lab.Item])) async {
-        guard let runner, let cmd = Lab.removeCommand(ids: cat.items.map(\.id)) else { return }
-        let gone = Set(cat.items.map(\.id))
+        await deleteItems(cat.items)
+    }
+
+    /// ⚠️ **服务器上真删**，所以先从界面拿掉再发命令 ——
+    /// 命令失败的话下一次 reload 会把它们带回来，比「删了却还在」诚实。
+    private func deleteItems(_ list: [Lab.Item]) async {
+        guard let runner, let cmd = Lab.removeCommand(ids: list.map(\.id)) else { return }
+        let gone = Set(list.map(\.id))
         items.removeAll { gone.contains($0.id) }
         _ = try? await runner.run(cmd)
     }
