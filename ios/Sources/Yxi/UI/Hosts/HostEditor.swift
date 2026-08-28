@@ -369,10 +369,16 @@ struct YxField: View {
                 } else {
                     TextField("", text: $text)
                         .keyboardType(number ? .numberPad : .default)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
                 }
             }
+            // ⚠️⚠️ **两支都要关掉自动大写和自动更正，尤其是密码框。**
+            // 原来这两句只加在普通输入框那一支上，`SecureField` 没有 ——
+            // 而密码恰恰是最不能被输入法动手脚的：改一个字符，
+            // 表现是「认证被拒」，跟「密码打错」长得一模一样，能查半天。
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            // 密码不该被系统当成什么「用户名」去联想填充
+            .textContentType(secure ? .password : .none)
             .font(mono ? .mono(15) : .system(size: 15))
             .foregroundStyle(Yx.onSurface)
             .tint(Yx.copper)
