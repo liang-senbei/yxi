@@ -18,6 +18,21 @@ trap 'rm -rf "$S"' EXIT
 cp -r project.yml App Sources Tests "$S"/ || exit 1
 ( cd "$S" && "$XG" generate --spec project.yml >/dev/null 2>&1 ) || { echo "❌ xcodegen 生成失败"; exit 1; }
 
+# ⚠️ **两端版本号必须一致。** 发安卓 0.9.28 时漏同步过 iOS（iOS 还停在 0.9.27），
+# 用户在 Xcode 里看到旧版本号才发现。两个平台是同一个产品，版本号对不上
+# 就没法讨论「你装的是哪一版」。
+AND=../android/app/build.gradle.kts
+if [ -f "$AND" ]; then
+  A_NAME=$(grep -oE 'versionName = "[^"]+"' "$AND" | head -1 | cut -d'"' -f2)
+  A_CODE=$(grep -oE 'versionCode = [0-9]+' "$AND" | head -1 | grep -oE '[0-9]+')
+  I_NAME=$(grep -oE 'marketingVersion "[^"]+"' project.yml | head -1 | cut -d'"' -f2)
+  I_CODE=$(grep -oE 'buildVersion "[0-9]+"' project.yml | head -1 | grep -oE '[0-9]+')
+  if [ "$A_NAME" != "$I_NAME" ] || [ "$A_CODE" != "$I_CODE" ]; then
+    echo "❌ 两端版本号对不上：安卓 $A_NAME($A_CODE) / iOS $I_NAME($I_CODE)"
+    exit 1
+  fi
+fi
+
 python3 - "$S" <<'PY'
 import re, sys, pathlib
 pb = pathlib.Path(sys.argv[1], "Yxi.xcodeproj/project.pbxproj").read_text()
