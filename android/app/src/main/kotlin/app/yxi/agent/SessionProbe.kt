@@ -3,6 +3,9 @@ package app.yxi.agent
 import app.yxi.ui.t
 import app.yxi.ssh.SshSession
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
@@ -183,6 +186,57 @@ object SessionProbe {
      * 表现成偶发的闪烁，非常难查。
      *
      */
+    private const val SCR_MARK = "__YXI_SCR__"
+
+    /**
+     * **盯屏幕：变了才推。** 一条长连通道，服务器侧自己比对，没变就不过网。
+     *
+     * ⚠️ 为什么不轮询：轮询是「每次都要问一遍」，每问一次就是一个 SSH 往返。
+     * 实测抓屏本身 **0 毫秒**，3 秒延迟几乎全是往返 + 轮询间隔 + 被 `busy` 停住的等待。
+     * 改成推之后，延迟 ≈ 服务器侧的检测间隔（0.2s）+ 单程网络，点完选项下一题基本立刻就到。
+     *
+     * ⚠️ `|| exit` 不能省：会话没了 / 手机断了要让远端这个循环自己退，
+     * 否则每次重连都在服务器上留一个空转的壳（[SshSession.follow] 踩过同样的坑）。
+     */
+    fun watchScreen(session: SshSession, target: String, lines: Int = 60): kotlinx.coroutines.flow.Flow<Pair<Pending?, Live>> =
+        kotlinx.coroutines.flow.flow {
+            val q = target.replace("'", "'\\''")
+            val script = "trap 'exit' PIPE HUP TERM INT; prev=''; while :; do " +
+                "cur=\$(tmux capture-pane -pt '$q' -S -$lines 2>/dev/null) || exit; " +
+                "if [ \"\$cur\" != \"\$prev\" ]; then " +
+                "printf '%s\\n$SCR_MARK\\n' \"\$cur\" || exit; prev=\$cur; fi; " +
+                "sleep 0.2; done"
+            val shell = session.openExecStream(script)
+            val onCancel = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
+                ?.invokeOnCompletion { runCatching { shell.close() } }
+            try {
+                val reader = shell.output.bufferedReader()
+                val buf = StringBuilder()
+                while (kotlinx.coroutines.currentCoroutineContext().isActive) {
+                    val line = reader.readLine() ?: break
+                    if (line == SCR_MARK) {
+                        // ⚠️ **在 IO 上就把屏幕解析完**再交给界面。放到主线程去解析的话，
+                        // 它一忙起来屏幕每 0.2 秒变一次，主线程就一直在解析 + 重组 → ANR。
+                        val screen = buf.toString()
+                        emit(Prompt.parse(screen) to Live.parse(screen))
+                        buf.setLength(0)
+                    } else {
+                        buf.append(line).append('\n')
+                        if (buf.length > 200_000) buf.setLength(0)   // 兜底，别把内存撑爆
+                    }
+                }
+            } finally {
+                onCancel?.dispose()
+                shell.close()
+            }
+        // ⚠️ **必须 flowOn(IO)。** `readLine()` 是阻塞调用，flow 体默认跑在**收集方的线程**上
+        // ——收集方是 Compose 的 LaunchedEffect（主线程），于是整个界面卡死弹 ANR。
+        // 实测就是这么撞出来的；[TranscriptStream] 那条流早就这么写了，我漏了。
+        }
+            // 主线程要是没跟上，丢掉中间那些帧只取最新的 —— 排队只会越积越卡
+            .conflate()
+            .flowOn(kotlinx.coroutines.Dispatchers.IO)
+
     suspend fun snapshot(session: SshSession, target: String): Pair<Pending?, Live> {
         val screen = peek(session, target, 60)
         return Prompt.parse(screen) to Live.parse(screen)

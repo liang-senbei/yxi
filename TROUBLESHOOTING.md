@@ -2491,3 +2491,44 @@ tmux resize-window -t cc-asktest -x 46 -y 30     # ← 复现窄屏换行的关�
 tmux capture-pane -pt cc-asktest > sample.txt
 ```
 真实样本已固化进 `PromptRealTest`（单选/多选/窄屏/复核页四种）。⚠️ 用完 `tmux kill-session`。
+
+## 134. 选择器延迟的根治：从「每次去问」改成「变了才推」
+
+**接 #133。** #133 把切题从 ~10 秒压到 ~3 秒，但那只是把轮询调快，**没治本**。
+
+**本因**：抓屏这件事本身是 **0 毫秒**（本地 `tmux capture-pane` 实测 0.00s），
+延迟几乎全在「每问一次就要一个 SSH 往返」+ 轮询间隔。轮询再快也是在**反复问**。
+
+**根治**：`SessionProbe.watchScreen()` —— 一条长连通道，**变化检测放在服务器侧**：
+```sh
+trap 'exit' PIPE HUP TERM INT; prev=''
+while :; do
+  cur=$(tmux capture-pane -pt '<会话>' -S -60) || exit
+  [ "$cur" != "$prev" ] && { printf '%s\n__YXI_SCR__\n' "$cur" || exit; prev=$cur; }
+  sleep 0.2
+done
+```
+没变就**一个字节都不过网**。实测：静止时零推送；屏幕一变 **206ms** 到本地。
+送键后不再自己抓屏，等推流把新屏送来即可（`waitScreenChange` 只读本地状态，零往返）。
+
+⚠️ **`|| exit` 不能省** —— 会话没了/手机断了要让远端循环自己退，否则每次重连都留一个空转的壳
+（跟 [SshSession.follow] 同一个坑）。
+
+**踩到两个真坑：**
+
+**① flow 体默认跑在收集方线程上 → ANR。**
+`readLine()` 是阻塞调用，而收集方是 Compose 的 `LaunchedEffect`（**主线程**），
+于是界面直接卡死弹「Yxi isn't responding」。必须 `.flowOn(Dispatchers.IO)`
+（`TranscriptStream` 早就这么写了，我照抄时漏了）。
+
+**② 解析也不能放主线程。**
+它忙起来时屏幕每 0.2 秒变一次，主线程就一直在解析 + 重组。
+改成**在 IO 上解析完**再把 `Pending?/Live` 交给界面，并 `.conflate()`
+（主线程没跟上就丢中间帧，只取最新的 —— 排队只会越积越卡）。
+
+**⚠️ 量延迟别用 uiautomator**：实测一次 `uiautomator dump` 要 **2.4–2.8 秒**，
+比被测对象慢一个数量级，量出来全是它自己的开销（我第一次量成 3 秒就是这么来的）。
+要量就**分段量**：TUI 重绘 100ms（服务器侧 tmux 自比对）、推送到达 206ms（本地跑那段脚本计时）。
+
+**代价**：聊天开着且对方在干活时，状态行每秒都在变 → 大约每秒一次、每次 ~4KB 的推送。
+换来的是「点一下就动」。不开聊天不产生流量。

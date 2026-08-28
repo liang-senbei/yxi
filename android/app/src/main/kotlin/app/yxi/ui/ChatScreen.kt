@@ -195,6 +195,8 @@ fun ChatScreen(
     var busy by remember { mutableStateOf(false) }
     // 「看改动」的 git diff 文本；非空就弹出 DiffSheet
     var diffText by remember { mutableStateOf<String?>(null) }
+    /** 送键前那一刻的指纹 —— 屏幕推过来后指纹变了就说明动作生效了，可以解锁。 */
+    var awaitingFp by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     // 历史灌完了没。灌的过程中一律瞬移到底，不做动画（见下面的 LaunchedEffect）
     var settled by remember(sessionName) { mutableStateOf(false) }
@@ -307,16 +309,25 @@ fun ChatScreen(
     // 所以历史读转录、待答抓屏幕，两条路各司其职（见 Prompt 的类注释）。
     LaunchedEffect(ssh, sessionName) {
         val s = ssh ?: return@LaunchedEffect
+        fun apply(p: Pending?, l: app.yxi.agent.Live) {
+            pending = p
+            live = l
+            // 动作生效了（指纹变了 / 面板没了）就解锁
+            if (awaitingFp != null && p?.fingerprint != awaitingFp) { awaitingFp = null; busy = false }
+        }
+        // ⚠️ **首选「变了才推」，不是轮询。** 轮询等于每次都要一个 SSH 往返，
+        // 而抓屏本身是 0ms —— 延迟几乎全花在往返和轮询间隔上（用户报的「点一下等十秒」）。
+        // 服务器侧自己比对，没变不过网；实测变化推到手机 **约 200ms**。
+        app.yxi.ssh.catching {
+            SessionProbe.watchScreen(s, sessionName).collect { (p, l) -> apply(p, l) }
+        }
+        // 推流断了（会话没了 / 通道被掐）→ 回落轮询，功能不受影响，只是慢一点
         while (true) {
-            if (!busy) {
-                runCatching { SessionProbe.snapshot(s, sessionName) }.onSuccess { (p, l) ->
-                    pending = p
-                    live = l
-                }
+            runCatching { SessionProbe.snapshot(s, sessionName) }.onSuccess { (p, l) ->
+                pending = p
+                live = l
+                if (awaitingFp != null && p?.fingerprint != awaitingFp) { awaitingFp = null; busy = false }
             }
-            // 忙的时候抓快一点 —— 状态行是给人看「它还活着」的，
-            // 2.5 秒一跳就不像在动了；闲的时候没必要这么勤
-            // 有「等你选」挂着时也抓快一点 —— 你刚点完一项，下一题要立刻顶上来
             delay(if (live.busy || pending != null) 700 else 2_500)
         }
     }
@@ -572,9 +583,11 @@ fun ChatScreen(
                             scope.launch {
                                 busy = true
                                 // 送屏幕上写的那个数字本身，**不是列表下标**
+                                awaitingFp = p.fingerprint
                                 ssh?.let { SessionProbe.sendKey(it, sessionName, o.number.toString()) }
-                                pending = awaitChange(ssh, sessionName, p.fingerprint) { pending = it }
-                                busy = false
+                                // 新屏由推流送达并解锁；这里只兜底，防万一没推过来卡住
+                                delay(4000)
+                                if (awaitingFp == p.fingerprint) { awaitingFp = null; busy = false }
                             }
                         }
                         // 危险审批（rm -rf / force-push / drop table …）先验一道指纹，防口袋误触
@@ -588,17 +601,19 @@ fun ChatScreen(
                     onPrev = {
                         scope.launch {
                             busy = true
+                            awaitingFp = p.fingerprint
                             ssh?.let { SessionProbe.sendKey(it, sessionName, "Left") }
-                            pending = awaitChange(ssh, sessionName, p.fingerprint) { pending = it }
-                            busy = false
+                            delay(4000)
+                            if (awaitingFp == p.fingerprint) { awaitingFp = null; busy = false }
                         }
                     },
                     onNext = {
                         scope.launch {
                             busy = true
+                            awaitingFp = p.fingerprint
                             ssh?.let { SessionProbe.sendKey(it, sessionName, "Right") }
-                            pending = awaitChange(ssh, sessionName, p.fingerprint) { pending = it }
-                            busy = false
+                            delay(4000)
+                            if (awaitingFp == p.fingerprint) { awaitingFp = null; busy = false }
                         }
                     },
                     onSubmit = {
@@ -612,13 +627,13 @@ fun ChatScreen(
                                 repeat(6) {
                                     if (cur.review) return@repeat
                                     SessionProbe.sendKey(s0, sessionName, "Right")
-                                    cur = awaitChange(s0, sessionName, cur.fingerprint) { pending = it } ?: cur
+                                    cur = waitScreenChange(cur.fingerprint) { pending } ?: cur
                                 }
                                 if (cur.review) {
                                     val submit = cur.options.firstOrNull { it.label.startsWith("Submit") }
                                     SessionProbe.sendKey(s0, sessionName, (submit?.number ?: 1).toString())
-                                    pending = awaitChange(s0, sessionName, cur.fingerprint) { pending = it }
-                                } else pending = cur
+                                    waitScreenChange(cur.fingerprint) { pending }
+                                }
                             }
                             busy = false
                         }
@@ -1324,21 +1339,22 @@ private fun stripTags(t: String): String =
  * 现在：短间隔连抓，**指纹一变立刻返回**（通常 <1 秒）；每抓到一次就先喂给界面 [onEach]，
  * 让它跟着动。到上限还没变就返回最后一次的结果（可能是它真没变）。
  */
-private suspend fun awaitChange(
-    ssh: SshSession?,
-    session: String,
+/**
+ * 等**推流送来的新状态**，不自己去抓 —— 抓屏交给 [SessionProbe.watchScreen] 那条长连。
+ *
+ * ⚠️ 老版本在这里自己轮询 SSH，每轮一次就是一个往返，正是「点一下等十秒」的来源。
+ * 现在只读本地状态（推流在实时更新它），零网络开销。
+ */
+private suspend fun waitScreenChange(
     before: String,
-    tries: Int = 20,
-    onEach: (Pending?) -> Unit = {},
+    timeoutMs: Long = 4000,
+    get: () -> Pending?,
 ): Pending? {
-    val s = ssh ?: return null
-    var last: Pending? = null
-    repeat(tries) {
-        delay(130)   // 抓屏本身是 0ms，成本全在 SSH 往返；间隔小一点，屏幕一变就跟上
-        last = runCatching { SessionProbe.pending(s, session) }.getOrNull()
-        onEach(last)
-        // 变了（换题/答完消失）就别再等了
-        if (last == null || last!!.fingerprint != before) return last
+    val t0 = System.currentTimeMillis()
+    while (System.currentTimeMillis() - t0 < timeoutMs) {
+        val cur = get()
+        if (cur == null || cur.fingerprint != before) return cur
+        delay(60)
     }
-    return last
+    return get()
 }
