@@ -326,6 +326,9 @@ struct PendingCard: View {
     let busy: Bool
     let onPick: (Pending.Option) -> Void
     let onSubmit: () -> Void
+    /// 回上一题 / 去下一题（送 ← / →）。多问题时才有意义。
+    var onPrev: (() -> Void)?
+    var onNext: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -336,6 +339,28 @@ struct PendingCard: View {
             }
             if !pending.title.isEmpty {
                 Text(pending.title).font(.system(size: 15, weight: .medium)).foregroundStyle(Yx.onSurface)
+            }
+            // 多问题：把标签栏画出来（☑ 已答 / ☐ 还没），并给出 ←/→ 来回走。
+            // TUI 本来就支持（脚注写着 Tab/Arrow keys to navigate），
+            // 安卓侧用户明确要过「能回上一题改选择」。
+            if pending.tabs.count > 1 {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        if let onPrev {
+                            Button("← 上一题", action: onPrev)
+                                .font(.system(size: 12)).buttonStyle(.bordered).disabled(busy)
+                        }
+                        ForEach(pending.tabs, id: \.label) { t in
+                            Text((t.submit ? "✔ " : t.answered ? "☑ " : "☐ ") + t.label)
+                                .font(.system(size: 11))
+                                .foregroundStyle(t.answered ? Yx.teal : Yx.dim)
+                        }
+                        if let onNext {
+                            Button("下一题 →", action: onNext)
+                                .font(.system(size: 12)).buttonStyle(.bordered).disabled(busy)
+                        }
+                    }
+                }
             }
             ForEach(pending.options) { o in
                 Button { onPick(o) } label: {
@@ -361,10 +386,10 @@ struct PendingCard: View {
                 .buttonStyle(.plain)
                 .disabled(busy)
             }
-            if pending.multiSelect {
-                // 多选时数字只是勾选，要 Right + 1 才算交卷（实测，TROUBLESHOOTING #29）
+            if pending.multiSelect || pending.tabs.count > 1 || pending.review {
+                // 多选时数字只是勾选，要走到复核页才算交卷（实测，TROUBLESHOOTING #29）
                 Button(action: onSubmit) {
-                    Text("提交").font(.system(size: 15, weight: .medium))
+                    Text(pending.review ? "确认提交" : "提交答案").font(.system(size: 15, weight: .medium))
                         .foregroundStyle(Yx.onCopper)
                         .frame(maxWidth: .infinity, minHeight: 48)
                         .background(Yx.copper, in: Capsule())

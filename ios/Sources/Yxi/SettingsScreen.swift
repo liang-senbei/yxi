@@ -13,10 +13,14 @@ struct SettingsScreen: View {
     @State private var identity: KeyIdentity?
     @State private var confirmRegenerate = false
     @State private var diagnosis: String?
+    @State private var ticketText = ""
+    @State private var tickets: [Tickets.Ticket] = []
+    @State private var ticketNote: String?
 
     var body: some View {
         NavigationStack {
             List {
+                ticketSection
                 versionSection
                 keySection
                 backgroundSection
@@ -34,6 +38,71 @@ struct SettingsScreen: View {
         } message: {
             // ⚠️ 这是不可逆的，而且后果发生在**别的机器上** —— 必须说清楚
             Text("旧公钥会立刻失效。所有装过它的服务器都要重新装一次公钥，在那之前一台都连不上。")
+        }
+    }
+
+    // MARK: 工单中心
+
+    /// 哪里不好用随手记一条，落在**连着的那台服务器** `~/.yxi/tickets.jsonl`，
+    /// 开发那边 `cat` 一下就看得全。
+    ///
+    /// ⚠️ **为什么存服务器不是本地**：存本地只有本人看得见，等于没提。
+    /// ⚠️ 自动带上版本号和机型 —— 不带的话回头对不上是哪版的毛病。
+    private var ticketSection: some View {
+        Section("工单中心") {
+            Text("哪里不好用，随手写一条。存在这台服务器上（~/.yxi/tickets.jsonl），开发直接查阅；会自动带上版本号和机型。")
+                .font(.system(size: 12)).foregroundStyle(Yx.dim)
+            TextField("比如：点了发送切出去，消息没发出去", text: $ticketText, axis: .vertical)
+                .lineLimit(2...5)
+                .font(.system(size: 14))
+            Button {
+                Task { await submitTicket() }
+            } label: {
+                Text("提一条").font(.system(size: 15, weight: .medium))
+                    .frame(maxWidth: .infinity, minHeight: 40)
+            }
+            .disabled(ticketText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            if let ticketNote {
+                Text(ticketNote).font(.system(size: 12)).foregroundStyle(Yx.teal)
+            }
+            if !tickets.isEmpty {
+                Text("已提 \(tickets.count) 条").font(.system(size: 12)).foregroundStyle(Yx.dim)
+                ForEach(tickets.prefix(5)) { t in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(t.text).font(.system(size: 13)).lineLimit(3)
+                        if !t.version.isEmpty {
+                            Text(t.version).font(.mono(11)).foregroundStyle(Yx.dim)
+                        }
+                    }
+                }
+            }
+        }
+        .task { await loadTickets() }
+    }
+
+    private var runner: ShellRunner? { app.live?.link.service as? ShellRunner }
+
+    private func loadTickets() async {
+        guard let runner else { return }
+        if let raw = try? await runner.run(Tickets.listCommand) { tickets = Tickets.parse(raw) }
+    }
+
+    private func submitTicket() async {
+        let body = ticketText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else { return }
+        guard let runner else { ticketNote = "没连上，提不了"; return }
+        let t = Tickets.Ticket(
+            at: Date().timeIntervalSince1970,
+            text: body,
+            version: "\(Self.versionName)(\(Self.versionCode))",
+            device: "\(UIDevice.current.model) / iOS \(UIDevice.current.systemVersion)"
+        )
+        if (try? await runner.run(Tickets.addCommand(t))) != nil {
+            ticketText = ""
+            ticketNote = "记下了"
+            await loadTickets()
+        } else {
+            ticketNote = "没提上去"
         }
     }
 
