@@ -48,12 +48,9 @@ struct LabScreen: View {
                 List {
                     ForEach(cats, id: \.key) { cat in
                         Section {
-                            if expanded.contains(cat.key) {
-                                ForEach(cat.items) { item in row(item) }
-                            }
-                        } header: {
+                            // ⚠️ 栏目标题是**普通行**不是 Section header：
+                            // `.swipeActions` 只对列表行生效，挂在 header 上不响应
                             header(cat)
-                                // iOS 自带的滑动操作 —— 不用像安卓那边手写拖拽手势
                                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                     Button(role: .destructive) {
                                         Task { await deleteCat(cat) }
@@ -66,6 +63,10 @@ struct LabScreen: View {
                                     }
                                     .tint(Yx.teal)
                                 }
+                            if expanded.contains(cat.key) {
+                                ForEach(cat.items) { item in row(item) }
+                            }
+                        }
                     }
                 }
                 .listStyle(.plain)

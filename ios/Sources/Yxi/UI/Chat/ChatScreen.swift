@@ -27,11 +27,18 @@ struct ChatScreen: View {
     @State private var importing = false
     @State private var showModes = false
     @State private var diff: String?
+    /// 正文里点开的那个文件
+    @State private var peek: String?
 
     private let bottomID = "yxi.chat.bottom"
     private let space = "yxi.chat.space"
 
+    /// ⚠️ 留着它是为了「点正文里的路径就地看文件」——那条路要 SFTP，
+    /// 而 ChatModel 只暴露对话那几件事
+    private let backend: ChatBackend
+
     init(backend: ChatBackend, session: String, cwd: String) {
+        self.backend = backend
         self.session = session
         self.cwd = cwd
         _model = StateObject(wrappedValue: ChatModel(backend: backend))
@@ -88,7 +95,7 @@ struct ChatScreen: View {
             guard let data = try? Data(contentsOf: url) else { return }
             model.attach(fileName: url.lastPathComponent, data: data, isImage: false)
         }
-        .onChange(of: photo) { item in
+        .onChange(of: photo) { _, item in
             guard let item else { return }
             Task {
                 guard let data = try? await item.loadTransferable(type: Data.self) else { return }
@@ -139,10 +146,9 @@ struct ChatScreen: View {
                         let now = y <= viewport + 12
                         if now != atBottom { atBottom = now }
                     }
-                    // ⚠️ 用的是 iOS 16 那个单参数版本（17 起标了 deprecated）。
-                    // 换成新签名会把最低版本顶到 17，不值得为一个警告付这个代价。
-                    .onChange(of: model.items.count) { _ in reposition(proxy) }
-                    .onChange(of: model.settled) { done in
+                    // 最低版本已经是 iOS 17（Citadel 要求），所以用新签名，没有 deprecated 警告
+                    .onChange(of: model.items.count) { reposition(proxy) }
+                    .onChange(of: model.settled) { _, done in
                         // ⚠️ **灌完那一刻无条件再定位一次。**
                         // `tail -n 800` 是分批灌的，最后一次定位发生在「布局还在变」的时候，
                         // 滚到一半列表又长高了 —— 结果永远差最后一屏（#80④）。
@@ -270,6 +276,23 @@ struct ChatScreen: View {
         .sheet(item: Binding(get: { diff.map(DiffText.init) },
                              set: { if $0 == nil { diff = nil } })) { d in
             diffSheet(d.text)
+        }
+        // 点正文里的路径 → 就地打开文件查看器（不用退出去进文件模式）
+        .environment(\.openURL, OpenURLAction { url in
+            guard let path = Linkify.pathOf(url.absoluteString) else { return .systemAction }
+            peek = path
+            return .handled
+        })
+        .sheet(item: Binding(get: { peek.map(DiffText.init) },
+                             set: { if $0 == nil { peek = nil } })) { f in
+            NavigationStack {
+                if let files = backend as? FileService {
+                    FileViewer(files: files, path: f.text) { peek = nil }
+                        .background(Yx.surface)
+                } else {
+                    EmptyNote(text: "看不了这个文件：这条连接不支持 SFTP。")
+                }
+            }
         }
         .sheet(isPresented: $showModes) {
             ModeSheet { cmd in model.sendMode(cmd) }
@@ -431,7 +454,9 @@ private struct ItemView: View {
         case let .assistant(_, md):
             // ⚠️ `.markdownTheme(.yxi)` 一定要传 —— 默认主题的 h1 是正文的两倍，
             // 聊天气泡里一个 `##` 就占掉半屏。见 [Theme.yxi]
-            Markdown(md)
+            // 正文里的文件路径改写成可点的链接（`yxi-file://`），点了进文件查看器。
+            // ⚠️ 识别规则全在 YxiKit.Linkify 里且有 13 个测试 —— 认错比漏认难受得多。
+            Markdown(Linkify.apply(md))
                 .markdownTheme(.yxi)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
