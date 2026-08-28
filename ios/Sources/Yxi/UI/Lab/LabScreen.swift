@@ -73,7 +73,11 @@ struct LabScreen: View {
             }
         }
         .background(Yx.surface)
-        .task { await reload() }
+        // ⚠️ **键要挂在连接上。** 只写 `.task { }` 的话它在**连上之前**就跑了一次，
+        // 那时 `runner` 还是 nil → 界面停在「没连上，实验室读不了」**再也不会自己恢复**
+        // （CI 截图里逮到的：同一时刻文件和终端都连上了，只有实验室这么写）。
+        // 文件模式没中招是因为 RootView 那边等 service 有了才渲染它。
+        .task(id: app.live?.link.id) { await reload() }
         .refreshable { await reload() }
     }
 

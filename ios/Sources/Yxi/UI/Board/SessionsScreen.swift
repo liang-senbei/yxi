@@ -179,12 +179,16 @@ struct SessionsScreen: View {
                     .truncationMode(.tail)
             }
             Spacer(minLength: 8)
+            // ⚠️ **必须 `.fixedSize()`。** 加到四颗之后这一行放不下，SwiftUI 就去压
+            // 每一颗的宽度 —— 实测「悬浮」被压成竖着的两个字还被裁掉一半
+            // （CI 截图里看出来的）。宁可让左边的标题截断，也不能把按钮压变形。
             HStack(spacing: 8) {
                 pillButton("＋") { newSession = true }
                 pillButton("悬浮") { floating = true }
                 pillButton("文件", action: onOpenFiles)
                 pillButton("终端") { onOpenTerminal(nil, ".") }
             }
+            .fixedSize()
         }
         .foregroundStyle(Yx.onSurface)
         .padding(.horizontal, Yx.pad)
@@ -194,7 +198,7 @@ struct SessionsScreen: View {
 
     private func pillButton(_ label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            YxPill { Text(label).font(.system(size: 14, weight: .medium)) }
+            YxPill { Text(label).font(.system(size: 14, weight: .medium)).lineLimit(1) }
         }
         .buttonStyle(.plain)
         .foregroundStyle(Yx.onSurface)

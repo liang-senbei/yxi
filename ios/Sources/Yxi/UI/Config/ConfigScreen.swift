@@ -49,7 +49,9 @@ struct ConfigScreen: View {
         }
         .navigationTitle("配置")
         .background(Yx.surface)
-        .task { await reload() }
+        // ⚠️ 跟实验室同一个坑：键挂在连接上，否则**连上之前**跑的那一次拿到 nil，
+        // 界面就停在「没连上」再也不恢复。
+        .task(id: app.live?.link.id) { await reload() }
         .refreshable { await reload() }
         .sheet(item: $open) { item in
             ConfigDetail(item: item, runner: runner,
