@@ -106,12 +106,20 @@ public enum ChatItem: Identifiable, Equatable, Sendable {
     /// 而不是让它烂在那 —— Claude Code 会不断加新块类型（`thinking` 就是后加的）。
     /// 之所以不直接丢掉：丢掉就没人知道有新类型了，而那正是 #72 的翻车方式。
     case unknown(id: String, raw: String)
+    /// **不是人打的**：队友消息、子 agent 回报、系统提醒、命令输出…
+    ///
+    /// ⚠️ 这些是通过用户消息那条路进来的，不认的话会**原样顶着「你说的话」的气泡
+    /// 显示一坨 XML** —— 而用户根本没打过那句话（安卓 #87，实测一个会话 33 处）。
+    case injected(id: String, label: String, from: String?, text: String)
+    /// API 报错（`isApiErrorMessage`）。当正文渲染会让人以为是 Claude 说的话。
+    case apiError(id: String, text: String)
 
     public var id: String {
         switch self {
         case let .user(id, _), let .assistant(id, _), let .thinking(id, _),
-             let .queued(id, _), let .unknown(id, _):
+             let .queued(id, _), let .unknown(id, _), let .apiError(id, _):
             return id
+        case let .injected(id, _, _, _): return id
         case let .tool(t): return t.id
         }
     }

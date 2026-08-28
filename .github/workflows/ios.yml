@@ -107,11 +107,17 @@ jobs:
           Subsystem sftp /usr/libexec/sftp-server
           LogLevel DEBUG1
           CONF
-          sudo /usr/sbin/sshd -f ~/sshd_ci.conf
+          # ⚠️ `-D -e`：前台跑 + **日志打到 stderr**。默认 sshd 写 syslog，
+          # 而认证被拒的真实原因只在服务端日志里 —— 客户端永远只看到
+          # 一句 Permission denied。上一轮就是因为拿不到这个日志在瞎猜。
+          sudo /usr/sbin/sshd -f ~/sshd_ci.conf -D -e 2> ~/sshd.log &
           for i in $(seq 1 30); do nc -z 127.0.0.1 2222 && break; sleep 1; done
-          nc -z 127.0.0.1 2222 || { echo "❌ 自己的 sshd 没起来"; exit 1; }
+          nc -z 127.0.0.1 2222 || { echo "❌ 自己的 sshd 没起来"; cat ~/sshd.log; exit 1; }
           echo "hostkey=$(awk '{print $1" "$2}' ~/ci_hostkey.pub)" >> "$GITHUB_OUTPUT"
-          ssh-keyscan -p 2222 127.0.0.1 2>/dev/null | awk '{print "提供：" $2}'
+          # 确认对面**就是我们起的那台**（指纹要对得上），不是系统那台
+          echo "我们的主机指纹： $(ssh-keygen -lf ~/ci_hostkey.pub | awk '{print $2}')"
+          ssh-keyscan -p 2222 127.0.0.1 2>/dev/null > ~/scanned.pub
+          echo "扫到的主机指纹： $(ssh-keygen -lf ~/scanned.pub 2>/dev/null | awk '{print $2}')"
 
       - name: 摆一份样本工作区（会话 + 文件）
         run: |
@@ -201,9 +207,12 @@ jobs:
             cat ~/.ssh/ci_probe.pub >> ~/.ssh/authorized_keys
             ssh -p 2222 -i ~/.ssh/ci_probe -o StrictHostKeyChecking=no -o BatchMode=yes \
                 -o ConnectTimeout=8 "$(whoami)@127.0.0.1" 'echo SSH_OK; tmux ls' \
-                || { echo "⚠️ sshd 自测没通，下面是详细过程："; \
-                     ssh -v -p 2222 -i ~/.ssh/ci_probe -o StrictHostKeyChecking=no \
-                         -o BatchMode=yes -o ConnectTimeout=8 "$(whoami)@127.0.0.1" true 2>&1 | tail -25; }
+                || { echo "⚠️ sshd 自测没通。"; \
+                     echo "--- authorized_keys ---"; \
+                     awk '{print $1, substr($2,1,24)"…"}' ~/.ssh/authorized_keys; \
+                     ls -ld ~ ~/.ssh ~/.ssh/authorized_keys; \
+                     echo "--- 服务端日志（真实原因在这里）---"; \
+                     tail -40 ~/sshd.log; }
           fi
 
           # ⚠️ **必须用数组。** 主机公钥是 `ssh-ed25519 AAAA…`，**中间有空格**；

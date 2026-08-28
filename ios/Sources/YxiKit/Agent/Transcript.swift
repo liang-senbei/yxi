@@ -102,6 +102,15 @@ public enum Transcript {
             guard msg.isObject else { continue }
             let id = idOf(d, index)
 
+            // ⚠️ **API 报错不能当正文渲染。** 它走的是普通消息那条路，
+            // 不认的话屏幕上会冒出一段像是 Claude 说的话（其实是
+            // 「Request timed out」之类），用户会当成回答（安卓 #105）。
+            if d["isApiErrorMessage"].bool {
+                let t = flatten(msg["content"])
+                if !t.isBlank { out.append(.apiError(id: id, text: t)) }
+                continue
+            }
+
             switch type {
             case "user": parseUser(msg, meta: d["toolUseResult"], id: id, calls: calls, out: &out)
             case "assistant": parseAssistant(msg, id: id, calls: &calls, out: &out)
@@ -143,19 +152,37 @@ public enum Transcript {
         return "line-\(index)"
     }
 
+    /// 这条「用户消息」到底是不是人打的。
+    ///
+    /// ⚠️ 队友消息、子 agent 回报、系统提醒、斜杠命令的输出**都走用户消息这条路**。
+    /// 不分开的话，屏幕上会顶着「你说的话」的气泡显示一坨 XML ——
+    /// 而用户根本没打过那句话（安卓 #87：实测一个会话里 33 处）。
+    private static func userOrInjected(id: String, text: String) -> ChatItem {
+        guard let inj = injectedOf(text) else { return .user(id: id, text: text) }
+        return .injected(id: id, label: inj.label, from: inj.from, text: clean(text))
+    }
+
+    /// 注入进来的那段里常常带 ANSI 转义（命令输出尤其），照原样显示是一串乱码。
+    /// ⚠️ 用普通字符串让 Swift 先把 ESC 插进去 —— raw string 会把 `\u{1B}`
+    /// 原样交给 ICU，按它自己的语法解释会吃掉整段（TROUBLESHOOTING #136）。
+    static func clean(_ s: String) -> String {
+        s.replacingOccurrences(of: "\u{1B}\\[[0-9;?]*[A-Za-z]", with: "",
+                               options: .regularExpression)
+    }
+
     private static func parseUser(
         _ msg: JSON, meta: JSON, id: String,
         calls: [String: Int], out: inout [ChatItem]
     ) {
         switch msg["content"] {
         case let .string(s):
-            if !s.isBlank { out.append(.user(id: id, text: s)) }
+            if !s.isBlank { out.append(userOrInjected(id: id, text: s)) }
         case let .array(blocks):
             for (i, b) in blocks.enumerated() {
                 switch b["type"].string {
                 case "text":
                     let t = b["text"].string
-                    if !t.isBlank { out.append(.user(id: "\(id)-\(i)", text: t)) }
+                    if !t.isBlank { out.append(userOrInjected(id: "\(id)-\(i)", text: t)) }
                 case "tool_result":
                     // 工具结果不单独成条，合并回它对应的工具卡片
                     guard let at = calls[b["tool_use_id"].string],
@@ -378,5 +405,43 @@ extension Transcript {
             of: "\u{1B}?\\[[0-9;]*m", with: "", options: .regularExpression)
         let out = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
         return out.isEmpty ? nil : out
+    }
+}
+
+// MARK: - 注入内容 / API 报错
+
+extension Transcript {
+
+    /// 这些标签都是**别人塞进来的**，不是用户打的。跟安卓 `INJECTED` 同一张表。
+    static let injectedTags: [(tag: String, label: String)] = [
+        ("teammate-message", "队友消息"),
+        ("agent-message", "子 agent 消息"),
+        ("cross-session-message", "跨会话消息"),
+        ("task-notification", "任务通知"),
+        ("system-reminder", "系统提醒"),
+        ("local-command-caveat", "系统提醒"),
+        ("local-command-stdout", "命令输出"),
+        ("command-name", "斜杠命令"),
+    ]
+
+    /// 认出来就返回（这是什么、谁发的）。
+    ///
+    /// ⚠️ **「谁发的」属性名不止一个**：子 agent 用 `from=`，队友消息用 `teammate_id=`，
+    /// 跨会话用 `agent_id=`。只认 `from` 的话队友那栏永远是空的
+    /// （安卓侧这条是测试抓出来的）。
+    public static func injectedOf(_ text: String) -> (label: String, from: String?)? {
+        for (tag, label) in injectedTags {
+            guard let i = text.range(of: "<" + tag) else { continue }
+            let rest = text[i.upperBound...]
+            return (label, firstAttribute(in: String(rest)))
+        }
+        return nil
+    }
+
+    private static let fromAttr = try! Regex(#"(?:from|teammate_id|agent_id)="([^"]+)""#)
+
+    private static func firstAttribute(in s: String) -> String? {
+        guard let m = s.firstMatch(of: fromAttr), let v = m[1].substring else { return nil }
+        return String(v)
     }
 }

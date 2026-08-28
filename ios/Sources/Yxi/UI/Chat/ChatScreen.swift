@@ -524,6 +524,10 @@ private struct ItemView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         case let .thinking(_, text):
             ThinkingRow(text: text)
+        case let .injected(_, label, from, text):
+            InjectedRow(label: label, from: from, text: text)
+        case let .apiError(_, text):
+            ApiErrorRow(text: text)
         case let .tool(call):
             ToolCardView(call: call)
         case .unknown:
@@ -666,4 +670,60 @@ private struct DiffText: Identifiable {
     let text: String
     var id: String { text }
     init(_ text: String) { self.text = text }
+}
+
+
+/// **别人塞进来的**：队友消息、子 agent 回报、系统提醒、命令输出…
+///
+/// ⚠️ 长得必须跟「你说的话」明显不一样 —— 它们本来就不是用户打的，
+/// 混在一起会让人以为自己发过那句话（安卓 #87）。默认折叠：
+/// 一条队友消息动辄几十行，展开着会把正文淹掉。
+private struct InjectedRow: View {
+    let label: String
+    let from: String?
+    let text: String
+    @State private var open = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button { open.toggle() } label: {
+                HStack(spacing: 6) {
+                    Text(from.map { "\(label) · \($0)" } ?? label)
+                        .font(.mono(11)).foregroundStyle(Yx.teal)
+                    Image(systemName: open ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9)).foregroundStyle(Yx.dim)
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if open {
+                Text(text)
+                    .font(.mono(12)).foregroundStyle(Yx.onSurfaceVar)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Text(text.prefix(80) + (text.count > 80 ? "…" : ""))
+                    .font(.system(size: 12)).foregroundStyle(Yx.dim)
+                    .lineLimit(1)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Yx.low, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+/// API 报错。⚠️ **不能当正文渲染** —— 那看起来就像 Claude 的回答
+/// （「Request timed out」被当成答案）。红框标死（安卓 #105）。
+private struct ApiErrorRow: View {
+    let text: String
+    var body: some View {
+        Text(text)
+            .font(.system(size: 13))
+            .foregroundStyle(Yx.error)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .background(Yx.errorBox, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
 }
