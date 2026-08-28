@@ -588,6 +588,17 @@
   **为什么存服务器而不是手机本地**：存本地只有本人看得见 = 等于没提。**为什么不开公网接口**：Yxi 无云后端，公网 POST 要防刷+隐私，与「不依赖第三方」冲突；走已有 SSH 通道零新基建。
   ⚠️ **局限**：APK 分享给别人后，他们的工单落在**他们自己的服务器**上，我们看不到。要收外部反馈得另在下载机(hk13)开收集端点 —— 那是另一件事，没做。
   查阅方式：`cat ~/.yxi/tickets.jsonl`。实测：App 里提交 → 服务器文件里出现带 version/device 的 JSON 行 → 按钮转「记下了」、列表显示「已提 1 条」✓。新增 `TicketsTest`（shell 单引号转义 + 坏行跳过），**全套 120 个测试通过**。已发 **code 65 / 0.9.21**。
+- ✅ **0.9.22→0.9.25 —— 更新改走公网下载页 + 上 HTTPS 域名（2026-08-28）**：用户问「换个客户不就搞不了了」，确实——旧做法查的是**所连服务器**的 `~/.yxi/latest.json`，别的客户机器上没包。
+  **现在**：`Update.checkPublic/publicVerbose` 查 **https://dl.keuury.com/latest.json**（根目录由 nginx 别名指向当前发布目录，**不用带 token**），下载走 HTTP 流式；公网不通才回落到服务器 SFTP（防火墙后仍可用）。
+  **域名/证书**：CF 加 A 记录 `dl` → 64.90.25.56（灰云）→ 源站 `certbot --nginx` 拿 Let's Encrypt 证书（到期 2026-11-26，自动续期）→ http 301 跳 https。nginx 里 `server_name dl.keuury.com` 的块早就写好了，只差 DNS。
+  ⚠️ 中途为明文 HTTP 加过 `network_security_config.xml`（只豁免单域名），**上了 HTTPS 后已整个删除**。
+  ⚠️ 关键 bug：第一版把公网检查写在 `LaunchedEffect(ssh)` 里，**没连主机就查不到更新**——已拆成独立 effect；设置页「检查更新」也不再要求已连接。
+  验证：**藏掉服务器 latest.json + 不配任何主机**，App 仍查到 0.9.24 并下完 33846290 字节（与公网一字节不差）、拉起安装器 ✓。**120 个测试通过**。已发 **code 69 / 0.9.25**。见 TROUBLESHOOTING #132。
+  ⚠️ 老链接 `http://64.90.25.56:8899/<token>/` **继续保留**（已装旧版的人靠它更新）。
+- ✅ **GitHub 恢复同步（2026-08-28）**：远端曾停在 0.8.6，落后十几个版本。已提交并推送 0.8.7→0.9.21（推前扫过密钥/密码/token，干净）。
+  ⚠️ 顺手把一个**有效的 GitHub token** 从 `mail` 仓 remote URL 的明文里摘掉，改存 `~/.git-credentials`（600）+ `credential.helper store`，以后各仓都能直接推。
+  ⚠️ **该 token 早前在聊天里贴过、且仍然有效，建议轮换**。
+  **纪律：以后每次发版顺手 commit + push，别再攒。**
 - 📎 **给 nanobanana 的模子文档**：`/root/src/workspace/nanobanana/YXI-MOLD.md`（174 行）—— 工具链/可抄文件/发布/纪律/踩坑 + **「在哪测怎么测」详版**（模拟器、UI 自动化的坑、端到端验证招式）；并在它的 `CLAUDE.md` 里加了指路。
   ⚠️ 模拟器踩坑：`install -r` 那次变成**全新安装**（uid 变了），App 数据被清空。恢复办法：读 App「公钥」界面的公钥追加进本机 `~/.ssh/authorized_keys`，再用 `adb shell run-as app.yxi` 直接写 `files/hosts.json`（UI 自动化填表会因软键盘顶起布局而串行到同一个输入框）。
 - ✅ **`yxi-lab` CLI —— 让别的 agent 把产物推进实验室（2026-08-25）**：用户问「别的 tmux（如 nanobanana 出图）

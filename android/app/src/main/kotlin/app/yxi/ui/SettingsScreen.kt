@@ -108,18 +108,26 @@ fun SettingsScreen(
                             // 这里原来打印 alias —— 用户名字栏填的是 IP、地址栏填的是别名「天亮」，
                             // 于是错误信息理直气壮地报了一个它压根没连过的 IP，
                             // 排查因此往端口/防火墙上跑偏了好几轮。见 TROUBLESHOOTING #71。
-                            result = if (f == null) Update.Result.Failed(t("连不上 %s，没查成").format(host?.display))
-                            else runCatching { Update.checkVerbose(f, BuildConfig.VERSION_CODE) }
-                                .getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it; Update.Result.Failed(t("查的时候出错：%s").format(it.message)) }
+                            // ⚠️ 公网下载页优先（换个客户也能更新）；它说「有新版」就用它，
+                            // 否则再问所连的服务器（防火墙后 / 没外网时的退路）。
+                            val pub = runCatching { Update.publicVerbose(BuildConfig.VERSION_CODE) }
+                                .getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it; null }
+                            result = when {
+                                pub is Update.Result.Newer -> pub
+                                f == null -> pub ?: Update.Result.Failed(t("连不上 %s，没查成").format(host?.display))
+                                else -> runCatching { Update.checkVerbose(f, BuildConfig.VERSION_CODE) }
+                                    .getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it; Update.Result.Failed(t("查的时候出错：%s").format(it.message)) }
+                                    .let { local -> if (local is Update.Result.Failed && pub != null) pub else local }
+                            }
                             checking = false
                         }
                     },
-                    enabled = ssh != null && !checking,
+                    // ⚠️ 不再要求「连上主机」——更新走公网，没连也能查
+                    enabled = !checking,
                     shape = Pill, modifier = Modifier.height(42.dp),
                 ) { Text(if (checking) t("查着…") else t("检查更新")) }
             }
             if (host == null) {
-                Hint2(t("还没有主机 —— 更新包放在你自己的服务器上，得先加一台才能查。"))
             }
             when (val r = result) {
                 null -> Unit

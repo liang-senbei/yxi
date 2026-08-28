@@ -2,6 +2,8 @@ package app.yxi.agent
 
 import app.yxi.ui.t
 import app.yxi.ssh.Sftp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 /**
@@ -22,10 +24,15 @@ import org.json.JSONObject
 data class Update(
     val versionCode: Int,
     val versionName: String,
+    /** SFTP 路径（服务器上那份）。走公网时为空。 */
     val remotePath: String,
     val notes: String,
     val sizeBytes: Long,
+    /** 公网直链。非空 = 走 HTTP 下载（[Source.Public]）。 */
+    val url: String = "",
 ) {
+    val fromPublic: Boolean get() = url.isNotBlank()
+
     val sizeText: String get() = "%.1f MB".format(sizeBytes / 1048576.0)
 
     /**
@@ -43,6 +50,59 @@ data class Update(
 
     companion object {
         private const val DIR = "/root/.yxi"
+
+        /**
+         * **公网下载页**。用户要求「App 更新走公网下载页」——
+         * 这样**任何客户**都能在 App 里更新，不用他自己的服务器上放包（那要我们能登他机器）。
+         *
+         * ⚠️ **HTTPS**（Let's Encrypt，certbot 自动续期）。所以 App 里**没有**任何明文 HTTP 豁免。
+         * ⚠️ 根目录 `/latest.json`、`/Yxi.apk` 由 nginx 别名指向当前发布目录，永远是最新的，
+         * 所以这里**不需要带 token** —— 少一个写死在包里的东西。
+         * ⚠️ 老的 `http://64.90.25.56:8899/<token>/` 仍然保留，别断了已装旧版的人。
+         */
+        const val PUBLIC_BASE = "https://dl.keuury.com"
+
+        /** 从公网下载页查 —— 读 `<base>/latest.json`。读不到返回 null（安静）。 */
+        suspend fun checkPublic(currentCode: Int): Update? =
+            (publicVerbose(currentCode) as? Result.Newer)?.update
+
+        /** 公网查更新，三种结果分清楚（主动点「检查更新」用）。 */
+        suspend fun publicVerbose(currentCode: Int): Result = withContext(Dispatchers.IO) {
+            val raw = runCatching { httpGet("$PUBLIC_BASE/latest.json") }
+                .getOrElse { return@withContext Result.Failed(t("连不上下载页：%s").format(it.message ?: "")) }
+                ?: return@withContext Result.Failed(t("下载页没返回内容"))
+            val o = runCatching { JSONObject(raw) }
+                .getOrElse { return@withContext Result.Failed(t("更新清单格式不对")) }
+            val code = o.optInt("versionCode", 0)
+            if (code <= currentCode) return@withContext Result.UpToDate
+            val file = o.optString("file").ifBlank { "Yxi.apk" }
+            val url = "$PUBLIC_BASE/$file"
+            // ⚠️ 先 HEAD 一下拿大小：拿不到大小就没法校验下全没下全（半个 APK 比不更新糟）
+            val size = runCatching { httpSize(url) }.getOrDefault(-1L)
+            if (size <= 0) return@withContext Result.Failed(t("下载页上没有安装包"))
+            Result.Newer(
+                Update(code, o.optString("versionName", code.toString()), "", o.optString("notes"), size, url)
+            )
+        }
+
+        private fun httpGet(url: String): String? {
+            val c = (java.net.URL(url).openConnection() as java.net.HttpURLConnection).apply {
+                connectTimeout = 10_000; readTimeout = 10_000; requestMethod = "GET"
+            }
+            return try {
+                if (c.responseCode !in 200..299) null
+                else c.inputStream.bufferedReader().use { it.readText() }
+            } finally { c.disconnect() }
+        }
+
+        private fun httpSize(url: String): Long {
+            val c = (java.net.URL(url).openConnection() as java.net.HttpURLConnection).apply {
+                connectTimeout = 10_000; readTimeout = 10_000; requestMethod = "HEAD"
+            }
+            return try {
+                if (c.responseCode !in 200..299) -1L else c.contentLengthLong
+            } finally { c.disconnect() }
+        }
 
         /**
          * @param currentCode 本机装的 versionCode

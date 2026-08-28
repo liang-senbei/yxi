@@ -46,19 +46,27 @@ object UpdateDownloader {
         forVersion = update.versionCode; phase = MorphPhase.Run; progress = -1f; message = ""
         scope.launch {
             val r = runCatching {
-                val s = ssh ?: throw RuntimeException(t("没连上"))
-                // ⚠️ 自己开一条 SFTP，别用界面那条（那条会随界面销毁被关）
-                val sftp = s.openSftp()
-                try {
-                    val f = File(app.cacheDir, "update/Yxi.apk")
-                    val got = sftp.download(update.remotePath, f) { n ->
+                val f = File(app.cacheDir, "update/Yxi.apk")
+                val got = if (update.fromPublic) {
+                    // ⚠️ **默认走公网下载页** —— 这样换个客户也能在 App 里更新，
+                    // 不需要他自己的服务器上放包（那要我们能登他机器，耦合太深）。
+                    downloadHttp(update.url, f) { n ->
                         progress = (n.toFloat() / update.sizeBytes).coerceIn(0f, 1f)
                     }
-                    // ⚠️ 大小对不上就别装 —— 半个 APK 比不更新糟得多
-                    if (got != update.sizeBytes) throw RuntimeException(t("下载不完整（%d/%d），没装").format(got, update.sizeBytes))
-                    install(app, f)?.let { throw RuntimeException(it) }
-                    t("拉起安装器")
-                } finally { runCatching { sftp.close() } }
+                } else {
+                    // 回落：包在所连服务器上（防火墙后 / 没外网时还能更新）
+                    val s = ssh ?: throw RuntimeException(t("没连上"))
+                    val sftp = s.openSftp()
+                    try {
+                        sftp.download(update.remotePath, f) { n ->
+                            progress = (n.toFloat() / update.sizeBytes).coerceIn(0f, 1f)
+                        }
+                    } finally { runCatching { sftp.close() } }
+                }
+                // ⚠️ 大小对不上就别装 —— 半个 APK 比不更新糟得多
+                if (got != update.sizeBytes) throw RuntimeException(t("下载不完整（%d/%d），没装").format(got, update.sizeBytes))
+                install(app, f)?.let { throw RuntimeException(it) }
+                t("拉起安装器")
             }
             r.onSuccess { message = it; phase = MorphPhase.Ok }
                 .onFailure { message = (it.message ?: t("下载失败")).take(40); phase = MorphPhase.Fail }
@@ -100,6 +108,31 @@ fun UpdateBanner(ssh: SshSession?, update: Update?, onDone: () -> Unit) {
         }
     }
 }
+
+/** 从公网下载页取包（流式，带进度）。@return 实际字节数 */
+private suspend fun downloadHttp(url: String, into: File, onBytes: (Long) -> Unit): Long =
+    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        into.parentFile?.mkdirs()
+        val c = (java.net.URL(url).openConnection() as java.net.HttpURLConnection).apply {
+            connectTimeout = 15_000; readTimeout = 30_000
+        }
+        try {
+            if (c.responseCode !in 200..299) throw RuntimeException("HTTP ${c.responseCode}")
+            var n = 0L
+            c.inputStream.use { input ->
+                into.outputStream().use { out ->
+                    val buf = ByteArray(64 * 1024)
+                    while (true) {
+                        val r = input.read(buf)
+                        if (r < 0) break
+                        out.write(buf, 0, r); n += r
+                        onBytes(n)
+                    }
+                }
+            }
+            n
+        } finally { c.disconnect() }
+    }
 
 /** @return 出错原因；null = 已经把安装器拉起来了 */
 private fun install(ctx: Context, apk: File): String? {

@@ -107,12 +107,20 @@ fun SessionsScreen(
             delay(5_000)
         }
     }
-    // 更新检查：连上之后看一眼就完事，不轮询
+    // 更新检查：连上之后看一眼就完事，不轮询。
+    // ⚠️ **先查公网下载页**（用户定的）—— 这样换个客户也能在 App 里更新，
+    // 不要求他自己的服务器上放着包。公网不通（没外网/被墙）才退回查所连服务器。
+    // ⚠️ **公网检查不能挂在 ssh 上**。原来写成 `val s = ssh ?: return`，
+    // 于是没连上（或还没连上）就永远查不到更新 —— 而「换个客户也能更新」正是走公网的理由。
+    LaunchedEffect(Unit) {
+        update = app.yxi.agent.Update.checkPublic(app.yxi.BuildConfig.VERSION_CODE)
+    }
+    // 回落：公网不通（没外网/被墙）时再问所连的服务器
     LaunchedEffect(ssh) {
         val s = ssh ?: return@LaunchedEffect
         val f = runCatching { s.openSftp() }.getOrNull() ?: return@LaunchedEffect
         sftp = f
-        update = app.yxi.agent.Update.check(f, app.yxi.BuildConfig.VERSION_CODE)
+        if (update == null) update = app.yxi.agent.Update.check(f, app.yxi.BuildConfig.VERSION_CODE)
     }
 
     // ⚠️ **只收自己开的 sftp 通道，绝不碰 ssh。**
