@@ -75,6 +75,11 @@ targets:
       properties:
         CFBundleName: Yxi
         CFBundleDisplayName: Yxi
+        # ⚠️ 版本号要跟安卓版对齐（设置页显示的就是它）。
+        # app target 关了 GENERATE_INFOPLIST_FILE，所以必须在这儿写死，
+        # 否则 Info.plist 里是默认的 1.0 (1) —— 截图里就是这么露馅的。
+        CFBundleShortVersionString: "0.9.27"
+        CFBundleVersion: "71" 
         UILaunchScreen: {}
         NSLocalNetworkUsageDescription: 连接你自己的服务器
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]

@@ -25,6 +25,7 @@ struct ChatScreen: View {
     @State private var picking = false
     @State private var photo: PhotosPickerItem?
     @State private var importing = false
+    @State private var showModes = false
 
     private let bottomID = "yxi.chat.bottom"
     private let space = "yxi.chat.space"
@@ -47,15 +48,34 @@ struct ChatScreen: View {
 
             transcript
 
-            if model.live.busy { LiveStatusRow(status: model.live.status) }
+            if model.live.busy {
+                HStack(spacing: 10) {
+                    LiveStatusRow(status: model.live.status)
+                    Spacer(minLength: 0)
+                    // 跑飞了一键掐断（送 Esc），不用进终端
+                    Button { model.interrupt() } label: {
+                        Text("■ 停").font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Yx.error)
+                            .padding(.horizontal, 12).padding(.vertical, 5)
+                            .background(Yx.errorBox, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, 16)
+                }
+            }
 
             if let p = model.pending {
                 PendingCard(pending: p, busy: model.answering,
-                            onPick: model.pick, onSubmit: model.submitMultiSelect)
+                            onPick: model.pick, onSubmit: model.submitMultiSelect,
+                            onPrev: p.tabs.count > 1 ? model.goPrevQuestion : nil,
+                            onNext: p.tabs.count > 1 ? model.goNextQuestion : nil)
                     .padding(.horizontal, 14).padding(.bottom, 8)
             }
 
             if !model.staged.isEmpty || model.uploading { stagedRow }
+
+            // 常用语：没打字时才露出来，点一下填进草稿 —— 手机打字是回复的瓶颈
+            if model.draft.isEmpty { snippetRow }
 
             inputRow
         }
@@ -236,6 +256,13 @@ struct ChatScreen: View {
                 .padding(.horizontal, 20).padding(.vertical, 15)
                 .background(Yx.container, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
 
+            Button { showModes = true } label: {
+                Text("⚡").font(.system(size: 17))
+                    .frame(width: 46, height: 46)
+                    .background(Yx.container, in: Circle())
+            }
+            .buttonStyle(.plain)
+
             Button { model.send() } label: {
                 Text("↑").font(.system(size: 17, weight: .medium))
                     .foregroundStyle(model.canSend ? Yx.onCopper : Yx.dim)
@@ -246,6 +273,60 @@ struct ChatScreen: View {
             .disabled(!model.canSend)
         }
         .padding(.horizontal, 14).padding(.top, 6).padding(.bottom, 12)
+        .sheet(isPresented: $showModes) {
+            ModeSheet { cmd in model.sendMode(cmd) }
+        }
+    }
+
+    /// 常用语 —— 你自己的短语库，跟斜杠命令菜单不是一回事（那是 Claude 的命令，这是你的话）。
+    private var snippetRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(Snippets.defaults, id: \.self) { s in
+                    Button { model.draft = s } label: {
+                        Text(s).font(.system(size: 13))
+                            .padding(.horizontal, 14).padding(.vertical, 8)
+                            .background(Yx.high, in: Capsule())
+                            .foregroundStyle(Yx.onSurface)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 14)
+        }
+        .padding(.bottom, 4)
+    }
+}
+
+/// **模式快切** —— 点一下把对应的斜杠命令发进会话。
+/// 这些模式是**各自独立的斜杠命令**，所以**能叠加**：连点几个就都生效（1M + 最大思考）。
+private struct ModeSheet: View {
+    let onPick: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(Modes.defaults) { m in
+                        Button { onPick(m.command) } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(m.label).font(.system(size: 15, weight: .medium))
+                                    .foregroundStyle(Yx.onSurface)
+                                Text(m.command).font(.mono(11)).foregroundStyle(Yx.dim)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                } footer: {
+                    Text("点一下就发进会话；能叠加的连着点，比如先 1M 再 最大思考。")
+                }
+            }
+            .navigationTitle("切模式")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } } }
+        }
+        .presentationDetents([.medium])
     }
 }
 

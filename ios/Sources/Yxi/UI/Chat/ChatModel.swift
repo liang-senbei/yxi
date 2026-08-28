@@ -170,12 +170,49 @@ final class ChatModel: ObservableObject {
         }
     }
 
-    /// 多选交卷：数字只是切换勾选，要 `Right` 跳到 Submit 页再送 `1`（实测，#29）
+    /// 交卷。
+    ///
+    /// ⚠️ **不能硬编码「Right 一次就是 Submit 页」** —— 那只在停在最后一题时成立，
+    /// 停在第一题时会跑去第二题（安卓侧 TROUBLESHOOTING #133 踩过）。
+    /// 改成一路往右，直到屏幕自己变成复核页（`pending.review`），再选 Submit。
     func submitMultiSelect() {
         answer { [backend = self.backend, session = self.session] in
-            try await backend.sendKey(session: session, key: "Right")
-            try await Task.sleep(nanoseconds: 300_000_000)
-            try await backend.sendKey(session: session, key: "1")
+            for _ in 0..<6 {
+                let screen = try await backend.peek(session: session, lines: 200)
+                let (p, _) = SessionProbe.readScreen(screen)
+                if p?.review == true {
+                    let n = p?.options.first { $0.label.hasPrefix("Submit") }?.number ?? 1
+                    try await backend.sendKey(session: session, key: String(n))
+                    return
+                }
+                try await backend.sendKey(session: session, key: "Right")
+                try await Task.sleep(nanoseconds: 250_000_000)
+            }
+        }
+    }
+
+    /// 回上一题 / 去下一题。TUI 本来就支持（脚注 `Tab/Arrow keys to navigate`），
+    /// 安卓侧用户明确要过「多个问题时能回上一题改选择」。
+    func goPrevQuestion() { navigate("Left") }
+    func goNextQuestion() { navigate("Right") }
+
+    private func navigate(_ key: String) {
+        answer { [backend = self.backend, session = self.session] in
+            try await backend.sendKey(session: session, key: key)
+        }
+    }
+
+    /// 它正忙的时候一键打断（送 Esc）。跑飞了不用进终端就能掐。
+    func interrupt() {
+        answer { [backend = self.backend, session = self.session] in
+            try await backend.sendKey(session: session, key: "Escape")
+        }
+    }
+
+    /// 把一条模式命令发进会话（`/effort max` 这种）。各模式是独立的斜杠命令，**能叠加**。
+    func sendMode(_ command: String) {
+        Task { [backend = self.backend, session = self.session] in
+            try? await backend.send(session: session, text: command)
         }
     }
 
@@ -185,11 +222,19 @@ final class ChatModel: ObservableObject {
         Task { [backend = self.backend, session = self.session] in
             defer { answering = false }
             do {
+                let before = pending?.fingerprint
                 try await work()
-                // 等 TUI 重绘完再抓，否则拿回来的还是刚才那一屏
-                try await Task.sleep(nanoseconds: 500_000_000)
-                (pending, live) = SessionProbe.readScreen(
-                    try await backend.peek(session: session, lines: 200))
+                // ⚠️ **别死等一个固定时长再抓一次。** TUI 常常还没重绘完，
+                // 抓到的是旧屏，于是要等下一轮轮询才看得到新题 ——
+                // 安卓侧用户报的「点一个选项要等十秒」就是这么来的（TROUBLESHOOTING #133）。
+                // 改成短间隔连抓，**指纹一变就停**。
+                for _ in 0..<16 {
+                    try await Task.sleep(nanoseconds: 180_000_000)
+                    let (p, l) = SessionProbe.readScreen(
+                        try await backend.peek(session: session, lines: 200))
+                    (pending, live) = (p, l)
+                    if p?.fingerprint != before { break }
+                }
             } catch {
                 if let m = reportable(error) { status = "送不过去：\(m)" }
             }
