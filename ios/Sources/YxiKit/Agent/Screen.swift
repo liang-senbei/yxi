@@ -57,6 +57,41 @@ public enum Prompt {
         return false
     }
 
+    /// 脚注**换行后的碎片**。窄屏（手机开过终端后 tmux 会话被缩到手机宽度）上那行会断成两截：
+    /// `Enter to select · Tab/Arrow keys to navigate ·` + `Esc to cancel`
+    /// 前半截既不是脚注也不是选项，于是被当成**最后一项的说明**贴上去
+    /// —— 安卓侧用户截图里就是这样（TROUBLESHOOTING #133）。
+    private static func isFooterish(_ l: String) -> Bool {
+        let t = l.trimmingCharacters(in: .whitespaces)
+        if t.isEmpty { return false }
+        for k in ["Enter to select", "to navigate", "Tab/Arrow", "Esc to cancel", "ctrl+e to", "Tab to amend"] {
+            if t.contains(k) { return true }
+        }
+        return false
+    }
+
+    /// `←  ☐ 名字  ☒ 配色  ✔ Submit  →` 这一行。有它 = 多个问题，可以左右切换。
+    private static func isTabBar(_ l: String) -> Bool {
+        let t = l.trimmingCharacters(in: .whitespaces)
+        return t.hasPrefix("←") && t.hasSuffix("→")
+            && (t.contains("☐") || t.contains("☒") || t.contains("✔"))
+    }
+
+    private static func parseTabs(_ l: String) -> [Pending.Tab] {
+        var t = l.trimmingCharacters(in: .whitespaces)
+        if t.hasPrefix("←") { t.removeFirst() }
+        if t.hasSuffix("→") { t.removeLast() }
+        return t.components(separatedBy: "  ").compactMap { raw -> Pending.Tab? in
+            let x = raw.trimmingCharacters(in: .whitespaces)
+            guard let mark = x.first, mark == "☐" || mark == "☒" || mark == "✔" else { return nil }
+            let label = String(x.dropFirst()).trimmingCharacters(in: .whitespaces)
+            guard !label.isEmpty else { return nil }
+            return Pending.Tab(label: label,
+                               answered: mark == "☒",
+                               submit: label.lowercased() == "submit")
+        }
+    }
+
     /// **光标行** —— `❯ 1. Yes, and use auto mode` 这种。
     ///
     /// ⚠️ **这是比脚注更稳的锚。** 脚注的形态到现在已经变过**三次**：
@@ -149,7 +184,7 @@ public enum Prompt {
                     label = c.rest.trimmingCharacters(in: .whitespaces)
                 }
                 opts.append(Pending.Option(number: m.number, label: label, checked: checked))
-            } else if let last = opts.last, !isNoise(lines[j]) {
+            } else if let last = opts.last, !isNoise(lines[j]), !isFooterish(lines[j]) {
                 if last.description.isEmpty {
                     opts[opts.count - 1] = Pending.Option(
                         number: last.number, label: last.label,
@@ -160,10 +195,25 @@ public enum Prompt {
             }
         }
 
-        // 标题 = 1 号选项上面最后一行「像话」的文本
-        let title = (0..<firstLine).reversed()
-            .first { !isNoise(lines[$0]) && matchOption(lines[$0]) == nil }
-            .map { lines[$0].trimmingCharacters(in: .whitespaces) } ?? ""
+        // 标题 = 1 号选项**上面那一段连续的正文**。
+        // ⚠️ **不能只取一行**：窄屏上长问题会折成好几行，只取最后一行等于把问题砍掉半截
+        // （安卓侧用户报的「只有选择没有问题」，TROUBLESHOOTING #133）。
+        var titleLines: [String] = []
+        var ti = firstLine - 1
+        while ti >= 0 {
+            let l = lines[ti]
+            if matchOption(l) != nil { break }
+            if l.trimmingCharacters(in: .whitespaces).isEmpty {
+                if !titleLines.isEmpty { break }
+                ti -= 1
+                continue
+            }
+            if isNoise(l) || isFooterish(l) || isTabBar(l) { break }
+            titleLines.append(l.trimmingCharacters(in: .whitespaces))
+            ti -= 1
+        }
+        let title = titleLines.reversed().joined(separator: " ")
+            .trimmingCharacters(in: .whitespaces)
 
         // 指纹：从 1 号选项**往上 8 行**一直到脚注，去掉空白后哈希。
         // 往上 8 行是为了把权限提示里的命令正文圈进来 —— **那才是区分两个提示的东西**
@@ -175,7 +225,11 @@ public enum Prompt {
                 .joined(separator: "\n")
                 .filter { !$0.isWhitespace }
         )
-        return Pending(title: title, options: opts, multiSelect: multi, fingerprint: fp)
+        let tabs = lines.last(where: isTabBar).map(parseTabs) ?? []
+        let review = lines.contains { $0.contains("Review your answers") }
+            || opts.contains { $0.label.hasPrefix("Submit answers") }
+        return Pending(title: title, options: opts, multiSelect: multi,
+                       fingerprint: fp, tabs: tabs, review: review)
     }
 
     private static func matchOption(_ l: String) -> (number: Int, label: String)? {

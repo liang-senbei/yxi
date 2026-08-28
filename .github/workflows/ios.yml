@@ -1,0 +1,43 @@
+# iOS 侧的构建与测试。
+#
+# ⚠️ **开发机是 Linux，iOS 的界面层只能在 macOS 上编译**（SwiftUI/UIKit）。
+# 所以分两半：
+#   · YxiKit（纯逻辑 + SSH）—— 在 Linux 上就能编能测，本机跑，不花额度
+#   · Yxi（SwiftUI 界面）—— 只有 macOS 编得动，放这儿
+#
+# ⚠️ macOS runner **按 10 倍分钟计费**，所以只在 ios/ 真的改了才触发。
+name: iOS
+
+on:
+  push:
+    paths: ['ios/**', '.github/workflows/ios.yml']
+  pull_request:
+    paths: ['ios/**']
+  workflow_dispatch:
+
+jobs:
+  logic:
+    name: 纯逻辑（Linux，便宜）
+    runs-on: ubuntu-latest
+    container: swift:6.0.3
+    steps:
+      - uses: actions/checkout@v4
+      - name: swift test
+        working-directory: ios
+        run: swift test 2>&1 | tail -40
+
+  ui-compiles:
+    name: 界面能否编译（macOS）
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: ios/.build
+          key: spm-${{ runner.os }}-${{ hashFiles('ios/Package.resolved') }}
+      - name: 环境
+        run: sw_vers; swift --version | head -2
+      # macOS 上 Package.swift 会把 SwiftUI 那个 target 也带进来（见文件头的 #if os(macOS)）
+      - name: 编译（含界面 target）
+        working-directory: ios
+        run: swift build 2>&1 | tail -40

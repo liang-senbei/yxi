@@ -173,6 +173,21 @@ public struct Pending: Equatable, Sendable {
     /// 你在终端里答掉了 A、屏幕换成了 B，那种比对照样放行 —— 你以为在批 A，实际批的是 B。
     /// 见 TROUBLESHOOTING #53。
     public let fingerprint: String
+    /// 多问题时顶上那条标签栏 `←  ☐ 名字  ☒ 配色  ✔ Submit  →`。只有一个问题时为空。
+    /// 有它就说明**可以用 ←/→ 在问题之间来回走**（含回上一题改选择）。
+    public let tabs: [Tab]
+    /// 当前是不是「Review your answers / Submit answers」那一页。
+    public let review: Bool
+
+    /// 标签栏里的一格。`answered` 来自 ☒（答过）/ ☐（还没答）。
+    public struct Tab: Equatable, Sendable {
+        public let label: String
+        public let answered: Bool
+        public let submit: Bool
+        public init(label: String, answered: Bool, submit: Bool = false) {
+            self.label = label; self.answered = answered; self.submit = submit
+        }
+    }
 
     public struct Option: Equatable, Identifiable, Sendable {
         /// 屏幕上那个数字。**送键就送它**，不是列表下标 —— 一旦两者对不上就会
@@ -189,9 +204,11 @@ public struct Pending: Equatable, Sendable {
         }
     }
 
-    public init(title: String, options: [Option], multiSelect: Bool, fingerprint: String) {
+    public init(title: String, options: [Option], multiSelect: Bool, fingerprint: String,
+                tabs: [Tab] = [], review: Bool = false) {
         self.title = title; self.options = options
         self.multiSelect = multiSelect; self.fingerprint = fingerprint
+        self.tabs = tabs; self.review = review
     }
 }
 
