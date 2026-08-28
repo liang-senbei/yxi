@@ -76,28 +76,42 @@ jobs:
       # 模拟器跟 Mac 共用网络栈，所以模拟器里的 127.0.0.1 **就是 runner 这台机器** ——
       # 跟安卓那边 `10.0.2.2` 指向服务器是同一个套路。
       # 于是这里在 runner 上现起一台 sshd + tmux + 一堆样本文件，让 App 真的去连。
-      - name: 在 runner 上起一台真 SSH 服务器（给端到端用）
+      # ⚠️ 这一步是整条 CI 里**唯一**能证明「真能连上、真读得到文件」的地方。
+      # 模拟器跟 Mac 共用网络栈，所以模拟器里的 127.0.0.1 **就是 runner 这台机器** ——
+      # 跟安卓那边 `10.0.2.2` 指向服务器是同一个套路。
+      #
+      # ⚠️ **不用系统那台 sshd**（`systemsetup -setremotelogin on`）。试过，连不上：
+      # macOS 把 SSH 登录权限单独关在 `com.apple.access_ssh` 这个组里，
+      # 而且系统 `sshd_config` 里在先的设置会压过我们追加的（OpenSSH 是先到先得）。
+      # 现象是公钥送出去了、服务器直接 `Permission denied`，日志在系统那头，很难查。
+      # 改成**自己起一台**：自己的配置、自己的主机密钥、自己的端口，全程可控。
+      - name: 在 runner 上起一台我们自己的 sshd（端口 2222）
         id: sshd
         run: |
           set -e
-          sudo systemsetup -setremotelogin on
           mkdir -p ~/.ssh && touch ~/.ssh/authorized_keys
           chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys
-          # ⚠️ **只留 ed25519 这一把主机密钥。** 上一轮就栽在这儿：
-          # macOS 的 sshd 默认同时提供 ed25519 / ecdsa / rsa，谈判出来的是哪一把不一定；
-          # 我们只把 ed25519 那把提前交给 App，于是 App 认为「指纹对不上」，
-          # 弹出「主机指纹变了，已拒绝连接」并拒连 —— 那是**它该有的行为**，不是 bug。
-          # OpenSSH 里只要显式写了 HostKey，默认的几把就不再用。
-          # ⚠️ StrictModes：macOS 上 /Users/runner 常常是组可写的，
-          # sshd 会因此**静默拒绝**公钥认证（日志里才有原因）。CI 是一次性机器，关掉它。
-          printf 'HostKey /etc/ssh/ssh_host_ed25519_key\nStrictModes no\n' \
-            | sudo tee -a /etc/ssh/sshd_config >/dev/null
-          sudo launchctl kickstart -k system/com.openssh.sshd || true
-          echo "hostkey=$(sudo awk '{print $1" "$2}' /etc/ssh/ssh_host_ed25519_key.pub)" >> "$GITHUB_OUTPUT"
-          for i in $(seq 1 30); do nc -z 127.0.0.1 22 && break; sleep 1; done
-          nc -z 127.0.0.1 22 && echo "sshd 已就绪"
-          # 服务器实际提供哪几把 —— 对不上就是上面那个错，先打出来省得瞎猜
-          ssh-keyscan -p 22 127.0.0.1 2>/dev/null | awk '{print "提供：" $2}'
+          ssh-keygen -q -t ed25519 -N "" -f ~/ci_hostkey
+          cat > ~/sshd_ci.conf <<CONF
+          Port 2222
+          ListenAddress 127.0.0.1
+          HostKey $HOME/ci_hostkey
+          PidFile $HOME/sshd_ci.pid
+          AuthorizedKeysFile $HOME/.ssh/authorized_keys
+          PubkeyAuthentication yes
+          PasswordAuthentication no
+          # ⚠️ runner 的家目录常常是组可写的，StrictModes yes 会**静默拒绝**公钥认证
+          StrictModes no
+          UsePAM no
+          # SFTP 是文件模式的命脉，必须显式开
+          Subsystem sftp /usr/libexec/sftp-server
+          LogLevel DEBUG1
+          CONF
+          sudo /usr/sbin/sshd -f ~/sshd_ci.conf
+          for i in $(seq 1 30); do nc -z 127.0.0.1 2222 && break; sleep 1; done
+          nc -z 127.0.0.1 2222 || { echo "❌ 自己的 sshd 没起来"; exit 1; }
+          echo "hostkey=$(awk '{print $1" "$2}' ~/ci_hostkey.pub)" >> "$GITHUB_OUTPUT"
+          ssh-keyscan -p 2222 127.0.0.1 2>/dev/null | awk '{print "提供：" $2}'
 
       - name: 摆一份样本工作区（会话 + 文件）
         run: |
@@ -185,18 +199,18 @@ jobs:
             # runner 自己那把并不在 authorized_keys 里，拿它测必然失败（上一轮的假警报）
             ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/ci_probe <<< y >/dev/null 2>&1 || true
             cat ~/.ssh/ci_probe.pub >> ~/.ssh/authorized_keys
-            ssh -i ~/.ssh/ci_probe -o StrictHostKeyChecking=no -o BatchMode=yes \
+            ssh -p 2222 -i ~/.ssh/ci_probe -o StrictHostKeyChecking=no -o BatchMode=yes \
                 -o ConnectTimeout=8 "$(whoami)@127.0.0.1" 'echo SSH_OK; tmux ls' \
                 || { echo "⚠️ sshd 自测没通，下面是详细过程："; \
-                     ssh -v -i ~/.ssh/ci_probe -o StrictHostKeyChecking=no -o BatchMode=yes \
-                         -o ConnectTimeout=8 "$(whoami)@127.0.0.1" true 2>&1 | tail -25; }
+                     ssh -v -p 2222 -i ~/.ssh/ci_probe -o StrictHostKeyChecking=no \
+                         -o BatchMode=yes -o ConnectTimeout=8 "$(whoami)@127.0.0.1" true 2>&1 | tail -25; }
           fi
 
           # ⚠️ **必须用数组。** 主机公钥是 `ssh-ed25519 AAAA…`，**中间有空格**；
           # 放进普通变量再 `--args $SEED` 会被词分割成两个参数，App 收到的
           # hostKey 只剩 `ssh-ed25519` —— 解不出来，于是它按 fail-closed 判成
           # 「指纹变了」并拒连。上一轮截图里那句红字就是这么来的（App 是对的）。
-          SEED=( -yxiSeedHost 127.0.0.1:22
+          SEED=( -yxiSeedHost 127.0.0.1:2222
                  -yxiSeedUser "$(whoami)"
                  -yxiSeedHostKey "${{ steps.sshd.outputs.hostkey }}" )
           live() {  # $1=文件名  $2..=额外启动参数

@@ -2656,3 +2656,41 @@ xcrun simctl launch "$UDID" app.yxi --args "${SEED[@]}"
 **另一个同批的**　macOS 的 `/Users/<user>` 常常是组可写的，sshd 的
 `StrictModes yes` 会因此**静默拒绝**公钥认证（只有 sshd 日志里有原因，
 客户端只看到 Permission denied）。CI 是一次性机器，`StrictModes no` 即可。
+
+## #139 macOS 上别用系统那台 sshd 做自动化测试，自己起一台
+
+**症状**　CI 里 `systemsetup -setremotelogin on` 开了远程登录，端口通、
+公钥装进了 `~/.ssh/authorized_keys`、`ssh-keyscan` 也确认主机密钥对，
+但认证一律 `Permission denied (publickey,password,keyboard-interactive)`。
+`ssh -v` 显示公钥**送出去了**，服务器直接拒绝，客户端这边看不出原因。
+
+**根因**（两条，叠在一起）
+1. macOS 把「谁能 SSH 登录」单独关在 **`com.apple.access_ssh`** 这个组里
+   （SACL）。开了远程登录不等于某个账号被放行。
+2. 系统的 `/etc/ssh/sshd_config` 里在先的设置**压过**我们追加在末尾的 ——
+   OpenSSH 多数关键字是**先到先得**，往文件尾部 `tee -a` 常常没用。
+
+而 sshd 拒绝的真实原因只写在系统日志里（`log show --predicate 'process=="sshd"'`），
+在 CI 上很难捞。
+
+**修法**　**别碰系统那台**，自己起一台，端口、主机密钥、配置全自己给：
+
+```bash
+ssh-keygen -q -t ed25519 -N "" -f ~/ci_hostkey
+cat > ~/sshd_ci.conf <<CONF
+Port 2222
+ListenAddress 127.0.0.1
+HostKey $HOME/ci_hostkey
+PidFile $HOME/sshd_ci.pid
+AuthorizedKeysFile $HOME/.ssh/authorized_keys
+PubkeyAuthentication yes
+StrictModes no          # 家目录常是组可写的，yes 会静默拒绝
+UsePAM no
+Subsystem sftp /usr/libexec/sftp-server   # 文件模式的命脉，必须显式开
+CONF
+sudo /usr/sbin/sshd -f ~/sshd_ci.conf
+```
+
+**怎么避开**　在别人的机器（CI runner、别人的服务器）上做 SSH 自动化，
+**起一台自己的**永远比改系统那台省事：配置可控、日志可读、不影响宿主、
+用完随机器一起消失。改系统 sshd 的每一步都可能被某条你看不见的策略推翻。
