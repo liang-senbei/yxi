@@ -48,6 +48,21 @@ public struct Update: Equatable, Sendable {
     public static let dir = "/root/.yxi"
     public static var manifestPath: String { "\(dir)/latest.json" }
 
+    /// **公网下载页。** 用户定的：更新走公网，这样**换任何一台设备/客户**都能更新，
+    /// 不要求他自己的服务器上放着包（那要我们能登他机器，耦合太深）。
+    ///
+    /// ⚠️ HTTPS（Let's Encrypt，certbot 自动续期），所以 App 里**不需要任何明文 HTTP 豁免**。
+    /// ⚠️ 根目录 `/latest.json`、`/Yxi.apk` 由 nginx 别名指向当前发布目录，永远是最新，
+    /// 所以这里**不用带 token**。iOS 侧的安装包另说（见 docs/分发.md），但**查版本**是同一份清单。
+    public static let publicBase = "https://dl.keuury.com"
+    public static var publicManifestURL: URL? { URL(string: "\(publicBase)/latest.json") }
+
+    /// 从公网清单判断有没有新版。跟 [parse] 同一套判据，只是来源不同。
+    /// ⚠️ 公网不通（没外网/被墙）时返回 `.failed`，调用方应回落到「问所连的服务器」。
+    public static func parsePublic(manifest raw: String, currentCode: Int) -> Result {
+        parse(manifest: raw, currentCode: currentCode)
+    }
+
     /// 第一步：只看清单。返回的 `.newer` 里 `sizeBytes == -1`，**还没确认包在不在**。
     public static func parse(manifest raw: String, currentCode: Int) -> Result {
         guard let o = JSON.parse(line: raw), o.isObject else { return .failed("更新清单格式不对") }

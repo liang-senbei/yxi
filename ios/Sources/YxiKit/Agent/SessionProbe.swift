@@ -75,11 +75,16 @@ public enum SessionProbe {
     s status_begin
     for f in $HOME/.cloud-status/*.json; do [ -f "$f" ] && cat "$f" && echo; done 2>/dev/null || true
     s status_end
+    s tr_begin
+    find "$HOME/.claude/projects" -maxdepth 2 -name '*.jsonl' -printf '%h\t%T@\n' 2>/dev/null | awk -F'\t' '{n=split($1,a,"/"); d=a[n]; t=int($2); if(t>m[d]) m[d]=t} END{for(k in m) printf "%s\t%d\n", k, m[k]}' 2>/dev/null || true
+    s tr_end
     """#
 
     public static func parseSnapshot(_ out: String) -> [BoardSession] {
         let tmux = extract(out, "tmux")
         let status = extract(out, "status")
+        // 转录最后写入时间 —— 「上次对话」的真来源，见 lastActivityOf
+        let transcripts = parseTranscriptTimes(extract(out, "tr"))
 
         // 状态先建索引：会话名 → (state, detail)
         var states: [String: (String, String)] = [:]
@@ -100,12 +105,55 @@ public enum SessionProbe {
                 windows: Int(p[1]) ?? 1,
                 attached: p[3] != "0",
                 cwd: p[4],
-                lastActivity: Date(timeIntervalSince1970: Double(p[2]) ?? 0),
+                lastActivity: Date(timeIntervalSince1970: lastActivityOf(
+                    tmuxTs: Double(p[2]) ?? 0, cwd: p[4], transcripts: transcripts)),
                 state: SessionState.of(st?.0),
                 detail: st?.1 ?? ""
             )
         }
     }
+
+    /// `<项目目录名>\t<unix秒>` 一行一条 → 表。解析不了的行忽略。
+    public static func parseTranscriptTimes(_ raw: String) -> [String: Double] {
+        var m: [String: Double] = [:]
+        for line in raw.components(separatedBy: "\n") {
+            guard let i = line.firstIndex(of: "\t") else { continue }
+            let key = String(line[line.startIndex..<i]).trimmingCharacters(in: .whitespaces)
+            let ts = Double(String(line[line.index(after: i)...]).trimmingCharacters(in: .whitespaces)) ?? 0
+            if ts > 0, !key.isEmpty { m[key] = ts }
+        }
+        return m
+    }
+
+    /// 这个会话**上次真正对话**是什么时候。
+    ///
+    /// ⚠️ **不能只信 tmux 的 `session_activity`。** 安卓侧实测（用户报「显示那么久之前，
+    /// 很多不是刚对话吗」）：`claude_desktop` 的 tmux 活动写着 **2 天前**、
+    /// cc-state 的 ts 更离谱写着 **7 天前**，而它的转录**一分钟前**还在写。
+    /// **转录文件的 mtime 才是权威** —— Claude Code 每说一句都在写它。
+    /// 见安卓侧 TROUBLESHOOTING #130。
+    public static func lastActivityOf(tmuxTs: Double, cwd: String, transcripts: [String: Double]) -> Double {
+        let tr = transcripts[Transcript.projectDirOf(cwd)] ?? 0
+        return max(tmuxTs, tr)
+    }
+
+    /// **盯屏幕：变了才推。** 一条长连通道，服务器侧自己比对，没变不过网。
+    ///
+    /// ⚠️ 为什么不轮询：轮询是「每次都要问一遍」，每问一次就是一个 SSH 往返。
+    /// 安卓侧实测抓屏本身 **0 毫秒**，延迟几乎全在往返上；改成推之后
+    /// 变化到达约 **200ms**（TROUBLESHOOTING #134）。
+    /// ⚠️ `|| exit` 不能省 —— 会话没了要让远端循环自己退，否则留一堆空转的壳。
+    public static func watchScreenCommand(target: String, lines: Int = 60) -> String {
+        let q = target.replacingOccurrences(of: "'", with: "'\\''")
+        return "trap 'exit' PIPE HUP TERM INT; prev=''; while :; do "
+            + "cur=$(tmux capture-pane -pt '\(q)' -S -\(lines) 2>/dev/null) || exit; "
+            + "if [ \"$cur\" != \"$prev\" ]; then "
+            + "printf '%s\\n\(screenMarker)\\n' \"$cur\" || exit; prev=$cur; fi; "
+            + "sleep 0.2; done"
+    }
+
+    /// 盯屏推流里，一屏结束的标记行。
+    public static let screenMarker = "__YXI_SCR__"
 
     /// 只要 `<marker>\tX_begin` 和 `<marker>\tX_end` 之间的内容。
     /// **缺段就当空，不抛异常** —— 这就是 marker 分段的意义所在。
