@@ -236,6 +236,14 @@ final class ChatModel: ObservableObject {
         }
     }
 
+    /// 未提交的改动。命令在 YxiKit 里（有测试），这里只跑一趟。
+    func loadDiff(_ done: @escaping (String) -> Void) {
+        Task { [backend = self.backend, cwd = self.cwd] in
+            let out = (try? await backend.run(SessionProbe.gitDiffCommand(cwd: cwd))) ?? ""
+            done(out.isEmpty ? "（读不到）" : out)
+        }
+    }
+
     private func answer(_ work: @escaping @Sendable () async throws -> Void) {
         guard !answering else { return }
         answering = true

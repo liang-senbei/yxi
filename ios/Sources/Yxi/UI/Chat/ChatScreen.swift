@@ -26,6 +26,7 @@ struct ChatScreen: View {
     @State private var photo: PhotosPickerItem?
     @State private var importing = false
     @State private var showModes = false
+    @State private var diff: String?
 
     private let bottomID = "yxi.chat.bottom"
     private let space = "yxi.chat.space"
@@ -266,6 +267,10 @@ struct ChatScreen: View {
             .disabled(!model.canSend)
         }
         .padding(.horizontal, 14).padding(.top, 6).padding(.bottom, 12)
+        .sheet(item: Binding(get: { diff.map(DiffText.init) },
+                             set: { if $0 == nil { diff = nil } })) { d in
+            diffSheet(d.text)
+        }
         .sheet(isPresented: $showModes) {
             ModeSheet { cmd in model.sendMode(cmd) }
         }
@@ -300,11 +305,58 @@ struct ChatScreen: View {
             let multi = p.tabs.count > 1
             let prev: (() -> Void)? = multi ? { model.goPrevQuestion() } : nil
             let next: (() -> Void)? = multi ? { model.goNextQuestion() } : nil
-            PendingCard(pending: p, busy: model.answering,
-                        onPick: model.pick, onSubmit: model.submitMultiSelect,
-                        onPrev: prev, onNext: next)
-                .padding(.horizontal, 14).padding(.bottom, 8)
+            VStack(spacing: 6) {
+                PendingCard(pending: p, busy: model.answering,
+                            onPick: model.pick, onSubmit: model.submitMultiSelect,
+                            onPrev: prev, onNext: next)
+                // 审批「让它改 / 提交」之前，一眼看清它到底动了什么
+                Button {
+                    diff = "读取中…"
+                    model.loadDiff { diff = $0 }
+                } label: {
+                    Text("看未提交的改动")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Yx.muted)
+                        .padding(.horizontal, 14).padding(.vertical, 7)
+                        .background(Yx.container, in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 14).padding(.bottom, 8)
         }
+    }
+
+    /// + 绿 / - 红 / @@ 青，等宽、可横滑。跟安卓 DiffSheet 一致。
+    @ViewBuilder
+    private func diffSheet(_ text: String) -> some View {
+        NavigationStack {
+            ScrollView([.vertical, .horizontal]) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(text.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
+                        Text(line.isEmpty ? " " : line)
+                            .font(.mono(11))
+                            .foregroundStyle(diffColor(line))
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
+            }
+            .background(Yx.surface)
+            .navigationTitle("未提交的改动")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("关闭") { diff = nil } }
+            }
+        }
+    }
+
+    private func diffColor(_ line: String) -> Color {
+        if line.hasPrefix("+") && !line.hasPrefix("+++") { return Yx.addFg }
+        if line.hasPrefix("-") && !line.hasPrefix("---") { return Yx.delFg }
+        if line.hasPrefix("@@") { return Yx.teal }
+        return Yx.onSurfaceVar
     }
 
     /// 常用语 —— 你自己的短语库，跟斜杠命令菜单不是一回事（那是 Claude 的命令，这是你的话）。
@@ -520,4 +572,11 @@ private struct LiveStatusRow: View {
             }
         }
     }
+}
+
+/// `sheet(item:)` 要 Identifiable —— 一段文本本身不是，包一层。
+private struct DiffText: Identifiable {
+    let text: String
+    var id: String { text }
+    init(_ text: String) { self.text = text }
 }

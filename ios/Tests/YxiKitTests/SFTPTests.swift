@@ -18,3 +18,21 @@ final class HumanSizeTests: XCTestCase {
         XCTAssertEqual(humanSize(2048), "2 K")
     }
 }
+
+// MARK: - git diff
+
+final class GitDiffCommandTests: XCTestCase {
+    func testQuotesPathWithApostrophe() {
+        let c = SessionProbe.gitDiffCommand(cwd: "/home/it's/repo")
+        XCTAssertTrue(c.contains(#"cd '/home/it'\''s/repo'"#), c)
+    }
+    /// 两种「没东西看」的情况都必须有话说，不能是空白
+    func testAlwaysSaysSomething() {
+        let c = SessionProbe.gitDiffCommand(cwd: "/x")
+        XCTAssertTrue(c.contains("（没有未提交的改动）"))
+        XCTAssertTrue(c.contains("（这里不是 git 仓库）"))
+    }
+    func testCapsOutput() {
+        XCTAssertTrue(SessionProbe.gitDiffCommand(cwd: "/x").contains("head -c 60000"))
+    }
+}

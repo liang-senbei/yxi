@@ -205,3 +205,20 @@ public enum SessionProbe {
         (Prompt.parse(screen), Live.parse(screen))
     }
 }
+
+// MARK: - 未提交的改动
+
+extension SessionProbe {
+    /// 审批「让它改 / 提交」之前，一眼看清 Claude 到底动了什么。
+    ///
+    /// `--stat` 摘要 + 具体 diff（封顶 60k，手机上够看了）。
+    /// ⚠️ 不是 git 仓库 / 没改动都要给**一句人话**，不能空着 —— 空白屏说明不了任何事。
+    public static func gitDiffCommand(cwd: String) -> String {
+        let safe = cwd.replacingOccurrences(of: "'", with: "'\\''")
+        return "cd '\(safe)' 2>/dev/null && "
+            + "{ s=$(git diff --stat 2>/dev/null); d=$(git diff 2>/dev/null | head -c 60000); "
+            + "if [ -z \"$s\" ]; then echo '（没有未提交的改动）'; "
+            + "else printf '%s\\n\\n%s' \"$s\" \"$d\"; fi; } "
+            + "|| echo '（这里不是 git 仓库）'"
+    }
+}

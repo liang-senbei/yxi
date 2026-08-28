@@ -57,7 +57,10 @@ jobs:
             -derivedDataPath build \
             -skipPackagePluginValidation \
             -skipMacroValidation \
-            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGN_ENTITLEMENTS= \
             2>&1 | grep -E "error:|warning: .*deprecated|BUILD|Compiling|Linking" | tail -60
 
       # ⚠️ 这一步是整条 CI 里**唯一**能证明「真能连上、真读得到文件」的地方。

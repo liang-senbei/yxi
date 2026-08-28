@@ -40,7 +40,7 @@ public struct Staged: Equatable, Identifiable, Sendable {
 /// ⚠️ 连接的生命周期归 Workspace，不归这些视图：切「终端 / 对话 / 文件」时视图会
 /// 销毁重建，而连接必须原样活着（TROUBLESHOOTING #75：挂在页面里的话切走再切回来
 /// 就是 TCP + 握手 + ed25519 认证重来一遍，安卓实测 ~3 秒）。
-protocol ChatBackend: SessionService, Sendable {
+protocol ChatBackend: SessionService, ShellRunner, Sendable {
 
     /// 找这个 cwd 对应的最新转录文件。命令和解析 `YxiKit.TranscriptStream` 都给好了，
     /// 这里只负责跑 SSH。

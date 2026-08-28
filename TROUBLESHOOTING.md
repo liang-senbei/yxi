@@ -2532,3 +2532,31 @@ done
 
 **代价**：聊天开着且对方在干活时，状态行每秒都在变 → 大约每秒一次、每次 ~4KB 的推送。
 换来的是「点一下就动」。不开聊天不产生流量。
+
+## #135 iOS 模拟器里钥匙串全挂：`keychain(-34018)`，根因是 CI 把签名整个关了
+
+**症状**　CI 里让 App 把自己的 SSH 公钥吐出来做端到端测试，拿回来的是
+`ERROR: keychain(-34018)`。`-34018` = `errSecMissingEntitlement`。
+表现上像是「模拟器不支持钥匙串」，实际不是。
+
+**根因**　为了在没有开发者账号的 runner 上编过，构建参数里写了
+`CODE_SIGNING_ALLOWED=NO`。这一关，App 就**完全没有签名、也没有
+`application-identifier` 这类 entitlement**，而钥匙串的每一次访问都要靠它
+划分归属 —— 于是 `SecItemAdd` / `SecItemCopyMatching` 一律 -34018。
+
+顺带说明一件更要紧的事：**Yxi 的凭据层整个建在钥匙串上**
+（`Vault` 存密码、`KeyManager` 存私钥）。签名一关，等于把认证层整个废掉，
+只是它不报「没签名」而报「钥匙串错误」，很容易被当成模拟器的毛病。
+
+**修法**　模拟器构建**不需要真证书，但需要签名**。把那一行换成 ad-hoc：
+
+```
+CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=-
+```
+
+`-` 就是 ad-hoc 身份，不用开发者账号，也不用 team id，同时 Xcode 会
+生成基本的 entitlements —— 钥匙串就正常了。
+
+**怎么避开**　凡是「关掉签名让它编过」的构建参数，都要记一笔它顺带关掉了什么。
+签名不只是签名，它带着一整套 entitlement；钥匙串、钥匙串共享、推送、
+App Group 都挂在上面。
