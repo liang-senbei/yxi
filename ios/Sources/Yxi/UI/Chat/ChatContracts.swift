@@ -56,6 +56,13 @@ protocol ChatBackend: SessionService, Sendable {
     /// **数据层不要再加一层节流** —— 两层节流叠起来，丢的还是最后一批（#35）。
     func transcriptLines(file: String, backlog: Int) -> AsyncStream<String>
 
+    /// **服务器主动推屏**：一条常驻命令在那头自己比对，只在**变了**的时候吐一屏。
+    ///
+    /// ⚠️ 这是「选完一项要等十秒才跳下一题」的**根治**办法。轮询再怎么调也是
+    /// 「问一次、等一轮」，间隔就是延迟下限；推流的延迟只剩一个来回。
+    /// 每屏以 `SessionProbe.screenMarker` 结尾。
+    func screenStream(session: String, lines: Int) -> AsyncStream<String>
+
     /// 送一个**按键**（不是一行文本，不带回车）。
     ///
     /// 实测过的协议（TROUBLESHOOTING #29）：

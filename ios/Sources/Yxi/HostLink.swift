@@ -234,6 +234,29 @@ struct RemoteHost: ChatBackend, UsageService, ShellRunner, FileService {
         }
     }
 
+    func screenStream(session: String, lines: Int) -> AsyncStream<String> {
+        AsyncStream { continuation in
+            let task = Task {
+                guard let shell = try? await ssh.openStream(SSHSession.follow(
+                    SessionProbe.watchScreenCommand(target: session, lines: lines))
+                ) else { return continuation.finish() }
+                var buffer = ""
+                let marker = "\n" + SessionProbe.screenMarker + "\n"
+                for await chunk in shell.output {
+                    buffer += String(decoding: chunk.bytes, as: UTF8.self)
+                    // 一屏一屏地切。⚠️ 跟 transcriptLines 一样，SSH 的块不落在边界上 ——
+                    // 半屏留着等下一块，否则会把屏幕从中间劈开，解析出半个待答框
+                    while let r = buffer.range(of: marker) {
+                        continuation.yield(String(buffer[buffer.startIndex..<r.lowerBound]))
+                        buffer.removeSubrange(buffer.startIndex..<r.upperBound)
+                    }
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     func sendKey(session: String, key: String) async throws {
         // 白名单在 YxiKit 里，不在白名单返回 nil —— 这里什么都不做
         guard let cmd = SessionProbe.keyCommand(target: session, key: key) else { return }

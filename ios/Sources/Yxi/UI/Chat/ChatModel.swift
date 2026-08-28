@@ -121,12 +121,32 @@ final class ChatModel: ObservableObject {
 
     // MARK: - 屏幕
 
+    /// 盯屏。**优先吃服务器推过来的流**，推流断了才退回轮询。
+    ///
+    /// ⚠️ 「点一个选项要等十秒才跳下一题」的根治办法就是这个：
+    /// 轮询的延迟下限就是它的间隔，怎么调都在；推流只剩一个来回（实测 ~0.3 秒）。
+    /// 但**轮询这条路必须留着** —— 服务器上没有那条命令要的东西（老 tmux、
+    /// 权限不对、shell 被限制）时，推流会直接结束，那时候不能变成完全不刷新。
     private func probeLoop() async {
+        for await screen in backend.screenStream(session: session, lines: 200) {
+            if Task.isCancelled { return }
+            guard !answering else { continue }
+            // ⚠️ **一次抓屏解两件事。** 分两次抓会看到不一致的瞬间
+            // （比如「已经不忙了」但「还挂着一个待答」），界面会闪。
+            let parsed = await Task.detached(priority: .userInitiated) {
+                SessionProbe.readScreen(screen)
+            }.value
+            (pending, live) = parsed
+        }
+        if Task.isCancelled { return }
+        await pollLoop()
+    }
+
+    /// 推流用不了时的后备。
+    private func pollLoop() async {
         while !Task.isCancelled {
             if !answering {
                 do {
-                    // ⚠️ **一次抓屏解两件事。** 分两次抓会看到不一致的瞬间
-                    // （比如「已经不忙了」但「还挂着一个待答」），界面会闪。
                     (pending, live) = SessionProbe.readScreen(
                         try await backend.peek(session: session, lines: 200))
                 } catch {
