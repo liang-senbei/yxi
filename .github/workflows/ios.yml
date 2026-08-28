@@ -46,14 +46,19 @@ jobs:
         working-directory: ios
         run: |
           set -o pipefail
+          # ⚠️ -skipPackagePluginValidation：SwiftTerm 带了个构建插件（SwiftTermBuildInfoPlugin），
+          #    Xcode 默认要人点「信任」，CI 里没人点 → 直接 BUILD FAILED。
+          #    -skipMacroValidation 同理（宏也要批准）。
           xcodebuild build \
             -project Yxi.xcodeproj \
             -scheme YxiApp \
             -configuration Debug \
             -destination 'platform=iOS Simulator,name=iPhone 16' \
             -derivedDataPath build \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
             CODE_SIGNING_ALLOWED=NO \
-            2>&1 | tail -60
+            2>&1 | grep -E "error:|warning: .*deprecated|BUILD|Compiling|Linking" | tail -60
 
       - name: 起模拟器 · 装上去 · 截图
         working-directory: ios
