@@ -46,6 +46,19 @@ struct ChatScreen: View {
                     .padding(.horizontal, 18).padding(.vertical, 8)
             }
 
+            // Claude 此刻在做计划里的哪一步 —— 最近一次 TodoWrite 里 in_progress 那条。
+            // 一眼看清进度，不用展开卡片。
+            if let doing = Todos.doingNow(model.items.compactMap {
+                if case let .tool(c) = $0 { return c } else { return nil }
+            }) {
+                Text("▶ 正在做 · \(doing)")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Yx.copper)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 18).padding(.bottom, 2)
+            }
+
             transcript
 
             if model.live.busy { busyRow }

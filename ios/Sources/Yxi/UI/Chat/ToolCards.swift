@@ -29,7 +29,7 @@ struct ToolCardView: View {
     }
 
     static func alwaysOpen(_ name: String) -> Bool {
-        name == "AskUserQuestion" || name == "ExitPlanMode"
+        name == "AskUserQuestion" || name == "ExitPlanMode" || name == "TodoWrite"
     }
 
     var body: some View {
@@ -100,6 +100,7 @@ struct ToolCardView: View {
         case "Edit", "Write": return Yx.teal
         // 这两个本来就是「要你拿主意」的，用琥珀
         case "AskUserQuestion", "ExitPlanMode": return Yx.amber
+        case "TodoWrite": return Yx.teal      // 计划/进度
         default: return Yx.muted
         }
     }
@@ -114,6 +115,7 @@ struct ToolCardView: View {
         case "Agent", "Task": AgentBody(call: call)
         case "AskUserQuestion": AskBody(call: call)
         case "ExitPlanMode": PlanBody(call: call)
+        case "TodoWrite": TodoBody(call: call)
         default: PlainBody(call: call)
         }
     }
@@ -282,6 +284,69 @@ private struct PlanBody: View {
                 Markdown(plan).markdownTheme(.yxi).frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+    }
+}
+
+/// TodoWrite 渲染成真待办清单 ☐ 待办 / ▶ 正在做 / ☑ 完成。
+/// 比 Bash/Read 那些高信号 —— 一眼看清 Claude 的计划和进度。默认展开。
+private struct TodoBody: View {
+    let call: ToolCall
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(Todos.of(call).enumerated()), id: \.offset) { _, todo in
+                HStack(alignment: .top, spacing: 8) {
+                    Text(todo.mark).font(.system(size: 14)).foregroundStyle(todo.markColor)
+                    Text(todo.text)
+                        .font(.system(size: 14))
+                        .foregroundStyle(todo.done ? Yx.muted : Yx.onSurface)
+                        .strikethrough(todo.done)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+        .padding(.top, 8)
+    }
+}
+
+/// 待办清单的解析。⚠️ 顶栏的「▶ 正在做」也读它，别抄第二份。
+enum Todos {
+    struct Row {
+        let text: String
+        let status: String
+        var done: Bool { status == "completed" }
+        var mark: String {
+            switch status {
+            case "completed": return "☑"
+            case "in_progress": return "▶"
+            default: return "☐"
+            }
+        }
+        var markColor: Color {
+            switch status {
+            case "completed": return Yx.muted
+            case "in_progress": return Yx.copper
+            default: return Yx.onSurfaceVar
+            }
+        }
+    }
+
+    static func of(_ call: ToolCall) -> [Row] {
+        // ⚠️ JSON.string / .array 是**非可选**的（空值回落成 "" / []），别写 `??`
+        call.input["todos"].array.compactMap { o in
+            let content = o["content"].string
+            let text = content.isEmpty ? o["activeForm"].string : content
+            guard !text.isEmpty else { return nil }
+            return Row(text: text, status: o["status"].string)
+        }
+    }
+
+    /// Claude 此刻在做计划里的哪一步 —— 最近一次 TodoWrite 里 in_progress 那条。
+    /// 顶栏回显一眼看清进度。
+    static func doingNow(_ calls: [ToolCall]) -> String? {
+        guard let last = calls.last(where: { $0.name == "TodoWrite" }) else { return nil }
+        guard let row = of(last).first(where: { $0.status == "in_progress" }) else { return nil }
+        return row.text
     }
 }
 

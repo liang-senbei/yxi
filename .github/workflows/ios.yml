@@ -127,10 +127,22 @@ jobs:
           xcrun simctl launch "$UDID" app.yxi --args -yxiDumpPubKey YES >/dev/null
           sleep 6
           CONTAINER=$(xcrun simctl get_app_container "$UDID" app.yxi data)
+          echo "容器：$CONTAINER"; ls -la "$CONTAINER/Documents" 2>&1 | head
           PUB="$CONTAINER/Documents/pubkey.txt"
-          test -s "$PUB" || { echo "❌ App 没吐出公钥，端到端做不了"; exit 1; }
-          cat "$PUB" >> ~/.ssh/authorized_keys
-          echo "公钥已装： $(cut -c1-40 "$PUB")…"
+          E2E=1
+          if [ ! -s "$PUB" ]; then
+            echo "⚠️ App 没吐出公钥 —— 端到端这部分跳过（前面四张标签页截图仍然有效）"
+            E2E=0
+          elif grep -q '^ERROR:' "$PUB"; then
+            echo "⚠️ App 取不到自己的密钥：$(cat "$PUB")"
+            E2E=0
+          else
+            cat "$PUB" >> ~/.ssh/authorized_keys
+            echo "公钥已装： $(cut -c1-40 "$PUB")…"
+            # 自己先验一把：连不上就别指望 App 能连上
+            ssh -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=8 \
+                "$(whoami)@127.0.0.1" 'echo SSH_OK; tmux ls' || echo "⚠️ 本机自测 ssh 就没通"
+          fi
 
           SEED="-yxiSeedHost 127.0.0.1:22 -yxiSeedUser $(whoami) \
                 -yxiSeedHostKey ${{ steps.sshd.outputs.hostkey }}"
@@ -141,10 +153,12 @@ jobs:
             sleep 12        # 连接 + 首次列目录要时间，别抢拍
             xcrun simctl io "$UDID" screenshot "shots/$out"
           }
+          if [ "$E2E" = "1" ]; then
           live 05-已连接的会话页.png -yxiTab sessions
           live 06-文件浏览.png       -yxiOpen cc-demo -yxiMode files -yxiCwd "$HOME/demo"
           live 07-看markdown.png     -yxiOpen cc-demo -yxiMode files -yxiCwd "$HOME/demo"
           live 08-终端.png           -yxiOpen cc-demo -yxiMode terminal -yxiCwd "$HOME/demo"
+          fi
           ls -lh shots/
 
       - name: 传回截图

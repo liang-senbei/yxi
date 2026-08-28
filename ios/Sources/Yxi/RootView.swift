@@ -280,11 +280,17 @@ final class AppState: ObservableObject {
         let d = UserDefaults.standard
         // ① 把本机公钥吐到 Documents，CI 拿去写进 runner 的 authorized_keys。
         //    容器目录在 Mac 上直接可读（`simctl get_app_container`）。
-        if d.bool(forKey: "yxiDumpPubKey"), let line = try? keys.identity().authorizedKeysLine,
-           let dir = try? FileManager.default.url(
+        if d.bool(forKey: "yxiDumpPubKey") {
+            // ⚠️ 失败也要**写点东西出去**：CI 那头只能看到「文件在不在」，
+            // 空手而归的话根本不知道是钥匙串挂了还是别的。把原因写进同一个文件。
+            var out: String
+            do { out = try keys.identity().authorizedKeysLine }
+            catch { out = "ERROR: \(error)" }
+            if let dir = try? FileManager.default.url(
                 for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true) {
-            try? line.write(to: dir.appendingPathComponent("pubkey.txt"),
-                            atomically: true, encoding: .utf8)
+                try? out.write(to: dir.appendingPathComponent("pubkey.txt"),
+                               atomically: true, encoding: .utf8)
+            }
         }
         // ② 播种一台主机
         guard let hostPort = d.string(forKey: "yxiSeedHost"),

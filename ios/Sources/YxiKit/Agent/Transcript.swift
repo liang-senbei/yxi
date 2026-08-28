@@ -245,3 +245,118 @@ public enum TranscriptStream {
 
     private static func projectDir(_ cwd: String) -> String { Transcript.projectDirOf(cwd) }
 }
+
+// MARK: - 本对话的模型 / 模式 / 上下文用量
+
+extension Transcript {
+
+    /// 顶栏那一行「模型 · 模式 · 上下文」。跟安卓 `Transcript.Ctx` 逐条对齐。
+    public struct Ctx: Equatable, Sendable {
+        public let tokens: Int64
+        /// ⚠️ `var`：`/model` 的回执会覆盖它（切了模型但还没回话的那一段）
+        public var model: String
+        /// 思考强度：`max` / `high` / `mid`。⚠️ 在转录行的**顶层**，不在 message 里。
+        public var effort: String = ""
+        /// 会话模式，来自 `{"type":"mode",…}` 行。空或 normal = 不用显示。
+        public var mode: String = ""
+        /// ponytail 插件的强度（`lite`/`full`/`ultra`）。
+        /// ⚠️ **不一定读得到**：它只在会话开始/换模式时注入。读不到就空着 ——
+        /// 宁可不显示也不显示假的。
+        public var ponytail: String = ""
+
+        public init(tokens: Int64, model: String, effort: String = "",
+                    mode: String = "", ponytail: String = "") {
+            self.tokens = tokens; self.model = model
+            self.effort = effort; self.mode = mode; self.ponytail = ponytail
+        }
+    }
+
+    /// 顺路从同一批转录行里读出来，**不额外跑一趟服务器**。
+    public static func context(_ lines: [String]) -> Ctx? {
+        var last: Ctx?
+        var lastMode = ""
+        var lastPony = ""
+
+        for line in lines where !line.trimmingCharacters(in: .whitespaces).isEmpty {
+            // ponytail 的强度只在它注入的那段文字里。
+            // ⚠️ 直接在**原始行**上找，别去钻 JSON 结构 —— 那是插件的实现细节，会变。
+            if line.contains("PONYTAIL MODE"), let lv = ponytailLevel(line) {
+                lastPony = lv
+                if var l = last { l.ponytail = lv; last = l }
+            }
+            guard let d = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else { continue }
+            // 侧链（子 agent 的内部对话）不算主线
+            if d["isSidechain"] as? Bool == true { continue }
+            let type = d["type"] as? String ?? ""
+            if type == "mode" { lastMode = d["mode"] as? String ?? lastMode; continue }
+            guard let msg = d["message"] as? [String: Any] else { continue }
+
+            switch type {
+            case "user":
+                // ⚠️ **切完模型、但它还没回话时，标签也得跟着变。** 顶栏的模型名来自
+                // 最后一条 assistant 消息，切换不会改写旧消息 —— 不认这一步的话，
+                // 用户切了模型还看见旧名字，会以为没切成（安卓那边用户真报过）。
+                if let name = modelSwitch(msg), var l = last { l.model = name; last = l }
+            case "assistant":
+                guard var c = usageCtx(msg) else { break }
+                // ⚠️ `effort` 在**转录行顶层**（`d`），不在 message 里 —— 找错地方永远是空
+                c.effort = d["effort"] as? String ?? ""
+                c.mode = lastMode
+                c.ponytail = lastPony
+                last = c
+            default: break
+            }
+        }
+        return last
+    }
+
+    /// ⚠️ **三项都要加**：`input_tokens` 是这轮新增的、`cache_creation` 是写进缓存的、
+    /// `cache_read` 是命中缓存复用的 —— 合起来才是模型这轮实际看到的量。
+    /// 只看 `input_tokens` 的话，一个 65 万 token 的会话会显示成「1」（实测就是 1）。
+    private static func usageCtx(_ msg: [String: Any]) -> Ctx? {
+        guard let u = msg["usage"] as? [String: Any] else { return nil }
+        func n(_ k: String) -> Int64 { (u[k] as? NSNumber)?.int64Value ?? 0 }
+        let total = n("input_tokens") + n("cache_creation_input_tokens") + n("cache_read_input_tokens")
+        guard total > 0 else { return nil }
+        return Ctx(tokens: total, model: msg["model"] as? String ?? "")
+    }
+
+    /// `PONYTAIL MODE ACTIVE — level: full` / `… CHANGED — level: ultra`
+    /// ⚠️ 破折号是 em dash，别写死；等级偶尔是空的，那就匹配不上，正好跳过。
+    private static func ponytailLevel(_ line: String) -> String? {
+        guard let re = try? NSRegularExpression(
+            pattern: #"PONYTAIL MODE [A-Z]+[^:]*level:\s*([A-Za-z]+)"#) else { return nil }
+        let ns = line as NSString
+        guard let m = re.firstMatch(in: line, range: NSRange(location: 0, length: ns.length)),
+              m.numberOfRanges > 1 else { return nil }
+        return ns.substring(with: m.range(at: 1)).lowercased()
+    }
+
+    /// `/model` 的回执：`Set model to Opus 5 (1M context) for this session only`。
+    ///
+    /// ⚠️ `<` 也是终止符：回执包在 `<local-command-stdout>…</local-command-stdout>` 里，
+    /// 不拦的话闭合标签会被吃进模型名（安卓的测试抓出来的）。模型名里不会有 `<`。
+    /// ⚠️ 结果还要去掉 `[1m]` 这类 ANSI 残留。
+    static func modelSwitch(_ msg: [String: Any]) -> String? {
+        let text: String
+        if let s = msg["content"] as? String { text = s }
+        else if let arr = msg["content"] as? [[String: Any]] {
+            text = arr.compactMap { $0["text"] as? String }.joined(separator: " ")
+        } else { return nil }
+        guard text.contains("Set model to"),
+              let re = try? NSRegularExpression(
+                pattern: #"Set model to\s+(.+?)\s*(?:for this session|and saved|<|$)"#)
+        else { return nil }
+        let ns = text as NSString
+        guard let m = re.firstMatch(in: text, range: NSRange(location: 0, length: ns.length)),
+              m.numberOfRanges > 1 else { return nil }
+        let raw = ns.substring(with: m.range(at: 1))
+        // ⚠️ **这里绝不能用 raw string**（`#"\u{1B}…"#`）：那样 ICU 拿到的是字面量
+        // `\u{1B}`，它会按自己的语法解释，结果**把整个模型名都吃掉**（实测返回空串）。
+        // 必须让 Swift 先把 ESC 插进去，正则里只留 `\[[0-9;]*m`。
+        let cleaned = raw.replacingOccurrences(
+            of: "\u{1B}?\\[[0-9;]*m", with: "", options: .regularExpression)
+        let out = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        return out.isEmpty ? nil : out
+    }
+}
