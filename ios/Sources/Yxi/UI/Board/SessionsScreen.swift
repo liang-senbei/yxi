@@ -369,7 +369,13 @@ private struct SessionCard: View {
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                 }
-                Text(s.cwd).font(.mono(11)).foregroundStyle(Yx.dim).lineLimit(1)
+                HStack(spacing: 8) {
+                    Text(s.cwd).font(.mono(11)).foregroundStyle(Yx.dim).lineLimit(1)
+                    Spacer(minLength: 4)
+                    // 「上次动过是多久以前」—— 解析早就对了（转录 mtime，#130），
+                    // 但一直没显示出来。二十个会话里挑一个，这是最有用的一条线索。
+                    Text(ago(s.lastActivity)).font(.mono(11)).foregroundStyle(Yx.dim)
+                }
 
                 // 只有「等你」那组带按钮 —— 其余安静
                 if s.state == .needsYou {

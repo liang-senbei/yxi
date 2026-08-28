@@ -36,3 +36,23 @@ final class GitDiffCommandTests: XCTestCase {
         XCTAssertTrue(SessionProbe.gitDiffCommand(cwd: "/x").contains("head -c 60000"))
     }
 }
+
+final class AgoTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+    private func at(_ secondsAgo: Int) -> Date { now.addingTimeInterval(-Double(secondsAgo)) }
+
+    func testBuckets() {
+        XCTAssertEqual(ago(at(5), now: now), "刚刚")
+        XCTAssertEqual(ago(at(59), now: now), "刚刚")
+        XCTAssertEqual(ago(at(60), now: now), "1 分钟前")
+        XCTAssertEqual(ago(at(3599), now: now), "59 分钟前")
+        XCTAssertEqual(ago(at(3600), now: now), "1 小时前")
+        XCTAssertEqual(ago(at(86400), now: now), "1 天前")
+        XCTAssertEqual(ago(at(86400 * 40), now: now), "很久以前")
+    }
+
+    /// ⚠️ 服务器时钟可能比手机快一点点 —— 别显示成「-3 秒前」
+    func testFutureIsNotNegative() {
+        XCTAssertEqual(ago(now.addingTimeInterval(30), now: now), "刚刚")
+    }
+}

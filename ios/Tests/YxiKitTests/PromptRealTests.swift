@@ -167,3 +167,36 @@ final class PromptRealTests: XCTestCase {
         XCTAssertEqual(p.options[0].label, "Submit answers")
     }
 }
+
+/// `/model` 选单**绝不能**被当成普通待答卡片。
+///
+/// ⚠️ 它也是编号列表，通用解析会照单全收；而待答卡片点一下是**送数字** ——
+/// 实测那等于「saved as your default for new sessions」。
+/// 在手机上顺手一点就把账号默认模型改了，不报错、事后想不起来为什么。
+final class ModelPickerGuardTests: XCTestCase {
+
+    /// 照 `/model` 真实屏幕的形状
+    private let modelScreen = """
+    ╭──────────────────────────────────────────╮
+    │ Select model                             │
+    │ Switch between Claude models. Applies    │
+    │ to use this session only.                │
+    │                                          │
+    │ ❯ 1. Default (recommended)               │
+    │   2. Opus 5                              │
+    │   3. Sonnet 5                            │
+    ╰──────────────────────────────────────────╯
+      ↑↓ to select · Enter to confirm
+    """
+
+    func test_模型选单不当成待答() {
+        XCTAssertTrue(Prompt.isModelPicker(modelScreen))
+        XCTAssertNil(Prompt.parse(modelScreen), "模型选单被当成待答卡片了 —— 点一下会改掉账号默认模型")
+    }
+
+    /// ⚠️ 两句都要有：只认「Select model」的话，正文里提到这几个字的普通对话
+    /// 会被误判成选单，**真正的待答卡片就凭空消失了**
+    func test_只提一句不算选单() {
+        XCTAssertFalse(Prompt.isModelPicker("我刚才在 Select model 那里选了 Opus"))
+    }
+}

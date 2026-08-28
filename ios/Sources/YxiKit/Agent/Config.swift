@@ -179,8 +179,17 @@ YXIEOF
     /// ⚠️ json 的语法校验放在界面层做 —— 一个语法错就能让 Claude Code 起不来。
     public static func backupCommand(_ path: String, stamp: Int) -> String {
         let p = shq(path)
-        return "cp \(p) \(p).yxi-bak-\(stamp) 2>/dev/null || true"
+        // ⚠️ **不能写 `|| true`。** 那样命令恒定成功，而 exec 本来也不因非零退出码抛异常
+        // —— 于是「备份成功了吗」这个问题**永远答是**：目录只读、磁盘满、路径是目录，
+        // cp 全都静默失败，界面照样告诉用户「旧版留在 .yxi-bak-…」。
+        // 用户以为有回滚点，改坏了回头找，不存在。
+        // 改成**只有备份文件真的存在**才吐 [backupOK]，调用方按这个字符串判。
+        return "cp \(p) \(p).yxi-bak-\(stamp) 2>/dev/null; "
+            + "[ -f \(p).yxi-bak-\(stamp) ] && echo \(backupOK)"
     }
+
+    /// [backupCommand] 成功时会吐这一行。**没有它就是没备份成功。**
+    public static let backupOK = "__YXI_BAK_OK__"
     /// 写回之前的把关。**结构化格式坏了绝不写** ——
     /// `~/.claude/settings.json` 里一个多余的逗号就能让 Claude Code 起不来，
     /// 而那是在服务器上，用户在手机上根本救不回来。
@@ -201,7 +210,13 @@ YXIEOF
             return "JSON 格式不对，没保存：第 \(line) 行有多余的逗号"
         }
         do {
-            _ = try JSONSerialization.jsonObject(with: Data(text.utf8), options: [.fragmentsAllowed])
+            // ⚠️ **不开 `.fragmentsAllowed`**：那样 `123` / `"hello"` / `null`
+            // 都算合法 json 放行 —— 而配置文件的顶层必须是对象，
+            // 写进去一个裸数字，Claude Code 一样起不来。这道校验就白设了。
+            let obj = try JSONSerialization.jsonObject(with: Data(text.utf8))
+            guard obj is [String: Any] || obj is [Any] else {
+                return "JSON 格式不对，没保存：顶层得是 { } 或 [ ]"
+            }
             return nil
         } catch {
             return "JSON 格式不对，没保存：" + String(error.localizedDescription.prefix(60))

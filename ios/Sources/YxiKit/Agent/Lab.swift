@@ -80,8 +80,14 @@ public enum Lab {
     /// 所以先试 GNU 写法，失败就退到 BSD 写法自己把换行去掉 —— 结果一样是一整行。
     /// 不这么写的话，服务器只要是 macOS/BSD，实验室的图就**全部空白且不报错**。
     public static func bytesCommand(_ file: String) -> String {
+        // ⚠️⚠️ **不能加单引号。** `dir` 里是 `$HOME`，单引号里它**不展开** ——
+        // 服务器上找的就成了一个字面量叫 `$HOME` 的目录，实验室的图和 GIF
+        // 全部拿不到字节**而且不报错**（`2>/dev/null` 把话也吞了）。
+        // 文本素材那条 `textCommand` 一直没加引号，所以 html/note 正常 ——
+        // 这解释了为什么「只有图片空白」。
+        // 文件名已经过 [safe] 只剩 `[字母数字._-/]`，没有需要引号挡的字符。
         let f = "\(dir)/\(safe(file))"
-        return "base64 -w0 '\(f)' 2>/dev/null || base64 '\(f)' 2>/dev/null | tr -d '\\n'"
+        return "base64 -w0 \(f) 2>/dev/null || base64 \(f) 2>/dev/null | tr -d '\\n'"
     }
     /// 删若干条 —— 调服务器上的 `yxi-lab rm`（它会连素材一起删、改 manifest）
     public static func removeCommand(ids: [String]) -> String? {

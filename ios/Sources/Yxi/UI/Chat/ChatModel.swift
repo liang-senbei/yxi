@@ -14,6 +14,9 @@ final class ChatModel: ObservableObject {
     @Published private(set) var items: [ChatItem] = []
     /// 历史灌完了没。**这个标志是「不要一闪一闪跳」的关键**，见 [run] 里的注释。
     @Published private(set) var settled = false
+    /// 本对话的模型 / 思考强度 / 模式 / 上下文用量。
+    /// ⚠️ **顺路从同一批转录行里解出来，不额外跑一趟服务器。**
+    @Published private(set) var ctx: Transcript.Ctx?
     @Published private(set) var live: Live = .idle
     @Published private(set) var pending: Pending?
     /// 只在出问题时说一句。正常情况下是 nil（标题和路径由 Workspace 的头部管）
@@ -113,9 +116,17 @@ final class ChatModel: ObservableObject {
             dirty = false
             let snapshot = buffer
             // 几百行不能在主线程解 —— 会明显卡住输入框
-            items = await Task.detached(priority: .userInitiated) {
-                Transcript.parse(snapshot)
+            let parsed = await Task.detached(priority: .userInitiated) {
+                (Transcript.parse(snapshot), Transcript.context(snapshot))
             }.value
+            // ⚠️ **`Task.detached` 按定义不继承取消**，所以 await 回来要**再查一次**。
+            // 少了这一句：切会话时旧任务这一笔照落 —— 界面顶着新会话的标题，
+            // 显示的是上一个会话的内容（新 run 还卡在一整个 SSH 来回上，窗口不小）。
+            if Task.isCancelled { return }
+            items = parsed.0
+            // ⚠️ **解不出来就不动它**，别把已经显示对的模型名清成空 ——
+            // 转录尾部那一段可能正好没有 assistant 消息
+            if let c = parsed.1 { ctx = c }
         }
     }
 
@@ -136,6 +147,7 @@ final class ChatModel: ObservableObject {
             let parsed = await Task.detached(priority: .userInitiated) {
                 SessionProbe.readScreen(screen)
             }.value
+            if Task.isCancelled { return }      // 同上：detached 不继承取消
             (pending, live) = parsed
         }
         if Task.isCancelled { return }

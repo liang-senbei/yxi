@@ -222,3 +222,21 @@ extension SessionProbe {
             + "|| echo '（这里不是 git 仓库）'"
     }
 }
+
+// MARK: - 「多久没动了」
+
+/// 相对时间。跟安卓 `ui/TimeFmt.ago` 一致。
+///
+/// ⚠️ **来源是转录文件的 mtime，不是 tmux 的 `session_activity`**（#130）——
+/// 后者会因为 tmux 自己的刷新而更新，看起来"刚活动过"其实早就停了。
+public func ago(_ date: Date, now: Date = Date()) -> String {
+    let s = Int(now.timeIntervalSince(date))
+    switch s {
+    case ..<0:      return "刚刚"          // 服务器时钟比手机快一点，别显示"-3 秒前"
+    case ..<60:     return "刚刚"
+    case ..<3600:   return "\(s / 60) 分钟前"
+    case ..<86400:  return "\(s / 3600) 小时前"
+    case ..<(86400 * 30): return "\(s / 86400) 天前"
+    default:        return "很久以前"
+    }
+}

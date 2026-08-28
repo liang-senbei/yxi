@@ -23,8 +23,15 @@ CHECKS = [
      "这些名字会遮住 SwiftUI 的属性包装器（报 'State' cannot be used as an attribute），换名"),
 ]
 
-# raw string 里的 \u{..}：要在**原文**上查（剥掉就看不见了），但只看非注释行
+# raw string 里的 \u{..}
+#
+# ⚠️ **只对 ICU 那条路报警**：`NSRegularExpression(pattern:)` 和
+# `replacingOccurrences(options: .regularExpression)` 走的是 ICU，raw string 里的
+# `\u{1B}` 会原样交给它，被按 ICU 自己的语法解释（#136 就是这么把模型名吃光的）。
+# 而 Swift 自己的 `Regex(#"…"#)` 是**另一个引擎**，`\u{00C0}` 它认得 ——
+# 已实测 `Sautéing…` 两种写法都匹配。不分开的话这条规则会误报正确代码。
 RAW_ESC = re.compile(r'#"[^"\n]*\\u\{')
+ICU_CALL = re.compile(r'NSRegularExpression|replacingOccurrences')
 
 bad = []
 for f in sorted(pathlib.Path("Sources").rglob("*.swift")):
@@ -44,9 +51,12 @@ for f in sorted(pathlib.Path("Sources").rglob("*.swift")):
         s = line.strip()
         if s.startswith("//") or s.startswith("///") or s.startswith("*"):
             continue
-        if RAW_ESC.search(line):
-            bad.append(f"{f}:{i} raw string 里的 \\u{{..}} 会原样交给正则引擎，"
-                       "ICU 按自己的语法解释会吃掉整段。用普通字符串让 Swift 先转义")
+        # 同一行、或紧邻的上一行里出现 ICU 那两个调用才算数
+        near = line + (raw.split("\n")[i - 2] if i >= 2 else "")
+        if RAW_ESC.search(line) and ICU_CALL.search(near):
+            bad.append(f"{f}:{i} raw string 里的 \\u{{..}} 会原样交给 ICU（NSRegularExpression / "
+                       "replacingOccurrences），按它自己的语法解释会吃掉整段。"
+                       "改成普通字符串让 Swift 先转义。（Swift 的 Regex 不受影响）")
 
 for b in bad:
     print("❌", b)

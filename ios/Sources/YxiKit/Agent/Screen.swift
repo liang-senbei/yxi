@@ -131,9 +131,22 @@ public enum Prompt {
         return end > c + 1 ? end : nil
     }
 
+    /// `/model` 选单的判据。**两句都要有**，只认「Select model」会把
+    /// 正文里提到这几个字的普通对话也当成选单，于是待答卡片凭空消失。
+    /// 跟安卓 `Model.parse` 用的是同一对判据。
+    static func isModelPicker(_ screen: String) -> Bool {
+        screen.contains("Select model") && screen.contains("to use this session only")
+    }
+
     /// - Parameter screen: `tmux capture-pane -p` 的原样输出
     /// - Returns: 没有在等人选就返回 nil
     public static func parse(_ screen: String) -> Pending? {
+        // ⚠️⚠️ **模型选单不走这里。** 它也是个编号列表，会被这套通用解析
+        // 当成「等你选」画成待答卡片 —— 而这条路点一下是**送数字**，
+        // 实测那等于「saved as your default for new sessions」：
+        // 在手机上顺手一点，账号的默认模型就被改了，**不报错、事后也想不起来为什么**。
+        // 模型该有自己的入口（语义安全得多），在那之前**宁可不显示**。
+        if isModelPicker(screen) { return nil }
         let lines = screen.components(separatedBy: "\n").map { $0.hasSuffix("\r") ? String($0.dropLast()) : $0 }
         // 先用脚注（真机钉住的老路子）；认不出来再退回光标锚。
         // 退回而不是替换：老路子实测验过，没必要拿新写法去赌它。
@@ -274,7 +287,16 @@ extension Live {
     /// ⚠️ 必须要求**顶格**。屏幕上完全可能有别的东西**提到**这些字样 ——
     /// 比如把画面贴进对话里给人看，那几行就带着缩进出现在转录区。
     /// 顶格是 TUI 渲染状态行的唯一形态，拿它当锚点。
-    private static let statusLine = try! Regex(#"(\S) (\S*….*)"#)
+    /// 状态行的两种形态，**都要认**：
+    ///   · `✻ Gusting… (29s · ↓ 208 tokens)` —— 还在跑
+    ///   · `✻ Baked for 13s`                —— 跑完了
+    ///
+    /// ⚠️ **只认「还在跑」那种是不够的。** 屏幕上历次的收尾行都还留着，
+    /// 只认 `…` 的话会跳过最近那条收尾行、一路往上找，
+    /// 撞上正文里一句长得像状态行的就误判成在忙
+    /// （真机上真有：`● Reticulating… 这是正文不是状态行`）。
+    /// 两种都认、**取最后一条**、再看它是哪种形态，才是对的。
+    private static let statusLine = try! Regex(#"(\S) ([A-Za-z\u{00C0}-\u{024F}]+)(…| for )(.*)"#)
 
     /// 状态词还必须是个**拉丁字母词**（`Scampering…` / `Pondering…` / `Sautéing…`）。
     ///
@@ -306,17 +328,29 @@ extension Live {
         let boxBottom = dividers.last ?? lines.count
 
         let below = boxBottom + 1 < lines.count ? lines[(boxBottom + 1)...].joined(separator: "\n") : ""
-        let busy = below.contains("esc to interrupt")
+        let footerBusy = below.contains("esc to interrupt")
         let above = boxTop >= 0 ? Array(lines[..<boxTop]) : lines
 
         // 取**最后一条**：屏幕上留着历次的 `✻ Baked for 13s`，只有最后那条是此刻的
-        let status = above.reversed().lazy
-            .compactMap { l -> String? in
-                guard let m = l.wholeMatch(of: statusLine), let s = m[2].substring else { return nil }
-                return statusWord(String(s))
-            }
+        let last = above.reversed().lazy
+            .compactMap { $0.wholeMatch(of: statusLine) }
             .first
+        // `…` = 还在跑；` for ` = 已经跑完 —— 那是结果，不是状态
+        let running = last.map { String($0[3].substring ?? "") == "…" } ?? false
+        let status: String? = running ? last.flatMap { m -> String? in
+            let word = String(m[2].substring ?? "")
+            let tail = String(m[3].substring ?? "") + String(m[4].substring ?? "")
+            return statusWord(word + tail)
+        } : nil
 
-        return Live(busy: busy, status: busy ? status : nil)
+        // ⚠️⚠️ **不能只看脚注。** 窄屏（手机就是窄屏）上那行脚注会被截断成
+        // `… · e…`，`esc to interrupt` 根本没露出来 —— 于是「在忙」永远判不出来，
+        // 状态条和「■ 停」都不出现。用户看到的是「明明在跑，手机上啥都没有，也停不掉」。
+        // 真正的判据是**屏幕上最后一条状态行是不是「还在跑」那种形态**
+        // （`Gusting…` 还在跑 / `Baked for 13s` 已经跑完）；`statusLine` 只认带 `…` 的那种，
+        // 所以它匹配上了就等于还在跑。脚注仍然认 —— 宽屏时是个额外确证，但不再是唯一依据。
+        let busy = footerBusy || running
+
+        return Live(busy: busy, status: status)
     }
 }

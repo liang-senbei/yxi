@@ -62,16 +62,23 @@ struct LabPreview: View {
         guard let runner else { failed = true; return }
         switch item.type {
         case "html":
-            text = try? await runner.run(Lab.textCommand(item.file))
-            failed = text == nil
+            let t = try? await runner.run(Lab.textCommand(item.file))
+            // ⚠️ 命令带 `2>/dev/null` 且 exec 不因非零退出码抛异常 ——
+            // 文件不存在/没权限拿回来的是**空串，不是错误**。
+            // 不把空串当失败的话，用户看到一个白框，什么也不说。
+            if let t, !t.isEmpty { text = t } else { failed = true }
         case "gif", "image", "svg":
             // ⚠️ 预览走 base64（一条 shell 命令就够）；**保存原文件走 SFTP**，
             // 见 LabSaveButton —— base64 把大文件塞进一条命令的输出里，
             // 视频那种尺寸会崩，而预览本来就不需要原尺寸。
-            guard let b64 = try? await runner.run(Lab.bytesCommand(item.file)) else { failed = true; return }
+            let b64 = (try? await runner.run(Lab.bytesCommand(item.file))) ?? ""
             let clean = b64.trimmingCharacters(in: .whitespacesAndNewlines)
-            data = Data(base64Encoded: clean, options: .ignoreUnknownCharacters)
-            failed = data == nil
+            // ⚠️ **`Data(base64Encoded: "")` 返回的是 0 字节，不是 nil。**
+            // 所以「拿不到文件」在这里长得跟「成功拿到空图」一模一样，
+            // 判 `data == nil` 永远为假 —— 写好的「这个预览拉不下来」一辈子不显示，
+            // 用户看到的是永远空白的一块。要判**有没有字节**。
+            let bytes = Data(base64Encoded: clean, options: .ignoreUnknownCharacters)
+            if let bytes, !bytes.isEmpty { data = bytes } else { failed = true }
         default:
             break
         }

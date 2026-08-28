@@ -146,11 +146,20 @@ struct SettingsScreen: View {
     }
 
     /// ⚠️ 「连不上」要落到 `.failed`，**不能落到 `.upToDate`**。
+    ///
+    /// ⚠️ **先问公网下载页，公网不通才回落到「问所连的服务器」。**
+    /// 用户定的：更新走公网，这样换任何一台设备/客户都能查更新，
+    /// 不要求他自己的服务器上放着包。走 SSH 的话，换个客户我们就不行了。
     private func check() async {
         checking = true
         defer { checking = false }
+
+        if let r = await checkPublic() {
+            update = r
+            return
+        }
         guard let live = app.live, let ssh = app.session(of: live) else {
-            update = .failed("没连上 \(app.current?.display ?? "任何主机")")
+            update = .failed("公网查不到，也没连上任何主机")
             return
         }
         do {
@@ -167,6 +176,22 @@ struct SettingsScreen: View {
             }
         } catch {
             update = .failed(Explain.sftp(error))
+        }
+    }
+
+    /// 公网清单。⚠️ 查不到就返回 nil 让调用方回落 —— **不要把「没查到」说成「已是最新」**。
+    private func checkPublic() async -> Update.Result? {
+        guard let url = Update.publicManifestURL else { return nil }
+        var req = URLRequest(url: url)
+        req.cachePolicy = .reloadIgnoringLocalCacheData   // 缓存住旧清单 = 永远查不到新版
+        req.timeoutInterval = 8
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200
+        else { return nil }
+        switch Update.parsePublic(manifest: String(decoding: data, as: UTF8.self),
+                                  currentCode: Self.versionCode) {
+        case .failed: return nil          // 清单读不出来也算公网没通，回落
+        case let ok: return ok
         }
     }
 

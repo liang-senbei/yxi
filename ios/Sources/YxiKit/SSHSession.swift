@@ -507,7 +507,17 @@ extension SSHSession {
             // 外壳自己却永远不退，于是每次重连在服务器上留一个空壳进程。
             + "trap 'kill $__p 2>/dev/null' EXIT; "
             + "trap 'exit' PIPE HUP TERM INT; "
-            + "while :; do sleep 20; printf '\\n' || exit; done"
+            // ⚠️⚠️ **必须查后台那个进程还活着没有。**
+            // 少了 `kill -0` 这一句，被包起来的命令死了（tmux 太老、会话被 kill、
+            // 权限不对）外壳照样每 20 秒吐心跳，通道**永远不关** ——
+            // 于是上层的 `for await` 永不返回，兜底的轮询是死代码。
+            // 表现最坏：待答卡片和「正在忙」永远不出现**且不报错**，
+            // 服务器那头 Claude 停在等审批，手机上看起来一切正常。
+            // 每 2 秒查一次活、每 10 次（20 秒）吐一次心跳 —— 心跳频率不变。
+            + "__n=0; while :; do sleep 2; "
+            + "kill -0 $__p 2>/dev/null || exit; "
+            + "__n=$((__n+1)); "
+            + "if [ $__n -ge 10 ]; then printf '\\n' || exit; __n=0; fi; done"
     }
 
     /// 建或接一个 tmux 会话，顺便把它调成适合手机的样子。
@@ -528,7 +538,11 @@ extension SSHSession {
         let safe = name.replacingOccurrences(of: "'", with: "")
         return "tmux has-session -t '\(safe)' 2>/dev/null || tmux new-session -d -s '\(safe)'; "
             + "tmux set -g set-titles on \\; set -g mouse on \\; set -g status-right '' ; "
-            + "tmux attach -t '\(safe)'"
+            // ⚠️ **`-d` 不能漏。** 不把别的客户端踢下去的话，电脑上也开着同一个会话时
+            // 两边共用一块画布，tmux 按**最小的那个**排版 —— 手机一接上，
+            // 桌面那边整屏花掉，手机这边也是错位的。而「电脑上开着 + 手机遥控」
+            // 正是这个 app 的典型用法，触发率接近 100%。
+            + "tmux attach -d -t '\(safe)'"
     }
 
     /// 把一行公钥装进远端的 `~/.ssh/authorized_keys`，相当于 `ssh-copy-id`（PRD §2.4 P0-14）。

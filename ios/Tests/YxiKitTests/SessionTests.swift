@@ -39,10 +39,13 @@ final class SessionTests: XCTestCase {
     }
 
     func test_follow每20秒吐一个空行当心跳() {
-        // 那个空行两边的解析器都会跳过，所以它同时是 Liveness 要的心跳，白送的
+        // 那个空行两边的解析器都会跳过，所以它同时是 Liveness 要的心跳，白送的。
+        // ⚠️ 循环改成 2 秒一轮（为了查后台进程还活着没有，见 FollowShellTests），
+        // **心跳仍然是 20 秒**：2 × 10。
         let s = SSHSession.follow("cat")
-        XCTAssertTrue(s.contains("sleep 20"))
-        XCTAssertTrue(s.contains(#"printf '\n' || exit"#))
+        XCTAssertTrue(s.contains("sleep 2;"), s)
+        XCTAssertTrue(s.contains("-ge 10"), "2 秒 × 10 = 20 秒心跳：\(s)")
+        XCTAssertTrue(s.contains(#"printf '\n' || exit"#), s)
     }
 
     // MARK: - tmux
@@ -53,7 +56,10 @@ final class SessionTests: XCTestCase {
         let cmd = SSHSession.attach(session: "cc-mail")
         XCTAssertTrue(cmd.contains("set -g mouse on"), "漏了 mouse on，tmux 里滚不动历史")
         XCTAssertTrue(cmd.contains("has-session -t 'cc-mail'"))
-        XCTAssertTrue(cmd.contains("attach -t 'cc-mail'"))
+        // ⚠️ `-d` 把别的客户端踢下去。不踢的话，电脑上也开着同一个会话时
+        // 两边共用一块画布、按最小的那个排版 —— 桌面整屏花掉，手机也是错位的。
+        // 「电脑上开着 + 手机遥控」正是本 app 的典型用法，触发率接近 100%。
+        XCTAssertTrue(cmd.contains("attach -d -t 'cc-mail'"), "漏了 -d：\(cmd)")
         // ⚠️ 分号要转义给 tmux，不是给 shell。漏了反斜杠的话 shell 自己吃掉分号，
         // tmux 只收到第一条 set，后两条**静默丢掉** —— 包括 mouse on。
         XCTAssertTrue(cmd.contains(#"on \; set -g mouse on \;"#), "分号没转义：\(cmd)")

@@ -94,3 +94,44 @@ final class LiveTests: XCTestCase {
         XCTAssertFalse(live.busy)
     }
 }
+
+/// 窄屏（手机就是窄屏）上脚注会被截断，`esc to interrupt` 根本没露出来 ——
+/// 那时候必须靠**状态行**判在忙，否则「明明在跑，手机上啥都没有，也停不掉」。
+final class BusyWithoutFooterTests: XCTestCase {
+
+    private func screen(_ statusLine: String) -> String {
+        """
+        ● 前面的正文
+
+        \(statusLine)
+
+        ────────────────────────────────
+         > 
+        ────────────────────────────────
+          ⏵⏵ auto mode on (shift+tab to c…
+        """     // ⚠️ 脚注**故意截断**：真机窄屏就是这样，没有 esc to interrupt
+    }
+
+    func test_没有脚注也能判出在忙() {
+        let live = Live.parse(screen("✻ Gusting… (29s · ↓ 208 tokens)"))
+        XCTAssertTrue(live.busy, "脚注被截断就判不出在忙 —— 状态条和「停」都不会出现")
+        XCTAssertEqual(live.status, "Gusting… (29s · ↓ 208 tokens)")
+    }
+
+    /// 收尾那条不是「在忙」，是结果
+    func test_跑完的状态行不算在忙() {
+        let live = Live.parse(screen("✻ Baked for 13s"))
+        XCTAssertFalse(live.busy, "`for` 那种是跑完了")
+        XCTAssertNil(live.status)
+    }
+
+    /// 带重音的状态词也要认（`Sautéing…`）—— 已实测 Swift 的 Regex 认这个范围
+    func test_带重音的状态词() {
+        XCTAssertTrue(Live.parse(screen("✻ Sautéing… (3s)")).busy)
+    }
+
+    /// 中文不能当状态词（真机上排队输入会顶格印中文）
+    func test_中文不算状态词() {
+        XCTAssertFalse(Live.parse(screen("❯ 排队丙：这条带省略号…后面还有字")).busy)
+    }
+}

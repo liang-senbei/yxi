@@ -144,8 +144,14 @@ struct LabScreen: View {
         guard let runner else { loading = false; note = "没连上，实验室读不了。"; return }
         loading = true
         defer { loading = false }
-        if let raw = try? await runner.run(Lab.manifestCommand) {
-            items = Lab.parse(manifest: raw)
+        // ⚠️ 跟配置页同一条规矩：**读失败不能显示成「实验室还是空的」**。
+        // 而且成功之后要**清掉旧提示**，否则重连了还挂着「没连上」。
+        do {
+            items = Lab.parse(manifest: try await runner.run(Lab.manifestCommand))
+            note = nil
+        } catch {
+            note = "实验室读不到：" + String(error.localizedDescription.prefix(50))
+            return
         }
         if let raw = try? await runner.run(Lab.approvalsCommand) {
             approved = Set(raw.components(separatedBy: "\n")

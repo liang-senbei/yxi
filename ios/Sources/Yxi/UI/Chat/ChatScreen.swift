@@ -54,6 +54,8 @@ struct ChatScreen: View {
                     .padding(.horizontal, 18).padding(.vertical, 8)
             }
 
+            ctxRow
+
             // Claude 此刻在做计划里的哪一步 —— 最近一次 TodoWrite 里 in_progress 那条。
             // 一眼看清进度，不用展开卡片。
             if let doing = Todos.doingNow(model.items.compactMap {
@@ -280,7 +282,14 @@ struct ChatScreen: View {
         // 点正文里的路径 → 就地打开文件查看器（不用退出去进文件模式）
         .environment(\.openURL, OpenURLAction { url in
             guard let path = Linkify.pathOf(url.absoluteString) else { return .systemAction }
-            peek = path
+            // ⚠️ **`~` 手机这边展不开，得交给服务器的 realpath。**
+            // Linkify 明确认 `~/x` 这种（正则里就写着），直接丢给 SFTP 必然打不开。
+            // 文件模式那边一直是先 resolve 的，这条路原来绕过了它。
+            if path.hasPrefix("~"), let fs = backend as? FileService {
+                Task { peek = (try? await fs.resolve(path)) ?? path }
+            } else {
+                peek = path
+            }
             return .handled
         })
         .sheet(item: Binding(get: { peek.map(DiffText.init) },
@@ -380,6 +389,59 @@ struct ChatScreen: View {
         if line.hasPrefix("-") && !line.hasPrefix("---") { return Yx.delFg }
         if line.hasPrefix("@@") { return Yx.teal }
         return Yx.onSurfaceVar
+    }
+
+    /// 本对话的**模型 · 思考强度 · 模式 · 上下文用量**，外加「⚡模式」入口。
+    ///
+    /// ⚠️ **必须能横滑**：窄屏放不下会把左边的挤没。横滑之后放不下也只是滑一下的事，
+    /// 不会有信息凭空消失。
+    ///
+    /// ⚠️ **解不出来的那一格整块不显示** —— 不显示 0，不显示「未知」。
+    @ViewBuilder
+    private var ctxRow: some View {
+        let c = model.ctx
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                Spacer(minLength: 0)
+                Button { showModes = true } label: {
+                    Text("⚡模式").font(.mono(11)).foregroundStyle(Yx.copper)
+                }
+                .buttonStyle(.plain)
+
+                if let m = c?.model, !m.isEmpty {
+                    // `claude-` 前缀对人没有信息量，占的却是最挤的那块地方
+                    Text(m.hasPrefix("claude-") ? String(m.dropFirst(7)) : m)
+                        .font(.mono(11)).foregroundStyle(Yx.muted).lineLimit(1)
+                }
+                if let bits = modeBits(c), !bits.isEmpty {
+                    Text(bits).font(.mono(11)).foregroundStyle(Yx.muted).lineLimit(1)
+                }
+                if let t = c?.tokens, t > 0 {
+                    Text(tokenText(t))
+                        .font(.mono(11))
+                        // 上下文吃紧了变琥珀色 —— 该 /compact 了
+                        .foregroundStyle(t > 600_000 ? Yx.amber : Yx.dim)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, 18).padding(.bottom, 2)
+        }
+    }
+
+    /// 思考强度 · 会话模式 · ponytail 等级，有几样显示几样。
+    /// ⚠️ `normal` 不显示 —— 那是默认值，占地方还什么都没说。
+    private func modeBits(_ c: Transcript.Ctx?) -> String? {
+        guard let c else { return nil }
+        var bits: [String] = []
+        if !c.effort.isEmpty { bits.append(c.effort) }
+        if !c.mode.isEmpty, c.mode != "normal" { bits.append(c.mode) }
+        if !c.ponytail.isEmpty { bits.append("ponytail:" + c.ponytail) }
+        return bits.isEmpty ? nil : bits.joined(separator: " · ")
+    }
+
+    private func tokenText(_ n: Int64) -> String {
+        n >= 1_000_000 ? String(format: "%.1fM", Double(n) / 1e6)
+                       : String(format: "%.0fK", Double(n) / 1e3)
     }
 
     /// 常用语 —— 你自己的短语库，跟斜杠命令菜单不是一回事（那是 Claude 的命令，这是你的话）。

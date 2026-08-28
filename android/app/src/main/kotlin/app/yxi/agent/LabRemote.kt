@@ -88,8 +88,11 @@ object LabRemote {
         // ⚠️ `-w0` 是 GNU 的，BSD/macOS 的 base64 不认（直接报错，一个字节都不吐）。
         // 先试 GNU 写法，失败退到 BSD 写法自己去掉换行。不这么写的话，
         // 服务器只要是 macOS/BSD，实验室的图就**全部空白且不报错**。
+        // ⚠️⚠️ **不能加单引号**：DIR 里是 `$HOME`，单引号里它不展开，
+        // 服务器上找的就成了一个字面量叫 `$HOME` 的目录 —— 图和 GIF 全部
+        // 拿不到字节**而且不报错**。文件名已经过 safe() 只剩安全字符。
         val f = "$DIR/${safe(file)}"
-        val b64 = ssh?.exec("base64 -w0 '$f' 2>/dev/null || base64 '$f' 2>/dev/null | tr -d '\n'")
+        val b64 = ssh?.exec("base64 -w0 $f 2>/dev/null || base64 $f 2>/dev/null | tr -d '\n'")
             .orEmpty().trim()
         if (b64.isBlank()) return null
         return runCatching { android.util.Base64.decode(b64, android.util.Base64.DEFAULT) }.getOrNull()
