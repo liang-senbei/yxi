@@ -2623,3 +2623,36 @@ ssh-keyscan -p 22 127.0.0.1        # 核一遍到底提供了哪几把
 **怎么避开**　凡是「提前钉指纹」的自动化，都要同时**把服务器锁到那一把**，
 并在日志里 `ssh-keyscan` 打出实际提供的算法 —— 否则失败信息只会说
 「指纹变了」，看不出是环境给错了。
+
+## #138 端到端还是「指纹变了」：带空格的参数被 shell 词分割掉了一半
+
+**症状**　#137 把 sshd 锁到 ed25519 之后（`ssh-keyscan` 确认只提供这一把），
+App 仍然报「`runner@127.0.0.1` 的主机指纹变了，已拒绝连接」。
+
+**根因**　主机公钥是 `ssh-ed25519 AAAAC3Nza…`，**中间有一个空格**。CI 里写的是
+
+```bash
+SEED="-yxiSeedHost 127.0.0.1:22 -yxiSeedUser runner -yxiSeedHostKey $HOSTKEY"
+xcrun simctl launch "$UDID" app.yxi --args $SEED       # ← 未加引号，词分割
+```
+
+于是 App 实际收到的 `-yxiSeedHostKey` 值只有 `ssh-ed25519`，后面那段 base64
+变成了一个游离参数。`NIOSSHPublicKey(openSSHPublicKey:)` 解不出来 ——
+而 `KnownHosts.decide` 对「存过东西但解不出来」的处理是**宁可拒，不降级成
+第一次见**（#49 的 fail-closed）。所以 App 的行为完全正确，错的是测试脚本。
+
+**修法**　用数组，别用字符串拼参数：
+
+```bash
+SEED=( -yxiSeedHost 127.0.0.1:22 -yxiSeedUser "$(whoami)" -yxiSeedHostKey "$HOSTKEY" )
+xcrun simctl launch "$UDID" app.yxi --args "${SEED[@]}"
+```
+
+**怎么避开**　凡是**值里可能有空格**的参数（公钥、路径、人名、中文句子），
+在 shell 里就只能用数组传，不能拼字符串。
+这个坑的欺骗性在于：**它长得像功能有 bug**，实际是测试环境喂错了数据 ——
+连续两轮都被同一句红字误导。查的时候要先问「App 收到的到底是什么」。
+
+**另一个同批的**　macOS 的 `/Users/<user>` 常常是组可写的，sshd 的
+`StrictModes yes` 会因此**静默拒绝**公钥认证（只有 sshd 日志里有原因，
+客户端只看到 Permission denied）。CI 是一次性机器，`StrictModes no` 即可。
