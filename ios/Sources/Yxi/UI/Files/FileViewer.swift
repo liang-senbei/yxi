@@ -180,8 +180,7 @@ func looksTextual(_ b: Data) -> Bool {
 /// json 排一下版再看。排不了（截断了 / 不是合法 json）就原样显示，别报错。
 private func prettyIfJSON(_ b: Data) -> String {
     let raw = String(decoding: b, as: UTF8.self)
-    guard Paths.extOf("x.json") == "json",
-          let obj = try? JSONSerialization.jsonObject(with: b),
+    guard let obj = try? JSONSerialization.jsonObject(with: b),
           let pretty = try? JSONSerialization.data(
             withJSONObject: obj, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
     else { return raw }

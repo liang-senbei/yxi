@@ -144,8 +144,11 @@ struct FilesScreen: View {
     /// 起点可能是 `~` 或不存在的路径 —— 解析失败就退到家目录，别把界面卡死
     private func resolveStart() async {
         guard dir.isEmpty else { return }
-        let start = (try? await files.resolve(startDir)) ?? (try? await files.resolve(".")) ?? "/"
-        await load(start)
+        // ⚠️ 别写成 `(try? await a) ?? (try? await b)` —— `??` 右边是 autoclosure，
+        // 里面不许 await（编译器原话：'async' call in a function that does not support concurrency）
+        var start = try? await files.resolve(startDir)
+        if start == nil { start = try? await files.resolve(".") }
+        await load(start ?? "/")
     }
 
     private func load(_ path: String) async {
