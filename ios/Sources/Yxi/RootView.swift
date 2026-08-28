@@ -7,10 +7,10 @@ import YxiKit
 /// App 的根。
 ///
 /// 结构照安卓的 `MainActivity`（决策 D22）：
-///   · 底部三栏 **会话 / 主机 / 设置** —— **只在外层出现**
+///   · 底部四栏 **会话 / 主机 / 配置 / 设置** —— **只在外层出现**（跟安卓版一致）
 ///   · **进工作区整屏让位，没有底部栏** —— 终端最缺竖向空间，而软键盘弹起时
 ///     底部栏会和键盘工具条、系统手势条挤成四层
-///   · 模式切换 `[终端│对话│文件]` **留在顶部** —— 它是「看哪一面」，
+///   · 模式切换 `[终端│对话│文件│实验室]` **留在顶部** —— 它是「看哪一面」，
 ///     跟底部栏的「在 app 的哪儿」是两条轴，放一起会打架
 public struct RootView: View {
 
@@ -62,6 +62,12 @@ public struct RootView: View {
             )
             .tabItem { Label("主机", systemImage: "server.rack") }
             .tag(AppState.Tab.hosts)
+
+            NavigationStack {
+                ConfigScreen(app: app)
+            }
+            .tabItem { Label("配置", systemImage: "slider.horizontal.3") }
+            .tag(AppState.Tab.config)
 
             SettingsScreen(app: app)
                 .tabItem { Label("设置", systemImage: "gearshape") }
@@ -120,6 +126,8 @@ private struct Workspace: View {
                 // ponytail: 文件模式还没人写（SFTP 那半 `YxiKit.SFTP` 已经就绪且有测试）。
                 // 先说实话而不是给个点了没反应的按钮 —— 补的时候换掉这一块即可。
                 EmptyNote(text: "文件模式还没做。SFTP 那层（YxiKit.SFTP）已经好了，缺的是界面。")
+            case .lab:
+                LabScreen(app: app)
             }
         }
         .background(Yx.surface)
@@ -144,9 +152,10 @@ private struct Workspace: View {
                 Text("终端").tag(AppState.Mode.terminal)
                 Text("对话").tag(AppState.Mode.chat)
                 Text("文件").tag(AppState.Mode.files)
+                Text("实验室").tag(AppState.Mode.lab)
             }
             .pickerStyle(.segmented)
-            .frame(width: 190)
+            .frame(width: 240)
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
         .background(Yx.low)
@@ -184,8 +193,8 @@ struct EmptyNote: View {
 @MainActor
 final class AppState: ObservableObject {
 
-    enum Tab { case sessions, hosts, settings }
-    enum Mode: Hashable { case terminal, chat, files }
+    enum Tab { case sessions, hosts, config, settings }
+    enum Mode: Hashable { case terminal, chat, files, lab }
     struct Target: Equatable {
         var mode: Mode
         var session: String

@@ -159,7 +159,7 @@ struct MissingCredentials: LocalizedError {
 /// ⚠️ **这一层只搬运，不做业务判断。** 命令怎么写、输出怎么解析全在
 /// `YxiKit.SessionProbe` / `Usage` / `TranscriptStream` 里 —— 那边是纯函数，
 /// **Linux 上有测试盯着**；搬到这里就再也测不到了。
-struct RemoteHost: ChatBackend, UsageService {
+struct RemoteHost: ChatBackend, UsageService, ShellRunner {
 
     let ssh: SSHSession
 
@@ -182,6 +182,12 @@ struct RemoteHost: ChatBackend, UsageService {
 
     func kill(session: String) async throws {
         _ = try await ssh.exec("tmux kill-session -t '\(session.replacingOccurrences(of: "'", with: ""))'")
+    }
+
+    // MARK: ShellRunner
+
+    func run(_ command: String) async throws -> String {
+        try await ssh.exec(command).stdout
     }
 
     // MARK: UsageService

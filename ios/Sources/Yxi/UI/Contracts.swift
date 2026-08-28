@@ -30,6 +30,15 @@ public protocol SessionService {
     func kill(session: String) async throws
 }
 
+/// 跑一条命令、把 stdout 拿回来。
+///
+/// 实验室 / 配置 / 工单这几块都是「命令由 `YxiKit` 拼好、界面只管跑」的形状 ——
+/// 命令怎么拼（转义、安全字符、打码）全在纯逻辑层，能在 Linux 上测；
+/// 这里只留最后一步「送出去」。
+public protocol ShellRunner {
+    func run(_ command: String) async throws -> String
+}
+
 public protocol UsageService {
     /// ⚠️ **探不到 `ccusage` 必须返回 nil。**
     /// 界面会把整块藏掉：不显示 0、不显示「未知」、不画空进度条。

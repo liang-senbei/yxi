@@ -34,6 +34,71 @@ public enum AgentConfig {
         public var id: String { key }
     }
 
+    /// 服务器侧抓取 + 打码。用 python3（这些机器都有）；没有就返回空，界面显示「读不到」。
+    /// ⚠️ **跟安卓版是同一份脚本** —— 两端看到的配置必须一模一样，否则「复刻」无从谈起。
+    public static let gatherScript = #"""
+command -v python3 >/dev/null 2>&1 || { echo '__YXI_CFG_V1__'; echo '{}'; exit 0; }
+python3 - <<'YXIEOF'
+import json, os, glob, re
+home = os.path.expanduser("~")
+SECRET = re.compile(r'(key|token|secret|password|passwd|auth|credential)', re.I)
+def mask(o, under_env=False):
+    if isinstance(o, dict):
+        return {k: ('••••' if (under_env or (SECRET.search(k) and isinstance(v,(str,int)) and str(v))) else mask(v, k.lower()=='env')) for k,v in o.items()}
+    if isinstance(o, list): return [mask(x) for x in o]
+    return o
+def md_list(d):
+    return [{"name": os.path.basename(f)[:-3], "path": f} for f in sorted(glob.glob(os.path.join(d,"*.md")))]
+out = {}
+cdir = os.path.join(home, ".claude")
+if os.path.isdir(cdir):
+    c = {}
+    mp = os.path.join(cdir,"CLAUDE.md"); c["memory"] = {"path": mp, "exists": os.path.isfile(mp)}
+    sp = os.path.join(cdir,"settings.json"); mcp = {}
+    if os.path.isfile(sp):
+        try: s = json.load(open(sp))
+        except Exception: s = {}
+        c["settings"] = {"path": sp, "model": s.get("model"), "hooks": {k: len(v) for k,v in (s.get("hooks") or {}).items()}, "raw": mask(s)}
+        mcp = dict(s.get("mcpServers") or {})
+    cj = os.path.join(home,".claude.json")
+    if os.path.isfile(cj):
+        try: mcp.update(json.load(open(cj)).get("mcpServers") or {})
+        except Exception: pass
+    c["mcp"] = [{"name": k, "info": mask(v)} for k,v in mcp.items()]
+    agents = md_list(os.path.join(cdir,"agents"))
+    commands = md_list(os.path.join(cdir,"commands"))
+    skills = [{"name": os.path.basename(os.path.dirname(sk)), "path": sk} for sk in sorted(glob.glob(os.path.join(cdir,"skills","*","SKILL.md")))]
+    plugins = []
+    pj = os.path.join(cdir,"plugins","installed_plugins.json")
+    if os.path.isfile(pj):
+        try:
+            for name, insts in (json.load(open(pj)).get("plugins") or {}).items():
+                for inst in insts:
+                    ip = inst.get("installPath","")
+                    plugins.append({"name": name, "version": inst.get("version",""), "path": ip})
+                    skills += [{"name": os.path.basename(os.path.dirname(sk)), "path": sk, "from": name} for sk in sorted(glob.glob(os.path.join(ip,"skills","*","SKILL.md")))]
+                    agents += [{"name": os.path.basename(f)[:-3], "path": f, "from": name} for f in sorted(glob.glob(os.path.join(ip,"agents","*.md")))]
+                    commands += [{"name": os.path.basename(f)[:-3], "path": f, "from": name} for f in sorted(glob.glob(os.path.join(ip,"commands","*.md")))]
+        except Exception: pass
+    c["agents"]=agents; c["commands"]=commands; c["skills"]=skills; c["plugins"]=plugins
+    out["claude"]=c
+xdir = os.path.join(home,".codex")
+if os.path.isdir(xdir):
+    x={}
+    mp=os.path.join(xdir,"AGENTS.md"); x["memory"]={"path":mp,"exists":os.path.isfile(mp)}
+    ct=os.path.join(xdir,"config.toml"); x["config"]={"path":ct,"exists":os.path.isfile(ct)}
+    mcps=[]
+    if os.path.isfile(ct):
+        for line in open(ct):
+            m=re.match(r'\s*\[mcp_servers\.([^\]]+)\]', line)
+            if m: mcps.append({"name": m.group(1).strip('"')})
+    x["mcp"]=mcps
+    x["prompts"]=[{"name": os.path.basename(f), "path": f} for f in sorted(glob.glob(os.path.join(xdir,"prompts","*")))]
+    out["codex"]=x
+print("__YXI_CFG_V1__"); print(json.dumps(out, ensure_ascii=False))
+YXIEOF
+"""#
+
     public static func parse(_ out: String) -> [Tool] {
         guard let r = out.range(of: marker) else { return [] }
         let json = String(out[r.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
