@@ -240,3 +240,29 @@ public func ago(_ date: Date, now: Date = Date()) -> String {
     default:        return "很久以前"
     }
 }
+
+// MARK: - 新开一个会话
+
+extension SessionProbe {
+    /// 目录名 → tmux 会话名。跟安卓 `SessionsScreen` 的取名规则一致
+    /// （`/opt/workspace/Yxi` → `cc-Yxi`），这样两端看到的是同一批会话名。
+    ///
+    /// ⚠️ 只留 `[字母数字._-]`：tmux 的会话名里带空格、冒号、点号会很难伺候
+    /// （`:` 是它 target 语法的分隔符）。滤空了就退到 `work`，别产出 `cc-`。
+    public static func sessionName(forDir dir: String) -> String {
+        let base = dir.reversed().drop { $0 == "/" }.reversed()
+        let last = base.split(separator: "/").last.map(String.init) ?? ""
+        let safe = last.filter { $0.isLetter || $0.isNumber || "._-".contains($0) }
+        return "cc-" + (safe.isEmpty ? "work" : safe)
+    }
+
+    /// **有就直接用，没有才新建**，新建时在那个目录里把 `claude` 跑起来。
+    /// ⚠️ 幂等：重复点不会开出第二个同名会话，也不会把已有会话里的活打断。
+    public static func newSessionCommand(dir: String) -> String {
+        let name = sessionName(forDir: dir)
+        let d = dir.replacingOccurrences(of: "'", with: "'\\''")
+        let n = name.replacingOccurrences(of: "'", with: "'\\''")
+        return "tmux has-session -t '\(n)' 2>/dev/null || "
+            + "{ tmux new-session -d -s '\(n)' -c '\(d)'; tmux send-keys -t '\(n)' 'claude' Enter; }"
+    }
+}

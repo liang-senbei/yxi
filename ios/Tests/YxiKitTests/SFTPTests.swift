@@ -56,3 +56,37 @@ final class AgoTests: XCTestCase {
         XCTAssertEqual(ago(now.addingTimeInterval(30), now: now), "刚刚")
     }
 }
+
+final class NewSessionTests: XCTestCase {
+    func testNameFromDir() {
+        XCTAssertEqual(SessionProbe.sessionName(forDir: "/opt/workspace/Yxi"), "cc-Yxi")
+        XCTAssertEqual(SessionProbe.sessionName(forDir: "/opt/workspace/Yxi/"), "cc-Yxi")
+        XCTAssertEqual(SessionProbe.sessionName(forDir: "/"), "cc-work")
+    }
+    /// ⚠️ tmux 的 target 语法用 `:` 做分隔，名字里带它会很难伺候；空格同理。
+    ///
+    /// ⚠️ **中文要留着。** 用户机器上真有 `cc-诗歌` / `cc-文件传` 这种会话，
+    /// 滤掉中文会让手机新建的会话跟他现有的一批取名规则不一致。
+    /// （`isLetter` 对汉字返回 true，跟安卓的 `isLetterOrDigit` 行为一致。）
+    func testNameIsSafe() {
+        XCTAssertEqual(SessionProbe.sessionName(forDir: "/a/我的项目"), "cc-我的项目")
+        XCTAssertFalse(SessionProbe.sessionName(forDir: "/a/b:c d").contains(":"))
+        XCTAssertFalse(SessionProbe.sessionName(forDir: "/a/b:c d").contains(" "))
+    }
+
+    /// 全是符号的目录名滤空之后不能产出一个光秃秃的 `cc-`
+    func testAllSymbolsFallsBack() {
+        XCTAssertEqual(SessionProbe.sessionName(forDir: "/a/@@@"), "cc-work")
+    }
+    /// **幂等**：已经有那个会话就直接用，不能把里面正在干的活打断
+    func testCommandIsIdempotent() {
+        let c = SessionProbe.newSessionCommand(dir: "/opt/workspace/Yxi")
+        XCTAssertTrue(c.hasPrefix("tmux has-session -t 'cc-Yxi'"), c)
+        XCTAssertTrue(c.contains("||"), "没有「已存在就跳过」这一层：\(c)")
+        XCTAssertTrue(c.contains("-c '/opt/workspace/Yxi'"), "没在那个目录开：\(c)")
+    }
+    /// 目录里有单引号也不能把命令拼断
+    func testQuoting() {
+        XCTAssertTrue(SessionProbe.newSessionCommand(dir: "/a/it's").contains(#"'/a/it'\''s'"#))
+    }
+}

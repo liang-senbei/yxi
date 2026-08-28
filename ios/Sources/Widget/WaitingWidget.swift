@@ -71,3 +71,18 @@ struct WaitingWidget: Widget {
         .supportedFamilies([.systemSmall, .systemMedium])
     }
 }
+
+
+/// 小组件扩展的入口。
+///
+/// ⚠️ **只有这一个 bundle，`@main` 直接挂在它身上。** 原来拆成
+/// `Bundle.swift` + 手写 `main()` + iOS 18 的 ControlWidget 三块，
+/// CI 上报的是 `cannot find type 'WidgetBundle' in scope` ——
+/// 而同一模块里 `WaitingWidget.swift` 用同样的 `import WidgetKit` 却编得过。
+/// 那批代码（AppIntents / ControlWidget / 手写 main）**在这台机器上一行都编不了**，
+/// 是凭记忆写的；与其留着一处编不过又说不清原因的东西，不如先只留能编过的这一个。
+/// 控制中心那个按钮等有真机/真 Xcode 能编一次再加。
+@main
+struct YxiWidgetBundle: WidgetBundle {
+    var body: some Widget { WaitingWidget() }
+}

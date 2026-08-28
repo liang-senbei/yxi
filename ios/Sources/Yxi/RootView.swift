@@ -86,7 +86,8 @@ public struct RootView: View {
                 onPickHost: { app.pick($0) },
                 onOpenChat: { app.open(.chat, session: $0, cwd: $1) },
                 onOpenTerminal: { app.open(.terminal, session: $0 ?? "", cwd: $1) },
-                onOpenFiles: { app.open(.files, session: "", cwd: "") }
+                onOpenFiles: { app.open(.files, session: "", cwd: "") },
+                onSessions: { app.sessions = $0 }
             )
         } else {
             EmptyNote(text: "还没有主机。去「主机」页加一台 —— 任意 IP、任意端口、密码或密钥都行。")
@@ -141,15 +142,45 @@ private struct Workspace: View {
 
     private var taskKey: String { "\(app.live?.link.id.uuidString ?? "-")|\(target.session)|\(target.mode)" }
 
+    /// 同一台机器上别的会话。**「等你」的排前面** —— 挑的时候找的就是它们。
+    private var others: [BoardSession] {
+        app.sessions
+            .filter { $0.name != target.session }
+            .sorted { a, b in
+                if (a.state == .needsYou) != (b.state == .needsYou) { return a.state == .needsYou }
+                return a.lastActivity > b.lastActivity
+            }
+    }
+
     private var header: some View {
         HStack(spacing: 12) {
             Button { app.workspace = nil } label: {
                 Image(systemName: "chevron.left").font(.system(size: 17, weight: .semibold))
             }
-            Text(target.session.hasPrefix("cc-") ? String(target.session.dropFirst(3)) : target.session)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(Yx.onSurface)
-                .lineLimit(1)
+            // ⚠️ **换会话是这个 app 里最高频的动作**（安卓侧的原话）。
+            // 原来标题是死的 `Text`，换个会话得「退出工作区 → 看板 → 滚 → 再进」四步。
+            // 现在标题本身就是入口：点开列表直接跳，连接不用重开（按 host 缓存）。
+            Menu {
+                ForEach(others, id: \.name) { s in
+                    Button {
+                        app.open(target.mode, session: s.name, cwd: s.cwd)
+                    } label: {
+                        // 带上「在等你 / 干活中」，好在二十个里挑一个
+                        Text(s.state == .needsYou ? "\(s.short) · 等你" : s.short)
+                    }
+                }
+                if others.isEmpty {
+                    Text("这台机器上没有别的会话")
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(target.session.hasPrefix("cc-") ? String(target.session.dropFirst(3)) : target.session)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Yx.onSurface)
+                        .lineLimit(1)
+                    Text("▾").font(.system(size: 11)).foregroundStyle(Yx.muted)
+                }
+            }
             Spacer()
             Picker("", selection: Binding(get: { target.mode }, set: { app.switchMode($0) })) {
                 Text("终端").tag(AppState.Mode.terminal)
@@ -227,6 +258,9 @@ final class AppState: ObservableObject {
     @Published var workspace: Target?
     /// 当前主机那条连接。⚠️ 变了要触发重绘，所以要转发它的 objectWillChange。
     @Published private(set) var live: HostLink?
+    /// 最近一次抓到的会话表。**只是给工作区的标题下拉用的缓存** ——
+    /// 权威来源仍然是会话页那条轮询，这里不自己去抓（免得多一条往返）。
+    @Published var sessions: [BoardSession] = []
 
     /// ⚠️⚠️ **按 host.id 缓存，活在标签页切换之上**（安卓 #75）。
     /// 建在页面里的话切一次 tab 就重连一次，实测约 3 秒。

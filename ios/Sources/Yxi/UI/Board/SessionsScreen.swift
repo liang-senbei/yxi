@@ -29,6 +29,8 @@ struct SessionsScreen: View {
     /// 会话名可以是 nil = 开一个裸终端
     var onOpenTerminal: (String?, String) -> Void
     var onOpenFiles: () -> Void
+    /// 抓到会话表就回传一份 —— 工作区的标题下拉要拿它换会话
+    var onSessions: ([BoardSession]) -> Void = { _ in }
 
     @State private var sessions: [BoardSession] = []
     @State private var status = ""
@@ -303,6 +305,7 @@ struct SessionsScreen: View {
         do {
             sessions = try await svc.snapshot()
             status = ""
+            onSessions(sessions)
             publishToWidget()
         } catch is CancellationError {
             // ⚠️ **取消不是失败。** 安卓上同一个错踩了五次（TROUBLESHOOTING #78/#79）：
