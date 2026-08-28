@@ -116,3 +116,49 @@ final class NewFeatureTests: XCTestCase {
         XCTAssertFalse(Update.publicBase.contains("64.90.25.56"))
     }
 }
+
+/// 排队气泡的进出。**每条都对应一个「气泡永远不消失」或「消息真丢了」的场景。**
+final class QueueOperationTests: XCTestCase {
+
+    private func line(_ op: String, _ content: String? = nil) -> String {
+        let c = content.map { ",\"content\":\($0.debugDescription)" } ?? ""
+        return "{\"type\":\"queue-operation\",\"operation\":\"\(op)\"\(c)}"
+    }
+    private func queuedTexts(_ lines: [String]) -> [String] {
+        Transcript.parse(lines).compactMap {
+            if case let .queued(_, t) = $0 { return t } else { return nil }
+        }
+    }
+
+    /// ⚠️ `dequeue` **从来不带 content**，只能弹队头。
+    /// 漏了这一支，打错的斜杠命令那条气泡**永远挂着**（它既不写 remove，
+    /// 也永远不会作为 user 消息出现）。
+    func testDequeuePopsHead() {
+        XCTAssertEqual(queuedTexts([line("enqueue", "甲"), line("enqueue", "乙"), line("dequeue")]),
+                       ["乙"])
+    }
+
+    /// ⚠️ `popAll`：TUI 里按 ↑ 把排队的全收回输入框，每收一条一行。
+    /// 漏了它，用户撤回之后气泡再也不消失。
+    func testPopAllRemoves() {
+        XCTAssertEqual(queuedTexts([line("enqueue", "甲"), line("enqueue", "乙"),
+                                    line("popAll", "甲"), line("popAll", "乙")]), [])
+    }
+
+    /// ⚠️⚠️ **同一句话排两次就是两条。** 去重等于真的丢消息。
+    func testDuplicatesAreTwoEntries() {
+        XCTAssertEqual(queuedTexts([line("enqueue", "同一句"), line("enqueue", "同一句")]).count, 2)
+    }
+
+    /// ⚠️ 空 content 要**占位**（老格式的 enqueue 没有 content），
+    /// 不占位的话 dequeue 会弹错人；但**展示时要滤掉**。
+    func testEmptyHoldsSlotButIsNotShown() {
+        let out = queuedTexts([line("enqueue"), line("enqueue", "真话"), line("dequeue")])
+        XCTAssertEqual(out, ["真话"], "空占位没起作用，dequeue 弹错了人：\(out)")
+    }
+
+    /// 系统注入的整块 XML 不能顶着「你排队的输入」显示
+    func testTaskNotificationNotShown() {
+        XCTAssertEqual(queuedTexts([line("enqueue", "<task-notification>内部</task-notification>")]), [])
+    }
+}

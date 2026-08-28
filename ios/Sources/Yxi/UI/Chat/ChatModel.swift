@@ -22,7 +22,14 @@ final class ChatModel: ObservableObject {
     /// 只在出问题时说一句。正常情况下是 nil（标题和路径由 Workspace 的头部管）
     @Published private(set) var status: String? = "连接中…"
 
-    @Published var draft = ""
+    /// ⚠️ 改动时**随手落盘**（按会话分开）——手机上打字最费劲，
+    /// 切个会话就没了是最招人烦的一种丢失。
+    @Published var draft = "" {
+        didSet {
+            guard !session.isEmpty, draft != oldValue else { return }
+            Drafts.save(session, draft)
+        }
+    }
     @Published private(set) var staged: [Staged] = []
     @Published private(set) var uploading = false
     /// 正在替你送键。这期间**别抓屏**：屏幕还没重绘完，抓回来的是旧的那一屏
@@ -57,6 +64,8 @@ final class ChatModel: ObservableObject {
         settled = false
         pending = nil
         live = .idle
+        // ⚠️ 草稿**按会话取回来**（落盘的）——切走再回来，打了一半的话还在
+        draft = Drafts.load(session)
         status = "连接中…"
 
         guard !session.isEmpty else { status = "没有指定会话"; return }
@@ -184,11 +193,23 @@ final class ChatModel: ObservableObject {
         let text = (backend.attachmentHeader(staged)
                     + draft.trimmingCharacters(in: .whitespacesAndNewlines))
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        let keptDraft = draft
+        let keptStaged = staged
         draft = ""
         staged = []
+        Drafts.clear(session)
+        // ⚠️ **不能用跟界面绑定的 Task。** `Task {}` 是非结构化的，不继承 `.task` 的取消，
+        // 所以点了发送马上退出去也送得出去 —— 这一条是有意的，别改成结构化并发。
         Task { [backend = self.backend, session = self.session] in
             do { try await backend.send(session: session, text: text) }
-            catch { if let m = reportable(error) { status = "发不出去：\(m)" } }
+            catch {
+                // ⚠️ **发不出去就把话还回来。** 先清空再发的话，失败时用户打的字
+                // 就真没了 —— 他会以为发出去了，或者得重打一遍（安卓 #131）。
+                draft = keptDraft
+                staged = keptStaged
+                Drafts.save(session, keptDraft)
+                if let m = reportable(error) { status = "没发出去（草稿还在）：\(m)" }
+            }
         }
     }
 

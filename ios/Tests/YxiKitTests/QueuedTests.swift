@@ -35,12 +35,20 @@ final class QueuedTests: XCTestCase {
         XCTAssertEqual(users(lines).count, 1)
     }
 
-    /// ⚠️ **2.1.241 的出队事件是 `dequeue`，而且不带 `content`** —— 没有任何东西
-    /// 能拿来匹配是哪一条出了队。这条测试钉的就是这个事实：光有出队事件，
-    /// 那条排队**照样挂着**。所以出队只能靠上面那条终态规则，不能靠事件。
-    /// （更早的转录里是 `remove` + content，见下一条。两种都真实存在。）
-    func test_dequeue不带content所以救不了任何东西() {
-        XCTAssertEqual(queued([Fixture.enqueueA, Fixture.dequeueOp]).count, 1)
+    /// ⚠️ **2.1.241 的出队事件是 `dequeue`，而且不带 `content`。**
+    ///
+    /// 原来的结论是「没东西可匹配，所以干脆不认它」—— 那留下一个真 bug：
+    /// 斜杠命令（比如打错的 `/modle`）被本地消化掉，既不写 `remove`、
+    /// 也**永远不会作为 user 消息出现**，于是「出现过就算说过」那条兜底也救不了它，
+    /// 气泡就永远挂着（安卓 #111）。
+    ///
+    /// 改成**按先进先出弹队头** —— 这本来就是队列的语义。安全性有实测背书：
+    /// 本机最近 40 份转录里 `enqueue` 1250 次、`dequeue` 968 + `remove` 282 = **1250**，
+    /// 一对一严丝合缝。所以弹队头不会错位。
+    /// （`dequeue` 968 次**全部不带 content**，也印证了只能按顺序弹。）
+    func test_dequeue按先进先出弹队头() {
+        XCTAssertEqual(queued([Fixture.enqueueA, Fixture.dequeueOp]).count, 0,
+                       "出队事件必须真的把队头拿掉，否则斜杠命令的气泡永远挂着")
     }
 
     /// 老版本的 `remove` + `content` 仍然要认 —— 它是同一轮内出队的快路径。
@@ -96,6 +104,9 @@ final class QueuedTests: XCTestCase {
             Fixture.userSameTextA, Fixture.userTaskNotification,
         ])
         let q = items.compactMap { if case let .queued(_, t) = $0 { return t } else { return nil } }
-        XCTAssertEqual(q, ["排队乙：这条也是"], "只剩真的还没处理的那条：\(q)")
+        // ⚠️ 这里原来断言剩一条「排队乙」—— 那是**旧行为**（dequeue 不认 + 注入在入队时就扔）
+        // 两个 bug 互相抵消凑出来的数。方法名和上面那句注释说的一直是
+        // 「一条『排队中』都不剩」，现在实现对了，断言跟上。
+        XCTAssertEqual(q, [], "全部消化完了，不该还剩「排队中」：\(q)")
     }
 }

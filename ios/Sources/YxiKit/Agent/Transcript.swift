@@ -38,20 +38,36 @@ public enum Transcript {
                 // （更早的转录里是 `remove` + content，两种都真实存在）。
                 // `remove` 这条快路径留着，但**靠得住的出队判据是最后那条「它有没有真的
                 // 进过对话」** —— 光认某一个转换事件是 #76 的翻车方式。
-                if !c.isEmpty {
-                    switch d["operation"].string {
-                    case "enqueue":
-                        // ⚠️ **enqueue 不一定是人打的。** 子 agent / 后台命令跑完时，
-                        // Claude Code 会把一整块 `<task-notification>…` 也 enqueue 进来
-                        // （真机转录里抓到的）。照原样显示就是在用户脸上糊一段内部 XML，
-                        // 而且是「你排队的输入」的口吻 —— 他根本没打过这句话。
-                        // 这个前缀是白名单式的：以后再冒出别的系统注入，往这加。
-                        if !c.hasPrefix("<task-notification>") && !queued.contains(c) {
-                            queued.append(c)
-                        }
-                    case "remove": queued.removeAll { $0 == c }
-                    default: break
-                    }
+                switch d["operation"].string {
+                case "enqueue":
+                    // ⚠️ **enqueue 不一定是人打的。** 子 agent / 后台命令跑完时，
+                    // Claude Code 会把一整块 `<task-notification>…` 也 enqueue 进来
+                    // （真机转录里抓到的）。照原样显示就是在用户脸上糊一段内部 XML，
+                    // 而且是「你排队的输入」的口吻 —— 他根本没打过这句话。
+                    // 这个前缀是白名单式的：以后再冒出别的系统注入，往这加。
+                    // ⚠️ 系统注入的那些**照样占位**（跟空 content 一个道理），
+                    // 只在展示时滤掉 —— 在入队时就扔掉会让 FIFO 错位，dequeue 弹错人。
+                    // ⚠️⚠️ **不能去重。** 队列就是队列：连着排两条一样的话是两条，
+                    // 合成一条**就是真的丢消息**。而且下面 `dequeue` 是按先进先出弹队头，
+                    // 少一个位置就会弹错人。
+                    // ⚠️ **空 content 也要占位**（老格式的 enqueue 就没有 content），
+                    // 展示时再把空的滤掉。
+                    queued.append(c)
+                case "remove", "popAll":
+                    // ⚠️ `popAll` 是实测才发现的第四种：在 TUI 里按 ↑ 会把排队的
+                    // **全部收回输入框**，每收一条写一条 popAll。漏掉它的后果是
+                    // 用户撤回之后那几条「排队中」气泡**再也不会消失**。
+                    if c.isEmpty { if !queued.isEmpty { queued.removeFirst() } }
+                    else { if let i = queued.firstIndex(of: c) { queued.remove(at: i) } }
+                case "dequeue":
+                    // ⚠️ **`dequeue` 从来不带 content**（安卓侧实测 1094 条，一条都没有），
+                    // 所以只能按先进先出弹队头 —— 这也正是队列本来的语义。
+                    //
+                    // ⚠️ 漏掉这一支的后果是**排队气泡永远不消失**：斜杠命令
+                    // （比如打错的 `/modle`）被本地消化掉，既不写 remove、
+                    // 也永远不会作为 user 消息出现，「出现过就算说过」那条兜底也救不了它。
+                    if !queued.isEmpty { queued.removeFirst() }
+                default: break
                 }
                 continue
             }
@@ -105,10 +121,14 @@ public enum Transcript {
                 said.insert(text.trimmingCharacters(in: .whitespacesAndNewlines))
             }
         }
-        for t in queued where !said.contains(t.trimmingCharacters(in: .whitespacesAndNewlines)) {
-            // id 用文本的稳定哈希而不是下标：出队一条时后面那些的下标会整体前移，
-            // 用下标的话 SwiftUI 会把「删一条」渲染成「整列全变了」。
-            out.append(.queued(id: "queued-" + stableHash(t), text: t))
+        // ⚠️ 空的那些是**占位用的**（老格式的 enqueue 不带 content，
+        // 少了它们 dequeue 弹队头会弹错人），到这一步才滤掉，别在入队时滤。
+        // id 里带上序号：**同一句话可以排两次**，不带序号两条会撞成一条。
+        for (i, t) in queued.enumerated()
+        where !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !t.hasPrefix("<task-notification>")
+            && !said.contains(t.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            out.append(.queued(id: "queued-\(i)-" + stableHash(t), text: t))
         }
         return out
     }
