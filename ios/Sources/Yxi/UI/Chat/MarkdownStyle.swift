@@ -77,6 +77,27 @@ extension Theme {
             }
             .fixedSize(horizontal: false, vertical: true)
         }
+        // ⚠️ **宽表要能横滑，聊天里和文件模式里都要。** 病根跟安卓一样
+        // （`MarkdownTable.kt`）：库默认把表格塞进屏宽，列一多每格就剩几个字，
+        // 用户原话「表格里全是省略号」。
+        // ⚠️ 原来只在文件模式那份主题里修了，**聊天里还是挤的** —— 同一个毛病
+        // 修一半比不修更难发现。挪进 `.yxi` 本体，两边一起好。
+.table { c in
+            ScrollView(.horizontal, showsIndicators: false) { c.label }
+                // ⚠️ 不加这句，横滑容器在竖滚里会去抢一整屏高度（嵌套 ScrollView 的老毛病）
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .tableCell { c in
+            c.label
+                // ⚠️ **必须是定宽 `width`，不能写 `maxWidth`。** 横滑给下来的宽度提案是「不限」，
+                // `maxWidth` 只裁不换行 —— 长内容会被截掉，正是我们要修的那个毛病。
+                // 定宽才会换行：窄表原样看全，宽表左右滑，一个字都不截。
+                .frame(width: 160, alignment: .leading)
+                .padding(.horizontal, 10).padding(.vertical, 8)
+                .markdownTextStyle { FontWeight(c.row == 0 ? .semibold : .regular) }
+                // 表头单独一层底色。横滑里画横线会算歪，用面分隔（M3 那套）
+                .background(c.row == 0 ? Yx.high : Color.clear)
+        }
 }
 
 /// 代码块：**横着滚，不折行** + 一键复制（PRD 附录 D.2）。

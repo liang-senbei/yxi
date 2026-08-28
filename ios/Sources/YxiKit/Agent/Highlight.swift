@@ -63,6 +63,11 @@ public enum Highlight {
         // 标题变灰凑巧好看，但 `https://x/#anchor` 之后整行都会灰掉
         case "md", "txt", "csv", "log", "json":
             return []
+        // html / xml / css 只有块注释（`<!-- -->` / `/* */`），而我们不认块注释。
+        // 硬套行注释符反而**每一行都在骗人**：`color: #fff` 之后整行变灰，
+        // `url(http://x)` 也一样。宁可不上色。
+        case "html", "htm", "xml", "svg", "css", "scss":
+            return []
         case "":
             return ["#"]            // 没扩展名的多半是脚本
         default:

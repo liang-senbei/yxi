@@ -77,6 +77,23 @@ final class HostLink: ObservableObject {
     /// 手动重连：把退避从头算起。用户刚把网切回来时不该干等最长 15 秒。
     func retry() { start() }
 
+    /// 一次最便宜的往返，带自己的超时。
+    ///
+    /// ⚠️ **必须有超时。** 半开的 TCP 上 `exec` 会一直挂着不返回也不报错 ——
+    /// 那正是我们要抓的那种「假活」，没有超时的话这个探活自己先卡死了。
+    private static func roundTripOK(_ session: SSHSession) async -> Bool {
+        await withTaskGroup(of: Bool.self) { group in
+            group.addTask { (try? await session.exec(":")) != nil }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(8))
+                return false
+            }
+            let first = await group.next() ?? false
+            group.cancelAll()
+            return first
+        }
+    }
+
     /// ⚠️ **连不上要自动重试**（安卓 #79）。此前失败一次就把「连不上」钉死在界面上、
     /// 再也不会自己清 —— 手机上网络时断时续，等于把一次抖动变成一次永久故障。
     ///
@@ -95,8 +112,21 @@ final class HostLink: ObservableObject {
                                        retry: { [weak self] in self?.retry() }))
                     delay = .seconds(1)
                     // 守着。掉了就往下走去重连。
+                    //
+                    // ⚠️⚠️ **不能只看 `isConnected`。** 手机切网（WiFi→流量、进电梯）之后
+                    // TCP 是**半开**的：本地这头的 channel 仍然 active，`isConnected`
+                    // 一直是 true，于是「连接断了」永远不显示、也永远不重连 ——
+                    // 用户看到的是「点什么都没反应，也不报错」（安卓 #81 就是这个）。
+                    //
+                    // 所以隔一阵子**主动打一次最便宜的往返**（`:` 是 shell 内建的空命令）。
+                    // 打不通 = 真死了，往下走重连。
+                    // ⚠️ 用 `background` 那档（45 秒）不是 `terminal`：宁可慢一点，
+                    // 也不能在网络抖一下的时候误杀一条好连接。
+                    var lastOK = Date()
                     while session.isConnected, !Task.isCancelled {
                         try? await Task.sleep(for: .seconds(3))
+                        guard Liveness.background.isDead(lastActivity: lastOK) else { continue }
+                        if await Self.roundTripOK(session) { lastOK = Date() } else { break }
                     }
                     self.terminal.detach()
                     self.publish(.init(id: UUID(), service: nil, error: "连接断了，正在重连…",

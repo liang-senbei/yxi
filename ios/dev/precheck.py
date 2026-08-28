@@ -68,6 +68,20 @@ for f in sorted(pathlib.Path("Sources").rglob("*.swift")):
                        "replacingOccurrences），按它自己的语法解释会吃掉整段。"
                        "改成普通字符串让 Swift 先转义。（Swift 的 Regex 不受影响）")
 
+# ⚠️ **语法级编译检查。** `Sources/Yxi`（SwiftUI/UIKit）在这台机器上**类型检查不了**，
+# 但 `swiftc -frontend -parse` 只做语法分析、不解析 import，所以它能跑 ——
+# 花括号、括号、表达式写坏都能当场抓到，不用等 CI 那 6 分钟。
+# 查不了类型（member 拼错、参数不对），那部分仍然只能靠 CI。
+# 已用「注入一处语法错」的对照组验过：好文件退出 0，坏文件退出 1。
+import shutil, subprocess
+if shutil.which("swiftc"):
+    for f in sorted(pathlib.Path("Sources").rglob("*.swift")):
+        r = subprocess.run(["swiftc", "-frontend", "-parse", str(f)],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            first = next((l for l in r.stderr.split("\n") if ": error:" in l), r.stderr[:160])
+            bad.append(f"{f} 语法错：{first.strip()[:150]}")
+
 for b in bad:
     print("❌", b)
 if not bad:

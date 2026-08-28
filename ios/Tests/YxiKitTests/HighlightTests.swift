@@ -96,6 +96,14 @@ final class HighlightTests: XCTestCase {
         assertRoundTrip(src, "py")
     }
 
+    /// ⚠️ css / html 里 `#fff` 和裸 URL 到处都是，认行注释符会**整行变灰**。
+    /// 它们只有块注释，而块注释我们不认 —— 那就一个都别认。
+    func test_css和html没有行注释() {
+        XCTAssertEqual(pieces("a { color: #fff; }", "css", .comment), [])
+        XCTAssertEqual(pieces("<a href=http://x>文字</a>", "html", .comment), [])
+        XCTAssertEqual(pieces("<!-- 注释 -->", "xml", .comment), [])
+    }
+
     /// 没扩展名的多半是脚本（Makefile / Dockerfile / 裸 shell）
     func test_没扩展名按脚本认() {
         XCTAssertEqual(pieces("PORT = 22  # 端口", "", .comment), ["# 端口"])

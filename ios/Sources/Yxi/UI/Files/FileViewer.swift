@@ -89,7 +89,10 @@ struct FileViewer: View {
     private var subtitle: String {
         if let error { return error }
         guard let b = bytes else { return "读取中…" }
-        return humanSize(Int64(b.count)) + (truncated ? " · 已截断" : "")
+        // 存到哪儿了写在这行，不写进按钮：顶栏那一排已经很挤，而这里本来就是状态行
+        return humanSize(Int64(b.count))
+            + (truncated ? " · 已截断" : "")
+            + (savedNote.map { " · \($0)" } ?? "")
     }
 
     /// 存到手机。**走 [SaveToPhone]，跟实验室那条路是同一套** ——
@@ -102,10 +105,11 @@ struct FileViewer: View {
     /// 再用系统分享面板让你自己送去 iCloud / 微信。这是 iOS 上的原生做法，不是将就。
     @ViewBuilder private var saveButton: some View {
         if let saved {
-            ShareLink(item: saved) { savePill((savedNote ?? "已保存") + " · 分享") }
-        } else if let savedNote {
-            // 进了相册，没有可分享的 URL —— 只报结果
-            savePill(savedNote)
+            // 落在「文件」里的可以接着送去 iCloud / 微信；存哪儿了顶栏那行小字已经说了
+            ShareLink(item: saved) { savePill("分享") }
+        } else if savedNote != nil {
+            // 进了相册，没有可分享的 URL —— 按钮到此为止
+            savePill("已保存")
         } else {
             Button {
                 saving = true
@@ -131,7 +135,7 @@ struct FileViewer: View {
         } else if ext == "md" && !source {
             ScrollView {
                 Markdown(String(decoding: b, as: UTF8.self))
-                    .markdownTheme(.yxiFile)
+                    .markdownTheme(.yxi)
                     // 图片路径是相对**这份 md 所在的目录**的，得走 SFTP 去取
                     .markdownImageProvider(SftpImages(files: files, baseDir: Paths.dirOf(path)))
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -385,29 +389,6 @@ private struct SftpImage: View {
     }
 }
 
-extension Theme {
-    /// 文件模式里的 markdown = 聊天那套 `.yxi`，外加**宽表能横滑**。
-    ///
-    /// ⚠️ 病根跟安卓一样（`MarkdownTable.kt`）：库默认把表格塞进屏宽，
-    /// 列一多每格就剩几个字，用户原话「表格里全是省略号」。
-    static let yxiFile = Theme.yxi
-        .table { c in
-            ScrollView(.horizontal, showsIndicators: false) { c.label }
-                // ⚠️ 不加这句，横滑容器在竖滚里会去抢一整屏高度（嵌套 ScrollView 的老毛病）
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .tableCell { c in
-            c.label
-                // ⚠️ **必须是定宽 `width`，不能写 `maxWidth`。** 横滑给下来的宽度提案是「不限」，
-                // `maxWidth` 只裁不换行 —— 长内容会被截掉，正是我们要修的那个毛病。
-                // 定宽才会换行：窄表原样看全，宽表左右滑，一个字都不截。
-                .frame(width: 160, alignment: .leading)
-                .padding(.horizontal, 10).padding(.vertical, 8)
-                .markdownTextStyle { FontWeight(c.row == 0 ? .semibold : .regular) }
-                // 表头单独一层底色。横滑里画横线会算歪，用面分隔（M3 那套）
-                .background(c.row == 0 ? Yx.high : Color.clear)
-        }
-}
 
 /// 按 CSS 渲染的 html。用系统自带的 WebView —— 手机上本来就有一个浏览器引擎，
 /// 没必要自己实现排版。
