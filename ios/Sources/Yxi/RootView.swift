@@ -260,32 +260,42 @@ final class AppState: ObservableObject {
     }
 
     #if DEBUG
-    /// **CI 用的一次性播种**：把一台主机（含密码）塞进 store，让模拟器能真连上
-    /// 云端 runner 上现起的那台 sshd —— 从而在 CI 里跑**真的** SSH/SFTP，
-    /// 而不是喂假数据截图。
+    /// **CI 用的一次性播种**：把一台主机塞进 store，让模拟器能真连上云端 runner 上
+    /// 现起的那台 sshd —— 从而在 CI 里跑**真的** SSH/SFTP，而不是喂假数据截图。
     ///
     /// ```
+    /// xcrun simctl launch <udid> app.yxi --args -yxiDumpPubKey YES   # ① 吐公钥
+    /// #  Mac 上：simctl get_app_container … data → Documents/pubkey.txt → authorized_keys
     /// xcrun simctl launch <udid> app.yxi --args \
-    ///     -yxiSeedHost 127.0.0.1:22 -yxiSeedUser runner -yxiSeedPassword <pw>
+    ///     -yxiSeedHost 127.0.0.1:22 -yxiSeedUser runner -yxiSeedHostKey "ssh-ed25519 AAAA…"
     /// ```
     ///
-    /// ⚠️ **`#if DEBUG` 不是装饰**：密码要经 [Vault] 落进钥匙串，
-    /// 这条路在 Release 包里必须根本不存在 —— 否则等于给发布版留了一个
-    /// 「用启动参数写一台主机进去」的口子。CI 编的就是 Debug。
+    /// ⚠️ **走密钥、不走密码**：密码那条路要先改 runner 账号的登录密码
+    /// （`dscl -passwd` 要旧密码，CI 上没有），而且密钥本来就是用户真正在用的认证方式 ——
+    /// 测的是真路径，不是为测试另开的后门。
+    ///
+    /// ⚠️ **`#if DEBUG` 不是装饰**：这是一个「用启动参数往主机列表里写一台机器」的口子，
+    /// 发布版里必须根本不存在。CI 编的就是 Debug。
     private func seedFromLaunchArgsIfAsked() {
         let d = UserDefaults.standard
+        // ① 把本机公钥吐到 Documents，CI 拿去写进 runner 的 authorized_keys。
+        //    容器目录在 Mac 上直接可读（`simctl get_app_container`）。
+        if d.bool(forKey: "yxiDumpPubKey"), let line = try? keys.identity().authorizedKeysLine,
+           let dir = try? FileManager.default.url(
+                for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true) {
+            try? line.write(to: dir.appendingPathComponent("pubkey.txt"),
+                            atomically: true, encoding: .utf8)
+        }
+        // ② 播种一台主机
         guard let hostPort = d.string(forKey: "yxiSeedHost"),
-              let user = d.string(forKey: "yxiSeedUser"),
-              let password = d.string(forKey: "yxiSeedPassword") else { return }
+              let user = d.string(forKey: "yxiSeedUser") else { return }
         let parts = hostPort.split(separator: ":")
         let name = String(parts.first ?? "127.0.0.1")
         let port = parts.count > 1 ? Int(parts[1]) ?? 22 : 22
         // 固定 id：重复启动只更新同一台，不会攒出一堆重复主机
         var h = Host(id: "ci-seed", alias: "CI", hostname: name, port: port,
-                     username: user, useKey: false)
-        h.sealedPassword = try? Vault.seal(password)
-        // 顺便把主机公钥也塞进去（`ssh-ed25519 AAAA…`），省掉首次连接的信任弹窗 ——
-        // 否则自动化截图会卡在那个框上，而它挡住的正是要看的界面
+                     username: user, useKey: true)
+        // 主机公钥提前塞进去，省掉首次连接的信任弹窗 —— 它挡住的正是要截的界面
         h.hostKey = d.string(forKey: "yxiSeedHostKey")
         store.upsert(h)
     }

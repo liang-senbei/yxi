@@ -87,6 +87,9 @@ targets:
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
         NSLocalNetworkUsageDescription: 连接你自己的服务器
+        # ⚠️ 只要「仅添加」权限：实验室里的图/视频存进相册要它。
+        # **不申请读相册** —— 我们从来不读，不该要读的权限。
+        NSPhotoLibraryAddUsageDescription: 把实验室里的图片和视频存进你的相册
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
     settings:
       groups: [common]

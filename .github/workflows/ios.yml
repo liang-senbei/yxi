@@ -64,20 +64,19 @@ jobs:
       # 模拟器跟 Mac 共用网络栈，所以模拟器里的 127.0.0.1 **就是 runner 这台机器** ——
       # 跟安卓那边 `10.0.2.2` 指向服务器是同一个套路。
       # 于是这里在 runner 上现起一台 sshd + tmux + 一堆样本文件，让 App 真的去连。
+      # ⚠️ 这一步是整条 CI 里**唯一**能证明「真能连上、真读得到文件」的地方。
+      # 模拟器跟 Mac 共用网络栈，所以模拟器里的 127.0.0.1 **就是 runner 这台机器** ——
+      # 跟安卓那边 `10.0.2.2` 指向服务器是同一个套路。
+      # 于是这里在 runner 上现起一台 sshd + tmux + 一堆样本文件，让 App 真的去连。
       - name: 在 runner 上起一台真 SSH 服务器（给端到端用）
         id: sshd
         run: |
           set -e
-          # macOS 的「远程登录」= sshd。runner 有免密 sudo
           sudo systemsetup -setremotelogin on
-          # 给 runner 账号设个密码，App 用密码登录（密钥那条路要先把公钥弄出来，绕）
-          PW="yxi-ci-$(uuidgen | head -c 8)"
-          sudo dscl . -passwd /Users/runner "$PW"
-          echo "::add-mask::$PW"
-          echo "pw=$PW" >> "$GITHUB_OUTPUT"
+          mkdir -p ~/.ssh && touch ~/.ssh/authorized_keys
+          chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys
           # 主机公钥提前交给 App，省掉首次连接的信任弹窗（它会挡住要截的界面）
           echo "hostkey=$(sudo awk '{print $1" "$2}' /etc/ssh/ssh_host_ed25519_key.pub)" >> "$GITHUB_OUTPUT"
-          # 等它真的起来，别抢跑
           for i in $(seq 1 30); do nc -z 127.0.0.1 22 && break; sleep 1; done
           nc -z 127.0.0.1 22 && echo "sshd 已就绪"
 
@@ -122,8 +121,18 @@ jobs:
 
           # ---- 端到端：连上 runner 那台真 sshd，截真界面 ----
           # ⚠️ 前面几张是「没连服务器」的样子；下面这几张才证明 SSH/SFTP 真的通。
-          SEED="-yxiSeedHost 127.0.0.1:22 -yxiSeedUser runner \
-                -yxiSeedPassword ${{ steps.sshd.outputs.pw }} \
+          # 先让 App 把**它自己的**公钥吐出来（走的就是用户平时那条密钥认证），
+          # 再写进 runner 的 authorized_keys。
+          xcrun simctl terminate "$UDID" app.yxi 2>/dev/null || true
+          xcrun simctl launch "$UDID" app.yxi --args -yxiDumpPubKey YES >/dev/null
+          sleep 6
+          CONTAINER=$(xcrun simctl get_app_container "$UDID" app.yxi data)
+          PUB="$CONTAINER/Documents/pubkey.txt"
+          test -s "$PUB" || { echo "❌ App 没吐出公钥，端到端做不了"; exit 1; }
+          cat "$PUB" >> ~/.ssh/authorized_keys
+          echo "公钥已装： $(cut -c1-40 "$PUB")…"
+
+          SEED="-yxiSeedHost 127.0.0.1:22 -yxiSeedUser $(whoami) \
                 -yxiSeedHostKey ${{ steps.sshd.outputs.hostkey }}"
           live() {  # $1=文件名  $2..=额外启动参数
             local out="$1"; shift

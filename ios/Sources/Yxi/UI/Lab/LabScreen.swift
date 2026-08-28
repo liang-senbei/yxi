@@ -79,10 +79,14 @@ struct LabScreen: View {
     private func row(_ item: Lab.Item) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(item.title).font(.system(size: 15)).foregroundStyle(Yx.onSurface)
+            LabPreview(item: item, runner: runner)
+                .frame(maxHeight: 340)
             if !item.desc.isEmpty {
                 Text(item.desc).font(.system(size: 12)).foregroundStyle(Yx.muted).lineLimit(3)
             }
             Text(meta(item)).font(.mono(11)).foregroundStyle(Yx.dim)
+            LabSaveButton(item: item, runner: runner,
+                          files: app.live?.link.service as? FileService)
             Button {
                 Task { await toggleApprove(item) }
             } label: {
