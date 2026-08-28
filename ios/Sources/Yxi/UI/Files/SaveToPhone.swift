@@ -50,9 +50,28 @@ enum SaveToPhone {
         // 退到 Documents 至少东西在手机上，用户在「文件」里找得到
         let dir = try FileManager.default.url(
             for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-        let url = dir.appendingPathComponent(name)
+        let url = unique(in: dir, name: name)
         try data.write(to: url, options: .atomic)
         return .documents(url)
+    }
+
+    /// 同名不覆盖：`报告.pdf` → `报告(1).pdf`。
+    ///
+    /// ⚠️ **不能直接覆盖**：两个不同目录下的同名文件很常见（`README.md` 到处都是），
+    /// 存第二个就把第一个悄悄顶掉了 —— 用户不会收到任何提示。
+    /// 安卓那边 MediaStore 自己会加后缀，iOS 得自己来。
+    static func unique(in dir: URL, name: String) -> URL {
+        let fm = FileManager.default
+        var url = dir.appendingPathComponent(name)
+        guard fm.fileExists(atPath: url.path) else { return url }
+        let ext = (name as NSString).pathExtension
+        let stem = (name as NSString).deletingPathExtension
+        for i in 1...999 {
+            let candidate = ext.isEmpty ? "\(stem)(\(i))" : "\(stem)(\(i)).\(ext)"
+            url = dir.appendingPathComponent(candidate)
+            if !fm.fileExists(atPath: url.path) { return url }
+        }
+        return url
     }
 
     #if canImport(Photos)

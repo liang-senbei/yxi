@@ -29,6 +29,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # ⚠️ 放在这儿而不是 logic 作业里：两个作业是**并行**的，
+      # 挡不住 sim 那 6 分钟的编译。要省时间就得挡在 xcodebuild 前面。
+      - name: 文本体检（秒级，先挡一道）
+        run: bash ios/dev/precheck.sh
+
       - name: 环境
         run: |
           sw_vers
