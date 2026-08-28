@@ -233,3 +233,43 @@ libssh2 系（NMSSH / Shout）被排除：ObjC 且多年不维护，或者要给
 
 代码里 `Host.watch` 因此只能是「**App 在前台时盯着**」。
 详细选项（含 Bark 那一层）在 [`docs/背景通知.md`](docs/背景通知.md)。
+
+---
+
+## 构建机（2026-08-28 起有了）
+
+| | |
+|---|---|
+| 机器 | 「echo的Mac mini」· Apple M4 · 16GB · macOS 26.3 |
+| 怎么连 | `ssh mac`（服务器 `~/.ssh/config` 里的别名，用户名 `echo`）|
+| 通路 | **Mac 主动建的反向隧道**：服务器 `127.0.0.1:2223` → Mac 的 22<br>（Mac 上 `autossh -M 0 -f -N -R 2223:localhost:22 root@216.36.108.147`）|
+| 同步代码 | `rsync -az --delete --exclude .build ios/ mac:~/yxi-ios/` |
+
+⚠️ **隧道靠 Mac 那头维持**。`ssh mac` 连不上多半是 Mac 睡了或换网了 —— 先让人确认
+Mac 醒着、`pgrep autossh` 有进程，别在服务器这头瞎查。
+
+### 这台机器上验证到哪了（诚实记录）
+
+| 事项 | 状态 |
+|---|---|
+| `YxiKit` 在**真 Apple 工具链**上编译 | ✅ 通过（Swift 6.3.1，2026-08-28）|
+| 跑 `swift test` | ❌ 缺 `XCTest` —— **只有完整 Xcode 才带** |
+| 编 iOS 界面（`Yxi` target） | ❌ 缺 iOS SDK（`no such module 'UIKit'`）—— 同上 |
+| iOS 模拟器 | ❌ 0 个 —— 同上 |
+
+**结论：完整 Xcode 是硬前提**（命令行工具不够）。它的下载必须过 Apple ID + 二次验证，
+得机器主人自己在 App Store 点。装完要跑
+`sudo xcodebuild -license accept` 和 `sudo xcodebuild -runFirstLaunch`。
+
+⚠️ `sudo` 在这台上**要密码**（没有免密），所以任何需要 sudo 的步骤都得机器主人自己来。
+
+### 逻辑层怎么快速迭代（不占 Mac）
+
+开发服务器（Linux）上装了 **Swift 6.0.3**（`/opt/swift`，`swift` 已在 PATH）。
+`YxiKit` 不 import SwiftUI/UIKit，所以**在 Linux 上就能编能测**：
+
+```bash
+cd ios && swift build && swift test      # 2026-08-28 实测：121 个测试全过
+```
+
+界面层改动才需要 Mac。CI 也按这个分工（`.github/workflows/ios.yml`）。
