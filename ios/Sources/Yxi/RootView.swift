@@ -205,7 +205,18 @@ final class AppState: ObservableObject {
     let keys = KeyManager()
     let trust = TrustGate()
 
-    @Published var tab: Tab = .sessions
+    /// ⚠️ **初始标签页可以用启动参数指定** —— 给自动化截图用：
+    /// `xcrun simctl launch <udid> app.yxi --args -yxiTab config`
+    /// iOS 会把 `-yxiTab config` 自动收进 `UserDefaults`（NSArgumentDomain），
+    /// 所以这里不用自己解析 argv。平时没传就是「会话」，行为不变。
+    @Published var tab: Tab = {
+        switch UserDefaults.standard.string(forKey: "yxiTab") {
+        case "hosts": return .hosts
+        case "config": return .config
+        case "settings": return .settings
+        default: return .sessions
+        }
+    }()
     @Published var hosts: [Host] = []
     @Published var currentID: String?
     @Published var workspace: Target?

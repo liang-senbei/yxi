@@ -71,13 +71,19 @@ jobs:
           APP=$(find build/Build/Products -name 'Yxi.app' -maxdepth 3 | head -1)
           echo "APP=$APP"
           xcrun simctl install "$UDID" "$APP"
-          xcrun simctl launch "$UDID" app.yxi
-          sleep 8
           mkdir -p shots
-          xcrun simctl io "$UDID" screenshot shots/01-启动.png
-          # 再等一会儿截第二张（首屏可能还在连）
-          sleep 6
-          xcrun simctl io "$UDID" screenshot shots/02-首屏.png
+          # 每个标签页单独启一次并截图 —— 用启动参数指定初始页（见 AppState.tab 的注释）。
+          # 比起引一整套 XCUITest，这样最省：一条 simctl 命令就够。
+          shoot() {   # $1=标签 $2=文件名
+            xcrun simctl terminate "$UDID" app.yxi 2>/dev/null || true
+            xcrun simctl launch "$UDID" app.yxi --args -yxiTab "$1" >/dev/null
+            sleep 7
+            xcrun simctl io "$UDID" screenshot "shots/$2"
+          }
+          shoot sessions 01-会话.png
+          shoot hosts    02-主机.png
+          shoot config   03-配置.png
+          shoot settings 04-设置.png
           ls -lh shots/
 
       - name: 传回截图
