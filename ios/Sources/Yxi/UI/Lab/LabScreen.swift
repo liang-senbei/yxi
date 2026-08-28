@@ -13,17 +13,29 @@ struct LabScreen: View {
     @State private var items: [Lab.Item] = []
     @State private var approved: Set<String> = []
     @State private var expanded: Set<String> = []
+    /// 置顶的栏目（按类型 key）。**本地存** —— 是每台设备自己的偏好，跟别人无关。
+    @AppStorage("lab_cat_pins") private var pinsRaw = ""
     @State private var loading = true
     @State private var note: String?
 
     private var runner: ShellRunner? { app.live?.link.service as? ShellRunner }
 
+    private var pins: Set<String> {
+        Set(pinsRaw.split(separator: "\n").map(String.init))
+    }
+
     /// 按类型分栏，只有有内容的类才出现。栏内按时间新的在前。
+    /// **置顶的排最前**，其余按最新条目的时间。
     private var cats: [(key: String, items: [Lab.Item])] {
         let grouped = Dictionary(grouping: items, by: \.catKey)
+        let pinned = pins
         return grouped
             .map { (key: $0.key, items: $0.value.sorted { $0.at > $1.at }) }
-            .sorted { $0.items.first?.at ?? 0 > $1.items.first?.at ?? 0 }
+            .sorted { a, b in
+                let pa = pinned.contains(a.key), pb = pinned.contains(b.key)
+                if pa != pb { return pa }
+                return (a.items.first?.at ?? 0) > (b.items.first?.at ?? 0)
+            }
     }
 
     var body: some View {
@@ -41,7 +53,19 @@ struct LabScreen: View {
                             }
                         } header: {
                             header(cat)
-                        }
+                                // iOS 自带的滑动操作 —— 不用像安卓那边手写拖拽手势
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    Button(role: .destructive) {
+                                        Task { await deleteCat(cat) }
+                                    } label: { Label("删除", systemImage: "trash") }
+                                    Button {
+                                        togglePin(cat.key)
+                                    } label: {
+                                        Label(pins.contains(cat.key) ? "取消置顶" : "置顶",
+                                              systemImage: "pin")
+                                    }
+                                    .tint(Yx.teal)
+                                }
                     }
                 }
                 .listStyle(.plain)
@@ -126,6 +150,21 @@ struct LabScreen: View {
             approved = Set(raw.components(separatedBy: "\n")
                 .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
         }
+    }
+
+    private func togglePin(_ key: String) {
+        var cur = pins
+        if cur.contains(key) { cur.remove(key) } else { cur.insert(key) }
+        pinsRaw = cur.sorted().joined(separator: "\n")
+    }
+
+    /// 删掉整栏。⚠️ **服务器上真删**，所以先从界面拿掉再发命令 ——
+    /// 命令失败的话下一次 reload 会把它们带回来，比「删了却还在」诚实。
+    private func deleteCat(_ cat: (key: String, items: [Lab.Item])) async {
+        guard let runner, let cmd = Lab.removeCommand(ids: cat.items.map(\.id)) else { return }
+        let gone = Set(cat.items.map(\.id))
+        items.removeAll { gone.contains($0.id) }
+        _ = try? await runner.run(cmd)
     }
 
     private func toggleApprove(_ item: Lab.Item) async {
