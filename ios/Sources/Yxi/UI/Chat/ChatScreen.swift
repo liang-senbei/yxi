@@ -212,14 +212,23 @@ struct ChatScreen: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 ForEach(model.staged) { a in
-                    Button { model.drop(a) } label: {
-                        Text(a.label + "  ✕")
-                            .font(.system(size: 12.5))
-                            .foregroundStyle(Yx.onSurfaceVar)
-                            .padding(.horizontal, 12).padding(.vertical, 6)
-                            .background(Yx.high, in: Capsule())
+                    // ⚠️ **名字和 ✕ 是两个热区。** 原来整块都是「删除」——
+                    // 想确认自己传的是哪张图，一点就没了，还得重传一遍。
+                    // 现在：点名字 = 看一眼，点 ✕ 才是删。
+                    HStack(spacing: 8) {
+                        Button { peek = a.remotePath } label: {
+                            Text(a.label)
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(Yx.onSurfaceVar)
+                        }
+                        .buttonStyle(.plain)
+                        Button { model.drop(a) } label: {
+                            Text("✕").font(.system(size: 12.5)).foregroundStyle(Yx.dim)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .background(Yx.high, in: Capsule())
                 }
                 if model.uploading {
                     Text("传着…").font(.system(size: 12.5)).foregroundStyle(Yx.dim).padding(8)

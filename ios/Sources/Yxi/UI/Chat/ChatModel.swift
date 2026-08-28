@@ -309,8 +309,14 @@ final class ChatModel: ObservableObject {
         Task { [backend = self.backend, session = self.session] in
             defer { uploading = false }
             do {
-                staged.append(try await backend.upload(
-                    session: session, fileName: fileName, data: data, isImage: isImage))
+                let up = try await backend.upload(
+                    session: session, fileName: fileName, data: data, isImage: isImage)
+                // ⚠️ **要编号。** 正文前面贴的是「图片1 = /path」，而药丸上如果
+                // 三个都叫「图片」，用户没法把「图片2」跟屏幕上哪一个对上 ——
+                // 更没法说「删掉图片2」。编号按同类计数（图片1/图片2、附件1…）。
+                let n = staged.filter { $0.isImage == up.isImage }.count + 1
+                staged.append(Staged(label: "\(up.label)\(n)",
+                                     remotePath: up.remotePath, isImage: up.isImage))
             } catch {
                 if let m = reportable(error) { status = "传不上去：\(m)" }
             }

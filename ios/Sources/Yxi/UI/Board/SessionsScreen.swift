@@ -37,6 +37,7 @@ struct SessionsScreen: View {
 
     @State private var sessions: [BoardSession] = []
     @State private var newSession = false
+    @State private var muted: Set<String> = []
     @State private var status = ""
     @State private var sendTo: BoardSession?
     @State private var floating = false
@@ -98,6 +99,8 @@ struct SessionsScreen: View {
             usageValue = nil
         }
         // ⚠️ 键见 `pollKey`：外层每次连接状态变化都该换一个新的 `link.id`
+        // ⚠️ 换主机要重新读 —— 静音是**按主机分开存**的
+        .task(id: host.id) { muted = Mute.all(host.id) }
         .task(id: pollKey) { await poll() }
         .task(id: pollKey) { await pollUsage() }
         .sheet(isPresented: $newSession) {
@@ -290,6 +293,11 @@ struct SessionsScreen: View {
             onTogglePin: {
                 if pinned.contains(s.name) { pinned.remove(s.name) } else { pinned.insert(s.name) }
                 Pinned.set(hostId: host.id, pinned)
+            },
+            isMuted: muted.contains(s.name),
+            onToggleMute: {
+                Mute.toggle(host.id, s.name)
+                muted = Mute.all(host.id)
             }
         )
     }
@@ -394,6 +402,8 @@ private struct SessionCard: View {
     let onTerminal: () -> Void
     let onSend: () -> Void
     let onTogglePin: () -> Void
+    var isMuted: Bool = false
+    var onToggleMute: () -> Void = {}
 
     var body: some View {
         YxCard {
@@ -414,6 +424,10 @@ private struct SessionCard: View {
                             .background(isPinned ? Yx.copperBox : Yx.high, in: Capsule())
                     }
                     .buttonStyle(.plain)
+                    if isMuted {
+                        // 静音了要**看得见** —— 否则「怎么这个会话不提醒我」查不出原因
+                        Text("🔕").font(.system(size: 11)).padding(.leading, 6)
+                    }
                     if s.attached {
                         Text("已连").font(.mono(11)).foregroundStyle(Yx.dim).padding(.leading, 8)
                     }
@@ -468,6 +482,8 @@ private struct SessionCard: View {
             Button("回它一句", action: onSend)
             Button("开终端", action: onTerminal)
             Button(isPinned ? "取消置顶" : "置顶", action: onTogglePin)
+            // 一直在跑的部署、盯日志的那种，根本不想被它 ping
+            Button(isMuted ? "取消静音" : "静音（不再提醒）", action: onToggleMute)
         }
     }
 }

@@ -361,7 +361,7 @@ final class AppState: ObservableObject {
             watcher.stop()
             return
         }
-        watcher.start(live)
+        watcher.start(live, hostID: id)
     }
 
     func open(_ mode: Mode, session: String, cwd: String) {

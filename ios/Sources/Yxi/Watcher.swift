@@ -21,14 +21,17 @@ final class Watcher: ObservableObject {
     /// 每轮都报的话，一个等了十分钟的会话会响十次。
     private var notified: Set<String> = []
     private var task: Task<Void, Never>?
+    /// 静音是按主机分开存的，得知道当前盯的是哪一台
+    private var hostID = ""
 
     /// 盯梢的间隔。⚠️ 别太密：每一轮是一次真的 SSH 往返，
     /// 手机网络下太密既费电又容易排队堆积。
     private let interval: Duration = .seconds(20)
 
-    func start(_ link: HostLink?) {
+    func start(_ link: HostLink?, hostID: String) {
         stop()
         guard let link else { return }
+        self.hostID = hostID
         task = Task { [weak self] in
             await self?.requestPermissionOnce()
             while !Task.isCancelled {
@@ -50,7 +53,9 @@ final class Watcher: ObservableObject {
         guard let sessions = try? await svc.snapshot() else { return }   // 抓不到就下一轮再说
         let waiting = sessions.filter { $0.state == SessionState.needsYou }
         let names = Set(waiting.map { $0.name })
-        for s in waiting where !notified.contains(s.name) {
+        // ⚠️ 静音的**连通知都不发**（但仍然算进 `notified`，
+        // 否则取消静音那一刻会把积压的全补报一遍）
+        for s in waiting where !notified.contains(s.name) && !Mute.isMuted(hostID, s.name) {
             await notify(session: s)
         }
         // ⚠️ 已经不等了的要从集合里去掉，否则它下次再等你时**不会再响**
