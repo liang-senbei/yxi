@@ -69,3 +69,19 @@ final class TrailingCommaTests: XCTestCase {
         XCTAssertNil(AgentConfig.validationError(path: "a.json", text: #"{"a":{"b":[1,{"c":2}]}}"#))
     }
 }
+
+/// ⚠️ `base64 -w0` 是 GNU 的；BSD/macOS 不认。两条路都要有，
+/// 否则服务器一是 macOS，实验室的图就全空白**而且不报错**。
+final class LabBytesCommandTests: XCTestCase {
+    func testHasBothGnuAndBsdForms() {
+        let c = Lab.bytesCommand("a.png")
+        XCTAssertTrue(c.contains("base64 -w0"), c)
+        XCTAssertTrue(c.contains("||"), "缺少 BSD 退路：\(c)")
+        XCTAssertTrue(c.contains("tr -d"), "BSD 那条要自己去掉换行：\(c)")
+    }
+    /// 文件名只留安全字符 —— manifest 是我们自己写的，但仍不给注入留口子
+    func testStripsUnsafeChars() {
+        XCTAssertFalse(Lab.bytesCommand("a;rm -rf /.png").contains(";"))
+        XCTAssertFalse(Lab.bytesCommand("a$(id).png").contains("$"))
+    }
+}

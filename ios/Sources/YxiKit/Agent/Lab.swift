@@ -74,8 +74,15 @@ public enum Lab {
 
     /// 取文本素材（html / note）
     public static func textCommand(_ file: String) -> String { "cat \(dir)/\(safe(file)) 2>/dev/null" }
-    /// 取二进制素材（图 / GIF）—— base64 经 exec 传回来
-    public static func bytesCommand(_ file: String) -> String { "base64 -w0 \(dir)/\(safe(file)) 2>/dev/null" }
+    /// 取二进制素材（图 / GIF）—— base64 经 exec 传回来。
+    ///
+    /// ⚠️ **`-w0` 是 GNU 的，BSD/macOS 的 base64 不认**（直接报错，一个字节都不吐）。
+    /// 所以先试 GNU 写法，失败就退到 BSD 写法自己把换行去掉 —— 结果一样是一整行。
+    /// 不这么写的话，服务器只要是 macOS/BSD，实验室的图就**全部空白且不报错**。
+    public static func bytesCommand(_ file: String) -> String {
+        let f = "\(dir)/\(safe(file))"
+        return "base64 -w0 '\(f)' 2>/dev/null || base64 '\(f)' 2>/dev/null | tr -d '\\n'"
+    }
     /// 删若干条 —— 调服务器上的 `yxi-lab rm`（它会连素材一起删、改 manifest）
     public static func removeCommand(ids: [String]) -> String? {
         let safeIds = ids.map { String($0.filter { c in c.isLetter || c.isNumber || ".-_".contains(c) }) }

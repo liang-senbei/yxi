@@ -105,6 +105,29 @@ jobs:
           tmux send-keys -t cc-demo "echo 这是给截图用的示例会话" Enter || true
           ls -la "$D"
 
+          # 实验室的样本：一张图 + 一段 html，好验预览那条路真的通
+          L="$HOME/.yxi/lab"; mkdir -p "$L"
+          python3 - "$L" <<'PYEOF'
+          import base64, json, pathlib, sys
+          lab = pathlib.Path(sys.argv[1])
+          # 8x8 纯色 PNG，够证明「取回来 → 解码 → 画出来」这条链路通了
+          png = base64.b64decode(
+              "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIAQMAAAD+wSzIAAAABlBMVEX///+"
+              "/v7+jQ3Y5AAAADklEQVQI12P4AIX8EAgALgAD/aNpbtEAAAAASUVORK5CYII=")
+          (lab / "sample.png").write_bytes(png)
+          (lab / "card.html").write_text(
+              "<style>body{background:#221F1B;color:#FFB787;font:16px -apple-system;"
+              "display:flex;align-items:center;justify-content:center;height:90vh}</style>"
+              "<div>实验室 html 预览（内联 CSS 渲染）</div>", encoding="utf-8")
+          (lab / "manifest.json").write_text(json.dumps([
+              {"id": "s1", "title": "示例图片", "type": "image", "file": "sample.png",
+               "desc": "验证 base64 取回 + 解码 + 显示", "by": "ci", "at": 1756300000},
+              {"id": "s2", "title": "示例网页", "type": "html", "file": "card.html",
+               "desc": "验证内联 CSS 真的渲染", "by": "ci", "at": 1756300001},
+          ], ensure_ascii=False), encoding="utf-8")
+          print("实验室样本就位")
+          PYEOF
+
       - name: 起模拟器 · 装上去 · 截图
         working-directory: ios
         run: |
@@ -171,7 +194,7 @@ jobs:
           if [ "$E2E" = "1" ]; then
           live 05-已连接的会话页.png -yxiTab sessions
           live 06-文件浏览.png       -yxiOpen cc-demo -yxiMode files -yxiCwd "$HOME/demo"
-          live 07-看markdown.png     -yxiOpen cc-demo -yxiMode files -yxiCwd "$HOME/demo"
+          live 07-实验室.png         -yxiOpen cc-demo -yxiMode lab -yxiCwd "$HOME/demo"
           live 08-终端.png           -yxiOpen cc-demo -yxiMode terminal -yxiCwd "$HOME/demo"
           fi
           ls -lh shots/

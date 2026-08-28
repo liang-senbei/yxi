@@ -85,7 +85,12 @@ object LabRemote {
 
     /** 取一个二进制文件（图 / GIF）的字节。base64 → 解码。 */
     suspend fun bytes(ssh: SshSession?, file: String): ByteArray? {
-        val b64 = ssh?.exec("base64 -w0 $DIR/${safe(file)} 2>/dev/null").orEmpty().trim()
+        // ⚠️ `-w0` 是 GNU 的，BSD/macOS 的 base64 不认（直接报错，一个字节都不吐）。
+        // 先试 GNU 写法，失败退到 BSD 写法自己去掉换行。不这么写的话，
+        // 服务器只要是 macOS/BSD，实验室的图就**全部空白且不报错**。
+        val f = "$DIR/${safe(file)}"
+        val b64 = ssh?.exec("base64 -w0 '$f' 2>/dev/null || base64 '$f' 2>/dev/null | tr -d '\n'")
+            .orEmpty().trim()
         if (b64.isBlank()) return null
         return runCatching { android.util.Base64.decode(b64, android.util.Base64.DEFAULT) }.getOrNull()
     }
