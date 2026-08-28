@@ -127,11 +127,15 @@ struct Switcher: View {
                 ForEach(list) { s in
                     card(s)
                         .containerRelativeFrame(.horizontal, count: 1, span: 1, spacing: 12)
-                        .scrollTransition { content, phase in
+                        // ⚠️ 先把 @Environment 的值**取到局部常量**再进闭包。
+                        // `scrollTransition` 的闭包是 `Sendable` 的，直接引用主线程隔离的
+                        // 属性会被 Swift 6 并发检查拦下（error: main actor-isolated property
+                        // 'reduceMotion' can not be referenced from a Sendable closure）。
+                        .scrollTransition { [motion = !reduceMotion] content, phase in
                             // 邻居缩小压暗，跟安卓那版同样的系数（0.86 / 0.55）
                             content
-                                .scaleEffect(reduceMotion ? 1 : 1 - 0.14 * abs(phase.value))
-                                .opacity(reduceMotion ? 1 : 1 - 0.45 * abs(phase.value))
+                                .scaleEffect(motion ? 1 - 0.14 * abs(phase.value) : 1)
+                                .opacity(motion ? 1 - 0.45 * abs(phase.value) : 1)
                         }
                 }
             }
@@ -180,8 +184,8 @@ struct Switcher: View {
             .padding(10)
             .background(Yx.lowest, in: RoundedRectangle(cornerRadius: Yx.blockRadius, style: .continuous))
             // 内容比卡片慢一拍 → 纵深感（D17 的第三层）
-            .scrollTransition { content, phase in
-                content.offset(y: reduceMotion ? 0 : phase.value * -28)
+            .scrollTransition { [motion = !reduceMotion] content, phase in
+                content.offset(y: motion ? phase.value * -28 : 0)
             }
         }
         .padding(16)

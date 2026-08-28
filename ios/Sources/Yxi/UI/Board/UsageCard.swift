@@ -57,7 +57,7 @@ struct UsageCard: View {
                         .foregroundStyle(u.elapsedPercent > 85 ? Yx.amber : Yx.muted)
                     Spacer()
                     Text("距重置 \(u.remainText)")
-                        .font(.mono(12, weight: .medium))
+                        .font(.mono(12, .medium))
                         .foregroundStyle(Yx.onSurface)
                 }
                 bar(u, height: 6)
