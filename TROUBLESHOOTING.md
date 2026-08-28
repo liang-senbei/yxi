@@ -2447,3 +2447,47 @@ Surface(shape = Pill, modifier = Modifier.clip(Pill).clickable { … })   // ✓
 （与公网 Content-Length 一字节不差）、系统安装器被拉起。
 
 ⚠️ **老链接 `http://64.90.25.56:8899/<token>/` 必须保留** —— 已装旧版的人还靠它更新。
+
+## 133. 选择器：问题正文丢失 / 切题要等十秒 / 回不到上一题
+
+**症状**（用户报，带截图）：①「只有选择没有问题」——卡片上只有选项，问题正文不见了；
+末尾多出两项，最后一项的说明写着 `Enter to select · Tab/Arrow keys to`。
+② 点一个选项要**等约十秒**才到下一题。③ 多个问题时**回不去上一题改选择**。
+
+**① 脚注换行 → 被当成最后一项的说明。**
+窄屏（**手机开过「终端」后 tmux 会话会被缩到手机宽度**）上，脚注断成两行：
+```
+Enter to select · Tab/Arrow keys to navigate ·
+Esc to cancel
+```
+`indexOfLast(isFooter)` 取到的是**第二行**，于是第一行落在选项块里 → 变成最后一项的说明。
+修：新增 `isFooterish()`，说明行里排除脚注碎片。
+
+**② 问题正文要按「段」收，不能只取一行。**
+长问题在窄屏会折行，只取「1 号选项上面第一行非噪声」= 只拿到最后半句。
+修：往上连续收集，遇到空行/分隔线/标签栏才停，再拼起来。
+
+**③ 十秒延迟的真正原因不是网络，是逻辑。**
+老写法：送键 → `delay(500)` → **抓一次**。TUI 常常还没重绘完，抓到的是旧屏；
+而这段时间轮询被 `busy` 停着，于是要等它恢复后的下一轮（**闲时 2.5 秒**）、
+甚至再下一轮才看得到新题。
+修：`awaitChange()` —— 短间隔连抓直到**指纹变了**就返回（130ms × 最多 20 次），
+每抓一次先喂给界面；同时「有待答面板挂着」时轮询间隔 2.5s → 0.7s。
+实测切题从 ~10 秒降到 **~3 秒**（余下的基本是 SSH 往返，本地抓屏本身是 0ms）。
+
+**④ 回上一题是 TUI 本来就支持的**，脚注写着 `Tab/Arrow keys to navigate`：
+顶上那条 `←  ☐ 名字  ☒ 配色  ✔ Submit  →` 就是问题标签栏，**←/→ 在问题间走**，
+`☒` = 已答、`☐` = 未答。已把标签栏解析出来（`Pending.tabs`）并在卡片上给了「← 上一题 / 下一题 →」。
+
+**⑤ 提交别硬编码「Right 一次就是 Submit 页」**——那只在停在最后一题时成立。
+改成：一路 `Right`，每次等屏幕变，直到解析出 `review`（`Review your answers`）页，再选 `Submit answers`。
+
+**怎么造样本**（以后再动这块解析，照这个来，别靠猜）：
+```bash
+tmux new-session -d -s cc-asktest -c /tmp/asktest
+tmux send-keys -t cc-asktest 'IS_SANDBOX=1 claude --dangerously-skip-permissions' Enter
+# 让它用 AskUserQuestion 出两个问题、第二个 multiSelect
+tmux resize-window -t cc-asktest -x 46 -y 30     # ← 复现窄屏换行的关键
+tmux capture-pane -pt cc-asktest > sample.txt
+```
+真实样本已固化进 `PromptRealTest`（单选/多选/窄屏/复核页四种）。⚠️ 用完 `tmux kill-session`。

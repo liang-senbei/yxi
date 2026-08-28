@@ -363,7 +363,17 @@ private fun summarize(c: ChatItem.ToolCall): String? = when (c.name) {
  * 一旦屏幕顺序和列表顺序对不上，就会**点 A 选中 B 且不报错**。
  */
 @Composable
-fun PendingCard(p: Pending, busy: Boolean, onPick: (Pending.Option) -> Unit, onSubmit: () -> Unit, onDiff: (() -> Unit)? = null) {
+fun PendingCard(
+    p: Pending,
+    busy: Boolean,
+    onPick: (Pending.Option) -> Unit,
+    onSubmit: () -> Unit,
+    onDiff: (() -> Unit)? = null,
+    /** 回到上一题（送 ←）。多问题时才有意义。 */
+    onPrev: (() -> Unit)? = null,
+    /** 去下一题（送 →）。 */
+    onNext: (() -> Unit)? = null,
+) {
     Surface(color = SurfaceContainerLow, shape = MaterialTheme.shapes.large) {
         Column(Modifier.fillMaxWidth().padding(16.dp, 14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -379,6 +389,37 @@ fun PendingCard(p: Pending, busy: Boolean, onPick: (Pending.Option) -> Unit, onS
                 }
             }
             if (p.title.isNotBlank()) Text(p.title, style = MaterialTheme.typography.titleSmall, color = OnSurface)
+            // 多问题：把标签栏画出来（☒=答过 / ☐=还没），并给出 ←/→ 来回走 ——
+            // 用户要的「能回上一题改选择」。TUI 本来就支持（脚注 Tab/Arrow keys to navigate）。
+            if (p.tabs.size > 1) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                ) {
+                    onPrev?.let {
+                        Surface(color = SurfaceContainer, shape = Pill,
+                            modifier = Modifier.clip(Pill).clickable(enabled = !busy, onClick = it)) {
+                            Text(t("← 上一题"), Modifier.padding(12.dp, 5.dp),
+                                style = MaterialTheme.typography.labelMedium, color = OnSurfaceVariant)
+                        }
+                    }
+                    p.tabs.forEach { tab ->
+                        Text(
+                            (if (tab.submit) "✔ " else if (tab.answered) "☑ " else "☐ ") + tab.label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (tab.answered) Teal else Dim,
+                        )
+                    }
+                    onNext?.let {
+                        Surface(color = SurfaceContainer, shape = Pill,
+                            modifier = Modifier.clip(Pill).clickable(enabled = !busy, onClick = it)) {
+                            Text(t("下一题 →"), Modifier.padding(12.dp, 5.dp),
+                                style = MaterialTheme.typography.labelMedium, color = OnSurfaceVariant)
+                        }
+                    }
+                }
+            }
             p.options.forEach { o ->
                 Surface(
                     color = if (o.checked) CopperContainer else SurfaceContainer,
@@ -400,10 +441,16 @@ fun PendingCard(p: Pending, busy: Boolean, onPick: (Pending.Option) -> Unit, onS
                     }
                 }
             }
-            if (p.multiSelect) {
+            // 提交：多选时数字只是「勾选」，必须显式交卷；多问题时也给一个入口
+            // （一路 → 走到复核页再选 Submit answers，由调用方处理）。
+            if (p.multiSelect || p.tabs.size > 1 || p.review) {
                 Button(onSubmit, enabled = !busy, shape = Pill, modifier = Modifier.fillMaxWidth().height(48.dp)) {
-                    Text(t("提交"))   // 多选时数字只是勾选，要 Right + 1 才算交卷
+                    Text(if (p.review) t("确认提交") else t("提交答案"))
                 }
+                if (p.multiSelect) Text(
+                    t("多选：点选项是勾/取消，选完再点提交"),
+                    style = MaterialTheme.typography.labelSmall, color = Dim,
+                )
             }
         }
     }

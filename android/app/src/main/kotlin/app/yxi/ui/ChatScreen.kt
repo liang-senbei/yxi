@@ -316,7 +316,8 @@ fun ChatScreen(
             }
             // 忙的时候抓快一点 —— 状态行是给人看「它还活着」的，
             // 2.5 秒一跳就不像在动了；闲的时候没必要这么勤
-            delay(if (live.busy) 900 else 2_500)
+            // 有「等你选」挂着时也抓快一点 —— 你刚点完一项，下一题要立刻顶上来
+            delay(if (live.busy || pending != null) 700 else 2_500)
         }
     }
     // ⚠️ **`settled` 也要当键。** 只用 items.size 的话，最后一次定位发生在
@@ -572,8 +573,7 @@ fun ChatScreen(
                                 busy = true
                                 // 送屏幕上写的那个数字本身，**不是列表下标**
                                 ssh?.let { SessionProbe.sendKey(it, sessionName, o.number.toString()) }
-                                delay(500)
-                                pending = ssh?.let { runCatching { SessionProbe.pending(it, sessionName) }.getOrNull() }
+                                pending = awaitChange(ssh, sessionName, p.fingerprint) { pending = it }
                                 busy = false
                             }
                         }
@@ -584,16 +584,42 @@ fun ChatScreen(
                         diffText = t("读取中…")
                         scope.launch { diffText = fetchGitDiff(ssh, cwd) }
                     },
+                    // ←/→ 在问题之间走（真实 TUI 支持，脚注写着 Tab/Arrow keys to navigate）
+                    onPrev = {
+                        scope.launch {
+                            busy = true
+                            ssh?.let { SessionProbe.sendKey(it, sessionName, "Left") }
+                            pending = awaitChange(ssh, sessionName, p.fingerprint) { pending = it }
+                            busy = false
+                        }
+                    },
+                    onNext = {
+                        scope.launch {
+                            busy = true
+                            ssh?.let { SessionProbe.sendKey(it, sessionName, "Right") }
+                            pending = awaitChange(ssh, sessionName, p.fingerprint) { pending = it }
+                            busy = false
+                        }
+                    },
                     onSubmit = {
                         scope.launch {
                             busy = true
-                            ssh?.let {
-                                SessionProbe.sendKey(it, sessionName, "Right")   // 跳到 Submit 页
-                                delay(300)
-                                SessionProbe.sendKey(it, sessionName, "1")       // 交卷
+                            val s0 = ssh
+                            if (s0 != null) {
+                                // ⚠️ **不能硬编码「Right 一次就是 Submit 页」** —— 那只在停在最后一题时成立。
+                                // 一路往右走，直到屏幕自己变成复核页，再选「Submit answers」。
+                                var cur = p
+                                repeat(6) {
+                                    if (cur.review) return@repeat
+                                    SessionProbe.sendKey(s0, sessionName, "Right")
+                                    cur = awaitChange(s0, sessionName, cur.fingerprint) { pending = it } ?: cur
+                                }
+                                if (cur.review) {
+                                    val submit = cur.options.firstOrNull { it.label.startsWith("Submit") }
+                                    SessionProbe.sendKey(s0, sessionName, (submit?.number ?: 1).toString())
+                                    pending = awaitChange(s0, sessionName, cur.fingerprint) { pending = it }
+                                } else pending = cur
                             }
-                            delay(500)
-                            pending = ssh?.let { runCatching { SessionProbe.pending(it, sessionName) }.getOrNull() }
                             busy = false
                         }
                     },
@@ -1287,3 +1313,32 @@ private fun stripTags(t: String): String =
         .replace(Regex("</?[a-z][a-z0-9-]*(\\s[^>]*)?>"), " ")
         .lineSequence().map { it.trim() }.filter { it.isNotEmpty() }
         .joinToString("\n").trim()
+
+/**
+ * 送完键之后**等屏幕真的变了**再返回，而不是死等一个固定时长。
+ *
+ * ⚠️ 病根（用户报「点一个选项要等十秒才到下一题」）：原来是 `delay(500)` 然后抓一次 ——
+ * TUI 往往还没重绘完，抓到的还是旧屏；而这期间轮询被 `busy` 停着，
+ * 于是要等它恢复后的下一轮（最长 2.5 秒）甚至再下一轮才看得到新题。
+ *
+ * 现在：短间隔连抓，**指纹一变立刻返回**（通常 <1 秒）；每抓到一次就先喂给界面 [onEach]，
+ * 让它跟着动。到上限还没变就返回最后一次的结果（可能是它真没变）。
+ */
+private suspend fun awaitChange(
+    ssh: SshSession?,
+    session: String,
+    before: String,
+    tries: Int = 20,
+    onEach: (Pending?) -> Unit = {},
+): Pending? {
+    val s = ssh ?: return null
+    var last: Pending? = null
+    repeat(tries) {
+        delay(130)   // 抓屏本身是 0ms，成本全在 SSH 往返；间隔小一点，屏幕一变就跟上
+        last = runCatching { SessionProbe.pending(s, session) }.getOrNull()
+        onEach(last)
+        // 变了（换题/答完消失）就别再等了
+        if (last == null || last!!.fingerprint != before) return last
+    }
+    return last
+}

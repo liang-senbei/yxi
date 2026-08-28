@@ -35,7 +35,17 @@ data class Pending(
      * 真正能区分两者的是上面那几行（命令本身），所以指纹要把它们算进去。
      */
     val fingerprint: String,
+    /**
+     * 多问题时顶上那条标签栏 `←  ☐ 名字  ☒ 配色  ✔ Submit  →`。
+     * 只有一个问题时为空。有它就说明**可以用 ←/→ 在问题之间来回走**（含回上一题）。
+     */
+    val tabs: List<Tab> = emptyList(),
+    /** 当前是不是「Review your answers / Submit answers」那一页。 */
+    val review: Boolean = false,
 ) {
+    /** 标签栏里的一格。[answered] 来自 ☒（答过）/ ☐（还没答）。 */
+    data class Tab(val label: String, val answered: Boolean, val submit: Boolean = false)
+
     data class Option(
         /** 屏幕上那个数字，**送键就送它**。 */
         val number: Int,
@@ -62,6 +72,20 @@ object Prompt {
      */
     private fun isFooter(l: String) =
         "to cancel" in l || ("to navigate" in l && ("Enter to" in l || "to select" in l))
+
+    /**
+     * 脚注**换行后的碎片**。窄屏（手机开过终端后会话被缩窄）上那行会断成两截：
+     * `Enter to select · Tab/Arrow keys to navigate ·` + `Esc to cancel`
+     * 前半截既不是脚注也不是选项，于是被当成**最后一项的说明**贴上去 ——
+     * 用户截图里「Chat about this」下面那行 `Enter to select · Tab/Arrow keys to` 就是它。
+     */
+    private fun isFooterish(l: String): Boolean {
+        val t = l.trim()
+        return t.isNotEmpty() && (
+            "Enter to select" in t || "to navigate" in t || "Tab/Arrow" in t ||
+                "Esc to cancel" in t || "ctrl+e to" in t || "Tab to amend" in t
+            )
+    }
 
     /**
      * **光标行** —— `❯ 1. Yes, and use auto mode` 这种。
@@ -137,17 +161,26 @@ object Prompt {
                     label = c.groupValues[2].trim()
                 }
                 opts += Pending.Option(m.groupValues[1].toInt(), label, checked = checked)
-            } else if (opts.isNotEmpty() && !isNoise(lines[i])) {
+            } else if (opts.isNotEmpty() && !isNoise(lines[i]) && !isFooterish(lines[i])) {
                 val last = opts.removeAt(opts.lastIndex)
                 opts += if (last.description.isEmpty()) last.copy(description = lines[i].trim()) else last
             }
         }
 
-        // 标题 = 1 号选项上面最后一行「像话」的文本
-        val title = (firstLine - 1 downTo 0)
-            .map { lines[it] }
-            .firstOrNull { !isNoise(it) && OPTION.matchEntire(it) == null }
-            ?.trim().orEmpty()
+        // 标题 = 1 号选项**上面那一段连续的正文**。
+        // ⚠️ **不能只取一行**：窄屏上长问题会折成好几行，只取最后一行等于把问题砍掉半截
+        // （用户报的「只有选择没有问题」）。往上收，遇到空行/分隔线/标签栏就停。
+        val titleLines = ArrayList<String>()
+        var ti = firstLine - 1
+        while (ti >= 0) {
+            val l = lines[ti]
+            if (OPTION.matchEntire(l) != null) break
+            if (l.isBlank()) { if (titleLines.isNotEmpty()) break else { ti--; continue } }
+            if (isNoise(l) || isFooterish(l) || isTabBar(l)) break
+            titleLines += l.trim()
+            ti--
+        }
+        val title = titleLines.asReversed().joinToString(" ").trim()
 
         // 指纹：从 1 号选项**往上 8 行**一直到脚注，去掉空白后哈希。
         // 往上 8 行是为了把权限提示里的命令正文圈进来 —— 那才是区分两个提示的东西。
@@ -157,7 +190,10 @@ object Prompt {
             .filter { !it.isWhitespace() }
             .hashCode().toString(16)
 
-        return Pending(title, opts, multi, fp)
+        val tabs = lines.lastOrNull(::isTabBar)?.let(::parseTabs).orEmpty()
+        val review = lines.any { "Review your answers" in it } ||
+            opts.any { it.label.startsWith("Submit answers") }
+        return Pending(title, opts, multi, fp, tabs, review)
     }
 
     /** 分隔线、标签栏（`←  ☒ 配菜  ✔ Submit  →`）、提示脚注这些不是内容。 */
@@ -190,6 +226,25 @@ object Prompt {
         // iOS 侧真机抓到了）。**但那是侥幸不是设计**，别指望它。
         return if (end > cursor + 1) end else -1
     }
+
+    /** `←  ☐ 名字  ☒ 配色  ✔ Submit  →` 这一行。有它 = 多个问题，可以左右切换。 */
+    private fun isTabBar(l: String): Boolean {
+        val t = l.trim()
+        return t.startsWith("←") && t.endsWith("→") && ('☐' in t || '☒' in t || '✔' in t)
+    }
+
+    private fun parseTabs(l: String): List<Pending.Tab> =
+        l.trim().removePrefix("←").removeSuffix("→").trim()
+            .split(Regex("\\s{2,}"))
+            .mapNotNull { raw ->
+                val t = raw.trim()
+                if (t.isEmpty()) return@mapNotNull null
+                val mark = t.first()
+                if (mark != '☐' && mark != '☒' && mark != '✔') return@mapNotNull null
+                val label = t.drop(1).trim()
+                if (label.isEmpty()) null
+                else Pending.Tab(label, answered = mark == '☒', submit = label.equals("Submit", true))
+            }
 
     private fun isNoise(l: String): Boolean {
         val t = l.trim()
