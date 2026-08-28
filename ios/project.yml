@@ -1,0 +1,87 @@
+# XcodeGen 的工程定义。**不手写 .xcodeproj** —— 那是机器生成的 plist，
+# 手改必冲突（跟安卓那边「能生成的就别手维护」同一条纪律）。
+#
+# ⚠️ 开发机是 Linux，没有 Xcode。真正的编译在 GitHub 的 macOS runner 上
+#    （.github/workflows/ios.yml），那儿预装 Xcode 和 iOS 模拟器。
+#
+# ⚠️ **必须分成三个 target**，不能合成一个：
+#    源码里写的是 `import YxiKit` / `import Yxi`，合并成单 target 后这些 import
+#    会变成「no such module」。分开还能保住「逻辑层不许 import SwiftUI」这条边界。
+name: Yxi
+options:
+  bundleIdPrefix: app.yxi
+  deploymentTarget: { iOS: "16.0" }
+  createIntermediateGroups: true
+
+packages:
+  Citadel:
+    url: https://github.com/orlandos-nl/Citadel.git
+    from: "0.7.0"
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm.git
+    from: "1.20.0"
+  MarkdownUI:
+    url: https://github.com/gonzalezreal/swift-markdown-ui.git
+    from: "2.4.1"
+
+settingGroups:
+  common:
+    SWIFT_VERSION: "5.9"
+    # 模拟器上跑不需要签名。真机分发是另一回事，见 docs/分发.md
+    CODE_SIGNING_ALLOWED: NO
+    CODE_SIGNING_REQUIRED: NO
+
+targets:
+  # 纯逻辑 + SSH。**不许 import SwiftUI/UIKit**
+  YxiKit:
+    type: framework
+    platform: iOS
+    sources: [Sources/YxiKit]
+    settings:
+      groups: [common]
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.yxi.kit
+    dependencies:
+      - package: Citadel
+        product: Citadel
+
+  # 界面层
+  Yxi:
+    type: framework
+    platform: iOS
+    sources: [Sources/Yxi]
+    settings:
+      groups: [common]
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.yxi.ui
+    dependencies:
+      - target: YxiKit
+      - package: SwiftTerm
+        product: SwiftTerm
+      - package: MarkdownUI
+        product: MarkdownUI
+
+  # 真正装到手机/模拟器上的那个
+  YxiApp:
+    type: application
+    platform: iOS
+    sources: [App]
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleName: Yxi
+        CFBundleDisplayName: Yxi
+        UILaunchScreen: {}
+        NSLocalNetworkUsageDescription: 连接你自己的服务器
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+    settings:
+      groups: [common]
+      base:
+        PRODUCT_NAME: Yxi
+        PRODUCT_BUNDLE_IDENTIFIER: app.yxi
+        MARKETING_VERSION: "0.9.27"
+        CURRENT_PROJECT_VERSION: "71"
+        GENERATE_INFOPLIST_FILE: NO
+    dependencies:
+      - target: Yxi
+      - target: YxiKit

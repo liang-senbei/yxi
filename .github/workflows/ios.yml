@@ -1,43 +1,84 @@
-# iOS 侧的构建与测试。
+# iOS 的构建 / 模拟器验证。
 #
-# ⚠️ **开发机是 Linux，iOS 的界面层只能在 macOS 上编译**（SwiftUI/UIKit）。
-# 所以分两半：
-#   · YxiKit（纯逻辑 + SSH）—— 在 Linux 上就能编能测，本机跑，不花额度
-#   · Yxi（SwiftUI 界面）—— 只有 macOS 编得动，放这儿
+# ⚠️ **开发机是 Linux，没有 Xcode**，所以 iOS 的界面层只能在这儿编。
+# 分两半，各跑各的：
+#   · logic  —— YxiKit（纯逻辑+SSH）在 Linux 容器里编+测，便宜、快
+#   · sim    —— 真编 iOS App、起模拟器、装上去、截图，产物传回来
 #
-# ⚠️ macOS runner **按 10 倍分钟计费**，所以只在 ios/ 真的改了才触发。
+# ⚠️ macOS runner 按 10 倍分钟计费，所以只在 ios/ 真的改了才触发。
 name: iOS
 
 on:
   push:
     paths: ['ios/**', '.github/workflows/ios.yml']
-  pull_request:
-    paths: ['ios/**']
   workflow_dispatch:
 
 jobs:
   logic:
-    name: 纯逻辑（Linux，便宜）
+    name: 逻辑层（Linux）
     runs-on: ubuntu-latest
     container: swift:6.0.3
     steps:
       - uses: actions/checkout@v4
-      - name: swift test
-        working-directory: ios
-        run: swift test 2>&1 | tail -40
+      - working-directory: ios
+        run: swift test 2>&1 | tail -30
 
-  ui-compiles:
-    name: 界面能否编译（macOS）
-    runs-on: macos-latest
+  sim:
+    name: iOS 编译 + 模拟器截图
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/cache@v4
-        with:
-          path: ios/.build
-          key: spm-${{ runner.os }}-${{ hashFiles('ios/Package.resolved') }}
+
       - name: 环境
-        run: sw_vers; swift --version | head -2
-      # macOS 上 Package.swift 会把 SwiftUI 那个 target 也带进来（见文件头的 #if os(macOS)）
-      - name: 编译（含界面 target）
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcrun simctl list devices available | grep -E "iPhone (16|15)" | head -5
+
+      - name: 装 XcodeGen 并生成工程
         working-directory: ios
-        run: swift build 2>&1 | tail -40
+        run: |
+          brew install xcodegen
+          xcodegen generate
+          ls -d Yxi.xcodeproj
+
+      - name: 编译（iOS 模拟器）
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project Yxi.xcodeproj \
+            -scheme YxiApp \
+            -configuration Debug \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tail -60
+
+      - name: 起模拟器 · 装上去 · 截图
+        working-directory: ios
+        run: |
+          UDID=$(xcrun simctl list devices available -j \
+            | python3 -c "import sys,json;d=json.load(sys.stdin);print([x['udid'] for v in d['devices'].values() for x in v if x['name']=='iPhone 16'][0])")
+          echo "模拟器 $UDID"
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          APP=$(find build/Build/Products -name 'Yxi.app' -maxdepth 3 | head -1)
+          echo "APP=$APP"
+          xcrun simctl install "$UDID" "$APP"
+          xcrun simctl launch "$UDID" app.yxi
+          sleep 8
+          mkdir -p shots
+          xcrun simctl io "$UDID" screenshot shots/01-启动.png
+          # 再等一会儿截第二张（首屏可能还在连）
+          sleep 6
+          xcrun simctl io "$UDID" screenshot shots/02-首屏.png
+          ls -lh shots/
+
+      - name: 传回截图
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simulator-shots
+          path: ios/shots/
+          if-no-files-found: warn
