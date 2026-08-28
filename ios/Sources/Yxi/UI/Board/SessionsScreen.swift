@@ -33,6 +33,7 @@ struct SessionsScreen: View {
     var onSessions: ([BoardSession]) -> Void = { _ in }
 
     @State private var sessions: [BoardSession] = []
+    @State private var newSession = false
     @State private var status = ""
     @State private var sendTo: BoardSession?
     @State private var floating = false
@@ -96,6 +97,19 @@ struct SessionsScreen: View {
         // ⚠️ 键见 `pollKey`：外层每次连接状态变化都该换一个新的 `link.id`
         .task(id: pollKey) { await poll() }
         .task(id: pollKey) { await pollUsage() }
+        .sheet(isPresented: $newSession) {
+            NewSessionSheet(recent: Array(NSOrderedSet(array: sessions.map(\.cwd))
+                                            .compactMap { $0 as? String }.prefix(8))) { dir in
+                newSession = false
+                let svc = link.service
+                Task {
+                    // 有就直接开，没有才新建并在那个目录里把 claude 跑起来（幂等）
+                    _ = try? await (svc as? ShellRunner)?
+                        .run(SessionProbe.newSessionCommand(dir: dir))
+                    onOpenChat(SessionProbe.sessionName(forDir: dir), dir)
+                }
+            }
+        }
         .sheet(item: $sendTo) { target in
             SendSheet(target: target) { text in
                 // ⚠️ **不能「弹窗关掉、错误吞掉」。** 原来是 `try?` + 立刻 `sendTo = nil`：
@@ -160,6 +174,7 @@ struct SessionsScreen: View {
             }
             Spacer(minLength: 8)
             HStack(spacing: 8) {
+                pillButton("＋") { newSession = true }
                 pillButton("悬浮") { floating = true }
                 pillButton("文件", action: onOpenFiles)
                 pillButton("终端") { onOpenTerminal(nil, ".") }
@@ -517,5 +532,55 @@ enum Pinned {
     }
     static func set(hostId: String, _ v: Set<String>) {
         UserDefaults.standard.set(Array(v), forKey: "pinned:\(hostId)")
+    }
+}
+
+
+/// 新开一个会话。**先给最近去过的目录**，手机上打路径最费劲。
+private struct NewSessionSheet: View {
+    let recent: [String]
+    let onCreate: (String) -> Void
+    @State private var path = ""
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if !recent.isEmpty {
+                    Section("最近") {
+                        ForEach(recent, id: \.self) { d in
+                            Button(d) { onCreate(d) }
+                                .font(.mono(13)).foregroundStyle(Yx.onSurface).lineLimit(1)
+                        }
+                    }
+                }
+                Section {
+                    TextField("/opt/workspace/…", text: $path)
+                        .font(.mono(14))
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .onSubmit { go() }
+                    if !path.trimmingCharacters(in: .whitespaces).isEmpty {
+                        // 会开成什么名字，当面说清 —— 免得开完在列表里找不到
+                        YxHint("会话名：\(SessionProbe.sessionName(forDir: path.trimmingCharacters(in: .whitespaces)))")
+                    }
+                }
+            }
+            .navigationTitle("新会话开在哪个目录")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("开起来") { go() }
+                        .disabled(path.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+
+    private func go() {
+        let d = path.trimmingCharacters(in: .whitespaces)
+        if !d.isEmpty { onCreate(d) }
     }
 }
