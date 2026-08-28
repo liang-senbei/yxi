@@ -2560,3 +2560,35 @@ CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=-
 **怎么避开**　凡是「关掉签名让它编过」的构建参数，都要记一笔它顺带关掉了什么。
 签名不只是签名，它带着一整套 entitlement；钥匙串、钥匙串共享、推送、
 App Group 都挂在上面。
+
+## #136 清 ANSI 的正则写成 raw string，ICU 把整个模型名吃光
+
+**症状**　顶栏该显示「切到了哪个模型」。`/model` 的回执解析出来是**空串**，
+于是顶栏永远显示上一条 assistant 消息里的旧模型名 —— 看起来像「切模型没生效」。
+
+**根因**　回执长这样（真样本，`ESC` 是真的转义字符）：
+
+```
+<local-command-stdout>Set model to <ESC>[1mOpus 4.6 (1M context)<ESC>[22m and saved …
+```
+
+要把 `<ESC>[1m` 这类 ANSI 去掉。原来写的是
+
+```swift
+raw.replacingOccurrences(of: #"\u{1B}?\[[0-9;]*m"#, with: "", options: .regularExpression)
+```
+
+`#"…"#` 是 **raw string**，Swift 不做转义，于是 ICU 拿到的是字面量 `\u{1B}` ——
+它按**自己**的语法去解释这一串，结果匹配到了整个字符串，替换后剩下空串。
+不报错，只是安静地把内容清空。
+
+**修法**　别用 raw string，让 Swift 先把 ESC 插进去，正则里只留 `\[[0-9;]*m`：
+
+```swift
+raw.replacingOccurrences(of: "\u{1B}?\\[[0-9;]*m", with: "", options: .regularExpression)
+```
+
+**怎么避开**　正则里出现 `\u`、`\x`、`\N` 这类**转义字符字面量**时，
+先想清楚是让 **Swift** 转义还是让**正则引擎**转义 —— raw string 会把这个决定
+默默交给引擎。另：这条是靠「用真回执做测试样本」照出来的，自己编一个
+`Set model to Opus 5` 的干净字符串永远碰不到（没有 ANSI）。

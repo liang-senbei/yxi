@@ -688,6 +688,16 @@
 
 改样式请改 `design/*.dc.html` 源文件（`design/apply_m3.py` 是当初批量转换的脚本，留档）。
 
+- ✅ **iOS 版补齐到与安卓同级（2026-08-28）**：用户要「像素级复刻安卓版」。
+  这一轮补上**文件浏览**（面包屑/跳转/多格式查看/保存到手机）、**实验室预览**
+  （html·会动的 GIF·图片，保存原文件走 SFTP 而不是存预览那份，左滑置顶/删除）、
+  **配置页可编辑**（json 先校验 + 改前备份两道保险）、**盯屏推流**（轮询兜底）、
+  **TodoWrite 卡 + 顶栏「正在做」**、**本对话的模型/强度/模式**、**看 git diff**。
+  逻辑层 **158 个测试全过**；界面在 CI 的 iPhone 16 模拟器上编译+截图。
+  剩下没做的只有「分享到会话」（要单开 Share Extension）和小组件。
+  ⚠️ 途中抓到两个隐蔽 bug，都记进 TROUBLESHOOTING：清 ANSI 的正则写成
+  raw string 会被 ICU 吃掉整个模型名；`CODE_SIGNING_ALLOWED=NO` 顺带废掉钥匙串。
+
 ## iOS 版（`ios/`）—— 状态与硬约束
 
 **目录**：`ios/`，与 `android/` 完全分开，互不引用。SwiftPM 双 target：
@@ -698,15 +708,29 @@
 
 | | 状态 |
 |---|---|
-| `YxiKit`（SSH / 密钥 / 主机存储 / 转录解析 / 屏幕解析） | ✅ **真编译真测试**：430/430 编译单元，98 条测试全绿 |
-| `Yxi`（SwiftUI 全部界面） | ❌ **一行都没编过** |
-| 真机 SSH / 终端 / 分发 / 推送 | ❌ 全部未验证，20 处显式标注 |
+| `YxiKit`（SSH / 密钥 / 主机存储 / 转录解析 / 屏幕解析 / 配置 / 实验室） | ✅ **真编译真测试**，158 条全绿（Linux 上跑） |
+| `Yxi`（SwiftUI 全部界面） | ✅ **在 GitHub 的 macOS runner 上真编译、装进 iPhone 16 模拟器、逐页截图** |
+| 真机 SSH / SFTP / tmux | ✅ **CI 里连的是真 sshd**（见下）——不是假数据 |
+| 分发（装到用户手机上） | ❌ 仍然需要开发者账号或每 7 天重签，见下面三条硬约束 |
+| 推送 | ❌ 未做 |
 
-在 Linux 上验逻辑层：
+在 Linux 上验逻辑层（秒级，日常就用它）：
 ```bash
 export PATH=/opt/swift/usr/bin:$PATH
 cd ios && swift build --target YxiKit && swift test
 ```
+
+**界面怎么验（没有 Mac 也能验）**——`.github/workflows/ios.yml`：
+macOS runner 编译 → 起 iPhone 16 模拟器 → 装上去 → **在 runner 上现起一台
+真 sshd + tmux + 样本文件**，App 用**自己的密钥**连 `127.0.0.1`
+（模拟器与 Mac 共用网络栈，等同安卓模拟器的 `10.0.2.2`）→ 逐页截图传回 artifact。
+
+⚠️ 两个绊过的坑，改 CI 前先看：
+- `CODE_SIGNING_ALLOWED=NO` 会把 entitlement 一起关掉 → 钥匙串全线 `-34018`
+  → `Vault`/`KeyManager` 失效 → 认证层整个废掉。模拟器要 **ad-hoc 签名**
+  （`CODE_SIGN_IDENTITY=-`）。TROUBLESHOOTING #135
+- SwiftUI 那半**在 Linux 上编不了**，所以它的编译错误只有推上去才知道，
+  一轮约 6 分钟。多攒几处改动再推，比一处一推划算。
 
 **三条硬约束（`ios/docs/` 里有完整论证和出处）**：
 
