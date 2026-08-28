@@ -84,7 +84,9 @@ public struct RootView: View {
                 link: live.link,
                 usage: live.link.service as? any UsageService,
                 onPickHost: { app.pick($0) },
-                onOpenChat: { app.open(.chat, session: $0, cwd: $1) },
+                // 点卡片本身 = 用**这个会话上次看的那一面**（没记录过才默认对话）。
+                // 从菜单里点「开终端」是明确指定，不走这条。
+                onOpenChat: { app.open(app.lastMode(of: $0) ?? .chat, session: $0, cwd: $1) },
                 onOpenTerminal: { app.open(.terminal, session: $0 ?? "", cwd: $1) },
                 onOpenFiles: { app.open(.files, session: "", cwd: "") },
                 onSessions: { app.sessions = $0 }
@@ -228,7 +230,8 @@ struct EmptyNote: View {
 final class AppState: ObservableObject {
 
     enum Tab { case sessions, hosts, config, settings }
-    enum Mode: Hashable { case terminal, chat, files, lab }
+    /// ⚠️ 带 `String` 原始值：要落盘记住「每个会话上次看的是哪一面」。
+    enum Mode: String, Hashable { case terminal, chat, files, lab }
     struct Target: Equatable {
         var mode: Mode
         var session: String
@@ -364,11 +367,32 @@ final class AppState: ObservableObject {
         watcher.start(live, hostID: id)
     }
 
+    /// ⚠️ **记住每个会话上次看的是哪一面。**
+    /// 有的会话你只在终端里用，有的只看对话 —— 每次都退回默认模式，
+    /// 等于每次进去都要多点一下。这是最省的一种「它记得我」。
+    ///
+    /// ⚠️ 只在「没有明确指定」时才用记住的那个：从会话卡上点「开终端」
+    /// 就是要终端，不能被记忆顶掉。所以 `remembered` 是给调用方选的，不是自动覆盖。
     func open(_ mode: Mode, session: String, cwd: String) {
         workspace = Target(mode: mode, session: session, cwd: cwd)
+        rememberMode(mode, for: session)
     }
 
-    func switchMode(_ mode: Mode) { workspace?.mode = mode }
+    /// 这个会话上次看的是哪一面；没记录过就 nil，调用方自己定默认。
+    func lastMode(of session: String) -> Mode? {
+        guard let raw = UserDefaults.standard.string(forKey: "mode/" + session) else { return nil }
+        return Mode(rawValue: raw)
+    }
+
+    private func rememberMode(_ mode: Mode, for session: String) {
+        guard !session.isEmpty else { return }
+        UserDefaults.standard.set(mode.rawValue, forKey: "mode/" + session)
+    }
+
+    func switchMode(_ mode: Mode) {
+        workspace?.mode = mode
+        if let t = workspace { rememberMode(mode, for: t.session) }
+    }
 
     func save(_ host: Host) {
         store.upsert(host)      // 地址/端口变了会自动忘掉旧指纹（#68）

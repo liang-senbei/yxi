@@ -160,7 +160,7 @@ private struct HostRow: View {
                     // 安卓 #124 是这条的反面教材：`clickable` 不认「长按」这回事，
                     // 长按原地松手照样发 onClick，于是长按一次就误开一次对话。
                     .onTapGesture(perform: onOpen)
-                    .onLongPressGesture(perform: toggleQuota)
+                    .onLongPressGesture { toggleQuota() }
 
                     // 铃铛：让手机为这台机器主动响。⚠️ 需要那台机器上装了 yxi-hook
                     Button(action: onWatch) {
@@ -274,7 +274,8 @@ private struct HostRow: View {
     /// ⚠️ **每次展开都重查一遍，旧值先摆着**（安卓那边同样的做法）：
     /// 额度是会动的，展开时看到的必须是刚拿到的；但也不能把界面清空让人对着空白等。
     private func toggleQuota() {
-        quotaOpen.toggle()
+        // 时长照抄 [ToolCards] 里那个展开动画，全 App 一个手感
+        withAnimation(.easeInOut(duration: 0.18)) { quotaOpen.toggle() }
         guard quotaOpen, !quotaBusy else { return }
         Task { await loadQuota() }
     }
@@ -291,7 +292,7 @@ private struct HostRow: View {
         // 首连要用户当面核对指纹再拍板，那是「会话」页那条路的事；
         // 在一个查额度的小面板里悄悄记下一把没人看过的主机公钥，
         // 等于把 SSH 唯一那道防线降级成「反正也没人看」（#24 / #22）。
-        guard let stored = h.hostKey else {
+        guard let knownKey = h.hostKey else {
             quotaNote = "还没连过这台主机 —— 先点一下连上、核对指纹，再来看额度。"
             return
         }
@@ -302,7 +303,7 @@ private struct HostRow: View {
         }
         let session = SSHSession(config: cfg, gate: HostKeyGate(
             target: cfg.target,
-            stored: { stored },
+            stored: { knownKey },
             // 这条连接只读不写：主机表由「会话」页那条连接负责维护
             remember: { _ in },
             prompt: .denyEverything
