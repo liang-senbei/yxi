@@ -281,10 +281,15 @@ struct ChatScreen: View {
     @ViewBuilder
     private var pendingRow: some View {
         if let p = model.pending {
+            // ⚠️ **必须写明类型。** 直接写 `p.tabs.count > 1 ? model.goPrevQuestion : nil`
+            // 让类型检查器去推 `(() -> Void)?`，它会直接放弃
+            // （CI 报 failed to produce diagnostic for expression）。
+            let multi = p.tabs.count > 1
+            let prev: (() -> Void)? = multi ? { model.goPrevQuestion() } : nil
+            let next: (() -> Void)? = multi ? { model.goNextQuestion() } : nil
             PendingCard(pending: p, busy: model.answering,
                         onPick: model.pick, onSubmit: model.submitMultiSelect,
-                        onPrev: p.tabs.count > 1 ? model.goPrevQuestion : nil,
-                        onNext: p.tabs.count > 1 ? model.goNextQuestion : nil)
+                        onPrev: prev, onNext: next)
                 .padding(.horizontal, 14).padding(.bottom, 8)
         }
     }
