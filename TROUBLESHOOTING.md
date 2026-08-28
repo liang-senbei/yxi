@@ -2694,3 +2694,37 @@ sudo /usr/sbin/sshd -f ~/sshd_ci.conf
 **怎么避开**　在别人的机器（CI runner、别人的服务器）上做 SSH 自动化，
 **起一台自己的**永远比改系统那台省事：配置可控、日志可读、不影响宿主、
 用完随机器一起消失。改系统 sshd 的每一步都可能被某条你看不见的策略推翻。
+
+## #140 公钥「装进去了」却还是 Permission denied —— 两把钥匙被粘成了一行
+
+**症状**　CI 里把 App 的公钥追加进 runner 的 `authorized_keys`，权限、属主、
+主机指纹全部核对无误（`ssh-keyscan` 扫到的跟自己生成的一模一样），
+sshd 日志也走到 `trying public key file /Users/.../authorized_keys`，
+然后认证仍然被拒。
+
+**根因**　`KeyIdentity.authorizedKeysLine` 生成的字符串**末尾没有换行符**
+（`"<key> <comment>"`，就这样）。于是
+
+```bash
+cat app.pub       >> ~/.ssh/authorized_keys
+cat ci_probe.pub  >> ~/.ssh/authorized_keys
+```
+
+产出的是**一行**：`ssh-ed25519 AAAA…app-keyssh-ed25519 AAAA…ci-key`。
+sshd 读到一行畸形数据，**两把钥匙一把都匹配不上**。
+本机可复现：上面那两条 `cat` 之后 `grep -c "^ssh-"` 只有 1，不是 2。
+
+**修法**　追加时自己补换行，并且**核一遍每行都是完整的钥匙**：
+
+```bash
+{ cat "$PUB"; echo; } >> ~/.ssh/authorized_keys
+awk '{ if (NF < 2 || $1 !~ /^ssh-/) print "❌ 第 " NR " 行不是合法钥匙行" }' ~/.ssh/authorized_keys
+```
+
+**怎么避开**　`cat a >> f` 只在 `a` 自带尾换行时才安全，而**程序生成的单行文本
+通常不带**。凡是「往一个按行解析的文件里追加」，都要么自己补换行、要么
+追加后立刻按行核一遍。
+
+这一条也说明**服务端日志值多少**：客户端从头到尾只有一句
+`Permission denied (publickey)`，连着三轮都只能靠猜；
+把 sshd 起成 `-D -e` 把日志留下来之后，方向立刻就清楚了。

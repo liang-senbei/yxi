@@ -27,6 +27,13 @@ packages:
 settingGroups:
   common:
     SWIFT_VERSION: "5.9"
+    # ⚠️ **五个 bundle 的版本号必须一致**（App + 两个扩展 + 两个内嵌 framework）。
+    # 扩展跟宿主不符会被「app extension 版本与宿主不符」直接打回；
+    # 内嵌 framework 不一致也会在上传校验里冒警告。
+    # 放在 common 里是为了**改一处全都跟着走** —— 分开写迟早漏一个。
+    # ⚠️ 锚点在这儿**定义**（YAML 要求先定义后引用），下面几处都引用它
+    MARKETING_VERSION: &marketingVersion "0.9.27"
+    CURRENT_PROJECT_VERSION: &buildVersion "71"
     # ⚠️ 内嵌的 framework **必须有 Info.plist**，否则装进模拟器时会失败：
     #   Failed to load Info.plist ... Yxi.app/Frameworks/YxiKit.framework
     # （app target 自己有 plist 文件，所以它那儿再覆盖回 NO）
@@ -78,8 +85,12 @@ targets:
         # ⚠️ 版本号要跟安卓版对齐（设置页显示的就是它）。
         # app target 关了 GENERATE_INFOPLIST_FILE，所以必须在这儿写死，
         # 否则 Info.plist 里是默认的 1.0 (1) —— 截图里就是这么露馅的。
-        CFBundleShortVersionString: "0.9.27"
-        CFBundleVersion: "71" 
+        # ⚠️ 下面这俩 `&锚点` 被两个扩展引用（YAML 锚点，XcodeGen 认）。
+        # **App 和它的扩展版本号必须一模一样** —— 不一样在上传时会被
+        # 「app extension 版本与宿主不符」直接打回，而那时离发版只剩最后一步。
+        # 从此只改这一处，扩展跟着走。
+        CFBundleShortVersionString: *marketingVersion
+        CFBundleVersion: *buildVersion
         UILaunchScreen: {}
         # 文件模式「保存」下来的东西落在 App 的 Documents 里。
         # ⚠️ 这两条是让它在系统「文件」App 里**看得见**的唯一开关 ——
@@ -100,9 +111,92 @@ targets:
         # 会**导入它自己**，于是找不到 RootView（CI 实测报 cannot find 'RootView' in scope）。
         PRODUCT_MODULE_NAME: YxiApp
         PRODUCT_BUNDLE_IDENTIFIER: app.yxi
-        MARKETING_VERSION: "0.9.27"
-        CURRENT_PROJECT_VERSION: "71"
         GENERATE_INFOPLIST_FILE: NO
+    # ⚠️ App Group 是主 App 和扩展之间**唯一**的共享通道（见 Sources/YxiKit/Shared.swift）。
+    # 注意 CI 的 xcodebuild 命令行上有 `CODE_SIGN_ENTITLEMENTS=`，会把这份整个清掉 ——
+    # 于是 CI 里的包**没有 App Group**，分享扩展和小组件在那儿只能是空的。
+    # 那是 ad-hoc 签名的固有限制，不是配置写错了。
+    entitlements:
+      path: App/Yxi.entitlements
+      properties:
+        com.apple.security.application-groups: [group.app.yxi]
     dependencies:
       - target: Yxi
       - target: YxiKit
+      # ⚠️ embed 显式写出来。默认值是对的，但漏了的表现是「扩展就是不出现」——
+      # 编译全绿、装得上、分享面板里没有 Yxi，没有任何报错可查。
+      - target: YxiShare
+        embed: true
+      - target: YxiWidget
+        embed: true
+
+  # 分享扩展：别的 App 里「分享 → Yxi」。对标安卓的 ShareActivity。
+  # ⚠️ **它不发送，只把东西暂存进共享容器**，等主 App 下次打开再送进会话。
+  #    为什么不能当场发：见 Sources/YxiKit/Shared.swift 里 Outbox 的说明。
+  YxiShare:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Sources/ShareExt
+      # ⚠️ **直接把这个文件编进来，不是 `import YxiKit`。**
+      # 扩展要链宿主的 framework 就得把 LD_RUNPATH_SEARCH_PATHS 指回 ../../Frameworks，
+      # 配错是**启动即 dyld 崩** —— 而这台机器编不了 iOS，配错了得等装进模拟器才知道。
+      # 它只依赖 Foundation，编两遍代价为零；跨进程传的只有 JSON，不是类型。
+      - Sources/YxiKit/Shared.swift
+    entitlements:
+      path: Sources/ShareExt/YxiShare.entitlements
+      properties:
+        com.apple.security.application-groups: [group.app.yxi]
+    info:
+      path: Sources/ShareExt/Info.plist
+      properties:
+        CFBundleDisplayName: Yxi
+        CFBundleShortVersionString: *marketingVersion
+        CFBundleVersion: *buildVersion
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          # ⚠️ Swift 类要带模块名才找得到。少了前缀就是运行时
+          # 「无法加载扩展」，编译期一点提示都没有。
+          NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).ShareViewController"
+          NSExtensionAttributes:
+            # 跟安卓 AndroidManifest 里那三条 mimeType 对齐：text/* image/* application/*
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsText: true
+              NSExtensionActivationSupportsWebURLWithMaxCount: 1
+              NSExtensionActivationSupportsImageWithMaxCount: 10
+              NSExtensionActivationSupportsFileWithMaxCount: 10
+    settings:
+      groups: [common]
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.yxi.share   # ⚠️ 必须以宿主的 bundle id 打头
+        GENERATE_INFOPLIST_FILE: NO                # 上面写了 info.path，再生成一份就撞了
+        # ⚠️ 打开它：用了扩展里不能用的 API（比如 UIApplication.shared）会**编不过**，
+        # 而不是装上去之后才崩。这正是我们最需要提前发现的那一类错。
+        APPLICATION_EXTENSION_API_ONLY: YES
+
+  # 桌面小组件 + 控制中心按钮。对标安卓的 WaitingWidget / WaitingTile。
+  YxiWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Sources/Widget
+      - Sources/YxiKit/Shared.swift   # 同上，直接编进来
+    entitlements:
+      path: Sources/Widget/YxiWidget.entitlements
+      properties:
+        com.apple.security.application-groups: [group.app.yxi]
+    info:
+      path: Sources/Widget/Info.plist
+      properties:
+        CFBundleDisplayName: Yxi
+        CFBundleShortVersionString: *marketingVersion
+        CFBundleVersion: *buildVersion
+        NSExtension:
+          # WidgetKit 靠 @main 找入口，没有 NSExtensionPrincipalClass
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      groups: [common]
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.yxi.widget
+        GENERATE_INFOPLIST_FILE: NO
+        APPLICATION_EXTENSION_API_ONLY: YES

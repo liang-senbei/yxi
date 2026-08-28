@@ -207,6 +207,8 @@ final class AppState: ObservableObject {
     let store = HostStore()
     let keys = KeyManager()
     let trust = TrustGate()
+    /// 前台盯梢（主机页那个铃铛后面接的就是它）。见 [Watcher] 头上关于 iOS 后台的说明。
+    let watcher = Watcher()
 
     /// ⚠️ **初始标签页可以用启动参数指定** —— 给自动化截图用：
     /// `xcrun simctl launch <udid> app.yxi --args -yxiTab config`
@@ -319,6 +321,15 @@ final class AppState: ObservableObject {
         bind()
     }
 
+    /// ⚠️ 铃铛开着才盯。**关掉要真的停** —— 否则用户关了它还在耗电、还在响。
+    func refreshWatch() {
+        guard let id = currentID, store.get(id)?.watch == true, let live else {
+            watcher.stop()
+            return
+        }
+        watcher.start(live)
+    }
+
     func open(_ mode: Mode, session: String, cwd: String) {
         workspace = Target(mode: mode, session: session, cwd: cwd)
     }
@@ -348,6 +359,7 @@ final class AppState: ObservableObject {
         h.watch = on
         store.upsert(h)
         hosts = store.hosts
+        refreshWatch()      // ⚠️ 开关要**立刻**生效：关了还在响 = 关不掉
     }
 
     private func bind() {
@@ -358,5 +370,6 @@ final class AppState: ObservableObject {
         // HostLink 是自己的 ObservableObject —— 不转发的话它 publish 新的 Link，
         // 这一层不会重绘，界面就停在「正在连接」不动。
         forward = link.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+        refreshWatch()      // 换主机 = 换盯梢对象
     }
 }

@@ -9,6 +9,11 @@ import YxiKit
 /// ⚠️ 这个界面**不需要在服务器上装任何东西**：`tmux list-sessions` 和
 /// `~/.cloud-status` 下的状态文件都是现成的（后者由 `cc-state` 写，早就在跑）。
 @MainActor
+enum SendError: LocalizedError {
+    case notConnected
+    var errorDescription: String? { "没连上" }
+}
+
 struct SessionsScreen: View {
 
     let host: Host
@@ -91,9 +96,21 @@ struct SessionsScreen: View {
         .task(id: pollKey) { await pollUsage() }
         .sheet(item: $sendTo) { target in
             SendSheet(target: target) { text in
+                // ⚠️ **不能「弹窗关掉、错误吞掉」。** 原来是 `try?` + 立刻 `sendTo = nil`：
+                // 发不出去时用户什么都看不到，以为发出去了 —— 而他正是在
+                // 「Claude 等你回话」的时候按的这个按钮，最不该静默失败。
+                // ⚠️ 用 `Task {}`（非结构化）：弹窗关掉了也要把话送出去。
                 let svc = link.service
-                Task { try? await svc?.send(session: target.name, text: text) }
                 sendTo = nil
+                Task {
+                    do {
+                        guard let svc else { throw SendError.notConnected }
+                        try await svc.send(session: target.name, text: text)
+                        status = "已发给 \(target.short)"
+                    } catch {
+                        status = "没发出去（\(target.short)）：" + String(error.localizedDescription.prefix(40))
+                    }
+                }
             }
         }
         .fullScreenCover(isPresented: $floating) {
@@ -286,6 +303,7 @@ struct SessionsScreen: View {
         do {
             sessions = try await svc.snapshot()
             status = ""
+            publishToWidget()
         } catch is CancellationError {
             // ⚠️ **取消不是失败。** 安卓上同一个错踩了五次（TROUBLESHOOTING #78/#79）：
             // 界面重组时任务被取消，异常被当成故障写进 status，
@@ -294,6 +312,23 @@ struct SessionsScreen: View {
         } catch {
             status = "刷新失败：\(error.localizedDescription)"
         }
+    }
+
+    /// 把「几个在等你」留给桌面小组件。
+    ///
+    /// ⚠️ **写完必须叫 `reloadAllTimelines()`** —— 只写文件的话小组件要等系统
+    /// 下次给预算才刷新，桌面上可能挂着几十分钟前的数字。
+    /// ⚠️ 这一句只能写在界面层：`YxiKit` 不许 import WidgetKit（它得在 Linux 上编得过）。
+    private func publishToWidget() {
+        let waiting = sessions.filter { $0.state == .needsYou }
+        WaitingSnapshot.publish(
+            waiting: waiting.count,
+            working: sessions.filter { $0.state == .working }.count,
+            names: waiting.map(\.short)
+        )
+        #if canImport(WidgetKit)
+        WidgetCenter.shared.reloadAllTimelines()
+        #endif
     }
 
     private func pullRefresh() async {

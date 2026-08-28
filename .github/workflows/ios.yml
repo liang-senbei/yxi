@@ -65,7 +65,6 @@ jobs:
             CODE_SIGNING_ALLOWED=YES \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY=- \
-            CODE_SIGN_ENTITLEMENTS= \
             2>&1 | grep -E "error:|warning: .*deprecated|BUILD|Compiling|Linking" | tail -60
 
       # ⚠️ 这一步是整条 CI 里**唯一**能证明「真能连上、真读得到文件」的地方。
@@ -167,6 +166,13 @@ jobs:
           APP=$(find build/Build/Products -name 'Yxi.app' -maxdepth 3 | head -1)
           echo "APP=$APP"
           xcrun simctl install "$UDID" "$APP"
+          # ⚠️ App Group 的容器 —— 分享扩展和小组件全靠它跟主 App 交换数据。
+          # 之前构建参数里写了 `CODE_SIGN_ENTITLEMENTS=`（命令行级覆盖，
+          # 把所有 target 的 entitlements 清空），于是**签名方式对了也没有容器**。
+          # 这一句是唯一能证明它真通了的检查；拿不到就明说，不当它通过。
+          xcrun simctl get_app_container "$UDID" app.yxi group.app.yxi \
+            && echo "✅ App Group 容器拿到了" \
+            || echo "⚠️ App Group 容器拿不到 —— 分享扩展只能暂存、小组件不显示数字"
           mkdir -p shots
           # 每个标签页单独启一次并截图 —— 用启动参数指定初始页（见 AppState.tab 的注释）。
           # 比起引一整套 XCUITest，这样最省：一条 simctl 命令就够。
@@ -199,12 +205,20 @@ jobs:
             echo "⚠️ App 取不到自己的密钥：$(cat "$PUB")"
             E2E=0
           else
-            cat "$PUB" >> ~/.ssh/authorized_keys
+            # ⚠️⚠️ **必须自己补换行。** App 写出来的 `authorizedKeysLine` **末尾没有换行符**，
+            # `cat >>` 直接追加会把它和后面那把 CI 自测密钥**粘成同一行** ——
+            # sshd 读到的是一行畸形数据，两把钥匙**一把都匹配不上**。
+            # 现象就是「公钥明明装进去了，服务器还是 Permission denied」。
+            # 用 `sed '$a\'` 保证末尾恰好一个换行，追加前后都不会粘连。
+            { cat "$PUB"; echo; } >> ~/.ssh/authorized_keys
             echo "公钥已装： $(cut -c1-40 "$PUB")…"
             # 自己先验一把 sshd 是否真的能用。⚠️ 要**另生成一把 CI 专用密钥**：
             # runner 自己那把并不在 authorized_keys 里，拿它测必然失败（上一轮的假警报）
             ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/ci_probe <<< y >/dev/null 2>&1 || true
-            cat ~/.ssh/ci_probe.pub >> ~/.ssh/authorized_keys
+            { cat ~/.ssh/ci_probe.pub; echo; } >> ~/.ssh/authorized_keys
+            # 每一行都必须是完整的一把钥匙 —— 粘行是上一轮翻车的原因，直接核一遍
+            echo "authorized_keys 共 $(grep -c "^ssh-" ~/.ssh/authorized_keys) 行合法钥匙"
+            awk '{ if (NF < 2 || $1 !~ /^ssh-/) print "❌ 第 " NR " 行不是合法钥匙行" }' ~/.ssh/authorized_keys
             ssh -p 2222 -i ~/.ssh/ci_probe -o StrictHostKeyChecking=no -o BatchMode=yes \
                 -o ConnectTimeout=8 "$(whoami)@127.0.0.1" 'echo SSH_OK; tmux ls' \
                 || { echo "⚠️ sshd 自测没通。"; \
@@ -212,7 +226,7 @@ jobs:
                      awk '{print $1, substr($2,1,24)"…"}' ~/.ssh/authorized_keys; \
                      ls -ld ~ ~/.ssh ~/.ssh/authorized_keys; \
                      echo "--- 服务端日志（真实原因在这里）---"; \
-                     tail -40 ~/sshd.log; }
+                     tail -80 ~/sshd.log; }
           fi
 
           # ⚠️ **必须用数组。** 主机公钥是 `ssh-ed25519 AAAA…`，**中间有空格**；
