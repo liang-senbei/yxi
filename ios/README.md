@@ -273,3 +273,44 @@ cd ios && swift build && swift test      # 2026-08-28 实测：121 个测试全�
 ```
 
 界面层改动才需要 Mac。CI 也按这个分工（`.github/workflows/ios.yml`）。
+
+---
+
+## 怎么在没有 Mac 的情况下把 iOS 跑起来（2026-08-28 打通）
+
+**结论：不需要 Mac 也能编译、能进模拟器、能截图。** GitHub 的 macOS runner
+预装 Xcode 和模拟器，既不用 Apple ID 也不用 sudo。
+
+| 环节 | 在哪跑 | 花费 |
+|---|---|---|
+| `YxiKit` 编译 + 全部测试 | **本机 Linux**（装了 Swift 6.0.3） | 免费、秒级 |
+| iOS App 编译 | GitHub macOS runner | 按 10 倍分钟计费 |
+| 起模拟器 · 装 App · 截图 | 同上，截图作为 artifact 传回 | 同上 |
+
+```bash
+cd ios && swift build && swift test      # 逻辑层，本机就够
+git push                                  # 碰了 ios/ 就自动触发 iOS CI
+```
+
+截图取回来看（artifact 里是 PNG）：
+```bash
+TOKEN=$(sed -n 's#https://[^:]*:\([^@]*\)@github.com#\1#p' ~/.git-credentials | head -1)
+# 取最近一次 run 的 artifact id，再 curl .../artifacts/<id>/zip
+```
+
+### 这条路上踩的坑（都真踩过）
+
+| 现象 | 原因 / 修法 |
+|---|---|
+| `Validate plug-in 'SwiftTermBuildInfoPlugin'` 卡住构建 | SPM 插件默认要人点「信任」→ 加 `-skipPackagePluginValidation -skipMacroValidation` |
+| `module 'Citadel' has a minimum deployment target of iOS 17.0` | SSH 库要求 iOS 17，最低版本只能跟它走 |
+| `cannot find 'RootView' in scope` | app 产品名 `Yxi` 跟界面框架模块同名 → `import Yxi` 导入了自己。加 `PRODUCT_MODULE_NAME: YxiApp` |
+| 装进模拟器报 `Failed to load Info.plist ... Frameworks/YxiKit.framework` | 内嵌 framework 没生成 Info.plist → `GENERATE_INFOPLIST_FILE: YES` |
+| `no such module 'UIKit'` / `'XCTest'`（在 Mac mini 上） | 只有**命令行工具**没有完整 Xcode。iOS SDK、XCTest、模拟器都只随完整 Xcode 附带 |
+
+### Mac mini 的现状
+
+`ssh mac` 通（反向隧道 2223）。**但它只有命令行工具，没有完整 Xcode** ——
+装 Xcode 要 Apple ID 二次验证 + sudo 密码，两样都只有机器主人能给。
+在它上面能做的：`YxiKit` 用真 Apple 工具链编译（已验证通过）。
+不能做的：跑测试、编界面、起模拟器。**所以 iOS 的验证走 CI，不走它。**
