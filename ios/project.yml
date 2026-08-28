@@ -27,6 +27,10 @@ packages:
 settingGroups:
   common:
     SWIFT_VERSION: "5.9"
+    # ⚠️ 内嵌的 framework **必须有 Info.plist**，否则装进模拟器时会失败：
+    #   Failed to load Info.plist ... Yxi.app/Frameworks/YxiKit.framework
+    # （app target 自己有 plist 文件，所以它那儿再覆盖回 NO）
+    GENERATE_INFOPLIST_FILE: "YES"
     # 模拟器上跑不需要签名。真机分发是另一回事，见 docs/分发.md
     CODE_SIGNING_ALLOWED: NO
     CODE_SIGNING_REQUIRED: NO
