@@ -39,6 +39,17 @@ public protocol ShellRunner {
     func run(_ command: String) async throws -> String
 }
 
+/// 文件浏览要用的那点 SFTP 能力。
+///
+/// ⚠️ **每次开一条新通道、用完就关**（`upload` 那儿也是这么做的）：
+/// 复用一条长命通道，空闲久了会被服务器关掉、或上一次出错后进坏状态，
+/// 之后每次操作都失败 —— 安卓侧踩过（附件上传要点好几次才成功）。
+public protocol FileService {
+    func listDir(_ path: String) async throws -> [SFTP.Entry]
+    func readFile(_ path: String, max: Int) async throws -> Data
+    func resolve(_ path: String) async throws -> String
+}
+
 public protocol UsageService {
     /// ⚠️ **探不到 `ccusage` 必须返回 nil。**
     /// 界面会把整块藏掉：不显示 0、不显示「未知」、不画空进度条。

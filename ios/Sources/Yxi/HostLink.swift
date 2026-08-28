@@ -159,7 +159,7 @@ struct MissingCredentials: LocalizedError {
 /// ⚠️ **这一层只搬运，不做业务判断。** 命令怎么写、输出怎么解析全在
 /// `YxiKit.SessionProbe` / `Usage` / `TranscriptStream` 里 —— 那边是纯函数，
 /// **Linux 上有测试盯着**；搬到这里就再也测不到了。
-struct RemoteHost: ChatBackend, UsageService, ShellRunner {
+struct RemoteHost: ChatBackend, UsageService, ShellRunner, FileService {
 
     let ssh: SSHSession
 
@@ -238,6 +238,26 @@ struct RemoteHost: ChatBackend, UsageService, ShellRunner {
         // 白名单在 YxiKit 里，不在白名单返回 nil —— 这里什么都不做
         guard let cmd = SessionProbe.keyCommand(target: session, key: key) else { return }
         _ = try await ssh.exec(cmd)
+    }
+
+    // MARK: FileService
+
+    func listDir(_ path: String) async throws -> [SFTP.Entry] {
+        let sftp = try await ssh.openSFTP()
+        defer { Task { await sftp.close() } }
+        return try await sftp.list(path)
+    }
+
+    func readFile(_ path: String, max: Int) async throws -> Data {
+        let sftp = try await ssh.openSFTP()
+        defer { Task { await sftp.close() } }
+        return try await sftp.read(path, max: max)
+    }
+
+    func resolve(_ path: String) async throws -> String {
+        let sftp = try await ssh.openSFTP()
+        defer { Task { await sftp.close() } }
+        return try await sftp.realpath(path)
     }
 
     // MARK: 附件（PRD 附录 F.1）

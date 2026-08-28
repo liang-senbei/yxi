@@ -123,9 +123,12 @@ private struct Workspace: View {
                     EmptyNote(text: "没连上，对话模式用不了。下拉「会话」页可以重连。")
                 }
             case .files:
-                // ponytail: 文件模式还没人写（SFTP 那半 `YxiKit.SFTP` 已经就绪且有测试）。
-                // 先说实话而不是给个点了没反应的按钮 —— 补的时候换掉这一块即可。
-                EmptyNote(text: "文件模式还没做。SFTP 那层（YxiKit.SFTP）已经好了，缺的是界面。")
+                if let fs = app.live?.link.service as? FileService {
+                    // 起点 = 这个会话的 cwd。空的话交给 FilesScreen 退到家目录
+                    FilesScreen(files: fs, startDir: target.cwd.isEmpty ? "." : target.cwd)
+                } else {
+                    EmptyNote(text: "没连上，文件模式用不了。下拉「会话」页可以重连。")
+                }
             case .lab:
                 LabScreen(app: app)
             }

@@ -211,3 +211,14 @@ public enum Paths {
         return out
     }
 }
+
+/// 文件大小的人话。跟安卓那份逐字对齐（`FilesScreen.human`）。
+public func humanSize(_ n: Int64) -> String {
+    let k = 1024.0
+    switch n {
+    case ..<1024:            return "\(n) B"
+    case ..<(1024 * 1024):   return String(format: "%.0f K", Double(n) / k)
+    case ..<(1024 * 1024 * 1024): return String(format: "%.1f M", Double(n) / k / k)
+    default:                 return String(format: "%.1f G", Double(n) / k / k / k)
+    }
+}

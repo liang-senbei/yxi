@@ -81,6 +81,11 @@ targets:
         CFBundleShortVersionString: "0.9.27"
         CFBundleVersion: "71" 
         UILaunchScreen: {}
+        # 文件模式「保存」下来的东西落在 App 的 Documents 里。
+        # ⚠️ 这两条是让它在系统「文件」App 里**看得见**的唯一开关 ——
+        # 少了它们文件确实存下来了，但用户在手机上永远找不到，等于没存。
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
         NSLocalNetworkUsageDescription: 连接你自己的服务器
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
     settings:
