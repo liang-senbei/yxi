@@ -1,5 +1,8 @@
 import SwiftUI
 import YxiKit
+#if canImport(WidgetKit)
+import WidgetKit
+#endif
 
 /// 会话看板：**等你 / 干活中 / 已完成 / 空闲** 四段（前三段是主角）。
 ///

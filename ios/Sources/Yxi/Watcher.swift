@@ -45,10 +45,11 @@ final class Watcher: ObservableObject {
     }
 
     private func tick(_ link: HostLink) async {
-        guard let svc = link.service else { return }
+        // ⚠️ `service` 在 `HostLink.link` 那一层（`Link` 结构体上），不在 HostLink 上
+        guard let svc = link.link.service else { return }
         guard let sessions = try? await svc.snapshot() else { return }   // 抓不到就下一轮再说
-        let waiting = sessions.filter { $0.state == .needsYou }
-        let names = Set(waiting.map(\.name))
+        let waiting = sessions.filter { $0.state == SessionState.needsYou }
+        let names = Set(waiting.map { $0.name })
         for s in waiting where !notified.contains(s.name) {
             await notify(session: s)
         }

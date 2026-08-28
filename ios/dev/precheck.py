@@ -42,6 +42,16 @@ for f in sorted(pathlib.Path("Sources").rglob("*.swift")):
     if d:
         bad.append(f"{f} 花括号差 {d}（改嵌套的 SwiftUI 结构最容易漏收尾）")
 
+    # ⚠️ 判「有没有 import」要看**行首的真 import 语句**。全文找字符串会被
+    # 注释里提到的那句骗过去 —— 这个检查第一版就是这么放行了一个真错的
+    # （SessionsScreen 的注释里正好写着 import WidgetKit）。
+    if "WidgetCenter" in code and not re.search(r'^\s*import WidgetKit\b', raw, re.M):
+        bad.append(f"{f} 用了 WidgetCenter 却没 import WidgetKit（要用 #if canImport 包着）")
+    # ⚠️ **这里不能加「link.service 写错了」这类规则。** 试过：`SessionsScreen`
+    # 里的 `link` 是 `Link`（写 `link.service` 是对的），`Watcher` 里的是 `HostLink`
+    # （得写 `link.link.service`）—— **光看文本分不出来**，规则一加就误报正确代码。
+    # 这个文件只能放**不需要类型信息**就能判的检查；要类型的交给 CI。
+
     for rx, why in CHECKS:
         for m in rx.finditer(code):
             line = code[:m.start()].count("\n") + 1
