@@ -266,3 +266,49 @@ extension SessionProbe {
             + "{ tmux new-session -d -s '\(n)' -c '\(d)'; tmux send-keys -t '\(n)' 'claude' Enter; }"
     }
 }
+
+// MARK: - 新会话开在哪个目录
+
+/// 「新开一个会话」的候选目录。跟安卓 `agent/Dirs.kt` 同一套规则。
+///
+/// ⚠️ **候选是「还没开会话的目录」，不是「现有会话的 cwd」。**
+/// 安卓那版一开始列的正是后者 —— 那些目录已经开着会话，点进去只会跳回同一个，
+/// 这个入口等于什么也没做。用户原话：「已经开着的对话就不支持再开」。
+public enum Dirs {
+
+    /// 从现有会话的 cwd 反推该去哪几个父目录里找。
+    /// ⚠️ **不写死 `/root/src/workspace`** —— 换个客户、换台机器路径就不一样。
+    public static func parents(of cwds: [String]) -> [String] {
+        var seen = Set<String>()
+        return cwds.compactMap { cwd -> String? in
+            let t = String(cwd.reversed().drop { $0 == "/" }.reversed())
+            guard let i = t.lastIndex(of: "/"), i != t.startIndex else { return nil }
+            return String(t[t.startIndex..<i])
+        }.filter { seen.insert($0).inserted }
+    }
+
+    /// ⚠️ **只列一层**（`-maxdepth 1`）：工作区下面动辄几万个文件，
+    /// 递归会把 SSH 通道塞满，而我们要的只是「有哪几个项目」。
+    public static func listCommand(parents: [String]) -> String? {
+        let ps = parents.filter { $0.hasPrefix("/") }.prefix(6)
+        guard !ps.isEmpty else { return nil }
+        return ps.map { p in
+            let q = p.replacingOccurrences(of: "'", with: "'\\''")
+            return "find '\(q)' -maxdepth 1 -mindepth 1 -type d 2>/dev/null"
+        }.joined(separator: "; ")
+    }
+
+    /// - Parameter taken: 已经开着会话的目录 —— **这些要剔掉**
+    public static func candidates(_ out: String, taken: [String]) -> [String] {
+        let busy = Set(taken.map { String($0.reversed().drop { $0 == "/" }.reversed()) })
+        var seen = Set<String>()
+        return out.components(separatedBy: "\n")
+            .map { String($0.trimmingCharacters(in: .whitespaces).reversed().drop { $0 == "/" }.reversed()) }
+            .filter { $0.hasPrefix("/") }
+            // `.git` / `.cache` 那些不是项目
+            .filter { !(Paths.nameOf($0).hasPrefix(".")) }
+            .filter { !busy.contains($0) }
+            .filter { seen.insert($0).inserted }
+            .sorted { Paths.nameOf($0).lowercased() < Paths.nameOf($1).lowercased() }
+    }
+}

@@ -1,5 +1,8 @@
 package app.yxi.ui
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import app.yxi.ui.theme.Dim
 import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -343,7 +346,11 @@ fun SessionsScreen(
 
     if (newSession) {
         NewSessionDialog(
-            recent = sessions.map { it.cwd }.distinct().take(8),
+            ssh = ssh,
+            // ⚠️ **传的是「已经开着会话的目录」，用来把它们从候选里剔掉** ——
+            // 原来这个参数传的是同一批目录、却当成「推荐去处」列出来，正好反了：
+            // 点进去只会跳回同一个会话，这个入口等于什么也没做。
+            taken = sessions.map { it.cwd },
             onDismiss = { newSession = false },
             onCreate = { dir ->
                 newSession = false
@@ -690,31 +697,77 @@ private fun SendSheet(
  * 通勤路上想起「该让 X 项目跑个活」，不用等到电脑前。
  */
 @Composable
-private fun NewSessionDialog(recent: List<String>, onDismiss: () -> Unit, onCreate: (String) -> Unit) {
+private fun NewSessionDialog(
+    ssh: SshSession?,
+    /** 已经开着会话的目录 —— 这些**不出现在候选里** */
+    taken: List<String>,
+    onDismiss: () -> Unit,
+    onCreate: (String) -> Unit,
+) {
     var path by remember { mutableStateOf("") }
+    var dirs by remember { mutableStateOf<List<String>?>(null) }   // null = 还在找
+
+    // 去服务器上问「工作区里还有哪些目录没开会话」。
+    // ⚠️ 从现有会话的 cwd 反推父目录 —— 不写死 `/root/src/workspace`，
+    // 换个客户、换台机器路径就不一样了。
+    LaunchedEffect(ssh, taken) {
+        val s0 = ssh
+        val cmd = app.yxi.agent.Dirs.listCommand(app.yxi.agent.Dirs.parentsOf(taken))
+        if (s0 == null || cmd == null) { dirs = emptyList(); return@LaunchedEffect }
+        dirs = app.yxi.ssh.catching { s0.exec(cmd) }
+            .map { app.yxi.agent.Dirs.candidates(it, taken) }
+            .getOrDefault(emptyList())
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(t("新会话开在哪个目录")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (recent.isNotEmpty()) {
-                    Text(t("最近"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
-                    recent.forEach { dir ->
-                        Surface(
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = Pill,
-                            modifier = Modifier.fillMaxWidth().clip(Pill).clickable { onCreate(dir) },
-                        ) {
-                            Text(
-                                dir, Modifier.padding(14.dp, 8.dp),
-                                style = MaterialTheme.typography.labelLarge.copy(fontFamily = FontFamily.Monospace),
-                                maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                            )
+                Text(
+                    t("选一个还没开会话的目录，会在那儿开一个会话并把 claude 跑起来。"),
+                    style = MaterialTheme.typography.labelSmall, color = Dim,
+                )
+                when {
+                    dirs == null -> Text(
+                        t("找目录中…"),
+                        style = MaterialTheme.typography.labelMedium, color = Dim,
+                    )
+                    dirs!!.isEmpty() -> Text(
+                        // ⚠️ 说清楚是「都开着了」还是「没找到」，别只给一句空
+                        if (taken.isEmpty()) t("还没连上，或者那台机器上没有工作区目录 —— 下面直接填路径也行。")
+                        else t("这些工作区目录都已经开着会话了 —— 下面直接填个新路径。"),
+                        style = MaterialTheme.typography.labelMedium, color = Dim,
+                    )
+                    else -> Column(
+                        Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        dirs!!.forEach { dir ->
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = Pill,
+                                modifier = Modifier.fillMaxWidth().clip(Pill).clickable { onCreate(dir) },
+                            ) {
+                                Column(Modifier.padding(14.dp, 8.dp)) {
+                                    Text(
+                                        dir.substringAfterLast('/'),
+                                        style = MaterialTheme.typography.labelLarge, maxLines = 1,
+                                    )
+                                    Text(
+                                        dir,
+                                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                        color = Dim, maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
                         }
                     }
                 }
                 OutlinedTextField(
                     path, { path = it }, singleLine = true, shape = MaterialTheme.shapes.medium,
-                    placeholder = { Text(t("/opt/workspace/…")) }, modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text(t("或者直接填：/opt/workspace/…")) },
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         },

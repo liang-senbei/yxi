@@ -90,3 +90,39 @@ final class NewSessionTests: XCTestCase {
         XCTAssertTrue(SessionProbe.newSessionCommand(dir: "/a/it's").contains(#"'/a/it'\''s'"#))
     }
 }
+
+/// 「新会话开在哪个目录」的候选。跟安卓 `DirsTest` 同一批用例。
+final class DirsTests: XCTestCase {
+
+    func testParentsFromCwds() {
+        XCTAssertEqual(Dirs.parents(of: ["/root/src/workspace/Yxi", "/root/src/workspace/mail/"]),
+                       ["/root/src/workspace"])
+    }
+
+    /// ⚠️ 这条是这个功能存在的理由：**已经开着会话的目录不能再出现在候选里**
+    func testTakenAreExcluded() {
+        let out = "/root/src/workspace/Yxi\n/root/src/workspace/mail\n/root/src/workspace/新项目"
+        XCTAssertEqual(Dirs.candidates(out, taken: ["/root/src/workspace/Yxi", "/root/src/workspace/mail"]),
+                       ["/root/src/workspace/新项目"])
+    }
+
+    /// 末尾斜杠不该让同一个目录被当成两个
+    func testTrailingSlashDoesNotDefeatComparison() {
+        XCTAssertEqual(Dirs.candidates("/a/b/\n/a/c", taken: ["/a/b"]), ["/a/c"])
+    }
+
+    func testHiddenDirsSkipped() {
+        XCTAssertEqual(Dirs.candidates("/a/.git\n/a/proj", taken: []), ["/a/proj"])
+    }
+
+    func testCommandIsShallowAndQuoted() {
+        let c = Dirs.listCommand(parents: ["/a/it's"])!
+        XCTAssertTrue(c.contains("-maxdepth 1"), c)
+        XCTAssertTrue(c.contains(#"'/a/it'\''s'"#), c)
+    }
+
+    func testNoParentsNoCommand() {
+        XCTAssertNil(Dirs.listCommand(parents: []))
+        XCTAssertNil(Dirs.listCommand(parents: ["相对路径"]))
+    }
+}

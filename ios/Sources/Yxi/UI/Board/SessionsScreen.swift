@@ -104,8 +104,11 @@ struct SessionsScreen: View {
         .task(id: pollKey) { await poll() }
         .task(id: pollKey) { await pollUsage() }
         .sheet(isPresented: $newSession) {
-            NewSessionSheet(recent: Array(NSOrderedSet(array: sessions.map(\.cwd))
-                                            .compactMap { $0 as? String }.prefix(8))) { dir in
+            // ⚠️ 传的是「**已经开着会话的目录**」，用来把它们从候选里剔掉 ——
+            // 原来传的是同一批目录、却当成「推荐去处」列出来，正好反了：
+            // 点进去只会跳回同一个会话，这个入口等于什么也没做。
+            NewSessionSheet(taken: sessions.map(\.cwd),
+                            runner: link.service as? ShellRunner) { dir in
                 newSession = false
                 let svc = link.service
                 Task {
@@ -561,24 +564,47 @@ enum Pinned {
 
 /// 新开一个会话。**先给最近去过的目录**，手机上打路径最费劲。
 private struct NewSessionSheet: View {
-    let recent: [String]
+    /// 已经开着会话的目录 —— 这些**不出现在候选里**
+    let taken: [String]
+    let runner: ShellRunner?
     let onCreate: (String) -> Void
+
     @State private var path = ""
+    @State private var dirs: [String]?          // nil = 还在找
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             Form {
-                if !recent.isEmpty {
-                    Section("最近") {
-                        ForEach(recent, id: \.self) { d in
-                            Button(d) { onCreate(d) }
-                                .font(.mono(13)).foregroundStyle(Yx.onSurface).lineLimit(1)
+                Section {
+                    YxHint("选一个还没开会话的目录，会在那儿开一个会话并把 claude 跑起来。")
+                }
+                if let dirs {
+                    if dirs.isEmpty {
+                        Section {
+                            // ⚠️ 说清楚是「都开着了」还是「没找到」，别只给一句空
+                            YxHint(taken.isEmpty
+                                   ? "还没连上，或者那台机器上没有工作区目录 —— 下面直接填路径也行。"
+                                   : "这些工作区目录都已经开着会话了 —— 下面直接填个新路径。")
+                        }
+                    } else {
+                        Section("还没开会话的目录") {
+                            ForEach(dirs, id: \.self) { d in
+                                Button { onCreate(d) } label: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(Paths.nameOf(d))
+                                            .font(.system(size: 15)).foregroundStyle(Yx.onSurface)
+                                        Text(d).font(.mono(11)).foregroundStyle(Yx.dim).lineLimit(1)
+                                    }
+                                }
+                            }
                         }
                     }
+                } else {
+                    Section { YxHint("找目录中…") }
                 }
                 Section {
-                    TextField("/opt/workspace/…", text: $path)
+                    TextField("或者直接填：/opt/workspace/…", text: $path)
                         .font(.mono(14))
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
@@ -599,7 +625,19 @@ private struct NewSessionSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
+        .task { await findDirs() }
+    }
+
+    /// 去服务器上问「工作区里还有哪些目录没开会话」。
+    /// ⚠️ 从现有会话的 cwd 反推父目录 —— **不写死** `/root/src/workspace`，
+    /// 换个客户、换台机器路径就不一样了。
+    private func findDirs() async {
+        guard let runner,
+              let cmd = Dirs.listCommand(parents: Dirs.parents(of: taken)),
+              let out = try? await runner.run(cmd)
+        else { dirs = []; return }
+        dirs = Dirs.candidates(out, taken: taken)
     }
 
     private func go() {
