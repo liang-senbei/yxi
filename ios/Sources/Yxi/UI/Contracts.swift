@@ -48,6 +48,9 @@ public protocol FileService {
     func listDir(_ path: String) async throws -> [SFTP.Entry]
     func readFile(_ path: String, max: Int) async throws -> Data
     func resolve(_ path: String) async throws -> String
+    /// ⚠️ 写是**二进制安全**的那条路（SFTP），不是 `echo > file`：
+    /// 配置里有中文、引号、反斜杠，拼 shell 命令迟早写坏一份文件。
+    func writeFile(_ path: String, bytes: Data) async throws
 }
 
 public protocol UsageService {

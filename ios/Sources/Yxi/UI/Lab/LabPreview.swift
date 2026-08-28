@@ -156,8 +156,10 @@ struct LabSaveButton: View {
     let runner: ShellRunner?
     let files: FileService?
 
-    @State private var state: State = .idle
-    private enum State: Equatable {
+    @State private var state: Step = .idle
+    /// ⚠️ 别叫 State —— 会把 SwiftUI 的 `@State` 遮掉
+    /// （编译器原话：enum 'State' cannot be used as an attribute）
+    private enum Step: Equatable {
         case idle, working, done(String), failed(String)
     }
 

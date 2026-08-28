@@ -181,6 +181,57 @@ YXIEOF
         let p = shq(path)
         return "cp \(p) \(p).yxi-bak-\(stamp) 2>/dev/null || true"
     }
+    /// 写回之前的把关。**结构化格式坏了绝不写** ——
+    /// `~/.claude/settings.json` 里一个多余的逗号就能让 Claude Code 起不来，
+    /// 而那是在服务器上，用户在手机上根本救不回来。
+    ///
+    /// 返回 nil = 可以写；返回字符串 = 拒绝的理由（直接给用户看）。
+    /// ⚠️ 只认 json；toml/md/txt 没有便宜的校验器，放行。
+    public static func validationError(path: String, text: String) -> String? {
+        guard path.hasSuffix(".json") else { return nil }
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "空文件，没保存"
+        }
+        // ⚠️ **不能只靠 JSONSerialization**：Linux 的 swift-corelibs-foundation
+        // 会**收下**尾逗号（`{"a":1,}`），而 iOS 上的 Darwin 版拒绝。
+        // 于是同一份代码两边行为不一样 —— 一个安全检查不能这样。
+        // 尾逗号又恰恰是手改 json 最常犯的错，所以这里自己认一遍，两边一致。
+        if let bad = trailingCommaIndex(text) {
+            let line = text.prefix(bad).filter { $0 == "\n" }.count + 1
+            return "JSON 格式不对，没保存：第 \(line) 行有多余的逗号"
+        }
+        do {
+            _ = try JSONSerialization.jsonObject(with: Data(text.utf8), options: [.fragmentsAllowed])
+            return nil
+        } catch {
+            return "JSON 格式不对，没保存：" + String(error.localizedDescription.prefix(60))
+        }
+    }
+
+    /// 找 `,` 后面（跳过空白）紧跟 `}` 或 `]` 的位置。**字符串字面量里的逗号不算**，
+    /// 所以要顺带跟踪引号和转义。返回那个逗号的下标。
+    private static func trailingCommaIndex(_ text: String) -> Int? {
+        var inString = false
+        var escaped = false
+        var lastComma: Int?
+        for (i, ch) in text.enumerated() {
+            if escaped { escaped = false; continue }
+            if inString {
+                if ch == "\\" { escaped = true }
+                else if ch == "\"" { inString = false }
+                continue
+            }
+            switch ch {
+            case "\"": inString = true; lastComma = nil
+            case ",": lastComma = i
+            case "}", "]": if lastComma != nil { return lastComma }
+            case " ", "\t", "\n", "\r": continue          // 空白不打断「逗号后面」
+            default: lastComma = nil
+            }
+        }
+        return nil
+    }
+
     private static func shq(_ p: String) -> String {
         "'" + p.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }

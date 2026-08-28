@@ -260,6 +260,12 @@ struct RemoteHost: ChatBackend, UsageService, ShellRunner, FileService {
         return try await sftp.realpath(path)
     }
 
+    func writeFile(_ path: String, bytes: Data) async throws {
+        let sftp = try await ssh.openSFTP()
+        defer { Task { await sftp.close() } }
+        try await sftp.write(path, bytes: bytes)
+    }
+
     // MARK: 附件（PRD 附录 F.1）
 
     func upload(session: String, fileName: String, data: Data, isImage: Bool) async throws -> Staged {
