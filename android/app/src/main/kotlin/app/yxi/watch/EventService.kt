@@ -14,6 +14,7 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.app.RemoteInput
 import app.yxi.MainActivity
 import app.yxi.R
 import app.yxi.ssh.Host
@@ -22,7 +23,9 @@ import app.yxi.ssh.KeyManager
 import app.yxi.ssh.KnownHosts
 import app.yxi.agent.Pending
 import app.yxi.agent.SessionProbe
+import app.yxi.agent.SessionState
 import app.yxi.ui.Pinned
+import app.yxi.ui.Mute
 import app.yxi.ssh.SshSession
 import kotlinx.coroutines.*
 import org.json.JSONObject
@@ -70,6 +73,8 @@ class EventService : Service() {
         startForeground(ONGOING_ID, ongoing(watched.size))
         scope.coroutineContext.cancelChildren()
         watched.forEach { host -> scope.launch { watch(host) } }
+        scope.launch { escalate() }   // 升级重提醒：等太久没答就再响一次
+        scope.launch { statusLoop() }  // 数「在跑」的会话，喂常驻通知/磁贴/小组件
         // START_STICKY：被系统杀掉后还会被拉回来（MagicOS 后台管控狠，这是最起码的）
         return START_STICKY
     }
@@ -148,63 +153,196 @@ class EventService : Service() {
         //
         // ⚠️ **一条都没置顶时不生效**，见 [Pinned.onlyPinned] 的注释。
         if (!Pinned.shouldNotify(Pinned.onlyPinned(this), Pinned.get(this, host.id), full)) return
+        // 这个会话被单独静音了就别响 —— 置顶的反面（在会话卡长按 / 通知上「静音」都能设）
+        if (Mute.isMuted(this, host.id, full)) return
 
-        // 常驻通知要跟着变 —— 胶囊上显示的就是它
-        if (kind == "needs") waiting += session else waiting -= session
+        val detail = e.optString("detail")       // 钩子那条「为什么找你」（Notification message）
+        val preview = e.optString("preview")      // Claude 最后说的一句（钩子从转录里取，零 token）——「到底要你决定什么」
+        // 常驻通知要跟着变 —— 胶囊上显示的就是它。顺便记下「从什么时候开始等」，给升级重提醒用
+        if (kind == "needs") {
+            waiting += session
+            waits.getOrPut(session) { WaitCtx(host, full, session, e.optString("cwd"), System.currentTimeMillis()) }
+                .also { it.detail = detail; it.preview = preview }   // 同一会话来新事件就刷新
+        } else {
+            waiting -= session; waits.remove(session)
+        }
         refreshOngoing()
 
-        val title = if (kind == "needs") t("%s 需要你").format(session) else t("%s 干完了").format(session)
-        // 「需要你」的 detail 是 Claude 自己给的一句人话（"needs your permission to use Bash"），有信息量；
-        // 「干完了」的 detail 是我们编的通用句，跟标题重复 —— 那就换成机器名，至少告诉你是哪台
-        val text = if (kind == "needs") e.optString("detail").ifBlank { t("等你决定") } else host.alias
+        if (kind == "needs") {
+            // 选项一律从屏幕读，绝不预设（把「拒绝」写死成 2 = 点一下就永久放行）；读不出就只留「点开去看」
+            val pending = if (full.isNotBlank()) runCatching { SessionProbe.pending(ssh, full) }.getOrNull() else null
+            postNeeds(host, full, session, e.optString("cwd"), pending, mins = 0, alert = true, detail = detail, preview = preview)
+        } else {
+            postDone(host, full, session, e.optString("cwd"), preview)
+        }
+    }
 
+    /** 「从什么时候开始等你」——给「已等你 Xm」和升级重提醒用；detail/preview 是「要你决定什么」的两个来源。 */
+    private class WaitCtx(
+        val host: Host, val full: String, val short: String, val cwd: String, val since: Long,
+        @Volatile var detail: String = "", @Volatile var preview: String = "",
+    ) { @Volatile var alerted: Int = 0 }
+    private val waits = java.util.concurrent.ConcurrentHashMap<String, WaitCtx>()
+
+    /**
+     * 「需要你」的通知 —— 纯构建，不碰 SSH（pending 由调用方抓好传进来）。
+     * 决策按钮（从屏幕读的选项）+ **回一句**（自由文本，顺带白送语音：RemoteInput 会露出输入法麦克风）+ **静音**。
+     * @param alert true = 要响（首发 / 升级重提醒）；false = 只更新不打扰
+     */
+    private fun postNeeds(host: Host, full: String, short: String, cwd: String, pending: Pending?, mins: Int, alert: Boolean, detail: String = "", preview: String = "") {
         val open = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra("hostId", host.id)
-            putExtra("session", e.optString("session"))
-            putExtra("cwd", e.optString("cwd"))
+            putExtra("hostId", host.id); putExtra("session", full); putExtra("cwd", cwd)
         }
         val pi = PendingIntent.getActivity(
-            this, (host.id + session).hashCode().absoluteValue,
+            this, (host.id + short).hashCode().absoluteValue,
             open, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-
-        // ⚠️ **「需要你」的时候，按钮上的选项一律从屏幕上读，绝不预设。**
-        // 权限提示的三个选项是 `1. Yes` / `2. Yes, and don\u2019t ask again for: …` / `3. No` ——
-        // 把「拒绝」硬编码成 2 的话，点一下就是**永久放行这一类命令**。
-        // 读不出来（解析失败 / 抓屏失败）就**不给按钮**，只留「点开去看」。宁可多一步，不能点错。
-        val pending: Pending? =
-            if (kind == "needs" && full.isNotBlank())
-                runCatching { SessionProbe.pending(ssh, full) }.getOrNull()
-            else null
-
-        val n = NotificationCompat.Builder(this, CH_EVENT)
+        val waitLine = if (mins >= 1) t("已等你 %d 分钟").format(mins) else t("等你决定")
+        // 「到底要你决定什么」—— 全是现成的文字，零 token：屏幕上的提示 > Claude 最后说的话 > 钩子那句 > 兜底
+        val promptTitle = pending?.title?.takeIf { it.isNotBlank() }
+        val what = promptTitle ?: preview.takeIf { it.isNotBlank() } ?: detail.takeIf { it.isNotBlank() } ?: waitLine
+        val b = NotificationCompat.Builder(this, CH_NEEDS)
             .setSmallIcon(R.drawable.ic_stat_yxi)
-            .setContentTitle(title)
-            .setContentText(text)
-            .setStyle(NotificationCompat.BigTextStyle().bigText("${host.alias} · ${e.optString("cwd")}"))
+            .setContentTitle(t("%s 需要你").format(short))
+            .setContentText(what)                     // 折叠时就看得到「要你决定什么」，不再只是「等你决定」
             .setContentIntent(pi)
             .setAutoCancel(true)
-            // 「需要你」要把屏幕点亮（锁屏也看得见）；「干完了」安静一点
-            .setPriority(if (kind == "needs") NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
-            .setCategory(if (kind == "needs") Notification.CATEGORY_CALL else Notification.CATEGORY_STATUS)
-            // 锁屏上要看得见内容 —— 看不见就没法判断，「锁屏批权限」也就无从谈起。
-            // 代价是命令文本会显示在锁屏上，这是个自觉的取舍。
+            .setOnlyAlertOnce(!alert)                 // 升级重提醒 alert=true → 再响一次
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(Notification.CATEGORY_CALL)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .also { b ->
-                pending?.options?.take(3)?.forEach { o ->
-                    b.addAction(0, "${o.number}. ${o.label.take(16)}", answerIntent(host, full, o, pending.fingerprint))
-                }
-                pending?.title?.takeIf { it.isNotBlank() }?.let {
-                    b.setStyle(NotificationCompat.BigTextStyle().bigText("${host.alias}\n$it"))
-                }
-            }
-            .build()
+        pending?.options?.take(3)?.forEach { o ->
+            b.addAction(0, "${o.number}. ${o.label.take(16)}", answerIntent(host, full, o, pending.fingerprint))
+        }
+        b.addAction(replyAction(host, full))
+        b.addAction(0, t("静音"), muteIntent(host, full, short))
+        // 展开：Claude 最后说的 + 屏幕提示 + 位置 + 等待时长，凑齐上下文
+        b.setStyle(NotificationCompat.BigTextStyle().bigText(
+            listOfNotNull(
+                preview.takeIf { it.isNotBlank() },
+                promptTitle?.takeIf { it != preview },
+                detail.takeIf { it.isNotBlank() && it != preview && it != promptTitle },
+                "${host.alias} · $cwd",
+                if (mins >= 1) waitLine else null,
+            ).joinToString("\n").ifBlank { what }))
+        runCatching { NotificationManagerCompat.from(this).notify((host.id + short).hashCode(), b.build()) }
+            .onFailure { Log.w("YxiWatch", "发通知失败（多半是没给通知权限）：${it.message}") }
+    }
 
-        runCatching {
-            // 同一个会话反复响用同一个通知 id —— 通知栏里不该堆一串
-            NotificationManagerCompat.from(this).notify((host.id + session).hashCode(), n)
-        }.onFailure { Log.w("YxiWatch", "发通知失败（多半是没给通知权限）：${it.message}") }
+    /** 「干完了」的通知 —— 安静一点，但也能**直接回一句**（以前是死胡同）和静音。 */
+    private fun postDone(host: Host, full: String, short: String, cwd: String, preview: String = "") {
+        val open = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("hostId", host.id); putExtra("session", full); putExtra("cwd", cwd)
+        }
+        val pi = PendingIntent.getActivity(
+            this, (host.id + short).hashCode().absoluteValue,
+            open, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        // 干完了也顺手告诉你 Claude 最后说了啥（零 token，从转录取）
+        val line = preview.takeIf { it.isNotBlank() } ?: host.alias
+        val b = NotificationCompat.Builder(this, CH_DONE)
+            .setSmallIcon(R.drawable.ic_stat_yxi)
+            .setContentTitle(t("%s 干完了").format(short))
+            .setContentText(line)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(
+                listOfNotNull(preview.takeIf { it.isNotBlank() }, "${host.alias} · $cwd").joinToString("\n")))
+            .setContentIntent(pi)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(Notification.CATEGORY_STATUS)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+        b.addAction(replyAction(host, full))
+        b.addAction(0, t("静音"), muteIntent(host, full, short))
+        runCatching { NotificationManagerCompat.from(this).notify((host.id + short).hashCode(), b.build()) }
+            .onFailure { Log.w("YxiWatch", "发通知失败：${it.message}") }
+    }
+
+    /** 通知上的「回一句」—— RemoteInput 自由文本。⚠️ PendingIntent 必须 MUTABLE，系统才能把回复塞进去。 */
+    private fun replyAction(host: Host, full: String): NotificationCompat.Action {
+        val ri = RemoteInput.Builder(KEY_REPLY).setLabel(t("回一句…")).build()
+        val i = Intent(this, AnswerReceiver::class.java).setAction(ACT_REPLY)
+            .putExtra("hostId", host.id).putExtra("session", full)
+        val pi = PendingIntent.getBroadcast(
+            this, (host.id + full + "reply").hashCode().absoluteValue, i,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
+        )
+        return NotificationCompat.Action.Builder(0, t("回一句"), pi)
+            .addRemoteInput(ri).setAllowGeneratedReplies(true).build()
+    }
+
+    private fun muteIntent(host: Host, full: String, short: String): PendingIntent {
+        val i = Intent(this, AnswerReceiver::class.java).setAction(ACT_MUTE)
+            .putExtra("hostId", host.id).putExtra("session", full).putExtra("short", short)
+        return PendingIntent.getBroadcast(
+            this, (host.id + full + "mute").hashCode().absoluteValue, i,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    /** 在通知上打字回了一句 —— 直接送进那个会话（顺带覆盖语音，输入法麦克风就是 RemoteInput 的一部分）。 */
+    internal suspend fun reply(i: Intent) {
+        val hostId = i.getStringExtra("hostId") ?: return
+        val full = i.getStringExtra("session") ?: return
+        val text = RemoteInput.getResultsFromIntent(i)?.getCharSequence(KEY_REPLY)?.toString()?.trim().orEmpty()
+        if (text.isBlank()) return
+        val s = live[hostId] ?: run { note(t("连接不在了，没送出去")); return }
+        val ok = runCatching { SessionProbe.send(s, full, text); true }.getOrDefault(false)
+        val short = full.removePrefix("cc-")
+        if (ok) {
+            waiting -= short; waits.remove(short); refreshOngoing()
+            runCatching { NotificationManagerCompat.from(this).cancel((hostId + short).hashCode()) }
+        } else note(t("送不出去，没批"))
+    }
+
+    /** 在通知上点了「静音」—— 把这个会话加进静音名单，清掉它的通知。 */
+    internal fun mute(i: Intent) {
+        val hostId = i.getStringExtra("hostId") ?: return
+        val full = i.getStringExtra("session") ?: return
+        val short = i.getStringExtra("short") ?: full.removePrefix("cc-")
+        Mute.toggle(this, hostId, full)
+        waiting -= short; waits.remove(short); refreshOngoing()
+        runCatching { NotificationManagerCompat.from(this).cancel((hostId + short).hashCode()) }
+        note(t("已静音 %s —— 之后不再提醒（会话卡长按可取消）").format(short))
+    }
+
+    /**
+     * 升级重提醒 —— 每分钟看一眼还在等你的会话，跨过 2/5/10/20/40 分钟就再响一次并更新「已等你 Xm」。
+     * ⚠️ 抓不到 pending 就等下一轮，**绝不主动取消通知**（可能只是抓屏时机没赶上）——
+     * 真答掉了，事件流随后会来 done / 下一个 needs，[handle] 自会清掉。
+     */
+    /**
+     * 轻量状态轮询 —— 每 30 秒快照一次，数「在跑」的会话，喂给常驻通知 / 磁贴 / 小组件。
+     * ⚠️ 30 秒而不是像看板那样 5 秒：后台要省电（荣耀本来就狠管后台），够「瞄一眼」就行。
+     */
+    private suspend fun statusLoop() {
+        while (currentCoroutineContext().isActive) {
+            var w = 0
+            for ((_, s) in live) {
+                val snap = runCatching { SessionProbe.snapshot(s) }.getOrNull() ?: continue
+                w += snap.count { it.state == SessionState.Working }
+            }
+            workingCount = w
+            refreshOngoing()
+            delay(30_000)
+        }
+    }
+
+    private suspend fun escalate() {
+        val thresh = intArrayOf(2, 5, 10, 20, 40)
+        while (currentCoroutineContext().isActive) {
+            delay(60_000)
+            for ((short, wc) in waits.entries.toList()) {
+                if (short !in waiting) { waits.remove(short); continue }
+                val mins = ((System.currentTimeMillis() - wc.since) / 60_000L).toInt()
+                val crossed = thresh.lastOrNull { it <= mins && it > wc.alerted } ?: continue
+                val s = live[wc.host.id] ?: continue
+                val pending = runCatching { SessionProbe.pending(s, wc.full) }.getOrNull() ?: continue
+                wc.alerted = crossed
+                postNeeds(wc.host, wc.full, short, wc.cwd, pending, mins, alert = true, detail = wc.detail, preview = wc.preview)
+            }
+        }
     }
 
     /**
@@ -264,7 +402,7 @@ class EventService : Service() {
     private fun note(text: String) = runCatching {
         NotificationManagerCompat.from(this).notify(
             9_001,
-            NotificationCompat.Builder(this, CH_EVENT)
+            NotificationCompat.Builder(this, CH_DONE)
                 .setSmallIcon(R.drawable.ic_stat_yxi)
                 .setContentTitle(text)
                 .setAutoCancel(true)
@@ -278,6 +416,8 @@ class EventService : Service() {
      * ⚠️ 用并发集合：`handle()` 在事件流协程里写，通知按钮的广播在主线程写。
      */
     private val waiting = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    /** 此刻有几个会话在真跑（由 [statusLoop] 每 30 秒快照一次）。 */
+    @Volatile private var workingCount = 0
 
     /**
      * 把常驻那条重画一遍。
@@ -287,6 +427,15 @@ class EventService : Service() {
      */
     private fun refreshOngoing() = runCatching {
         NotificationManagerCompat.from(this).notify(ONGOING_ID, ongoing(store.hosts.value.count { it.watch }))
+        // 磁贴 / 桌面小组件没有连接，只能读这份「上一次已知态」
+        prefs().edit()
+            .putInt("waitingCount", waiting.size)
+            .putString("waitingNames", waiting.toList().sorted().joinToString("、"))
+            .putInt("workingCount", workingCount)
+            .apply()
+        app.yxi.widget.WaitingWidget.refresh(this)
+        android.service.quicksettings.TileService.requestListeningState(
+            this, android.content.ComponentName(this, app.yxi.widget.WaitingTile::class.java))
     }.let { }
 
     private fun prefs() = getSharedPreferences("yxi", Context.MODE_PRIVATE)
@@ -314,10 +463,14 @@ class EventService : Service() {
                 )
             )
         if (who.isEmpty()) {
-            b.setContentTitle(t("盯着 %d 台机器").format(n)).setContentText(t("Claude 需要你时会响"))
+            if (workingCount > 0)
+                b.setContentTitle(t("%d 个会话在跑").format(workingCount)).setContentText(t("Claude 正在干活"))
+            else
+                b.setContentTitle(t("盯着 %d 台机器").format(n)).setContentText(t("Claude 需要你时会响"))
         } else {
             b.setContentTitle(t("%d 个会话等你").format(who.size))
-                .setContentText(who.joinToString("、"))
+                .setContentText(if (workingCount > 0) who.joinToString("、") + t(" · %d 在跑").format(workingCount)
+                else who.joinToString("、"))
                 // 有事的时候才上色：颜色是提示，天天亮着就不是提示了
                 .setColorized(true)
                 .setColor(0xFFE08B57.toInt())
@@ -348,24 +501,48 @@ class EventService : Service() {
     private fun channels() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = getSystemService(NotificationManager::class.java)
+        // 拆成两条频道：不只是分类，更是给「触感词汇表」和「单独静音 / 免打扰」留的抓手 ——
+        // 系统里能分别调「Claude 找你」和「干完了」。震动写在频道上（频道创建后改不动，所以是新 id）。
         nm.createNotificationChannel(
-            NotificationChannel(CH_EVENT, t("Claude 找你"), NotificationManager.IMPORTANCE_HIGH)
-                .apply { description = t("干完了 / 需要你决定") }
+            NotificationChannel(CH_NEEDS, t("Claude 找你"), NotificationManager.IMPORTANCE_HIGH).apply {
+                description = t("需要你决定")
+                enableVibration(true); vibrationPattern = longArrayOf(0, 55, 65, 55)   // 急促两下 = 该管了
+            }
+        )
+        nm.createNotificationChannel(
+            NotificationChannel(CH_DONE, t("干完了"), NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = t("会话干完了")
+                enableVibration(true); vibrationPattern = longArrayOf(0, 28)            // 轻轻一下 = 完事了
+            }
         )
         nm.createNotificationChannel(
             // MIN：常驻那条不该占用户的注意力，它只是系统要求的「我在后台跑」的凭证
             NotificationChannel(CH_ONGOING, t("后台盯梢"), NotificationManager.IMPORTANCE_MIN)
         )
+        // 老的合并频道退休 —— 它的震动/重要级改不动，换成上面 needs/done 两条
+        runCatching { nm.deleteNotificationChannel("yxi.events") }
     }
 
     companion object {
-        private const val CH_EVENT = "yxi.events"
+        private const val CH_NEEDS = "yxi.needs"
+        private const val CH_DONE = "yxi.done"
         private const val CH_ONGOING = "yxi.ongoing"
         private const val ONGOING_ID = 1
         internal const val ACT_ANSWER = "app.yxi.ANSWER"
+        internal const val ACT_REPLY = "app.yxi.REPLY"
+        internal const val ACT_MUTE = "app.yxi.MUTE"
+        internal const val KEY_REPLY = "reply_text"
 
         /** 广播接收器要够到活着的这个服务实例。同进程单例，直接引用最省事。 */
         @Volatile internal var instance: EventService? = null
+
+        /** 分享到会话用：借盯梢服务已经建好的那条连接，省得再连一次（连不上就 null，调用方自己新建）。 */
+        internal fun liveConn(): Pair<Host, SshSession>? {
+            val svc = instance ?: return null
+            val (hid, s) = svc.live.entries.firstOrNull() ?: return null
+            val host = svc.store.hosts.value.firstOrNull { it.id == hid } ?: return null
+            return host to s
+        }
 
         /** 有主机被勾选就起，全都取消就停。调用方不用自己判断。 */
         fun sync(ctx: Context, anyWatched: Boolean) {

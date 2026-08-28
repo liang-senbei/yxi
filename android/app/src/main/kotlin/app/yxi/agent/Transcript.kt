@@ -126,7 +126,21 @@ object Transcript {
      * 说明同一个模型名下有不同窗口。按 200K 算会显示成 328%，
      * 那比不显示危险得多（跟 [Usage] 那条「宁可不显示也不显示假的」是同一条规矩）。
      */
-    data class Ctx(val tokens: Long, val model: String)
+    data class Ctx(
+        val tokens: Long,
+        val model: String,
+        /** 思考强度：`max` / `high` / `mid`。⚠️ 在转录行的**顶层**（不是 message 里）。空 = 转录没记。 */
+        val effort: String = "",
+        /** 会话模式：`normal` / `plan` 之类，来自 `{"type":"mode",…}` 行。空或 normal = 不用显示。 */
+        val mode: String = "",
+        /**
+         * ponytail 插件的强度（`lite`/`full`/`ultra`）。来自它每次注入的
+         * `PONYTAIL MODE ACTIVE — level: x`（钩子输出，落在转录里）。
+         * ⚠️ **不一定读得到**：它只在会话开始/换模式/提交提示时注入，
+         * 中间隔几千行都可能。读不到就**空着不显示**（宁可不显示也不显示假的）。
+         */
+        val ponytail: String = "",
+    )
 
     class Incremental {
         private val out = ArrayList<ChatItem>()
@@ -173,11 +187,25 @@ object Transcript {
         said: HashSet<String>,
         onCtx: (Ctx) -> Unit = {},
     ) {
+        var lastCtx: Ctx? = null       // 最近一次报出来的用量，给「切了模型但还没回话」时套用
+        var lastMode = ""              // 最近一条 {"type":"mode"} 行
+        var lastPony = ""              // 最近一次 ponytail 注入报的强度
         lines.forEach { line ->
             if (line.isBlank()) return@forEach
             val d = runCatching { JSONObject(line) }.getOrNull() ?: return@forEach
             // 侧链（子 agent 的内部对话）不进主时间线，否则会把主线淹掉
             if (d.optBoolean("isSidechain", false)) return@forEach
+
+            // ponytail 的强度只在它注入的那段文字里（钩子输出，包在 attachment 里）。
+            // ⚠️ 直接在**原始行**上正则，别去钻 JSON 结构 —— 那个结构是插件的实现细节，会变。
+            if ("PONYTAIL MODE" in line) {
+                PONYTAIL.find(line)?.groupValues?.get(1)?.lowercase()?.let { lv ->
+                    if (lv != lastPony) {
+                        lastPony = lv
+                        lastCtx?.let { onCtx(it.copy(ponytail = lv)) }
+                    }
+                }
+            }
 
             val type = d.optString("type")
 
@@ -238,17 +266,38 @@ object Transcript {
                 return@forEach
             }
 
+            // ⚠️ 模式行**没有 message 字段**，得在下面那个 return 之前接住。
+            //   {"type":"mode","mode":"normal","sessionId":"…"}   计划模式之类
+            // 顶栏要显示「这个会话在什么模式」，而它只在这种行里。
+            if (type == "mode") {
+                val m = d.optString("mode")
+                if (m.isNotBlank() && m != lastMode) {
+                    lastMode = m
+                    lastCtx?.let { onCtx(it.copy(mode = m)) }   // 已经有用量的话立刻反映到顶栏
+                }
+                return@forEach
+            }
+
             val msg = d.optJSONObject("message") ?: run {
-                // 非消息行（mode / file-history-snapshot / ai-title 之类）静默跳过
+                // 非消息行（file-history-snapshot / ai-title 之类）静默跳过
                 return@forEach
             }
             val uuid = d.optString("uuid", d.optString("requestId", line.hashCode().toString()))
 
             when (type) {
-                "user" -> parseUser(msg, d.optJSONObject("toolUseResult"), uuid, calls, out, said)
+                "user" -> {
+                    parseUser(msg, d.optJSONObject("toolUseResult"), uuid, calls, out, said)
+                    // ⚠️ **切完模型、但它还没回话时，标签也得跟着变。**
+                    // 顶栏那个模型名来自「最后一条 assistant 消息」的 model —— 切换不会改写旧消息，
+                    // 所以不认这一步的话，用户切了模型还看见旧名字，会以为没切成（用户报过）。
+                    // `/model` 的回执落在命令输出里（`Set model to …`），照它覆盖。
+                    modelSwitchOf(msg)?.let { name -> lastCtx?.let { onCtx(it.copy(model = name)) } }
+                }
                 "assistant" -> {
                     // ⚠️ 顺路取，不额外跑一趟服务器 —— 这些行本来就在手上
-                    ctxOf(msg)?.let(onCtx)
+                    // ⚠️ `effort` 在**转录行顶层**（`d`），不在 message 里 —— 找错地方就永远是空
+                    ctxOf(msg)?.copy(effort = d.optString("effort"), mode = lastMode, ponytail = lastPony)
+                        ?.let { lastCtx = it; onCtx(it) }
                     parseAssistant(msg, uuid, calls, out)
                 }
                 else -> Unit
@@ -269,6 +318,38 @@ object Transcript {
             u.optLong("cache_creation_input_tokens") +
             u.optLong("cache_read_input_tokens")
         return if (n > 0) Ctx(n, msg.optString("model")) else null
+    }
+
+    /**
+     * `/model` 的回执：`Set model to Opus 5 (1M context) for this session only`
+     * / `… and saved as your default for new sessions`。取中间那个模型名。
+     * ⚠️ 先 [clean] 掉 ANSI —— 回执里带 `\u001b[1m` 加粗序列（见 [ANSI] 那条注释）。
+     */
+    /**
+     * `PONYTAIL MODE ACTIVE — level: full` / `… CHANGED — level: ultra`。
+     * ⚠️ 破折号是 em dash，别写死；等级偶尔是空的（实测有 29 条），那就匹配不上，正好跳过。
+     */
+    private val PONYTAIL = Regex("""PONYTAIL MODE [A-Z]+[^:]*level:\s*([A-Za-z]+)""")
+
+    // ⚠️ `<` 也是终止符：回执被包在 `<local-command-stdout>…</local-command-stdout>` 里，
+    // 不拦的话闭合标签会被吃进模型名（测试抓出来的）。模型名里不会有 `<`。
+    private val SET_MODEL = Regex("""Set model to\s+(.+?)\s*(?:for this session|and saved|<|$)""")
+
+    private fun modelSwitchOf(msg: JSONObject): String? {
+        val c = msg.opt("content")
+        val text = when (c) {
+            is String -> c
+            is org.json.JSONArray -> (0 until c.length()).joinToString(" ") { i ->
+                c.optJSONObject(i)?.optString("text").orEmpty()
+            }
+            else -> return null
+        }
+        if ("Set model to" !in text) return null
+        // ⚠️ **在原文上匹配，别先 [clean]。** 别名形式 `claude-opus-5[1m]` 里的 `[1m`
+        // 跟 ANSI 加粗序列长得一模一样，先清一遍会把它吃掉 → 显示成 `claude-opus-5]`。
+        // 所以只在取出来的名字上摘掉首尾那对加粗标记（ESC 有无都兼容）。
+        val raw = SET_MODEL.find(text)?.groupValues?.get(1)?.trim()?.replace("\u001B", "") ?: return null
+        return raw.removePrefix("[1m").removeSuffix("[22m").trim().takeIf { it.isNotBlank() }?.take(40)
     }
 
     private fun uuidOf(d: JSONObject, line: String): String =

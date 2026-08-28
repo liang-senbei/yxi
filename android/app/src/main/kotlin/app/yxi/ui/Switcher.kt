@@ -18,6 +18,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -25,6 +26,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.yxi.agent.Live
 import app.yxi.agent.Session
 import app.yxi.agent.SessionProbe
 import app.yxi.agent.SessionState
@@ -64,6 +66,7 @@ fun Switcher(
     var killing by remember { mutableStateOf<Session?>(null) }
     var showArchived by remember { mutableStateOf(false) }
     val shots = remember { mutableStateMapOf<String, String>() }
+    val lives = remember { mutableStateMapOf<String, Live>() }
     val motion = remember { motionEnabled(ctx) }
 
     val list = remember(all, archived, showArchived) {
@@ -88,7 +91,10 @@ fun Switcher(
             for (i in (pager.currentPage - 1)..(pager.currentPage + 1)) {
                 val name = list.getOrNull(i)?.name ?: continue
                 runCatching { SessionProbe.peek(s, name, 14) }
-                    .onSuccess { shots[name] = it.lines().filter { l -> l.isNotBlank() }.takeLast(9).joinToString("\n") }
+                    .onSuccess { raw ->
+                        shots[name] = raw.lines().filter { l -> l.isNotBlank() }.takeLast(9).joinToString("\n")
+                        lives[name] = Live.parse(raw)
+                    }
             }
             delay(3_000)
         }
@@ -125,7 +131,7 @@ fun Switcher(
                 if (archived.isNotEmpty()) {
                     Surface(
                         color = if (showArchived) SurfaceContainerHigh else SurfaceContainer, shape = Pill,
-                        modifier = Modifier.combinedClickable { showArchived = !showArchived },
+                        modifier = Modifier.clip(Pill).combinedClickable { showArchived = !showArchived },
                     ) {
                         Text(
                             t("归档 %d").format(archived.size), Modifier.padding(13.dp, 7.dp),
@@ -135,7 +141,7 @@ fun Switcher(
                     }
                 }
                 Spacer(Modifier.width(8.dp))
-                Surface(color = SurfaceContainer, shape = Pill, modifier = Modifier.combinedClickable(onClick = onDismiss)) {
+                Surface(color = SurfaceContainer, shape = Pill, modifier = Modifier.clip(Pill).combinedClickable(onClick = onDismiss)) {
                     Text("✕", Modifier.padding(15.dp, 7.dp), style = MaterialTheme.typography.labelLarge, color = Muted)
                 }
             }
@@ -163,6 +169,7 @@ fun Switcher(
                     SwitcherCard(
                         s = s,
                         shot = shots[s.name].orEmpty(),
+                        live = lives[s.name] ?: Live.IDLE,
                         isCurrent = s.name == current,
                         scale = scale, dim = dim,
                         parallax = if (motion) (pager.currentPage - page + pager.currentPageOffsetFraction) * -28f else 0f,
@@ -215,6 +222,7 @@ fun Switcher(
 private fun SwitcherCard(
     s: Session,
     shot: String,
+    live: Live,
     isCurrent: Boolean,
     scale: Float,
     dim: Float,
@@ -253,7 +261,7 @@ private fun SwitcherCard(
         Surface(
             color = if (isCurrent) SurfaceContainerHigh else SurfaceContainerLow,
             shape = MaterialTheme.shapes.large,
-            modifier = Modifier.fillMaxSize().combinedClickable(onClick = onTap, onLongClick = onLong),
+            modifier = Modifier.fillMaxSize().clip(MaterialTheme.shapes.large).combinedClickable(onClick = onTap, onLongClick = onLong),
         ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -262,10 +270,13 @@ private fun SwitcherCard(
                     if (isCurrent) Text(t("当前"), style = MaterialTheme.typography.labelSmall, color = Copper)
                     else if (archivedView) Text(t("已归档"), style = MaterialTheme.typography.labelSmall, color = Dim)
                 }
-                Text(
-                    s.detail.ifBlank { s.cwd },
-                    style = MaterialTheme.typography.labelSmall, color = Muted, maxLines = 1,
-                )
+                // 优先显示「此刻在忙什么」：跑着 → ✽ 状态词（Teal）；刚跑完 → 用时；否则回落 detail/cwd
+                val (liveText, liveColor) = when {
+                    live.busy && !live.status.isNullOrBlank() -> "✽ " + live.status to Teal
+                    !live.doneFor.isNullOrBlank() -> t("刚跑完 · %s").format(live.doneFor) to Copper
+                    else -> s.detail.ifBlank { s.cwd } to Muted
+                }
+                Text(liveText, style = MaterialTheme.typography.labelSmall, color = liveColor, maxLines = 1)
                 // 实时屏幕缩略 —— 直接画 capture-pane 的文本。
                 // 比截图便宜得多，而且**认得出是哪个会话**靠的本来就是文字内容。
                 Surface(

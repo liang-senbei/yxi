@@ -2,6 +2,8 @@ package app.yxi.agent
 
 import app.yxi.ui.t
 import app.yxi.ssh.SshSession
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 /** 会话状态。语义跟服务器上 `cc-state` 写的一致。 */
@@ -54,6 +56,9 @@ object SessionProbe {
 
     private const val MARKER = "__YXI_SNAPSHOT_V1__"
 
+    // ⚠️ 转录时间那段用 `find -printf` + `awk` **一次扫完**：实测 8ms，
+    // 而「每个目录 ls+stat」的写法要 230ms —— 看板每 5 秒跑一次，那个代价不能要。
+    // `-printf` 是 GNU find 专有；不是 GNU find 就输出空，[lastActivityOf] 自动退回 tmux 的时间（优雅降级）。
     private val SCRIPT = """
         m=$MARKER
         s(){ printf '%s\t%s\n' "${'$'}m" "${'$'}1"; }
@@ -63,12 +68,17 @@ object SessionProbe {
         s status_begin
         for f in ${'$'}HOME/.cloud-status/*.json; do [ -f "${'$'}f" ] && cat "${'$'}f" && echo; done 2>/dev/null || true
         s status_end
+        s tr_begin
+        find "${'$'}HOME/.claude/projects" -maxdepth 2 -name '*.jsonl' -printf '%h\t%T@\n' 2>/dev/null | awk -F'\t' '{n=split(${'$'}1,a,"/"); d=a[n]; t=int(${'$'}2); if(t>m[d]) m[d]=t} END{for(k in m) printf "%s\t%d\n", k, m[k]}' 2>/dev/null || true
+        s tr_end
     """.trimIndent()
 
     suspend fun snapshot(session: SshSession): List<Session> {
         val out = session.exec(SCRIPT)
         val tmux = extract(out, "tmux")
         val status = extract(out, "status")
+        // 转录最后写入时间 —— **「上次对话」的真来源**（见 [lastActivityOf]）
+        val trs = parseTranscriptTimes(extract(out, "tr"))
 
         // 状态先建索引：会话名 → (state, detail, ts)
         val states = HashMap<String, Triple<String, String, Double>>()
@@ -92,7 +102,7 @@ object SessionProbe {
             Session(
                 name = name,
                 windows = p[1].toIntOrNull() ?: 1,
-                lastActivity = p[2].toLongOrNull() ?: 0L,
+                lastActivity = lastActivityOf(p[2].toLongOrNull() ?: 0L, p[4], trs),
                 attached = p[3] != "0",
                 cwd = p[4],
                 state = SessionState.of(st?.first),
@@ -100,6 +110,34 @@ object SessionProbe {
                 stateTs = st?.third ?: 0.0,
             )
         }.toList()
+    }
+
+    /** `<项目目录名>\t<unix秒>` 一行一条 → map。解析不了的行忽略。 */
+    internal fun parseTranscriptTimes(raw: String): Map<String, Long> {
+        val m = HashMap<String, Long>()
+        raw.lineSequence().forEach { ln ->
+            val i = ln.indexOf('\t')
+            if (i <= 0) return@forEach
+            val ts = ln.substring(i + 1).trim().toLongOrNull() ?: return@forEach
+            if (ts > 0) m[ln.substring(0, i).trim()] = ts
+        }
+        return m
+    }
+
+    /**
+     * 这个会话**上次真正对话**是什么时候。
+     *
+     * ⚠️ **不能只信 `tmux session_activity`。** 实测（用户报「为什么显示那么久之前，很多不是刚对话吗」）：
+     * `cc-claude_desktop` 的 tmux 活动写着 **2 天前**、cc-state 的 ts 更离谱写着 **7 天前**，
+     * 而它的转录**一分钟前**还在写 —— 那个会话正聊着。两个信号都会陈旧（tmux 那个不随
+     * 无人 attach 的输出更新，cc-state 那个要靠钩子写）。
+     *
+     * **转录文件的 mtime 才是权威**：Claude Code 每说一句都在写它。取两者较大的，
+     * 转录读不到（不是 Claude 会话 / 目录对不上）就退回 tmux 那个。
+     */
+    internal fun lastActivityOf(tmuxTs: Long, cwd: String, transcripts: Map<String, Long>): Long {
+        val tr = transcripts[Transcript.projectDirOf(cwd)] ?: 0L
+        return maxOf(tmuxTs, tr)
     }
 
     /** 只要 `<marker>\tX_begin` 和 `<marker>\tX_end` 之间的内容。缺段就当空，不抛异常。 */
@@ -112,9 +150,16 @@ object SessionProbe {
     }
 
     /** 给某个会话发一句话。`hub say` 已经验证过这条路走得通。 */
-    suspend fun send(session: SshSession, target: String, text: String) {
-        // 分两步：先送文本、再单独送回车。合成一条时，文本里若含特殊字符
-        // 会让 send-keys 把它当按键名解析（比如 "Enter" 三个字就会变成回车键）
+    /**
+     * 给某个会话发一句话。
+     *
+     * ⚠️ **整段不可取消（[NonCancellable]）。** 它是两步：先送文本、再单独送回车
+     * （合成一条时文本里的特殊字符会被 send-keys 当按键名解析，比如 "Enter" 三个字
+     * 就真变成回车）。中间被取消的话，**字打进去了但回车没送** ——
+     * 那句话就卡在对方输入框里没提交，用户以为发了、其实没发。
+     * 用户原话：「点了向上的箭头然后切出去，容易没发送给 agent，要在对话里等几秒再返回才算发出去」。
+     */
+    suspend fun send(session: SshSession, target: String, text: String) = withContext(NonCancellable) {
         val q = text.replace("'", "'\\''")
         session.exec("tmux send-keys -t '$target' -l '$q'")
         session.exec("tmux send-keys -t '$target' Enter")

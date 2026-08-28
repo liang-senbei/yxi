@@ -15,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -73,6 +74,11 @@ fun SettingsScreen(
     ) {
         Text(t("设置"), style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(18.dp, 14.dp, 18.dp, 4.dp))
 
+        // ── 工单中心 ───────────────────────────────────────────────
+        // 哪里不好用随手记一条，落在**连着的那台服务器** `~/.yxi/tickets.jsonl`，
+        // 开发那边 `cat` 一下就能看全（存手机本地等于没提，见 [app.yxi.agent.Tickets]）
+        TicketsCard(ssh)
+
         // ── 版本 ───────────────────────────────────────────────────
         Card(t("版本"), Glyph.Info, subtitle = t("%s（versionCode %d）").format(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -124,7 +130,7 @@ fun SettingsScreen(
                     Line(t("✗ 没查到：%s").format(r.why), MaterialTheme.colorScheme.error)
                 is Update.Result.Newer -> {
                     Line(t("有新版本 %s · %s").format(r.update.versionName, r.update.sizeText), Copper)
-                    UpdateBanner(sftp, r.update) { result = null }
+                    UpdateBanner(ssh, r.update) { result = null }
                 }
             }
         }
@@ -205,7 +211,7 @@ fun SettingsScreen(
                     Surface(
                         color = if (on) CopperContainer else SurfaceContainerHigh,
                         shape = Pill,
-                        modifier = Modifier.clickable { Skin.set(ctx, st) },
+                        modifier = Modifier.clip(Pill).clickable { Skin.set(ctx, st) },
                     ) {
                         Text(
                             st.label,
@@ -228,7 +234,7 @@ fun SettingsScreen(
                     Surface(
                         color = if (on) CopperContainer else SurfaceContainerHigh,
                         shape = Pill,
-                        modifier = Modifier.clickable { I18n.set(ctx, l) },
+                        modifier = Modifier.clip(Pill).clickable { I18n.set(ctx, l) },
                     ) {
                         Text(
                             l.label,
@@ -452,3 +458,83 @@ private fun notificationsOn(ctx: Context): Boolean = runCatching {
     else ctx.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
         android.content.pm.PackageManager.PERMISSION_GRANTED
 }.getOrDefault(true)
+
+/** 工单中心：写一条 + 看已提的。存在连着的服务器上（[app.yxi.agent.Tickets]）。 */
+@Composable
+private fun TicketsCard(ssh: app.yxi.ssh.SshSession?) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var text by remember { mutableStateOf("") }
+    var list by remember { mutableStateOf<List<app.yxi.agent.Tickets.Ticket>?>(null) }
+    var sending by remember { mutableStateOf(false) }
+    var reload by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(ssh, reload) { if (ssh != null) list = app.yxi.agent.Tickets.load(ssh) }
+
+    Card(t("工单中心"), Glyph.Wrench, subtitle = t("哪里不好用，随手记一条")) {
+        Text(
+            t("写下来存在这台服务器上（~/.yxi/tickets.jsonl），开发那边直接查阅。会自动带上版本号和机型。"),
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
+        )
+        Spacer(Modifier.height(10.dp))
+        OutlinedTextField(
+            text, { text = it },
+            placeholder = { Text(t("比如：点了发送切出去，消息没发出去")) },
+            shape = MaterialTheme.shapes.medium,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 96.dp),
+        )
+        Spacer(Modifier.height(10.dp))
+        SubmitButton(
+            label = t("提一条"),
+            modifier = Modifier.fillMaxWidth(), height = 46.dp,
+            successLabel = t("记下了"),
+        ) {
+            val body = text.trim()
+            if (body.isBlank()) Result.failure(RuntimeException(t("先写点什么")))
+            else {
+                val err = app.yxi.agent.Tickets.add(
+                    ssh,
+                    app.yxi.agent.Tickets.Ticket(
+                        at = System.currentTimeMillis() / 1000,
+                        text = body,
+                        version = "%s(%d)".format(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE),
+                        device = android.os.Build.MODEL + " / Android " + android.os.Build.VERSION.RELEASE,
+                    ),
+                )
+                if (err == null) { text = ""; reload++; Result.success(t("记下了")) }
+                else Result.failure(RuntimeException(err))
+            }
+        }
+
+        val ls = list
+        if (!ls.isNullOrEmpty()) {
+            Spacer(Modifier.height(14.dp))
+            Text(t("已提 %d 条").format(ls.size), style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.outline)
+            Spacer(Modifier.height(6.dp))
+            ls.take(8).forEach { tk ->
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerLowest,
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                ) {
+                    Column(Modifier.padding(12.dp, 9.dp)) {
+                        Text(tk.text, style = MaterialTheme.typography.bodySmall, maxLines = 4)
+                        val meta = listOf(beijingTime(tk.at), tk.version).filter { it.isNotBlank() }.joinToString(" · ")
+                        if (meta.isNotBlank()) Text(
+                            meta,
+                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                            color = MaterialTheme.colorScheme.outline,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** unix 秒 → 北京时间 `MM-dd HH:mm`。0 = 空串。 */
+private fun beijingTime(at: Long): String = if (at <= 0) "" else runCatching {
+    java.time.Instant.ofEpochSecond(at).atZone(java.time.ZoneId.of("Asia/Shanghai"))
+        .format(java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm"))
+}.getOrDefault("")

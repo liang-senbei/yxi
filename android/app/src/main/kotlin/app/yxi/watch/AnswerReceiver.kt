@@ -17,11 +17,16 @@ import kotlinx.coroutines.launch
  */
 class AnswerReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
-        if (intent.action != EventService.ACT_ANSWER) return
         val svc = EventService.instance ?: return
         val pending = goAsync()
         svc.scope.launch {
-            try { svc.answer(intent) } finally { pending.finish() }
+            try {
+                when (intent.action) {
+                    EventService.ACT_ANSWER -> svc.answer(intent)   // 点了某个数字选项
+                    EventService.ACT_REPLY -> svc.reply(intent)     // 打字/语音回了一句
+                    EventService.ACT_MUTE -> svc.mute(intent)       // 点了静音
+                }
+            } finally { pending.finish() }
         }
     }
 }

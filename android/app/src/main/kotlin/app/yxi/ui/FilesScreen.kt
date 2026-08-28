@@ -10,6 +10,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import app.yxi.ssh.Host
@@ -116,7 +117,7 @@ fun FilesScreen(
                 Surface(
                     color = if (target == dir) SurfaceContainerHigh else SurfaceContainer,
                     shape = Pill,
-                    modifier = Modifier.clickable { dir = target },
+                    modifier = Modifier.clip(Pill).clickable { dir = target },
                 ) {
                     Text(
                         label, Modifier.padding(11.dp, 6.dp),
@@ -126,7 +127,7 @@ fun FilesScreen(
                 }
             }
             // ⚠️ 必须有：/tmp 这种目录随便就是几百项，靠滚是找不到东西的
-            Surface(color = SurfaceContainer, shape = Pill, modifier = Modifier.clickable { jumping = true }) {
+            Surface(color = SurfaceContainer, shape = Pill, modifier = Modifier.clip(Pill).clickable { jumping = true }) {
                 Text(
                     "⌖", Modifier.padding(12.dp, 6.dp),
                     style = MaterialTheme.typography.labelMedium, color = Copper,

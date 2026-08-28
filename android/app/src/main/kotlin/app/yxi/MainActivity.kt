@@ -29,7 +29,7 @@ import app.yxi.ui.theme.YxiTheme
 
 /** 底部导航的三格。⚠️ 只有 app 级的平级目的地能进来（决策 D22）。 */
 private enum class Tab(private val zh: String, val icon: String) {
-    Sessions("会话", "◫"), Hosts("主机", "▤"), Settings("设置", "⚙");
+    Sessions("会话", "◫"), Hosts("主机", "▤"), Config("配置", "❖"), Settings("设置", "⚙");
 
     // ⚠️ **label 必须是 get() 而不是构造参数。** enum 常量的参数在**类初始化时求值一次**，
     // 之后换语言它不会跟着变 —— 现象是底部导航栏 / 模式切换条永远停在启动时那种语言，
@@ -176,6 +176,12 @@ class MainActivity : ComponentActivity() {
                             onOpen = { hostId = it.id; tab = Tab.Sessions },
                             modifier = m,
                         )
+                        Tab.Config -> if (host == null) {
+                            EmptyHint(t("还没有主机"), t("去「主机」那一栏加一台"), m)
+                        } else {
+                            app.yxi.ui.ConfigScreen(shared.session, host, hosts,
+                                onPickHost = { picked -> hostId = picked.id }, modifier = m)
+                        }
                         Tab.Settings -> SettingsScreen(store, keys, host, shared.session, shared.error, modifier = m)
                     }
                 }

@@ -1,6 +1,7 @@
 package app.yxi.agent
 
 import org.junit.Assert.assertEquals
+import org.json.JSONObject
 import org.junit.Test
 
 class TranscriptTest {
@@ -20,5 +21,114 @@ class TranscriptTest {
         assertEquals("-root--claude", Transcript.projectDirOf("/root/.claude"))
         assertEquals("-a-b-c", Transcript.projectDirOf("/a b.c"))
         assertEquals("-x-y", Transcript.projectDirOf("/x-y"))
+    }
+
+    /**
+     * **切了模型、它还没回话时，顶栏也要显示新模型。**
+     *
+     * ⚠️ 用户报过：在会话里切到 Opus 5，App 顶栏还写着 opus-4-8，以为没切成。
+     * 病根是顶栏那个名字来自**最后一条 assistant 消息**的 model —— 切换不会改写旧消息。
+     * 所以要认 `/model` 的回执（命令输出里的 `Set model to …`）并覆盖。
+     *
+     * ⚠️ 回执里带 ANSI 加粗序列；而别名形式 `claude-opus-5[1m]` 里的 `[1m` 跟加粗序列长得一样，
+     * **不能先整体清 ANSI**，否则显示成 `claude-opus-5]`。这条用例盯着这两点。
+     */
+    @Test fun 切完模型还没回话也显示新模型() {
+        val esc = "\u001B"
+        fun line(text: String) =
+            """{"type":"user","message":{"role":"user","content":${JSONObject.quote(text)}}}"""
+        val assistant =
+            """{"type":"assistant","message":{"role":"assistant","model":"claude-opus-4-8",""" +
+                """"usage":{"input_tokens":10,"cache_read_input_tokens":90},"content":[]}}"""
+
+        // 只有 assistant：显示它自己的模型
+        Transcript.Incremental().apply { add(sequenceOf(assistant)) }.let {
+            assertEquals("claude-opus-4-8", it.ctx?.model)
+        }
+        // 之后来一条切换回执（带 ANSI 加粗）：显示新模型，token 数保持
+        Transcript.Incremental().apply {
+            add(sequenceOf(assistant, line("<local-command-stdout>Set model to $esc[1mOpus 5 (1M context)$esc[22m and saved as your default for new sessions</local-command-stdout>")))
+        }.let {
+            assertEquals("Opus 5 (1M context)", it.ctx?.model)
+            assertEquals(100L, it.ctx?.tokens)
+        }
+        // 别名形式：`[1m` 是模型名的一部分，别被当成 ANSI 吃掉
+        Transcript.Incremental().apply {
+            add(sequenceOf(assistant, line("<local-command-stdout>Set model to claude-opus-5[1m]</local-command-stdout>")))
+        }.let { assertEquals("claude-opus-5[1m]", it.ctx?.model) }
+        // 「Kept model as …」= 没切，不能误判
+        Transcript.Incremental().apply {
+            add(sequenceOf(assistant, line("<local-command-stdout>Kept model as $esc[1mOpus 4.8$esc[22m</local-command-stdout>")))
+        }.let { assertEquals("claude-opus-4-8", it.ctx?.model) }
+    }
+
+    /**
+     * **顶栏要显示这个会话的模型 + 模式。**
+     *
+     * ⚠️ `effort` 在转录行的**顶层**（跟 `type`/`uuid` 平级），**不在 message 里** —— 找错地方永远是空。
+     * ⚠️ 模式来自单独的 `{"type":"mode",…}` 行（**没有 message 字段**），
+     * 得在「非消息行静默跳过」之前接住，否则永远读不到。
+     */
+    @Test fun 顶栏带思考强度和模式() {
+        val assistant =
+            """{"type":"assistant","effort":"max","message":{"role":"assistant","model":"claude-opus-5",""" +
+                """"usage":{"input_tokens":10,"cache_read_input_tokens":90},"content":[]}}"""
+        val planLine = """{"type":"mode","mode":"plan","sessionId":"s1"}"""
+        val normalLine = """{"type":"mode","mode":"normal","sessionId":"s1"}"""
+
+        // effort 取到；没有 mode 行时 mode 为空
+        Transcript.Incremental().apply { add(sequenceOf(assistant)) }.let {
+            assertEquals("max", it.ctx?.effort)
+            assertEquals("claude-opus-5", it.ctx?.model)
+            assertEquals("", it.ctx?.mode)
+        }
+        // 先进计划模式再回话：带上 plan
+        Transcript.Incremental().apply { add(sequenceOf(planLine, assistant)) }
+            .let { assertEquals("plan", it.ctx?.mode) }
+        // 回完话之后才切模式：也要立刻反映（用量保持）
+        Transcript.Incremental().apply { add(sequenceOf(assistant, planLine)) }.let {
+            assertEquals("plan", it.ctx?.mode)
+            assertEquals(100L, it.ctx?.tokens)
+            assertEquals("max", it.ctx?.effort)
+        }
+        // 切回 normal
+        Transcript.Incremental().apply { add(sequenceOf(assistant, planLine, normalLine)) }
+            .let { assertEquals("normal", it.ctx?.mode) }
+    }
+
+    /**
+     * ponytail 强度（lite/full/ultra）——顶栏也要显示。
+     * ⚠️ 它藏在钩子输出的那段文字里（`PONYTAIL MODE ACTIVE — level: x`），破折号是 em dash。
+     * ⚠️ 等级为空的注入（实测真有）不能把已知值冲掉。
+     */
+    @Test fun 认得出ponytail强度() {
+        val assistant =
+            """{"type":"assistant","effort":"max","message":{"role":"assistant","model":"claude-opus-5",""" +
+                """"usage":{"input_tokens":10,"cache_read_input_tokens":90},"content":[]}}"""
+        fun hook(text: String) =
+            """{"type":"system","attachment":{"type":"hook_success","text":${JSONObject.quote(text)}}}"""
+
+        // 注入在回话之前
+        Transcript.Incremental().apply {
+            add(sequenceOf(hook("PONYTAIL MODE ACTIVE \u2014 level: full"), assistant))
+        }.let { assertEquals("full", it.ctx?.ponytail) }
+
+        // 注入在回话之后：也要立刻反映
+        Transcript.Incremental().apply {
+            add(sequenceOf(assistant, hook("PONYTAIL MODE CHANGED \u2014 level: ultra")))
+        }.let {
+            assertEquals("ultra", it.ctx?.ponytail)
+            assertEquals(100L, it.ctx?.tokens)      // 用量不受影响
+        }
+
+        // 空等级的注入不能把已知值冲掉
+        Transcript.Incremental().apply {
+            add(sequenceOf(hook("PONYTAIL MODE ACTIVE \u2014 level: ultra"), assistant,
+                hook("PONYTAIL MODE ACTIVE \u2014 level: ")))
+        }.let { assertEquals("ultra", it.ctx?.ponytail) }
+
+        // 压根没注入过 → 空着，不瞎猜
+        Transcript.Incremental().apply { add(sequenceOf(assistant)) }
+            .let { assertEquals("", it.ctx?.ponytail) }
     }
 }

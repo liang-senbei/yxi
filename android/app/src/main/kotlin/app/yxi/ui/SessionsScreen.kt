@@ -81,7 +81,11 @@ fun SessionsScreen(
     // 20 个会话的时候还是列表能一眼扫完（决策 D16b 里就写明了这个代价）
     var floating by remember(host.id) { mutableStateOf(false) }
     var pinned by remember(host.id) { mutableStateOf(Pinned.get(ctx, host.id)) }
+    var muted by remember(host.id) { mutableStateOf(Mute.get(ctx, host.id)) }
     var refreshing by remember { mutableStateOf(false) }
+    // 「回它一句」目标 —— 非空就弹底部输入框，送键到那个会话（不进对话）
+    var replyTo by remember { mutableStateOf<Session?>(null) }
+    var newSession by remember { mutableStateOf(false) }
 
     LaunchedEffect(connectError) { connectError?.let { status = it } }
 
@@ -130,6 +134,7 @@ fun SessionsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
+                    Box(Modifier.size(9.dp).clip(CircleShape).background(hostColor(host.id)))
                     Text(host.alias, style = MaterialTheme.typography.headlineSmall)
                     if (hosts.size > 1) Text("▾", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.outline)
                 }
@@ -150,9 +155,19 @@ fun SessionsScreen(
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // ＋ 从手机拉起一个新会话（在某目录跑起 claude），不用先到电脑前
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer, shape = Pill,
+                    modifier = Modifier.height(44.dp).clip(Pill).clickable { newSession = true },
+                ) {
+                    Box(Modifier.padding(horizontal = 15.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                        Text("＋", style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    }
+                }
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceContainer, shape = Pill,
-                    modifier = Modifier.height(44.dp).clickable { floating = true },
+                    modifier = Modifier.height(44.dp).clip(Pill).clickable { floating = true },
                 ) {
                     Box(Modifier.padding(horizontal = 14.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
                         Text(t("悬浮"), style = MaterialTheme.typography.labelLarge)
@@ -161,7 +176,7 @@ fun SessionsScreen(
                 listOf(t("文件") to onOpenFiles, t("终端") to { onOpenTerminal(null, ".") }).forEach { (label, go) ->
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceContainer, shape = Pill,
-                        modifier = Modifier.height(44.dp).clickable(onClick = go),
+                        modifier = Modifier.height(44.dp).clip(Pill).clickable(onClick = go),
                     ) {
                         Box(Modifier.padding(horizontal = 16.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
                             Text(label, style = MaterialTheme.typography.labelLarge)
@@ -175,7 +190,8 @@ fun SessionsScreen(
         // 不该跟着会话列表一起滚走
         update?.let {
             Box(Modifier.padding(14.dp, 0.dp, 14.dp, 8.dp)) {
-                UpdateBanner(sftp, it) { update = null }
+                // ⚠️ 传 ssh 不传 sftp —— 下载得自己开条活得久的 SFTP，别用界面这条（切页面会关）
+                UpdateBanner(ssh, it) { update = null }
             }
         }
         // ⚠️ **会话页顶上不再显示额度**（用户要求）。额度只在主机页长按那台机器时查。
@@ -246,6 +262,7 @@ fun SessionsScreen(
                     ReorderablePinned(
                         tops = tops,
                         onOpen = { onOpenChat(it.name, it.cwd) },
+                        onReply = { replyTo = it },
                         onUnpin = { pinned = pinned - it.name; Pinned.set(ctx, host.id, pinned) },
                         onReorder = { from, to ->
                             // 在**完整的 pinned 列表**里挪（tops 可能因为会话被杀而比 pinned 短）
@@ -273,9 +290,11 @@ fun SessionsScreen(
                         SessionCard(
                             group[i],
                             modifier = Modifier.animateItem(),
-                            // 点卡片 = 进对话（在里面回它一句）
+                            // 点卡片 = 进对话；气泡按钮 = 不进对话直接回一句
                             onOpen = { onOpenChat(group[i].name, group[i].cwd) },
+                            onReply = { replyTo = group[i] },
                             onPin = { pinned = pinned + group[i].name; Pinned.set(ctx, host.id, pinned) },
+                            muted = group[i].name in muted,
                         )
                     }
                 }
@@ -290,6 +309,47 @@ fun SessionsScreen(
             hostId = host.id,
             onPick = { onOpenChat(it.name, it.cwd) },
             onDismiss = { floating = false },
+        )
+    }
+
+    // 回它一句：不进对话，直接把这句送进那个 tmux 会话（send-keys）。
+    replyTo?.let { target ->
+        SendSheet(
+            target = target,
+            // 连接断了就算失败（exec 现在失败静默返回空，不抛，所以靠 isConnected 判成败）
+            send = { msg ->
+                val s = ssh
+                if (s == null || !s.isConnected) Result.failure(RuntimeException(t("连接断了")))
+                else runCatching { SessionProbe.send(s, target.name, msg); t("已送达") }
+            },
+            muted = target.name in muted,
+            onToggleMute = {
+                Mute.toggle(ctx, host.id, target.name)
+                muted = Mute.get(ctx, host.id)
+            },
+            onDismiss = { replyTo = null },
+        )
+    }
+
+    if (newSession) {
+        NewSessionDialog(
+            recent = sessions.map { it.cwd }.distinct().take(8),
+            onDismiss = { newSession = false },
+            onCreate = { dir ->
+                newSession = false
+                val s = ssh ?: return@NewSessionDialog
+                val base = dir.trimEnd('/').substringAfterLast('/').ifBlank { "work" }
+                    .filter { it.isLetterOrDigit() || it in "._-" }.ifBlank { "work" }
+                val full = "cc-$base"
+                val d = dir.replace("'", "'\''")
+                scope.launch {
+                    // 有就直接开，没有就在那个目录新建并跑起 claude
+                    runCatching {
+                        s.exec("tmux has-session -t '$full' 2>/dev/null || { tmux new-session -d -s '$full' -c '$d'; tmux send-keys -t '$full' 'claude' Enter; }")
+                    }
+                    onOpenChat(full, dir)
+                }
+            },
         )
     }
 
@@ -347,9 +407,9 @@ private fun GroupHeader(st: SessionState, n: Int) {
  * 屏幕位置、还要处理边缘自动滚动，很脆。置顶通常就三五个、固定在最上面，
  * 用一个**普通 Column** 装，拖动只在这几张卡之间发生，简单又稳。
  *
- * ⚠️ **轻点 = 进对话（去回它），长按 = 拖排序** —— 这就是「回复」和「排序」的区分。
- * `detectDragGesturesAfterLongPress` 只在长按之后才接管手势，轻点漏给底下的
- * `clickable`，两者不打架。
+ * ⚠️ **轻点 = 进对话，长按 = 拖排序**。回复另有右侧气泡按钮，不占手势。
+ * `detectDragGesturesAfterLongPress` 在长按后接管拖动；但 `clickable` **不认长按**——
+ * 长按原地松手它照样当一次点击，所以拖动一起来就 `openEnabled=false` 掐掉它（见 #124）。
  *
  * 换位靠**累计位移 / 卡高**：拖过一张卡的高度就跟邻居换一次，边拖边换、松手落定。
  */
@@ -357,6 +417,7 @@ private fun GroupHeader(st: SessionState, n: Int) {
 private fun ReorderablePinned(
     tops: List<Session>,
     onOpen: (Session) -> Unit,
+    onReply: (Session) -> Unit,
     onUnpin: (Session) -> Unit,
     onReorder: (from: Int, to: Int) -> Unit,
 ) {
@@ -379,7 +440,10 @@ private fun ReorderablePinned(
             SessionCard(
                 sess, pinned = true,
                 dragging = isDragged,
+                // 只要有一张被拎起来（dragIndex>=0），就把点击关掉 —— 免得松手误开对话
+                openEnabled = dragIndex < 0,
                 onOpen = { onOpen(sess) },
+                onReply = { onReply(sess) },
                 onPin = { onUnpin(sess) },
                 modifier = Modifier
                     .onSizeChanged { with(density) { slot = it.height.toFloat() + 9.dp.toPx() } }
@@ -429,36 +493,87 @@ private fun ReorderablePinned(
 @Composable
 private fun SessionCard(
     s: Session,
-    /** 点一下 = 进对话（在里面回它）。**回复不再有单独按钮/长按**（用户要求，0.8.5）。 */
+    /** 点一下 = 进对话（在里面回它）。 */
     onOpen: () -> Unit,
+    /** 图钉下面那个气泡按钮 = **不进对话直接回一句**（0.8.8 加回来，用户要求）。 */
+    onReply: () -> Unit = {},
     pinned: Boolean = false,
     onPin: () -> Unit = {},
+    muted: Boolean = false,
     /** 拖动排序时给卡片加一层「被拎起来」的样子（抬高 + 微微透明）。 */
     dragging: Boolean = false,
+    /**
+     * 轻点开对话能不能触发。⚠️ **拖动中要禁掉**：否则长按拎起来、没拖就松手，
+     * `clickable` 照样会把它当一次点击 → 误开对话（实测踩过，用户报「长按不能排序」，
+     * 其实是长按松手被当成点击开了对话）。拎起来的一刻就把点击关掉，就不会误触。
+     */
+    openEnabled: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         shape = MaterialTheme.shapes.large,
         shadowElevation = if (dragging) 8.dp else 0.dp,
-        // ⚠️ **长按不再在这里绑发消息** —— 长按现在归「拖动排序」，由外面的 Modifier 接管。
-        // 点一下还是进对话（在里面回它一句），这就是「回复」和「排序」的区分：
-        // 轻点开对话去回，长按拎起来拖排序。
-        modifier = modifier.fillMaxWidth().clickable(onClick = onOpen),
+        // ⚠️ **长按不在这里绑发消息** —— 长按归「拖动排序」，由外面的 Modifier 接管。
+        // 轻点 = 进对话；右侧气泡按钮 = 不进对话直接回一句。两条路各自独立。
+        modifier = modifier.fillMaxWidth().clickable(enabled = openEnabled, onClick = onOpen),
     ) {
-        Column(Modifier.padding(16.dp, 14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(s.short, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                // 图钉一直在（不是只在置顶时才出现）—— 只在置顶时显示的话，
-                // 用户根本不知道有这个功能
-                // ⚠️ **不用 emoji 📌。** emoji 由系统字体渲染，各家手机长得不一样、
-                // 粗细跟界面其余部分对不上，而且**没法跟着主题变色** ——
-                // 深色界面里就是一块彩色贴纸。这里画的是矢量图钉，置顶时才上色。
+        Row(
+            Modifier.padding(16.dp, 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(s.short, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                    // 多久没动了 —— 一眼看出哪些会话是新鲜的、哪些搁置了
+                    ago(s.lastActivity).takeIf { it.isNotEmpty() }?.let {
+                        Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                    }
+                    if (muted) {
+                        Text(
+                            t("🔕 静音"),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline,
+                        )
+                    }
+                    if (s.attached) {
+                        Text(
+                            t("已连"),
+                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                            color = MaterialTheme.colorScheme.outline,
+                        )
+                    }
+                }
+                if (s.detail.isNotEmpty()) {
+                    Text(
+                        s.detail,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                    )
+                }
+                Text(
+                    s.cwd,
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.outline,
+                    maxLines = 1,
+                )
+            }
+            // 右侧竖排：图钉在上，回它一句在下（用户要「别针下面再加一个按钮」）。
+            // ⚠️ 这两个 Box 各自 `clickable` 会**消费**掉点击，不会冒泡到 Surface 的 onOpen ——
+            // 所以点图钉/点气泡都不会顺带把对话打开（跟图钉一直以来的行为一致）。
+            Column(
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                // 图钉一直在（不是只在置顶时才出现）—— 只在置顶时显示的话用户不知道有这功能。
+                // ⚠️ **不用 emoji 📌**：各机型不一、粗细对不上、不跟主题变色。矢量图钉，置顶才上色。
                 Box(
                     Modifier.size(36.dp).clip(CircleShape)
                         .background(
                             if (pinned) MaterialTheme.colorScheme.tertiaryContainer
-                            else androidx.compose.ui.graphics.Color.Transparent
+                            else Color.Transparent
                         )
                         .clickable(onClick = onPin),
                     contentAlignment = Alignment.Center,
@@ -470,29 +585,16 @@ private fun SessionCard(
                         18.dp,
                     )
                 }
-                Spacer(Modifier.width(4.dp))
-                if (s.attached) {
-                    Text(
-                        t("已连"),
-                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                        color = MaterialTheme.colorScheme.outline,
-                    )
+                // 回它一句：淡底 + primary 气泡，一眼看出「可点」。点它弹底部输入框，直接送键。
+                Box(
+                    Modifier.size(36.dp).clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                        .clickable(onClick = onReply),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    GlyphIcon(Glyph.Chat, MaterialTheme.colorScheme.primary, 18.dp)
                 }
             }
-            if (s.detail.isNotEmpty()) {
-                Text(
-                    s.detail,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                )
-            }
-            Text(
-                s.cwd,
-                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                color = MaterialTheme.colorScheme.outline,
-                maxLines = 1,
-            )
         }
     }
 }
@@ -500,3 +602,115 @@ private fun SessionCard(
 
 
 
+
+/**
+ * 「回它一句」底部输入框 —— 不进对话，直接把这句送进那个 tmux 会话。
+ *
+ * 0.8.5 曾把它连同卡片按钮一起撤掉（改成「点卡片进对话去回」）；0.8.8 按用户要求
+ * 加回来，位置挪到图钉底下那个气泡按钮。区分：**轻点卡片 = 进对话细聊，气泡 = 甩一句就走**。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SendSheet(
+    target: Session,
+    /** 真去发，返回成/败。发送键 morph 成进度→成功✓/失败（[SubmitButton]）。 */
+    send: suspend (String) -> Result<String>,
+    muted: Boolean = false,
+    onToggleMute: () -> Unit = {},
+    onDismiss: () -> Unit,
+) {
+    var text by remember { mutableStateOf("") }
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
+        Column(
+            Modifier.padding(18.dp, 0.dp, 18.dp, 28.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(t("发给 %s").format(target.short), style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.weight(1f))
+                // 顺手静音/取消静音这个会话（长按卡片被排序占了，放这儿）
+                Surface(
+                    color = if (muted) MaterialTheme.colorScheme.primaryContainer
+                    else MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shape = Pill, modifier = Modifier.clip(Pill).clickable(onClick = onToggleMute),
+                ) {
+                    Text(
+                        if (muted) t("🔔 取消静音") else t("🔕 静音"),
+                        Modifier.padding(14.dp, 7.dp), style = MaterialTheme.typography.labelLarge,
+                        color = if (muted) MaterialTheme.colorScheme.onPrimaryContainer
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Text(
+                t("不用先 attach —— 直接送进那个会话（tmux send-keys）。"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.outline,
+            )
+            // 常用语：点一下填进下面的框，省掉在手机上打字
+            SnippetChips(onPick = { text = it }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(
+                text, { text = it },
+                placeholder = { Text(t("说一句…")) },
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 96.dp),
+            )
+            if (text.isNotBlank()) {
+                SubmitButton(
+                    label = t("发送"),
+                    modifier = Modifier.fillMaxWidth(),
+                    successLabel = t("已送达"),
+                    onSuccess = onDismiss,   // 成功打勾后自动收起
+                    work = { send(text.trim()) },
+                )
+            } else {
+                // 没字时是个灰的占位（点不动）
+                Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = Pill, modifier = Modifier.fillMaxWidth().height(54.dp)) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(t("发送"), color = MaterialTheme.colorScheme.outline, style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 从手机拉起一个新会话 —— 选个最近目录（或手打路径），在那儿新建 tmux 会话并跑起 claude。
+ * 通勤路上想起「该让 X 项目跑个活」，不用等到电脑前。
+ */
+@Composable
+private fun NewSessionDialog(recent: List<String>, onDismiss: () -> Unit, onCreate: (String) -> Unit) {
+    var path by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(t("新会话开在哪个目录")) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (recent.isNotEmpty()) {
+                    Text(t("最近"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
+                    recent.forEach { dir ->
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = Pill,
+                            modifier = Modifier.fillMaxWidth().clip(Pill).clickable { onCreate(dir) },
+                        ) {
+                            Text(
+                                dir, Modifier.padding(14.dp, 8.dp),
+                                style = MaterialTheme.typography.labelLarge.copy(fontFamily = FontFamily.Monospace),
+                                maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    path, { path = it }, singleLine = true, shape = MaterialTheme.shapes.medium,
+                    placeholder = { Text(t("/opt/workspace/…")) }, modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = path.isNotBlank(), onClick = { onCreate(path.trim()) }) { Text(t("开起来")) }
+        },
+        dismissButton = { TextButton(onDismiss) { Text(t("取消")) } },
+    )
+}

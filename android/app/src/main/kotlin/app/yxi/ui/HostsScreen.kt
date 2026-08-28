@@ -17,6 +17,7 @@ import androidx.compose.runtime.*
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -128,7 +129,7 @@ private fun HostRow(
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         shape = MaterialTheme.shapes.large,
-        modifier = Modifier.fillMaxWidth().combinedClickable(
+        modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.large).combinedClickable(
             onClick = onClick,
             onLongClick = { expanded = !expanded },
         ),
@@ -162,7 +163,7 @@ private fun HostRow(
                 color = if (h.watch) MaterialTheme.colorScheme.tertiaryContainer
                 else MaterialTheme.colorScheme.surfaceContainerHigh,
                 shape = Pill,
-                modifier = Modifier.padding(end = 8.dp).clickable(onClick = onWatch),
+                modifier = Modifier.padding(end = 8.dp).clip(Pill).clickable(onClick = onWatch),
             ) {
                 // ⚠️ 开/关不能只靠换图形，**颜色也要变** —— 铃铛和静音铃铛在 18dp
                 // 下轮廓很像，光看形状容易看错。而这两个状态后果差很远：
@@ -257,7 +258,7 @@ private fun HostQuota(h: Host, ctx: android.content.Context, store: HostStore, k
             else Spacer(Modifier.weight(1f))
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = Pill,
-                modifier = Modifier.clickable(onClick = onEdit),
+                modifier = Modifier.clip(Pill).clickable(onClick = onEdit),
             ) {
                 Text(t("改主机"), Modifier.padding(14.dp, 7.dp), style = MaterialTheme.typography.labelMedium, color = Muted)
             }
@@ -478,7 +479,7 @@ fun PublicKeySheetPublic(keys: KeyManager, onDone: () -> Unit) {
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainerLowest,
                 shape = MaterialTheme.shapes.medium,
-                modifier = Modifier.fillMaxWidth().clickable { copy() },
+                modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).clickable { copy() },
             ) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(line, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace))
@@ -587,7 +588,7 @@ private fun IconTextButton(text: String, primary: Boolean = false, onClick: () -
     Surface(
         color = if (primary) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainer,
         shape = Pill,
-        modifier = Modifier.height(44.dp).clickable(onClick = onClick),
+        modifier = Modifier.height(44.dp).clip(Pill).clickable(onClick = onClick),
     ) {
         Box(Modifier.padding(horizontal = 18.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
             Text(
@@ -609,10 +610,7 @@ private fun InstallKeySheet(
     host: Host,
     onDone: () -> Unit,
 ) {
-    val scope = rememberCoroutineScope()
     var password by remember { mutableStateOf("") }
-    var busy by remember { mutableStateOf(false) }
-    var result by remember { mutableStateOf<String?>(null) }
 
     ModalBottomSheet(onDismissRequest = onDone, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
         Column(
@@ -622,27 +620,31 @@ private fun InstallKeySheet(
             Text(t("给 %s 装公钥").format(host.alias), style = MaterialTheme.typography.titleLarge)
             Hint(t("用密码连一次，把这台手机的公钥追加进 ~/.ssh/authorized_keys，之后就免密了。相当于 ssh-copy-id。"))
             Field(password, { password = it }, t("密码"), password = true)
-            result?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary) }
-            Button(
-                onClick = {
-                    busy = true; result = t("连接中…")
-                    scope.launch {
-                        // 用密码连一次，但指纹校验和别处完全一样（第一次会弹指纹确认）
+            if (password.isNotEmpty()) {
+                SubmitButton(
+                    label = t("连接并安装"),
+                    modifier = Modifier.fillMaxWidth(),
+                    successLabel = t("装好了，已切密钥"),
+                    // 用密码连一次，把公钥追加进 authorized_keys，成功就切到密钥认证。失败给人话原因。
+                    work = {
                         val c = connect(app.yxi.ssh.HostConfig.Auth.Password(password))
-                        result = if (c == null) t("建不了连接") else runCatching {
+                        if (c == null) Result.failure(RuntimeException(t("建不了连接")))
+                        else runCatching {
                             c.session.connect()
                             val n = c.session.installPublicKey(keys.publicKeyLine()).trim()
                             c.session.disconnect()
                             store.upsert(host.copy(useKey = true, sealedPassword = app.yxi.ssh.Vault.seal(password)))
-                            t("✅ 装好了（authorized_keys 里现有 %s 行 yxi 公钥），已切到密钥认证").format(n)
-                        }.getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it; c.explain(it) }
-                        busy = false
+                            t("装好了（%s 行公钥）").format(n)
+                        }.recoverCatching { if (it is kotlinx.coroutines.CancellationException) throw it; throw RuntimeException(c.explain(it)) }
+                    },
+                )
+            } else {
+                Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = Pill, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(t("连接并安装"), color = MaterialTheme.colorScheme.outline, style = MaterialTheme.typography.titleMedium)
                     }
-                },
-                enabled = password.isNotEmpty() && !busy,
-                shape = Pill,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-            ) { Text(if (busy) t("处理中…") else t("连接并安装")) }
+                }
+            }
         }
     }
 }

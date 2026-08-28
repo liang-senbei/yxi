@@ -266,14 +266,27 @@ class SshSession(
     }
 
     suspend fun exec(command: String): String = withContext(Dispatchers.IO) { chanLock.withLock {
-        val s = requireNotNull(session) { "还没 connect()" }
-        val ch = s.openChannel("exec") as com.jcraft.jsch.ChannelExec
-        ch.setCommand(command)
-        val out = ch.inputStream
-        ch.connect(10_000)
-        val text = out.readBytes().decodeToString()
-        ch.disconnect()
-        text
+        // ⚠️ **连接半路死掉是手机上的常态，不是 bug** —— 锁屏、切基站、服务器掐空闲连接，
+        // 下一条 exec 就撞上 `Broken pipe` / `session is down`。这异常从协程里逸出 =
+        // **整个 app 闪退**（dropbox 里 exec 未捕获实测崩过，见 TROUBLESHOOTING #125）。
+        // exec 有 30+ 个调用点，逐个加 try 漏一个就是一次崩溃 —— 所以在**源头**兜住：
+        // 取消照抛（结构化并发要它），连接类失败**吞掉返回空**，交给上层的重连看门狗收拾。
+        // 跟 [Shell.write] 一个路子（它失败也是返回 false 不抛）。
+        try {
+            val s = session ?: return@withLock ""
+            val ch = s.openChannel("exec") as com.jcraft.jsch.ChannelExec
+            ch.setCommand(command)
+            val out = ch.inputStream
+            ch.connect(10_000)
+            val text = out.readBytes().decodeToString()
+            ch.disconnect()
+            text
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Log.w("YxiSSH", "exec 挂了（多半连接断了）：${e.message}")
+            ""
+        }
     } }
 
     /**

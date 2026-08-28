@@ -20,6 +20,8 @@ data class Live(
     val busy: Boolean,
     /** 状态词原文，如 `Scampering… (4m 48s · ↓ 10.2k tokens)`。不忙时为 null。 */
     val status: String?,
+    /** 收尾那条 `✻ Baked for 13s` 里的耗时（`13s`）。刚跑完才有，用来显示「刚跑完·13s」。 */
+    val doneFor: String? = null,
 ) {
     companion object {
         val IDLE = Live(busy = false, status = null)
@@ -85,8 +87,10 @@ data class Live(
             // ⚠️ 只有「还在跑」那一条才给文案。收尾那条（`Baked for 13s`）不是状态，是结果。
             val status = last?.takeIf { running }
                 ?.let { (it.groupValues[2] + it.groupValues[3] + it.groupValues[4]).trim() }
+            // 收尾形态 `✻ Baked for 13s`：group4 是耗时。刚跑完才有，喂给「刚跑完·13s」。
+            val doneFor = last?.takeIf { !running }?.groupValues?.get(4)?.trim()?.ifBlank { null }
 
-            return Live(busy, status)
+            return Live(busy, status, doneFor)
         }
     }
 }

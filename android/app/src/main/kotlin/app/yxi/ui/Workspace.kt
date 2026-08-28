@@ -12,6 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -35,7 +36,7 @@ import org.connectbot.terminal.TerminalEmulatorFactory
 private val Pill = RoundedCornerShape(100.dp)
 
 enum class Mode(private val zh: String) {
-    Terminal("终端"), Chat("对话"), Files("文件");
+    Terminal("终端"), Chat("对话"), Files("文件"), Lab("实验室");
 
     // ⚠️ **label 必须是 get() 而不是构造参数。** enum 常量的参数在**类初始化时求值一次**，
     // 之后换语言它不会跟着变 —— 现象是底部导航栏 / 模式切换条永远停在启动时那种语言，
@@ -451,7 +452,7 @@ fun Workspace(
                         val (on, toggle) = st
                         Surface(
                             color = if (on) SurfaceContainerHigh else SurfaceContainer, shape = Pill,
-                            modifier = Modifier.clickable(onClick = toggle),
+                            modifier = Modifier.clip(Pill).clickable(onClick = toggle),
                         ) {
                             Text(
                                 icon, Modifier.padding(12.dp, 8.dp),
@@ -503,6 +504,8 @@ fun Workspace(
                 Mode.Files -> FilesScreen(
                     sftp, cwd, jumpTo, onJumped = { jumpTo = null }, Modifier.fillMaxSize(),
                 )
+                // 实验室：UI 实验台。多数 demo 纯本地；「审核勾选」要 ssh 把结果写回服务器。
+                Mode.Lab -> LabScreen(ssh, Modifier.fillMaxSize())
             }
             if (mode == Mode.Terminal && dpad) {
                 DPad(
@@ -612,7 +615,7 @@ private fun ModeSwitcher(mode: Mode, chatBlocked: String?, onPick: (Mode) -> Uni
                 Surface(
                     color = if (m == mode) SurfaceContainerHighest else androidx.compose.ui.graphics.Color.Transparent,
                     shape = Pill,
-                    modifier = Modifier.weight(1f).height(38.dp).clickable {
+                    modifier = Modifier.weight(1f).height(38.dp).clip(Pill).clickable {
                         // 置灰的不是「点不动」而是「点了告诉你为什么」
                         if (blocked) why = chatBlocked else onPick(m)
                     },

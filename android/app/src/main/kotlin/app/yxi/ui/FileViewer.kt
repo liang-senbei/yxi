@@ -12,9 +12,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.unit.dp
 import app.yxi.ssh.Paths
 import app.yxi.ssh.Sftp
@@ -51,6 +56,9 @@ fun FileViewer(sftp: Sftp?, path: String, onBack: () -> Unit, modifier: Modifier
     var error by remember(path) { mutableStateOf<String?>(null) }
     var source by remember(path) { mutableStateOf(false) }   // [RENDERABLE] 的「源码」开关
     var truncated by remember(path) { mutableStateOf(false) }
+    var dling by remember(path) { mutableStateOf(false) }
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(path, sftp) {
         val s = sftp ?: return@LaunchedEffect
@@ -66,7 +74,7 @@ fun FileViewer(sftp: Sftp?, path: String, onBack: () -> Unit, modifier: Modifier
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Surface(color = SurfaceContainer, shape = Pill, modifier = Modifier.clickable(onClick = onBack)) {
+            Surface(color = SurfaceContainer, shape = Pill, modifier = Modifier.clip(Pill).clickable(onClick = onBack)) {
                 Text("←", Modifier.padding(15.dp, 8.dp), style = MaterialTheme.typography.titleSmall)
             }
             Column(Modifier.weight(1f)) {
@@ -77,10 +85,41 @@ fun FileViewer(sftp: Sftp?, path: String, onBack: () -> Unit, modifier: Modifier
                     color = if (error != null) MaterialTheme.colorScheme.error else Dim,
                 )
             }
+            // 下载**整个原文件**到手机（不是那份有上限的预览）：图/视频进相册，csv/xlsx/pdf 等进「下载」目录。
+            // 从对话里点文件路径就能到这个查看器，所以这一颗按钮 = 直接在对话里把文件抓到手机。
+            Surface(
+                color = SurfaceContainer, shape = Pill,
+                modifier = Modifier.clip(Pill).clickable(enabled = sftp != null && !dling) {
+                    dling = true
+                    scope.launch {
+                        val name = Paths.nameOf(path)
+                        val mime = MediaSaver.mimeOf(name, "")
+                        val msg = runCatching {
+                            val s = sftp ?: error(t("没连上"))
+                            val f = java.io.File(ctx.cacheDir, "dl/$name")
+                            withContext(Dispatchers.IO) {
+                                f.parentFile?.mkdirs()
+                                s.download(path, f)
+                                MediaSaver.save(ctx, name, mime, f)
+                            }
+                            runCatching { f.delete() }
+                            if (mime.startsWith("image/") || mime.startsWith("video/")) t("已存到相册") else t("已存到下载目录")
+                        }.getOrElse { (it.message ?: t("下载失败")).take(30) }
+                        dling = false
+                        android.widget.Toast.makeText(ctx, msg, android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                },
+            ) {
+                Text(
+                    if (dling) t("下载中…") else t("下载"),
+                    Modifier.padding(14.dp, 8.dp),
+                    style = MaterialTheme.typography.labelMedium, color = Copper,
+                )
+            }
             if (ext in RENDERABLE && bytes != null) {
                 Surface(
                     color = if (source) SurfaceContainerHigh else SurfaceContainer, shape = Pill,
-                    modifier = Modifier.clickable { source = !source },
+                    modifier = Modifier.clip(Pill).clickable { source = !source },
                 ) {
                     Text(
                         if (source) t("源码") else t("阅读"),

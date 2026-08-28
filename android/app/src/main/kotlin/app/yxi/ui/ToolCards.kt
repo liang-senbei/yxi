@@ -11,8 +11,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import app.yxi.agent.ChatItem
 import app.yxi.agent.Pending
@@ -45,7 +47,7 @@ fun ToolCard(c: ChatItem.ToolCall) {
     // 两个例外**不折叠**，它们不是噪音：
     //   · 出错的 —— 失败才是你要看的那条
     //   · 要你拿主意的（AskUserQuestion / ExitPlanMode）
-    val alwaysOpen = c.name == "AskUserQuestion" || c.name == "ExitPlanMode"
+    val alwaysOpen = c.name == "AskUserQuestion" || c.name == "ExitPlanMode" || c.name == "TodoWrite"
     var open by remember(c.key) { mutableStateOf(alwaysOpen || c.isError) }
     Surface(color = SurfaceContainerLow, shape = MaterialTheme.shapes.large) {
         Column(
@@ -63,6 +65,7 @@ fun ToolCard(c: ChatItem.ToolCall) {
                 "Agent", "Task" -> AgentBody(c, true)
                 "AskUserQuestion" -> AskBody(c)
                 "ExitPlanMode" -> PlanBody(c, true)
+                "TodoWrite" -> TodoBody(c)
                 else -> PlainBody(c, true)
             }
         }
@@ -75,6 +78,11 @@ fun ToolCard(c: ChatItem.ToolCall) {
  */
 private fun summary(c: ChatItem.ToolCall): String {
     val i = c.input
+    if (i.has("todos")) {
+        val a = i.optJSONArray("todos"); val n = a?.length() ?: 0
+        val done = (0 until n).count { a?.optJSONObject(it)?.optString("status") == "completed" }
+        return "$done/$n"
+    }
     val raw = when {
         i.has("command") -> i.optString("command")
         i.has("file_path") -> i.optString("file_path").substringAfterLast('/')
@@ -88,12 +96,44 @@ private fun summary(c: ChatItem.ToolCall): String {
     return raw.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty().trim()
 }
 
+/**
+ * TodoWrite 渲染成真待办清单 ☐ 待办 / ▶ 正在做 / ☑ 完成。
+ * 比 Bash/Read 那些高信号 —— 一眼看清 Claude 的计划和进度。默认展开。
+ */
+@Composable
+private fun TodoBody(c: ChatItem.ToolCall) {
+    val todos = c.input.optJSONArray("todos") ?: return
+    Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        for (idx in 0 until todos.length()) {
+            val o = todos.optJSONObject(idx) ?: continue
+            val status = o.optString("status")
+            val content = o.optString("content").ifBlank { o.optString("activeForm") }
+            val done = status == "completed"
+            val (mark, markColor) = when (status) {
+                "completed" -> "☑" to Muted           // ☑
+                "in_progress" -> "▶" to Copper         // ▶
+                else -> "☐" to MaterialTheme.colorScheme.onSurfaceVariant   // ☐
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(mark, style = MaterialTheme.typography.bodyMedium, color = markColor)
+                Text(
+                    content,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (done) Muted else MaterialTheme.colorScheme.onSurface,
+                    textDecoration = if (done) TextDecoration.LineThrough else null,
+                )
+            }
+        }
+    }
+}
+
 /** ⚠️ `@Composable`：配色跟着风格走（[app.yxi.ui.Skin]），要读当前 Palette。 */
 @androidx.compose.runtime.Composable
 private fun accent(name: String) = when (name) {
     "Bash" -> Copper
     "Edit", "Write" -> Teal
     "AskUserQuestion", "ExitPlanMode" -> Amber   // 这两个本来就是「要你拿主意」的
+    "TodoWrite" -> Teal   // 计划/进度
     else -> Muted
 }
 
@@ -323,19 +363,27 @@ private fun summarize(c: ChatItem.ToolCall): String? = when (c.name) {
  * 一旦屏幕顺序和列表顺序对不上，就会**点 A 选中 B 且不报错**。
  */
 @Composable
-fun PendingCard(p: Pending, busy: Boolean, onPick: (Pending.Option) -> Unit, onSubmit: () -> Unit) {
+fun PendingCard(p: Pending, busy: Boolean, onPick: (Pending.Option) -> Unit, onSubmit: () -> Unit, onDiff: (() -> Unit)? = null) {
     Surface(color = SurfaceContainerLow, shape = MaterialTheme.shapes.large) {
         Column(Modifier.fillMaxWidth().padding(16.dp, 14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Box(Modifier.size(7.dp).background(Amber, Pill))
                 Text(if (p.multiSelect) t("等你选（可多选）") else t("等你选"), style = MaterialTheme.typography.labelMedium, color = Amber)
+                Spacer(Modifier.weight(1f))
+                // 审批前看一眼 Claude 改了什么 —— 看得见改动，「允许提交/编辑」才是知情的
+                onDiff?.let {
+                    Surface(color = SurfaceContainer, shape = Pill, modifier = Modifier.clip(Pill).clickable(onClick = it)) {
+                        Text(t("看改动"), Modifier.padding(12.dp, 5.dp),
+                            style = MaterialTheme.typography.labelMedium, color = OnSurfaceVariant)
+                    }
+                }
             }
             if (p.title.isNotBlank()) Text(p.title, style = MaterialTheme.typography.titleSmall, color = OnSurface)
             p.options.forEach { o ->
                 Surface(
                     color = if (o.checked) CopperContainer else SurfaceContainer,
                     shape = MaterialTheme.shapes.medium,
-                    modifier = Modifier.fillMaxWidth().clickable(enabled = !busy) { onPick(o) },
+                    modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).clickable(enabled = !busy) { onPick(o) },
                 ) {
                     Row(Modifier.padding(14.dp, 11.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(

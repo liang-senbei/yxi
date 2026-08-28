@@ -2220,3 +2220,200 @@ access/refresh token，不能出现在任何日志、抓屏、缓存里。
 
 **判据**：CF 令牌能不能干某件事，别看 verify，**直接拿那个具体的写操作试**。
 verify 只说令牌活着，不说它有你要的那条权限。
+
+## 124. ⭐ 长按松手误开对话 —— `clickable` 不认长按，照样在抬手时点一下（订正 #121）
+
+**症状**：#121 上线后用户报「长按既不能发消息又不能排列了」。实测：
+**长按拎起来、还没拖就松手 → 对话被打开了**（`dumpsys` 抓到 MainActivity 里
+进了 ChatScreen）。#121 里那句「轻点漏给 clickable、长按被 `detectDragGesturesAfterLongPress`
+接管，两者天然不打架」**是错的**。
+
+**根因**：同一个元素上叠了 `clickable` 和 `detectDragGesturesAfterLongPress` 两套手势。
+`clickable` **不知道「长按」这回事** —— 它只看「按下→抬起、中间没滑出 touch slop」。
+长按之后**原地松手**（没拖动）正好满足这条件，于是 `onClick`（= 开对话）照发。
+`detectDragGesturesAfterLongPress` 的 `onDragStart/onDragEnd` 只管**拖**，
+不拦这一次点击。→ 长按不拖 = 误开对话。
+
+**修法**：拖动一起来就**禁掉** `clickable`。给 `SessionCard` 加 `openEnabled: Boolean = true`，
+`.clickable(enabled = openEnabled, onClick = onOpen)`；`ReorderablePinned` 里
+`openEnabled = dragIndex < 0` —— 任一张卡被拎起（`dragIndex >= 0`）就把整组的轻点关掉。
+`onDragStart` 里先 `dragIndex = i`，重组后 `openEnabled` 变 false，`clickable` 在
+`enabled` 翻假时会**取消**尚未 fire 的那次点击 → 松手不再误开。拖完
+`onDragEnd/onDragCancel` 把 `dragIndex` 归 -1，轻点恢复。
+
+**实测三态齐全（0.8.7 / code 41）**：
+- 轻点 → 进对话 ✓（`dragIndex<0` → `openEnabled=true`）
+- 长按+拖 → 排序（`pinned_ordered` prefs 顺序翻转）✓
+- 长按+松手（不拖）→ **不开对话**（dumpsys 停在主界面）✓
+
+**教训**：Compose 里 `clickable` + 长按手势叠加，**默认会在长按松手时误触发点击**。
+想「长按干别的、轻点还要能用」，就得在长按态显式 `enabled=false` 掐掉 clickable，
+别指望它自己认长按。#121 那句「天然不打架」是没测「长按不拖就松手」这一路想当然了。
+
+## 125. ⭐ 有时闪退 —— SSH 操作在连接半路死掉时抛未捕获异常
+
+**症状**：用户报「有时候会闪退」。dropbox（`dumpsys dropbox`）里两条崩溃，都在 SSH 层：
+- `java.io.IOException: Broken pipe` @ `SshSession$Shell$write`（0.1.0，**早已修**：write 现在 runCatching 返回 false）
+- `com.jcraft.jsch.JSchException: session is down` @ `SshSession$exec`（0.8.1，**没修**）
+
+**根因**：手机上连接**半路死掉是常态**——锁屏、切基站、进电梯、服务器掐空闲连接。
+死了之后，重连看门狗（[rememberHostSession]）要等 jsch 的心跳判死才动，
+而心跳 15 秒 × 2 = **最长 30 秒**才发现。这 30 秒窗口里，任何一个协程往这条死连接上
+`exec` / `openExecStream`，jsch 立刻抛 `session is down` / `Broken pipe`。
+**这异常从协程里逸出，没人接 = 整个 app 闪退**。
+
+`exec` 有 **30+ 个调用点**，`openExecStream` 在对话界面跟转录流。逐个调用点加 try
+必漏；而且看板轮询（每 5 秒一次）**背景一直在 exec**，是撞上死连接概率最高的那个。
+
+**修法（在源头兜，别指望每个调用点）**：
+- `SshSession.exec`：整段包 try —— **取消照抛**（`CancellationException`，结构化并发要它），
+  连接类失败**吞掉返回空串**，交给看门狗重连。跟 `Shell.write` 一个路子（失败返回 false 不抛）。
+  这一处覆盖了全部 30+ 个 exec 调用点。
+- `ChatScreen` 的 `TranscriptStream.stream(...).collect`：这条是**裸 collect 在 LaunchedEffect 里**，
+  `openExecStream` 抛出来直接逸出 → 看聊天时连接抖一下就崩。用 `app.yxi.ssh.catching { }` 包住。
+
+**为什么不用全局 `CoroutineExceptionHandler` / `setDefaultUncaughtExceptionHandler`**：
+那个会把**所有**未捕获异常一起吞（包括真 bug），还得判断哪些该吞哪些该崩，容易把真崩溃藏掉。
+在 SSH 源头兜住「连接死了」这一类，精准、不误伤。
+
+**判据**：`catching`（rethrow 取消）vs `runCatching`（吞取消）—— 凡是失败要么显示要么恢复的地方，
+用 `catching`；纯粹「失败就当没有」的返回值型（exec→""、write→false）直接吞。**永远单独放过取消**。
+
+**别的 SSH 通道操作**已经安全：`openSftp`（所有调用点 runCatching）、`openShell`（Workspace 外层 runCatching）、
+`openExecStream` 在 EventService（watch 里 runCatching + onFailure）。审计过一圈，只有上面两处是裸的。
+
+## 126. 实验室的 WebView demo：动画/复杂背景层不合成，画不出来
+
+**症状**：实验室「网页效果」第一版用 `<canvas>`+`requestAnimationFrame` 画弹球 —— **全黑**。
+第二版换成 CSS `body{background:linear-gradient(...);background-size:400% 400%;animation}`（流动渐变）——
+**背景还是黑的**，但同一页里的按钮、圆球（元素纯色底）照常显示。
+
+**根因**：`loadDataWithBaseURL(null, …)` 起来的 WebView，对**需要单独合成层**的东西画不出来：
+- `<canvas>`：初始 `innerWidth/innerHeight` 常常是 0（WebView 还没 layout），画布 0×0，`onresize` 也不一定补得上。
+- **body 的动画/大尺寸渐变背景**（`background-size:400% 400%` + `@keyframes background-position`）：不合成，透明。
+
+但**稳画得出**的是：纯色背景（`body{background:#12152e}`）、元素纯色底（`.ball{background:#f00}`）、
+`transform` 动画（旋转/位移/缩放）。文件预览里那张纯色+静态卡片的 html 也正是这些，所以没事。
+
+**修法**：demo 只用「保证会画」的原语搭 —— **纯色底 + 元素纯色 + transform 动画**。
+弹球改成三个纯色圆 `transform:rotate() translateX()` 绕圈，背景给纯深色，JS 只留一个计数按钮证明 JS 开着。
+
+**判据**：要在这个 WebView 里做视觉效果，**别碰 canvas 和动画背景层**；用 SVG/纯色元素 + CSS transform。
+真要 canvas，得等 layout 完再设尺寸（`ResizeObserver` 或 post 一帧再 `fit()`），单靠 `onload` 不够。
+
+## 127. 更新下载切进会话就停 —— 下载挂在界面 scope + 界面的 SFTP 通道上
+
+**症状**（用户报）：点「下载并安装」开始下更新，**切进任意会话再退出来，下载就停了**，永远装不上。
+
+**根因**：两条都绑在会死的东西上。旧的 `UpdateBanner` 里下载跑在自己的 `rememberCoroutineScope`，
+用的又是 `SessionsScreen` 持有、`onDispose` 会关的那条 SFTP 通道。一进会话 `work != null` →
+看板 composable 销毁 → **协程被取消 + SFTP 通道被关**，下载静悄悄断掉，连个报错都没有。
+
+**修法**：下载搬进单例 `object UpdateDownloader`，挂在**永不取消**的 app 级
+`CoroutineScope(SupervisorJob() + Dispatchers.Main)`；状态（`phase/progress/message`）用 `mutableStateOf`
+放单例里，横幅只当「显示器」读它画进度。通道**自己从常驻 ssh 现开一条**（`shared.session.openSftp()`，
+finally 关），不碰界面那条 —— `shared` 是 `rememberHostSession` 在 MainActivity **导航切换之上**持有的，
+进会话不销毁。回到看板时 `LaunchedEffect(ssh)` 重跑 `Update.check` 把横幅摆回来，`mine` 命中就接着显示实时进度。
+
+**判据**：**任何得活过导航的长任务**（下载/上传/长命令）—— 放 app 级或单例 scope，通道从「跟主机活、不跟界面活」
+的那条连接现开，别用界面的 `rememberCoroutineScope`，也别用界面 `onDispose` 会关的通道。发布 code 53 / 0.9.9。
+
+## 128. 一批小巧思（0.9.11）踩到的三个平台坑
+
+**① 通知上的 RemoteInput「回一句」不回填 —— PendingIntent 用了 IMMUTABLE。**
+症状：点通知的回复框、打字、发送，`RemoteInput.getResultsFromIntent()` 拿到 null。
+根因：回复动作的 `PendingIntent` 必须是 **`FLAG_MUTABLE`**，系统才能把用户输入塞进那个 Intent；
+用 `FLAG_IMMUTABLE`（其它通知动作的标配）就永远取不到回复。
+修：`replyAction()` 里的 PendingIntent 用 `FLAG_MUTABLE`（唯独这个动作，别的照旧 IMMUTABLE）。
+
+**② 改了通知频道的震动/重要级，不生效。**
+根因：`NotificationChannel` 一旦创建，之后改 `vibrationPattern`/importance **系统一律忽略**（只有用户能在设置里改）。
+修：要新行为就**换新频道 id**。所以「触感词汇表」拆成 `yxi.needs`/`yxi.done` 两个新频道，
+并 `deleteNotificationChannel("yxi.events")` 把老的合并频道退休。
+
+**③ 想在通知按钮上验指纹 —— 做不到。**
+根因：通知动作走**广播**（`BroadcastReceiver`，无 Activity），而 `BiometricPrompt` 需要一个前台 Activity 才能弹。
+所以「危险审批先验指纹」只做在**应用内**的审批卡（`ChatScreen` 的 `PendingCard.onPick`，那儿有 Activity）；
+通知上的一键批准维持原状。要在通知上也验，得起一个透明 trampoline Activity 弹 BiometricPrompt 再广播 —— 本次没做。
+
+**另**：磁贴/桌面小组件没有 SSH 连接，只能读 `EventService` 写进 `SharedPreferences("yxi")` 的
+`waitingCount/workingCount/waitingNames`（服务每次 `refreshOngoing` 写一版并 poke 它们）。`ShareActivity` 则借
+`EventService.liveConn()` 已建好的连接，省一次握手（借来的连接用完**不能**关，只关自己新建的）。
+
+## 129. 按下/长按时高亮是个方块，不跟按钮形状（水波纹没被裁）
+
+**症状**（用户报）：长按界面上各种可点的东西，变色的**不是那个按钮本身**，而是一个方方正正的长方形块。
+
+**根因**：Compose 里**水波纹只会被它前面的 `clip` 裁**。写法是
+```kotlin
+Surface(shape = Pill, modifier = Modifier.clickable { … })   // ❌
+```
+`Surface` 自己确实按 `shape` 裁了**它的内容**，但 `clickable` 挂在**它外面的 modifier 上** ——
+波纹画在这个节点的**矩形边界**里，于是胶囊按钮按下去是个长方形。全 App **48 处**都是这么写的。
+
+**修法**：在 `clickable` **紧前面**加 `.clip(那个 shape)`：
+```kotlin
+Surface(shape = Pill, modifier = Modifier.clip(Pill).clickable { … })   // ✓
+```
+
+⚠️ **位置必须紧挨着 `clickable`，不能甩到链首。** 链里若有 `.padding()`，
+`Modifier.clip(X).padding(…).clickable{}` 的波纹取的是**padding 之后那个更小的矩形**，照样是方块。
+正确是 `Modifier.padding(…).clip(X).clickable{}` —— 第一版脚本就是插到链首，等于没修，
+是复查 `ConfigScreen` 那个带 `padding(start=12.dp)` 的行时发现的。
+
+**怎么验**（肉眼看不准，波纹很淡）：`adb shell input motionevent DOWN x y` **按住不放**，
+截图，再 `UP`；跟静止那张做**像素 diff**，看变化区域的**四角有没有被涂到** ——
+四角没变、边中点变了 = 跟着圆角走。⚠️ 单看「四角没变」会被**没裁的圆形波纹**骗过去
+（圆形本来也不碰四角），还要比对变化区域是否超出按钮边界。
+
+## 130. 会话卡的「上次活动」时间严重不准（tmux 和 cc-state 两个信号都会陈旧）
+
+**症状**（用户报）：看板上写着「14 小时前 / 1 天前」，可那些会话**刚刚还在聊**。
+
+**根因**：`lastActivity` 原来只取 `tmux list-sessions` 的 `#{session_activity}`。实测同一时刻：
+
+| 会话 | tmux 活动 | cc-state 的 ts | **转录 mtime（真相）** |
+|---|---|---|---|
+| claude_desktop | 2 天前 | **7 天前** | **1 分钟前** |
+| mail | 1 天前 | 3 分钟前 | **5 分钟前** |
+| nanobanana | 1 天前 | 1 天前 | **4 分钟前** |
+| Yxi | 0 分钟前 | 0 分钟前 | 0 分钟前 |
+
+`session_activity` 不随「没人 attach 时的输出」可靠更新；`cc-state` 的 ts 要靠钩子写，更容易过期。
+**只有转录文件的 mtime 是权威** —— Claude Code 每说一句都在写它。
+
+**修法**：抓取脚本多一段，列出 `~/.claude/projects/<项目目录>` → 最新 `.jsonl` 的 mtime；
+`lastActivityOf()` 取 `max(tmux 活动, 转录 mtime)`，转录读不到就退回 tmux（不会显示成 1970）。
+
+⚠️ **别用「每个目录 ls + stat」的写法**：实测 230ms，而看板每 5 秒抓一次。
+`find ... -printf '%h\t%T@\n' | awk` 一次扫完只要 **8ms**（快 29 倍）。
+`-printf` 是 GNU find 专有，不是 GNU find 就输出空 → 自动退回 tmux 的时间，优雅降级。
+
+⚠️ **顺带记一笔**：`state`（等你/干活中）也来自 cc-state，同样可能陈旧 —— 这次没动它，
+但看板分组理论上也会跟着旧。哪天发现「分组不对」，先怀疑这个。
+
+## 131. 点了发送再切走，消息丢了（协程跟着界面被取消）
+
+**症状**（用户报）：对话里点向上的提交箭头，**马上切出去，那句话就没发给 agent**；
+「要在对话里面等几秒再返回才算发出去」。
+
+**根因两层**，都得修：
+
+1. 发送跑在对话界面的 `rememberCoroutineScope()` 上 —— **界面一销毁协程就被取消**。
+   而草稿在点击那一刻就已经清空**并落盘**了（防「退出去草稿复活」），
+   于是那句话**既没发出去、又从输入框消失了**。
+2. `SessionProbe.send()` 是**两步**：先 `send-keys -l <文本>`、再 `send-keys Enter`
+   （合成一条的话文本里的 `Enter` 三个字会被当按键名）。
+   中间被取消 = **字打进去了但回车没送**，那句话卡在对方输入框里没提交 —— 看起来更像「发了没反应」。
+
+**修法**：
+- `SessionProbe.send()` 整段包 `withContext(NonCancellable)` —— 打字和回车不可能被劈开
+- 新增 `ui/Sender.kt`：挂 app 级 `SupervisorJob` scope（跟 `UpdateDownloader` 同一个套路），
+  界面销毁也照发；**发失败就把话还回草稿**并提示，绝不让它凭空没了
+
+**判据（通用）**：**任何「点一下就走」的动作**（发消息、上传、装公钥、下载）
+都不能挂在界面的 `rememberCoroutineScope` 上 —— 用户点完立刻切走是最自然的操作。
+
+**怎么验**：开个临时 tmux 会话当靶子 → App 里输入一个无空格标记 → 点发送 → **立刻按返回（零等待）**
+→ `tmux capture-pane -pt <会话> | grep <标记>`。命中且**被执行过**（command not found）才算通过，
+只看到文字没被执行 = 回车丢了。⚠️ 别拿真在干活的会话当靶子。

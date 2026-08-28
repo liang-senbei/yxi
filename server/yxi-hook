@@ -69,6 +69,38 @@ def short(s, n=90):
     return re.sub(r"\s+", " ", str(s)).strip()[:n]
 
 
+def last_assistant(transcript_path, n=180):
+    """转录里 Claude **最后说的一句** —— 就是「到底要你决定什么」。
+    纯读文件，**零 token、零 API**（只 tail 末尾 64KB，不整个读）。取不到就空串。"""
+    try:
+        if not transcript_path or not os.path.isfile(transcript_path):
+            return ""
+        with open(transcript_path, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - 65536))
+            tail = f.read().decode("utf-8", "ignore")
+        for ln in reversed(tail.splitlines()):
+            ln = ln.strip()
+            if not ln:
+                continue
+            try:
+                d = json.loads(ln)
+            except Exception:
+                continue
+            if d.get("type") != "assistant":
+                continue
+            content = (d.get("message") or {}).get("content", [])
+            texts = [b.get("text", "") for b in content
+                     if isinstance(b, dict) and b.get("type") == "text"]
+            t = " ".join(x for x in texts if x).strip()
+            if t:
+                return short(t, n)
+        return ""
+    except Exception:
+        return ""
+
+
 def main():
     raw = ""
     if not sys.stdin.isatty():
@@ -91,6 +123,8 @@ def main():
         "event": ev,
         "kind": kind,
         "detail": detail,
+        # Claude 最后说的一句 —— 手机通知直接显示「要你决定什么」，不用你点开去猜（零 token）
+        "preview": last_assistant(data.get("transcript_path", "")),
         "cwd": data.get("cwd", ""),
         # ⚠️ hook 的 stdin 里本来就带 transcript_path —— App 直接拿去渲染对话，
         # 不用自己去 ~/.claude/projects 下按 cwd 反推目录名（那个映射规则有坑，见 #36）

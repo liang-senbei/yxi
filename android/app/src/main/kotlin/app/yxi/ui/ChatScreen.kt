@@ -2,6 +2,8 @@ package app.yxi.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
+import app.yxi.ui.theme.Amber
+import app.yxi.ui.theme.Copper
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -95,6 +97,7 @@ fun ChatScreen(
     /** `/model` 选单开着的时候放这儿。null = 没开 */
     var models by remember(sessionName) { mutableStateOf<List<app.yxi.agent.Model.Choice>?>(null) }
     var modelBusy by remember(sessionName) { mutableStateOf(false) }
+    var showModes by remember { mutableStateOf(false) }
     /** 正在放大看的那张附件图。null = 没在看 */
     var preview by remember { mutableStateOf<app.yxi.agent.Attachments.Staged?>(null) }
 
@@ -190,9 +193,33 @@ fun ChatScreen(
     // 见 Live 的类注释和 TROUBLESHOOTING #72
     var live by remember { mutableStateOf(app.yxi.agent.Live.IDLE) }
     var busy by remember { mutableStateOf(false) }
+    // 「看改动」的 git diff 文本；非空就弹出 DiffSheet
+    var diffText by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     // 历史灌完了没。灌的过程中一律瞬移到底，不做动画（见下面的 LaunchedEffect）
     var settled by remember(sessionName) { mutableStateOf(false) }
+    // 「粘在底部」：在底部就跟着新消息走；手动往上翻就停；点 ↓ 会重新粘上。
+    // ⚠️ 关键在「一次点到底」—— 以前要点好几次，因为点一下滚到底、历史又灌进来把你顶上去。
+    // 现在只要粘着，之后每条新内容都自动跟到底，不用再点。
+    var stick by remember(sessionName) { mutableStateOf(true) }
+    LaunchedEffect(listState) {
+        // ⚠️ **只有用户亲手拖动才改 stick，程序滚动/新内容一律不碰。**
+        // 上一版栽在这：活跃会话里新内容一直来，程序滚到底的那一下经常在「刚到底又被新内容顶起」
+        // 之间落定 —— 被当成「不在底部」→ stick 关掉 → 跟随停 → ↓ 按钮又冒出来，永远点不到底。
+        // 现在：记住这次滚动是不是用户拖的（DragInteraction），只有用户拖完才按落点定 stick；
+        // 程序滚（跳底部 / 跟随）settle 时**不动 stick**，跟随就不会被自己打断。
+        var userDragged = false
+        launch {
+            listState.interactionSource.interactions.collect {
+                if (it is androidx.compose.foundation.interaction.DragInteraction.Start) userDragged = true
+            }
+        }
+        launch {
+            snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
+                if (!scrolling && userDragged) { stick = listState.atBottom; userDragged = false }
+            }
+        }
+    }
 
     LaunchedEffect(sessionName, ssh) {
         val s = ssh ?: return@LaunchedEffect
@@ -232,10 +259,17 @@ fun ChatScreen(
         // ⚠️ **只喂新行。** 老做法是每 300ms 把整个缓冲从头重解 ——
         // 实测真实会话 `tail -n 800` 是 4.17 MB，等于**每秒重嚼三次 4 MB**，
         // 会话越长越慢。见 TROUBLESHOOTING #86。
+        // ⚠️ **历史悄悄在后台灌，界面一直停在 head（最新一屏），不给用户看「从旧滚到新」。**
+        // 病根：流是 `tail -n N` 从**最老**开始吐的，原来每来一批就 `items = inc.snapshot()`，
+        // head 的最新内容立刻被「只含最老几行」的快照顶掉 —— 用户眼睁睁看着旧对话先加载、
+        // 一路滚到新（原话：加载旧的对话先，又慢）。
+        // 改成：inc 在后台默默攒，等它**追上 head 的最新那条**（key 对上）才把完整列表交出来；
+        // 在那之前界面就是 head，稳稳停在最新。key 是 uuid，稳定，所以交接时最新那屏无缝不跳。
+        val headLastKey = items.lastOrNull()?.key
+        var caughtUp = headLastKey == null
         val inc = Transcript.Incremental()
         val pending = ArrayList<String>()
-        // ⚠️ 收行和刷新是两个协程。`toList()` 和 `clear()` 之间来一行就会**丢**，
-        // 所以这两处都要在同一把锁里。老代码不清空所以没这个问题，现在清了就得管。
+        // ⚠️ 收行和刷新是两个协程。`toList()` 和 `clear()` 之间来一行就会**丢**，所以都在同一把锁里。
         val lock = Any()
         launch {
             while (true) {
@@ -244,21 +278,30 @@ fun ChatScreen(
                     if (pending.isEmpty()) emptyList() else pending.toList().also { pending.clear() }
                 }
                 if (batch.isEmpty()) {
-                    // ⚠️ 一个空转的周期 = 历史灌完了。**这个标志是「不要跳」的关键**：
-                    // 在它之前每次刷新都瞬移到底（不做动画），之后才允许动画。
-                    // `tail -n 800` 是分批吐的，每批都动画一次滚到底 ——
-                    // 动画没走完下一批又来，看起来就是一闪一闪地跳。
+                    // 一个空转周期 = 历史灌完。兜底：万一始终没匹配上 head 的 key，也把完整的放出来
+                    if (!caughtUp) {
+                        val snap = withContext(Dispatchers.Default) { inc.snapshot() }
+                        if (snap.isNotEmpty()) { items = snap; caughtUp = true; inc.ctx?.let { ctxUse = it } }
+                    }
                     if (items.isNotEmpty()) settled = true
                     continue
                 }
-                items = withContext(Dispatchers.Default) {
-                    inc.add(batch.asSequence())
-                    inc.snapshot()
+                val snap = withContext(Dispatchers.Default) {
+                    inc.add(batch.asSequence()); inc.snapshot()
                 }
-                inc.ctx?.let { ctxUse = it }
+                // 还没追上 head 就先不换（继续显示 head=最新）；追上了才交出完整列表、之后每批都跟着更新
+                if (!caughtUp && headLastKey != null && snap.any { it.key == headLastKey }) caughtUp = true
+                if (caughtUp) { items = snap; inc.ctx?.let { ctxUse = it } }
             }
         }
-        TranscriptStream.stream(s, file).collect { line -> synchronized(lock) { pending += line } }
+        // ⚠️ 连接半路断了，`openExecStream` 会抛「session is down」——从这个 LaunchedEffect
+        // 里逸出就是**闪退**（看聊天时连接抖一下就崩，见 TROUBLESHOOTING #125）。
+        // catching 兜住（取消照抛，切页面照常），断了让看门狗重连，effect 会随 ssh 变化重启。
+        app.yxi.ssh.catching {
+            // backlog 从 800 收到 400：head 已经把最新一屏立刻显示了，历史在后台灌，
+            // 400 行向上翻足够，传输/解析减半，追上得更快。
+            TranscriptStream.stream(s, file, backlog = 400).collect { line -> synchronized(lock) { pending += line } }
+        }
     }
     // ⚠️ 「此刻在等你选」这件事**只有屏幕知道** —— tool_use 要等工具跑完才落进转录。
     // 所以历史读转录、待答抓屏幕，两条路各司其职（见 Prompt 的类注释）。
@@ -282,15 +325,15 @@ fun ChatScreen(
     // 加上 settled：灌完那一刻**再定位一次**，这次布局是稳的。
     LaunchedEffect(items.size, settled) {
         if (items.isEmpty()) return@LaunchedEffect
-        val last = items.size - 1
         runCatching {
-            if (!settled) {
-                // 还在灌历史：**瞬移**。用户看到的是「一进来就在最新的地方」
-                listState.scrollToEnd(last)
-            } else if (listState.atBottom) {
-                // ⚠️ 只有本来就在底部才跟着走。用户往上翻着看旧消息时，
-                // 新消息把他拽回底部比不滚更烦（跟 #61 是同一类错误）
-                listState.scrollToEnd(last)
+            // 灌历史时一律瞬移到底（停在最新）；灌完之后只有「粘着」才跟随 ——
+            // 用户往上翻看旧消息时 stick=false，不会被新消息拽回底部（#61 那类错误）。
+            if (!settled || stick) {
+                listState.scrollToEnd()
+                // ⚠️ 补一次。一批多条一次涌入时，最后一条的高度常在首次滚动**之后**才定下来，
+                // 首次滚到的「底」其实差最后一条 —— 等布局稳一下再滚一次，才真正贴底。
+                delay(120)
+                if (!settled || stick) listState.scrollToEnd()
             }
         }
     }
@@ -317,10 +360,21 @@ fun ChatScreen(
         // 额度和花费显示一个假的比不显示危险得多，你会照着它决定今天开不开大活。
         if (ctxUse != null || todayUse != null) {
             Row(
-                Modifier.fillMaxWidth().padding(18.dp, 0.dp, 18.dp, 2.dp),
+                // ⚠️ **必须能横滑。** 这一行现在有五格（⚡模式 / 模型 / 思考强度·模式 / 上下文 / 今日），
+                // 窄屏放不下就会把左边的挤没 —— 加了「模式」这格之后风险是实打实的。
+                // 横滑之后放不下也只是滑一下的事，不会有信息凭空消失。
+                Modifier.fillMaxWidth().padding(18.dp, 0.dp, 18.dp, 2.dp)
+                    .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // 模式快切：模型 / 思考强度 / ultracode，点开面板一点就切、可叠加
+                Text(
+                    t("⚡模式"),
+                    Modifier.clickable(enabled = ssh != null) { showModes = true }.padding(end = 12.dp),
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.primary, maxLines = 1,
+                )
                 // 模型名单独一格，**可点** —— 点开就是 `/model` 那个选单
                 ctxUse?.model?.takeIf { it.isNotBlank() }?.let { m ->
                     Text(
@@ -348,18 +402,73 @@ fun ChatScreen(
                         maxLines = 1,
                     )
                 }
-                val bits = buildList {
-                    // ⚠️ 只给绝对值，不给百分比 —— 见 [Transcript.Ctx] 的注释
-                    ctxUse?.let { add(t("上下文 %s").format(tokenText(it.tokens))) }
-                    todayUse?.let { add(t("今日 %s · %s").format(it.tokenText, it.costText)) }
+                // 这个会话在什么**模式**：思考强度（max/high/mid）+ 计划模式。跟模型一样是**按会话**的。
+                // ⚠️ 数据顺着转录一起解出来（assistant 行顶层的 `effort` + `{"type":"mode"}` 行），不额外跑服务器。
+                ctxUse?.let { cu ->
+                    val bits = buildList {
+                        when (cu.effort) {
+                            "max" -> add(t("最大思考")); "high" -> add(t("高强度")); "mid" -> add(t("中等"))
+                            else -> if (cu.effort.isNotBlank()) add(cu.effort)
+                        }
+                        if (cu.mode == "plan") add(t("计划模式"))
+                        // ponytail 强度（lite/full/ultra）——读得到才显示
+                        if (cu.ponytail.isNotBlank()) add("ponytail " + cu.ponytail)
+                    }
+                    if (bits.isNotEmpty()) Text(
+                        bits.joinToString(" · "),
+                        Modifier.padding(end = 10.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Copper, maxLines = 1,
+                    )
                 }
-                Text(
-                    bits.joinToString("   "),
-                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                    color = MaterialTheme.colorScheme.outline,
-                    maxLines = 1,
-                )
+                // 上下文单独一格、可点：快满了染琥珀，点一下发 /compact（手机上懒得敲那几个字母）
+                ctxUse?.let { cu ->
+                    // ponytail: 固定阈值 15 万 —— 逼近常见的 20 万自动压缩线；模型窗口不同就改这个数
+                    val tight = cu.tokens >= 150_000
+                    Text(
+                        t("上下文 %s").format(tokenText(cu.tokens)),
+                        Modifier
+                            .clickable(enabled = ssh != null) {
+                                val s0 = ssh ?: return@clickable
+                                scope.launch { runCatching { SessionProbe.send(s0, sessionName, "/compact") } }
+                                android.widget.Toast.makeText(ctx, t("已发 /compact —— 压一下上下文"),
+                                    android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                            .padding(end = 10.dp),
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        color = if (tight) Amber else MaterialTheme.colorScheme.outline,
+                        maxLines = 1,
+                    )
+                }
+                todayUse?.let {
+                    Text(
+                        t("今日 %s · %s").format(it.tokenText, it.costText),
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.outline,
+                        maxLines = 1,
+                    )
+                }
             }
+        }
+
+        // Claude 此刻在做计划里的哪一步 —— 取最近一次 TodoWrite 里 in_progress 那条，顶栏回显一眼看清进度
+        val doingNow = remember(items) {
+            items.filterIsInstance<ChatItem.ToolCall>().lastOrNull { it.name == "TodoWrite" }
+                ?.input?.optJSONArray("todos")?.let { a ->
+                    (0 until a.length()).asSequence().mapNotNull { a.optJSONObject(it) }
+                        .firstOrNull { it.optString("status") == "in_progress" }
+                        ?.let { it.optString("activeForm").ifBlank { it.optString("content") } }
+                }?.takeIf { it.isNotBlank() }
+        }
+        doingNow?.let {
+            Text(
+                t("▶ 正在做 · %s").format(it),
+                Modifier.fillMaxWidth().padding(18.dp, 0.dp, 18.dp, 2.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
         }
 
         // ⚠️ 库把链接点击交给 `LocalUriHandler`，所以在这儿换一个自己的。
@@ -424,14 +533,16 @@ fun ChatScreen(
                     color = MaterialTheme.colorScheme.secondaryContainer,
                     shape = CircleShape,
                     shadowElevation = 4.dp,
-                    modifier = Modifier.size(44.dp).clickable {
+                    modifier = Modifier.size(44.dp).clip(CircleShape).clickable {
                         // ⚠️ 瞬移不做动画：几百条的列表上 animateScrollToItem 要滚好几秒，
                         // 而这个按钮的意思就是「立刻到底」
                         // ⚠️ 第二个参数是**在那一条内部再往下滚多少像素**。
                         // 不给的话是把最后一条的**顶部**对齐视口顶部 ——
                         // 那条要是比一屏长，尾巴还在屏幕外，用户会觉得按了没用。
                         // 给一个大数，Compose 会夹到列表真正的末尾。
-                        scope.launch { listState.scrollToEnd(items.size - 1) }
+                        // 点一下就粘住 —— 之后新内容自动跟到底，不用再点第二次
+                        stick = true
+                        scope.launch { listState.scrollToEnd() }
                     },
                 ) {
                     Box(contentAlignment = Alignment.Center) {
@@ -446,21 +557,32 @@ fun ChatScreen(
         }
         }   // CompositionLocalProvider(LocalUriHandler)
 
-        if (live.busy) LiveStatus(live.status)
+        if (live.busy) LiveStatus(live.status, onStop = {
+            val s0 = ssh
+            if (s0 != null) scope.launch { runCatching { SessionProbe.sendKey(s0, sessionName, "Escape") } }
+        })
 
         pending?.let { p ->
             Box(Modifier.padding(14.dp, 0.dp, 14.dp, 8.dp)) {
                 PendingCard(
                     p, busy,
                     onPick = { o ->
-                        scope.launch {
-                            busy = true
-                            // 送屏幕上写的那个数字本身，**不是列表下标**
-                            ssh?.let { SessionProbe.sendKey(it, sessionName, o.number.toString()) }
-                            delay(500)
-                            pending = ssh?.let { runCatching { SessionProbe.pending(it, sessionName) }.getOrNull() }
-                            busy = false
+                        val doSend: () -> Unit = {
+                            scope.launch {
+                                busy = true
+                                // 送屏幕上写的那个数字本身，**不是列表下标**
+                                ssh?.let { SessionProbe.sendKey(it, sessionName, o.number.toString()) }
+                                delay(500)
+                                pending = ssh?.let { runCatching { SessionProbe.pending(it, sessionName) }.getOrNull() }
+                                busy = false
+                            }
                         }
+                        // 危险审批（rm -rf / force-push / drop table …）先验一道指纹，防口袋误触
+                        if (Risky.matches(p.title + " " + o.label)) Biometric.gate(ctx, o.label, doSend) else doSend()
+                    },
+                    onDiff = {
+                        diffText = t("读取中…")
+                        scope.launch { diffText = fetchGitDiff(ssh, cwd) }
                     },
                     onSubmit = {
                         scope.launch {
@@ -478,6 +600,8 @@ fun ChatScreen(
                 )
             }
         }
+
+        DiffSheet(diffText) { diffText = null }
 
         // 斜杠命令提示。手机上把 `/compact` 一个字母一个字母敲出来太痛苦了 —— 点一下就好。
         //
@@ -557,6 +681,12 @@ fun ChatScreen(
             }
         }
 
+        // 常用语 chip：没打字时才露出来，点一下填进草稿，省掉手机打字
+        if (draft.isBlank()) {
+            SnippetChips(onPick = { draft = it },
+                modifier = Modifier.fillMaxWidth().padding(14.dp, 0.dp, 14.dp, 8.dp))
+        }
+
         // 输入框：打进那个活着的会话，不调任何 API
         //
         // ⚠️ **整条是一个胶囊，不是四个圆按钮排排站。** 原来是 📎 🎤 输入框 ↑ 四块分开，
@@ -595,14 +725,18 @@ fun ChatScreen(
                     color = if (canSend) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.surfaceContainerHigh,
                     shape = CircleShape,
-                    modifier = Modifier.size(44.dp).clickable(enabled = canSend) {
+                    modifier = Modifier.size(44.dp).clip(CircleShape).clickable(enabled = canSend) {
                         // 附件的路径映射贴在正文前面 —— Claude 自己去读那些文件
                         val t = (app.yxi.agent.Attachments.header(staged) + draft.trim()).trim()
                         draft = ""; staged = emptyList()
                         // ⚠️ 立刻清盘上那份 —— 只清内存的话，防抖那 600ms 里退出去，
                         // 下次进来发过的话又冒出来一遍
                         Drafts.set(ctx, hostId, sessionName, "")
-                        scope.launch { ssh?.let { SessionProbe.send(it, sessionName, t) } }
+                        // ⚠️ **不能用界面的 scope** —— 点完立刻切走会把它取消，那句话就没了（见 [Sender]）
+                        Sender.send(ctx, ssh, hostId, sessionName, t) { msg ->
+                            draft = Drafts.get(ctx, hostId, sessionName)   // 话还回来了，回填输入框
+                            android.widget.Toast.makeText(ctx, msg, android.widget.Toast.LENGTH_LONG).show()
+                        }
                     },
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -624,6 +758,17 @@ fun ChatScreen(
     // 实测：直接送数字 = 「saved as your default for new sessions」——
     // 在手机上顺手一点就把以后每个新会话的模型都改了，那是事后想不起来为什么的坑。
     // 想改默认得单独点那一行，文案里写明白。
+    if (showModes) ModeSheet(
+        onPick = { cmd ->
+            val s0 = ssh
+            if (s0 != null) {
+                scope.launch { runCatching { SessionProbe.send(s0, sessionName, cmd) } }
+                android.widget.Toast.makeText(ctx, t("已发 %s").format(cmd), android.widget.Toast.LENGTH_SHORT).show()
+            }
+        },
+        onDismiss = { showModes = false },
+    )
+
     models?.let { list ->
         val cur = list.firstOrNull { it.current }?.number ?: 1
         var asDefault by remember(list) { mutableStateOf(false) }
@@ -800,6 +945,10 @@ private fun Item(item: ChatItem, onCopy: (String) -> Unit, onPopQueue: () -> Uni
             md,
             // ⚠️ 一定要传 —— 库默认把 `##` 渲染成 45sp（正文的 3 倍）。见 [yxiMarkdown]
             typography = yxiMarkdown(),
+            // 表格换成自己画的：横向滚动 + 单元格换行，不再一堆省略号（见 [MarkdownScrollTable]）
+            components = com.mikepenz.markdown.compose.components.markdownComponents(
+                table = { MarkdownScrollTable(it) },
+            ),
             modifier = Modifier.fillMaxWidth(),
         )
     }
@@ -816,16 +965,27 @@ private fun Item(item: ChatItem, onCopy: (String) -> Unit, onPopQueue: () -> Uni
  * 传个巨大的 `scrollOffset` 也不可靠。老老实实滚到滚不动为止。
  * 次数封顶，免得内容还在增长时转不出来。
  */
-private suspend fun androidx.compose.foundation.lazy.LazyListState.scrollToEnd(lastIndex: Int) {
-    scrollToItem(lastIndex)
-    repeat(30) {
-        // ⚠️ **每次判之前先等一帧。** `canScrollForward` 是从 layoutInfo 算的，
-        // 刚 scrollToItem 完布局还没重新量，这里读到的是**上一帧**的答案 ——
-        // 读成 false 就会在第一次循环里直接 return，于是永远差最后一屏。
-        // 现象是「一进对话，最后一条被切掉一半，↓ 按钮赖着不走」。
+private suspend fun androidx.compose.foundation.lazy.LazyListState.scrollToEnd() {
+    // ⚠️ **自己读真正的最后一项，别信外面传进来的下标** —— 边界情况全栽在「下标过时」上：
+    // 加载时 items 还在长，点的一刻 items.size 已经不是最新；懒加载下面几项还没组合，
+    // `canScrollForward` 又会**提前**报 false，于是 scrollToItem 只跳到半路、循环第一下就 return，
+    // 表现就是用户说的「点好几次才到底，每次只挪一点」。
+    var last = layoutInfo.totalItemsCount - 1
+    if (last < 0) return
+    scrollToItem(last)
+    var stable = 0
+    repeat(60) {
+        // 每次判前等一帧：canScrollForward 从 layoutInfo 算，scrollToItem 完布局还没重量
         androidx.compose.runtime.withFrameNanos { }
-        if (!canScrollForward) return
-        scroll { scrollBy(4000f) }
+        val n = layoutInfo.totalItemsCount - 1
+        if (n > last) { last = n; scrollToItem(last); stable = 0 }   // 又来新内容，再跳到最后
+        if (!canScrollForward) {
+            // 连续两帧都到底才算真到底（一帧可能是布局没跟上的假象）
+            if (++stable >= 2) return
+        } else {
+            stable = 0
+            scroll { scrollBy(6000f) }
+        }
     }
 }
 
@@ -885,7 +1045,7 @@ private fun UserBubble(text: String, onCopy: (String) -> Unit) {
             Surface(
                 color = MaterialTheme.colorScheme.primaryContainer,
                 shape = RoundedCornerShape(26.dp, 26.dp, 8.dp, 26.dp),
-                modifier = Modifier.fillMaxWidth().combinedClickable(
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp, 26.dp, 8.dp, 26.dp)).combinedClickable(
                     onClick = {},
                     onLongClick = { menu = true },
                 ),
@@ -925,7 +1085,7 @@ private fun QueuedBubble(text: String, onCopy: (String) -> Unit, onPopQueue: () 
             border = androidx.compose.foundation.BorderStroke(
                 1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f),
             ),
-            modifier = Modifier.fillMaxWidth().combinedClickable(
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp, 26.dp, 8.dp, 26.dp)).combinedClickable(
                 onClick = {},
                 onLongClick = { menu = true },
             ),
@@ -966,7 +1126,7 @@ private fun QueuedBubble(text: String, onCopy: (String) -> Unit, onPopQueue: () 
  * 换成「处理中…」反而丢了信息（词本身+耗时+token 数都在里面）。
  */
 @Composable
-private fun LiveStatus(status: String?) {
+private fun LiveStatus(status: String?, onStop: () -> Unit) {
     val dots = rememberInfiniteTransition(label = "live")
     val a by dots.animateFloat(
         0.35f, 1f,
@@ -987,12 +1147,26 @@ private fun LiveStatus(status: String?) {
             // 是视觉重量：labelMedium 自带 Medium 字重 + 强调色 + 独占一行。
             // 所以这里压的是字重和颜色，不是一味调小 —— 它还得看得见。
             // 单行截断：状态里带 token 数，长的会折成两行，那时候才是真的一大块。
+            modifier = Modifier.weight(1f),
             fontSize = 12.sp,
             fontWeight = androidx.compose.ui.text.font.FontWeight.Normal,
             maxLines = 1,
             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
             color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.8f),
         )
+        // 一键「停」—— 发 Escape 打断当前回合。跑飞时不用进终端就能掐（Escape 在 SAFE_KEY 白名单里）
+        Spacer(Modifier.width(10.dp))
+        Surface(
+            color = MaterialTheme.colorScheme.errorContainer, shape = Pill,
+            modifier = Modifier.clip(Pill).clickable(onClick = onStop),
+        ) {
+            Text(
+                "■ " + t("停"),
+                Modifier.padding(12.dp, 5.dp),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+        }
     }
 }
 
@@ -1003,7 +1177,7 @@ private fun ThinkingRow(text: String) {
     Column {
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainerLow, shape = Pill,
-            modifier = Modifier.clickable { open = !open },
+            modifier = Modifier.clip(Pill).clickable { open = !open },
         ) {
             Row(
                 Modifier.padding(16.dp, 11.dp),
@@ -1032,7 +1206,7 @@ private fun ThinkingRow(text: String) {
 private fun RoundBtn(icon: String, onTap: () -> Unit) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer, shape = Pill,
-        modifier = Modifier.size(46.dp).clickable(onClick = onTap),
+        modifier = Modifier.size(46.dp).clip(Pill).clickable(onClick = onTap),
     ) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(icon, style = MaterialTheme.typography.titleSmall)
@@ -1062,7 +1236,7 @@ private fun InjectedCard(item: ChatItem.Injected) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         shape = MaterialTheme.shapes.large,
-        modifier = Modifier.fillMaxWidth().clickable { open = !open },
+        modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.large).clickable { open = !open },
     ) {
         Column(Modifier.padding(16.dp, if (open) 13.dp else 9.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {

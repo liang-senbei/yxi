@@ -11,6 +11,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import app.yxi.ui.theme.*
@@ -96,7 +97,7 @@ private fun Cap(label: String, on: Boolean, onTap: () -> Unit) {
     Surface(
         color = if (on) CopperContainer else SurfaceContainerHigh,
         shape = Pill,
-        modifier = Modifier.height(38.dp).clickable(onClick = onTap),
+        modifier = Modifier.height(38.dp).clip(Pill).clickable(onClick = onTap),
     ) {
         Box(Modifier.padding(horizontal = 13.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
             Text(
@@ -114,7 +115,7 @@ private fun CapIcon(path: String, onTap: () -> Unit) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
         shape = Pill,
-        modifier = Modifier.height(44.dp).clickable(onClick = onTap),
+        modifier = Modifier.height(44.dp).clip(Pill).clickable(onClick = onTap),
     ) {
         Box(Modifier.padding(horizontal = 16.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
             GlyphIcon(path, MaterialTheme.colorScheme.onSurface, 20.dp)

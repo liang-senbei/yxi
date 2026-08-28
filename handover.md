@@ -433,6 +433,181 @@
   ChatGPT/Codex：只能读本机装了的，本机没 codex，不做。见 TROUBLESHOOTING #122。
   ⚠️ **DNS 还是加不了**：用户给的 CF 令牌是 R2 的，能读 zone 但没 DNS:Edit（#123），
   `dl.keuury.com` 仍差一条 A 记录（要 Zone:DNS:Edit 令牌，或面板手加 → 64.90.25.56，DNS only）。
+- ✅ **0.8.7 —— 修长按松手误开对话（2026-08-24）**：
+  #121 上线后长按不拖就松手会误开对话（`clickable` 不认长按，抬手照样点一下）。
+  修法：拖动一起来就 `openEnabled=false` 掐掉 `clickable`（`dragIndex>=0` → 整组轻点关掉）。
+  实测三态齐全：轻点进对话、长按+拖排序、长按松手不开对话。见 TROUBLESHOOTING #124。
+  **已发 code 41 到公网**（hk13:64.90.25.56，sha256 校验一致）。
+- ✅ **0.8.8 —— 图钉下面加回「回它一句」快捷按钮（2026-08-24）**：
+  0.8.5 把卡片上的回复按钮撤了（改成「点卡片进对话去回」）；用户要一个**不进对话、
+  直接甩一句就走**的快捷入口。加回来，位置在**图钉正下方**一个气泡按钮（`Glyph.Chat`）。
+  区分：**轻点卡片 = 进对话细聊；气泡 = 弹底部输入框送一句（`SessionProbe.send` → tmux send-keys）**。
+  卡片布局从「Column + 顶栏 Row」重构成「Row(左内容 weight1 / 右竖排 图钉+气泡)」，文字不再和按钮抢位。
+  ⚠️ 气泡/图钉各自 `clickable` 会**消费**点击，不冒泡到卡片的 onOpen —— 点它们不会顺带开对话。
+  实测六态齐全（scratch `cat` 会话验的送达）：气泡弹框、送达 pane、框自关、点正文进对话、长按拖排序都对。
+  **已发 code 42 到公网**（sha256 校验一致）。SendSheet 复活，见源码尾部。
+- ✅ **0.8.9 —— 修「有时闪退」（2026-08-24）**：dropbox 里挖出崩溃都在 SSH 层 ——
+  连接半路断了（锁屏/切网/服务器掐空闲），下一个 SSH 操作抛 `session is down`/`Broken pipe`，
+  **从协程逸出没人接 = 闪退**。看门狗最长 30 秒才判死，这窗口里任何 exec 撞上就崩。
+  修法（源头兜，别指望 30+ 调用点各自加 try）：`SshSession.exec` 整段 try —— 取消照抛、
+  连接类失败吞掉返回空（跟 `Shell.write` 一个路子）；`ChatScreen` 那条裸 `stream().collect`
+  用 `catching` 包住（看聊天时连接抖一下就崩的那条）。见 TROUBLESHOOTING #125。
+  **实测**：杀连接/冻结连接/看聊天时杀连接三种走法都不崩，日志里能看到 `exec 挂了…session is down`
+  被兜住、随后自动重连。**已发 code 43 到公网**（sha256 一致）。
+- ✅ **0.9.0 —— 会话新增「实验室」页（2026-08-24）**：会话导航栏从 3 个变 4 个
+  （终端/对话/文件/**实验室**）。实验室 = UI 实验的展示台，一张张 demo 卡，点开满屏跑：
+  加载 UI 合集 / 弹簧动效 / 网页效果（WebView JS 开着）/ 新页面原型。**加新实验 = 往
+  `LabScreen.experiments()` 加一个 `Experiment`**。纯本地不碰 SSH。`Mode` 枚举加 `Lab`、
+  `when(mode)` 加一路分派、`ModeSwitcher` 自动多一个 tab。实测四个 demo 都跑通。
+  ⚠️ WebView demo 别用 canvas / 动画背景层（不合成），只用纯色+transform，见 TROUBLESHOOTING #126。
+  **已发 code 44 到公网**（sha256 一致）。
+- ✅ **0.9.1 —— 实验室支持 GIF（2026-08-24）**：加了「动图 GIF」实验，`assets/lab_sample.gif`
+  用 `ImageDecoder`→`AnimatedImageDrawable` **原生播放**（API 28+；26/27 退回 BitmapFactory 首帧），
+  **没引任何图片库**。证明实验室能吃 GIF 这类现成媒体格式，不止手写 Compose。已发 code 45。
+- ✅ **0.9.2 —— 实验室：Yxxxxxi 加载动画候选 + 审核勾选（2026-08-24）**：抄 Dribbble「字顶上滚东西」
+  的 loading，改成「Yxxxxxi」——`YxiLoader.kt` 里 **5 版候选**（顶部传送带/扫光填充/小球跳过/
+  字母波浪/底部点阵），`HorizontalPager` **左右滑着挑**（像刷小红书），标序号 + 圆点。每版底下
+  **审核勾选**：勾了写进**连的那台服务器** `~/.yxi/lab-approvals.txt`（一行一个 id，见 `agent/LabApprovals.kt`）——
+  **这样开发者 `cat` 一下就知道用户审核过哪几个**（勾选落服务器不落本地，就为了我读得到）。
+  实测：5 版都跑通、滑动/序号/圆点对、勾选后文件里出现 `loader-1-topconveyor` 等。已发 code 46。
+- ✅ **0.9.3 —— 实验室加图标候选 + 参考动效收藏（2026-08-25）**：
+  ① **Yxi 图标 4 候选**（`LogoConcepts.kt`）：❯提示符/对话气泡/Y字标/遥控，**Compose Canvas 画的**
+  （`LogoMark`，`PathParser` 解 SVG 路径 + 珊瑚渐变底），实测跟网页提案 `mark.html` 一样质感。
+  也放进网页版给对比：hk13 上 `http://64.90.25.56:8899/mark.html`（临时预览，选定后可撤）。
+  ② **参考动效收藏**：把用户发的两个 Dribbble GIF（`assets/ref_submit.gif` 提交→进度→成功/失败、
+  `ref_blob.gif` 液态球→打勾）摆进实验室能播；勾选 = 「想复刻这个」。
+  两个都走 `LabApprovals`（logo-N-* / ref-N-*），`cat ~/.yxi/lab-approvals.txt` 读用户勾了啥。已发 code 47。
+- ✅ **0.9.4 —— 实验室「在线实验」：内容从服务器读，推新设计不用更新 App（2026-08-25）**：
+  用户问「以后要更新 App 才能在实验室看到吗」→ 不用了。`agent/LabRemote.kt` 读连的那台机器
+  `~/.yxi/lab/manifest.json` + 素材（html/gif/image/note），`ui/RemoteLab.kt` 渲染（html 走 WebView JS 开、
+  gif/图 base64 经 exec 传回来）。**我往 `~/.yxi/lab/` 丢东西、用户点刷新就见，不发版不更新。**
+  勾选审核照走 `LabApprovals`。已 seed 两个**参考动效的真复刻**（不是播 GIF）：
+  `submit.html`（GIF A：按钮→进度→成功/失败，状态驱动）、`blob.html`（GIF B：液态球 loading，
+  **打勾只在加载真完成时画一次**——用户指出直接用 GIF 会循环闪勾，这版把勾挂到完成事件）。
+  实测：改服务器 html + 点刷新即更新（不重装）；blob 的勾像素级验过只在 done 帧出现。已发 code 48。
+- ✅ **0.9.5 —— 表格横滑看全 + 变形提交按钮（2026-08-25）**：
+  ① **聊天里 markdown 表格**原来每格单行截成省略号，读不到。换掉库默认表格（`markdownComponents(table=…)`）：
+  自己画的 `MarkdownScrollTable`（`ui/MarkdownTable.kt`）—— 定宽列 + 单元格换行 + 整表横向滚动，
+  从 AST 取原始表格文本 `getTextInNode` 自己按 `|` 切（`parseMdTable`）。实测窄表看全、宽表左右滑。
+  ② **变形提交按钮** `ui/SubmitButton.kt`（复刻用户选中的 Dribbble GIF A）：点→morph 进度条→✓成功/✗失败重试，
+  接**真状态**不是播动画（work 返回 Result，可喂真实 progress）。接进用户选定的三处：**回它一句的发送**
+  （成功✓自动收起 sheet；exec 静默失败，靠 isConnected 判成败）、**下载更新**（真实百分比进度）、**装公钥**。
+  实测回它一句：发送→✓已送达→自动关，消息真的到了。已发 code 49。
+- ✅ **0.9.6 —— 对话加载体验修好（2026-08-25）**：用户报「加载慢 / 先加载旧对话 / 跳底部要点好几次」。
+  ① **先加载旧的**根因：head（tail -60 最新）先显示没错，但随后 `tail -n N -f` 流从**最老**开始吐，
+  每批 `items=inc.snapshot()` 把最新顶成「只含最老几行」——用户看着从旧滚到新。改成 inc 后台默默攒，
+  等它**追上 head 最新那条**（uuid key 对上）才交出完整列表；在那之前界面稳停 head=最新。
+  ② **跳底部要点好几次**：加了 `stick`（粘底）状态 —— `snapshotFlow{isScrollInProgress}` 每次滚停按落点
+  更新 stick=atBottom；点 ↓ 直接 stick=true。粘着时每条新内容自动跟到底，一次点到位不用再点。
+  ③ backlog 800→400，传输/解析减半。实测：一进来就在最新（无 ↓ 按钮）、点一次 ↓ 到底、表格也正常。已发 code 50。
+- ✅ **0.9.7 —— 对话跳底部真·一次到位（2026-08-25）**：0.9.6 修了大半但用户报「活跃会话还是点好几次」。两处根因：
+  ① **scrollToEnd 提前退出**：懒加载下面几项没组合时 `canScrollForward` 会提前报 false，传进来的下标又过时，
+  于是只滚一点就 return。改成：**自己读 `layoutInfo.totalItemsCount` 不信外面的下标**，边滚边发现新项就重跳，
+  要求**连续两帧**都到底才算真到底，最多 60 帧。（改成无参 `scrollToEnd()`）
+  ② **stick 被程序滚动误关**：`snapshotFlow{isScrollInProgress}` 每次滚停都 `stick=atBottom`，活跃会话里程序滚
+  常在「刚到底又被新内容顶起」间落定→被判不在底→stick 关→跟随停。改成**只有用户拖动（DragInteraction）才改 stick**。
+  ③ 一批多条一次涌入时，最后一条高度在首次滚动后才定，补一个 `delay(120)` 再滚一次贴死底。
+  实测（scrolltest 30→40 条 + 突发追加）：一进来在最新、一次点到底、流入自动贴底最后一条完整。已发 code 51。
+- ✅ **0.9.8 —— 实验室大改：从「写死的 demo 画廊」变「按类型分栏的产物库」（2026-08-25）**：
+  **撤掉所有内嵌 demo**（删了 YxiLoader/LogoConcepts/RemoteLab.kt + 三个 bundled gif）。实验室现在全从服务器读。
+  顶层 = **栏目**（按 type 分：图像/矢量/动图/视频/网页/文字，只有有内容的类才出现），
+  **左滑露出置顶/删除**（`SwipeActions` 自绘，Animatable+detectHorizontalDrag；删调服务器 `yxi-lab rm`，置顶存本地 `LabPins`）；
+  点栏目 → 详情列表，每条：预览（图/网页/动图/文字）+ **由谁生成**（manifest 的 `by`）+ **北京时间**（`at` unix→Asia/Shanghai）+ 勾选审核。
+  `yxi-lab add` 第 5 参数 = 由谁生成；已更新 nanobanana 的 CLAUDE.md 让它出图带 "Gemini · nanobanana"。
+  实测：4 类分栏、左滑置顶(📌浮顶)/删除(服务器同步没了)、点开图像栏看到真图+由谁+北京时间。已发 code 52。
+- ✅ **0.9.9 —— 更新下载改到后台，切页面不断（2026-08-25）**：用户报「点更新后切进会话再退出，下载就停了」。
+  根因：下载挂在更新横幅的 `rememberCoroutineScope` + 界面持有的 SFTP 通道上，一进会话看板销毁 → 协程取消、通道关闭 → 静悄悄断。
+  修：下载搬进单例 `object UpdateDownloader`（app 级 `SupervisorJob` scope，永不取消），状态 `mutableStateOf` 放单例、横幅只读它画进度；
+  通道自己从常驻 `shared.session`（MainActivity 导航之上持有）现开一条 SFTP。回看板时 `LaunchedEffect(ssh)` 重查、横幅摆回、`mine` 命中续显实时进度。
+  顺手把 `SubmitButton` 拆出纯视觉 `MorphButton`（状态外传）给横幅复用。已发 **code 53 / 0.9.9**（本地 `~/.yxi/` + hk13，sha256 一致 9cfded23778c）。见 TROUBLESHOOTING #127。
+- ✅ **0.9.10 —— 实验室素材「保存原画到本地」（2026-08-25）**：用户要图/GIF/视频等能把原画直接下到手机。
+  每个素材卡加一个「保存原图/保存 GIF/保存视频/下载到本地」按钮（复用 `SubmitButton`：点→进度条→✓已存到相册）。
+  **存的是原文件字节**（不是预览缩图）：`LabRemote.download` 走 **SFTP 流式**下（`.yxi/lab/<file>` 相对路径 jsch 自解析到 home）——
+  **不用 base64 经 exec**，那个会把大文件（视频）截断。`MediaSaver`（新）用 MediaStore 分区存：图→相册 Pictures/Yxi、
+  视频→相册 Movies/Yxi、其它→下载 Download/Yxi，**Android 10+ 不要任何权限**。
+  实测（模拟器连 10.0.2.2=本机）：点保存原图 → `/sdcard/Pictures/Yxi/…jpg` **943575 字节，跟服务器原文件一模一样**（原画），
+  MediaStore 登记 mime=image/jpeg、按钮转「✓已存到相册」。已发 **code 54 / 0.9.10**（本地 + hk13，sha256 一致 660fb4f57b3f）。
+  ⚠️ ponytail 天花板：只做了 API 29+（用户机是 15）；26–28 会明确报「需要 Android 10+」，要支持再加动态存储权限。
+- ✅ **0.9.11 —— 一批小巧思（19 项，调研后用户拍板全做，2026-08-25）**：四路 subagent 调研（代码盘点/同类App/CC能力面/手机端）汇总后落地。清单见 `POLISH-CHECKLIST.md`。
+  **通知**（`watch/EventService.kt`+`AnswerReceiver`）：拆 CH_NEEDS(急促两下)/CH_DONE(轻一下)两频道给不同触感；加 RemoteInput「回一句」到 needs+done（顺带白送语音）；「静音」动作+`ui/Mute.kt`；等待计时+跨 2/5/10/20/40 分升级重提醒(escalate)；30s statusLoop 数「在跑」喂常驻通知。
+  **聊天**（`ChatScreen`/`ToolCards`）：TodoWrite 渲染成 ☐▶☑ 清单+顶栏「正在做…」；忙时 LiveStatus 加「■停」(发 Escape)；上下文数 ≥15万染琥珀、点发 /compact；`Snippets.kt` 常用语 chip（草稿框+回复 sheet，可编辑）；危险审批(`Risky`正则)先验指纹(`Biometric` 框架 API28+)；PendingCard「看改动」→`GitDiff` DiffSheet(+绿-红@@青)。
+  **看板**（`SessionsScreen`）：相对活跃时间`ago()`；悬浮卡实时状态词/耗时(`Live.doneFor`)；每会话静音(卡片🔕+回复sheet开关)；每主机稳定配色`hostColor()`；「＋」从手机拉起会话(最近目录→tmux new+claude)。
+  **新组件**：`ShareActivity`(分享文字/图片/文件到某会话)、`widget/WaitingTile`(QS磁贴)、`widget/WaitingWidget`(桌面小组件，RemoteViews无新依赖)——后两个读 EventService 写进 prefs 的已知态。
+  **没做**（用户说大赌注先不做）：PreToolUse 阻塞式远程审批、连接健康点+自动重连；Wear OS（荣耀表非 Wear OS）。
+  实测（模拟器）：ShareActivity 全流程（选会话+预览+相对时间）、看板配色点/＋、聊天常用语 chip 均正常，三个新组件已注册、无崩溃。已发 **code 55 / 0.9.11**（sha256 一致 a9133f7788d1）。
+  ⚠️ 现有已很完整：终端快捷键条(`KeyBar.kt` esc/tab/^B/方向/^C…)、语音(RecognizerIntent)、灵动胶囊(promote)本就有，本次没重做。
+- ✅ **0.9.12 —— 对话里下载文件 + 「配置」tab（2026-08-25/26）**：
+  **① 对话里下载文件**：文件查看器（`ui/FileViewer.kt`）顶栏加「下载」按钮 —— 从对话点文件路径就能到这，把**整个原文件**下到手机：图/视频进相册、csv/xlsx/pdf/zip 等进「下载」目录(Download/Yxi)。复用现成 `Sftp.download`(流式) + `MediaSaver`；`MediaSaver.mimeOf` 加了 xlsx/csv/pdf 等办公/数据格式表(各机型 MimeTypeMap 不一致)。实测：csv 下到 `/sdcard/Download/Yxi/`，字节一字不差。**全程走 SSH/SFTP,不碰公网 HTTP**(那只给网页装包)。
+  **② 「配置」tab**（底部导航 会话/主机/**配置**/设置）：分服务器、分工具(Claude Code `~/.claude` / Codex `~/.codex`)浏览 + 编辑 agent 配置：技能/MCP/子 agent/命令/权限/钩子/记忆/插件。工具无关——哪台装了哪个才显示(现在三台都只有 Claude Code,Codex 没装)。**插件自带的技能/命令也枚举**(installPath 下 glob)。
+  - `agent/ConfigRemote.kt`：一次 SSH 抓取(python3 heredoc)→ 结构化 JSON。**密钥服务器侧就打码**(env 值 + 键名含 key/token/secret/password/auth → ••••)，`.credentials.json`/`auth.json` **根本不读**。`save()` = json 先 `JSONObject` 校验 → `cp` 备份成 `<file>.yxi-bak-<ts>` → SFTP 写回。
+  - `ui/ConfigScreen.kt`：主机头+下拉 → 工具段 → 可展开类目 → 项 → 详情(md 渲染/mono 文本；编辑取原文明文，结构化文件横幅提醒)。
+  实测(模拟器连本机)：配置 tab 显示 Claude Code 的 记忆/设置/技能6(全是 ponytail 插件的)/插件1；开 skill 看 SKILL.md(md 渲染)；settings.json **env 值已打码 ••••**；造个测试 skill 改一行保存 → 磁盘内容变了 + 生成 `.yxi-bak-` 备份(内容是原文)。已发 **code 56 / 0.9.12**(sha256 一致 d42590007f9b)。
+  ⚠️ 用户拍板范围=**查看+编辑**、工具通用框架；大赌注(PreToolUse 阻塞审批/连接健康)仍不做。编辑 settings.json/config.toml 这类结构化文件风险高——已上 json 校验+备份，但 toml 只备份没校验(Codex 没装,没实测)。
+- ✅ **0.9.13 —— 通知显示「要你决定什么」（2026-08-26）**：用户报「通知说需要决策，但没说决策什么，回复不了」。**根因是 0.9.11 我的 Phase-4 回归**：重构成 `postNeeds`/`postDone` 时把事件的 `detail`（Notification message）漏掉了，只剩「等你决定」。
+  修：① `EventService` 把 `detail`（为什么找你）+ 新的 `preview`（Claude 最后说的一句）穿进 `postNeeds`/`postDone`，折叠行就显示「要你决定什么」，展开显示 preview+屏幕提示+位置+等待时长；`WaitCtx` 存 detail/preview 给升级重提醒。② **服务器 `yxi-hook` 加 `preview` 字段** —— 从 `transcript_path` **tail 末尾 64KB**取最后一条 assistant 文本，**纯读文件、零 token/零 API**。
+  实测（模拟器）：造 needs 事件带 preview → 通知 `android.text` 直接是那句「…rm 掉可以吗？」，不再是「等你决定」。已发 **code 57 / 0.9.13**（sha a1515c141bd9）。
+  ⚠️ **配套**：`yxi-hook` 已更到**本机**（手机盯的就是这台；station/inst2 没装 hook）。手机连别的装了 hook 的机器要一起更 `~/.local/bin/yxi-hook`。旧 hook 也不会崩，只是没 preview。
+- ✅ **0.9.14 —— 聊天顶栏「⚡模式」快切（2026-08-26）**：用户要便捷切模型/模式(1M、最大思考、ultracode)且能叠加。
+  `ui/Modes.kt`：底部弹出 `ModeSheet`，大 chip 一点就把对应**斜杠命令**发进会话(`SessionProbe.send`)，**点了不关面板**——好连点**叠加**(各模式是独立斜杠命令,`/model`+`/effort`+`/ponytail` 各走各的)。命令**可编辑**(「名字|命令」一行一个,存 prefs)。默认:`1M 上下文|/model opus[1m]`、`最大思考|/effort max`、`高强度|/effort high`、`ultracode|/ponytail ultra`、`普通|/ponytail`。入口=聊天顶栏「⚡模式」(在模型名旁)。
+  ⚠️ **默认命令是最可能的猜测**——不同 Claude Code 版本/习惯,`/effort`、`/model <arg>`、ultracode 具体命令可能不一样,所以做成**可编辑**,用户进去改成真能用的那句。实测(模拟器):⚡模式 chip 在、sheet 五个 chip 都对(标签+命令)、编辑弹窗能开;**没在真会话上点发**(会真切模型/模式),send 本身是proven。已发 **code 58 / 0.9.14**(sha 0586a8d034de)。
+- ✅ **0.9.15 —— 切完模型立刻显示 + ⚡模式默认命令修正（2026-08-26）**：用户报「切到 Opus 5 了，模式旁边还显示 opus-4-8」。
+  **先查清:那次不是 bug** —— 模型是**按会话**的：他在 Yxi 会话切的，而 App 当时显示的是 **claude_desktop**（另一个已在跑的会话，实测其转录最后仍是 `claude-opus-4-8`）；`/model` 回执写的也是「saved as your default for **new sessions**」，不动已跑的会话。
+  **但顺带暴露两个真问题，都修了**：
+  ① **顶栏模型名会滞后**：它取自「最后一条 assistant 消息」的 model，切换不改写旧消息 → 切完没回话前还显示旧名，用户会以为没切成。修：`Transcript` 认 `/model` 回执（命令输出里的 `Set model to …`）并覆盖 `Ctx.model`（`parseInto` 里加 `lastCtx`）。
+    ⚠️ 两个坑（都写进测试了）：**不能先整体 clean ANSI** —— 别名 `claude-opus-5[1m]` 里的 `[1m` 跟加粗序列一样，会被吃成 `claude-opus-5]`；改成**在原文匹配、只摘首尾加粗标记**。正则还要**以 `<` 收尾**，否则把 `</local-command-stdout>` 吃进模型名（**测试抓出来的**）。`Kept model as …`＝没切，不能误判。
+  ② **⚡模式默认命令是错的**：`/model opus[1m]` 实测回「Kept model as Opus 4.8」=没切；转录里核到能用的是全名形式 **`/model claude-opus-5[1m]`**。`/effort max|high|mid` 转录里确认真在用（13/5/6 次），另加了「中等」。
+  测试：`TranscriptTest.切完模型还没回话也显示新模型`（4 个断言）；**全套 111 个测试通过**。已发 **code 59 / 0.9.15**（sha 5c71833edd80）。
+- ✅ **0.9.16 —— 顶栏显示本会话的模型 + 模式（2026-08-26）**：用户要「模型显示要显示本对话的模型和模式」。
+  数据**全在转录里，零额外开销**：`effort`（`max`/`high`/`mid`）在**转录行顶层**（跟 `type`/`uuid` 平级，**不在 message 里**——找错地方永远是空）；模式来自单独的 `{"type":"mode","mode":"plan|normal"}` 行（**没有 message 字段**，得在「非消息行静默跳过」之前接住）。
+  `Transcript.Ctx` 加 `effort`/`mode` 两个字段；`parseInto` 加 `lastMode`，模式行来得比回话晚也立刻反映。顶栏在模型名后显示「最大思考/高强度/中等」+「计划模式」（Copper 色），normal 不显示（默认态不占位）。
+  ⚠️ 那一行现在有**五格**（⚡模式/模型/强度·模式/上下文/今日），窄屏会挤没左边的 → 整行改成**可横滑**（`horizontalScroll`）。
+  测试：`TranscriptTest.顶栏带思考强度和模式`（模式行在回话前/后两种顺序都验）；**全套 112 个测试通过**。实机(模拟器)确认顶栏渲染成 `⚡模式 opus-4-8 最大思考 上下文 693K 今日 …`。已发 **code 60 / 0.9.16**（sha f1627f946683）。
+- ✅ **0.9.17 —— 顶栏再加 ponytail 强度（2026-08-26）**：接 0.9.16 那条待办。
+  **比原计划更省**：本来打算 SSH 读 `~/.claude/.ponytail-active`（每次进会话多一个请求，而且那文件是**全局的**、未必等于本会话）；查下来它每次注入的 `PONYTAIL MODE ACTIVE — level: x` **就落在转录里**，于是**零额外请求、而且是本会话的**。
+  `Ctx` 加 `ponytail` 字段；`parseInto` 用正则**直接扫原始行**（`PONYTAIL MODE [A-Z]+[^:]*level:\s*([A-Za-z]+)`）——不钻 hook_success 的 JSON 结构（那是插件实现细节，会变）。
+  ⚠️ **不一定读得到**：它只在会话开始/换模式/提交提示时注入，实测同一会话相邻两次可隔 ~3000 行，超出 App 的 tail 窗口就读不到 → **读不到就空着不显示**（沿用「宁可不显示也不显示假的」）。空等级的注入（实测真有 29 条）不会冲掉已知值。
+  验证：`TranscriptTest.认得出ponytail强度`（4 组断言）+ **正则跑真实转录：122 条真注入全中、全部解出 `full`，17 条未匹配都是我自己的 grep 命令文本被记进转录，正确忽略**；**全套 113 个测试通过**。已发 **code 61 / 0.9.17**（sha b092dba11a94）。
+  ⚠️ 顶栏那行没再视觉复核（模拟器 App 数据又被重装清空）——渲染走的是跟「最大思考」同一条 buildList 分支，那条 0.9.16 已实机确认。
+- ✅ **0.9.18 —— 修「按下时高亮是个方块」（2026-08-26）**：用户报长按各种可点的东西，变色的是个长方形块而不是按钮本身。
+  根因：`Surface(shape = X, modifier = Modifier.clickable{})` —— Surface 只裁**内容**，`clickable` 在它**外面**，波纹画在矩形边界里。全 App **48 处**都这么写。修法：`clickable` **紧前面**加 `.clip(X)`。
+  ⚠️ 第一版脚本插到链首，遇到链里有 `.padding()` 的等于没修（波纹变成 padding 后的小矩形）——必须紧挨 `clickable`，改了 24 处位置。详见 TROUBLESHOOTING #129（含验证手法）。
+  验证：脚本复查「有 shape 且 clickable 却没 clip 的 Surface」= **0 处**；非 Surface（带 shape 背景的 Box/Row）也扫了 = 0 处；**113 个测试通过**；实机 `input motionevent DOWN` 按住截图 + 像素 diff：变化区域**四角未被涂到**、且与胶囊边界吻合，放大目视确认是**胶囊形高亮**。已发 **code 62 / 0.9.18**（sha d6edd7e28d19）。
+- ✅ **0.9.19 —— 修「会话卡时间不对」（2026-08-26）**：用户报卡片写着 14 小时前/1 天前，但那些会话刚聊过。
+  根因：`lastActivity` 只取 tmux 的 `#{session_activity}`，而它会陈旧到离谱 —— 实测 `claude_desktop` tmux 说 2 天前、cc-state 的 ts 说 **7 天前**，而转录**1 分钟前**还在写。**转录 mtime 才是权威**（Claude Code 每说一句都写它）。
+  修：抓取脚本加一段列「项目目录 → 最新 .jsonl mtime」，`SessionProbe.lastActivityOf()` 取 `max(tmux, 转录)`，读不到退回 tmux。⚠️ 用 `find -printf | awk` 一次扫完（**8ms**）而不是每目录 ls+stat（**230ms**，看板每 5 秒一次受不了）；非 GNU find 就输出空 → 优雅降级。
+  验证：新 `ActivityTest`（4 例，含真实的 claude_desktop 数据）；**全套 117 个测试通过**；实机确认卡片从「14 小时前/1 天前」变成 **5/7/24 分钟前**。已发 **code 63 / 0.9.19**（sha 73f6173d354a）。见 TROUBLESHOOTING #130。
+  ⚠️ 遗留：`state`（等你/干活中）也来自 cc-state，同样可能陈旧，本次没动 —— 哪天「分组不对」先怀疑它。
+- ✅ **0.9.20 —— 修「点发送再切走，消息丢了」（2026-08-26）**：用户原话「要在对话里面等几秒再返回才算发给 agent 了」。
+  两层病根：① 发送跑在对话界面的 `rememberCoroutineScope`，切走即取消，而草稿在点击那刻已清空并落盘 → 话**既没发出去也没了**；② `SessionProbe.send()` 是「打字 + 回车」两步，中途取消 = 字进去了回车没送，卡在对方输入框里。
+  修：`send()` 整段 `withContext(NonCancellable)`；新增 `ui/Sender.kt`（app 级 scope，仿 `UpdateDownloader`），**发失败把话还回草稿**并提示。
+  实测：临时 tmux 靶子会话 → 输入 `YXISENDPROOF42` → 点发送后**立刻返回（零等待）** → 会话里收到**且被执行**（command not found）✓。**120 个测试通过**。已发 **code 64 / 0.9.20**。见 TROUBLESHOOTING #131。
+  ⚠️ 判据推广：**任何「点一下就走」的动作**都不能挂界面 scope。已排查：装公钥/附件上传在 sheet 里（点完不会立刻销毁）、下载更新已是 app scope。
+- ✅ **0.9.21 —— 设置里加「工单中心」（2026-08-26）**：用户要一个地方收集 App 的不足，方便查阅更新。
+  `agent/Tickets.kt` + 设置页 `TicketsCard`：写一条 → 追加进**连着那台服务器**的 `~/.yxi/tickets.jsonl`（JSONL，只追加），
+  **自动带上版本号 + 机型**（不带的话回头对不上是哪版的毛病）；卡片里同时列出已提的（北京时间）。
+  **为什么存服务器而不是手机本地**：存本地只有本人看得见 = 等于没提。**为什么不开公网接口**：Yxi 无云后端，公网 POST 要防刷+隐私，与「不依赖第三方」冲突；走已有 SSH 通道零新基建。
+  ⚠️ **局限**：APK 分享给别人后，他们的工单落在**他们自己的服务器**上，我们看不到。要收外部反馈得另在下载机(hk13)开收集端点 —— 那是另一件事，没做。
+  查阅方式：`cat ~/.yxi/tickets.jsonl`。实测：App 里提交 → 服务器文件里出现带 version/device 的 JSON 行 → 按钮转「记下了」、列表显示「已提 1 条」✓。新增 `TicketsTest`（shell 单引号转义 + 坏行跳过），**全套 120 个测试通过**。已发 **code 65 / 0.9.21**。
+- 📎 **给 nanobanana 的模子文档**：`/root/src/workspace/nanobanana/YXI-MOLD.md`（174 行）—— 工具链/可抄文件/发布/纪律/踩坑 + **「在哪测怎么测」详版**（模拟器、UI 自动化的坑、端到端验证招式）；并在它的 `CLAUDE.md` 里加了指路。
+  ⚠️ 模拟器踩坑：`install -r` 那次变成**全新安装**（uid 变了），App 数据被清空。恢复办法：读 App「公钥」界面的公钥追加进本机 `~/.ssh/authorized_keys`，再用 `adb shell run-as app.yxi` 直接写 `files/hosts.json`（UI 自动化填表会因软键盘顶起布局而串行到同一个输入框）。
+- ✅ **`yxi-lab` CLI —— 让别的 agent 把产物推进实验室（2026-08-25）**：用户问「别的 tmux（如 nanobanana 出图）
+  能不能把生成的东西放实验室」。能 —— 在线实验本来就读 `~/.yxi/lab/`。做了个 `/root/.local/bin/yxi-lab`：
+  `yxi-lab add <文件> [标题] [说明]`（图/GIF/网页/文本，新的排最前，自动写 manifest.json）、`list`/`rm`/`clear`、
+  `yxi-lab approved`（读用户勾了哪些）。别的 agent 一行就推，用户 App 刷新即见、勾选审核。
+  实测：PIL 造图 → `yxi-lab add` → 手机实验室第一张就是那图、渲染正常、能勾选。
+  ⚠️ 图走 base64 经 SSH 取，>3MB 会慢（脚本会提醒）。要让某 agent 常态这么干，往它项目的 CLAUDE.md 加一句即可。
+  ⚠️ 发版又差点栽 #107：改完版本号没重编就 publish，APK 还是旧 code。**每次 publish 后必用 aapt2 核 APK 实际 versionCode**。
+  ⚠️ WebView 在 RemoteLab 容器里会把短内容竖直居中/顶部裁切，做全屏 html 别指望精确布局，留余量。
+  ⚠️ 图标定了 → 把选中那版转成真自适应图标（改 `res/drawable/ic_launcher_fg.xml` + `ic_launcher_colors.xml`）。
+  ⚠️ 选定用哪版接到真加载态（连接中/重连中）时，改 `YxiLoader.YxiLoader()` 里默认调的那个变体。
+- ✅ **下载站升级成正经网页（2026-08-24）**：原来公网只是个裸文件直链（`return 404` 的根）。
+  现在 hk13 的 `/var/www/yxi/index.html` 是一张**深色下载页**（Yxi logo + 版本/大小/更新说明现取
+  自 `latest.json` + 大按钮 + 4 步安装引导）。nginx snippet `yxi-dl.conf` 改成：`/`=首页、
+  `/Yxi.apk` 和 `/latest.json`=干净公开直链、老 token 路径保留（已分享的链接不断）。`:8899` 和
+  将来的 `dl.keuury.com` 共用这个 snippet。已 `nginx -t` + reload，实测首页/直链/版本都对。
+  ⏳ **就差 HTTPS**：要 `dl.keuury.com` A→64.90.25.56 的 DNS 记录（R2 令牌改不了 DNS，见 #123），
+  记录一通就 certbot 签证书（hk13 已有 certbot，别的站在用）。在此之前站是活的、只是 HTTP + 靠 IP:8899 访问。
+  ⚠️ **App 内更新走 SFTP**（连的那台的 `~/.yxi/`），跟 hk13 这套 HTTP 分发**互不相干**，改这边不影响升级。
 
 ## 读写信息在哪
 | 路径 | 性质 |
