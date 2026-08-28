@@ -10,7 +10,7 @@
 name: Yxi
 options:
   bundleIdPrefix: app.yxi
-  deploymentTarget: { iOS: "16.0" }
+  deploymentTarget: { iOS: "17.0" }   # ⚠️ 不能降：Citadel（SSH 库）最低就是 iOS 17
   createIntermediateGroups: true
 
 packages:
