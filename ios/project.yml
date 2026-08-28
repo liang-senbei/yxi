@@ -78,6 +78,10 @@ targets:
       groups: [common]
       base:
         PRODUCT_NAME: Yxi
+        # ⚠️ **模块名必须跟产品名分开。** 产品名叫 Yxi（装到手机上显示的名字），
+        # 而界面框架的模块也叫 Yxi —— 不分开的话 App 里那句 `import Yxi`
+        # 会**导入它自己**，于是找不到 RootView（CI 实测报 cannot find 'RootView' in scope）。
+        PRODUCT_MODULE_NAME: YxiApp
         PRODUCT_BUNDLE_IDENTIFIER: app.yxi
         MARKETING_VERSION: "0.9.27"
         CURRENT_PROJECT_VERSION: "71"
