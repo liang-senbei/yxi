@@ -60,6 +60,41 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | grep -E "error:|warning: .*deprecated|BUILD|Compiling|Linking" | tail -60
 
+      # ⚠️ 这一步是整条 CI 里**唯一**能证明「真能连上、真读得到文件」的地方。
+      # 模拟器跟 Mac 共用网络栈，所以模拟器里的 127.0.0.1 **就是 runner 这台机器** ——
+      # 跟安卓那边 `10.0.2.2` 指向服务器是同一个套路。
+      # 于是这里在 runner 上现起一台 sshd + tmux + 一堆样本文件，让 App 真的去连。
+      - name: 在 runner 上起一台真 SSH 服务器（给端到端用）
+        id: sshd
+        run: |
+          set -e
+          # macOS 的「远程登录」= sshd。runner 有免密 sudo
+          sudo systemsetup -setremotelogin on
+          # 给 runner 账号设个密码，App 用密码登录（密钥那条路要先把公钥弄出来，绕）
+          PW="yxi-ci-$(uuidgen | head -c 8)"
+          sudo dscl . -passwd /Users/runner "$PW"
+          echo "::add-mask::$PW"
+          echo "pw=$PW" >> "$GITHUB_OUTPUT"
+          # 主机公钥提前交给 App，省掉首次连接的信任弹窗（它会挡住要截的界面）
+          echo "hostkey=$(sudo awk '{print $1" "$2}' /etc/ssh/ssh_host_ed25519_key.pub)" >> "$GITHUB_OUTPUT"
+          # 等它真的起来，别抢跑
+          for i in $(seq 1 30); do nc -z 127.0.0.1 22 && break; sleep 1; done
+          nc -z 127.0.0.1 22 && echo "sshd 已就绪"
+
+      - name: 摆一份样本工作区（会话 + 文件）
+        run: |
+          set -e
+          brew list tmux >/dev/null 2>&1 || brew install tmux
+          D="$HOME/demo"; mkdir -p "$D/子目录"
+          printf '# 示例项目\n\n这是 **markdown** 阅读模式。\n\n- 第一条\n- 第二条\n' > "$D/README.md"
+          printf '{"名字":"yxi","版本":"0.9.27","能力":["ssh","sftp","tmux"]}' > "$D/配置.json"
+          printf 'print("hello")\n' > "$D/脚本.py"
+          head -c 200000 /dev/urandom > "$D/大文件.bin"
+          # 一个真 tmux 会话，让「会话」页有东西可显示
+          tmux new-session -d -s cc-demo -c "$D" || true
+          tmux send-keys -t cc-demo "echo 这是给截图用的示例会话" Enter || true
+          ls -la "$D"
+
       - name: 起模拟器 · 装上去 · 截图
         working-directory: ios
         run: |
@@ -84,6 +119,23 @@ jobs:
           shoot hosts    02-主机.png
           shoot config   03-配置.png
           shoot settings 04-设置.png
+
+          # ---- 端到端：连上 runner 那台真 sshd，截真界面 ----
+          # ⚠️ 前面几张是「没连服务器」的样子；下面这几张才证明 SSH/SFTP 真的通。
+          SEED="-yxiSeedHost 127.0.0.1:22 -yxiSeedUser runner \
+                -yxiSeedPassword ${{ steps.sshd.outputs.pw }} \
+                -yxiSeedHostKey ${{ steps.sshd.outputs.hostkey }}"
+          live() {  # $1=文件名  $2..=额外启动参数
+            local out="$1"; shift
+            xcrun simctl terminate "$UDID" app.yxi 2>/dev/null || true
+            xcrun simctl launch "$UDID" app.yxi --args $SEED "$@" >/dev/null
+            sleep 12        # 连接 + 首次列目录要时间，别抢拍
+            xcrun simctl io "$UDID" screenshot "shots/$out"
+          }
+          live 05-已连接的会话页.png -yxiTab sessions
+          live 06-文件浏览.png       -yxiOpen cc-demo -yxiMode files -yxiCwd "$HOME/demo"
+          live 07-看markdown.png     -yxiOpen cc-demo -yxiMode files -yxiCwd "$HOME/demo"
+          live 08-终端.png           -yxiOpen cc-demo -yxiMode terminal -yxiCwd "$HOME/demo"
           ls -lh shots/
 
       - name: 传回截图

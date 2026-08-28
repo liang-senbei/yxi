@@ -234,10 +234,62 @@ final class AppState: ObservableObject {
     lazy var installer: PasswordInstaller = .init(keys: keys, store: store, gate: trust)
 
     init() {
+        #if DEBUG
+        seedFromLaunchArgsIfAsked()
+        #endif
         hosts = store.hosts
         currentID = hosts.first?.id
         bind()
+        openFromLaunchArgsIfAsked()
     }
+
+    /// 跟 [tab] 同一个路子：让自动化能**直接落到工作区的某个模式**
+    /// （`--args -yxiOpen cc-demo -yxiMode files -yxiCwd /tmp/x`），
+    /// 否则截图脚本得先模拟点击列表里的某个会话 —— simctl 点不了。
+    private func openFromLaunchArgsIfAsked() {
+        let d = UserDefaults.standard
+        guard let session = d.string(forKey: "yxiOpen") else { return }
+        let mode: Mode
+        switch d.string(forKey: "yxiMode") {
+        case "files": mode = .files
+        case "chat": mode = .chat
+        case "lab": mode = .lab
+        default: mode = .terminal
+        }
+        workspace = Target(mode: mode, session: session, cwd: d.string(forKey: "yxiCwd") ?? ".")
+    }
+
+    #if DEBUG
+    /// **CI 用的一次性播种**：把一台主机（含密码）塞进 store，让模拟器能真连上
+    /// 云端 runner 上现起的那台 sshd —— 从而在 CI 里跑**真的** SSH/SFTP，
+    /// 而不是喂假数据截图。
+    ///
+    /// ```
+    /// xcrun simctl launch <udid> app.yxi --args \
+    ///     -yxiSeedHost 127.0.0.1:22 -yxiSeedUser runner -yxiSeedPassword <pw>
+    /// ```
+    ///
+    /// ⚠️ **`#if DEBUG` 不是装饰**：密码要经 [Vault] 落进钥匙串，
+    /// 这条路在 Release 包里必须根本不存在 —— 否则等于给发布版留了一个
+    /// 「用启动参数写一台主机进去」的口子。CI 编的就是 Debug。
+    private func seedFromLaunchArgsIfAsked() {
+        let d = UserDefaults.standard
+        guard let hostPort = d.string(forKey: "yxiSeedHost"),
+              let user = d.string(forKey: "yxiSeedUser"),
+              let password = d.string(forKey: "yxiSeedPassword") else { return }
+        let parts = hostPort.split(separator: ":")
+        let name = String(parts.first ?? "127.0.0.1")
+        let port = parts.count > 1 ? Int(parts[1]) ?? 22 : 22
+        // 固定 id：重复启动只更新同一台，不会攒出一堆重复主机
+        var h = Host(id: "ci-seed", alias: "CI", hostname: name, port: port,
+                     username: user, useKey: false)
+        h.sealedPassword = try? Vault.seal(password)
+        // 顺便把主机公钥也塞进去（`ssh-ed25519 AAAA…`），省掉首次连接的信任弹窗 ——
+        // 否则自动化截图会卡在那个框上，而它挡住的正是要看的界面
+        h.hostKey = d.string(forKey: "yxiSeedHostKey")
+        store.upsert(h)
+    }
+    #endif
 
     var current: Host? { hosts.first { $0.id == currentID } }
 
