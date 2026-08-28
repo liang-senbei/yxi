@@ -54,7 +54,12 @@ public struct Update: Equatable, Sendable {
     /// ⚠️ HTTPS（Let's Encrypt，certbot 自动续期），所以 App 里**不需要任何明文 HTTP 豁免**。
     /// ⚠️ 根目录 `/latest.json`、`/Yxi.apk` 由 nginx 别名指向当前发布目录，永远是最新，
     /// 所以这里**不用带 token**。iOS 侧的安装包另说（见 docs/分发.md），但**查版本**是同一份清单。
-    public static let publicBase = "https://dl.keuury.com"
+    /// ⚠️ **改域名要留后路。** 已经装出去的 0.9.24~0.9.27 里这一行写死的是
+    /// `dl.keuury.com` —— 它们只会去问那个地址。所以 `dl` **不能停**，
+    /// 至少要留到「用户手机上装的是切过来之后的版本」为止；
+    /// 停早了 = 那些版本永远收不到更新提示，也就永远升不上来。
+    /// 现在 dl 那头：页面 301 到新域名，但 `latest.json` / `Yxi.apk` 仍然直供 200。
+    public static let publicBase = "https://yxi.keuury.com"
     public static var publicManifestURL: URL? { URL(string: "\(publicBase)/latest.json") }
 
     /// 从公网清单判断有没有新版。跟 [parse] 同一套判据，只是来源不同。

@@ -119,6 +119,9 @@ private struct HostRow: View {
     /// 默认什么都不画，长按才展开（跟安卓一致）
     @State private var quotaOpen = false
     @State private var quota: Quota?
+    /// 这份数字什么时候取的。⚠️ **必须显示** —— 缓存值和刚取的值长得一模一样，
+    /// 不写时间的话用户没法判断「到底刷新了没有」。
+    @State private var quotaAt: Date?
     @State private var quotaNote: String?
     @State private var quotaBusy = false
 
@@ -226,6 +229,8 @@ private struct HostRow: View {
             }
             if quotaBusy {
                 Text("查着…").font(.system(size: 11)).foregroundStyle(Yx.dim)
+            } else if let quotaAt {
+                Text(ago(quotaAt) + " 取的").font(.system(size: 11)).foregroundStyle(Yx.dim)
             } else if let note = quotaNote {
                 Text(note)
                     .font(.system(size: 11))
@@ -276,6 +281,8 @@ private struct HostRow: View {
     private func toggleQuota() {
         // 时长照抄 [ToolCards] 里那个展开动画，全 App 一个手感
         withAnimation(.easeInOut(duration: 0.18)) { quotaOpen.toggle() }
+        // ⚠️ 每次长按展开都重查一次（用户明确要的：「长按服务器就更新一次用量」）。
+        // `!quotaBusy` 只挡「上一次还没回来就又点」，不挡「重新展开」。
         guard quotaOpen, !quotaBusy else { return }
         Task { await loadQuota() }
     }
@@ -312,11 +319,15 @@ private struct HostRow: View {
             try await session.connect()
             defer { Task { await session.disconnect() } }
             let out = try await session.exec(Quota.probeCommand).stdout
-            if let q = Quota.parse(out) {
-                quota = q
+            let (got, why) = Quota.read(out)
+            if let got {
+                quota = got
+                quotaAt = Date()      // 「什么时候取的」要看得见，否则刷没刷分不出来
             } else {
                 // ⚠️ 说清楚是**为什么**没有，别只留一块空白。
-                quotaNote = "这台机器上查不到订阅额度 —— 多半是没装 claude，或者它还没登录账号。"
+                // ⚠️ **说真原因，别用「多半是」蒙。** 猜错的原因比不说更糟：
+                // 用户会照着去做无用功（比如去关会话、去重登账号）。
+                quotaNote = why?.text ?? "这台机器上查不到订阅额度。"
             }
         } catch is CancellationError {
             // ⚠️ 取消不是失败 —— 别把它写成一句钉在界面上的假错误（#78 / #79）

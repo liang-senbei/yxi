@@ -114,7 +114,14 @@ fun Workspace(
      * 下拉开着的时候**再点一次标题**就换成卡片墙。
      */
     var menu by remember { mutableStateOf(false) }
-    var quick by remember { mutableStateOf<List<app.yxi.agent.Session>>(emptyList()) }
+    // ⚠️ **开局就用缓存那份填上**（会话页每次刷新都会存）——
+    // 原来这里是空的、等菜单打开才去抓，于是点开先看到一片空白再跳出内容。
+    var quick by remember(host.id) {
+        // ⚠️ 缓存那份是**整台机器的**会话，这里要的是**置顶的那几个** —— 别忘了筛，
+        // 否则一点开就是二十条，跟菜单的用途正好相反
+        val names = Pinned.get(ctx, host.id)
+        mutableStateOf(app.yxi.agent.Recent.get(host.id).filter { it.name in names })
+    }
     var dpad by remember { mutableStateOf(false) }
     var bar by remember { mutableStateOf(true) }
 
@@ -548,14 +555,24 @@ fun Workspace(
     // ⚠️ **终端模式下语音必须先确认。**
     // 识别错一个字，在服务器上就是**另一条命令**。对话模式还能在输入框里改，
     // 终端是直接打进 PTY 的 —— 没有反悔的机会。
-    // 下拉打开时抓一次 —— 置顶的名字存在手机上，但状态和 cwd 得问服务器
+    // 置顶的名字存在手机上，状态和 cwd 得问服务器。
+    //
+    // ⚠️ **缓存先画、后台再刷**：抓那一趟在手机网络下动辄一两秒，
+    // 原来它挡在「点开菜单」和「看到内容」之间，用户的原话是
+    // 「点击后显示有点太慢了，是不是我点击的时候才加载」——就是。
+    // 现在 `quick` 开局就是缓存那份（上面），这里只负责把它刷新掉。
     LaunchedEffect(menu) {
         if (!menu) return@LaunchedEffect
         val s0 = ssh ?: return@LaunchedEffect
         val names = Pinned.get(ctx, host.id)
-        if (names.isEmpty()) { quick = emptyList(); return@LaunchedEffect }
+        // ⚠️ 一个置顶都没有时**不能把 quick 清空**：菜单里还要靠它显示
+        // 「全部会话…」那条，清了就成了一个空菜单
+        if (names.isEmpty()) return@LaunchedEffect
         runCatching { app.yxi.agent.SessionProbe.snapshot(s0) }
-            .onSuccess { all -> quick = all.filter { it.name in names } }
+            .onSuccess { all ->
+                app.yxi.agent.Recent.put(host.id, all)
+                quick = all.filter { it.name in names }
+            }
     }
 
     if (switcher) {

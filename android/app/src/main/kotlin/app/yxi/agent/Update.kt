@@ -60,7 +60,12 @@ data class Update(
          * 所以这里**不需要带 token** —— 少一个写死在包里的东西。
          * ⚠️ 老的 `http://64.90.25.56:8899/<token>/` 仍然保留，别断了已装旧版的人。
          */
-        const val PUBLIC_BASE = "https://dl.keuury.com"
+        // ⚠️ **改域名要留后路。** 已经装出去的 0.9.24~0.9.27 里这一行写死的是
+        // `dl.keuury.com` —— 它们只会去问那个地址。所以 `dl` **不能停**，
+        // 至少要留到「用户手机上装的是切过来之后的版本」为止；
+        // 停早了 = 那些版本永远收不到更新提示，也就永远升不上来。
+        // 现在 dl 那头：页面 301 到新域名，但 `latest.json` / `Yxi.apk` 仍然直供 200。
+        const val PUBLIC_BASE = "https://yxi.keuury.com"
 
         /** 从公网下载页查 —— 读 `<base>/latest.json`。读不到返回 null（安静）。 */
         suspend fun checkPublic(currentCode: Int): Update? =

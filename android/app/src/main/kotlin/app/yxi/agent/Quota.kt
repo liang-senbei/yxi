@@ -75,19 +75,46 @@ object Quota {
      * ⚠️ **别加 `IS_SANDBOX`**：那是给交互式 `--dangerously-skip-permissions` 用的，
      * `-p` 打印模式不需要，加了反而可能改变行为。
      */
-    suspend fun fetch(ssh: SshSession): Q? {
-        val out = runCatching {
-            ssh.exec(
-                "export PATH=\$HOME/.local/bin:\$HOME/.npm-global/bin:/usr/local/bin:\$PATH; " +
-                    "for d in /opt/node*/bin; do [ -d \"\$d\" ] && PATH=\$PATH:\$d; done; " +
-                    "command -v claude >/dev/null 2>&1 || exit 0; " +
-                    // ⚠️ 顺手把档位读出来（Max 5x/20x/Pro 藏在 credentials 里，/usage 不给）。
-                    // 只 grep rateLimitTier/subscriptionType 两个字段，**绝不整个 cat**——
-                    // 那文件里还有 access/refresh token，不该出现在任何日志或抓屏里。
-                    "grep -oE '\"(rateLimitTier|subscriptionType)\":\"[^\"]*\"' \$HOME/.claude/.credentials.json 2>/dev/null; " +
-                    "timeout 30 claude -p '/usage' 2>/dev/null"
-            )
-        }.getOrNull().orEmpty()
-        return parse(out)
+    /** 查不到时的**真原因**。原来界面上一律显示「没有空闲会话可借来查额度」——
+     *  而这条路根本不借会话（下面 [fetch] 是直接 exec），那句话是错的。
+     *  说错原因比不说更糟：用户会去关会话，然后发现没用。 */
+    sealed interface Why {
+        /** 服务器上没有 `claude` 这个命令 */
+        object NoClaude : Why
+        /** `claude -p '/usage'` 30 秒没回来（它要连 API，慢是常态） */
+        object Timeout : Why
+        /** 有输出但认不出来 —— 多半是 Claude Code 换了 `/usage` 的排版 */
+        object Unparsable : Why
+        data class Failed(val message: String) : Why
     }
+
+    /** 成功给 Q，失败给 [Why]。 */
+    suspend fun fetchDetailed(ssh: SshSession): Pair<Q?, Why?> {
+        // ⚠️ 用一个**标记**区分「命令没跑成」和「跑了但没输出」——
+        // 光看输出空不空分不出「claude 没装」和「超时」。
+        val out = runCatching { ssh.exec(probe()) }.getOrElse {
+            if (it is kotlinx.coroutines.CancellationException) throw it
+            return null to Why.Failed(it.message.orEmpty().take(60))
+        }
+        if (NO_CLAUDE in out) return null to Why.NoClaude
+        if (out.isBlank()) return null to Why.Timeout
+        val q = parse(out) ?: return null to Why.Unparsable
+        return q to null
+    }
+
+    /** 服务器上没有 claude 时会打出来的标记。挑一个正常输出里不会出现的串。 */
+    private const val NO_CLAUDE = "__YXI_NO_CLAUDE__"
+
+    /** 探测命令。抽出来是为了 [fetchDetailed] 和 [fetch] 用同一份。 */
+    private fun probe() =
+        "export PATH=\$HOME/.local/bin:\$HOME/.npm-global/bin:/usr/local/bin:\$PATH; " +
+            "for d in /opt/node*/bin; do [ -d \"\$d\" ] && PATH=\$PATH:\$d; done; " +
+            "command -v claude >/dev/null 2>&1 || { echo $NO_CLAUDE; exit 0; }; " +
+            // ⚠️ 顺手把档位读出来（Max 5x/20x/Pro 藏在 credentials 里，/usage 不给）。
+            // 只 grep rateLimitTier/subscriptionType 两个字段，**绝不整个 cat**——
+            // 那文件里还有 access/refresh token，不该出现在任何日志或抓屏里。
+            "grep -oE '\"(rateLimitTier|subscriptionType)\":\"[^\"]*\"' \$HOME/.claude/.credentials.json 2>/dev/null; " +
+            "timeout 30 claude -p '/usage' 2>/dev/null"
+
+    suspend fun fetch(ssh: SshSession): Q? = fetchDetailed(ssh).first
 }

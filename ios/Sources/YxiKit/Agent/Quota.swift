@@ -49,10 +49,39 @@ public struct Quota: Codable, Equatable, Sendable {
     ///
     /// ⚠️⚠️ 档位那一段**只 `grep` 两个字段，绝不整个 `cat` credentials**（#122）：
     /// 那文件里还有 access / refresh token，不该出现在任何日志、抓屏或缓存里。
+    /// 服务器上没有 `claude` 时会打出来的标记。挑一个正常输出里不会出现的串。
+    public static let noClaudeMark = "__YXI_NO_CLAUDE__"
+
+    /// 查不到时的**真原因**。
+    public enum Why: Equatable, Sendable {
+        case noClaude          // 那台机器上没有 claude 这个命令
+        case timeout           // `claude -p '/usage'` 30 秒没回来（它要连 API）
+        case unparsable        // 有输出但认不出来 —— 多半是 Claude Code 换排版了
+
+        public var text: String {
+            switch self {
+            case .noClaude:   return "这台机器上没装 claude —— 额度是问它要的"
+            case .timeout:    return "查询超时：claude -p '/usage' 要连 API，30 秒没回来"
+            case .unparsable: return "认不出 /usage 的输出 —— 多半是 Claude Code 换排版了"
+            }
+        }
+    }
+
+    /// 解析结果 + 失败时的真原因。
+    public static func read(_ out: String) -> (Quota?, Why?) {
+        if out.contains(noClaudeMark) { return (nil, .noClaude) }
+        if out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return (nil, .timeout) }
+        guard let q = parse(out) else { return (nil, .unparsable) }
+        return (q, nil)
+    }
+
     public static let probeCommand =
         "export PATH=$HOME/.local/bin:$HOME/.npm-global/bin:/usr/local/bin:$PATH; " +
         "for d in /opt/node*/bin; do [ -d \"$d\" ] && PATH=$PATH:$d; done; " +
-        "command -v claude >/dev/null 2>&1 || exit 0; " +
+        // ⚠️ 没装 claude 时**打个标记**再退出。只写 `exit 0` 的话，
+        // 「没装」和「命令超时」的输出都是空的，界面就只能猜原因 ——
+        // 而猜错的原因比不说更糟（用户会照着去做无用功）。
+        "command -v claude >/dev/null 2>&1 || { echo \(noClaudeMark); exit 0; }; " +
         "grep -oE '\"(rateLimitTier|subscriptionType)\":\"[^\"]*\"' $HOME/.claude/.credentials.json 2>/dev/null; " +
         "timeout 30 claude -p '/usage' 2>/dev/null"
 

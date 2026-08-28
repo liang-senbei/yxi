@@ -98,7 +98,9 @@ fun SessionsScreen(
             // 用户看到的位置和点下去的位置必须是同一个。
             if (!listState.isScrollInProgress) {
                 runCatching { SessionProbe.snapshot(s) }
-                    .onSuccess { onSessions(it); status = "" }
+                    // ⚠️ 顺手存一份给工作区左上角那个下拉用（[app.yxi.agent.Recent]）——
+                    // 它原来是「点了才去抓」，打开菜单要干等一趟 SSH 往返
+                    .onSuccess { app.yxi.agent.Recent.put(host.id, it); onSessions(it); status = "" }
                     .onFailure {
                         if (it is kotlinx.coroutines.CancellationException) throw it
                         status = t("刷新失败：%s").format(it.message)

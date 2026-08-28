@@ -126,12 +126,17 @@ private fun HostRow(
 ) {
     // ⚠️ **长按 = 展开额度**（用户要的）。原来长按是「改主机」，挪进展开区里那个按钮。
     var expanded by remember(h.id) { mutableStateOf(false) }
+    /// 长按一次 +1 —— [HostQuota] 靠它知道「该重查了」
+    var expandAt by remember(h.id) { mutableStateOf(0) }
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         shape = MaterialTheme.shapes.large,
         modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.large).combinedClickable(
             onClick = onClick,
-            onLongClick = { expanded = !expanded },
+            // ⚠️ 每次长按都把 `expandAt` +1 传给 [HostQuota] —— 它据此重查。
+            // 不能只靠「展开时子树被重建」：AnimatedVisibility 什么时候真销毁子树
+            // 是它的实现细节，赌它等于赌「长按了却没刷新」。
+            onLongClick = { expanded = !expanded; if (expanded) expandAt++ },
         ),
     ) {
         Column(Modifier.padding(16.dp, 14.dp)) {
@@ -193,7 +198,7 @@ private fun HostRow(
         }
         // ⚠️ **默认什么都不画**（用户要的）。长按展开才显示 5h / 7d 两档额度。
         androidx.compose.animation.AnimatedVisibility(visible = expanded) {
-            HostQuota(h, ctx, store, keys, onEdit)
+            HostQuota(h, ctx, store, keys, onEdit, expandAt)
         }
         }
     }
@@ -207,15 +212,31 @@ private fun HostRow(
  * 再在后台刷新 —— 不让人对着空白等。查不到就说清楚原因，别干等。
  */
 @Composable
-private fun HostQuota(h: Host, ctx: android.content.Context, store: HostStore, keys: KeyManager, onEdit: () -> Unit) {
+private fun HostQuota(
+    h: Host, ctx: android.content.Context, store: HostStore, keys: KeyManager,
+    onEdit: () -> Unit,
+    /** 长按一次变一次 —— 变了就重查 */
+    refreshAt: Int,
+) {
     val scope = rememberCoroutineScope()
     val connect = rememberSshConnector(store, keys, h, aliveIntervalMs = 15_000)
     var q by remember(h.id) { mutableStateOf(QuotaCache.get(ctx, h.id)?.first) }
     var busy by remember(h.id) { mutableStateOf(false) }
     var note by remember(h.id) { mutableStateOf<String?>(null) }
+    /// 这份数字是什么时候取的。⚠️ **必须显示** —— 缓存值和刚取的值长得一模一样，
+    /// 不写时间的话用户没法判断「到底刷新了没有」（他的原话：不够同步）。
+    var fetchedAt by remember(h.id) {
+        // ⚠️ `QuotaCache.get` 的第二个值是**距今多少分钟**，不是时间戳 —— 换算回来
+        val ageMin = QuotaCache.get(ctx, h.id)?.second
+        mutableStateOf(if (ageMin == null) 0L else System.currentTimeMillis() / 1000 - ageMin * 60)
+    }
 
-    // 展开就查一次（缓存有就先显示着，这里刷新它）
-    LaunchedEffect(h.id) {
+    // ⚠️ **每次长按展开都重查一次**（用户明确要的：「长按服务器就更新一次用量」）。
+    // 缓存那份先摆着别让面板空着，同时 `busy` 显示「查着…」——
+    // 新旧值长得一样时，没有这个可见状态用户看不出到底刷没刷。
+    //
+    // ⚠️ 慢是**正常**的：`claude -p '/usage'` 要去连一次 API，几秒到十几秒都有。
+    LaunchedEffect(h.id, refreshAt) {
         busy = true; note = null
         val c = connect()
         if (c == null) { note = t("这台主机还没有可用的认证方式"); busy = false; return@LaunchedEffect }
@@ -224,10 +245,26 @@ private fun HostQuota(h: Host, ctx: android.content.Context, store: HostStore, k
             if (err is kotlinx.coroutines.CancellationException) throw err
             note = c.explain(err); busy = false; return@LaunchedEffect
         }
-        val got = app.yxi.ssh.catching { app.yxi.agent.Quota.fetch(c.session) }.getOrNull()
+        val (got, why) = app.yxi.ssh.catching { app.yxi.agent.Quota.fetchDetailed(c.session) }
+            .getOrDefault(null to app.yxi.agent.Quota.Why.Failed(""))
         runCatching { c.session.disconnect() }
-        if (got != null) { q = got; QuotaCache.put(ctx, h.id, got) }
-        else if (q == null) note = t("没有空闲会话可借来查额度")
+        if (got != null) { q = got; QuotaCache.put(ctx, h.id, got); fetchedAt = System.currentTimeMillis() / 1000 }
+        else {
+            // ⚠️ **说真原因。** 这里原来一律写「没有空闲会话可借来查额度」——
+            // 而这条路**根本不借会话**（`Quota.fetch` 是直接 exec）。
+            // 说错原因比不说更糟：用户会照着去关会话，然后发现没用。
+            note = when (why) {
+                app.yxi.agent.Quota.Why.NoClaude ->
+                    t("这台机器上没装 claude —— 额度是问它要的")
+                app.yxi.agent.Quota.Why.Timeout ->
+                    t("查询超时：claude -p '/usage' 要连 API，30 秒没回来")
+                app.yxi.agent.Quota.Why.Unparsable ->
+                    t("认不出 /usage 的输出 —— 多半是 Claude Code 换排版了")
+                is app.yxi.agent.Quota.Why.Failed ->
+                    t("查不到：%s").format(why.message.ifBlank { t("连接出错") })
+                null -> null
+            }
+        }
         busy = false
     }
 
@@ -254,6 +291,10 @@ private fun HostQuota(h: Host, ctx: android.content.Context, store: HostStore, k
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             if (busy) Text(t("查着…"), style = MaterialTheme.typography.labelSmall, color = Dim)
+            else if (fetchedAt > 0) Text(
+                ago(fetchedAt) + t(" 取的"),
+                style = MaterialTheme.typography.labelSmall, color = Dim,
+            )
             else if (note != null) Text(note!!, style = MaterialTheme.typography.labelSmall, color = Dim, modifier = Modifier.weight(1f))
             else Spacer(Modifier.weight(1f))
             Surface(
