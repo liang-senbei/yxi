@@ -68,6 +68,9 @@ object SessionProbe {
         s tmux_begin
         tmux list-sessions -F '#{session_name}|#{session_windows}|#{session_activity}|#{session_attached}|#{pane_current_path}' 2>/dev/null || true
         s tmux_end
+        s cc_begin
+        for f in ${'$'}HOME/.claude/sessions/*.json; do [ -f "${'$'}f" ] && cat "${'$'}f" && echo; done 2>/dev/null || true
+        s cc_end
         s status_begin
         for f in ${'$'}HOME/.cloud-status/*.json; do [ -f "${'$'}f" ] && cat "${'$'}f" && echo; done 2>/dev/null || true
         s status_end
@@ -84,6 +87,48 @@ object SessionProbe {
         val trs = parseTranscriptTimes(extract(out, "tr"))
 
         // 状态先建索引：会话名 → (state, detail, ts)
+        // ⚠️⚠️ **首选 Claude Code 自己维护的那份**（`~/.claude/sessions/*.json`）。
+        //
+        // 原来只读 `~/.cloud-status/`，而那是 **`cc-state` 写的，`cc-state` 不是 Yxi 装的**
+        // —— `server/install.sh` 只装 `yxi-hook`。它只在我们自己的开发机上跑着
+        // （那是 remote-dev-station 的一部分），于是**在任何真实用户的服务器上
+        // 那个目录是空的 → 每个会话都判成 Idle → 看板首页全是「空闲」，
+        // 一个「等你」都没有**。而「一眼看清谁在等你」正是这个 App 存在的理由。
+        // 实测：本机 37 个状态文件，另一台普通服务器 0 个。
+        //
+        // Claude Code 自己那份是**零安装**的，任何装了 Claude Code 的机器上都有，
+        // 而且是**水平状态**（当前是什么）不是**边缘事件**（发生过什么）——
+        // 后者会漂：hook 写完 `input` 之后用户在终端答完了，没有任何 hook 把它改回来。
+        //
+        // ⚠️ 只换「谁在等你」这一个来源。**选项解析仍然必须抓屏** ——
+        // 实测 AskUserQuestion 的 hook 只给 3 个选项而屏幕上是 5 个
+        // （Claude Code 自己插了「Type something」「Chat about this」）。
+        // **屏幕上的编号才是契约**，从别处读顺序会静默选错（#47 那一族）。
+        val ccStates = HashMap<String, Triple<String, String, Double>>()
+        extract(out, "cc").lineSequence().filter { it.isNotBlank() }.forEach { line ->
+            runCatching {
+                val o = JSONObject(line)
+                // `tmux` 字段形如 `cc-Yxi:@28.%28` —— 取冒号前那段就是会话名
+                val tm = o.optString("tmux")
+                val name = if (tm.isNotEmpty()) tm.substringBefore(':') else ""
+                if (name.isEmpty()) return@runCatching
+                val state = when (o.optString("status")) {
+                    "waiting" -> "input"
+                    "busy" -> "work"
+                    else -> ""            // idle：留空 → SessionState.of 给 Idle
+                }
+                if (state.isEmpty()) return@runCatching
+                ccStates[name] = Triple(
+                    state,
+                    // `waitingFor` 是它自己的枚举（dialog open / input needed / …），
+                    // ⚠️ 未登记的新类型它默认落到 "permission prompt" —— 失败方向朝
+                    // 「更该提醒你」偏，正是我们要的那一侧
+                    o.optString("waitingFor"),
+                    o.optDouble("statusUpdatedAt", 0.0) / 1000.0,
+                )
+            }
+        }
+
         val states = HashMap<String, Triple<String, String, Double>>()
         status.lineSequence().filter { it.isNotBlank() }.forEach { line ->
             runCatching {
@@ -101,7 +146,8 @@ object SessionProbe {
             val p = line.split('|')
             if (p.size < 5) return@mapNotNull null
             val name = p[0]
-            val st = states[name]
+            // Claude Code 自己那份优先；没有才退回 cc-state（我们自己机器上才有）
+            val st = ccStates[name] ?: states[name]
             Session(
                 name = name,
                 windows = p[1].toIntOrNull() ?: 1,
