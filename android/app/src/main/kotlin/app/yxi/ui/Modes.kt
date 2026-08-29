@@ -24,12 +24,15 @@ import androidx.compose.ui.unit.dp
  */
 object Modes {
     // ⚠️ 默认命令是**从真转录里核过的形式**，别凭感觉写：
-    //   · `/model opus[1m]` **不认**（实测回「Kept model as Opus 4.8」，等于没切）；
-    //     认的是**全名带后缀**：`/model claude-opus-5[1m]`（转录里有成功回执）。
+    //   · `/model opus[1m]` **不认**（实测回「Kept model as …」，等于没切）；
+    //     认的是**全名带后缀**。两条都在转录里有成功回执：
+    //       `/model claude-opus-4-6[1m]` → 「Set model to Opus 4.6 (1M context)」
+    //       `/model claude-opus-5[1m]`   → 「Set model to Opus 5 (1M context)」
     //   · `/effort max|high|mid` 是真的（转录里用过很多次）。
     // 各家版本/习惯可能不同，所以整张表在界面上**可编辑**。
     private val DEFAULTS = listOf(
-        "1M 上下文" to "/model claude-opus-5[1m]",
+        "Opus 4.6 · 1M" to "/model claude-opus-4-6[1m]",
+        "Opus 5 · 1M" to "/model claude-opus-5[1m]",
         "最大思考" to "/effort max",
         "高强度" to "/effort high",
         "中等" to "/effort mid",

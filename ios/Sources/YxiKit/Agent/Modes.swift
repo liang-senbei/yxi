@@ -16,9 +16,13 @@ public enum Modes {
     }
 
     /// ⚠️ 别凭感觉写：安卓侧实测 `/model opus[1m]` **不认**（回「Kept model as …」等于没切），
-    /// 认的是**全名带后缀** `/model claude-opus-5[1m]`；`/effort max|high|mid` 转录里用过很多次。
+    /// 认的是**全名带后缀**。两条都在真转录里有成功回执：
+    ///   `/model claude-opus-4-6[1m]` → 「Set model to Opus 4.6 (1M context)」
+    ///   `/model claude-opus-5[1m]`   → 「Set model to Opus 5 (1M context)」
+    /// `/effort max|high|mid` 转录里用过很多次。
     public static let defaults: [Mode] = [
-        .init(label: "1M 上下文", command: "/model claude-opus-5[1m]"),
+        .init(label: "Opus 4.6 · 1M", command: "/model claude-opus-4-6[1m]"),
+        .init(label: "Opus 5 · 1M", command: "/model claude-opus-5[1m]"),
         .init(label: "最大思考", command: "/effort max"),
         .init(label: "高强度", command: "/effort high"),
         .init(label: "中等", command: "/effort mid"),

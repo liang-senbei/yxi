@@ -162,3 +162,35 @@ final class QueueOperationTests: XCTestCase {
         XCTAssertEqual(queuedTexts([line("enqueue", "<task-notification>内部</task-notification>")]), [])
     }
 }
+
+/// ⚡模式里的模型命令。
+///
+/// ⚠️ **这些是从真转录里核过的形式，不是凭感觉写的。**
+/// `/model opus[1m]` 实测**不认**（回「Kept model as …」，等于没切）；
+/// 认的是全名带后缀，两条都有成功回执：
+///   `claude-opus-4-6[1m]` → 「Set model to Opus 4.6 (1M context)」
+///   `claude-opus-5[1m]`   → 「Set model to Opus 5 (1M context)」
+final class ModeCommandTests: XCTestCase {
+
+    func testModelCommandsUseFullName() {
+        let models = Modes.defaults.filter { $0.command.hasPrefix("/model") }
+        XCTAssertFalse(models.isEmpty, "一个切模型的都没有")
+        for m in models {
+            XCTAssertTrue(m.command.contains("claude-"),
+                          "「\(m.command)」不是全名形式 —— 短别名实测切不动")
+        }
+    }
+
+    /// 1M 上下文那两条必须带 `[1m]` 后缀，漏了就是普通上下文
+    func testOneMillionSuffix() {
+        for m in Modes.defaults where m.label.contains("1M") {
+            XCTAssertTrue(m.command.hasSuffix("[1m]"), "「\(m.label)」漏了 [1m]：\(m.command)")
+        }
+    }
+
+    /// 标签要认得出是哪个模型 —— 面板上一排 chip，「1M 上下文」看不出是哪一个
+    func testLabelsNameTheModel() {
+        XCTAssertTrue(Modes.defaults.contains { $0.label.contains("4.6") })
+        XCTAssertTrue(Modes.defaults.contains { $0.label.contains("5") })
+    }
+}
