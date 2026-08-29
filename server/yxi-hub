@@ -97,7 +97,7 @@ print(json.dumps({"hookSpecificOutput": {
     "hookEventName": "SessionStart", "additionalContext": txt}}, ensure_ascii=False))
 PY
     ;;
-    who)
+  who)
     if [ -z "$self" ]; then echo "不在 tmux 里，认不出我是谁"; exit 1; fi
     echo "我: $self"
     g="$(mygroups "$self")"
