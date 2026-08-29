@@ -12,6 +12,7 @@ import app.yxi.ssh.KeyManager
 import app.yxi.ssh.KnownHosts
 import app.yxi.ssh.SshSession
 import app.yxi.ssh.TrustPrompt
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 
@@ -172,6 +173,18 @@ fun rememberHostSession(store: HostStore, keys: KeyManager, host: Host?): HostSe
     LaunchedEffect(host.id, generation) {
         var wait = 1_000L
         while (true) {
+            // ⚠️ **先看盯梢服务有没有现成的。** 那条连接是前台服务维持的，
+            // App 切后台它照样活着 —— 借来用等于**省掉整整一次重连（实测 2.9–3.4 秒）**，
+            // 而且不多花一分内存一分电：它本来就开着，不借也在那儿。
+            // ⚠️ 借来的**不许 disconnect**（会把后台盯梢一起弄死），
+            // 所以这里只把它交出去，`connect()` 那条自建的路径不受影响。
+            app.yxi.watch.EventService.liveConn(host.id)?.let {
+                session = it; error = null
+                // 借到了就守着它：它断了（服务重连会换新对象）再回到下面自己连
+                while (it.isConnected) delay(1_000)
+                session = null
+                continue
+            }
             val c = connect()
             if (c == null) { error = t("这台主机还没有可用的认证方式"); return@LaunchedEffect }
             val err = runCatching { c.session.connect() }.exceptionOrNull()

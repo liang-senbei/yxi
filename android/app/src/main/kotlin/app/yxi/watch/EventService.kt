@@ -587,6 +587,16 @@ class EventService : Service() {
         @Volatile internal var instance: EventService? = null
 
         /** 分享到会话用：借盯梢服务已经建好的那条连接，省得再连一次（连不上就 null，调用方自己新建）。 */
+        /**
+         * 盯梢服务给**这台主机**开着的那条连接，界面可以直接借来用。
+         *
+         * ⚠️ **借来的连接绝对不许 disconnect。** 断了就把后台盯梢一起弄死了 ——
+         * 那是通知的唯一来源。调用方必须像 [ShareActivity] 那样记住「这条不是我的」。
+         * ⚠️ 只在这台主机**开着盯梢**时才有；没开就返回 null，照旧自己连。
+         */
+        internal fun liveConn(hostId: String): SshSession? =
+            instance?.live?.get(hostId)?.takeIf { it.isConnected }
+
         internal fun liveConn(): Pair<Host, SshSession>? {
             val svc = instance ?: return null
             val (hid, s) = svc.live.entries.firstOrNull() ?: return null
