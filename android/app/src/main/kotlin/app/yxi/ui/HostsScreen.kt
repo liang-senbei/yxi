@@ -17,6 +17,7 @@ import androidx.compose.runtime.*
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
@@ -232,7 +233,7 @@ private fun HostQuota(
     }
 
     // ⚠️ **每次长按展开都重查一次**（用户明确要的：「长按服务器就更新一次用量」）。
-    // 缓存那份先摆着别让面板空着，同时 `busy` 显示「查着…」——
+    // 缓存那份先摆着别让面板空着，同时 `busy` 把旧数字压暗 + 画转圈 ——
     // 新旧值长得一样时，没有这个可见状态用户看不出到底刷没刷。
     //
     // ⚠️ 慢是**正常**的：`claude -p '/usage'` 要去连一次 API，几秒到十几秒都有。
@@ -273,6 +274,9 @@ private fun HostQuota(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         q?.let {
+            // ⚠️ **查新的时候把旧数字压暗。** 缓存值和实时值长得一模一样，
+            // 满色画着的话，用户分不出面板上这两根条是刚取的还是上次的（他报的就是这个）。
+            Column(Modifier.alpha(if (busy) .4f else 1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             // 档位 + 工具，学 Moshi 那个「Max 20x · Claude Code」的头。读不到档位就只写工具名。
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (it.plan.isNotBlank()) Surface(
@@ -288,15 +292,30 @@ private fun HostQuota(
             }
             QuotaBar(t("5 小时"), it.sessionPct, it.sessionResets)
             QuotaBar(t("本周"), it.weekPct, it.weekResets)
+            }
         }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (busy) Text(t("查着…"), style = MaterialTheme.typography.labelSmall, color = Dim)
-            else if (fetchedAt > 0) Text(
-                t("%s 取的").format(ago(fetchedAt)),
-                style = MaterialTheme.typography.labelSmall, color = Dim,
-            )
-            else if (note != null) Text(note!!, style = MaterialTheme.typography.labelSmall, color = Dim, modifier = Modifier.weight(1f))
-            else Spacer(Modifier.weight(1f))
+        // ⚠️ `heightIn` 是为了**不跳**：转圈那会儿这行比平时高，查完塌回去会闪一下。
+        Row(
+            Modifier.heightIn(min = 44.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            when {
+                // ⚠️ 查额度**慢是常态**（`claude -p '/usage'` 要连一次 API，几秒到十几秒）。
+                // 原来这里只有一行灰字「查着…」，太轻了 —— 用户看不出在动，
+                // 以为面板上那两根缓存的条就是实时的。换成「下载并安装」那个
+                // [MorphButton] 的 Run 态（转圈 + 跑条），跟装更新一个动效，一眼就知道在取新的。
+                busy -> MorphButton(MorphPhase.Run, "", Modifier.weight(1f), height = 44.dp)
+                // ⚠️ **先判 note 再判 fetchedAt**，别反过来。反过来的话
+                // 「有缓存 + 这次刷新失败」只会画出时间戳，错误被**整个吞掉** ——
+                // 用户以为刷成功了，其实盯着的还是旧数字。
+                note != null -> Text(note!!, Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = Dim)
+                fetchedAt > 0 -> Text(
+                    t("%s 取的").format(ago(fetchedAt)), Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelSmall, color = Dim,
+                )
+                else -> Spacer(Modifier.weight(1f))
+            }
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = Pill,
                 modifier = Modifier.clip(Pill).clickable(onClick = onEdit),

@@ -1,7 +1,11 @@
 package app.yxi.ui
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -88,7 +92,20 @@ fun MorphButton(
                     if (progress >= 0f)
                         Box(Modifier.fillMaxWidth(w).fillMaxHeight().clip(RoundedCornerShape(4.dp)).background(green))
                     else
-                        Box(Modifier.fillMaxWidth(0.4f).fillMaxHeight().clip(RoundedCornerShape(4.dp)).background(green.copy(alpha = .6f)))
+                        // ⚠️ 不知道进度时**让它跑**。原来这里画一根**不动的** 40% 条 ——
+                        // 圈在转、条却钉死在四成，看着像卡住了，比不画还糟。
+                        // 走这条路的有装公钥、发消息、查额度：它们都问不到百分比。
+                        // 外面那层 Box 有 clip，滑出去的部分自然被裁掉。
+                        BoxWithConstraints(Modifier.fillMaxSize()) {
+                            val x by rememberInfiniteTransition(label = "indet").animateFloat(
+                                -0.42f, 1f,
+                                infiniteRepeatable(tween(1100, easing = LinearEasing)), label = "slide",
+                            )
+                            Box(
+                                Modifier.fillMaxWidth(0.4f).fillMaxHeight().offset(x = maxWidth * x)
+                                    .clip(RoundedCornerShape(4.dp)).background(green.copy(alpha = .6f)),
+                            )
+                        }
                 }
                 Spacer(Modifier.width(4.dp))
             }

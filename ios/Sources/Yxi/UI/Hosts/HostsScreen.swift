@@ -227,16 +227,29 @@ private struct HostRow: View {
                 quotaBar("5 小时", percent: q.sessionPercent, resets: q.sessionResets)
                 quotaBar("本周", percent: q.weekPercent, resets: q.weekResets)
             }
-            if quotaBusy {
-                Text("查着…").font(.system(size: 11)).foregroundStyle(Yx.dim)
-            } else if let quotaAt {
-                Text(ago(quotaAt) + " 取的").font(.system(size: 11)).foregroundStyle(Yx.dim)
-            } else if let note = quotaNote {
-                Text(note)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Yx.dim)
-                    .fixedSize(horizontal: false, vertical: true)
+            // ⚠️ **查新的时候把旧数字压暗。** 缓存值和实时值长得一模一样，
+            // 满色画着的话，用户分不出面板上这两根条是刚取的还是上次的。
+            .opacity(quotaBusy ? 0.4 : 1)
+            // ⚠️ 固定高度是为了**不跳** —— 转圈那会儿比一行字高，查完塌回去会闪一下。
+            HStack(spacing: 8) {
+                if quotaBusy {
+                    // 查额度慢是常态（`claude -p '/usage'` 要连一次 API，几秒到十几秒）。
+                    // 原来只有一行灰字「查着…」，太轻了，用户看不出在动。
+                    ProgressView().controlSize(.small)
+                    Text("在取实时额度…").font(.system(size: 11)).foregroundStyle(Yx.dim)
+                // ⚠️ **先判 note 再判 quotaAt**，别反过来。反过来的话
+                // 「有缓存 + 这次刷新失败」只会画出时间戳，错误被**整个吞掉** ——
+                // 用户以为刷成功了，其实盯着的还是旧数字。
+                } else if let note = quotaNote {
+                    Text(note)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Yx.dim)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if let quotaAt {
+                    Text(ago(quotaAt) + " 取的").font(.system(size: 11)).foregroundStyle(Yx.dim)
+                }
             }
+            .frame(minHeight: 22)
         }
         .padding(.top, 12)
     }
