@@ -218,6 +218,17 @@ class EventService : Service() {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(Notification.CATEGORY_CALL)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+        // **锁屏上把屏幕点亮。**
+        //
+        // ⚠️ 光有 PRIORITY_HIGH 不够：手机躺在桌上黑着屏时，普通高优先级通知
+        // 只是进列表，屏幕不一定亮 —— 而这个 App 的全部意义就是「你不在电脑前也能被叫住」。
+        // fullScreenIntent 才会点亮屏幕并把内容摆到锁屏上。
+        //
+        // ⚠️ **必须能降级。** Android 14 起系统默认不把这个权限给非通话/闹钟类应用，
+        // 拿不到就当没有这行 —— 退回普通高优先级通知，跟以前一个样，不能因此崩或者不发。
+        // ⚠️ 第二个参数传 true = 允许系统在用户正在用手机时改成「悬浮条」而不是全屏接管。
+        // 传 false 会在你正打字时糊你一脸全屏，那比不提醒还讨厌。
+        if (canFullScreen()) b.setFullScreenIntent(pi, true)
         // ⚠️ **危险动作不给一键批。**
         //
         // 我们原来只防「提示变了」（#53 加指纹校验）—— 那是**机器侧的过期**。
@@ -518,6 +529,20 @@ class EventService : Service() {
         })
     }
 
+    /**
+     * 系统给不给我们「点亮屏幕」这个权限。
+     *
+     * ⚠️ Android 14（API 34）起，`USE_FULL_SCREEN_INTENT` 从装上就有变成了
+     * **只默认给通话和闹钟类应用**，别的应用要用户去设置里单独开。
+     * 所以这里必须问一次再用 —— 问都不问直接调，在新系统上等于这行代码不存在，
+     * 而你还以为自己做了锁屏唤醒。
+     */
+    private fun canFullScreen(): Boolean =
+        if (Build.VERSION.SDK_INT < 34) true
+        else runCatching {
+            getSystemService(NotificationManager::class.java).canUseFullScreenIntent()
+        }.getOrDefault(false)
+
     private fun channels() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = getSystemService(NotificationManager::class.java)
@@ -527,12 +552,17 @@ class EventService : Service() {
             NotificationChannel(CH_NEEDS, t("Claude 找你"), NotificationManager.IMPORTANCE_HIGH).apply {
                 description = t("需要你决定")
                 enableVibration(true); vibrationPattern = longArrayOf(0, 55, 65, 55)   // 急促两下 = 该管了
+                // ⚠️ **频道上也要放开。** Android 8 起频道的锁屏可见性会盖过单条通知的
+                // `setVisibility` —— 只在通知上设的话，锁屏可能只显示「内容已隐藏」，
+                // 而「一眼看清它要批什么」正是这条通知存在的理由。
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
         )
         nm.createNotificationChannel(
             NotificationChannel(CH_DONE, t("干完了"), NotificationManager.IMPORTANCE_DEFAULT).apply {
                 description = t("会话干完了")
                 enableVibration(true); vibrationPattern = longArrayOf(0, 28)            // 轻轻一下 = 完事了
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
         )
         nm.createNotificationChannel(

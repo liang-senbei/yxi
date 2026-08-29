@@ -2966,3 +2966,63 @@ nginx 加一条 `location ~ ^/Yxi-([0-9]+)\.apk$`，下载页的按钮由 instal
   输出乱码（实测 `后端<乱码>上线`）。多字节分隔符交给 python join。
 
 **没编进任何组时 `yxi-hub context` 什么都不输出** —— 不在组里的会话零 token 开销。
+
+## #148 中文输入次序会乱：「好的」打出来是「的好」
+
+**症状**：终端里用中文输入法打字，字的**顺序会颠倒**。英文基本不出现。
+
+**根因**：`ui/Workspace.kt` 的 `onKeyboardInput = { bytes -> scope.launch { shell?.write(bytes) } }`
+—— **每一次按键起一个独立协程**。`SshSession.Shell.write` 里
+`withContext(Dispatchers.IO)` 一甩到线程池，谁先抢到 `ioLock` 谁先发。
+
+⚠️ **`Mutex` 保证的是「不并发」，不是「按顺序」。** 这两件事很容易混为一谈：
+加锁修好了「并发写坏包流」（#16），但顺序问题一直在，只是英文一次一个字节、
+间隔又大（人的手速），很少撞上。中文 IME 一次提交多个字节、候选词连着吐，就撞出来了。
+
+**修法**：`Channel` 的 FIFO 是**写在契约里**的，不像 dispatcher 的调度顺序那样是实现细节。
+出站字节全部走一条 `Channel(UNLIMITED)`，一个消费者协程按序写：
+- `trySend` 到 UNLIMITED 通道**不挂起、不失败** → 入队发生在调用的那一刻、调用方线程里
+  → **入队顺序 == 按键顺序**
+- 通道保证按入队顺序出队 → 发送顺序 == 按键顺序
+- 每条捎一个 `CompletableDeferred`，所以 `write` 仍然是「等真写完再返回 Boolean」，
+  六个调用点一个都不用改
+
+**怎么避开**：要「保序」就别指望锁。锁只管互斥。顺序要么用单消费者队列，
+要么用单线程 dispatcher（但那是实现细节，不是契约）。
+
+## #149 从后台切回来一片空白
+
+**症状**：App 切后台待一会儿，再切回来，对话页**什么都不显示** —— 不是转圈，是纯白。
+
+**根因**（两条叠在一起）：
+1. 荣耀这类国产 ROM 后台管控很凶，进程会被杀。回前台是整个重建，
+   Compose 里 `remember` 的 `items` 全空。
+2. `ChatScreen` 的加载 effect 有两处**静默**：
+   - `val s = ssh ?: return@LaunchedEffect` —— 连接没了直接返回，**status 一个字都不设**
+   - `status = null` **写在** `TranscriptStream.head()` **之前**，而那是一个 SSH 往返 + 0.58 MB
+   于是「上面没提示 + 下面没内容」= 纯白屏，零解释。
+
+**修法**：
+- 磁盘缓存上次那几条**原始 JSONL 行**（`TranscriptCache`），进对话先画出来再去拉新的。
+  存原始行不存解析后的对象 —— 复用现成解析路径，不用给 ChatItem 写序列化。
+- 连接没了要说「正在重连…」，别默默 return。
+- **有东西看之前不许清提示**：`status = if (items.isEmpty()) "正在载入对话…" else null`。
+
+**通则**：`?: return` 在 UI 的加载路径上是个陷阱 —— 它把「失败」和「什么都没发生」
+变成同一种画面。每条 return 前问一句：**这时候屏幕上有东西吗？**
+
+## #150 麦克风按钮在用户手机上一直是死的（GMS 关掉时）
+
+**症状**：点语音输入，什么都不发生，没有任何提示。
+
+**根因**：`runCatching { listen.launch(RecognizerIntent...) }` —— 兜住了不崩，
+但**失败完全静默**。用户的荣耀 **GMS 是关的**，实测在模拟器上
+`pm disable-user com.google.android.tts` 之后，
+`pm query-activities -a android.speech.action.RECOGNIZE_SPEECH` 返回 **0 个**
+→ `resolveActivity` 是 null → 这个按钮在他手机上从来就没工作过。
+
+**修法**：先 `resolveActivity` 判一下，没有就 Toast 说清楚
+「这台手机上没有语音识别（多半是没装或关了 Google 服务）」；launch 失败也报出来。
+
+**怎么避开**：`runCatching { }` 不带 `onFailure` 等于**把错误扔进垃圾桶**。
+用户侧的表现是「点了没反应」，比崩溃还难查 —— 崩溃至少有堆栈。

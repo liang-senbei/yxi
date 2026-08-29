@@ -533,15 +533,26 @@ fun Workspace(
                 history = history,
                 onHistory = { history = !history },
                 onVoice = {
-                    runCatching {
-                        listen.launch(
-                            android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-                                .putExtra(
-                                    android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                                    android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
-                                )
-                                .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, t("说吧"))
+                    // ⚠️ **没有语音识别时要说一声。** 原来只是 `runCatching { launch }` ——
+                    // 兜住了不崩，但**失败完全静默**：点了麦克风什么都不发生，一个字的解释都没有。
+                    // 这不是边角情况：用户的荣耀 **GMS 是关的**，实测把识别服务禁掉之后
+                    // `pm query-activities` 是 0 个 —— 也就是他手机上这个按钮一直是死的。
+                    val vi = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                        .putExtra(
+                            android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                            android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
                         )
+                        .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, t("说吧"))
+                    if (vi.resolveActivity(ctx.packageManager) == null) {
+                        android.widget.Toast.makeText(
+                            ctx, t("这台手机上没有语音识别（多半是没装或关了 Google 服务）"),
+                            android.widget.Toast.LENGTH_LONG,
+                        ).show()
+                    } else runCatching { listen.launch(vi) }.onFailure {
+                        android.widget.Toast.makeText(
+                            ctx, t("叫不起语音识别：%s").format(it.message ?: ""),
+                            android.widget.Toast.LENGTH_LONG,
+                        ).show()
                     }
                 },
                 onCompose = {

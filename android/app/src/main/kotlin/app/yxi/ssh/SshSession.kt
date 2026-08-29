@@ -5,6 +5,8 @@ import com.jcraft.jsch.ChannelShell
 import com.jcraft.jsch.JSch
 import com.jcraft.jsch.Session
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.InputStream
@@ -98,16 +100,57 @@ class SshSession(
          * 实测：控件一发 `onResize -> 55x42`，通道立刻死。加锁串行化后正常。
          */
         private val ioLock = kotlinx.coroutines.sync.Mutex()
+
+        /**
+         * **出站队列 —— 保证「先按的先发」。**
+         *
+         * ⚠️ 上面那把 [ioLock] 只保证**不并发**，**不保证顺序**。
+         * 每次按键都是 `scope.launch { shell.write(bytes) }` 一个独立协程，
+         * `withContext(Dispatchers.IO)` 一甩到线程池，谁先抢到锁谁先发 ——
+         * 用户报的就是这个：中文打「好的」出来是「的好」。
+         * 英文很少撞上（一次一个字节、间隔又大），中文 IME 一次提交多个字节、
+         * 候选词连着吐，就撞出来了。
+         *
+         * 修法**不能靠赌 dispatcher 的调度顺序**（那不是契约，换个调度器就变）。
+         * `Channel` 的 FIFO 才是写在契约里的：`send` 到 UNLIMITED 通道**不挂起**，
+         * 于是入队顺序 == 调用顺序，而通道保证按入队顺序出队。
+         * 一个消费者协程按序写下去，顺序就钉死了。
+         *
+         * 每条带一个 [CompletableDeferred]，所以 [write] 仍然是「等真的写完再返回」，
+         * 调用方拿到的还是那个 Boolean，语义没变。
+         */
+        private class Out(val bytes: ByteArray, val done: kotlinx.coroutines.CompletableDeferred<Boolean>)
+
+        private val outbox = kotlinx.coroutines.channels.Channel<Out>(
+            kotlinx.coroutines.channels.Channel.UNLIMITED,
+        )
+        private val pumpScope =
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+
+        init {
+            pumpScope.launch {
+                for (o in outbox) {
+                    val ok = ioLock.withLock {
+                        runCatching { input.write(o.bytes); input.flush() }
+                            .onFailure { Log.w("YxiSSH", "写入失败（通道多半已关）: ${it.message}") }
+                            .isSuccess
+                    }
+                    o.done.complete(ok)
+                }
+            }
+        }
         // ⚠️ 两条都必须 suspend + IO：安卓禁止主线程网络操作，
         // 直接在 Compose 的回调里调会抛 NetworkOnMainThreadException。
         //
         // ⚠️ 而且必须吞掉 Broken pipe：终端控件的 resize 回调和连接建立/断开之间有竞态，
         // 往已关闭的通道写会抛 IOException —— 从协程里逸出就是整个 app 崩掉。
         // 通道断了不是异常情况，是常态（切网、远端退出、会话关闭），按「写失败」处理即可。
-        suspend fun write(bytes: ByteArray): Boolean = withContext(Dispatchers.IO) {
-            ioLock.withLock { runCatching { input.write(bytes); input.flush() } }
-                .onFailure { Log.w("YxiSSH", "写入失败（通道多半已关）: ${it.message}") }
-                .isSuccess
+        suspend fun write(bytes: ByteArray): Boolean {
+            val d = kotlinx.coroutines.CompletableDeferred<Boolean>()
+            // ⚠️ **顺序在这一行定死。** UNLIMITED 通道的 trySend 不挂起、不失败，
+            // 入队发生在调用方的线程里、就在调用的那一刻 —— 所以入队顺序 == 按键顺序。
+            if (outbox.trySend(Out(bytes, d)).isFailure) return false
+            return d.await()
         }
         suspend fun write(text: String): Boolean = write(text.toByteArray())
         /** 横竖屏切换、软键盘弹出都要重发，不然远端还按老尺寸折行 */
@@ -130,7 +173,11 @@ class SshSession(
                   }.isSuccess
                 }
             }
-        fun close() { runCatching { channel.disconnect() } }
+        fun close() {
+            outbox.close()
+            pumpScope.cancel()
+            runCatching { channel.disconnect() }
+        }
         val isConnected: Boolean get() = channel.isConnected
     }
 

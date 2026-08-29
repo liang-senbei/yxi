@@ -12,6 +12,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 锁屏上把屏幕点亮、直接把「要你批什么」摆出来。
+         ⚠️ Android 14 起系统**默认不给**非通话/闹钟类应用这个权限 ——
+         所以代码里必须能优雅降级（拿不到就退回普通高优先级通知），
+         见 EventService.postNeeds 里的 canFullScreen()。 -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <!-- 开机自起：手机重启后不用手动打开 App 才恢复盯梢 -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- 直接对本应用弹「后台不受限制」的授权框。

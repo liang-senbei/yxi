@@ -223,14 +223,35 @@ fun ChatScreen(
         }
     }
 
+    // ⚠️ **先把上次那几条从磁盘画出来。** 这条独立于连接 ——
+    // 从后台切回来时进程可能已经被系统杀过一轮（荣耀这类 ROM 很凶），
+    // 那时 `items` 是空的，而重新拉转录要一个 SSH 往返 + 0.58 MB。
+    // 那几秒钟里 LazyColumn 上面什么都没有 = 纯白屏。用户原话：什么都不显示。
+    LaunchedEffect(sessionName, cwd) {
+        if (items.isNotEmpty()) return@LaunchedEffect
+        val cached = app.yxi.agent.TranscriptCache.load(ctx, sessionName, cwd)
+        if (cached.isEmpty() || items.isNotEmpty()) return@LaunchedEffect
+        val inc = Transcript.Incremental()
+        val shown = withContext(Dispatchers.Default) { inc.add(cached.asSequence()); inc.snapshot() }
+        if (items.isEmpty()) { items = shown; inc.ctx?.let { ctxUse = it } }
+    }
+
     LaunchedEffect(sessionName, ssh) {
-        val s = ssh ?: return@LaunchedEffect
+        // ⚠️ **连接没了要说一声，不能默默 return。** 原来这里直接 `?: return`，
+        // 于是「正在重连」这个事实在对话页上**一个字都不显示** —— 配上空的 items
+        // 就是一整块白。重连是 Workspace 那边自动做的，这里只负责别装死。
+        val s = ssh ?: run {
+            if (items.isEmpty()) status = t("连接断了，正在重连…")
+            return@LaunchedEffect
+        }
         val file = TranscriptStream.latestFor(s, cwd)
         if (file == null) {
             status = t("这个会话里没找到 Claude Code 的转录\n（%s）").format(cwd)
             return@LaunchedEffect
         }
-        status = null
+        // ⚠️ **有东西看之前别把提示清掉。** 原来这里先 `status = null` 再去拉 0.58 MB，
+        // 那几秒钟正好是「上面没提示、下面没内容」的纯白屏。
+        status = if (items.isEmpty()) t("正在载入对话…") else null
 
         // ⚠️ **先画最新的一屏，再补历史。** `tail -n 800` 从最老那条开始吐、
         // 最新的最后才到，所以完整那次要等 4.17 MB 传完你才看得见最新内容。
@@ -247,9 +268,15 @@ fun ChatScreen(
                         inc0.add(head.asSequence()); inc0.snapshot()
                     }
                     inc0.ctx?.let { ctxUse = it }
+                    // 存下来，下次从后台切回来能立刻画出这几条
+                    app.yxi.agent.TranscriptCache.save(ctx, sessionName, cwd, head)
                 }
+                status = null
             }
-            .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+            .onFailure {
+                if (it is kotlinx.coroutines.CancellationException) throw it
+                if (items.isEmpty()) status = t("载入失败：%s").format(it.message ?: "")
+            }
 
         // 攒一批再解析：tail 一上来就吐几百行，逐行重解会把 UI 卡住。
         //
@@ -750,15 +777,26 @@ fun ChatScreen(
                 }
                 Box(Modifier.weight(1f)) { BasicTextFieldRow(draft) { draft = it } }
                 FlatIcon(Glyph.Mic, t("语音输入")) {
-                    runCatching {
-                        listen.launch(
-                            android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-                                .putExtra(
-                                    android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                                    android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
-                                )
-                                .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, t("说吧"))
+                    // ⚠️ **没有语音识别时要说一声。** 原来只是 `runCatching { launch }` ——
+                    // 兜住了不崩，但**失败完全静默**：点了麦克风什么都不发生，一个字的解释都没有。
+                    // 这不是边角情况：用户的荣耀 **GMS 是关的**，实测把识别服务禁掉之后
+                    // `pm query-activities` 是 0 个 —— 也就是他手机上这个按钮一直是死的。
+                    val vi = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                        .putExtra(
+                            android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                            android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
                         )
+                        .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, t("说吧"))
+                    if (vi.resolveActivity(ctx.packageManager) == null) {
+                        android.widget.Toast.makeText(
+                            ctx, t("这台手机上没有语音识别（多半是没装或关了 Google 服务）"),
+                            android.widget.Toast.LENGTH_LONG,
+                        ).show()
+                    } else runCatching { listen.launch(vi) }.onFailure {
+                        android.widget.Toast.makeText(
+                            ctx, t("叫不起语音识别：%s").format(it.message ?: ""),
+                            android.widget.Toast.LENGTH_LONG,
+                        ).show()
                     }
                 }
                 val canSend = draft.isNotBlank() || staged.isNotEmpty()
