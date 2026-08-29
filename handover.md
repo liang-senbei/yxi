@@ -746,6 +746,46 @@ macOS runner 编译 → 起 iPhone 16 模拟器 → 装上去 → **在 runner �
 ⚠️ **服务器侧零改动**：`server/yxi-hook` / `install.sh` 一个字没动，安卓版不受影响。
 推送是一个**可选的独立脚本**，装不装都行。
 
+## ⚠️ 定位前提已经变了（2026-08-29 调研）
+
+**官方自己做了「手机上管 Claude Code」。** Claude Code 2.1.251 内置
+`claude remote-control`，帮助第一行原话：
+
+> Remote Control - Control local sessions from **claude.ai/code or the Claude mobile app**
+
+它在几块上**比 Yxi 强**，而且追不上（三周内 20+ 条相关更新）：
+原生对话/工具卡片（不用解析 TUI）、远程批权限**无限期挂起 + 断线补发**
+（我们架在 hook 的 600 秒上，是硬上限）、跨机器统一会话列表。
+
+**但它硬编码排除了一批人**，这是 Yxi 结构性的市场（二进制原话，已亲自核实）：
+
+- 「Remote Control is only available with **claude.ai subscriptions**.」
+- 「connected through an **enterprise cloud gateway** … does not support Remote Control」
+- 「(`_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL` does not apply to Remote Control.)」
+  ← **连绕过的后门都专门堵了**，说明是主动排除不是遗漏
+
+即：**用第三方中转 key / Bedrock / Vertex / 企业网关的人，官方那套永远用不了。**
+（v2.1.196 起的策略。本项目的用户自己就在这个人群里：站长机走第三方中转、
+手机是 GMS 默认关闭的荣耀。）
+
+**官方还明确不做的**：真终端 / 任意 tmux 全景（它只给「一个 Claude Code 会话的窗口」，
+没有 shell）、多 agent、不经过 Anthropic 服务器（RC 期间 transcript 全量存它那儿）。
+另：官方文档写死 **one remote session per interactive process** —— 「一屏看清所有机器
+所有会话谁在等你」它结构上给不了。
+
+### 由此得出的方向（尚待用户拍板）
+
+1. **定位从「Claude Code 手机客户端」改成「SSH 终端 + 多 agent 指挥台」** ——
+   终端那块（G2/G8/G9）已经做完，且是官方明确不做的，是唯一不会被抹掉的沉没投入。
+2. **目标用户 = 官方明文排除的那批**：中转 key / Bedrock / 内网 / 受限地区 / 非 GMS。
+   对他们 Yxi 不是「更好」，是**唯一选项**。
+3. **别再往正面重合处投工时**：对话渲染精细度、工具卡片完整度、权限转发可靠性 ——
+   保持够用即可。尤其那条 600 秒的远程审批，应从「卖点」降级成「够用的兜底」。
+
+⚠️ **未验证、且只有用户能验的**：他的荣耀手机（非 GMS + 大陆 IP）到底能不能用官方那套。
+这一次实测能一次性定下方向 —— 过不去，则第 2 条从「一个细分市场」升级成「Yxi 存在的
+全部理由」。
+
 ## 决策记录（用户拍板过的，按时间倒序 —— 改动前先看这里，别推翻已定的）
 
 | # | 决定 | 理由 / 出处 |
