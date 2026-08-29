@@ -84,7 +84,6 @@ fun SessionsScreen(
     var update by remember(host.id) { mutableStateOf<app.yxi.agent.Update?>(null) }
     // 列表 / 悬浮排列。⚠️ 两者**并存**不是替代 —— 悬浮好看但同屏信息量少三分之一，
     // 20 个会话的时候还是列表能一眼扫完（决策 D16b 里就写明了这个代价）
-    var floating by remember(host.id) { mutableStateOf(false) }
     var pinned by remember(host.id) { mutableStateOf(Pinned.get(ctx, host.id)) }
     var view by remember(host.id) { mutableStateOf(Board.view(ctx, host.id)) }
     var collapsed by remember(host.id) { mutableStateOf(Board.collapsed(ctx, host.id)) }
@@ -177,11 +176,15 @@ fun SessionsScreen(
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
             }
-            // ⚠️ **能横向滑。** 这排药丸原来就已经顶到窄屏边上了（＋/悬浮/文件/终端），
-            // 再加一个「状态/分组」必挤爆。窄屏折行在这个项目上翻过四次车，
-            // 与其赌宽度够，不如让它滑。
+            // ⚠️ **`weight` 和 `horizontalScroll` 必须一起给。**
+            // 只给 horizontalScroll（0.9.35 我就是这么加的）会**把主机名挤没** ——
+            // 可横向滚动的 Row 没有宽度上界，Compose 先按它的内容全宽量它，
+            // 剩下的才给左边那个 weight 列，于是左列被压到接近 0。
+            // 用户报的「主机『天亮』被挡住了」就是这么来的。
+            // 1:2 的权重 = 主机名至少拿到三分之一，工具条最多三分之二、装不下就滑。
+            // 不写死 dp：加减药丸、换屏幕宽度都不用再调。
             Row(
-                Modifier.horizontalScroll(rememberScrollState()),
+                Modifier.weight(2f, fill = false).horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 // ＋ 从手机拉起一个新会话（在某目录跑起 claude），不用先到电脑前
@@ -211,14 +214,6 @@ fun SessionsScreen(
                             color = if (view == BoardView.Group) MaterialTheme.colorScheme.onSecondaryContainer
                             else MaterialTheme.colorScheme.onSurface,
                         )
-                    }
-                }
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainer, shape = Pill,
-                    modifier = Modifier.height(44.dp).clip(Pill).clickable { floating = true },
-                ) {
-                    Box(Modifier.padding(horizontal = 14.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
-                        Text(t("悬浮"), style = MaterialTheme.typography.labelLarge)
                     }
                 }
                 listOf(t("文件") to onOpenFiles, t("终端") to { onOpenTerminal(null, ".") }).forEach { (label, go) ->
@@ -388,15 +383,6 @@ fun SessionsScreen(
         }
     }
 
-    if (floating) {
-        Switcher(
-            ssh = ssh,
-            current = null,
-            hostId = host.id,
-            onPick = { onOpenChat(it.name, it.cwd) },
-            onDismiss = { floating = false },
-        )
-    }
 
     // 回它一句：不进对话，直接把这句送进那个 tmux 会话（send-keys）。
     replyTo?.let { target ->
