@@ -86,7 +86,12 @@ fun ChatScreen(
     DisposableEffect(sessionName) {
         onDispose { Drafts.set(ctx, hostId, sessionName, draft) }
     }
-    var uploading by remember { mutableStateOf(false) }
+    /**
+     * 正在传的张数。
+     * ⚠️ **是计数不是布尔。** 原来是布尔：第一张传完就置 false，
+     * 而第二张还在传 —— 界面上那句「上传中」提前消失，用户以为完事了。
+     */
+    var uploading by remember { mutableIntStateOf(0) }
     /**
      * 这个会话此刻占多少上下文。⚠️ 顺着转录一起解出来的，**不额外跑一趟服务器**。
      * 名字不叫 `ctx` —— 这个文件里 `ctx` 已经是 `LocalContext`。
@@ -108,7 +113,7 @@ fun ChatScreen(
         val u = uri ?: return@rememberLauncherForActivityResult
         val s0 = ssh ?: return@rememberLauncherForActivityResult
         scope.launch {
-            uploading = true
+            uploading++
             // ⚠️ **先把字节读进内存，再谈传。** 读文件本身可能失败（授权过期、文件没了），
             // 那跟「传失败」是两码事，要分开报，否则用户不知道是手机侧还是网络侧的问题。
             val bytes = withContext(Dispatchers.IO) {
@@ -118,7 +123,7 @@ fun ChatScreen(
             }
             if (bytes == null || bytes.isEmpty()) {
                 android.widget.Toast.makeText(ctx, t("这个文件读不出来 —— 换一张试试"), android.widget.Toast.LENGTH_LONG).show()
-                uploading = false; return@launch
+                uploading--; return@launch
             }
             val cr = ctx.contentResolver
             val mime = cr.getType(u).orEmpty()
@@ -153,7 +158,7 @@ fun ChatScreen(
                 }
             }
             if (ok != null) {
-                staged = staged + ok!!
+                staged = app.yxi.agent.Attachments.renumber(staged + ok!!)
                 runCatching { app.yxi.agent.Attachments.sweep(s0) }   // 顺手清 3 天前的
             } else {
                 android.widget.Toast.makeText(
@@ -161,7 +166,7 @@ fun ChatScreen(
                     android.widget.Toast.LENGTH_LONG,
                 ).show()
             }
-            uploading = false
+            uploading--
         }
     }
 
@@ -732,7 +737,7 @@ fun ChatScreen(
             }
         }
 
-        if (staged.isNotEmpty() || uploading) {
+        if (staged.isNotEmpty() || uploading > 0) {
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(16.dp, 0.dp, 16.dp, 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -762,7 +767,7 @@ fun ChatScreen(
                         }
                     }
                 }
-                if (uploading) Text(
+                if (uploading > 0) Text(
                     t("传着…"), Modifier.padding(8.dp, 8.dp),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.outline,

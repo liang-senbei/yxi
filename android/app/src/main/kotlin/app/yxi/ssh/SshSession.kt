@@ -45,6 +45,12 @@ class SshSession(
      * 每几秒抓一次屏幕看有没有在等你），就必须把开通道这件事串起来。
      */
     private val chanLock = kotlinx.coroutines.sync.Mutex()
+    /**
+     * **整条连接共用一把 SFTP 锁。**
+     * ⚠️ 不能让每条 SFTP 通道自己拿一把 —— 那样并发上传各锁各的，
+     * 两条通道同时往这条连接写就把包流写坏（同 #16）。见 [Sftp] 的构造参数注释。
+     */
+    private val sftpLock = kotlinx.coroutines.sync.Mutex()
 
     /**
      * 包一条**跟着通道一起死**的长期跟随命令。
@@ -308,7 +314,7 @@ class SshSession(
             val s = requireNotNull(session) { "还没 connect()" }
             val ch = s.openChannel("sftp") as com.jcraft.jsch.ChannelSftp
             ch.connect(10_000)
-            Sftp(ch)
+            Sftp(ch, sftpLock)
         }
     }
 

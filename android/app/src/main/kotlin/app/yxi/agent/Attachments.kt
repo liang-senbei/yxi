@@ -51,6 +51,26 @@ object Attachments {
         return Staged(if (isImage) t("图片%d").format(index) else t("附件%d").format(index), path, isImage)
     }
 
+    /**
+     * 重新编号。
+     *
+     * ⚠️ **必须在加进列表之后统一编，不能在上传前各算各的。**
+     * 原来是 `staged.count { … } + 1` —— 而 `staged` 只在**上传成功后**才更新，
+     * 于是第一张还在传的时候点第二张，两张算出来的都是 1，
+     * 双双叫「图片1」。而 [header] 是靠标签把路径喂给 Claude 的，
+     * 两个同名标签 = 它拿到两条自相矛盾的映射。
+     *
+     * 顺带把「传完的顺序不等于点的顺序」也抹平了：编号只跟列表里的位置走。
+     */
+    fun renumber(list: List<Staged>): List<Staged> {
+        var img = 0
+        var file = 0
+        return list.map {
+            if (it.isImage) it.copy(label = t("图片%d").format(++img))
+            else it.copy(label = t("附件%d").format(++file))
+        }
+    }
+
     /** 发送时贴在正文前面的路径映射。没有附件就返回空串。 */
     fun header(staged: List<Staged>): String =
         if (staged.isEmpty()) "" else

@@ -19,9 +19,16 @@ import java.io.ByteArrayOutputStream
  * 所以每个操作都上锁 —— 跟 [SshSession] 里 `chanLock` 是同一类问题
  * （TROUBLESHOOTING #16：jsch 的写包路径不是线程安全的）。
  */
-class Sftp internal constructor(private val ch: ChannelSftp) {
+/**
+ * @param lock ⚠️ **这把锁必须是 [SshSession] 级的，不能每条通道自己 new 一把。**
+ *   原来是 `private val lock = Mutex()` —— 而每次上传都新开一条通道
+ *   （见 [SshSession.openSftp] 的调用方），于是两次并发上传拿到**两把不同的锁**，
+ *   等于没锁。而 jsch 的 Session 写包路径**不是线程安全**的（TROUBLESHOOTING #16，
+ *   当年只给 Shell 修了，SFTP 一直漏着）：两条通道同时往一条连接写就把包流写坏，
+ *   表现是「第一张还没传完就点第二张，第二张失败」。
+ */
+class Sftp internal constructor(private val ch: ChannelSftp, private val lock: Mutex) {
 
-    private val lock = Mutex()
 
     data class Entry(
         val name: String,
