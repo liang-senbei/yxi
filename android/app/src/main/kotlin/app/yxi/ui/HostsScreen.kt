@@ -18,6 +18,8 @@ import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
@@ -232,6 +234,45 @@ private fun HostQuota(
         mutableStateOf(if (ageMin == null) 0L else System.currentTimeMillis() / 1000 - ageMin * 60)
     }
 
+    /**
+     * 服务器体检。**跟额度分开跑，而且先跑。**
+     *
+     * ⚠️ 额度要跑 `claude -p '/usage'`（几秒到十几秒，还要连一次 API），
+     * 而体检只读 `/proc`、一个进程都不 fork ——
+     * **机器越卡，越是只有体检出得来**，正好是最需要它的时候。
+     * 两件事绑在一起的话，体检会被额度拖死。
+     */
+    var health by remember(h.id) { mutableStateOf<app.yxi.agent.Health.Report?>(null) }
+    var healthBusy by remember(h.id) { mutableStateOf(false) }
+    var healthNote by remember(h.id) { mutableStateOf<String?>(null) }
+    /** 一键修复扫出来的东西。null = 还没扫；空表 = 没什么可收的 */
+    var junk by remember(h.id) { mutableStateOf<List<app.yxi.agent.Health.Junk>?>(null) }
+    var confirmFix by remember(h.id) { mutableStateOf(false) }
+    var fixing by remember(h.id) { mutableStateOf(false) }
+
+    LaunchedEffect(h.id, refreshAt) {
+        healthBusy = true; healthNote = null
+        val c = connect()
+        if (c == null) { healthNote = t("这台主机还没有可用的认证方式"); healthBusy = false; return@LaunchedEffect }
+        val err = runCatching { c.session.connect() }.exceptionOrNull()
+        if (err != null) {
+            if (err is kotlinx.coroutines.CancellationException) throw err
+            healthNote = c.explain(err); healthBusy = false; return@LaunchedEffect
+        }
+        app.yxi.ssh.catching { c.session.exec(app.yxi.agent.Health.COMMAND) }
+            .onSuccess { out ->
+                val v = app.yxi.agent.Health.parse(out)
+                if (v == null) healthNote = t("读不出这台机器的状态（不是 Linux？）")
+                else health = app.yxi.agent.Health.score(v)
+            }
+            .onFailure { healthNote = t("体检失败：%s").format(it.message ?: "") }
+        // 顺手扫一遍「有什么可以安全收掉的」—— 不收，只看
+        app.yxi.ssh.catching { c.session.exec(app.yxi.agent.Health.SCAN_COMMAND) }
+            .onSuccess { junk = app.yxi.agent.Health.junkFrom(it) }
+        runCatching { c.session.disconnect() }
+        healthBusy = false
+    }
+
     // ⚠️ **每次长按展开都重查一次**（用户明确要的：「长按服务器就更新一次用量」）。
     // 缓存那份先摆着别让面板空着，同时 `busy` 把旧数字压暗 + 画转圈 ——
     // 新旧值长得一样时，没有这个可见状态用户看不出到底刷没刷。
@@ -273,6 +314,82 @@ private fun HostQuota(
         Modifier.fillMaxWidth().padding(top = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        // ── 体检：分数 + 那几个数 + 扣在哪儿 ──
+        // ⚠️ 放在额度**前面**：它出得快得多，机器越卡这个差距越大。
+        health?.let { r ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                // 分数用颜色说话：绿→黄→橙→红
+                val tone = when {
+                    r.score >= 85 -> Color(0xFF5FB570)
+                    r.score >= 65 -> Color(0xFFD6C34A)
+                    r.score >= 40 -> Color(0xFFE0913F)
+                    else -> MaterialTheme.colorScheme.error
+                }
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        "${r.score}", style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold, color = tone,
+                    )
+                    Text(
+                        " /100", style = MaterialTheme.typography.labelSmall,
+                        color = Dim, modifier = Modifier.padding(bottom = 4.dp),
+                    )
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        when (app.yxi.agent.Health.verdict(r.score)) {
+                            "easy" -> t("松快")
+                            "tight" -> t("有点紧")
+                            "strained" -> t("很吃力")
+                            else -> t("快扛不住了")
+                        },
+                        style = MaterialTheme.typography.labelLarge, color = tone,
+                    )
+                    Text(
+                        t("负载 %.1f/%d核 · 内存 %d%% · 交换 %d%% · 被抢 %d%% · 盘 %d%%").format(
+                            r.vitals.load1, r.vitals.cores, r.vitals.memUsedPct,
+                            r.vitals.swapUsedPct, r.vitals.steal, r.vitals.diskUsedPct,
+                        ),
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        color = Dim, maxLines = 2,
+                    )
+                }
+            }
+            // 扣分理由。⚠️ 不 fixable 的要**明说修不了**，
+            // 否则用户按了一键修复没反应，只会更困惑。
+            r.issues.forEach { i ->
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("−${i.cost}", style = MaterialTheme.typography.labelSmall.copy(
+                        fontFamily = FontFamily.Monospace), color = Dim)
+                    Text(
+                        issueText(i) + if (i.fixable) "" else t("（机器里面修不了，得找服务商）"),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (i.fixable) Muted else MaterialTheme.colorScheme.error,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+            // 一键修复：有东西可收才出现
+            junk?.takeIf { it.isNotEmpty() }?.let { list ->
+                val mb = list.sumOf { it.rssKb } / 1024
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer, shape = Pill,
+                    modifier = Modifier.fillMaxWidth().clip(Pill).clickable(enabled = !fixing) { confirmFix = true },
+                ) {
+                    Text(
+                        if (fixing) t("收拾中…") else t("一键收拾 · %d 项 · 约 %d MB").format(list.size, mb),
+                        Modifier.padding(14.dp, 9.dp),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                }
+            }
+        }
+        if (healthBusy && health == null) MorphButton(MorphPhase.Run, "", Modifier.fillMaxWidth(), height = 44.dp)
+        healthNote?.let {
+            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+        }
+
         q?.let {
             // ⚠️ **查新的时候把旧数字压暗。** 缓存值和实时值长得一模一样，
             // 满色画着的话，用户分不出面板上这两根条是刚取的还是上次的（他报的就是这个）。
@@ -323,6 +440,67 @@ private fun HostQuota(
                 Text(t("改主机"), Modifier.padding(14.dp, 7.dp), style = MaterialTheme.typography.labelMedium, color = Muted)
             }
         }
+    }
+
+    // ⚠️ **杀之前把要杀的逐条摆出来。** 一键修复要是能弄丢东西，
+    // 它就不是「方便」而是陷阱 —— 所以先看清、再点。
+    if (confirmFix) {
+        val list = junk.orEmpty()
+        AlertDialog(
+            onDismissRequest = { confirmFix = false },
+            title = { Text(t("要收拾这些")) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        t("这些都是缓存和跑飞的搜索，收掉不会丢任何东西。你的会话、编辑器、tmux 一概不碰。"),
+                        style = MaterialTheme.typography.labelSmall, color = Dim,
+                    )
+                    Column(
+                        Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        list.forEach { j ->
+                            Text(
+                                t("· %s · %d MB · 跑了 %d 分钟").format(junkText(j.what), j.rssKb / 1024, j.ageSec / 60),
+                                style = MaterialTheme.typography.labelSmall, color = Muted,
+                            )
+                        }
+                    }
+                    // ⚠️ steal 高的时候要**明说这个按钮救不了它**，别让人白按一次再失望
+                    health?.vitals?.takeIf { it.steal >= 10 }?.let {
+                        Text(
+                            t("⚠️ 这台机器有 %d%% 的 CPU 被宿主机抢走了 —— 那个收拾不掉，得让服务商迁移实例。").format(it.steal),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton({
+                    confirmFix = false
+                    val cmd = app.yxi.agent.Health.killCommand(list) ?: return@TextButton
+                    scope.launch {
+                        fixing = true
+                        val c = connect()
+                        val s0 = c?.session
+                        if (s0 != null && runCatching { s0.connect() }.isSuccess) {
+                            app.yxi.ssh.catching { s0.exec(cmd) }
+                            // 收完立刻重新体检一次，让分数当场动给用户看
+                            app.yxi.ssh.catching { s0.exec(app.yxi.agent.Health.COMMAND) }
+                                .onSuccess { out ->
+                                    app.yxi.agent.Health.parse(out)?.let { health = app.yxi.agent.Health.score(it) }
+                                }
+                            app.yxi.ssh.catching { s0.exec(app.yxi.agent.Health.SCAN_COMMAND) }
+                                .onSuccess { junk = app.yxi.agent.Health.junkFrom(it) }
+                            runCatching { s0.disconnect() }
+                        }
+                        fixing = false
+                    }
+                }) { Text(t("收拾")) }
+            },
+            dismissButton = { TextButton({ confirmFix = false }) { Text(t("算了")) } },
+        )
     }
 }
 
@@ -752,4 +930,36 @@ private fun BatteryHint(ctx: android.content.Context, onDone: () -> Unit) {
         },
         dismissButton = { TextButton(onDone) { Text(t("知道了")) } },
     )
+}
+
+/** 扣分理由的话术。⚠️ 在这儿拼，不在 [app.yxi.agent.Health] 里 —— 那边是纯逻辑，
+ *  而且插值拼出来的句子 `t()` 永远匹配不上、i18n-check 也看不见。 */
+@Composable
+private fun issueText(i: app.yxi.agent.Health.Issue): String = when (i.code) {
+    "steal" -> when (i.level) {
+        2 -> t("CPU 被宿主机抢走 %d%% —— 这台云主机所在的物理机严重超卖").format(i.value)
+        1 -> t("CPU 被宿主机抢走 %d%%").format(i.value)
+        else -> t("CPU 被宿主机抢走 %d%%，偏高").format(i.value)
+    }
+    "swap" -> when (i.level) {
+        2 -> t("交换分区用掉 %d%% —— 机器在颠簸，什么都会变慢").format(i.value)
+        1 -> t("交换分区用掉 %d%%").format(i.value)
+        else -> t("开始用交换分区了（%d%%）").format(i.value)
+    }
+    "load" -> if (i.level >= 1) t("负载是核数的 %.1f 倍，进程在排长队").format(i.value / 10.0)
+    else t("负载是核数的 %.1f 倍").format(i.value / 10.0)
+    "mem" -> if (i.level >= 1) t("内存用掉 %d%%，快没了").format(i.value)
+    else t("内存用掉 %d%%").format(i.value)
+    "disk" -> if (i.level >= 1) t("根分区用掉 %d%%，快写不进去了").format(i.value)
+    else t("根分区用掉 %d%%").format(i.value)
+    else -> ""
+}
+
+/** 一键收拾里那几类东西的名字。 */
+@Composable
+private fun junkText(code: String): String = when (code) {
+    "gradle" -> t("Gradle 编译守护进程")
+    "kotlin" -> t("Kotlin 编译守护进程")
+    "rg" -> t("跑飞的 rg 全盘搜索")
+    else -> code
 }
