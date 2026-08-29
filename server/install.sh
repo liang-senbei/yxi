@@ -38,7 +38,9 @@ d = json.loads(p.read_text())
 hooks = d.get("hooks", {})
 for ev, groups in list(hooks.items()):
     for g in groups:
-        g["hooks"] = [h for h in g.get("hooks", []) if "yxi-hook" not in str(h.get("command", ""))]
+        g["hooks"] = [h for h in g.get("hooks", [])
+                      if "yxi-hook" not in str(h.get("command", ""))
+                      and "yxi-hub" not in str(h.get("command", ""))]
     hooks[ev] = [g for g in groups if g.get("hooks")]
     if not hooks[ev]: del hooks[ev]
 p.write_text(json.dumps(d, ensure_ascii=False, indent=2))
@@ -138,9 +140,10 @@ BAK="${SETTINGS}.yxi-bak-$(date +%s)"
 cp "$SETTINGS" "$BAK"
 echo "· 备份 $BAK"
 
-python3 - "$SETTINGS" "$HOOK_DST" "$EVENTS_LIST" <<'PY'
+python3 - "$SETTINGS" "$HOOK_DST" "$EVENTS_LIST" "$HUB_DST" <<'PY'
 import json, sys, pathlib
 settings, hook, events = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3].split()
+hub = sys.argv[4]
 d = json.loads(settings.read_text() or "{}")
 hooks = d.setdefault("hooks", {})
 added = []
@@ -164,6 +167,22 @@ for ev in events:
         g["matcher"] = "permission_prompt|agent_needs_input"
     groups.append(g)
     added.append(ev)
+# SessionStart 注入「你在哪个组、同组有谁」。
+#
+# ⚠️ **为什么用钩子而不是写进 CLAUDE.md**：写文档的话成员名单是**静态**的，
+#    一改分组就得改文档，而且新开的会话根本不知道自己有队友。
+#    钩子是**每次会话开始时现算**的 —— 改组只要写 ~/.yxi/groups.json，别的什么都不用动。
+# ⚠️ SessionStart 的 source 含 startup / resume / clear / **compact**，
+#    所以 `/compact` 之后会再注入一次，名单不会因为上下文被压缩而丢。
+# ⚠️ **这条不能 async**：async 的钩子输出不会被当成上下文注入（要的就是它的 stdout）。
+#    这跟上面那条「yxi-hook 必须 async」不冲突 —— 那条是不许它阻塞决定权限，
+#    这条根本不碰权限，只吐一段文字。
+# ⚠️ 没编进任何组时 `yxi-hub context` 什么都不输出，所以不在组里的会话零开销。
+sg = hooks.setdefault("SessionStart", [])
+if not any("yxi-hub" in str(h.get("command", "")) for g in sg for h in g.get("hooks", [])):
+    sg.append({"hooks": [{"type": "command", "command": hub + " context"}]})
+    added.append("SessionStart(分组)")
+
 settings.write_text(json.dumps(d, ensure_ascii=False, indent=2))
 print("· 注册了：" + (", ".join(added) if added else "（已经装过，没重复加）"))
 PY

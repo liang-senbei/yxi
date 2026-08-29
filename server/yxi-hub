@@ -6,6 +6,7 @@
 # 组存在 ~/.yxi/groups.json（手机写、这里读），一个组 = 一串 tmux 会话名。
 #
 #   yxi-hub who              我是谁、在哪个组、同组还有谁
+#   yxi-hub context          给 Claude Code 的 SessionStart 钩子用（见下）
 #   yxi-hub say <名> "话"     发给同组的某一个
 #   yxi-hub all "话"          发给同组其他所有人
 #
@@ -64,7 +65,39 @@ push() {
 self="$(me)"
 
 case "${1:-who}" in
-  who)
+  # Claude Code 的 SessionStart 钩子调这个，把「你在哪个组、同组有谁」
+  # **注入进 agent 的上下文**。
+  #
+  # ⚠️ 为什么不写进 CLAUDE.md：那样成员名单是**静态**的，一改组就得改文档，
+  #    而且新开的会话不会自动知道。这里的名单是**此刻**从 groups.json 算出来的 ——
+  #    改组只要写那个文件，别的什么都不用动。
+  # ⚠️ SessionStart 的 source 含 startup/resume/clear/**compact** ——
+  #    所以 /compact 之后会再注入一次，名单不会因为上下文被压缩而丢。
+  # ⚠️ **没编组就什么都不输出**（连 JSON 都不出）—— 不在组里的会话零开销。
+  context)
+    [ -n "$self" ] || exit 0
+    m="$(mates "$self")"
+    [ -n "$m" ] || exit 0
+    # ⚠️ 用换行分隔传给 python 去拼。**不能用 `paste -sd、`** ——
+    #    `paste -d` 只吃单字节分隔符，多字节的「、」会被截成半个字符（实测出乱码）。
+    g="$(mygroups "$self")"
+    python3 - "$self" "$g" "$m" <<'PY'
+import json, sys
+j = lambda v: "、".join(x for x in v.splitlines() if x.strip())
+me, groups, mates = sys.argv[1], j(sys.argv[2]), j(sys.argv[3])
+txt = (
+    "【同组协作】你是 " + me + "，在「" + groups + "」组里。同组还有：" + mates + "。\n"
+    "需要跟他们配合时，用 `yxi-hub say <名字> \"内容\"` 直接发给对方"
+    "（对方会在自己的输入框里收到，署你的名）；"
+    "`yxi-hub all \"内容\"` 发给同组所有人；`yxi-hub who` 查当前组员。"
+    "**只能发给同组的**。\n"
+    "别为了发消息去抄别人的 tmux —— 用这个命令就行。"
+)
+print(json.dumps({"hookSpecificOutput": {
+    "hookEventName": "SessionStart", "additionalContext": txt}}, ensure_ascii=False))
+PY
+    ;;
+    who)
     if [ -z "$self" ]; then echo "不在 tmux 里，认不出我是谁"; exit 1; fi
     echo "我: $self"
     g="$(mygroups "$self")"

@@ -2941,3 +2941,28 @@ nginx 加一条 `location ~ ^/Yxi-([0-9]+)\.apk$`，下载页的按钮由 instal
 **源站对 ≠ 用户拿到的对** —— 中间隔着一层 CDN。现在最后一步是
 **走公网真下一遍、用 aapt2 读 versionCode 比对**，对不上就红着脸退出。
 （#69 说「传完不校验 = 没传」，这条补上后半句：**校验源站不等于校验用户看到的**。）
+
+## #147 怎么让分组里的 agent 知道自己能跟谁通讯 —— 别写进 CLAUDE.md，用 SessionStart 钩子
+
+**问题**：把「你在 X 组，同组有 A、B，用 yxi-hub 找他们」写进 CLAUDE.md 有两个死结：
+① 成员名单是**静态**的，一改分组就得改文档；② 新开的会话根本不知道自己有队友。
+
+**解法**：`SessionStart` 钩子 + `hookSpecificOutput.additionalContext`
+（Claude Code 会把这段文字**注入进模型上下文**）。名单是钩子跑的那一刻从
+`~/.yxi/groups.json` 算出来的 —— **改组只要写那个文件，别的什么都不用动**。
+
+**实测过的三件事**（别信文档，这三条都是跑出来的）：
+1. `additionalContext` 真的进上下文：临时 hook 注入一句暗号，`claude -p` 问它暗号，答对了。
+2. **端到端**：真会话 `cc-alpha` 编进组，冷启动第一句问「我同组有谁、怎么发消息」，
+   答「同组只有 cc-beta，发消息用 `yxi-hub say beta "内容"`」。
+3. `SessionStart` 的 source 取值含 `startup` / `resume` / `clear` / **`compact`** ——
+   所以 `/compact` 之后会**再注入一次**，名单不会因为上下文被压缩而丢。
+
+**两个坑**：
+- ⚠️ 这条钩子**不能加 `async: true`**。async 的钩子输出不会被当成上下文注入 ——
+  而我们要的就是它的 stdout。（跟「yxi-hook 必须 async」不冲突：那条是不许它阻塞权限决定，
+  这条根本不碰权限。）
+- ⚠️ `paste -sd、 -` **拼不了多字节分隔符**。`paste -d` 只吃单字节，「、」会被截成半个字符，
+  输出乱码（实测 `后端<乱码>上线`）。多字节分隔符交给 python join。
+
+**没编进任何组时 `yxi-hub context` 什么都不输出** —— 不在组里的会话零 token 开销。
