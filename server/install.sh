@@ -64,7 +64,7 @@ if [ "${1:-}" = "--publish" ]; then
   #    固定叫 Yxi.apk 的话，Cloudflare 会把那个 URL 缓存 4 小时 ——
   #    清单说有新版、下下来还是上一版，手机上表现为「更新了个寂寞」。
   #    带上版本号 = 每次发布都是一个 CDN 没见过的新 URL，结构上不可能拿到旧包。
-  #    见 TROUBLESHOOTING #146。App 读的是清单里的 `file` 字段，所以老版本也能跟上。
+  #    见 TROUBLESHOOTING #148。App 读的是清单里的 `file` 字段，所以老版本也能跟上。
   VER_APK="Yxi-${CODE}.apk"
   cp -f "$EVENTS_DIR/Yxi.apk" "$EVENTS_DIR/$VER_APK"
   python3 -c 'import json,sys,pathlib; pathlib.Path(sys.argv[1]).write_text(json.dumps({"versionCode":int(sys.argv[2]),"versionName":sys.argv[3],"file":sys.argv[5],"notes":sys.argv[4]},ensure_ascii=False,indent=1))' \
@@ -154,11 +154,13 @@ for ev in events:
     if already: continue
     # 单独一组，跟别人（比如 cc-state）的 hook 井水不犯河水
     # ⚠️⚠️ async=true 不只是「别拖慢正事」，它是一道**结构性护栏**：
-    # 带了它 hook 就无法阻塞、也就无法返回 permissionDecision。
+    # 它的准确含义是「**Claude Code 不等这个钩子跑完**」（实测：钩子里 sleep 20，
+    # 阻塞式那次 claude 退出时钩子已经跑完，async 那次还没跑完）。
+    # 不等 = 钩子想说什么都是一场它多半会输的赛跑 —— 于是它**当不了决定者**。
     # 实测阻塞式 hook 返回 allow 时，**屏幕上一个提示都不曾出现** ——
     # 「自动放行」会变成一个 if 写错就发生、且事后查不出来的事；
     # 而且阻塞期间坐在键盘前的人**没有任何东西可以按**（桌面被废掉）。
-    # 见 TROUBLESHOOTING #145。**别去掉这个 true。**
+    # 见 TROUBLESHOOTING #153。**别去掉这个 true。**
     g = {"hooks": [{"type": "command", "command": hook, "async": True}]}
     # ⚠️ `Notification` 混着 `idle_prompt`（空闲 60 秒的提醒，文案是
     # "Claude is waiting for your input"）—— 不加 matcher 的话，
@@ -174,9 +176,12 @@ for ev in events:
 #    钩子是**每次会话开始时现算**的 —— 改组只要写 ~/.yxi/groups.json，别的什么都不用动。
 # ⚠️ SessionStart 的 source 含 startup / resume / clear / **compact**，
 #    所以 `/compact` 之后会再注入一次，名单不会因为上下文被压缩而丢。
-# ⚠️ **这条不能 async**：async 的钩子输出不会被当成上下文注入（要的就是它的 stdout）。
-#    这跟上面那条「yxi-hook 必须 async」不冲突 —— 那条是不许它阻塞决定权限，
-#    这条根本不碰权限，只吐一段文字。
+# ⚠️ **这条不能 async**。async = Claude Code 不等它跑完，
+#    而我们要的**就是**它的 stdout（那段注入上下文的 JSON）。
+#    ⚠️ 实测提醒：钩子够快的话，async 那次**照样注入成功了** ——
+#    所以这是个**赛跑**，不是稳定的失败。正因为它平时看着能用、偶尔悄悄丢，
+#    才更要老老实实用阻塞式。`yxi-hub context` 要起两次 python3，不是没有输的可能。
+#    这跟上面那条「yxi-hook 必须 async」不冲突：那条本来就不该说话。
 # ⚠️ 没编进任何组时 `yxi-hub context` 什么都不输出，所以不在组里的会话零开销。
 sg = hooks.setdefault("SessionStart", [])
 if not any("yxi-hub" in str(h.get("command", "")) for g in sg for h in g.get("hooks", [])):
