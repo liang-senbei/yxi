@@ -50,9 +50,45 @@ object Model {
      * 权限提示、计划审批那些**也是编号列表**，会被当成模型选单，
      * 然后用户一点就把选项送进了一个完全不同的提示里。
      */
+    /** 模型选单副标题的几种措辞。**只增不删** —— 老版本的会话还在跑。 */
+    private val SUBTITLE = listOf(
+        "to use this session only",                 // 老版；新版脚注里也有这句
+        "Switch between Claude models",             // 2.1.24x 的副标题
+        "becomes the default for new sessions",     // 同上，另一句
+    )
+
+    /**
+     * ⚠️⚠️ **匹配前必须把换行和多余空白压平。**
+     *
+     * 手机上的 tmux 窗格很窄，TUI 会折行。真机 46 列抓屏实测，脚注变成：
+     * ```
+     * Enter to set as default · s to use this
+     * session only · Esc to cancel
+     * ```
+     * —— `to use this session only` **被换行劈成两半**，子串匹配必然失败。
+     * 于是这个护栏在**手机上**（也就是唯一会用到它的地方）形同虚设：
+     * 模型选单被当成普通「等你选」卡片画出来，用户点一下**就把账号默认模型改了**。
+     *
+     * ⚠️ 加更多短语**治不了这个** —— 任何一句都可能被折行劈开。
+     * 压平才是对的。这跟 #113（窄屏脚注被截断导致判不出「在忙」）、
+     * #133（窄屏折行让选项标题错位）是**同一个病根**。
+     */
+    private fun flat(screen: String) = screen.replace(Regex("""\s+"""), " ")
+
     fun parse(screen: String): List<Choice>? {
-        if ("Select model" !in screen) return null
-        if ("to use this session only" !in screen) return null
+        if ("Select model" !in flat(screen)) return null
+        // ⚠️⚠️ **第二句判据必须能认多种措辞。** Claude Code 改过这段说明文字：
+        //   老版：「… to use this session only」
+        //   新版：「Switch between Claude models. Your pick becomes the default
+        //          for new sessions.」
+        // 只认老版的后果**很严重**：判据失效 → 这个护栏不再拦 →
+        // 模型选单被通用解析当成普通「等你选」卡片画出来 → 用户点一下
+        // **就把账号默认模型改了**，而且不报错。真机截图逮到的。
+        //
+        // ⚠️ 只认「Select model」一句不够：正文里提到这两个词的普通对话会被误判成选单，
+        // 那时真正的待答卡片会凭空消失。所以要两句都在。
+        val f = flat(screen)
+        if (SUBTITLE.none { it in f }) return null
         val out = screen.split('\n').mapNotNull { line ->
             val m = ROW.matchEntire(line.trimEnd()) ?: return@mapNotNull null
             val rawName = m.groupValues[2]
