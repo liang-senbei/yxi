@@ -192,6 +192,18 @@ fun ChatScreen(
     // ⚠️ 此刻在忙什么、有哪些输入还排着队 —— **只有屏幕知道**，转录里没有。
     // 见 Live 的类注释和 TROUBLESHOOTING #72
     var live by remember { mutableStateOf(app.yxi.agent.Live.IDLE) }
+    /**
+     * 这个会话的**实时状态**拿到手了没。
+     *
+     * ⚠️ **「我知道它闲着」和「我还不知道」不是一回事，以前画成了同一个样子。**
+     * `live` 初值是 IDLE，而 `live.busy == false` 时那行 Composing… 就不画 ——
+     * 于是刚从后台切回来（连接还没重建、推流还没第一帧）的那几秒，
+     * 界面看起来跟「一切正常、agent 闲着」一模一样。
+     * 用户报的就是这个：切回来不显示现在在干什么，等一会儿才出来 ——
+     * 而且**看不出它是旧的**，这比白屏更坑。
+     * ⚠️ 键里带 `ssh`：重连会换一个新的 Session 对象，那一刻就该复位。
+     */
+    var synced by remember(ssh, sessionName) { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     // 「看改动」的 git diff 文本；非空就弹出 DiffSheet
     var diffText by remember { mutableStateOf<String?>(null) }
@@ -339,6 +351,7 @@ fun ChatScreen(
         fun apply(p: Pending?, l: app.yxi.agent.Live) {
             pending = p
             live = l
+            synced = true
             // 动作生效了（指纹变了 / 面板没了）就解锁
             if (awaitingFp != null && p?.fingerprint != awaitingFp) { awaitingFp = null; busy = false }
         }
@@ -353,6 +366,7 @@ fun ChatScreen(
             runCatching { SessionProbe.snapshot(s, sessionName) }.onSuccess { (p, l) ->
                 pending = p
                 live = l
+                synced = true
                 if (awaitingFp != null && p?.fingerprint != awaitingFp) { awaitingFp = null; busy = false }
             }
             delay(if (live.busy || pending != null) 700 else 2_500)
@@ -596,10 +610,17 @@ fun ChatScreen(
         }
         }   // CompositionLocalProvider(LocalUriHandler)
 
-        if (live.busy) LiveStatus(live.status, onStop = {
-            val s0 = ssh
-            if (s0 != null) scope.launch { runCatching { SessionProbe.sendKey(s0, sessionName, "Escape") } }
-        })
+        // ⚠️ **三选一，而且「不知道」必须占一个位置。**
+        // 少了中间那条的话，没连上/没同步跟「闲着」长得一模一样，
+        // 用户会把一屏旧内容当成当前状态。
+        when {
+            ssh == null -> SyncNote(t("连接断了，正在重连…"))
+            !synced -> SyncNote(t("正在取这个会话此刻的状态…"))
+            live.busy -> LiveStatus(live.status, onStop = {
+                val s0 = ssh
+                if (s0 != null) scope.launch { runCatching { SessionProbe.sendKey(s0, sessionName, "Escape") } }
+            })
+        }
 
         pending?.let { p ->
             Box(Modifier.padding(14.dp, 0.dp, 14.dp, 8.dp)) {
@@ -1204,6 +1225,28 @@ private fun QueuedBubble(text: String, onCopy: (String) -> Unit, onPopQueue: () 
  * Searching…），**不翻译也不归一** —— 那些词是它自己在屏幕上说的话，
  * 换成「处理中…」反而丢了信息（词本身+耗时+token 数都在里面）。
  */
+/** 「还不知道」那条。跟 [LiveStatus] 同一个位置、同一套视觉语言，但压成灰的、没有停止键。 */
+@Composable
+private fun SyncNote(text: String) {
+    val dots = rememberInfiniteTransition(label = "sync")
+    val a by dots.animateFloat(
+        0.3f, 0.9f,
+        infiniteRepeatable(tween(750), RepeatMode.Reverse), label = "pulse",
+    )
+    Row(
+        Modifier.fillMaxWidth().padding(20.dp, 2.dp, 20.dp, 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(6.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = a), CircleShape))
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text, Modifier.weight(1f), fontSize = 12.sp,
+            fontWeight = androidx.compose.ui.text.font.FontWeight.Normal,
+            maxLines = 1, color = MaterialTheme.colorScheme.outline,
+        )
+    }
+}
+
 @Composable
 private fun LiveStatus(status: String?, onStop: () -> Unit) {
     val dots = rememberInfiniteTransition(label = "live")

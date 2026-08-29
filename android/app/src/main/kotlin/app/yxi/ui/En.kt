@@ -163,6 +163,7 @@ internal object En {
         "发送" to "Send",
         "这个 App" to "This app",
         "查着…" to "Checking…",
+        "正在取这个会话此刻的状态…" to "Getting this session's current state…",
         "这台手机上没有语音识别（多半是没装或关了 Google 服务）" to "No speech recognition on this phone (Google services are probably off or missing)",
         "叫不起语音识别：%s" to "Couldn't start speech recognition: %s",
         "正在载入对话…" to "Loading the conversation…",
