@@ -68,11 +68,19 @@ object SessionProbe {
         s tmux_begin
         tmux list-sessions -F '#{session_name}|#{session_windows}|#{session_activity}|#{session_attached}|#{pane_current_path}' 2>/dev/null || true
         s tmux_end
+        s ev_begin
+        tail -n 200 ${'$'}HOME/.yxi/events.jsonl 2>/dev/null || true
+        s ev_end
         s cc_begin
-        for f in ${'$'}HOME/.claude/sessions/*.json; do [ -f "${'$'}f" ] && cat "${'$'}f" && echo; done 2>/dev/null || true
+        # ⚠️ 用 `awk 1` 不用 `for … cat`：后者**每个文件起一个进程**，
+        # 19 个文件实测 352ms，而看板每 5 秒跑一次。`awk 1` 是 25ms，快 14 倍。
+        # ⚠️ 也不能用 `cat *.json`：这些 JSON **末尾没有换行**，
+        # cat 会把它们**粘成一行**（实测 19 条变 1 条）—— 跟 #140 公钥粘行同一个坑。
+        # `awk 1` 每读完一个文件补一个换行，两个问题一起解决。
+        awk 1 ${'$'}HOME/.claude/sessions/*.json 2>/dev/null || true
         s cc_end
         s status_begin
-        for f in ${'$'}HOME/.cloud-status/*.json; do [ -f "${'$'}f" ] && cat "${'$'}f" && echo; done 2>/dev/null || true
+        awk 1 ${'$'}HOME/.cloud-status/*.json 2>/dev/null || true
         s status_end
         s tr_begin
         find "${'$'}HOME/.claude/projects" -maxdepth 2 -name '*.jsonl' -printf '%h\t%T@\n' 2>/dev/null | awk -F'\t' '{n=split(${'$'}1,a,"/"); d=a[n]; t=int(${'$'}2); if(t>m[d]) m[d]=t} END{for(k in m) printf "%s\t%d\n", k, m[k]}' 2>/dev/null || true
@@ -129,6 +137,26 @@ object SessionProbe {
             }
         }
 
+        // ⚠️ **把 hook 算好的 `preview` 搬到看板上。**
+        //
+        // `yxi-hook` 早就在算它了（`last_assistant()` 读转录末 64KB，**零 token 零 API**），
+        // 但一直只用在通知里。而一行「它到底卡在哪」比一张缩略图有用得多 ——
+        // 缩略图在手机尺寸上基本读不出内容，还要每 5 秒多跑几次 capture-pane。
+        // 第一方 Claude Code 的 agent view 那句「Haiku 生成的摘要」就是这个东西，
+        // 而我们不用花 Haiku 的钱。
+        //
+        // ⚠️ 只取**每个会话最后一条**：events.jsonl 是追加写的流水，
+        // 前面那些是历史，拿来当「此刻卡在哪」会是陈年旧事。
+        val evPreview = HashMap<String, String>()
+        extract(out, "ev").lineSequence().filter { it.isNotBlank() }.forEach { line ->
+            runCatching {
+                val o = JSONObject(line)
+                val name = o.optString("session")
+                val pv = o.optString("preview").ifEmpty { o.optString("arg") }
+                if (name.isNotEmpty() && pv.isNotEmpty()) evPreview[name] = pv
+            }
+        }
+
         val states = HashMap<String, Triple<String, String, Double>>()
         status.lineSequence().filter { it.isNotBlank() }.forEach { line ->
             runCatching {
@@ -155,7 +183,8 @@ object SessionProbe {
                 attached = p[3] != "0",
                 cwd = p[4],
                 state = SessionState.of(st?.first),
-                detail = st?.second.orEmpty(),
+                // 状态源给的 detail 优先（它更「此刻」）；空了才用 hook 那句摘要
+                detail = st?.second?.takeIf { it.isNotBlank() } ?: evPreview[name].orEmpty(),
                 stateTs = st?.third ?: 0.0,
             )
         }.toList()

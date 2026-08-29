@@ -292,7 +292,7 @@ private fun HostQuota(
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             if (busy) Text(t("查着…"), style = MaterialTheme.typography.labelSmall, color = Dim)
             else if (fetchedAt > 0) Text(
-                ago(fetchedAt) + t(" 取的"),
+                t("%s 取的").format(ago(fetchedAt)),
                 style = MaterialTheme.typography.labelSmall, color = Dim,
             )
             else if (note != null) Text(note!!, style = MaterialTheme.typography.labelSmall, color = Dim, modifier = Modifier.weight(1f))

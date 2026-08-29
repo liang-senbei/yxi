@@ -33,7 +33,36 @@ KINDS = {
     "Stop": ("done", "干完了，等你说下一步"),
     "Notification": ("needs", "需要你"),
     "SessionEnd": ("end", "会话结束了"),
+    # ⚠️ 这一条是**为了通知正文**：它带 `tool_input`，也就是「它到底想跑哪条命令」
+    # 的原文。没有它，锁屏上只有一句「需要你」—— 用户得点开 App 才知道要批什么，
+    # 那这条通知就白发了。实测它只在提示真的渲染出来时才触发，比 Notification 准。
+    "PermissionRequest": ("needs", "要你批一个操作"),
 }
+
+# 这几个工具的参数里，哪个字段是「人该看的那一句」。
+# ⚠️ 只挑**短且信息量大**的字段：锁屏上就一行，塞一整个文件内容等于没写。
+WHAT = (
+    ("command", None),                  # Bash：命令原文
+    ("file_path", "改 %s"),             # Edit / Write
+    ("pattern", "搜 %s"),               # Grep
+    ("url", "抓 %s"),                   # WebFetch
+    ("description", None),              # Task / 兜底
+)
+
+
+def what_it_wants(data):
+    """从 PermissionRequest 的 tool_input 里挤出一句人话。拿不到就返回空。"""
+    ti = data.get("tool_input")
+    if not isinstance(ti, dict):
+        return ""
+    tool = data.get("tool_name", "")
+    for key, fmt in WHAT:
+        v = ti.get(key)
+        if isinstance(v, str) and v.strip():
+            v = " ".join(v.split())          # 多行命令压成一行
+            return (fmt % v) if fmt else v
+    # 一个认识的字段都没有 —— 至少说清是哪个工具，别留空白
+    return f"{tool} …" if tool else ""
 
 
 def tmux_session():
@@ -116,6 +145,11 @@ def main():
     msg = data.get("message") or ""
     if msg:
         detail = short(msg)
+    # ⚠️ **命令原文优先于那句套话。** 「需要你」谁都会说，
+    # 「要跑 rm -rf build/」才是用户真正要判断的东西。
+    want = what_it_wants(data)
+    if want:
+        detail = short(want)
 
     line = {
         "ts": round(time.time(), 3),
@@ -126,6 +160,10 @@ def main():
         # Claude 最后说的一句 —— 手机通知直接显示「要你决定什么」，不用你点开去猜（零 token）
         "preview": last_assistant(data.get("transcript_path", "")),
         "cwd": data.get("cwd", ""),
+        # ⚠️ 结构化地带上「哪个工具、要动什么」——App 侧据此判「这是不是危险动作」，
+        # 比在一句中文里正则找 `rm -rf` 靠谱得多
+        "tool": data.get("tool_name", ""),
+        "arg": short(what_it_wants(data), 200),
         # ⚠️ hook 的 stdin 里本来就带 transcript_path —— App 直接拿去渲染对话，
         # 不用自己去 ~/.claude/projects 下按 cwd 反推目录名（那个映射规则有坑，见 #36）
         "transcript": data.get("transcript_path", ""),

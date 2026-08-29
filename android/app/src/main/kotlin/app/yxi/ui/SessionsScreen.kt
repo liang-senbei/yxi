@@ -570,6 +570,25 @@ private fun SessionCard(
                         maxLines = 2,
                     )
                 }
+                // ⚠️ **「卡了多久」比「多久没动」重要得多。**
+                //
+                // 20 个会话时真正的失败模式不是「看不过来」，是**有东西悄悄卡死了没人发现**。
+                // 实测本机有会话卡在对话框上 8.4 天、另一个 4.6 天，完全没人管。
+                //
+                // ⚠️ 用 `stateTs`（状态**跃迁**的时刻）不是 `lastActivity`：
+                // 后者是 tmux 活动/转录 mtime，会被无关的刷新带着走（#130 抱怨的就是它俩）。
+                // 状态跃迁时刻才是「它从什么时候开始等你的」。
+                if (s.state == SessionState.NeedsYou && s.stateTs > 0) {
+                    val w = waited(s.stateTs.toLong())
+                    if (w.isNotEmpty()) {
+                        Text(
+                            t("已经等了 %s").format(w),
+                            style = MaterialTheme.typography.labelSmall,
+                            // 等久了要显眼 —— 这正是最容易被漏掉的那一类
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
                 Text(
                     s.cwd,
                     style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),

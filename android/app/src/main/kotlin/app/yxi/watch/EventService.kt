@@ -1,5 +1,6 @@
 package app.yxi.watch
 
+import app.yxi.ui.Risky
 import app.yxi.ui.t
 import android.app.Notification
 import android.app.NotificationChannel
@@ -158,6 +159,10 @@ class EventService : Service() {
 
         val detail = e.optString("detail")       // 钩子那条「为什么找你」（Notification message）
         val preview = e.optString("preview")      // Claude 最后说的一句（钩子从转录里取，零 token）——「到底要你决定什么」
+        // PermissionRequest 带来的结构化信息：哪个工具、要动什么。
+        // ⚠️ 用它判「能不能一键批」比在中文里正则找 `rm -rf` 靠谱得多
+        val tool = e.optString("tool")
+        val arg = e.optString("arg")
         // 常驻通知要跟着变 —— 胶囊上显示的就是它。顺便记下「从什么时候开始等」，给升级重提醒用
         if (kind == "needs") {
             waiting += session
@@ -171,7 +176,8 @@ class EventService : Service() {
         if (kind == "needs") {
             // 选项一律从屏幕读，绝不预设（把「拒绝」写死成 2 = 点一下就永久放行）；读不出就只留「点开去看」
             val pending = if (full.isNotBlank()) runCatching { SessionProbe.pending(ssh, full) }.getOrNull() else null
-            postNeeds(host, full, session, e.optString("cwd"), pending, mins = 0, alert = true, detail = detail, preview = preview)
+            postNeeds(host, full, session, e.optString("cwd"), pending, mins = 0, alert = true,
+                      detail = detail, preview = preview, tool = tool, arg = arg)
         } else {
             postDone(host, full, session, e.optString("cwd"), preview)
         }
@@ -189,7 +195,7 @@ class EventService : Service() {
      * 决策按钮（从屏幕读的选项）+ **回一句**（自由文本，顺带白送语音：RemoteInput 会露出输入法麦克风）+ **静音**。
      * @param alert true = 要响（首发 / 升级重提醒）；false = 只更新不打扰
      */
-    private fun postNeeds(host: Host, full: String, short: String, cwd: String, pending: Pending?, mins: Int, alert: Boolean, detail: String = "", preview: String = "") {
+    private fun postNeeds(host: Host, full: String, short: String, cwd: String, pending: Pending?, mins: Int, alert: Boolean, detail: String = "", preview: String = "", tool: String = "", arg: String = "") {
         val open = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra("hostId", host.id); putExtra("session", full); putExtra("cwd", cwd)
@@ -212,8 +218,22 @@ class EventService : Service() {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(Notification.CATEGORY_CALL)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-        pending?.options?.take(3)?.forEach { o ->
-            b.addAction(0, "${o.number}. ${o.label.take(16)}", answerIntent(host, full, o, pending.fingerprint))
+        // ⚠️ **危险动作不给一键批。**
+        //
+        // 我们原来只防「提示变了」（#53 加指纹校验）—— 那是**机器侧的过期**。
+        // 没防的是**人麻木了**：锁屏上连点几次「批准」是肌肉记忆，
+        // 而事故靠的从来不是绕过校验，是「你正忙着，顺手点了」。
+        // 业界叫这个「批准疲劳」。
+        //
+        // 所以 `rm -rf` / force-push / 动 `authorized_keys` 这类**不给按钮**，
+        // 只留「回一句」和「静音」—— 想批就得点开看清楚。
+        // ⚠️ 真踩过：脚本把用户手机的公钥从 authorized_keys 里删了（#65）。
+        // 那种操作批错了，你连补救都进不去。
+        val oneTap = Risky.oneTapOk(tool, arg) && !Risky.matches(what)
+        if (oneTap) {
+            pending?.options?.take(3)?.forEach { o ->
+                b.addAction(0, "${o.number}. ${o.label.take(16)}", answerIntent(host, full, o, pending.fingerprint))
+            }
         }
         b.addAction(replyAction(host, full))
         b.addAction(0, t("静音"), muteIntent(host, full, short))

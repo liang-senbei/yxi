@@ -17,8 +17,13 @@ SETTINGS="${HOME}/.claude/settings.json"
 EVENTS_DIR="${HOME}/.yxi"
 EVENTS="${EVENTS_DIR}/events.jsonl"
 
-# 这三种事件才值得让手机响。PreToolUse 之类每秒好几次，注册了等于把手机变成骚扰源
-EVENTS_LIST='Stop Notification SessionEnd'
+# 这几种事件才值得让手机响。PreToolUse 之类每秒好几次，注册了等于把手机变成骚扰源。
+#
+# ⚠️ `PermissionRequest` 是**为了通知正文**加的：它带 `tool_input`，
+# 也就是「Claude 到底想跑哪条命令」的原文。没有它，通知只能写一句
+# 「需要你」，用户得点开 App 才知道要批什么 —— 那这条通知就白发了。
+# 实测它**只在提示真的渲染出来时才触发**，比 Notification 准。
+EVENTS_LIST='Stop Notification SessionEnd PermissionRequest'
 
 uninstall() {
   python3 - "$SETTINGS" <<'PY'
@@ -108,8 +113,19 @@ for ev in events:
                   for g in groups for h in g.get("hooks", []))
     if already: continue
     # 单独一组，跟别人（比如 cc-state）的 hook 井水不犯河水
-    # async=true：Claude Code 不等它返回 —— 通知这件事没有任何理由拖慢正事
-    groups.append({"hooks": [{"type": "command", "command": hook, "async": True}]})
+    # ⚠️⚠️ async=true 不只是「别拖慢正事」，它是一道**结构性护栏**：
+    # 带了它 hook 就无法阻塞、也就无法返回 permissionDecision。
+    # 实测阻塞式 hook 返回 allow 时，**屏幕上一个提示都不曾出现** ——
+    # 「自动放行」会变成一个 if 写错就发生、且事后查不出来的事；
+    # 而且阻塞期间坐在键盘前的人**没有任何东西可以按**（桌面被废掉）。
+    # 见 TROUBLESHOOTING #145。**别去掉这个 true。**
+    g = {"hooks": [{"type": "command", "command": hook, "async": True}]}
+    # ⚠️ `Notification` 混着 `idle_prompt`（空闲 60 秒的提醒，文案是
+    # "Claude is waiting for your input"）—— 不加 matcher 的话，
+    # 一个闲了一分钟的会话也会把手机叫醒。这是「手机白响」的来源之一。
+    if ev == "Notification":
+        g["matcher"] = "permission_prompt|agent_needs_input"
+    groups.append(g)
     added.append(ev)
 settings.write_text(json.dumps(d, ensure_ascii=False, indent=2))
 print("· 注册了：" + (", ".join(added) if added else "（已经装过，没重复加）"))
