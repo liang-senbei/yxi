@@ -54,8 +54,15 @@ if [ "${1:-}" = "--publish" ]; then
   [ -f "$APK" ] || { echo "找不到 $APK"; exit 1; }
   mkdir -p "$EVENTS_DIR"
   install -m 644 "$APK" "$EVENTS_DIR/Yxi.apk"
-  python3 -c 'import json,sys,pathlib; pathlib.Path(sys.argv[1]).write_text(json.dumps({"versionCode":int(sys.argv[2]),"versionName":sys.argv[3],"file":"Yxi.apk","notes":sys.argv[4]},ensure_ascii=False,indent=1))' \
-    "$EVENTS_DIR/latest.json" "$CODE" "$NAME" "$NOTES"
+  # ⚠️ **清单里的文件名带版本号**（`Yxi-78.apk`）。
+  #    固定叫 Yxi.apk 的话，Cloudflare 会把那个 URL 缓存 4 小时 ——
+  #    清单说有新版、下下来还是上一版，手机上表现为「更新了个寂寞」。
+  #    带上版本号 = 每次发布都是一个 CDN 没见过的新 URL，结构上不可能拿到旧包。
+  #    见 TROUBLESHOOTING #146。App 读的是清单里的 `file` 字段，所以老版本也能跟上。
+  VER_APK="Yxi-${CODE}.apk"
+  cp -f "$EVENTS_DIR/Yxi.apk" "$EVENTS_DIR/$VER_APK"
+  python3 -c 'import json,sys,pathlib; pathlib.Path(sys.argv[1]).write_text(json.dumps({"versionCode":int(sys.argv[2]),"versionName":sys.argv[3],"file":sys.argv[5],"notes":sys.argv[4]},ensure_ascii=False,indent=1))' \
+    "$EVENTS_DIR/latest.json" "$CODE" "$NAME" "$NOTES" "$VER_APK"
   echo "· 发布好了：$EVENTS_DIR/Yxi.apk（$(du -h "$EVENTS_DIR/Yxi.apk" | cut -f1)）"
   echo "  清单 → versionCode $CODE / $NAME"
   echo "  ⚠️ versionCode 必须比上一版大 —— 手机只比这个数，versionName 只给人看。"
@@ -74,15 +81,40 @@ if [ "${1:-}" = "--publish" ]; then
     echo "  ⚠️ 连不上 hk13，跳过公网同步 —— 手机上还是旧包。"
   else
     DST="/var/www/yxi/$(cat "$TOKEN")"
-    scp -q "$EVENTS_DIR/Yxi.apk" "$EVENTS_DIR/latest.json" "hk13:$DST/"
+    scp -q "$EVENTS_DIR/Yxi.apk" "$EVENTS_DIR/$VER_APK" "$EVENTS_DIR/latest.json" "hk13:$DST/"
     HERE=$(sha256sum "$EVENTS_DIR/Yxi.apk" | cut -d" " -f1)
-    THERE=$(ssh hk13 "sha256sum $DST/Yxi.apk" | cut -d" " -f1)
+    THERE=$(ssh hk13 "sha256sum $DST/$VER_APK" | cut -d" " -f1)
     if [ "$HERE" = "$THERE" ]; then
       echo "  · 已同步到 hk13，sha256 一致：${HERE:0:12}…"
     else
       echo "  ❌ hk13 上的包对不上！本地 ${HERE:0:12}… ≠ 远端 ${THERE:0:12}…"
       echo "     手机会下到错的东西，手动查一下 $DST"
       exit 1
+    fi
+
+    # 下载页那个按钮也指到带版本号的文件上 —— 它原来写死 /Yxi.apk，
+    # 同样会被 CDN 缓存住（实测新用户从页面下到的是三个版本前的包）。
+    ssh hk13 "sed -i -E 's#href=\"/Yxi(-[0-9]+)?\.apk\"#href=\"/$VER_APK\"#g' /var/www/yxi/index.html 2>/dev/null || true"
+
+    # ⚠️ **最后走一遍公网真下载，看 versionCode 对不对。**
+    #    前面所有校验都是「源站上是对的」；用户走的是 CDN。
+    #    #69 的教训是「传完不校验 = 没传」，#146 补一句：**校验源站不等于校验用户看到的**。
+    if command -v curl >/dev/null && command -v aapt2 >/dev/null 2>&1 || [ -x /opt/android-sdk/build-tools/37.0.0/aapt2 ]; then
+      AAPT=$(command -v aapt2 || echo /opt/android-sdk/build-tools/37.0.0/aapt2)
+      TMPAPK=$(mktemp); BASE="https://yxi.keuury.com/$(cat "$TOKEN")"
+      if curl -fsS --max-time 180 -o "$TMPAPK" "$BASE/$VER_APK"; then
+        GOT=$("$AAPT" dump badging "$TMPAPK" 2>/dev/null | grep -oE "versionCode='[0-9]+'" | grep -oE '[0-9]+')
+        if [ "$GOT" = "$CODE" ]; then
+          echo "  · 公网真下一遍：versionCode $GOT ✓"
+        else
+          echo "  ❌ 公网下到的是 versionCode $GOT，不是 $CODE —— 用户拿不到这一版！"
+          echo "     多半是 CDN 缓存。查 cf-cache-status，或去 Cloudflare 清一下缓存。"
+          rm -f "$TMPAPK"; exit 1
+        fi
+      else
+        echo "  ⚠️ 公网下载没成功，没法确认用户能不能拿到 —— 手动试一下 $BASE/$VER_APK"
+      fi
+      rm -f "$TMPAPK"
     fi
   fi
   exit 0

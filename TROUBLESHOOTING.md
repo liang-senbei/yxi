@@ -2905,3 +2905,39 @@ CSS 更惨：`color: #fff` 里的 `#` 不是注释符，但按「行注释」规
 第二次踩了。`awk 1` 每读完一个文件补一个换行，两个问题一起解决，所以它是正解不是巧合。
 
 **怎么避开**：shell 里读一批文件，默认用 `awk 1`，别用 `for…cat`，也别用裸 `cat *`。
+
+## #145 分组功能整个失灵，但每一步看着都对 —— `GROUPS` 是 bash 内置变量
+
+**症状**：`yxi-hub` 里 `GROUPS="$HOME/.yxi/groups.json"`，赋值那行 `set -x` 打出来完全正确，
+但函数里再用 `$GROUPS` 就变成了 `0`。不报错，`set -euo pipefail` 也拦不住。
+
+**根因**：**`GROUPS` 是 bash 的内置特殊变量**（当前用户所属的组 ID 数组，跟 `UID`/`PPID` 一类）。
+你能赋值，但 bash 会在后续把它重新填成真实的组 ID —— root 上就是 `0`。
+
+**修法**：换个名字（`GROUPS_FILE`）。
+
+**怎么避开**：shell 变量别用这些名字 —— `GROUPS` `UID` `EUID` `PPID` `RANDOM` `SECONDS`
+`LINENO` `HOSTNAME` `PWD` `OLDPWD` `IFS` `HOME` `PATH`。拿不准就加个后缀（`_FILE` / `_DIR`）。
+症状永远是「值莫名其妙变了」，而不是报错。
+
+## #146 发了新版，用户下到的还是旧包 —— Cloudflare 把 APK 缓存了 4 小时
+
+**症状**：`install.sh --publish` 全绿（源站 sha256 一致），清单 `latest.json` 也是新的 versionCode，
+但手机点更新下下来还是上一版。页面按钮下到的更旧（发了三版之后还在给 76）。
+
+**根因**：源站 nginx **完全没发 `Cache-Control`**，Cloudflare 就按自己的默认给 `.apk`
+缓存 4 小时（`cf-cache-status: HIT` / `max-age=14400`）。文件名固定叫 `Yxi.apk` ——
+同一个 URL，内容换了 CDN 不知道。
+
+⚠️ 补 `Cache-Control: no-store` **救不了当下**：那只影响以后的缓存填充，
+已经躺在边缘的那份要等它自己过期（或者去 Cloudflare 后台清）。
+
+**修法（结构性的，不依赖任何 CDN 配置）**：发布的文件名带上 versionCode ——
+`Yxi-78.apk`，清单的 `file` 字段指它。**每次发布都是一个 CDN 没见过的新 URL**，
+拿到旧包在结构上就不可能。带版本号的那个还能放心长缓存（`immutable`）。
+nginx 加一条 `location ~ ^/Yxi-([0-9]+)\.apk$`，下载页的按钮由 install.sh 每次 sed 成新名字。
+
+**更重要的一条教训**：`--publish` 原来只校验「源站上的文件对不对」。
+**源站对 ≠ 用户拿到的对** —— 中间隔着一层 CDN。现在最后一步是
+**走公网真下一遍、用 aapt2 读 versionCode 比对**，对不上就红着脸退出。
+（#69 说「传完不校验 = 没传」，这条补上后半句：**校验源站不等于校验用户看到的**。）

@@ -19,6 +19,7 @@ HOOK = os.path.expanduser("~/.local/bin/yxi-hook")
 YXI = os.path.expanduser("~/.yxi")
 EVENTS = os.path.join(YXI, "events.jsonl")
 SESSION = "cc-yxi-failclosed"
+HUB = os.path.expanduser("~/.local/bin/yxi-hub")
 MARKER = "/tmp/yxi-fail-closed-MARKER"
 
 
@@ -164,6 +165,94 @@ def test_seed_never_evicts_a_real_phone():
         "模拟器自己的钥匙要用 yxi@emulator 打标签，过滤也只过滤这个标签。"
     )
     print("✓ seed.sh 不会误删真手机的公钥")
+
+
+def _hub(cmd, sess, env_home):
+    """在某个 tmux 会话**里面**跑一句 yxi-hub，拿它的输出。
+
+    ⚠️ 必须真在 tmux 里跑 —— `yxi-hub` 靠 `tmux display-message` 认自己是谁，
+    在外面调它永远认不出来，测了等于没测。
+    """
+    out = f"/tmp/yxi-hub-test-{sess}.out"
+    if os.path.exists(out):
+        os.remove(out)
+    # ⚠️ **等的是结束标记，不是「文件出现了」。** `>` 一重定向文件就存在了，
+    #    内容还没写。照着文件存在去读，读到的是半截输出 —— 而半截输出会让
+    #    断言以「功能坏了」的样子失败，实际只是读早了。（自己踩过一次。）
+    subprocess.run(["tmux", "send-keys", "-t", sess,
+                    f"HOME={env_home} {HUB} {cmd} > {out} 2>&1; echo __完__ >> {out}",
+                    "Enter"], check=True)
+    for _ in range(100):
+        time.sleep(0.1)
+        if os.path.exists(out) and "__完__" in open(out).read():
+            return open(out).read().replace("__完__\n", "")
+    return open(out).read() if os.path.exists(out) else ""
+
+
+def test_hub_only_talks_inside_the_group():
+    """**同组才能发**。这是「分组」和「所有会话」的唯一区别。
+
+    这条塌了的表现很隐蔽：分组看着还在、UI 一切正常，但任何 agent 都能
+    给任何会话送键 —— 组从协作边界退化成一个纯视觉标签，而用户以为它是边界。
+    所以这里用三个真 tmux 会话端到端走一遍，不 mock。
+    """
+    if not shutil.which("tmux"):
+        print("· 没装 tmux，跳过")
+        return
+    assert os.path.exists(HUB), f"先跑 server/install.sh —— 找不到 {HUB}"
+    home = "/tmp/yxi-hub-test-home"
+    a, b, c = "yxitest-a", "yxitest-b", "yxitest-c"
+    try:
+        shutil.rmtree(home, ignore_errors=True)
+        os.makedirs(os.path.join(home, ".yxi"))
+        # a 和 b 一组，c 是组外的
+        with open(os.path.join(home, ".yxi", "groups.json"), "w") as f:
+            json.dump({"v": 1, "groups": {"测试组": [a, b]}}, f)
+        for s in (a, b, c):
+            subprocess.run(["tmux", "kill-session", "-t", s], capture_output=True)
+            subprocess.run(["tmux", "new-session", "-d", "-s", s], check=True)
+        # ⚠️ 等**每个 shell 真的能收键**再往下。固定 sleep 不行 ——
+        #    这台机器的 .bashrc 不轻，起得慢的那次键会被吞掉。
+        for s in (a, b, c):
+            ready = f"/tmp/yxi-hub-ready-{s}"
+            if os.path.exists(ready):
+                os.remove(ready)
+            for _ in range(60):
+                subprocess.run(["tmux", "send-keys", "-t", s, f"touch {ready}", "Enter"],
+                               capture_output=True)
+                time.sleep(0.25)
+                if os.path.exists(ready):
+                    break
+            assert os.path.exists(ready), f"{s} 的 shell 一直没起来"
+            os.remove(ready)
+
+        who = _hub("who", a, home)
+        assert "测试组" in who, f"who 认不出自己的组:\n{who}"
+        assert b in who, f"who 没列出同组的 {b}:\n{who}"
+        assert c not in who, f"who 把组外的 {c} 也算进来了:\n{who}"
+
+        # 同组的：发得出去，而且对方屏幕上真的出现了
+        said = _hub(f'say {b} "组内握手"', a, home)
+        assert "已发给" in said, f"发给同组失败了:\n{said}"
+        time.sleep(0.5)
+        pane = subprocess.run(["tmux", "capture-pane", "-p", "-t", b],
+                              capture_output=True, text=True).stdout
+        assert "组内握手" in pane, f"{b} 的屏幕上没出现那句话:\n{pane[-400:]}"
+        assert a in pane, f"没署名是谁发的 —— 对方不知道找谁回:\n{pane[-400:]}"
+
+        # 组外的：必须拒绝
+        refused = _hub(f'say {c} "越界"', a, home)
+        assert "不在你的组里" in refused, (
+            f"给组外的 {c} 发居然成了 —— 分组不是边界了:\n{refused}")
+        time.sleep(0.4)
+        pane_c = subprocess.run(["tmux", "capture-pane", "-p", "-t", c],
+                                capture_output=True, text=True).stdout
+        assert "越界" not in pane_c, f"嘴上说拒绝，键还是送进去了:\n{pane_c[-400:]}"
+        print("✓ yxi-hub 只在组内送得动，组外真的送不进去")
+    finally:
+        for s in (a, b, c):
+            subprocess.run(["tmux", "kill-session", "-t", s], capture_output=True)
+        shutil.rmtree(home, ignore_errors=True)
 
 
 if __name__ == "__main__":

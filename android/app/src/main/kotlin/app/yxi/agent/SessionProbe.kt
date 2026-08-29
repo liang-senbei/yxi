@@ -85,6 +85,10 @@ object SessionProbe {
         s tr_begin
         find "${'$'}HOME/.claude/projects" -maxdepth 2 -name '*.jsonl' -printf '%h\t%T@\n' 2>/dev/null | awk -F'\t' '{n=split(${'$'}1,a,"/"); d=a[n]; t=int(${'$'}2); if(t>m[d]) m[d]=t} END{for(k in m) printf "%s\t%d\n", k, m[k]}' 2>/dev/null || true
         s tr_end
+        s gp_begin
+        # 分组表（手机写、组里的 agent 读）。就一个小文件，几乎不花时间。
+        cat ${'$'}HOME/.yxi/groups.json 2>/dev/null || true
+        s gp_end
     """.trimIndent()
 
     suspend fun snapshot(session: SshSession): List<Session> {

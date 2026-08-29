@@ -358,13 +358,29 @@ fun SessionsScreen(
                 val base = dir.trimEnd('/').substringAfterLast('/').ifBlank { "work" }
                     .filter { it.isLetterOrDigit() || it in "._-" }.ifBlank { "work" }
                 val full = "cc-$base"
-                val d = dir.replace("'", "'\''")
                 scope.launch {
-                    // 有就直接开，没有就在那个目录新建并跑起 claude
-                    runCatching {
-                        s.exec("tmux has-session -t '$full' 2>/dev/null || { tmux new-session -d -s '$full' -c '$d'; tmux send-keys -t '$full' 'claude' Enter; }")
+                    // ⚠️ **不信 tmux 的退出码。** 目录不存在时它照样返回 0，然后开在 $HOME ——
+                    // 见 Dirs.createCommand。这里只认它自己回报的那行结果，
+                    // 开成了才跳进去；没开成就把原因摆在会话页顶上，别让人对着空会话猜。
+                    val made = app.yxi.ssh.catching { s.exec(app.yxi.agent.Dirs.createCommand(dir, full)) }
+                        .map { app.yxi.agent.Dirs.madeFrom(it) }
+                        .getOrElse { app.yxi.agent.Dirs.Made.Failed("unknown", it.message.orEmpty()) }
+                    when (made) {
+                        is app.yxi.agent.Dirs.Made.Failed -> status = t("没开成：%s").format(
+                            when (made.code) {
+                                "nodir" -> t("建不了这个目录 —— 没权限，或者上级路径不对")
+                                "failed" -> t("tmux 起不来这个会话")
+                                "wrongdir" -> t("tmux 没开在你指定的目录（跑到 %s 去了），已经撤销")
+                                    .format(made.detail.ifBlank { t("别处") })
+                                "noresult" -> t("没拿到结果 —— 连接可能断了")
+                                else -> made.detail.ifBlank { t("说不上来") }
+                            },
+                        )
+                        else -> {
+                            runCatching { SessionProbe.snapshot(s) }.onSuccess(onSessions)
+                            onOpenChat(full, dir)
+                        }
                     }
-                    onOpenChat(full, dir)
                 }
             },
         )

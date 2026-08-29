@@ -53,4 +53,79 @@ object Dirs {
             .sortedBy { it.substringAfterLast('/').lowercase() }
             .toList()
     }
+
+    /** shell 单引号里安全地嵌一个值。⚠️ 是 `'\''` 四个字符 —— 少一个反斜杠就成了 `'''`，是错的。 */
+    private fun q(v: String) = v.replace("'", "'\\''")
+
+    const val TAG = "__YXI_NEW__"
+
+    /**
+     * 「在这个目录开一个新会话」的命令。
+     *
+     * ⚠️ **`tmux new-session -c <不存在的目录>` 会返回 0，然后跑到 `$HOME` 去。**
+     * 不报错、不非零退出 —— 调用方 `runCatching` 看到的是成功，
+     * 于是 App 高高兴兴跳进一个根本不在你指定位置的会话。
+     * 用户报的就是这个：想在 `/root/src/workspace/logto` 开，最后开在了 `/root`。
+     *
+     * 所以这里做两件事：
+     *  1. **先 `mkdir -p`** —— 目录不存在就建出来（用户要的「没有就直接创建」）
+     *  2. **建完回头核对 `pane_current_path`** —— 不信 tmux 的退出码，只信它真正落在哪。
+     *     对不上就把会话杀掉再报错，不留一个「名字对、位置错」的会话在那儿骗人。
+     *
+     * 两边都过一遍 `cd && pwd -P`，免得 `/root/src` 这种软链把比较搞砸。
+     */
+    fun createCommand(dir: String, session: String): String {
+        val d = q(dir.trimEnd('/').ifBlank { "/" })
+        val n = q(session)
+        return """
+            d='$d'; n='$n'
+            mkdir -p "${'$'}d" 2>/dev/null
+            [ -d "${'$'}d" ] || { echo '$TAG:nodir'; exit 0; }
+            if tmux has-session -t "${'$'}n" 2>/dev/null; then echo '$TAG:exists'; exit 0; fi
+            tmux new-session -d -s "${'$'}n" -c "${'$'}d" 2>/dev/null || { echo '$TAG:failed'; exit 0; }
+            want=${'$'}(cd "${'$'}d" 2>/dev/null && pwd -P)
+            got=${'$'}(tmux display-message -p -t "${'$'}n" '#{pane_current_path}' 2>/dev/null)
+            got=${'$'}(cd "${'$'}got" 2>/dev/null && pwd -P)
+            if [ "${'$'}want" != "${'$'}got" ]; then
+              tmux kill-session -t "${'$'}n" 2>/dev/null
+              echo "$TAG:wrongdir:${'$'}got"; exit 0
+            fi
+            tmux send-keys -t "${'$'}n" 'claude' Enter
+            echo '$TAG:ok'
+        """.trimIndent()
+    }
+
+    /**
+     * [createCommand] 的结果。只有 [Made.Ok] / [Made.Exists] 才可以跳进那个会话。
+     *
+     * ⚠️ 失败只带**代号**，不带话术 —— [Dirs] 是纯逻辑（能单测、拿不到 Context），
+     * 在这儿写中文的话，英文界面会原样吐中文，而 `dev/i18n-check.sh` 看不见它。
+     * 话术在 UI 层用 `t()` 拼。
+     */
+    sealed interface Made {
+        object Ok : Made
+        object Exists : Made
+        /** @param code nodir / failed / wrongdir / noresult / unknown */
+        data class Failed(val code: String, val detail: String = "") : Made
+    }
+
+    /**
+     * 读 [createCommand] 的输出。
+     *
+     * ⚠️ **认不出来一律当失败**（fail-closed）。跳进一个没建成的会话，
+     * 用户看到的是一片空白加「连不上」，比直接说「没开成」难查得多。
+     */
+    fun madeFrom(out: String): Made {
+        val line = out.lineSequence().lastOrNull { it.trim().startsWith(TAG) }?.trim()
+            ?: return Made.Failed("noresult")
+        val body = line.removePrefix("$TAG:")
+        return when {
+            body == "ok" -> Made.Ok
+            body == "exists" -> Made.Exists
+            body == "nodir" -> Made.Failed("nodir")
+            body == "failed" -> Made.Failed("failed")
+            body.startsWith("wrongdir") -> Made.Failed("wrongdir", body.substringAfter("wrongdir:"))
+            else -> Made.Failed("unknown", body)
+        }
+    }
 }
