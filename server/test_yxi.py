@@ -182,7 +182,7 @@ def _hub(cmd, sess, env_home):
     subprocess.run(["tmux", "send-keys", "-t", sess,
                     f"HOME={env_home} {HUB} {cmd} > {out} 2>&1; echo __完__ >> {out}",
                     "Enter"], check=True)
-    for _ in range(100):
+    for _ in range(300):
         time.sleep(0.1)
         if os.path.exists(out) and "__完__" in open(out).read():
             return open(out).read().replace("__完__\n", "")
@@ -210,6 +210,14 @@ def test_hub_only_talks_inside_the_group():
             json.dump({"v": 1, "groups": {"测试组": [a, b]}}, f)
         for s in (a, b, c):
             subprocess.run(["tmux", "kill-session", "-t", s], capture_output=True)
+            # ⚠️ 等它**真的没了**再建同名的。kill 是异步的，紧接着建同名会话时
+            # 旧 pane 可能还在，键会送进将死的那个 —— 表现为「输出是空的」，
+            # 看起来像功能坏了，其实只是测试自己在打架。
+            for _ in range(40):
+                if subprocess.run(["tmux", "has-session", "-t", s],
+                                  capture_output=True).returncode != 0:
+                    break
+                time.sleep(0.1)
             subprocess.run(["tmux", "new-session", "-d", "-s", s], check=True)
         # ⚠️ 等**每个 shell 真的能收键**再往下。固定 sleep 不行 ——
         #    这台机器的 .bashrc 不轻，起得慢的那次键会被吞掉。

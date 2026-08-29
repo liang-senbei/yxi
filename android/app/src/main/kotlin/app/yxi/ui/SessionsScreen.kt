@@ -7,7 +7,9 @@ import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.ui.graphics.graphicsLayer
@@ -84,6 +86,11 @@ fun SessionsScreen(
     // 20 个会话的时候还是列表能一眼扫完（决策 D16b 里就写明了这个代价）
     var floating by remember(host.id) { mutableStateOf(false) }
     var pinned by remember(host.id) { mutableStateOf(Pinned.get(ctx, host.id)) }
+    var view by remember(host.id) { mutableStateOf(Board.view(ctx, host.id)) }
+    var collapsed by remember(host.id) { mutableStateOf(Board.collapsed(ctx, host.id)) }
+    var groups by remember(host.id) { mutableStateOf(app.yxi.agent.Groups.Table()) }
+    /// 正在给哪个会话选组
+    var grouping by remember { mutableStateOf<Session?>(null) }
     var muted by remember(host.id) { mutableStateOf(Mute.get(ctx, host.id)) }
     var refreshing by remember { mutableStateOf(false) }
     // 「回它一句」目标 —— 非空就弹底部输入框，送键到那个会话（不进对话）
@@ -100,10 +107,13 @@ fun SessionsScreen(
             // 而刷新和点击之间只有几十毫秒 —— 我自己就因此点进过别人的会话。
             // 用户看到的位置和点下去的位置必须是同一个。
             if (!listState.isScrollInProgress) {
-                runCatching { SessionProbe.snapshot(s) }
+                runCatching { SessionProbe.snapshotFull(s) }
                     // ⚠️ 顺手存一份给工作区左上角那个下拉用（[app.yxi.agent.Recent]）——
                     // 它原来是「点了才去抓」，打开菜单要干等一趟 SSH 往返
-                    .onSuccess { app.yxi.agent.Recent.put(host.id, it); onSessions(it); status = "" }
+                    .onSuccess {
+                        app.yxi.agent.Recent.put(host.id, it.sessions)
+                        onSessions(it.sessions); groups = it.groups; status = ""
+                    }
                     .onFailure {
                         if (it is kotlinx.coroutines.CancellationException) throw it
                         status = t("刷新失败：%s").format(it.message)
@@ -167,7 +177,13 @@ fun SessionsScreen(
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // ⚠️ **能横向滑。** 这排药丸原来就已经顶到窄屏边上了（＋/悬浮/文件/终端），
+            // 再加一个「状态/分组」必挤爆。窄屏折行在这个项目上翻过四次车，
+            // 与其赌宽度够，不如让它滑。
+            Row(
+                Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 // ＋ 从手机拉起一个新会话（在某目录跑起 claude），不用先到电脑前
                 Surface(
                     color = MaterialTheme.colorScheme.primaryContainer, shape = Pill,
@@ -176,6 +192,25 @@ fun SessionsScreen(
                     Box(Modifier.padding(horizontal = 15.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
                         Text("＋", style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    }
+                }
+                // 换个轴看：按状态（谁在等我）⇄ 按分组（这摊活儿都谁在干）
+                Surface(
+                    color = if (view == BoardView.Group) MaterialTheme.colorScheme.secondaryContainer
+                    else MaterialTheme.colorScheme.surfaceContainer,
+                    shape = Pill,
+                    modifier = Modifier.height(44.dp).clip(Pill).clickable {
+                        view = if (view == BoardView.Group) BoardView.State else BoardView.Group
+                        Board.setView(ctx, host.id, view)
+                    },
+                ) {
+                    Box(Modifier.padding(horizontal = 14.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                        Text(
+                            if (view == BoardView.Group) t("分组") else t("状态"),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = if (view == BoardView.Group) MaterialTheme.colorScheme.onSecondaryContainer
+                            else MaterialTheme.colorScheme.onSurface,
+                        )
                     }
                 }
                 Surface(
@@ -248,8 +283,8 @@ fun SessionsScreen(
                 refreshing = true
                 if (ssh == null) onRetry() else scope.launch {
                     val s = ssh
-                    if (s != null) runCatching { SessionProbe.snapshot(s) }
-                        .onSuccess { onSessions(it); status = "" }
+                    if (s != null) runCatching { SessionProbe.snapshotFull(s) }
+                        .onSuccess { onSessions(it.sessions); groups = it.groups; status = "" }
                     // 转一下让人看见它确实动了 —— 一闪而过的刷新等于没反馈
                     delay(400)
                 }
@@ -293,6 +328,42 @@ fun SessionsScreen(
                     )
                 }
             }
+            if (view == BoardView.Group) {
+                // ⚠️ 组按名字排；**没编进任何组的单独兜底放最后** ——
+                // 不兜的话，刚建完组的那一刻大部分会话会凭空消失，看着像丢了。
+                val inAny = groups.groups.values.flatten().toSet()
+                val named = groups.groups.keys.sorted()
+                (named + listOf(null)).forEach { g ->
+                    val members = if (g == null) sessions.filter { it.name !in inAny }
+                    else sessions.filter { it.name in groups.groups[g].orEmpty() }
+                    // 空组也画头 —— 建了组还没放人时得看得见它存在
+                    if (g == null && members.isEmpty()) return@forEach
+                    val label = g ?: t("没编组")
+                    val shut = label in collapsed
+                    item(key = "gh-$label") {
+                        GroupNameHeader(label, members.size, shut) {
+                            collapsed = if (shut) collapsed - label else collapsed + label
+                            Board.setCollapsed(ctx, host.id, collapsed)
+                        }
+                    }
+                    if (!shut) items(members.size, key = { "$label/${members[it].name}" }) { i ->
+                        SessionCard(
+                            members[i],
+                            modifier = Modifier.animateItem(),
+                            onOpen = { onOpenChat(members[i].name, members[i].cwd) },
+                            onReply = { replyTo = members[i] },
+                            pinned = members[i].name in pinned,
+                            onPin = {
+                                val n = members[i].name
+                                pinned = if (n in pinned) pinned - n else pinned + n
+                                Pinned.set(ctx, host.id, pinned)
+                            },
+                            onLongPress = { grouping = members[i] },
+                            muted = members[i].name in muted,
+                        )
+                    }
+                }
+            } else {
             listOf(SessionState.NeedsYou, SessionState.Working, SessionState.Done, SessionState.Idle)
                 .forEach { st ->
                     val group = sessions.filter { it.state == st && it.name !in pinned }
@@ -307,10 +378,12 @@ fun SessionsScreen(
                             onOpen = { onOpenChat(group[i].name, group[i].cwd) },
                             onReply = { replyTo = group[i] },
                             onPin = { pinned = pinned + group[i].name; Pinned.set(ctx, host.id, pinned) },
+                            onLongPress = { grouping = group[i] },
                             muted = group[i].name in muted,
                         )
                     }
                 }
+            }
         }
         }
     }
@@ -341,6 +414,34 @@ fun SessionsScreen(
                 muted = Mute.get(ctx, host.id)
             },
             onDismiss = { replyTo = null },
+        )
+    }
+
+    // 给某个会话选组。存回服务器后**给组里每个人发一句「你有队友了」** ——
+    // 这一句就是「打通」发生的那一刻：不发的话，分组对 agent 而言根本不存在，
+    // 它不会主动去读 groups.json，也就不知道自己能 yxi-hub say 谁。
+    grouping?.let { target ->
+        GroupPicker(
+            session = target.name,
+            table = groups,
+            onDismiss = { grouping = null },
+            onSave = { table, joined ->
+                grouping = null
+                groups = table                     // 先画出来，别让人等一趟 SSH
+                val s = ssh ?: return@GroupPicker
+                scope.launch {
+                    runCatching {
+                        app.yxi.agent.Groups.save(s, table)
+                        if (joined != null) {
+                            val n = app.yxi.agent.Groups.announce(s, table, joined)
+                            if (n > 0) status = t("「%s」组已打通，通知了 %d 个").format(joined, n)
+                        }
+                    }.onFailure {
+                        if (it is kotlinx.coroutines.CancellationException) throw it
+                        status = t("分组没存上：%s").format(it.message ?: "")
+                    }
+                }
+            },
         )
     }
 
@@ -541,6 +642,11 @@ private fun SessionCard(
      * 其实是长按松手被当成点击开了对话）。拎起来的一刻就把点击关掉，就不会误触。
      */
     openEnabled: Boolean = true,
+    /**
+     * 长按 = 给它选组。
+     * ⚠️ 置顶那块**不传这个**：那儿长按是拖动排序，两个手势会打架。
+     */
+    onLongPress: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -549,7 +655,9 @@ private fun SessionCard(
         shadowElevation = if (dragging) 8.dp else 0.dp,
         // ⚠️ **长按不在这里绑发消息** —— 长按归「拖动排序」，由外面的 Modifier 接管。
         // 轻点 = 进对话；右侧气泡按钮 = 不进对话直接回一句。两条路各自独立。
-        modifier = modifier.fillMaxWidth().clickable(enabled = openEnabled, onClick = onOpen),
+        modifier = modifier.fillMaxWidth().combinedClickable(
+            enabled = openEnabled, onClick = onOpen, onLongClick = onLongPress,
+        ),
     ) {
         Row(
             Modifier.padding(16.dp, 14.dp),
@@ -809,6 +917,148 @@ private fun NewSessionDialog(
         confirmButton = {
             TextButton(enabled = path.isNotBlank(), onClick = { onCreate(path.trim()) }) { Text(t("开起来")) }
         },
+        dismissButton = { TextButton(onDismiss) { Text(t("取消")) } },
+    )
+}
+
+/**
+ * 看板的两种看法。
+ *
+ * ⚠️ 分组不是替代按状态看，是**换个轴**：按状态看回答「谁在等我」，
+ * 按分组看回答「这摊活儿都谁在干」。所以是切换，不是取代。
+ */
+internal enum class BoardView { State, Group }
+
+internal object Board {
+    private fun p(ctx: android.content.Context) =
+        ctx.getSharedPreferences("yxi", android.content.Context.MODE_PRIVATE)
+
+    fun view(ctx: android.content.Context, hostId: String): BoardView =
+        if (p(ctx).getString("boardview:$hostId", "") == "group") BoardView.Group else BoardView.State
+
+    fun setView(ctx: android.content.Context, hostId: String, v: BoardView) =
+        p(ctx).edit().putString("boardview:$hostId", if (v == BoardView.Group) "group" else "state").apply()
+
+    /** 收起来的组名。⚠️ 存的是「收起的」不是「展开的」—— 新建的组默认展开。 */
+    fun collapsed(ctx: android.content.Context, hostId: String): Set<String> =
+        p(ctx).getStringSet("collapsed:$hostId", emptySet())!!.toSet()
+
+    fun setCollapsed(ctx: android.content.Context, hostId: String, v: Set<String>) =
+        p(ctx).edit().putStringSet("collapsed:$hostId", v).apply()
+}
+
+/** 分组模式下的组头：名字 + 几个 + 收起/展开箭头。整行可点 = 收起展开。 */
+@Composable
+internal fun GroupNameHeader(
+    name: String,
+    n: Int,
+    collapsed: Boolean,
+    onToggle: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).clickable(onClick = onToggle)
+            .padding(4.dp, 10.dp, 4.dp, 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        // ⚠️ 用旋转的三角不用两个字符（▸/▾）—— 后者在不同机型上宽度不一，
+        // 会让整行标题左右跳。旋转是同一个字形，位置稳。
+        val deg by animateFloatAsState(if (collapsed) 0f else 90f, label = "arrow")
+        Text(
+            "▸",
+            Modifier.graphicsLayer { rotationZ = deg },
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.outline,
+        )
+        Text(name, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
+        Text(
+            "$n",
+            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+            color = MaterialTheme.colorScheme.outline,
+        )
+    }
+}
+
+/**
+ * 「这个会话归哪几个组」。
+ *
+ * ⚠️ **多选**：一个会话可以同时在好几个组里（用户明确要的）——
+ * 一个 agent 既在「后端」又在「上线」是常事，逼人二选一等于让分组没法用。
+ */
+@Composable
+internal fun GroupPicker(
+    session: String,
+    table: app.yxi.agent.Groups.Table,
+    onDismiss: () -> Unit,
+    onSave: (app.yxi.agent.Groups.Table, String?) -> Unit,
+) {
+    var t by remember { mutableStateOf(table) }
+    var fresh by remember { mutableStateOf("") }
+    /// 这一轮新加进的组 —— 保存后要给组里的人发「你有队友了」，只发变动的那个
+    var joined by remember { mutableStateOf<String?>(null) }
+    val mine = t.of(session).toSet()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(t("归到哪几个组")) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    t("同一个组里的 agent 能互相发消息（yxi-hub）。一个会话可以同时在好几个组里。"),
+                    style = MaterialTheme.typography.labelSmall, color = Dim,
+                )
+                if (t.groups.isNotEmpty()) Column(
+                    Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    t.groups.keys.sorted().forEach { g ->
+                        val on = g in mine
+                        Surface(
+                            color = if (on) MaterialTheme.colorScheme.secondaryContainer
+                            else MaterialTheme.colorScheme.surfaceContainerHigh,
+                            shape = Pill,
+                            modifier = Modifier.fillMaxWidth().clip(Pill).clickable {
+                                t = if (on) t.withoutMember(g, session) else t.withMember(g, session)
+                                joined = if (on) null else g
+                            },
+                        ) {
+                            Row(
+                                Modifier.padding(14.dp, 9.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(if (on) "✓" else "  ", style = MaterialTheme.typography.labelLarge)
+                                Text(g, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+                                Text(
+                                    "${t.groups[g]?.size ?: 0}",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                    color = Dim,
+                                )
+                            }
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    fresh, { fresh = it }, singleLine = true, shape = MaterialTheme.shapes.medium,
+                    placeholder = { Text(t("新建一个组…")) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (fresh.isNotBlank()) Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer, shape = Pill,
+                    modifier = Modifier.fillMaxWidth().clip(Pill).clickable {
+                        t = t.withMember(fresh.trim(), session); joined = fresh.trim(); fresh = ""
+                    },
+                ) {
+                    Text(
+                        t("建「%s」并把它放进去").format(fresh.trim()),
+                        Modifier.padding(14.dp, 9.dp),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton({ onSave(t, joined) }) { Text(t("存下")) } },
         dismissButton = { TextButton(onDismiss) { Text(t("取消")) } },
     )
 }

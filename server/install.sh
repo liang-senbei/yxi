@@ -11,8 +11,12 @@
 set -euo pipefail
 
 HOOK_SRC="$(cd "$(dirname "$0")" && pwd)/yxi-hook"
+HUB_SRC="$(cd "$(dirname "$0")" && pwd)/yxi-hub"
 BIN_DIR="${HOME}/.local/bin"
 HOOK_DST="${BIN_DIR}/yxi-hook"
+# 同组的 agent 靠它互相说话。⚠️ 装了才「打通」得起来 ——
+# 手机把分组写进 ~/.yxi/groups.json，但 agent 得有个东西去读它、去送键。
+HUB_DST="${BIN_DIR}/yxi-hub"
 SETTINGS="${HOME}/.claude/settings.json"
 EVENTS_DIR="${HOME}/.yxi"
 EVENTS="${EVENTS_DIR}/events.jsonl"
@@ -124,6 +128,7 @@ if [ "${1:-}" = "--uninstall" ]; then uninstall; exit 0; fi
 
 mkdir -p "$BIN_DIR" "$EVENTS_DIR"
 install -m 755 "$HOOK_SRC" "$HOOK_DST"
+[ -f "$HUB_SRC" ] && install -m 755 "$HUB_SRC" "$HUB_DST"
 touch "$EVENTS"; chmod 600 "$EVENTS"
 echo "· 装好 $HOOK_DST"
 

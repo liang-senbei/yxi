@@ -91,7 +91,17 @@ object SessionProbe {
         s gp_end
     """.trimIndent()
 
-    suspend fun snapshot(session: SshSession): List<Session> {
+    /** 一次抓取拿到的全部东西：会话 + 分组表。 */
+    data class Snap(val sessions: List<Session>, val groups: Groups.Table)
+
+    /**
+     * 只要会话。**七个调用点都只关心这个**，所以保持原样别动它们 ——
+     * 要分组表的（只有看板）走 [snapshotFull]。分组表跟会话是同一次抓取里带回来的，
+     * 不多花一个来回。
+     */
+    suspend fun snapshot(session: SshSession): List<Session> = snapshotFull(session).sessions
+
+    suspend fun snapshotFull(session: SshSession): Snap {
         val out = session.exec(SCRIPT)
         val tmux = extract(out, "tmux")
         val status = extract(out, "status")
@@ -174,7 +184,8 @@ object SessionProbe {
             }
         }
 
-        return tmux.lineSequence().filter { it.contains('|') }.mapNotNull { line ->
+        return Snap(
+            tmux.lineSequence().filter { it.contains('|') }.mapNotNull { line ->
             val p = line.split('|')
             if (p.size < 5) return@mapNotNull null
             val name = p[0]
@@ -191,7 +202,9 @@ object SessionProbe {
                 detail = st?.second?.takeIf { it.isNotBlank() } ?: evPreview[name].orEmpty(),
                 stateTs = st?.third ?: 0.0,
             )
-        }.toList()
+        }.toList(),
+            Groups.parse(extract(out, "gp")),
+        )
     }
 
     /** `<项目目录名>\t<unix秒>` 一行一条 → map。解析不了的行忽略。 */
