@@ -27,21 +27,6 @@ internal object Pinned {
     fun set(ctx: Context, hostId: String, v: List<String>) =
         p(ctx).edit().putString(key(hostId), v.joinToString("\n")).apply()
 
-    /**
-     * 记住这个置顶会话开在哪个目录 —— **为了它被杀之后还能原地拉回来**。
-     *
-     * ⚠️ 会话名不够用：`tmux new-session -s cc-foo` 不带 `-c` 会开在 `$HOME`，
-     * 而不是它原来干活的地方（[app.yxi.agent.Dirs] 的注释里记着这个坑）。
-     * 所以活着的时候顺手把 cwd 存下来，死了才复活得回去。
-     */
-    fun remember(ctx: Context, hostId: String, name: String, cwd: String) {
-        if (cwd.isBlank()) return
-        p(ctx).edit().putString("cwd:$hostId:$name", cwd).apply()
-    }
-
-    fun cwdOf(ctx: Context, hostId: String, name: String): String? =
-        p(ctx).getString("cwd:$hostId:$name", null)?.takeIf { it.isNotBlank() }
-
     fun onlyPinned(ctx: Context): Boolean = p(ctx).getBoolean("notifyPinnedOnly", true)
     fun setOnlyPinned(ctx: Context, v: Boolean) =
         p(ctx).edit().putBoolean("notifyPinnedOnly", v).apply()
@@ -58,4 +43,41 @@ internal object Pinned {
      */
     fun shouldNotify(onlyPinned: Boolean, pins: List<String>, eventSession: String): Boolean =
         !onlyPinned || pins.isEmpty() || eventSession in pins
+}
+
+/**
+ * 收藏 —— **一个状态标记，跟置顶各管各的**。
+ *
+ * · 置顶 = 位置：把它拎到看板最上面。
+ * · 收藏 = 状态：这个会话我还要用。被终止后进「未启用」，随时原地拉回来。
+ *
+ * 一个会话可以既置顶又收藏，也可以只收藏不置顶（想留一堆、但只把三个顶上去）。
+ *
+ * ⚠️ 存在手机本地就够了 —— 跟分组不一样，收藏**没有第二个读者**。
+ * 分组要存服务器是因为组里的 agent 自己要读它（`yxi-hub who`），
+ * 收藏只有你自己看，多存一份到服务器只是多一个会不同步的地方。
+ */
+internal object Favorites {
+    private fun p(ctx: android.content.Context) =
+        ctx.getSharedPreferences("yxi", android.content.Context.MODE_PRIVATE)
+    private fun key(hostId: String) = "faved:$hostId"
+
+    fun get(ctx: android.content.Context, hostId: String): Set<String> =
+        p(ctx).getString(key(hostId), null)?.split('\n')?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
+
+    fun set(ctx: android.content.Context, hostId: String, v: Set<String>) =
+        p(ctx).edit().putString(key(hostId), v.joinToString("\n")).apply()
+
+    /**
+     * 记住它开在哪个目录 —— **为了被终止之后还能原地拉回来**。
+     * ⚠️ 只记名字不够：`tmux new-session` 不带 `-c` 会开在 `$HOME`，
+     * 而不是它原来干活的地方（见 [app.yxi.agent.Dirs]）。
+     */
+    fun remember(ctx: android.content.Context, hostId: String, name: String, cwd: String) {
+        if (cwd.isBlank()) return
+        p(ctx).edit().putString("favcwd:$hostId:$name", cwd).apply()
+    }
+
+    fun cwdOf(ctx: android.content.Context, hostId: String, name: String): String? =
+        p(ctx).getString("favcwd:$hostId:$name", null)?.takeIf { it.isNotBlank() }
 }

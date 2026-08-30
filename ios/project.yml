@@ -32,8 +32,8 @@ settingGroups:
     # 内嵌 framework 不一致也会在上传校验里冒警告。
     # 放在 common 里是为了**改一处全都跟着走** —— 分开写迟早漏一个。
     # ⚠️ 锚点在这儿**定义**（YAML 要求先定义后引用），下面几处都引用它
-    MARKETING_VERSION: &marketingVersion "0.9.44"
-    CURRENT_PROJECT_VERSION: &buildVersion "88"
+    MARKETING_VERSION: &marketingVersion "0.9.45"
+    CURRENT_PROJECT_VERSION: &buildVersion "89"
     # ⚠️ 内嵌的 framework **必须有 Info.plist**，否则装进模拟器时会失败：
     #   Failed to load Info.plist ... Yxi.app/Frameworks/YxiKit.framework
     # （app target 自己有 plist 文件，所以它那儿再覆盖回 NO）

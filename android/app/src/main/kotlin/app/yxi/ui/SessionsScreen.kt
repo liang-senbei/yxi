@@ -10,6 +10,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
+import app.yxi.ui.theme.Copper
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.rememberSwipeToDismissBoxState
@@ -95,6 +96,8 @@ fun SessionsScreen(
     var grouping by remember { mutableStateOf<Session?>(null) }
     /** 要终止哪个会话（滑动后弹确认框）。null = 没在问 */
     var killing by remember { mutableStateOf<Session?>(null) }
+    /** 收藏了哪些。⚠️ **跟置顶各管各的** —— 置顶管位置，收藏管「还要不要它」。 */
+    var faved by remember(host.id) { mutableStateOf(Favorites.get(ctx, host.id)) }
     var muted by remember(host.id) { mutableStateOf(Mute.get(ctx, host.id)) }
     var refreshing by remember { mutableStateOf(false) }
     // 「回它一句」目标 —— 非空就弹底部输入框，送键到那个会话（不进对话）
@@ -303,8 +306,8 @@ fun SessionsScreen(
             // ⚠️ 置顶按**保存的次序**排（不是 sessions 的顺序）—— 拖动排的就是它。
             // 会话没了（被杀）的置顶名跳过，但保留在存储里，回来还在原位。
             val byName = sessions.associateBy { it.name }
-            // 活着的时候顺手记住它在哪个目录 —— 死了才复活得回原地
-            pinned.forEach { n -> byName[n]?.let { Pinned.remember(ctx, host.id, n, it.cwd) } }
+            // 收藏的会话活着时顺手记住它在哪个目录 —— 死了才复活得回原地
+            faved.forEach { n -> byName[n]?.let { Favorites.remember(ctx, host.id, n, it.cwd) } }
             // ⚠️ **只在「状态」视图里把置顶单独拎出来。**
             // 分组视图下拎出来会让置顶的会话**画两遍**（上面一次、自己组里又一次）——
             // 这是 0.9.35 加分组时引进的 bug。
@@ -354,7 +357,17 @@ fun SessionsScreen(
                         }
                     }
                     if (!shut) items(members.size, key = { "$label/${members[it].name}" }) { i ->
-                        SwipeCard(members[i], onAskKill = { killing = members[i] }, modifier = Modifier.animateItem()) {
+                        SwipeCard(
+                            faved = members[i].name in faved,
+                            onAskKill = { killing = members[i] },
+                            onToggleFav = {
+                                val n = members[i].name
+                                faved = if (n in faved) faved - n else faved + n
+                                Favorites.set(ctx, host.id, faved)
+                                if (n in faved) Favorites.remember(ctx, host.id, n, members[i].cwd)
+                            },
+                            modifier = Modifier.animateItem(),
+                        ) {
                         SessionCard(
                             members[i],
                             onOpen = { onOpenChat(members[i].name, members[i].cwd) },
@@ -367,6 +380,7 @@ fun SessionsScreen(
                             },
                             onLongPress = { grouping = members[i] },
                             muted = members[i].name in muted,
+                            faved = members[i].name in faved,
                         )
                         }
                     }
@@ -379,7 +393,17 @@ fun SessionsScreen(
                     item(key = "h-${st.name}") { GroupHeader(st, group.size) }
                     items(group.size, key = { group[it].name }) { i ->
                         // 换组时滑过去而不是瞬移 —— 至少让用户看见「它动了」
-                        SwipeCard(group[i], onAskKill = { killing = group[i] }, modifier = Modifier.animateItem()) {
+                        SwipeCard(
+                            faved = group[i].name in faved,
+                            onAskKill = { killing = group[i] },
+                            onToggleFav = {
+                                val n = group[i].name
+                                faved = if (n in faved) faved - n else faved + n
+                                Favorites.set(ctx, host.id, faved)
+                                if (n in faved) Favorites.remember(ctx, host.id, n, group[i].cwd)
+                            },
+                            modifier = Modifier.animateItem(),
+                        ) {
                         SessionCard(
                             group[i],
                             // 点卡片 = 进对话；气泡按钮 = 不进对话直接回一句
@@ -388,6 +412,7 @@ fun SessionsScreen(
                             onPin = { pinned = pinned + group[i].name; Pinned.set(ctx, host.id, pinned) },
                             onLongPress = { grouping = group[i] },
                             muted = group[i].name in muted,
+                            faved = group[i].name in faved,
                         )
                         }
                     }
@@ -396,7 +421,7 @@ fun SessionsScreen(
             // ── 未启用：置顶过、但现在没在跑的 ──
             // ⚠️ 放在**最后**：它们不占注意力，只是「随时能拉回来」。
             // 放前面会让每天都看的活会话被一堆睡着的挤下去。
-            val dormant = pinned.filter { it !in byName }
+            val dormant = faved.filter { it !in byName }.sorted()
             if (dormant.isNotEmpty()) {
                 item(key = "h-dormant") {
                     Row(
@@ -415,7 +440,7 @@ fun SessionsScreen(
                 }
                 items(dormant.size, key = { "dz-${dormant[it]}" }) { i ->
                     val n = dormant[i]
-                    val cwd = Pinned.cwdOf(ctx, host.id, n)
+                    val cwd = Favorites.cwdOf(ctx, host.id, n)
                     DormantCard(
                         n, cwd,
                         onWake = {
@@ -438,8 +463,8 @@ fun SessionsScreen(
                             }
                         },
                         onForget = {
-                            pinned = pinned - n
-                            Pinned.set(ctx, host.id, pinned)
+                            faved = faved - n
+                            Favorites.set(ctx, host.id, faved)
                         },
                     )
                 }
@@ -491,8 +516,8 @@ fun SessionsScreen(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.error,
                     )
-                    if (s0.name in pinned) Text(
-                        t("它是置顶的 —— 杀掉后会进「未启用」，随时点一下就能在原目录拉回来。"),
+                    if (s0.name in faved) Text(
+                        t("它是收藏的 —— 杀掉后会进「未启用」，随时点一下就能在原目录拉回来。"),
                         style = MaterialTheme.typography.labelSmall, color = Dim,
                     )
                 }
@@ -504,7 +529,7 @@ fun SessionsScreen(
                     val c = ssh ?: return@TextButton
                     scope.launch {
                         // 活着的时候记下 cwd，这样置顶的杀完还能原地拉回来
-                        if (target in pinned) Pinned.remember(ctx, host.id, target, s0.cwd)
+                        if (target in faved) Favorites.remember(ctx, host.id, target, s0.cwd)
                         if (SessionProbe.kill(c, target)) {
                             runCatching { SessionProbe.snapshot(c) }.onSuccess(onSessions)
                         } else status = t("终止失败 —— 会话可能已经没了")
@@ -730,6 +755,8 @@ private fun SessionCard(
     onReply: () -> Unit = {},
     pinned: Boolean = false,
     onPin: () -> Unit = {},
+    /** 收藏了没。⚠️ 只画一颗星做标记，**不做成按钮** —— 它跟「点卡片进对话」抢同一块地方。 */
+    faved: Boolean = false,
     muted: Boolean = false,
     /** 拖动排序时给卡片加一层「被拎起来」的样子（抬高 + 微微透明）。 */
     dragging: Boolean = false,
@@ -763,6 +790,7 @@ private fun SessionCard(
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (faved) Text("★", style = MaterialTheme.typography.labelMedium, color = Copper)
                     Text(s.short, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                     // 多久没动了 —— 一眼看出哪些会话是新鲜的、哪些搁置了
                     ago(s.lastActivity).takeIf { it.isNotEmpty() }?.let {
@@ -1170,35 +1198,49 @@ internal fun GroupPicker(
  */
 @Composable
 private fun SwipeCard(
-    s: Session,
+    faved: Boolean,
     onAskKill: () -> Unit,
+    onToggleFav: () -> Unit,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
     val state = rememberSwipeToDismissBoxState(
         confirmValueChange = {
-            if (it == SwipeToDismissBoxValue.EndToStart) { onAskKill(); false } else false
+            when (it) {
+                // ⚠️ **左滑不直接杀，只把确认框弹出来。** 返回 false 让卡片弹回原位。
+                // 杀一个会话 = 里面跑着的 Claude 一起没，这种事不能由一个可能是误触的手势独自决定。
+                SwipeToDismissBoxValue.EndToStart -> onAskKill()
+                // 右滑收藏可以就地生效 —— 它只是个标记，点错了再滑一次就回来了。
+                SwipeToDismissBoxValue.StartToEnd -> onToggleFav()
+                else -> Unit
+            }
+            false
         },
     )
     SwipeToDismissBox(
         state = state,
         modifier = modifier,
-        enableDismissFromStartToEnd = false,   // 只支持左滑，右滑什么都不做
         backgroundContent = {
+            // ⚠️ **背景要说清这一下会干什么**，而且左右不同色。
+            // 「右滑收藏」这种手势没人猜得到，滑到一半看见字才知道 ——
+            // 这是它唯一的发现途径。
+            val toStart = state.dismissDirection == SwipeToDismissBoxValue.EndToStart
             Surface(
-                color = MaterialTheme.colorScheme.errorContainer,
+                color = if (toStart) MaterialTheme.colorScheme.errorContainer
+                else MaterialTheme.colorScheme.secondaryContainer,
                 shape = MaterialTheme.shapes.large,
                 modifier = Modifier.fillMaxSize(),
             ) {
                 Row(
                     Modifier.fillMaxSize().padding(horizontal = 22.dp),
-                    horizontalArrangement = Arrangement.End,
+                    horizontalArrangement = if (toStart) Arrangement.End else Arrangement.Start,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        t("终止"),
+                        if (toStart) t("终止") else if (faved) t("取消收藏") else t("收藏"),
                         style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        color = if (toStart) MaterialTheme.colorScheme.onErrorContainer
+                        else MaterialTheme.colorScheme.onSecondaryContainer,
                     )
                 }
             }

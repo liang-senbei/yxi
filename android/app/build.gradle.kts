@@ -15,8 +15,8 @@ android {
         targetSdk = 37
         // ⚠️ versionCode 是**更新检查唯一比较的东西**，每次发包必须 +1。
         // versionName 只给人看。
-        versionCode = 88
-        versionName = "0.9.44"
+        versionCode = 89
+        versionName = "0.9.45"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
