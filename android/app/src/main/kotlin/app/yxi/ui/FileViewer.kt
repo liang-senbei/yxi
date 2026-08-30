@@ -116,6 +116,37 @@ fun FileViewer(sftp: Sftp?, path: String, onBack: () -> Unit, modifier: Modifier
                     style = MaterialTheme.typography.labelMedium, color = Copper,
                 )
             }
+            // APK 多一颗「装上」—— 你在服务器上编的包，一步装到手机里试。
+            //
+            // ⚠️ **必须下到 `cacheDir/update/`**：`res/xml/file_paths.xml` 只开放了这一个目录，
+            // FileProvider 拿不到别处的 URI，安装器会收到一个它读不了的 content:// 然后失败。
+            // ⚠️ 装这一步复用自更新那套 [install] —— 权限没给时先送设置页那条分支也一起继承，
+            // 再抄一份必定漏掉其中一条。
+            if (Paths.nameOf(path).endsWith(".apk", ignoreCase = true)) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer, shape = Pill,
+                    modifier = Modifier.clip(Pill).clickable(enabled = sftp != null && !dling) {
+                        dling = true
+                        scope.launch {
+                            val msg = runCatching {
+                                val s = sftp ?: error(t("没连上"))
+                                val f = java.io.File(ctx.cacheDir, "update/${Paths.nameOf(path)}")
+                                withContext(Dispatchers.IO) { f.parentFile?.mkdirs(); s.download(path, f) }
+                                install(ctx, f) ?: t("安装器拉起来了")
+                            }.getOrElse { (it.message ?: t("装不上")).take(40) }
+                            dling = false
+                            android.widget.Toast.makeText(ctx, msg, android.widget.Toast.LENGTH_LONG).show()
+                        }
+                    },
+                ) {
+                    Text(
+                        if (dling) t("下载中…") else t("装上"),
+                        Modifier.padding(14.dp, 8.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                }
+            }
             if (ext in RENDERABLE && bytes != null) {
                 Surface(
                     color = if (source) SurfaceContainerHigh else SurfaceContainer, shape = Pill,

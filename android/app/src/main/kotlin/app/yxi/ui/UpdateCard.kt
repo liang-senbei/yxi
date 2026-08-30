@@ -134,8 +134,14 @@ private suspend fun downloadHttp(url: String, into: File, onBytes: (Long) -> Uni
         } finally { c.disconnect() }
     }
 
-/** @return 出错原因；null = 已经把安装器拉起来了 */
-private fun install(ctx: Context, apk: File): String? {
+/**
+ * @return 出错原因；null = 已经把安装器拉起来了
+ *
+ * ⚠️ 内部可见是为了让 [FileViewer] 复用 —— 从文件页装一个自己编的 APK
+ * 跟自更新是**同一件事**：同样要 `REQUEST_INSTALL_PACKAGES`、同样走 FileProvider、
+ * 同样要在没给权限时先把人送去设置页。再抄一份只会漏掉其中一条。
+ */
+internal fun install(ctx: Context, apk: File): String? {
     if (android.os.Build.VERSION.SDK_INT >= 26 && !ctx.packageManager.canRequestPackageInstalls()) {
         // 没给「安装未知应用」的权限就先送去设置页 —— 直接 startActivity 会被静默拒
         runCatching {

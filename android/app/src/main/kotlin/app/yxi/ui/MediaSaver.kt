@@ -68,6 +68,9 @@ object MediaSaver {
         "ppt" to "application/vnd.ms-powerpoint",
         "pdf" to "application/pdf",
         "zip" to "application/zip",
+        // ⚠️ Android 的 MimeTypeMap **不认 apk**，不写在这儿就落成 octet-stream ——
+        // 存进「下载」目录后点它，系统不知道那是个安装包，不会给「安装」的入口。
+        "apk" to "application/vnd.android.package-archive",
         "json" to "application/json",
         "md" to "text/markdown",
         "txt" to "text/plain",
