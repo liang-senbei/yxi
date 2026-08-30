@@ -27,6 +27,21 @@ internal object Pinned {
     fun set(ctx: Context, hostId: String, v: List<String>) =
         p(ctx).edit().putString(key(hostId), v.joinToString("\n")).apply()
 
+    /**
+     * 记住这个置顶会话开在哪个目录 —— **为了它被杀之后还能原地拉回来**。
+     *
+     * ⚠️ 会话名不够用：`tmux new-session -s cc-foo` 不带 `-c` 会开在 `$HOME`，
+     * 而不是它原来干活的地方（[app.yxi.agent.Dirs] 的注释里记着这个坑）。
+     * 所以活着的时候顺手把 cwd 存下来，死了才复活得回去。
+     */
+    fun remember(ctx: Context, hostId: String, name: String, cwd: String) {
+        if (cwd.isBlank()) return
+        p(ctx).edit().putString("cwd:$hostId:$name", cwd).apply()
+    }
+
+    fun cwdOf(ctx: Context, hostId: String, name: String): String? =
+        p(ctx).getString("cwd:$hostId:$name", null)?.takeIf { it.isNotBlank() }
+
     fun onlyPinned(ctx: Context): Boolean = p(ctx).getBoolean("notifyPinnedOnly", true)
     fun setOnlyPinned(ctx: Context, v: Boolean) =
         p(ctx).edit().putBoolean("notifyPinnedOnly", v).apply()

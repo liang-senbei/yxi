@@ -374,4 +374,17 @@ object SessionProbe {
     /** 抓某个会话最近 n 行屏幕，看板上做预览。 */
     suspend fun peek(session: SshSession, target: String, lines: Int = 40): String =
         session.exec("tmux capture-pane -p -t '$target' 2>/dev/null | tail -$lines")
+
+    /**
+     * 终止一个会话 —— 等于在服务器上 `tmux kill-session`。
+     *
+     * ⚠️ **这是真的杀掉**：里面跑着的 Claude 一起没，没存的东西不会自己保存。
+     * 所以调用方**必须先问一句**（[app.yxi.ui.SessionsScreen] 里滑动后弹确认框）。
+     * ⚠️ 名字只从 [snapshot] 拿到的会话列表来，不接受界面传任意字符串 ——
+     *    免得哪天改 UI 时留下一个能杀任意 tmux 会话的口子。
+     */
+    suspend fun kill(session: SshSession, target: String): Boolean {
+        val q = target.replace("'", "'\\''")
+        return app.yxi.ssh.catching { session.exec("tmux kill-session -t '$q' 2>&1") }.isSuccess
+    }
 }

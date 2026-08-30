@@ -10,6 +10,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.ui.graphics.graphicsLayer
@@ -90,6 +93,8 @@ fun SessionsScreen(
     var groups by remember(host.id) { mutableStateOf(app.yxi.agent.Groups.Table()) }
     /// 正在给哪个会话选组
     var grouping by remember { mutableStateOf<Session?>(null) }
+    /** 要终止哪个会话（滑动后弹确认框）。null = 没在问 */
+    var killing by remember { mutableStateOf<Session?>(null) }
     var muted by remember(host.id) { mutableStateOf(Mute.get(ctx, host.id)) }
     var refreshing by remember { mutableStateOf(false) }
     // 「回它一句」目标 —— 非空就弹底部输入框，送键到那个会话（不进对话）
@@ -298,7 +303,14 @@ fun SessionsScreen(
             // ⚠️ 置顶按**保存的次序**排（不是 sessions 的顺序）—— 拖动排的就是它。
             // 会话没了（被杀）的置顶名跳过，但保留在存储里，回来还在原位。
             val byName = sessions.associateBy { it.name }
-            val tops = pinned.mapNotNull { byName[it] }
+            // 活着的时候顺手记住它在哪个目录 —— 死了才复活得回原地
+            pinned.forEach { n -> byName[n]?.let { Pinned.remember(ctx, host.id, n, it.cwd) } }
+            // ⚠️ **只在「状态」视图里把置顶单独拎出来。**
+            // 分组视图下拎出来会让置顶的会话**画两遍**（上面一次、自己组里又一次）——
+            // 这是 0.9.35 加分组时引进的 bug。
+            // 而且道理上也不该拎：你切到分组视图，选的就是「按组看」这个轴，
+            // 再横插一个置顶区等于同时用两个轴。分组视图里置顶只当个标记（图钉亮着）。
+            val tops = if (view == BoardView.State) pinned.mapNotNull { byName[it] } else emptyList()
             if (tops.isNotEmpty()) {
                 item(key = "h-pinned") { PinnedHeader(tops.size) }
                 item(key = "pinned-group") {
@@ -342,9 +354,9 @@ fun SessionsScreen(
                         }
                     }
                     if (!shut) items(members.size, key = { "$label/${members[it].name}" }) { i ->
+                        SwipeCard(members[i], onAskKill = { killing = members[i] }, modifier = Modifier.animateItem()) {
                         SessionCard(
                             members[i],
-                            modifier = Modifier.animateItem(),
                             onOpen = { onOpenChat(members[i].name, members[i].cwd) },
                             onReply = { replyTo = members[i] },
                             pinned = members[i].name in pinned,
@@ -356,6 +368,7 @@ fun SessionsScreen(
                             onLongPress = { grouping = members[i] },
                             muted = members[i].name in muted,
                         )
+                        }
                     }
                 }
             } else {
@@ -366,9 +379,9 @@ fun SessionsScreen(
                     item(key = "h-${st.name}") { GroupHeader(st, group.size) }
                     items(group.size, key = { group[it].name }) { i ->
                         // 换组时滑过去而不是瞬移 —— 至少让用户看见「它动了」
+                        SwipeCard(group[i], onAskKill = { killing = group[i] }, modifier = Modifier.animateItem()) {
                         SessionCard(
                             group[i],
-                            modifier = Modifier.animateItem(),
                             // 点卡片 = 进对话；气泡按钮 = 不进对话直接回一句
                             onOpen = { onOpenChat(group[i].name, group[i].cwd) },
                             onReply = { replyTo = group[i] },
@@ -376,7 +389,59 @@ fun SessionsScreen(
                             onLongPress = { grouping = group[i] },
                             muted = group[i].name in muted,
                         )
+                        }
                     }
+                }
+            }
+            // ── 未启用：置顶过、但现在没在跑的 ──
+            // ⚠️ 放在**最后**：它们不占注意力，只是「随时能拉回来」。
+            // 放前面会让每天都看的活会话被一堆睡着的挤下去。
+            val dormant = pinned.filter { it !in byName }
+            if (dormant.isNotEmpty()) {
+                item(key = "h-dormant") {
+                    Row(
+                        Modifier.padding(4.dp, 12.dp, 0.dp, 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Box(Modifier.size(7.dp).background(MaterialTheme.colorScheme.outline, Pill))
+                        Text(t("未启用"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
+                        Text(
+                            "${dormant.size}",
+                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                            color = MaterialTheme.colorScheme.outline,
+                        )
+                    }
+                }
+                items(dormant.size, key = { "dz-${dormant[it]}" }) { i ->
+                    val n = dormant[i]
+                    val cwd = Pinned.cwdOf(ctx, host.id, n)
+                    DormantCard(
+                        n, cwd,
+                        onWake = {
+                            val s0 = ssh ?: return@DormantCard
+                            scope.launch {
+                                status = t("在拉起 %s…").format(n.removePrefix("cc-"))
+                                // ⚠️ 复用 ＋ 号那套：会建目录、而且**回头核对真的开在那儿**
+                                //    （tmux 对不存在的目录会假装成功然后开在 $HOME，见 Dirs）
+                                val made = app.yxi.ssh.catching {
+                                    s0.exec(app.yxi.agent.Dirs.createCommand(cwd ?: "~", n))
+                                }.map { app.yxi.agent.Dirs.madeFrom(it) }
+                                    .getOrElse { app.yxi.agent.Dirs.Made.Failed("unknown", it.message.orEmpty()) }
+                                if (made is app.yxi.agent.Dirs.Made.Failed) {
+                                    status = t("拉不起来：%s").format(made.detail.ifBlank { made.code })
+                                } else {
+                                    status = ""
+                                    runCatching { SessionProbe.snapshot(s0) }.onSuccess(onSessions)
+                                    onOpenChat(n, cwd ?: ".")
+                                }
+                            }
+                        },
+                        onForget = {
+                            pinned = pinned - n
+                            Pinned.set(ctx, host.id, pinned)
+                        },
+                    )
                 }
             }
         }
@@ -406,6 +471,52 @@ fun SessionsScreen(
     // 给某个会话选组。存回服务器后**给组里每个人发一句「你有队友了」** ——
     // 这一句就是「打通」发生的那一刻：不发的话，分组对 agent 而言根本不存在，
     // 它不会主动去读 groups.json，也就不知道自己能 yxi-hub say 谁。
+    // 终止确认。⚠️ **杀会话 = 里面跑着的 Claude 一起没、没存的东西不会自己保存。**
+    // 所以滑动只是把这个框弹出来，真正的决定在这儿。
+    killing?.let { s0 ->
+        val busy = s0.state == SessionState.Working || s0.state == SessionState.NeedsYou
+        AlertDialog(
+            onDismissRequest = { killing = null },
+            title = { Text(t("终止 %s？").format(s0.name.removePrefix("cc-"))) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        t("会话连同里面跑着的 Claude 一起结束，占的内存放出来。转录文件留着，不会删。"),
+                        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    // ⚠️ 正在干活/正在等你的，要**额外说一句** —— 这两种状态下杀掉最可能丢东西
+                    if (busy) Text(
+                        if (s0.state == SessionState.Working) t("⚠️ 它**正在干活**，现在杀会丢掉这一轮还没写完的东西。")
+                        else t("⚠️ 它**正在等你回答**，杀掉这个问题就没了。"),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    if (s0.name in pinned) Text(
+                        t("它是置顶的 —— 杀掉后会进「未启用」，随时点一下就能在原目录拉回来。"),
+                        style = MaterialTheme.typography.labelSmall, color = Dim,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton({
+                    val target = s0.name
+                    killing = null
+                    val c = ssh ?: return@TextButton
+                    scope.launch {
+                        // 活着的时候记下 cwd，这样置顶的杀完还能原地拉回来
+                        if (target in pinned) Pinned.remember(ctx, host.id, target, s0.cwd)
+                        if (SessionProbe.kill(c, target)) {
+                            runCatching { SessionProbe.snapshot(c) }.onSuccess(onSessions)
+                        } else status = t("终止失败 —— 会话可能已经没了")
+                    }
+                }) {
+                    Text(t("终止"), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton({ killing = null }) { Text(t("算了")) } },
+        )
+    }
+
     grouping?.let { target ->
         GroupPicker(
             session = target.name,
@@ -1047,4 +1158,98 @@ internal fun GroupPicker(
         confirmButton = { TextButton({ onSave(t, joined) }) { Text(t("存下")) } },
         dismissButton = { TextButton(onDismiss) { Text(t("取消")) } },
     )
+}
+
+/**
+ * 会话卡片 + **左滑终止**。
+ *
+ * ⚠️ **滑到底不直接杀，只是把确认框弹出来。**
+ * `confirmValueChange` 一律返回 false —— 卡片弹回原位，动作交给对话框。
+ * 杀一个会话 = 里面跑着的 Claude 一起没、没存的东西不会自己保存，
+ * 这种事不能由一个可能是误触的手势独自决定。
+ */
+@Composable
+private fun SwipeCard(
+    s: Session,
+    onAskKill: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    val state = rememberSwipeToDismissBoxState(
+        confirmValueChange = {
+            if (it == SwipeToDismissBoxValue.EndToStart) { onAskKill(); false } else false
+        },
+    )
+    SwipeToDismissBox(
+        state = state,
+        modifier = modifier,
+        enableDismissFromStartToEnd = false,   // 只支持左滑，右滑什么都不做
+        backgroundContent = {
+            Surface(
+                color = MaterialTheme.colorScheme.errorContainer,
+                shape = MaterialTheme.shapes.large,
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                Row(
+                    Modifier.fillMaxSize().padding(horizontal = 22.dp),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        t("终止"),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                }
+            }
+        },
+    ) { content() }
+}
+
+/**
+ * 「未启用」—— 置顶过、但现在没在跑的会话。
+ *
+ * ⚠️ **这就是「收藏」**：置顶本来就把名字长期存着（会话被杀也不删），
+ * 只是以前不显示。与其再造一个「收藏」的概念、再加一颗星星按钮，
+ * 不如把已有的置顶补完：**置顶 = 这个会话对我重要 = 死了也记着，随时能拉回来**。
+ */
+@Composable
+private fun DormantCard(name: String, cwd: String?, onWake: () -> Unit, onForget: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.large).clickable(onClick = onWake),
+    ) {
+        Row(
+            Modifier.padding(16.dp, 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(name.removePrefix("cc-"), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    // ⚠️ 没记住 cwd 的（老版本置顶的）要**说清楚**会开在 $HOME，
+                    // 不然点下去开错地方，用户以为「唤起」坏了
+                    cwd ?: t("不知道原来在哪个目录，会开在 ~"),
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                    color = Dim, maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+            }
+            Surface(
+                color = MaterialTheme.colorScheme.primaryContainer, shape = Pill,
+                modifier = Modifier.clip(Pill).clickable(onClick = onWake),
+            ) {
+                Text(
+                    t("唤起"), Modifier.padding(14.dp, 7.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
+            Box(
+                Modifier.size(32.dp).clip(CircleShape).clickable(onClick = onForget),
+                contentAlignment = Alignment.Center,
+            ) { Text("✕", style = MaterialTheme.typography.labelMedium, color = Dim) }
+        }
+    }
 }
