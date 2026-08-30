@@ -248,6 +248,8 @@ private fun HostQuota(
     /** 一键修复扫出来的东西。null = 还没扫；空表 = 没什么可收的 */
     var junk by remember(h.id) { mutableStateOf<List<app.yxi.agent.Health.Junk>?>(null) }
     var confirmFix by remember(h.id) { mutableStateOf(false) }
+    /** 勾了哪几**类**要收拾。⚠️ 默认空 —— 这是杀进程，让人主动勾比让人记得取消安全。 */
+    var picked by remember(h.id) { mutableStateOf<Set<String>>(emptySet()) }
     var fixing by remember(h.id) { mutableStateOf(false) }
 
     LaunchedEffect(h.id, refreshAt) {
@@ -377,7 +379,9 @@ private fun HostQuota(
                     modifier = Modifier.fillMaxWidth().clip(Pill).clickable(enabled = !fixing) { confirmFix = true },
                 ) {
                     Text(
-                        if (fixing) t("收拾中…") else t("一键收拾 · %d 项 · 约 %d MB").format(list.size, mb),
+                        // 按**类别**报数，跟点进去看到的一致 —— 外面说「3 项」进去却是 1 组会对不上
+                        if (fixing) t("收拾中…")
+                        else t("可以收拾 %d 类 · 约 %d MB").format(list.map { it.what }.distinct().size, mb),
                         Modifier.padding(14.dp, 9.dp),
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -444,11 +448,19 @@ private fun HostQuota(
 
     // ⚠️ **杀之前把要杀的逐条摆出来。** 一键修复要是能弄丢东西，
     // 它就不是「方便」而是陷阱 —— 所以先看清、再点。
+    // ⚠️ **逐条可选，而且默认全不选。**
+    // 「一键全杀」在只有一类东西时还行，一旦扫出好几类就太粗 ——
+    // 用户可能只想收掉 Gradle 缓存、但保留正在跑的那个搜索。
+    // 默认不选是因为这是**杀进程**：让人主动勾，比让人记得取消安全。
     if (confirmFix) {
         val list = junk.orEmpty()
+        // 按类别归堆：一堆 Gradle 守护进程列成十行没意义，
+        // 而「Gradle 编译守护进程 · 3 个 · 3100 MB」一眼就够做决定。
+        val groups = list.groupBy { it.what }.toList().sortedByDescending { (_, v) -> v.sumOf { it.rssKb } }
+        val chosen = groups.filter { it.first in picked }.flatMap { it.second }
         AlertDialog(
             onDismissRequest = { confirmFix = false },
-            title = { Text(t("要收拾这些")) },
+            title = { Text(t("挑要收拾的")) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
@@ -456,14 +468,39 @@ private fun HostQuota(
                         style = MaterialTheme.typography.labelSmall, color = Dim,
                     )
                     Column(
-                        Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        list.forEach { j ->
-                            Text(
-                                t("· %s · %d MB · 跑了 %d 分钟").format(junkText(j.what), j.rssKb / 1024, j.ageSec / 60),
-                                style = MaterialTheme.typography.labelSmall, color = Muted,
-                            )
+                        groups.forEach { (what, items) ->
+                            val on = what in picked
+                            val mb = items.sumOf { it.rssKb } / 1024
+                            Surface(
+                                color = if (on) MaterialTheme.colorScheme.secondaryContainer
+                                else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                shape = Pill,
+                                modifier = Modifier.fillMaxWidth().clip(Pill).clickable {
+                                    picked = if (on) picked - what else picked + what
+                                },
+                            ) {
+                                Row(
+                                    Modifier.padding(14.dp, 9.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(if (on) "✓" else "○", style = MaterialTheme.typography.labelLarge)
+                                    Column(Modifier.weight(1f)) {
+                                        Text(junkText(what), style = MaterialTheme.typography.labelLarge)
+                                        Text(
+                                            // 最久的那个跑了多久 —— 判断「是不是跑飞了」看这个
+                                            t("%d 个 · %d MB · 最久跑了 %d 分钟").format(
+                                                items.size, mb, (items.maxOf { it.ageSec }) / 60,
+                                            ),
+                                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                            color = Dim,
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                     // ⚠️ steal 高的时候要**明说这个按钮救不了它**，别让人白按一次再失望
@@ -477,9 +514,10 @@ private fun HostQuota(
                 }
             },
             confirmButton = {
-                TextButton({
+                // ⚠️ 一个都没勾就**禁用**，别让人点了个没反应的按钮
+                TextButton(enabled = chosen.isNotEmpty(), onClick = {
                     confirmFix = false
-                    val cmd = app.yxi.agent.Health.killCommand(list) ?: return@TextButton
+                    val cmd = app.yxi.agent.Health.killCommand(chosen) ?: return@TextButton
                     scope.launch {
                         fixing = true
                         val c = connect()
@@ -495,9 +533,15 @@ private fun HostQuota(
                                 .onSuccess { junk = app.yxi.agent.Health.junkFrom(it) }
                             runCatching { s0.disconnect() }
                         }
+                        picked = emptySet()
                         fixing = false
                     }
-                }) { Text(t("收拾")) }
+                }) {
+                    Text(
+                        if (chosen.isEmpty()) t("先勾几个")
+                        else t("收拾 %d 个 · %d MB").format(chosen.size, chosen.sumOf { it.rssKb } / 1024),
+                    )
+                }
             },
             dismissButton = { TextButton({ confirmFix = false }) { Text(t("算了")) } },
         )

@@ -137,4 +137,27 @@ class HealthTest {
         assertTrue("kill -KILL" in cmd)
         assertTrue("TERM 必须在 KILL 前面", cmd.indexOf("-TERM") < cmd.indexOf("-KILL"))
     }
+
+    /**
+     * ⚠️ **只杀勾中的那几类。** 界面按类别归堆、逐类勾选，
+     * 传给 [Health.killCommand] 的必须是**筛过的子集** ——
+     * 传全表就等于「勾选是个摆设」，而用户以为自己保住了那个搜索。
+     */
+    @Test fun 只杀勾中的那类() {
+        val all = listOf(
+            Health.Junk(11, 1000, 7200, "gradle"),
+            Health.Junk(12, 2000, 7200, "gradle"),
+            Health.Junk(21, 500, 900, "rg"),
+        )
+        // 只勾了 gradle
+        val chosen = all.filter { it.what in setOf("gradle") }
+        val cmd = Health.killCommand(chosen)!!
+        assertTrue("11" in cmd && "12" in cmd)
+        assertFalse("没勾的 rg 被杀了", Regex("""\b21\b""").containsMatchIn(cmd))
+    }
+
+    /** 一个都没勾 → 不该生成命令（界面上那个按钮也是禁用的）。 */
+    @Test fun 一个没勾就不出命令() {
+        assertNull(Health.killCommand(emptyList()))
+    }
 }
