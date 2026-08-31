@@ -381,6 +381,12 @@ fun SessionsScreen(
                             onLongPress = { grouping = members[i] },
                             muted = members[i].name in muted,
                             faved = members[i].name in faved,
+                            onFav = {
+                                val n = members[i].name
+                                faved = if (n in faved) faved - n else faved + n
+                                Favorites.set(ctx, host.id, faved)
+                                if (n in faved) Favorites.remember(ctx, host.id, n, members[i].cwd)
+                            },
                         )
                         }
                     }
@@ -413,6 +419,12 @@ fun SessionsScreen(
                             onLongPress = { grouping = group[i] },
                             muted = group[i].name in muted,
                             faved = group[i].name in faved,
+                            onFav = {
+                                val n = group[i].name
+                                faved = if (n in faved) faved - n else faved + n
+                                Favorites.set(ctx, host.id, faved)
+                                if (n in faved) Favorites.remember(ctx, host.id, n, group[i].cwd)
+                            },
                         )
                         }
                     }
@@ -755,8 +767,16 @@ private fun SessionCard(
     onReply: () -> Unit = {},
     pinned: Boolean = false,
     onPin: () -> Unit = {},
-    /** 收藏了没。⚠️ 只画一颗星做标记，**不做成按钮** —— 它跟「点卡片进对话」抢同一块地方。 */
+    /**
+     * 收藏了没。
+     *
+     * ⚠️ **必须是看得见、点得着的按钮。** 上一版我只做了右滑 + 一颗纯展示的星，
+     * 理由是「卡片右列塞不下第三颗」。结果用户第一句话就是「我没看见收藏的按钮」——
+     * 一个没有可见入口的手势等于不存在，滑动时那行提示只有**已经知道要滑**的人才看得到。
+     * 省 30dp 不值得让一个功能找不到。
+     */
     faved: Boolean = false,
+    onFav: () -> Unit = {},
     muted: Boolean = false,
     /** 拖动排序时给卡片加一层「被拎起来」的样子（抬高 + 微微透明）。 */
     dragging: Boolean = false,
@@ -790,7 +810,6 @@ private fun SessionCard(
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (faved) Text("★", style = MaterialTheme.typography.labelMedium, color = Copper)
                     Text(s.short, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                     // 多久没动了 —— 一眼看出哪些会话是新鲜的、哪些搁置了
                     ago(s.lastActivity).takeIf { it.isNotEmpty() }?.let {
@@ -849,13 +868,33 @@ private fun SessionCard(
             // ⚠️ 这两个 Box 各自 `clickable` 会**消费**掉点击，不会冒泡到 Surface 的 onOpen ——
             // 所以点图钉/点气泡都不会顺带把对话打开（跟图钉一直以来的行为一致）。
             Column(
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
+                // ★ 收藏。⚠️ **跟图钉放同一列**：找得到图钉的人自然就找得到它。
+                // 上一版只做了右滑，用户第一句就是「我没看见收藏的按钮」——
+                // 三颗按钮从 36dp 收到 32dp，卡片几乎不变高，比让功能藏起来划算。
+                // 空心 ☆ = 没收藏，实心 ★ = 收藏了；状态一眼可见，不用点开才知道。
+                Box(
+                    Modifier.size(32.dp).clip(CircleShape)
+                        .background(
+                            if (faved) MaterialTheme.colorScheme.secondaryContainer
+                            else Color.Transparent
+                        )
+                        .clickable(onClick = onFav),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        if (faved) "★" else "☆",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = if (faved) MaterialTheme.colorScheme.onSecondaryContainer
+                        else MaterialTheme.colorScheme.outline,
+                    )
+                }
                 // 图钉一直在（不是只在置顶时才出现）—— 只在置顶时显示的话用户不知道有这功能。
                 // ⚠️ **不用 emoji 📌**：各机型不一、粗细对不上、不跟主题变色。矢量图钉，置顶才上色。
                 Box(
-                    Modifier.size(36.dp).clip(CircleShape)
+                    Modifier.size(32.dp).clip(CircleShape)
                         .background(
                             if (pinned) MaterialTheme.colorScheme.tertiaryContainer
                             else Color.Transparent
@@ -872,7 +911,7 @@ private fun SessionCard(
                 }
                 // 回它一句：淡底 + primary 气泡，一眼看出「可点」。点它弹底部输入框，直接送键。
                 Box(
-                    Modifier.size(36.dp).clip(CircleShape)
+                    Modifier.size(32.dp).clip(CircleShape)
                         .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                         .clickable(onClick = onReply),
                     contentAlignment = Alignment.Center,
@@ -1175,7 +1214,7 @@ internal fun GroupPicker(
                     },
                 ) {
                     Text(
-                        t("建「%s」并把它放进去").format(fresh.trim()),
+                        t("再建一个「%s」").format(fresh.trim()),
                         Modifier.padding(14.dp, 9.dp),
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -1183,7 +1222,19 @@ internal fun GroupPicker(
                 }
             }
         },
-        confirmButton = { TextButton({ onSave(t, joined) }) { Text(t("存下")) } },
+        confirmButton = {
+            TextButton({
+                // ⚠️ **把输入框里没提交的那个也算上。**
+                // 用户报的：新建分组没生效。病根是这里要点**两下** ——
+                // 先点「建「X」并把它放进去」，再点「存下」。
+                // 少点中间那下，`t` 还是原来那张空表，打的字被静默丢掉，
+                // 而界面上没有任何提示（服务器上落下的是 `{"v":1,"groups":{}}`）。
+                // 「输入框里有字 = 用户想要这个组」是唯一合理的解读，别逼人去发现那颗按钮。
+                val name = fresh.trim()
+                val table = if (name.isNotEmpty()) t.withMember(name, session) else t
+                onSave(table, if (name.isNotEmpty()) name else joined)
+            }) { Text(t("存下")) }
+        },
         dismissButton = { TextButton(onDismiss) { Text(t("取消")) } },
     )
 }

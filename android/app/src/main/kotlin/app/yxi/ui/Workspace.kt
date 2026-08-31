@@ -420,6 +420,29 @@ fun Workspace(
             }
 
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                // ⚠️ **复制路径放第一项。** 用户要的是「把这个会话的目录粘到别处去」——
+                // 而路径就显示在头部那行、点它弹的就是这个菜单，所以放在这儿是最短的路。
+                // 不做成「点路径直接复制」：那块地方的点击已经归这个菜单了，
+                // 抢过去会让「切会话」这个更常用的动作失灵。
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(t("复制路径"), style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                cwd,
+                                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                color = Dim, maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.MiddleEllipsis,
+                            )
+                        }
+                    },
+                    onClick = {
+                        menu = false
+                        app.yxi.ui.DevMode.copy(ctx, cwd, "path")
+                        android.widget.Toast.makeText(ctx, t("路径已复制"), android.widget.Toast.LENGTH_SHORT).show()
+                    },
+                )
+                HorizontalDivider()
                 if (quick.isEmpty()) {
                     DropdownMenuItem(
                         text = { Text(t("还没有置顶的会话"), style = MaterialTheme.typography.bodySmall, color = Dim) },

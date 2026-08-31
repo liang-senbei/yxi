@@ -67,4 +67,30 @@ class GroupsTest {
         val t = Groups.Table(mapOf("it's" to listOf("cc-a")))
         assertEquals(listOf("cc-a"), Groups.parse(Groups.encode(t)).groups["it's"])
     }
+
+    /**
+     * 用户报的：新建分组不生效。
+     *
+     * 病根不在 [Groups] 而在界面 —— 建组要点**两下**（先「建 X」再「存下」），
+     * 少点中间那下就把输入静默丢掉，服务器上落下 `{"v":1,"groups":{}}`。
+     * 这里钉住那条**唯一合理的解读**：**输入框里有字 = 用户想要这个组**。
+     * （界面上是「存下时若输入非空就先 withMember」，这条测的是那个语义。）
+     */
+    @Test fun 输入框里有字就该建出组来() {
+        val empty = Groups.Table()
+        val typed = "后端"
+        // 界面在「存下」时做的事
+        val saved = if (typed.isNotEmpty()) empty.withMember(typed, "cc-api") else empty
+        assertEquals(listOf("cc-api"), saved.groups["后端"])
+        assertTrue("空表存下去 = 用户白填一场", saved.groups.isNotEmpty())
+        // 而没填字的时候不该凭空造组
+        val nothing = if ("".isNotEmpty()) empty.withMember("", "cc-api") else empty
+        assertTrue(nothing.groups.isEmpty())
+    }
+
+    /** 组名前后空格要吃掉 —— 「后端 」和「后端」不该是两个组。 */
+    @Test fun 组名去空格() {
+        val t = Groups.Table().withMember("  后端  ".trim(), "cc-api")
+        assertEquals(setOf("后端"), t.groups.keys)
+    }
 }
