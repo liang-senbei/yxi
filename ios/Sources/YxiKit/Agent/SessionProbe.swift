@@ -72,9 +72,18 @@ public enum SessionProbe {
     s tmux_begin
     tmux list-sessions -F '#{session_name}|#{session_windows}|#{session_activity}|#{session_attached}|#{pane_current_path}' 2>/dev/null || true
     s tmux_end
+    s ev_begin
+    tail -n 200 $HOME/.yxi/events.jsonl 2>/dev/null || true
+    s ev_end
+    s cc_begin
+    awk 1 $HOME/.claude/sessions/*.json 2>/dev/null || true
+    s cc_end
     s status_begin
-    for f in $HOME/.cloud-status/*.json; do [ -f "$f" ] && cat "$f" && echo; done 2>/dev/null || true
+    awk 1 $HOME/.cloud-status/*.json 2>/dev/null || true
     s status_end
+    s gp_begin
+    cat $HOME/.yxi/groups.json 2>/dev/null || true
+    s gp_end
     s tr_begin
     find "$HOME/.claude/projects" -maxdepth 2 -name '*.jsonl' -printf '%h\t%T@\n' 2>/dev/null | awk -F'\t' '{n=split($1,a,"/"); d=a[n]; t=int($2); if(t>m[d]) m[d]=t} END{for(k in m) printf "%s\t%d\n", k, m[k]}' 2>/dev/null || true
     s tr_end
@@ -85,6 +94,42 @@ public enum SessionProbe {
         let status = extract(out, "status")
         // 转录最后写入时间 —— 「上次对话」的真来源，见 lastActivityOf
         let transcripts = parseTranscriptTimes(extract(out, "tr"))
+
+        // ⚠️⚠️ **首选 Claude Code 自己维护的那份**（`~/.claude/sessions/*.json`）。
+        //
+        // 原来只读 `~/.cloud-status/`，而那是 **`cc-state` 写的，`cc-state` 不是 Yxi 装的**
+        // —— `server/install.sh` 只装 `yxi-hook`。它只在开发机上跑着（那是
+        // remote-dev-station 的一部分），于是**在任何真实用户的服务器上那个目录是空的
+        // → 每个会话都判成 idle → 看板首页全是「空闲」，一个「等你」都没有**。
+        // 而「一眼看清谁在等你」正是这个 App 存在的理由。安卓端实测：
+        // 本机 37 个状态文件，另一台普通服务器 0 个。见 TROUBLESHOOTING #144。
+        //
+        // Claude Code 自己那份是**零安装**的，任何装了 Claude Code 的机器上都有，
+        // 而且是**水平状态**（当前是什么）不是**边缘事件**（发生过什么）——
+        // 后者会漂：hook 写完 input 之后用户在终端答完了，没有任何 hook 把它改回来。
+        var ccStates: [String: (String, String)] = [:]
+        for line in extract(out, "cc").components(separatedBy: "\n") where !line.isBlank {
+            guard let o = JSON.parse(line: line), o.isObject else { continue }
+            // `tmux` 字段形如 `cc-Yxi:@28.%28` —— 取冒号前那段就是会话名
+            let tm = o["tmux"].string
+            guard let name = tm.split(separator: ":").first.map(String.init), !name.isEmpty else { continue }
+            let st: String
+            switch o["status"].string {
+            case "waiting": st = "input"
+            case "busy": st = "work"
+            default: continue          // idle：留空，让 SessionState.of 给 idle
+            }
+            ccStates[name] = (st, o["name"].string)
+        }
+
+        // hook 算好的那句「它到底要批什么」（rm -rf build/ / 改某个文件），零 token。
+        var evPreview: [String: String] = [:]
+        for line in extract(out, "ev").components(separatedBy: "\n") where !line.isBlank {
+            guard let o = JSON.parse(line: line), o.isObject else { continue }
+            let sess = o["session"].string
+            let prev = o["preview"].string
+            if !sess.isEmpty && !prev.isEmpty { evPreview[sess] = prev }
+        }
 
         // 状态先建索引：会话名 → (state, detail)
         var states: [String: (String, String)] = [:]
@@ -99,7 +144,8 @@ public enum SessionProbe {
         return tmux.components(separatedBy: "\n").compactMap { line in
             let p = line.components(separatedBy: "|")
             guard p.count >= 5 else { return nil }
-            let st = states[p[0]]
+            // ⚠️ 顺序：Claude Code 自己那份优先，cloud-status 只是兜底
+            let st = ccStates[p[0]] ?? states[p[0]]
             return BoardSession(
                 name: p[0],
                 windows: Int(p[1]) ?? 1,
@@ -108,7 +154,8 @@ public enum SessionProbe {
                 lastActivity: Date(timeIntervalSince1970: lastActivityOf(
                     tmuxTs: Double(p[2]) ?? 0, cwd: p[4], transcripts: transcripts)),
                 state: SessionState.of(st?.0),
-                detail: st?.1 ?? ""
+                // 状态源给的 detail 优先（它更「此刻」）；空了才用 hook 那句摘要
+                detail: (st?.1).flatMap { $0.isEmpty ? nil : $0 } ?? (evPreview[p[0]] ?? "")
             )
         }
     }
@@ -310,5 +357,92 @@ public enum Dirs {
             .filter { !busy.contains($0) }
             .filter { seen.insert($0).inserted }
             .sorted { Paths.nameOf($0).lowercased() < Paths.nameOf($1).lowercased() }
+    }
+}
+
+// MARK: - 在这个目录开一个新会话
+
+extension Dirs {
+
+    /// 建会话脚本的输出标记。挑一个正常 shell 输出里不会出现的串，
+    /// 这样 [madeFrom] 能从一堆 shell 噪音里认出「结论」那一行。
+    public static let tag = "__YXI_NEW__"
+
+    /// shell 单引号里安全地嵌一个值。
+    /// ⚠️ 是 `'\''` **四个字符** —— 少一个反斜杠就成了 `'''`，是错的。
+    private static func q(_ v: String) -> String {
+        v.replacingOccurrences(of: "'", with: "'\\''")
+    }
+
+    /// 「在这个目录开一个新会话」的命令。
+    ///
+    /// ⚠️ **`tmux new-session -c <不存在的目录>` 会返回 0，然后跑到 `$HOME` 去。**
+    /// 不报错、不非零退出 —— 调用方看到的是成功，
+    /// 于是 App 高高兴兴跳进一个根本不在你指定位置的会话。
+    /// 安卓侧用户报的就是这个：想在 `/root/src/workspace/logto` 开，最后开在了 `/root`。
+    ///
+    /// 所以这里做两件事：
+    ///  1. **先 `mkdir -p`** —— 目录不存在就建出来（用户要的「没有就直接创建」）
+    ///  2. **建完回头核对 `pane_current_path`** —— 不信 tmux 的退出码，只信它真正落在哪。
+    ///     对不上就把会话杀掉再报错，不留一个「名字对、位置错」的会话在那儿骗人。
+    ///
+    /// 两边都过一遍 `cd && pwd -P`，免得 `/root/src` 这种软链把比较搞砸。
+    public static func createCommand(dir: String, session: String) -> String {
+        let noSlash = String(dir.reversed().drop { $0 == "/" }.reversed())
+        let d = q(noSlash.isBlank ? "/" : noSlash)
+        let n = q(session)
+        return #"""
+        d='\#(d)'; n='\#(n)'
+        mkdir -p "$d" 2>/dev/null
+        [ -d "$d" ] || { echo '\#(tag):nodir'; exit 0; }
+        if tmux has-session -t "$n" 2>/dev/null; then echo '\#(tag):exists'; exit 0; fi
+        tmux new-session -d -s "$n" -c "$d" 2>/dev/null || { echo '\#(tag):failed'; exit 0; }
+        want=$(cd "$d" 2>/dev/null && pwd -P)
+        got=$(tmux display-message -p -t "$n" '#{pane_current_path}' 2>/dev/null)
+        got=$(cd "$got" 2>/dev/null && pwd -P)
+        if [ "$want" != "$got" ]; then
+          tmux kill-session -t "$n" 2>/dev/null
+          echo "\#(tag):wrongdir:$got"; exit 0
+        fi
+        tmux send-keys -t "$n" 'claude' Enter
+        echo '\#(tag):ok'
+        """#
+    }
+
+    /// [createCommand] 的结果。**只有 [Made.ok] / [Made.exists] 才可以跳进那个会话。**
+    ///
+    /// ⚠️ 失败只带**代号**不带话术 —— [Dirs] 是纯逻辑层（能单测、拿不到界面），
+    /// 在这儿写中文的话，英文界面会原样吐中文。话术在 UI 层拼。
+    public enum Made: Equatable, Sendable {
+        case ok
+        case exists
+        /// - Parameter code: nodir / failed / wrongdir / noresult / unknown
+        /// - Parameter detail: wrongdir 时是它**真正落在**的路径；其余多为空
+        case failed(code: String, detail: String)
+    }
+
+    /// 读 [createCommand] 的输出。
+    ///
+    /// ⚠️ **认不出来一律当失败**（fail-closed）。跳进一个没建成的会话，
+    /// 用户看到的是一片空白加「连不上」，比直接说「没开成」难查得多。
+    /// ⚠️ 取**最后**一条标记行：前面可能还有 shell 自己的回显。
+    public static func madeFrom(_ out: String) -> Made {
+        guard let line = out.components(separatedBy: "\n")
+            .map({ $0.trimmingCharacters(in: .whitespaces) })
+            .last(where: { $0.hasPrefix(tag) })
+        else { return .failed(code: "noresult", detail: "") }
+
+        let prefix = tag + ":"
+        let body = line.hasPrefix(prefix) ? String(line.dropFirst(prefix.count)) : line
+        switch body {
+        case "ok":     return .ok
+        case "exists": return .exists
+        case "nodir":  return .failed(code: "nodir", detail: "")
+        case "failed": return .failed(code: "failed", detail: "")
+        default:
+            guard body.hasPrefix("wrongdir") else { return .failed(code: "unknown", detail: body) }
+            let got = body.range(of: "wrongdir:").map { String(body[$0.upperBound...]) } ?? ""
+            return .failed(code: "wrongdir", detail: got)
+        }
     }
 }
