@@ -87,16 +87,43 @@ if [ "${1:-}" = "--publish" ]; then
     echo "  ⚠️ 连不上 hk13，跳过公网同步 —— 手机上还是旧包。"
   else
     DST="/var/www/yxi/$(cat "$TOKEN")"
-    scp -q "$EVENTS_DIR/Yxi.apk" "$EVENTS_DIR/$VER_APK" "$EVENTS_DIR/latest.json" "hk13:$DST/"
-    HERE=$(sha256sum "$EVENTS_DIR/Yxi.apk" | cut -d" " -f1)
-    THERE=$(ssh hk13 "sha256sum $DST/$VER_APK" | cut -d" " -f1)
-    if [ "$HERE" = "$THERE" ]; then
-      echo "  · 已同步到 hk13，sha256 一致：${HERE:0:12}…"
+    # ⚠️⚠️ **顺序是硬要求：先传包 → 校验 → 最后才传清单。**
+    #    原来三个文件一条 scp 一起传 —— 传输被打断（我就撞过一次：发布跑在
+    #    有超时的后台任务里，2 分钟到点被杀）时**清单已经落地、APK 还是半截**，
+    #    于是清单指向一个 12MB 的残包，手机上报「解析包时出现问题」。
+    #    而 sha256 校验写在 scp 之后，进程被杀就根本没跑到。
+    #    清单是**发布的开关**：它必须是最后一步，而且只在包验过之后才翻。
+    #    见 TROUBLESHOOTING #159。
+    # ⚠️ **用 rsync 不用 scp。** 到 hk13 的链路实测只有 **约 1 Mbps** ——
+    #    34MB 要传五到八分钟，scp 一断就得从头再来（我连着被超时杀过三次）。
+    #    rsync 的 `--append-verify` 能接着 `.part` 续传，而且相邻版本的 APK
+    #    大部分内容是一样的，增量传输还能再省一大截。
+    #    没有 rsync 就退回 scp（功能不受影响，只是慢）。
+    if command -v rsync >/dev/null; then
+      rsync --append-verify --partial -e ssh "$EVENTS_DIR/$VER_APK" "hk13:$DST/$VER_APK.part"
     else
-      echo "  ❌ hk13 上的包对不上！本地 ${HERE:0:12}… ≠ 远端 ${THERE:0:12}…"
-      echo "     手机会下到错的东西，手动查一下 $DST"
+      scp -q "$EVENTS_DIR/$VER_APK" "hk13:$DST/$VER_APK.part"
+    fi
+    HERE=$(sha256sum "$EVENTS_DIR/$VER_APK" | cut -d" " -f1)
+    THERE=$(ssh hk13 "sha256sum $DST/$VER_APK.part" | cut -d" " -f1)
+    if [ "$HERE" != "$THERE" ]; then
+      echo "  ❌ 传过去的包对不上！本地 ${HERE:0:12}… ≠ 远端 ${THERE:0:12}…"
+      ssh hk13 "rm -f $DST/$VER_APK.part"
+      echo "     残件已删，清单没动（手机上还是上一个能用的版本）"
       exit 1
     fi
+    # ⚠️ 传 `.part` 再改名：mv 在同一文件系统上是原子的，
+    #    所以那个正式文件名要么不存在、要么就是完整的，不会有中间态。
+    ssh hk13 "mv $DST/$VER_APK.part $DST/$VER_APK"
+    if command -v rsync >/dev/null; then
+      rsync --partial -e ssh "$EVENTS_DIR/Yxi.apk" "hk13:$DST/Yxi.apk.part"
+    else
+      scp -q "$EVENTS_DIR/Yxi.apk" "hk13:$DST/Yxi.apk.part"
+    fi
+    ssh hk13 "mv $DST/Yxi.apk.part $DST/Yxi.apk"
+    echo "  · 包已同步，sha256 一致：${HERE:0:12}…"
+    # 包验过了，现在才翻开关
+    scp -q "$EVENTS_DIR/latest.json" "hk13:$DST/"
 
     # 下载页那个按钮也指到带版本号的文件上 —— 它原来写死 /Yxi.apk，
     # 同样会被 CDN 缓存住（实测新用户从页面下到的是三个版本前的包）。
