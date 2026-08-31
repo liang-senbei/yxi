@@ -1,5 +1,6 @@
 import Combine
 import SwiftUI
+import UIKit          // UIPasteboard（复制会话目录）
 import YxiKit
 
 // ⚠️ 本文件在这台 Linux 上**一行都没编过**。
@@ -108,6 +109,8 @@ private struct Workspace: View {
     @ObservedObject var app: AppState
     let target: AppState.Target
     @State private var shell: SSHSession.Shell?
+    /// 刚复制过路径 —— 用来闪一下「路径已复制」
+    @State private var copiedPath = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -174,6 +177,19 @@ private struct Workspace: View {
                 if others.isEmpty {
                     Text("这台机器上没有别的会话")
                 }
+                // ⚠️ **复制路径放在这个菜单里。** 用户要的是「把这个会话的目录粘到别处去」——
+                // 而会话名 + 路径就在头部这一行、点它弹的就是这个菜单，所以这是最短的路。
+                // 不做成「点路径直接复制」：那块地方的点击已经归切会话了，
+                // 抢过去会让更常用的动作失灵。
+                if !target.cwd.isEmpty {
+                    Divider()
+                    Button {
+                        UIPasteboard.general.string = target.cwd
+                        copiedPath = true
+                    } label: {
+                        Label("复制路径 \(target.cwd)", systemImage: "doc.on.doc")
+                    }
+                }
             } label: {
                 HStack(spacing: 4) {
                     Text(target.session.hasPrefix("cc-") ? String(target.session.dropFirst(3)) : target.session)
@@ -195,6 +211,24 @@ private struct Workspace: View {
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
         .background(Yx.low)
+        // ⚠️ 复制这种「按了就完了」的动作**必须有反馈** —— 剪贴板是看不见的，
+        // 没提示的话用户不知道到底复制上没有，只能去别处粘一下试。
+        .overlay(alignment: .top) {
+            if copiedPath {
+                Text("路径已复制")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Yx.onCopper)
+                    .padding(.horizontal, 14).padding(.vertical, 7)
+                    .background(Yx.copper, in: Capsule())
+                    .padding(.top, 6)
+                    .transition(.opacity)
+                    .task {
+                        try? await Task.sleep(nanoseconds: 1_400_000_000)
+                        copiedPath = false
+                    }
+            }
+        }
+        .animation(.easeInOut(duration: 0.18), value: copiedPath)
     }
 
     /// ⚠️⚠️ **开 PTY 的初始尺寸必须用控件量出来的，别写死 80x24**（安卓 #77）。

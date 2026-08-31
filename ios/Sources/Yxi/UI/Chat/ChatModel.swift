@@ -305,25 +305,51 @@ final class ChatModel: ObservableObject {
     // MARK: - 附件
 
     func attach(fileName: String, data: Data, isImage: Bool) {
+        // ⚠️ **是计数不是布尔。** 布尔的话第一张传完就置 false，
+        // 而第二张还在传 —— 界面上「上传中」提前消失，用户以为完事了。
         uploading = true
+        uploadCount += 1
         Task { [backend = self.backend, session = self.session] in
-            defer { uploading = false }
+            defer { uploadCount -= 1; uploading = uploadCount > 0 }
             do {
                 let up = try await backend.upload(
                     session: session, fileName: fileName, data: data, isImage: isImage)
-                // ⚠️ **要编号。** 正文前面贴的是「图片1 = /path」，而药丸上如果
-                // 三个都叫「图片」，用户没法把「图片2」跟屏幕上哪一个对上 ——
-                // 更没法说「删掉图片2」。编号按同类计数（图片1/图片2、附件1…）。
-                let n = staged.filter { $0.isImage == up.isImage }.count + 1
-                staged.append(Staged(label: "\(up.label)\(n)",
-                                     remotePath: up.remotePath, isImage: up.isImage))
+                staged.append(Staged(label: up.label, remotePath: up.remotePath, isImage: up.isImage))
+                staged = Self.renumber(staged)
             } catch {
                 if let m = reportable(error) { status = "传不上去：\(m)" }
             }
         }
     }
 
-    func drop(_ s: Staged) { staged.removeAll { $0.id == s.id } }
+    /// 正在传几个（0 = 都传完了）。
+    private var uploadCount = 0
+
+    /// 重新编号。
+    ///
+    /// ⚠️ **必须在加进列表之后统一编，不能在上传前各算各的。**
+    /// 原来是 `staged.filter { … }.count + 1` —— 而 `staged` 只在**上传成功后**才更新，
+    /// 于是第一张还在传的时候点第二张，两张算出来的都是 1，双双叫「图片1」。
+    /// 而正文前面贴的路径映射是**靠标签**认的，两个同名标签 =
+    /// Claude 拿到两条自相矛盾的映射。安卓端用户真撞上了（第二张必失败）。
+    ///
+    /// 顺带把「传完的顺序不等于点的顺序」也抹平了：编号只跟列表里的位置走。
+    static func renumber(_ list: [Staged]) -> [Staged] {
+        var img = 0, file = 0
+        return list.map { s in
+            let base = s.label.trimmingCharacters(in: .decimalDigits)
+            if s.isImage { img += 1; return Staged(label: "\(base)\(img)", remotePath: s.remotePath, isImage: true) }
+            file += 1
+            return Staged(label: "\(base)\(file)", remotePath: s.remotePath, isImage: false)
+        }
+    }
+
+    func drop(_ s: Staged) {
+        staged.removeAll { $0.id == s.id }
+        // ⚠️ 删掉中间一个之后要**重编** —— 不然会留下「图片1、图片3」这种断号，
+        // 而正文里的映射是靠标签认的。
+        staged = Self.renumber(staged)
+    }
 }
 
 /// 该不该把这个错误显示给用户。**取消不算失败** → 返回 nil。
