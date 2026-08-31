@@ -3196,3 +3196,46 @@ scp 清单                     验过了才翻开关
 任何「指针 + 数据」的更新都一样 —— 指针必须最后动。
 #148 说的是「校验源站不等于校验用户看到的」，这条补前半段：
 **校验必须在翻牌之前，而且不能写在一个会被跳过的位置。**
+
+## #160 iOS 从 0.9.33 起就一直编译不过，而我们一直不知道
+
+**症状**：把 iOS 拿到 Mac 上第一次真编译，第一个错就是
+`instance member 'opacity' cannot be used on type 'View'`
+—— 出在 **2026-08-29 我给 iOS 额度面板加压暗**那次改的代码里。
+也就是说 **iOS 已经好几天编不过了，而每一版的 `ios/project.yml` 都跟着安卓写着新版本号。**
+
+**根因（两层）**：
+
+**① 代码错**：`.opacity(...)` 写在了 `if` 的右花括号**后面**：
+```swift
+if let q = quota {
+    ...
+}
+.opacity(quotaBusy ? 0.4 : 1)     // ← ViewBuilder 里这等于对 `View` 类型调实例方法
+```
+修饰符必须贴在**视图**上。把 `if` 里的内容包进一个 `VStack` 再贴上去。
+
+**② 流程错（这个更要命）**：这台 Linux 机器**编译不了 SwiftUI**（macOS 专属），
+`dev/precheck.sh` 只做文本检查（括号配平、语法解析）——
+**语义错误它一个都抓不到**。而我一直拿 precheck 通过当「iOS 没问题」。
+
+**怎么避免**：iOS 的 UI 改动，**Mac 上真 `xcodebuild` 是唯一算数的验证**。流程：
+```bash
+# Linux 侧
+rsync -a --exclude .build --exclude '*.xcodeproj' ios/ /tmp/iosbuild/
+cd /tmp/iosbuild && xcodegen generate
+rsync -az /tmp/iosbuild/ mac:~/yxi-build/
+# Mac 侧
+ssh mac 'cd ~/yxi-build && xcodebuild -project Yxi.xcodeproj -scheme Yxi \
+  -destination "generic/platform=iOS Simulator" -configuration Debug build \
+  CODE_SIGNING_ALLOWED=NO -skipPackagePluginValidation -skipMacroValidation'
+```
+⚠️ `-skipPackagePluginValidation` 是必须的：SwiftTerm 带一个构建插件，
+Xcode 会拦下来要人工批准，报的却是含糊的
+`Validate plug-in "SwiftTermBuildInfoPlugin" ... BUILD FAILED`，
+很容易误以为是自己的代码坏了。
+
+**通则**：**「我验不了的东西」和「验过了」不是一回事。**
+precheck 通过只说明「文本上像 Swift」，不说明它能编译。
+跨平台项目里，凡是只有一侧能验证的部分，都要显式标出「这部分没验过」——
+而不是让另一侧的绿灯替它背书。
