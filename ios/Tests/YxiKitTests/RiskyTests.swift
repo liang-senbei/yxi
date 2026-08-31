@@ -17,7 +17,7 @@ final class RiskyTests: XCTestCase {
             ("Bash", "git push --force"),
             ("Bash", "git push --force-with-lease"),
             ("Bash", "mkfs.ext4 /dev/sdb1"),
-            ("Bash", "dd if=/dev/zero of=/dev/sda"),
+            ("Bash", "cat /dev/zero > /dev/sda"),
             ("Bash", "DROP TABLE users"),
             ("Bash", "truncate table logs"),
             ("Bash", "kubectl delete pod api-0"),

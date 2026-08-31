@@ -3,10 +3,12 @@ import XCTest
 
 /// 「在这个目录开一个新会话」。
 ///
+/// ⚠️ 类名不叫 `DirsTests`：`SFTPTests.swift` 里已经有一个（测的是候选目录那几个函数）。
+///
 /// ⚠️ 这块**错了不会报错，只会静静地开错地方** —— `tmux new-session -c <不存在的目录>`
 /// 返回 0 然后跑去 `$HOME`。安卓侧用户真撞上过：想在 `.../logto` 开，开在了 `/root`。
 /// 所以下面每一条钉的都是「少了它就会静默出问题」的东西。
-final class DirsTests: XCTestCase {
+final class DirsCreateTests: XCTestCase {
 
     private let cmd = Dirs.createCommand(dir: "/root/src/workspace/logto", session: "cc-logto")
 
