@@ -55,6 +55,17 @@ PY
 # 手机连上这台机器时会看到「有新版本」，走 SFTP 下载 ——
 # 不用 GitHub、不用 token、不用公网 HTTP，防火墙后面照样能用。
 if [ "${1:-}" = "--publish" ]; then
+  # ⚠️ **同一时刻只许一个发布在跑。**
+  #    踩过：一个旧流程的发布进程还活着（传得慢，34MB 在 1Mbps 的链路上要五到八分钟），
+  #    我又起了一个新的 —— 两个往同一个目录写，旧的那个用老顺序把清单翻到了
+  #    一个还没传完的包上，手机立刻报「解析包时出现问题」。
+  #    发布是**有副作用且不可交换**的操作，必须串行。见 TROUBLESHOOTING #159。
+  exec 9>/tmp/.yxi-publish.lock
+  if ! flock -n 9; then
+    echo "❌ 已经有一个发布在跑了（34MB 在这条 1Mbps 的链路上要好几分钟）。"
+    echo "   等它跑完，或者 kill 掉再来 —— 两个一起跑会把清单翻到半截包上。"
+    exit 1
+  fi
   APK="${2:?用法: $0 --publish <apk> <versionCode> <versionName> [说明]}"
   CODE="${3:?缺 versionCode}"; NAME="${4:?缺 versionName}"; NOTES="${5:-}"
   [ -f "$APK" ] || { echo "找不到 $APK"; exit 1; }
