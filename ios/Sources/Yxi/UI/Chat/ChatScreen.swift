@@ -23,12 +23,15 @@ struct ChatScreen: View {
     /// 不像 Android 一个 `GetContent("*/*")` 通吃
     @State private var attaching = false
     @State private var picking = false
-    @State private var photo: PhotosPickerItem?
+    /// ⚠️ 是数组不是单个 —— 一次可以选多张（用户要的）。
+    @State private var photos: [PhotosPickerItem] = []
     @State private var importing = false
     @State private var showModes = false
     @State private var diff: String?
     /// 正文里点开的那个文件
     @State private var peek: String?
+    /// 按住说话
+    @StateObject private var voice = Dictation()
 
     private let bottomID = "yxi.chat.bottom"
     private let space = "yxi.chat.space"
@@ -45,6 +48,49 @@ struct ChatScreen: View {
     }
 
     var body: some View {
+        ZStack {
+            // 光晕铺**整页**（含输入框背后）—— 只铺列表区会在输入框上方留一道色差（#192）
+            ThinkingGlow(busy: model.live.busy, waiting: model.pending != nil,
+                         streaming: model.live.busy && lastIsAssistant)
+            page
+        }
+        .background(Yx.surface)
+        // 会话或 cwd 一变就整条重来。`.task(id:)` 的取消是结构化的 ——
+        // 视图一消失，tail / 节流 / 抓屏三条循环全停，不用自己记 Task
+        // ⚠️ 会话/cwd 是**参数**不是 init 存的：换会话时 ChatScreen 原地复用，
+        // `@StateObject` 不会重建，init 里存死就会拿着旧会话去 send-keys
+        .task(id: session + "\u{1}" + cwd) { await model.run(session: session, cwd: cwd) }
+        // ⚠️ **一次能选多张 / 多个文件**：一张一张选、传完再点加号，五张就是五轮操作。
+        // 9 这个上限是随手定的够用值 —— 手机上一次挑十几张本身就不好挑。
+        .photosPicker(isPresented: $picking, selection: $photos,
+                      maxSelectionCount: 9, matching: .images)
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.item],
+                      allowsMultipleSelection: true) { result in
+            guard case let .success(urls) = result else { return }
+            for url in urls {
+                // ⚠️ 文件选择器给的是**沙箱外**的 URL，不开安全作用域读不到（会静默拿到空数据）
+                let ok = url.startAccessingSecurityScopedResource()
+                defer { if ok { url.stopAccessingSecurityScopedResource() } }
+                guard let data = try? Data(contentsOf: url) else { continue }
+                model.attach(fileName: url.lastPathComponent, data: data, isImage: false)
+            }
+        }
+        .onChange(of: photos) { _, items in
+            guard !items.isEmpty else { return }
+            Task {
+                // ⚠️ **文件名要带序号。** 相册给的每张都叫 `image.png`，
+                // 而远端路径是「时间戳-文件名」—— 同一秒选的几张会**写到同一个路径上**，
+                // 后面的把前面的覆盖掉，静悄悄少几张。（安卓那边靠 idx 避开的是同一个坑。）
+                for (i, item) in items.enumerated() {
+                    guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
+                    model.attach(fileName: "image-\(i + 1).png", data: data, isImage: true)
+                }
+                photos = []
+            }
+        }
+    }
+
+    private var page: some View {
         VStack(spacing: 0) {
             if let s = model.status {
                 Text(s)
@@ -82,29 +128,12 @@ struct ChatScreen: View {
 
             inputRow
         }
-        .background(Yx.surface)
-        // 会话或 cwd 一变就整条重来。`.task(id:)` 的取消是结构化的 ——
-        // 视图一消失，tail / 节流 / 抓屏三条循环全停，不用自己记 Task
-        // ⚠️ 会话/cwd 是**参数**不是 init 存的：换会话时 ChatScreen 原地复用，
-        // `@StateObject` 不会重建，init 里存死就会拿着旧会话去 send-keys
-        .task(id: session + "\u{1}" + cwd) { await model.run(session: session, cwd: cwd) }
-        .photosPicker(isPresented: $picking, selection: $photo, matching: .images)
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.item]) { result in
-            guard case let .success(url) = result else { return }
-            // ⚠️ 文件选择器给的是**沙箱外**的 URL，不开安全作用域读不到（会静默拿到空数据）
-            let ok = url.startAccessingSecurityScopedResource()
-            defer { if ok { url.stopAccessingSecurityScopedResource() } }
-            guard let data = try? Data(contentsOf: url) else { return }
-            model.attach(fileName: url.lastPathComponent, data: data, isImage: false)
-        }
-        .onChange(of: photo) { _, item in
-            guard let item else { return }
-            Task {
-                guard let data = try? await item.loadTransferable(type: Data.self) else { return }
-                model.attach(fileName: "image.png", data: data, isImage: true)
-                photo = nil
-            }
-        }
+    }
+
+    /// 回答正在到达：最后一条是助手的正文
+    private var lastIsAssistant: Bool {
+        if case .assistant = model.items.last { return true }
+        return false
     }
 
     // MARK: - 转录列表
@@ -116,7 +145,11 @@ struct ChatScreen: View {
                 ZStack(alignment: .bottomTrailing) {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 18) {
-                            ForEach(model.items) { ItemView(item: $0) }
+                            let files = backend as? FileService
+                            ForEach(model.items) { item in
+                                ItemView(item: item, files: files, onOpen: { ref in peek = ref.path })
+                                    .transition(.rise)
+                            }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 16)
@@ -240,13 +273,6 @@ struct ChatScreen: View {
 
     private var inputRow: some View {
         HStack(spacing: 10) {
-            // ⚠️ **没有麦克风按钮，这是故意的。**
-            // iOS 没有 Android `RecognizerIntent` 那种「叫一个系统识别界面回来」的东西；
-            // 自己接 Speech.framework 要麦克风+语音两个权限、还要往 Info.plist 加两条 ——
-            // 而 Info.plist 不归 UI 这层改。
-            // 系统键盘自带的听写麦克风在任何输入框里都能用，**而且识别结果落在输入框里、
-            // 要你自己按发送** —— 恰好就是 PRD 附录 E.2 要求的「先显示、确认才发」。
-            // 零代码、零权限、零风险。真要做服务器端 whisper（E.3）再说。
             Button { attaching = true } label: {
                 Text("📎").font(.system(size: 17))
                     .frame(width: 46, height: 46)
@@ -266,6 +292,13 @@ struct ChatScreen: View {
                 .tint(Yx.copper)
                 .padding(.horizontal, 20).padding(.vertical, 15)
                 .background(Yx.container, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+
+            // 按住说话（识别在手机上做）。结果**只填进输入框、绝不直接发** ——
+            // 识别错一个字，在服务器上就是另一条命令（PRD 附录 E.2）。
+            MicHold(voice: voice, onText: { said in
+                model.draft = (model.draft.trimmingCharacters(in: .whitespaces) + " " + said)
+                    .trimmingCharacters(in: .whitespaces)
+            }, onError: { model.say($0) })
 
             Button { showModes = true } label: {
                 Text("⚡").font(.system(size: 17))
@@ -515,13 +548,16 @@ private struct BottomEdge: PreferenceKey {
 
 private struct ItemView: View {
     let item: ChatItem
+    /// 缩略图要从服务器拉图；nil = 这条连接不支持 SFTP，只显示文件名
+    let files: FileService?
+    let onOpen: (Attachments.Ref) -> Void
 
     var body: some View {
         switch item {
         case let .user(_, text):
-            UserBubble(text: text)
+            UserBubble(text: text, files: files, onOpen: onOpen)
         case let .queued(_, text):
-            QueuedBubble(text: text)
+            QueuedBubble(text: text, files: files, onOpen: onOpen)
         case let .assistant(_, md):
             // ⚠️ `.markdownTheme(.yxi)` 一定要传 —— 默认主题的 h1 是正文的两倍，
             // 聊天气泡里一个 `##` 就占掉半屏。见 [Theme.yxi]
@@ -545,17 +581,28 @@ private struct ItemView: View {
     }
 }
 
+/// 你说过的话。附件头摘出来画成缩略图（在气泡外面上方）——
+/// 一条又长又没用的路径占四行，用户想看的是**那张图**。
 private struct UserBubble: View {
     let text: String
+    let files: FileService?
+    let onOpen: (Attachments.Ref) -> Void
     var body: some View {
+        let parsed = Attachments.parseRefs(text)
         HStack {
             Spacer(minLength: 40)
-            Text(text)
-                .font(.system(size: 15))
-                .foregroundStyle(Yx.onCopperBox)
-                .textSelection(.enabled)
-                .padding(.horizontal, 18).padding(.vertical, 14)
-                .background(Yx.copperBox, in: BubbleShape())
+            VStack(alignment: .trailing, spacing: 6) {
+                if !parsed.refs.isEmpty { ThumbRow(refs: parsed.refs, files: files, onOpen: onOpen) }
+                // 只有附件、没打字时**不画空气泡**（很常见：直接发一张图）
+                if !parsed.body.isEmpty || parsed.refs.isEmpty {
+                    Text(parsed.body.isEmpty ? text : parsed.body)
+                        .font(.system(size: 15))
+                        .foregroundStyle(Yx.onCopperBox)
+                        .textSelection(.enabled)
+                        .padding(.horizontal, 18).padding(.vertical, 14)
+                        .background(Yx.copperBox, in: BubbleShape())
+                }
+            }
         }
     }
 }
@@ -569,26 +616,50 @@ private struct UserBubble: View {
 /// ⚠️ 虚线边是全 app 唯一的描边（其余一律靠面的明度分层）。就是要它显得**没落定**。
 private struct QueuedBubble: View {
     let text: String
+    let files: FileService?
+    let onOpen: (Attachments.Ref) -> Void
     var body: some View {
+        // 跟 UserBubble 一样把附件摘出来画缩略图 —— 「排队中」是一条路径、入了转录才变成图，
+        // 用户说「割裂」
+        let parsed = Attachments.parseRefs(text)
         HStack {
             Spacer(minLength: 40)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("排队中 · 它忙完就轮到这条")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Yx.copper)
-                Text(text)
-                    .font(.system(size: 15))
-                    .foregroundStyle(Yx.onSurface.opacity(0.75))
+            VStack(alignment: .trailing, spacing: 6) {
+                if !parsed.refs.isEmpty { ThumbRow(refs: parsed.refs, files: files, onOpen: onOpen) }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("排队中 · 它忙完就轮到这条")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Yx.copper)
+                    if !parsed.body.isEmpty || parsed.refs.isEmpty {
+                        Text(parsed.body.isEmpty ? text : parsed.body)
+                            .font(.system(size: 15))
+                            .foregroundStyle(Yx.onSurface.opacity(0.75))
+                    }
+                }
+                .padding(.horizontal, 18).padding(.vertical, 12)
+                .background(Yx.copperBox.opacity(0.30), in: BubbleShape())
+                .overlay(
+                    BubbleShape().strokeBorder(
+                        Yx.copper.opacity(0.45),
+                        style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                )
             }
-            .padding(.horizontal, 18).padding(.vertical, 12)
-            .background(Yx.copperBox.opacity(0.30), in: BubbleShape())
-            .overlay(
-                BubbleShape().strokeBorder(
-                    Yx.copper.opacity(0.45),
-                    style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-            )
         }
     }
+}
+
+/// 新条目的进入动画：从下面 28pt 滑上来 + 淡入（#191）。移除不做动画。
+private struct Rise: ViewModifier {
+    let on: Bool
+    func body(content: Content) -> some View {
+        content.opacity(on ? 0 : 1).offset(y: on ? 28 : 0)
+    }
+}
+
+extension AnyTransition {
+    static let rise = AnyTransition.asymmetric(
+        insertion: .modifier(active: Rise(on: true), identity: Rise(on: false)),
+        removal: .identity)
 }
 
 /// 用户气泡的形状：右下角收一个小角，指向自己。

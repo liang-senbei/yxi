@@ -528,12 +528,16 @@ private struct HostRow: View {
                 Text("挑要收拾的")
                     .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(Yx.onSurface)
-                YxHint("这些都是缓存和跑飞的搜索，收掉不会丢任何东西。你的会话、编辑器、tmux 一概不碰。")
+                YxHint("缓存和跑飞的进程收掉不丢东西。会话那一类会真的关掉 —— 但对话存档留着，之后还能接回来。")
 
                 ForEach(groups) { g in
                     let on = picked.contains(g.what)
                     // 最久的那个跑了多久 —— 判断「是不是跑飞了」看这个。同样先算好再进 `Text`
-                    let line = "\(g.items.count) 个 · \(totalMb(g.items)) MB · 最久跑了 \(oldestMin(g.items)) 分钟"
+                    // ⚠️ 会话那类 ageSec 是「多久没动过」不是「跑了多久」，
+                    // 照进程的话术写会把「闲了 17 天」说成「跑了 17 天」，正好反了
+                    let line = g.what == "idle"
+                        ? "\(g.items.count) 个 · \(totalMb(g.items)) MB · 最久 \(oldestDays(g.items)) 天没动过"
+                        : "\(g.items.count) 个 · \(totalMb(g.items)) MB · 最久跑了 \(oldestMin(g.items)) 分钟"
                     Button {
                         if on { picked.remove(g.what) } else { picked.insert(g.what) }
                     } label: {
@@ -707,8 +711,14 @@ private struct HostRow: View {
         case "gradle": return "Gradle 编译守护进程"
         case "kotlin": return "Kotlin 编译守护进程"
         case "rg":     return "跑飞的 rg 全盘搜索"
+        case "hog":    return "一直霸着 CPU 的进程"
+        case "idle":   return "很久没动过的会话"
         default:       return code
         }
+    }
+
+    private func oldestDays(_ items: [Health.Junk]) -> Int64 {
+        (items.map(\.ageSec).max() ?? 0) / 86400
     }
 
     private func totalMb(_ items: [Health.Junk]) -> Int64 {

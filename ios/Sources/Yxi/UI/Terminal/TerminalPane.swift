@@ -25,7 +25,7 @@ struct TerminalPane: View {
                     .padding(14)
             }
         }
-        .background(Yx.lowest)
+        .background(Yx.terminalBg)
         // ⚠️ **这里绝对不能加 `.ignoresSafeArea(.keyboard)`。**
         // Android 上同一件事踩过（TROUBLESHOOTING #62）：edge-to-edge 之下软键盘
         // 把整条键盘工具条盖住了 —— 而 esc / tab / ^C 恰恰是打字时最需要的几个键。

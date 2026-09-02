@@ -47,7 +47,9 @@ protocol ChatBackend: SessionService, ShellRunner, Sendable {
     ///
     /// 返回 nil = 这个会话里没跑过 Claude Code，对话模式该置灰**并说明原因** ——
     /// 灰着不说话最气人。
-    func latestTranscript(cwd: String) async throws -> String?
+    /// ⚠️ `session` 必须传：转录按 sessionId 找，不按目录找 ——
+    /// 会话里 `cd` 过一次，目录就永远对不上了。
+    func latestTranscript(cwd: String, session: String) async throws -> String?
 
     /// `tail -n backlog -f` 那个文件，一行一个元素。
     ///

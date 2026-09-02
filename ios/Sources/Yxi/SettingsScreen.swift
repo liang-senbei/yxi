@@ -16,12 +16,14 @@ struct SettingsScreen: View {
     @State private var ticketText = ""
     @State private var tickets: [Tickets.Ticket] = []
     @State private var ticketNote: String?
+    @AppStorage(Appearance.key) private var appearance = Appearance.light
 
     var body: some View {
         NavigationStack {
             List {
                 ticketSection
                 versionSection
+                appearanceSection
                 keySection
                 backgroundSection
                 diagnosticSection
@@ -103,6 +105,20 @@ struct SettingsScreen: View {
             await loadTickets()
         } else {
             ticketNote = "没提上去"
+        }
+    }
+
+    // MARK: 外观
+
+    private var appearanceSection: some View {
+        Section("外观") {
+            Picker("主题", selection: $appearance) {
+                Text("浅色").tag(Appearance.light)
+                Text("深色").tag(Appearance.dark)
+                Text("跟随系统").tag(Appearance.system)
+            }
+            .pickerStyle(.segmented)
+            YxHint("终端永远是深底 —— ANSI 彩色输出在浅底上读不了。")
         }
     }
 

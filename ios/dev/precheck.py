@@ -7,8 +7,13 @@ import pathlib, re, sys
 
 def strip(src: str) -> str:
     """去掉注释和字符串字面量，只留代码骨架。"""
+    # ⚠️ 整行注释先剥：注释里写个 `#"…"#` 举例，会被下面的 raw string 规则当成字符串开头，
+    #    一路吞到几十行外真正的 "# —— Transcript.swift 就这么被报成「花括号差 2」过
+    src = re.sub(r'^[ \t]*//[^\n]*', '', src, flags=re.M)
     src = re.sub(r'"""(?:.|\n)*?"""', '""', src)          # 多行字符串
-    src = re.sub(r'#"(?:[^"]|"(?!#))*"#', '""', src)      # raw string
+    # ⚠️ 开头的 #" 前面不能是引号：普通字符串 "#" 里也有 #"，不挡住会从那儿一路吞到
+    #    下一个 "# —— Transcript.swift 就被这么吞掉过 150 行，报成「花括号差 2」
+    src = re.sub(r'(?<!")#"(?:[^"]|"(?!#))*"#', '""', src)  # raw string
     src = re.sub(r'"(?:[^"\\\n]|\\.)*"', '""', src)       # 普通字符串
     src = re.sub(r'/\*(?:.|\n)*?\*/', '', src)            # 块注释
     src = re.sub(r'//[^\n]*', '', src)                    # 行注释

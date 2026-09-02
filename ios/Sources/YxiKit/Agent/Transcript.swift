@@ -112,7 +112,9 @@ public enum Transcript {
             }
 
             switch type {
-            case "user": parseUser(msg, meta: d["toolUseResult"], id: id, calls: calls, out: &out)
+            // ⚠️ isMeta = Claude Code 自己塞的，不是用户打的 —— 见 parseUser
+            case "user": parseUser(msg, meta: d["toolUseResult"], id: id, calls: calls,
+                                   out: &out, isMeta: d["isMeta"].bool)
             case "assistant": parseAssistant(msg, id: id, calls: &calls, out: &out)
             default: break
             }
@@ -157,6 +159,15 @@ public enum Transcript {
     /// ⚠️ 队友消息、子 agent 回报、系统提醒、斜杠命令的输出**都走用户消息这条路**。
     /// 不分开的话，屏幕上会顶着「你说的话」的气泡显示一坨 XML ——
     /// 而用户根本没打过那句话（安卓 #87：实测一个会话里 33 处）。
+    /// 读图之后 Claude Code 追加的坐标注解，形如
+    /// `[Image: original 1264x2800, displayed at 903x2000. Multiply coordinates by 1.40 …]`。
+    /// 纯粹是给模型换算坐标用的，**对话里一点意义都没有** —— 整条丢掉。
+    static func isImageNote(_ s: String) -> Bool {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.range(of: #"^\[Image: original \d+x\d+[^\n]*\]$"#,
+                       options: .regularExpression) != nil
+    }
+
     private static func userOrInjected(id: String, text: String) -> ChatItem {
         guard let inj = injectedOf(text) else { return .user(id: id, text: text) }
         return .injected(id: id, label: inj.label, from: inj.from, text: clean(text))
@@ -170,19 +181,37 @@ public enum Transcript {
                                options: .regularExpression)
     }
 
+    /// ⚠️ **`isMeta` 的消息不是用户打的，绝不能画成用户气泡。**
+    ///
+    /// Claude Code 把一批「role 是 user、但人没说过」的东西也写成 user 消息，
+    /// 统一带 `isMeta: true`：读图后的坐标注解、Stop 钩子回执、目标复查、
+    /// skill 载入说明……照直渲染就是**凭空替用户说话**。用户报的就是这个：
+    /// 他从没打过那句 `[Image: original 1264x2800, displayed at 903x2000. …]`，
+    /// 手机上却整整齐齐一个蓝气泡。一份真实转录里 91 条 isMeta，62 条是图片注解。
+    ///
+    /// 带 `<agent-message>` 之类标签的照旧走 `userOrInjected`（那些**有内容**，
+    /// 比如别的会话发来的消息，用户是要看的）；图片坐标注解直接丢；其余当系统消息画。
     private static func parseUser(
         _ msg: JSON, meta: JSON, id: String,
-        calls: [String: Int], out: inout [ChatItem]
+        calls: [String: Int], out: inout [ChatItem], isMeta: Bool = false
     ) {
+        func emit(_ key: String, _ text: String) -> ChatItem? {
+            let item = userOrInjected(id: key, text: text)
+            guard isMeta else { return item }
+            // 已经认出是注入内容（队友消息之类）就照旧显示
+            if case .injected = item { return item }
+            if isImageNote(text) { return nil }
+            return .injected(id: key, label: "系统消息", from: nil, text: clean(text))
+        }
         switch msg["content"] {
         case let .string(s):
-            if !s.isBlank { out.append(userOrInjected(id: id, text: s)) }
+            if !s.isBlank, let it = emit(id, s) { out.append(it) }
         case let .array(blocks):
             for (i, b) in blocks.enumerated() {
                 switch b["type"].string {
                 case "text":
                     let t = b["text"].string
-                    if !t.isBlank { out.append(userOrInjected(id: "\(id)-\(i)", text: t)) }
+                    if !t.isBlank, let it = emit("\(id)-\(i)", t) { out.append(it) }
                 case "tool_result":
                     // 工具结果不单独成条，合并回它对应的工具卡片
                     guard let at = calls[b["tool_use_id"].string],
@@ -265,12 +294,36 @@ public enum Transcript {
 /// 那样这一层才能在 Linux 上跑测试，不用起一台真机。
 public enum TranscriptStream {
 
-    /// 找某个 cwd 对应的最新转录文件。
+    /// 找这个会话的最新转录文件。
+    ///
+    /// ⚠️⚠️ **按 sessionId 找，别只按目录找。**
+    ///
+    /// Claude Code 的转录目录是拿**启动时**那个目录的名字拼的，而 `pane_current_path`
+    /// 是**此刻**的目录 —— 会话里 `cd` 一下，两者就永久对不上。用户报过：
+    /// `cc-hexingyang` 在 `/root/src/workspace/hexingyang` 启动、后来 cd 进了子目录，
+    /// 对话页从此一直显示「这个会话里没找到 Claude Code 的转录」，
+    /// 而转录一直好好地在原来那个目录里写着。
+    ///
+    /// `~/.claude/sessions/` 下那些 json 里有 `tmux`（会话名）和 `sessionId`，
+    /// 转录文件名就是 `<sessionId>.jsonl` —— 这条链精确，不受 cd 影响。
+    ///
+    /// ⚠️ 找不到才退回按目录找。**不往父目录爬**：`/a/b/c` 爬到 `/a/b`
+    /// 很可能撞上另一个会话的转录，显示错人的对话比显示「没找到」糟得多。
     ///
     /// ⚠️ 通配符只有一层（`<项目>/*.jsonl`），不递归 —— 2.1.241 起子 agent 的转录在
     /// `<会话uuid>/subagents/` 下面，递归的话会挑到子 agent 那份，主线一条都不显示。
-    public static func latestCommand(cwd: String) -> String {
-        "ls -t \"$HOME/.claude/projects/\(projectDir(cwd))\"/*.jsonl 2>/dev/null | head -1"
+    /// 按 sessionId 找的那条 `*/<sid>.jsonl` 同样只有一层，一样安全。
+    public static func latestCommand(cwd: String, session: String = "") -> String {
+        let n = session.replacingOccurrences(of: "'", with: "'\\''")
+        let byDir = "ls -t \"$p/\(projectDir(cwd))\"/*.jsonl 2>/dev/null | head -1"
+        guard !session.isEmpty else { return "p=\"$HOME/.claude/projects\"; " + byDir }
+        return "p=\"$HOME/.claude/projects\"; n='\(n)'; "
+            + "m=$(grep -l \"\\\"tmux\\\":\\\"$n:\" \"$HOME\"/.claude/sessions/*.json 2>/dev/null | head -1); "
+            + "if [ -n \"$m\" ]; then "
+            + "s=$(sed -n 's/.*\"sessionId\":\"\\([^\"]*\\)\".*/\\1/p' \"$m\" 2>/dev/null | head -1); "
+            + "if [ -n \"$s\" ]; then r=$(ls -t \"$p\"/*/\"$s\".jsonl 2>/dev/null | head -1); "
+            + "[ -n \"$r\" ] && { printf '%s\\n' \"$r\"; exit 0; }; fi; fi; "
+            + byDir
     }
 
     /// [latestCommand] 的输出 → 文件路径。没有就是 nil（这个会话没跑过 Claude Code，

@@ -16,6 +16,8 @@ import YxiKit
 public struct RootView: View {
 
     @StateObject private var app = AppState()
+    /// 浅色 / 深色 / 跟随系统，设置页改。默认浅色。
+    @AppStorage(Appearance.key) private var appearance = Appearance.light
 
     public init() {}
 
@@ -29,7 +31,7 @@ public struct RootView: View {
                 tabs
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Appearance.scheme(appearance))
         .tint(Yx.copper)
         // 首连确认。⚠️ 指纹**变了**根本走不到这里 —— KnownHosts 直接拒，连问都不问。
         // 在这儿加一个「仍然连接」就等于把安卓 #22 那个洞原样搬过来。

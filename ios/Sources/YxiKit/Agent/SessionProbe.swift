@@ -214,14 +214,37 @@ public enum SessionProbe {
             .trimmingCharacters(in: CharacterSet(charactersIn: "\r\n"))
     }
 
+    /// 终止一个会话的命令。
+    ///
+    /// ⚠️⚠️ **光 `tmux kill-session` 在有 watchdog 的机器上不算终止。**
+    /// remote-dev-station 那套里有个 `cloud-watchdog.timer`，每 15 秒把「登记过但没在跑」
+    /// 的会话 `claude --resume` 拉回来 —— 用户滑动终止、确认、看着它消失，十几秒后又在看板上了
+    /// （用户原话：「终止不是真的终止，终止了还在的」）。
+    /// `cloud-forget` 先移出恢复名单再杀，**对话存档保留**。没装那套的机器退回 kill-session。
+    /// 跟安卓 `SessionProbe.kill` / 体检面板收拾闲置会话是同一条路（#166）。
+    public static func killCommand(session: String) -> String {
+        let n = session.replacingOccurrences(of: "'", with: "'\\''")
+        return "if command -v cloud-forget >/dev/null 2>&1; then cloud-forget '\(n)' >/dev/null 2>&1; "
+            + "else tmux kill-session -t '\(n)' 2>&1; fi"
+    }
+
     /// 给某个会话发一句话。`hub say` 已经验证过这条路走得通。
     ///
     /// ⚠️ **分两步：先送文本、再单独送回车。** 合成一条时，文本里若含特殊字符
     /// 会让 `send-keys` 把它当按键名解析 —— 比如 `Enter` 这三个字就会变成一次回车。
+    ///
+    /// ⚠️⚠️ **两步之间必须隔一下，否则多行的发不出去。**
+    /// Claude Code 的输入框认「括号粘贴」：一大块文本连着来按**粘贴**处理，
+    /// 而粘贴块里的换行是**字面换行不是提交**；紧跟着的 Enter 被算进那一块，
+    /// 整段话原样躺在输入框里没发出去。`server/yxi-hub` 上真栽过（用户截图为证），
+    /// 实测背靠背发 3 行必留在框里、中间隔 0.4 秒就正常提交。
+    /// ⚠️ 以前靠**网络往返的偶然延迟**躲过去 —— 链路快的时候一样会中招。
+    /// 现在合成一条命令、中间显式 sleep：**一个来回**（比原来还少一个），间隔是确定的。
+    /// ⚠️ 带附件的消息一定是多行（头部路径 + 正文），所以多行是常态不是特例。
     public static func sendCommands(target: String, text: String) -> [String] {
         let q = text.replacingOccurrences(of: "'", with: "'\\''")
         let t = target.replacingOccurrences(of: "'", with: "'\\''")
-        return ["tmux send-keys -t '\(t)' -l '\(q)'", "tmux send-keys -t '\(t)' Enter"]
+        return ["tmux send-keys -t '\(t)' -l '\(q)'; sleep 0.4; tmux send-keys -t '\(t)' Enter"]
     }
 
     /// 允许送的按键。⚠️ 白名单，因为 key 最终会拼进 shell 命令、

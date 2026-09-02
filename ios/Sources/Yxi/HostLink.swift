@@ -224,7 +224,8 @@ struct RemoteHost: ChatBackend, UsageService, ShellRunner, FileService {
     }
 
     func kill(session: String) async throws {
-        _ = try await ssh.exec("tmux kill-session -t '\(session.replacingOccurrences(of: "'", with: ""))'")
+        // 命令在 YxiKit 里（Linux 上有测试盯着它必须走 cloud-forget）
+        _ = try await ssh.exec(SessionProbe.killCommand(session: session))
     }
 
     // MARK: ShellRunner
@@ -244,8 +245,9 @@ struct RemoteHost: ChatBackend, UsageService, ShellRunner, FileService {
 
     // MARK: ChatBackend
 
-    func latestTranscript(cwd: String) async throws -> String? {
-        TranscriptStream.parseLatest(try await ssh.exec(TranscriptStream.latestCommand(cwd: cwd)).stdout)
+    func latestTranscript(cwd: String, session: String) async throws -> String? {
+        TranscriptStream.parseLatest(
+            try await ssh.exec(TranscriptStream.latestCommand(cwd: cwd, session: session)).stdout)
     }
 
     /// ⚠️ **不在这里加节流。** 界面那边的 `ChatModel.flush` 已经带尾随刷新了，
@@ -338,7 +340,10 @@ struct RemoteHost: ChatBackend, UsageService, ShellRunner, FileService {
         let project = session.hasPrefix("cc-") ? String(session.dropFirst(3)) : session
         let dir = "/root/src/tmp/\(project)"
         let safe = fileName.replacingOccurrences(of: "/", with: "_")
-        let path = "\(dir)/\(Int(Date().timeIntervalSince1970))-\(safe)"
+        // ⚠️ **毫秒，不是秒。** 一次选多张时几个上传是并发的，
+        // 秒级时间戳 + 相同文件名会算出**同一个远端路径**，后传的覆盖先传的，
+        // 用户只看到附件条上少了几个却没有任何报错。
+        let path = "\(dir)/\(Int(Date().timeIntervalSince1970 * 1000))-\(safe)"
         let sftp = try await ssh.openSFTP()
         defer { Task { await sftp.close() } }
         try await sftp.mkdirs(dir)

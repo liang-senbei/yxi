@@ -88,7 +88,7 @@ final class NewFeatureTests: XCTestCase {
 
     func test_实验室_解析manifest并归类() {
         let raw = """
-        [{"id":"a1","title":"雪山","type":"image","file":"a1.jpg","by":"Gemini","at":1787646917},
+        [{"id":"a1","title":"雪山","type":"image","file":"a1.jpg","by":"画图模型","at":1787646917},
          {"id":"a2","title":"动图","type":"gif","file":"a2.gif"},
          {"id":"a3","title":"随手记","type":"note","file":""}]
         """
@@ -96,7 +96,7 @@ final class NewFeatureTests: XCTestCase {
         XCTAssertEqual(items.count, 3)
         XCTAssertEqual(items[0].catKey, "image")
         XCTAssertEqual(Lab.categoryName(items[0].catKey), "图像")
-        XCTAssertEqual(items[0].by, "Gemini")
+        XCTAssertEqual(items[0].by, "画图模型")
         XCTAssertEqual(Lab.categoryName(items[1].catKey), "动图")
         XCTAssertEqual(Lab.categoryName(items[2].catKey), "文字")
     }

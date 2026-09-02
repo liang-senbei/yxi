@@ -17,7 +17,7 @@ public enum Lab {
         public let type: String
         public let file: String
         public let desc: String
-        /// 谁生成的（`yxi-lab add` 的第 5 个参数），如 "Gemini · nanobanana"。空 = 没标
+        /// 谁生成的（`yxi-lab add` 的第 5 个参数），如 "画图模型 · nanobanana"。空 = 没标
         public let by: String
         /// 生成时间，unix 秒。0 = 老数据没记
         public let at: Double

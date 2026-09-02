@@ -61,9 +61,9 @@ final class TerminalSession: ObservableObject, TerminalViewDelegate {
 
     init() {
         view.terminalDelegate = self
-        view.nativeBackgroundColor = UIColor(Yx.lowest)
-        view.nativeForegroundColor = UIColor(Yx.onSurface)
-        view.backgroundColor = UIColor(Yx.lowest)
+        view.nativeBackgroundColor = UIColor(Yx.terminalBg)
+        view.nativeForegroundColor = UIColor(Yx.terminalFg)
+        view.backgroundColor = UIColor(Yx.terminalBg)
         view.keyboardAppearance = .dark
         // 等宽 13pt（PRD 附录 J.1）。再小手机上认不出 `l` 和 `1`
         view.font = UIFont.monospacedSystemFont(ofSize: 13, weight: .regular)

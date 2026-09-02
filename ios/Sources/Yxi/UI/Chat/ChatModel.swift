@@ -72,7 +72,7 @@ final class ChatModel: ObservableObject {
 
         let file: String?
         do {
-            file = try await backend.latestTranscript(cwd: cwd)
+            file = try await backend.latestTranscript(cwd: cwd, session: session)
         } catch {
             status = reportable(error).map { "找不到转录：\($0)" }
             return
@@ -132,7 +132,12 @@ final class ChatModel: ObservableObject {
             // 少了这一句：切会话时旧任务这一笔照落 —— 界面顶着新会话的标题，
             // 显示的是上一个会话的内容（新 run 还卡在一整个 SSH 来回上，窗口不小）。
             if Task.isCancelled { return }
-            items = parsed.0
+            if settled && !UIAccessibility.isReduceMotionEnabled {
+                // 新条目从下面滑入淡入（#191）。灌历史那阵不做：几百条一起滑入是灾难
+                withAnimation(.easeOut(duration: 0.38)) { items = parsed.0 }
+            } else {
+                items = parsed.0
+            }
             // ⚠️ **解不出来就不动它**，别把已经显示对的模型名清成空 ——
             // 转录尾部那一段可能正好没有 assistant 消息
             if let c = parsed.1 { ctx = c }
@@ -277,6 +282,15 @@ final class ChatModel: ObservableObject {
         }
     }
 
+    /// 界面上说一句（语音识别失败之类），几秒后自动收回。
+    func say(_ s: String) {
+        status = s
+        Task {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            if status == s { status = nil }
+        }
+    }
+
     private func answer(_ work: @escaping @Sendable () async throws -> Void) {
         guard !answering else { return }
         answering = true
@@ -315,6 +329,9 @@ final class ChatModel: ObservableObject {
                 let up = try await backend.upload(
                     session: session, fileName: fileName, data: data, isImage: isImage)
                 staged.append(Staged(label: up.label, remotePath: up.remotePath, isImage: up.isImage))
+                // ⚠️ 图刚从这台手机传上去 —— 先种进缩略图缓存，发出去的气泡第一帧就是图，
+                // 不是先一条路径、等 SFTP 拉回来再变（用户说「割裂」）
+                if up.isImage { Thumbs.seed(up.remotePath, data: data) }
                 staged = Self.renumber(staged)
             } catch {
                 if let m = reportable(error) { status = "传不上去：\(m)" }

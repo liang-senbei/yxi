@@ -32,8 +32,8 @@ settingGroups:
     # 内嵌 framework 不一致也会在上传校验里冒警告。
     # 放在 common 里是为了**改一处全都跟着走** —— 分开写迟早漏一个。
     # ⚠️ 锚点在这儿**定义**（YAML 要求先定义后引用），下面几处都引用它
-    MARKETING_VERSION: &marketingVersion "0.9.48"
-    CURRENT_PROJECT_VERSION: &buildVersion "92"
+    MARKETING_VERSION: &marketingVersion "0.9.64"
+    CURRENT_PROJECT_VERSION: &buildVersion "108"
     # ⚠️ 内嵌的 framework **必须有 Info.plist**，否则装进模拟器时会失败：
     #   Failed to load Info.plist ... Yxi.app/Frameworks/YxiKit.framework
     # （app target 自己有 plist 文件，所以它那儿再覆盖回 NO）
@@ -101,6 +101,9 @@ targets:
         # ⚠️ 只要「仅添加」权限：实验室里的图/视频存进相册要它。
         # **不申请读相册** —— 我们从来不读，不该要读的权限。
         NSPhotoLibraryAddUsageDescription: 把实验室里的图片和视频存进你的相册
+        # 按住说话。识别在手机上做（SFSpeechRecognizer），结果只填进输入框、不自动发。
+        NSMicrophoneUsageDescription: 按住说话时录音，识别在这台手机上完成
+        NSSpeechRecognitionUsageDescription: 把你说的话转成文字填进输入框，不会自动发送
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
     settings:
       groups: [common]
@@ -112,6 +115,8 @@ targets:
         PRODUCT_MODULE_NAME: YxiApp
         PRODUCT_BUNDLE_IDENTIFIER: app.yxi
         GENERATE_INFOPLIST_FILE: NO
+        # 图标在 App/Assets.xcassets（单张 1024，Xcode 自己出各尺寸）
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     # ⚠️ App Group 是主 App 和扩展之间**唯一**的共享通道（见 Sources/YxiKit/Shared.swift）。
     # 注意 CI 的 xcodebuild 命令行上有 `CODE_SIGN_ENTITLEMENTS=`，会把这份整个清掉 ——
     # 于是 CI 里的包**没有 App Group**，分享扩展和小组件在那儿只能是空的。

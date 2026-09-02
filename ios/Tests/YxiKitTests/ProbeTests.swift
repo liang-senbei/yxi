@@ -57,15 +57,30 @@ final class ProbeTests: XCTestCase {
         XCTAssertNil(SessionProbe.keyCommand(target: "cc-Yxi", key: "Enter Enter"))
     }
 
-    /// ⚠️ **发消息必须分两步：先送文本、再单独送回车。**
-    /// 合成一条时，文本里若含特殊字符会让 `send-keys` 把它当**按键名**解析 ——
+    /// ⚠️ **发消息必须是两条 `send-keys`：先送文本、再单独送回车。**
+    /// 合成**一条 send-keys** 时，文本里若含特殊字符会让它当**按键名**解析 ——
     /// 比如 `Enter` 这三个字就会变成一次回车，用户的半句话会被当场发出去。
-    func test_发消息分两步且转义单引号() {
+    ///
+    /// ⚠️⚠️ **而且两者之间必须隔一下。** Claude Code 的输入框认「括号粘贴」：
+    /// 一大块文本连着来按粘贴处理，粘贴块里的换行是**字面换行不是提交**，
+    /// 紧跟着的 Enter 被算进那一块 —— 整段话躺在输入框里没发出去。
+    /// `server/yxi-hub` 上真栽过：agent 之间发的长消息全卡在对方输入框里。
+    /// ⚠️ 单行不触发（不够长，不当粘贴），所以手测「你好」是测不出来的。
+    func test_发消息两条send_keys中间要隔一下() {
         let cmds = SessionProbe.sendCommands(target: "cc-Yxi", text: "别把 Enter 当按键 it's fine")
-        XCTAssertEqual(cmds.count, 2)
-        XCTAssertTrue(cmds[0].contains(" -l "), "第一条是字面文本")
-        XCTAssertTrue(cmds[0].contains(#"it'\''s"#), "单引号要转义，否则命令被截断")
-        XCTAssertEqual(cmds[1], "tmux send-keys -t 'cc-Yxi' Enter")
+        XCTAssertEqual(cmds.count, 1, "现在合成一条 shell 命令，一个来回")
+        let c = cmds[0]
+        XCTAssertTrue(c.contains(" -l "), "文本要走字面")
+        XCTAssertTrue(c.contains(#"it'\''s"#), "单引号要转义，否则命令被截断")
+        XCTAssertTrue(c.contains("sleep"), "少了停顿，多行消息会卡在对方输入框里")
+        // 顺序：文本 → sleep → Enter，一步都不能挪
+        let iText = c.range(of: " -l ")!.lowerBound
+        let iSleep = c.range(of: "sleep")!.lowerBound
+        // ⚠️ 从后往前找 —— 正文里就有「Enter」两个字（这条测试的样例文本故意带着它），
+        // 从前往后找会找到正文里那个，断言就永远是假的
+        let iEnter = c.range(of: "Enter", options: .backwards)!.lowerBound
+        XCTAssertTrue(iText < iSleep && iSleep < iEnter, "顺序错了：\(c)")
+        XCTAssertTrue(c.contains("send-keys -t 'cc-Yxi' Enter"), "回车仍是单独一条 send-keys")
     }
 
     // MARK: - 用量
@@ -154,5 +169,60 @@ final class ProbeTests: XCTestCase {
         // 这个会话里没跑过 Claude Code —— 必须是 nil，对话模式据此置灰**并说明原因**
         XCTAssertNil(TranscriptStream.parseLatest(""))
         XCTAssertNil(TranscriptStream.parseLatest("ls: 没有那个文件或目录\n"))
+    }
+
+    /// ⚠️⚠️ **转录要按 sessionId 找，不能只按目录找。**
+    ///
+    /// Claude Code 的转录目录是拿**启动时**那个目录名拼的，`pane_current_path`
+    /// 是**此刻**的目录 —— 会话里 `cd` 一下，两者永久对不上。真事：
+    /// `cc-hexingyang` 在 `/root/src/workspace/hexingyang` 启动、后来 cd 进子目录，
+    /// 对话页从此一直说「没找到转录」，而转录一直在原目录里写着。
+    func test_转录按sessionId找() {
+        let cmd = TranscriptStream.latestCommand(
+            cwd: "/root/src/workspace/hexingyang/unitree_rl_mjlab-main", session: "cc-hexingyang")
+        XCTAssertTrue(cmd.contains("sessions"), "没去读 Claude Code 自己的会话表：\(cmd)")
+        XCTAssertTrue(cmd.contains("sessionId"), "没按 sessionId 找：\(cmd)")
+        XCTAssertTrue(cmd.contains("cc-hexingyang"), "会话名没带进去：\(cmd)")
+        // ⚠️ 找不到还得能退回按目录找（没有会话表的机器）
+        XCTAssertTrue(cmd.contains("-root-src-workspace-hexingyang-unitree-rl-mjlab-main"),
+                      "没有退回按目录找那条：\(cmd)")
+        // ⚠️ 通配符只能一层 —— 递归会挑到 `<会话uuid>/subagents/` 里子 agent 那份
+        XCTAssertFalse(cmd.contains("**"), "不许递归找")
+    }
+
+    /// ⚠️ 终止必须优先走 `cloud-forget`：光 kill-session 十几秒后 watchdog 就把会话拉回来，
+    /// 用户看到的是「终止了还在」。没装的机器要能退回 kill-session。
+    func test_终止要先移出自动恢复名单() {
+        let c = SessionProbe.killCommand(session: "cc-begirl")
+        XCTAssertTrue(c.contains("cloud-forget 'cc-begirl'"), "没走 cloud-forget：\(c)")
+        XCTAssertTrue(c.contains("tmux kill-session -t 'cc-begirl'"), "没有退路：\(c)")
+        XCTAssertLessThan(c.range(of: "cloud-forget")!.lowerBound, c.range(of: "kill-session")!.lowerBound,
+                          "cloud-forget 得在前面")
+        XCTAssertTrue(SessionProbe.killCommand(session: "it's").contains(#"'it'\''s'"#), "单引号要转义")
+    }
+
+    /// 不给会话名时保持老行为（按目录找），别把没传名字的调用点弄坏。
+    func test_没有会话名时退回按目录找() {
+        let cmd = TranscriptStream.latestCommand(cwd: "/opt/workspace/日常对话")
+        XCTAssertFalse(cmd.contains("sessionId"), "没会话名就不该去查会话表")
+        XCTAssertTrue(cmd.contains("-opt-workspace-----"))
+    }
+
+    /// ⚠️ **`isMeta` 的消息不是用户打的，绝不能画成用户气泡。**
+    /// 用户报的就是这个：他从没打过那句 `[Image: original …]`，手机上却是个蓝气泡。
+    func test_图片注解不冒充用户说的话() {
+        let img = #"[Image: original 1264x2800, displayed at 903x2000. Multiply coordinates by 1.40 to map to original image.]"#
+        let line = #"{"type":"user","uuid":"u1","isMeta":true,"message":{"role":"user","content":"\#(img)"}}"#
+        XCTAssertTrue(Transcript.parse([line]).isEmpty, "图片坐标注解该整条丢掉")
+
+        // 其余 isMeta 当系统消息画，不混进用户说的话里
+        let hook = #"{"type":"user","uuid":"u2","isMeta":true,"message":{"role":"user","content":"Stop hook feedback: 还没做完"}}"#
+        let items = Transcript.parse([hook])
+        XCTAssertEqual(items.count, 1)
+        if case .user = items[0] { XCTFail("isMeta 被画成用户气泡了") }
+
+        // 真是用户打的照旧
+        let real = #"{"type":"user","uuid":"u3","message":{"role":"user","content":"帮我看看这个"}}"#
+        if case .user = Transcript.parse([real])[0] {} else { XCTFail("真用户消息不该被吞") }
     }
 }
