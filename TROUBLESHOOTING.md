@@ -3959,7 +3959,7 @@ ssh mac 'cd ~/yxi-build && ./tools/xcodegen/bin/xcodegen generate && xcodebuild 
    一次登录，git 和 MCP 都有。
 3. **远程 MCP 走 `claude mcp login <名> --no-browser`**：它把授权 URL 打在屏幕上，还接受
    `Or paste the redirect URL here:`。授权完服务商把浏览器重定向到 `http://localhost:64202/callback`
-   （Claude Code 临时起的回调口，端口实测两次都是 64202）。手机上用 **jsch 本地端口转发**
+   （Claude Code 临时起的回调口。⚠️ **端口是随机的**：三次实测 64202、64202、60018，所以必须每次从 URL 里解出来，不能写死）。手机上用 **jsch 本地端口转发**
    （`setPortForwardingL("127.0.0.1", port, "127.0.0.1", port)`）把手机的 localhost:port 接到服务器 ——
    手机浏览器打 localhost 就直接到了 Claude Code，页面显示它自己的「成功」页。转发不成就退回粘地址。
    ⚠️ `capture-pane` 必须带 `-J`：授权 URL 三百多字符必然折行，不接回去正则抓不到整条。
