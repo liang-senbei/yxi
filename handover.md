@@ -634,6 +634,11 @@
   ⏳ **就差 HTTPS**：要 `dl.keuury.com` A→64.90.25.56 的 DNS 记录（R2 令牌改不了 DNS，见 #123），
   记录一通就 certbot 签证书（hk13 已有 certbot，别的站在用）。在此之前站是活的、只是 HTTP + 靠 IP:8899 访问。
   ⚠️ **App 内更新走 SFTP**（连的那台的 `~/.yxi/`），跟 hk13 这套 HTTP 分发**互不相干**，改这边不影响升级。
+- ✅ **0.9.65（2026-09-02）**：配置页分成「连接」和「Agent 配置」两块。「连接」（`agent/Connect.kt` +
+  `ui/ConnectPanel.kt`）：GitHub 设备码登录（git + GitHub MCP 一起）、二十来个公开远程 MCP
+  （Notion / Linear / Sentry / Jira / Stripe / Zapier / Vercel / Figma …）一键 `claude mcp add` + `login`，
+  回调靠 SSH 端口转发接到手机（#198）；免认证的 Context7 / DeepWiki / Hugging Face 直接加；自定义地址。
+  Gmail / Slack / 日历只在 claude.ai 订阅登录下有，面板里说明了。⏳ iOS 还没有这块。
 - ✅ **0.9.60 ~ 0.9.64（2026-09-02）**：终止走 `cloud-forget`（#188）；通知图标换新 logo + 官网换 logo/favicon（#189）；
   附件发出去第一帧就是缩略图（#190）；**照参考款 录像逐帧抄的动效**：光晕待机在底部、忙了迁到顶部、
   干活中色相循环、回答到达退掉，新消息滑入淡入（#191）。`/model` 菜单只在会话启动时读配置（#187）。

@@ -360,5 +360,18 @@ class SshSession(
     }
 
     fun disconnect() { runCatching { session?.disconnect() }; session = null }
+
+    /**
+     * 把**手机**的 127.0.0.1:port 转到**服务器**的 127.0.0.1:port（SSH 本地端口转发）。
+     *
+     * 用处只有一个：MCP 授权（[app.yxi.agent.Connect]）。授权完服务商把手机浏览器重定向到
+     * `http://localhost:<port>/callback` —— 那是服务器上 Claude Code 临时起的回调口；
+     * 转发一开，手机浏览器打 localhost 就直接到了服务器，一步都不用手动粘。
+     * ⚠️ 用完必须 [unforwardLocal]，不然那个端口一直占着。
+     */
+    fun forwardLocal(port: Int): Boolean =
+        runCatching { session?.setPortForwardingL("127.0.0.1", port, "127.0.0.1", port) != null }.getOrDefault(false)
+
+    fun unforwardLocal(port: Int) { runCatching { session?.delPortForwardingL("127.0.0.1", port) } }
     val isConnected: Boolean get() = session?.isConnected == true
 }

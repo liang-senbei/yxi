@@ -3942,3 +3942,28 @@ ssh mac 'cd ~/yxi-build && ./tools/xcodegen/bin/xcodegen generate && xcodebuild 
 
 **修法**（`dev/precheck.py`）：整行注释先剥；raw string 的开头要求前面不是引号（`(?<!")#"`）。
 ⚠️ 通则：文本级检查报错先怀疑检查器 —— 拿 `strip()` 的输出按声明行核对花括号计数，一分钟定位。
+
+## #198 「连接」：在手机上把 GitHub / Notion 这类服务认证给服务器上的 agent —— 三个关键事实
+
+用户要的：配置页里点一下、手机上弹认证界面、认证完 Claude Code / Codex 就能用那个服务。
+调研（2026-09-02，官方文档 + 服务器实测）得出三件事，决定了怎么做：
+
+1. **claude.ai 连接器（Gmail / 日历 / Slack …）用 API key 的 Claude Code 一律不加载**——文档写死的：
+   只有 claude.ai 订阅登录才拉取。「Claude in Chrome」也只配同一台电脑上的 Claude Code。
+   所以这两类在面板里**只解释、不假装能连**。
+2. **GitHub 走 `gh auth login -h github.com -p https -w` 的设备码**。在 tmux 里跑，屏幕上会先问
+   `Authenticate Git with your GitHub credentials? (Y/n)`（回 Enter = 顺手把 gh 配成 git 的凭据助手，
+   Codex 也就能 push 了），再打印 `one-time code: XXXX-XXXX` 和 `Press Enter to open …`（服务器没浏览器，
+   回个 Enter 让它继续等）。手机把码复制进剪贴板、开 github.com/login/device，用户粘一下就完。
+   登录后 `gh auth token` 拿 token 给 GitHub 官方远程 MCP（`api.githubcopilot.com/mcp/`，Bearer 头）——
+   一次登录，git 和 MCP 都有。
+3. **远程 MCP 走 `claude mcp login <名> --no-browser`**：它把授权 URL 打在屏幕上，还接受
+   `Or paste the redirect URL here:`。授权完服务商把浏览器重定向到 `http://localhost:64202/callback`
+   （Claude Code 临时起的回调口，端口实测两次都是 64202）。手机上用 **jsch 本地端口转发**
+   （`setPortForwardingL("127.0.0.1", port, "127.0.0.1", port)`）把手机的 localhost:port 接到服务器 ——
+   手机浏览器打 localhost 就直接到了 Claude Code，页面显示它自己的「成功」页。转发不成就退回粘地址。
+   ⚠️ `capture-pane` 必须带 `-J`：授权 URL 三百多字符必然折行，不接回去正则抓不到整条。
+   ⚠️ 用错的 code 打回调，屏幕上是 `Couldn't complete authentication for "notion": …` + 非零退出 ——
+   把 `echo __DONE__$?` 接在命令后面，手机只认这个标记，不猜屏幕文案。
+
+所有地址都在服务器上用 MCP `initialize` 探过：401 = 在线要认证，200 = 免认证（Hugging Face / Context7 / DeepWiki）。

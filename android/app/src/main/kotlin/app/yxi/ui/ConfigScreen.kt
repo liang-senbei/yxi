@@ -13,6 +13,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,6 +50,7 @@ fun ConfigScreen(
     var tools by remember(host.id) { mutableStateOf<List<ConfigRemote.Tool>?>(null) }
     var open by remember(host.id) { mutableStateOf<ConfigRemote.Item?>(null) }
     val expanded = remember(host.id) { mutableStateListOf<String>() }
+    var panel by rememberSaveable { mutableStateOf("connect") }
 
     LaunchedEffect(ssh, host.id) {
         tools = null
@@ -83,6 +85,23 @@ fun ConfigScreen(
                     color = MaterialTheme.colorScheme.outline)
             }
         }
+
+        // 两块：「连接」（把第三方服务接给 agent）和「Agent 配置」（原来那棵配置树）
+        Row(Modifier.padding(14.dp, 0.dp, 14.dp, 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("connect" to t("连接"), "agent" to t("Agent 配置")).forEach { (k, label) ->
+                val on = panel == k
+                Text(
+                    label,
+                    Modifier.clip(Pill)
+                        .background(if (on) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh)
+                        .clickable { panel = k }
+                        .padding(16.dp, 9.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (on) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (panel == "connect") { ConnectPanel(ssh, host); return@Column }
 
         val ts = tools
         when {
