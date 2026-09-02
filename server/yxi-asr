@@ -1,0 +1,219 @@
+#!/usr/bin/env python3
+# yxi-asr —— 在**你自己的服务器上**做语音识别，手机只管录音和上传。
+#
+# 为什么不是调云 API：Yxi 没有后端，密钥只能塞进 APK 里，等于把它公开
+# （跟不查 GitHub Release 是同一个理由）。而且防火墙后面的机器一样能用。
+#
+# 模型：SenseVoice-Small（阿里 FunAudioLLM，Apache-2.0），走 sherpa-onnx 的
+# ONNX 运行时，不需要 torch。中文强、自带标点、CPU 就能跑。
+#
+# ⚠️ **必须常驻。** 实测装载模型要 6~10 秒，而解码 5.6 秒的音频只要 1.6 秒 ——
+#    每次现装的话，一条 10 秒语音要等十几秒，没法用。所以第一次调用会
+#    顺手把守护进程拉起来，之后走 unix socket，**闲置 10 分钟自己退**
+#    （常驻 326MB，不该在用户不用语音的时候一直占着）。
+#
+# 用法：
+#   yxi-asr <音频文件>     识别，文本打到 stdout（失败则 stderr + 非零退出）
+#   yxi-asr --check        装好了没（给 App 探测用，装好打 ok）
+#   yxi-asr --warm         把守护预热起来，**立刻返回不等**（进对话页时调）
+#   yxi-asr --stop         停掉守护
+#   yxi-asr --daemon       前台跑守护（一般不用手动调）
+import json
+import os
+import socket
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+
+HOME = os.path.expanduser("~")
+ROOT = os.path.join(HOME, ".yxi", "asr")
+SOCK = os.path.join(HOME, ".yxi", "asr.sock")
+MODEL = os.path.join(ROOT, "model")
+VENV_PY = os.path.join(ROOT, "venv", "bin", "python3")
+IDLE_EXIT = 600          # 闲置这么久就退（秒）
+THREADS = 4              # 别把整台机器吃满 —— 它上面还跑着一堆会话
+
+
+def ready() -> bool:
+    return os.path.exists(VENV_PY) and os.path.exists(os.path.join(MODEL, "model.int8.onnx"))
+
+
+# ────────────── 守护进程 ──────────────
+
+def to_wav(src: str) -> str:
+    """任意格式 → 16k 单声道 wav。手机录的是 m4a/opus，模型只吃 16k pcm。"""
+    out = tempfile.mktemp(suffix=".wav")
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-i", src,
+         "-ac", "1", "-ar", "16000", "-f", "wav", out],
+        check=True, timeout=120,
+    )
+    return out
+
+
+def serve():
+    import wave
+    import numpy as np
+    import sherpa_onnx
+
+    rec = sherpa_onnx.OfflineRecognizer.from_sense_voice(
+        model=os.path.join(MODEL, "model.int8.onnx"),
+        tokens=os.path.join(MODEL, "tokens.txt"),
+        use_itn=True,                 # 数字/日期归一化 + 标点
+        num_threads=THREADS,
+    )
+
+    last = [time.time()]
+
+    def reaper():
+        while True:
+            time.sleep(30)
+            if time.time() - last[0] > IDLE_EXIT:
+                # ⚠️ 直接退，不留 socket 文件 —— 留着的话下次客户端会连一个死地址
+                try:
+                    os.unlink(SOCK)
+                except OSError:
+                    pass
+                os._exit(0)
+
+    threading.Thread(target=reaper, daemon=True).start()
+
+    try:
+        os.unlink(SOCK)
+    except OSError:
+        pass
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    srv.bind(SOCK)
+    os.chmod(SOCK, 0o600)             # 只有自己能用
+    srv.listen(8)
+    sys.stderr.write("yxi-asr 守护已就绪\n")
+    sys.stderr.flush()
+
+    while True:
+        conn, _ = srv.accept()
+        last[0] = time.time()
+        try:
+            path = conn.makefile("r").readline().strip()
+            wav = None
+            try:
+                wav = to_wav(path)
+                w = wave.open(wav)
+                n, sr = w.getnframes(), w.getframerate()
+                a = np.frombuffer(w.readframes(n), dtype=np.int16).astype(np.float32) / 32768
+                w.close()
+                s = rec.create_stream()
+                s.accept_waveform(sr, a)
+                rec.decode_stream(s)
+                # ⚠️ SenseVoice 会在前面挂 <|zh|><|NEUTRAL|> 这种标签，得剥掉，
+                #    否则那几个尖括号会原样进用户的输入框
+                txt = s.result.text
+                while txt.startswith("<|"):
+                    txt = txt.split("|>", 1)[1] if "|>" in txt else txt
+                out = {"text": txt.strip()}
+            except Exception as e:                       # noqa: BLE001
+                out = {"error": f"{type(e).__name__}: {e}"[:200]}
+            finally:
+                if wav:
+                    try:
+                        os.unlink(wav)
+                    except OSError:
+                        pass
+            conn.sendall((json.dumps(out, ensure_ascii=False) + "\n").encode())
+        except Exception:                                # noqa: BLE001
+            pass
+        finally:
+            conn.close()
+            last[0] = time.time()
+
+
+# ────────────── 客户端 ──────────────
+
+def ask(path: str, spawn_ok: bool = True) -> dict:
+    try:
+        c = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        c.settimeout(180)
+        c.connect(SOCK)
+    except OSError:
+        if not spawn_ok:
+            return {"error": "守护起不来"}
+        # ⚠️ 用 venv 里那个 python 跑守护，不是系统的 —— sherpa-onnx 只装在 venv 里
+        subprocess.Popen(
+            [VENV_PY, os.path.abspath(__file__), "--daemon"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        # 装载要 6~10 秒，给足 40 秒
+        for _ in range(80):
+            time.sleep(0.5)
+            if os.path.exists(SOCK):
+                try:
+                    c = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                    c.settimeout(180)
+                    c.connect(SOCK)
+                    break
+                except OSError:
+                    continue
+        else:
+            return {"error": "守护起不来（40 秒没就绪）"}
+    c.sendall((path + "\n").encode())
+    line = c.makefile("r").readline()
+    c.close()
+    try:
+        return json.loads(line)
+    except Exception:                                    # noqa: BLE001
+        return {"error": "守护回了看不懂的东西"}
+
+
+def main() -> int:
+    a = sys.argv[1:]
+    if not a:
+        sys.stderr.write(__doc__ or "用法: yxi-asr <音频文件>\n")
+        return 2
+    if a[0] == "--check":
+        print("ok" if ready() else "missing")
+        return 0 if ready() else 1
+    if a[0] == "--warm":
+        # ⚠️ **立刻返回，不等它装载好。** 这是「进对话页顺手预热」用的，
+        # 阻塞在这儿就等于给每次进对话加 6~10 秒。守护起没起来不重要 ——
+        # 真用的时候 ask() 还会再等一次。
+        if ready() and not os.path.exists(SOCK):
+            subprocess.Popen(
+                [VENV_PY, os.path.abspath(__file__), "--daemon"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        print("ok" if ready() else "missing")
+        return 0
+    if a[0] == "--stop":
+        try:
+            os.unlink(SOCK)
+        except OSError:
+            pass
+        subprocess.run(["pkill", "-f", "yxi-asr --daemon"], check=False)
+        print("停了")
+        return 0
+    if a[0] == "--daemon":
+        if not ready():
+            sys.stderr.write("模型没装好\n")
+            return 1
+        serve()
+        return 0
+
+    if not ready():
+        sys.stderr.write("这台机器上没装语音识别（server/install.sh --asr 装）\n")
+        return 1
+    if not os.path.exists(a[0]):
+        sys.stderr.write(f"找不到 {a[0]}\n")
+        return 1
+    r = ask(a[0])
+    if "error" in r:
+        sys.stderr.write(r["error"] + "\n")
+        return 1
+    print(r.get("text", ""))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

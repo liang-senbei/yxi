@@ -47,7 +47,14 @@ enum class MorphPhase { Idle, Run, Ok, Fail }
 
 private val green = Color(0xFF5FB570)
 
-/** 变形按钮的纯视觉。状态从外面来；空闲/失败态点一下触发 [onTap]。 */
+/**
+ * 变形按钮的纯视觉。状态从外面来；空闲/失败态点一下触发 [onTap]。
+ *
+ * ⚠️ **成功态默认不可点** —— 它通常是「做完了」的收尾，再点没有意义。
+ * 但有的成功态**本身就是个动作**（比如「已下好 · 点一下安装」），
+ * 那种要把 [okTap] 打开，否则用户照着字面点下去**一点反应都没有**（用户报过）。
+ * ⚠️ 收尾话术和可点状态必须一致：**写成动词就得能点，不能点就别写成动词。**
+ */
 @Composable
 fun MorphButton(
     phase: MorphPhase,
@@ -58,6 +65,8 @@ fun MorphButton(
     msg: String = "",
     /** Run 时的进度：0..1 = 确定进度；<0 = 不确定（转圈）。 */
     progress: Float = -1f,
+    /** 成功态也能点吗。见类注释 —— 只有「成功态本身是个动作」时才打开。 */
+    okTap: Boolean = false,
     onTap: () -> Unit = {},
 ) {
     val bg by animateColorAsState(
@@ -71,7 +80,11 @@ fun MorphButton(
     Surface(
         color = bg, shape = RoundedCornerShape(100.dp),
         modifier = modifier.height(height)
-            .clickable(enabled = phase == MorphPhase.Idle || phase == MorphPhase.Fail, onClick = onTap),
+            .clickable(
+                enabled = phase == MorphPhase.Idle || phase == MorphPhase.Fail ||
+                    (phase == MorphPhase.Ok && okTap),
+                onClick = onTap,
+            ),
     ) {
         when (phase) {
             MorphPhase.Idle -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

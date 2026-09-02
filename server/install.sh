@@ -54,6 +54,43 @@ PY
 #   ./install.sh --publish <apk> <versionCode> <versionName> [说明]
 # 手机连上这台机器时会看到「有新版本」，走 SFTP 下载 ——
 # 不用 GitHub、不用 token、不用公网 HTTP，防火墙后面照样能用。
+# ────────────────────────────────────────────────────────────────
+# --asr：装语音识别（可选，约 360MB）
+#
+# ⚠️ **不默认装。** 一个连自己服务器的工具，不该强迫用户先在服务器上放 360MB 模型
+#    才能用麦克风 —— 没装就退回手机系统那个识别，App 自己会探（`yxi-asr --check`）。
+#
+# 为什么识别放服务器而不是调云 API：Yxi 没有后端，密钥只能塞进 APK 里 = 公开它。
+# 模型是 SenseVoice-Small（阿里 FunAudioLLM，Apache-2.0），走 sherpa-onnx 的 ONNX
+# 运行时，**不要 torch**。实测 16 核（被宿主机抢走三到五成）上：5.6 秒中文 1.6 秒解码。
+if [ "${1:-}" = "--asr" ]; then
+  ASR_DIR="${HOME}/.yxi/asr"
+  MODEL_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2"
+  command -v ffmpeg >/dev/null || { echo "❌ 需要 ffmpeg（手机录的是 m4a，要转成 16k wav）"; exit 1; }
+  mkdir -p "$ASR_DIR"
+  if [ ! -x "$ASR_DIR/venv/bin/python3" ]; then
+    echo "· 建 venv 并装 sherpa-onnx…"
+    python3 -m venv "$ASR_DIR/venv"
+    "$ASR_DIR/venv/bin/pip" install -q --disable-pip-version-check sherpa-onnx numpy
+  fi
+  if [ ! -f "$ASR_DIR/model/model.int8.onnx" ]; then
+    echo "· 下模型（约 1GB，解开后只留 229MB 那个 int8 的）…"
+    tmp="$(mktemp -d)"
+    curl -fsSL --max-time 1800 -o "$tmp/m.tar.bz2" "$MODEL_URL"
+    tar xf "$tmp/m.tar.bz2" -C "$tmp"
+    rm -rf "$ASR_DIR/model"
+    mv "$tmp"/sherpa-onnx-sense-voice-* "$ASR_DIR/model"
+    # ⚠️ fp32 那份 895MB 用不上（int8 的精度实测一样），删掉
+    rm -f "$ASR_DIR/model/model.onnx"
+    rm -rf "$tmp"
+  fi
+  install -m 755 "$(cd "$(dirname "$0")" && pwd)/yxi-asr" "${HOME}/.local/bin/yxi-asr"
+  echo "· 装好了：$(du -sh "$ASR_DIR" | cut -f1)"
+  echo "  自测：yxi-asr $ASR_DIR/model/test_wavs/zh.wav"
+  echo "  ⚠️ 第一次调用要 6~10 秒装载模型，之后走常驻守护（闲置 10 分钟自己退，常驻约 330MB）。"
+  exit 0
+fi
+
 if [ "${1:-}" = "--publish" ]; then
   # ⚠️ **同一时刻只许一个发布在跑。**
   #    踩过：一个旧流程的发布进程还活着（传得慢，34MB 在 1Mbps 的链路上要五到八分钟），

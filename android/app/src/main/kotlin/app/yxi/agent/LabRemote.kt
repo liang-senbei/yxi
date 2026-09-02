@@ -25,7 +25,7 @@ object LabRemote {
 
     class Item(
         val id: String, val title: String, val type: String, val file: String, val desc: String,
-        /** 谁生成的（yxi-lab add 的第 5 个参数），如 "Gemini (nanobanana)"。空 = 没标 */
+        /** 谁生成的（yxi-lab add 的第 5 个参数），如 "画图模型 (nanobanana)"。空 = 没标 */
         val by: String = "",
         /** 生成时间，unix 秒。0 = 老数据没记 */
         val at: Long = 0L,

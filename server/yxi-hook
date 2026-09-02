@@ -98,6 +98,22 @@ def short(s, n=90):
     return re.sub(r"\s+", " ", str(s)).strip()[:n]
 
 
+def plain(md):
+    """把 markdown 的记号剥掉，只留能读的字。
+    通知栏是纯文本：`**0.9.60 已发布**`、`## 三条线`、`|---|---|` 原样显示出来
+    （用户截图为证），一行 180 字里一半是符号。不求完美，只求别把记号带进去。"""
+    import re
+    t = re.sub(r"(^|\s)#{1,6}\s+", r"\1", md, flags=re.M)         # 标题井号（行首或空格后，多段拼接后 ## 会落在行中）
+    t = re.sub(r"\*\*(.+?)\*\*", r"\1", t)                      # 粗体
+    t = re.sub(r"(?<!\w)[*_](.+?)[*_](?!\w)", r"\1", t)            # 斜体
+    t = re.sub(r"`([^`]*)`", r"\1", t)                              # 行内代码
+    t = re.sub(r"^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$", "", t, flags=re.M)  # 表格分隔行
+    t = re.sub(r"^\s*[-*+]\s+", "", t, flags=re.M)                 # 列表点
+    t = re.sub(r"\|", " ", t)                                       # 表格竖线
+    t = re.sub(r"^\s*>\s?", "", t, flags=re.M)                     # 引用
+    return re.sub(r"\s+", " ", t).strip()
+
+
 def last_assistant(transcript_path, n=180):
     """转录里 Claude **最后说的一句** —— 就是「到底要你决定什么」。
     纯读文件，**零 token、零 API**（只 tail 末尾 64KB，不整个读）。取不到就空串。"""
@@ -124,7 +140,7 @@ def last_assistant(transcript_path, n=180):
                      if isinstance(b, dict) and b.get("type") == "text"]
             t = " ".join(x for x in texts if x).strip()
             if t:
-                return short(t, n)
+                return short(plain(t), n)
         return ""
     except Exception:
         return ""

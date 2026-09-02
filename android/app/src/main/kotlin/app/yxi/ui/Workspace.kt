@@ -133,7 +133,7 @@ fun Workspace(
     // ⚠️ **终端永远深底，不跟着界面风格走。**
     // ANSI 彩色输出是按深底配的：浅底上黄色、亮绿几乎看不见，而那恰恰是
     // 警告和 diff 用的颜色。代价是浅色风格下切到终端有一下明暗跳变 ——
-    // 自觉的取舍，见 [app.yxi.ui.theme.GeminiPalette] 的注释。
+    // 自觉的取舍，见 [app.yxi.ui.theme.LightPalette] 的注释。
     val fg = app.yxi.ui.theme.TerminalFg
     val bg = app.yxi.ui.theme.TerminalBg
     val focus = remember { FocusRequester() }
@@ -224,7 +224,7 @@ fun Workspace(
             status = null
             chatBlocked = when {
                 sessionName == null -> t("没有指定会话")
-                TranscriptStream.latestFor(it, cwd) == null -> t("这个会话里没跑过 Claude Code")
+                TranscriptStream.latestFor(it, cwd, sessionName.orEmpty()) == null -> t("这个会话里没跑过 Claude Code")
                 else -> ""
             }
             return@LaunchedEffect
@@ -244,7 +244,7 @@ fun Workspace(
         // 对话模式要有转录才有内容可渲染。没有就置灰**并说明原因** —— 灰着不说话最气人
         chatBlocked = when {
             sessionName == null -> t("没有指定会话")
-            TranscriptStream.latestFor(ssh!!, cwd) == null -> t("这个会话里没跑过 Claude Code")
+            TranscriptStream.latestFor(ssh!!, cwd, sessionName.orEmpty()) == null -> t("这个会话里没跑过 Claude Code")
             else -> ""
         }
     }
@@ -604,7 +604,7 @@ fun Workspace(
         if (names.isEmpty()) return@LaunchedEffect
         runCatching { app.yxi.agent.SessionProbe.snapshot(s0) }
             .onSuccess { all ->
-                app.yxi.agent.Recent.put(host.id, all)
+                app.yxi.agent.Recent.put(ctx, host.id, all)
                 quick = all.filter { it.name in names }
             }
     }

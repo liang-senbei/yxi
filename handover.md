@@ -391,7 +391,7 @@
   连 `~/.claude/settings.json` 的 `model` 都会被改写。见 TROUBLESHOOTING #108。
   实测：选 Fable → 会话里显示 `for this session only`，账号默认仍是 `opus[1m]`。
   窄窗口下会折行 + 截断（`… +2 models`，行首是 `↓`），已按方向键滚动收集并滚回原位。
-- ✅ **0.8.0 —— 界面风格可切换，先来一套 Gemini 浅色（2026-08-24）**：
+- ✅ **0.8.0 —— 界面风格可切换，先来一套 浅色（参考款）（2026-08-24）**：
   设置页「界面风格」里切，立刻生效、落盘。
   实现的关键不是配色本身，是**把 `Color.kt` 里的顶层常量改成读 `LocalPalette` 的取值器** ——
   全 app 250+ 处 `Copper` / `Dim` / `SurfaceContainerLow` **一个字都不用改**。
@@ -411,7 +411,7 @@
   窄屏脚注会被截断，见 #113）。
   ② 终端不再花屏：桌面同时 attach 把窗口撑宽 → `attach -d` 让手机独占 + 关掉那条 tmux 状态栏（#114）。
   ③ 附件上传不再「要好几次」：每次开新 SFTP 通道 + 试两次 + 失败报真原因（原来复用坏通道且静默失败，#115）。
-  ④ 设置页照 Gemini 加了引导图标、粗标题、大留白（改 Card 一处，七节全变，#116）。
+  ④ 设置页照参考款 加了引导图标、粗标题、大留白（改 Card 一处，七节全变，#116）。
 - ✅ **0.8.3 —— 设置收起成行 + 主机页长按看额度（2026-08-24）**：
   ① 设置默认一条条收起，点标题才展开（`Card` 加 `startExpanded`/`subtitle`，收起显示一句副标题）。
   ② 版本那节标题从「这个 App」改成「版本」。
@@ -513,7 +513,7 @@
   顶层 = **栏目**（按 type 分：图像/矢量/动图/视频/网页/文字，只有有内容的类才出现），
   **左滑露出置顶/删除**（`SwipeActions` 自绘，Animatable+detectHorizontalDrag；删调服务器 `yxi-lab rm`，置顶存本地 `LabPins`）；
   点栏目 → 详情列表，每条：预览（图/网页/动图/文字）+ **由谁生成**（manifest 的 `by`）+ **北京时间**（`at` unix→Asia/Shanghai）+ 勾选审核。
-  `yxi-lab add` 第 5 参数 = 由谁生成；已更新 nanobanana 的 CLAUDE.md 让它出图带 "Gemini · nanobanana"。
+  `yxi-lab add` 第 5 参数 = 由谁生成；已更新 nanobanana 的 CLAUDE.md 让它出图带 "参考款 · nanobanana"。
   实测：4 类分栏、左滑置顶(📌浮顶)/删除(服务器同步没了)、点开图像栏看到真图+由谁+北京时间。已发 code 52。
 - ✅ **0.9.9 —— 更新下载改到后台，切页面不断（2026-08-25）**：用户报「点更新后切进会话再退出，下载就停了」。
   根因：下载挂在更新横幅的 `rememberCoroutineScope` + 界面持有的 SFTP 通道上，一进会话看板销毁 → 协程取消、通道关闭 → 静悄悄断。
@@ -634,6 +634,80 @@
   ⏳ **就差 HTTPS**：要 `dl.keuury.com` A→64.90.25.56 的 DNS 记录（R2 令牌改不了 DNS，见 #123），
   记录一通就 certbot 签证书（hk13 已有 certbot，别的站在用）。在此之前站是活的、只是 HTTP + 靠 IP:8899 访问。
   ⚠️ **App 内更新走 SFTP**（连的那台的 `~/.yxi/`），跟 hk13 这套 HTTP 分发**互不相干**，改这边不影响升级。
+- ✅ **0.9.60 ~ 0.9.64（2026-09-02）**：终止走 `cloud-forget`（#188）；通知图标换新 logo + 官网换 logo/favicon（#189）；
+  附件发出去第一帧就是缩略图（#190）；**照参考款 录像逐帧抄的动效**：光晕待机在底部、忙了迁到顶部、
+  干活中色相循环、回答到达退掉，新消息滑入淡入（#191）。`/model` 菜单只在会话启动时读配置（#187）。
+  0.9.63：光晕铺整页，输入框上方那道色差没了（#192）；仓库里旧产品名全部换成「参考款」，只改名字（#193）。
+  0.9.64：通知着色改品牌蓝；锁屏小图标显示旧的是 **ROM 缓存**，包里已核实是新 Y（#194）。
+  官网首屏加了同一套流动光晕，底边 mask 淡出（#195，已部署）。
+  ⏳ **iOS 还没跟上这一轮**（缩略图 / 光晕 / 滑入 / 手机端语音 / 新 logo / 默认浅色）—— 本机编不了 SwiftUI，
+  要推上去跑 CI；用户说 GitHub token 要先换，所以还没推。
+- ✅ **0.9.53 ~ 0.9.59（2026-09-01 ~ 09-02）**：
+  - 同组 agent 互发**多行**消息卡在对方输入框（#174）：Claude Code 把连着来的一大块当**粘贴**，
+    紧跟的 Enter 被吞进粘贴块。`yxi-hub` 和手机端 `send` 都在文本和回车之间 `sleep 0.4`。
+  - 语音识别三层（#175 #177）：**手机上算**（sherpa-onnx + SenseVoice，APK 28→49MB，
+    模型 153MB 首次下载）→ 服务器 `yxi-asr` → 系统识别。按住说话，结果只填输入框。
+    ⚠️ release 只打包 arm64，**模拟器上没语音**；debug 补回 x86_64。
+  - 发出去的图显示缩略图、点开放大（#179 #184）；思考时多色**流动**背景光（#180 #185 #186）。
+  - 新 logo（`design/logo-yunxi.png`，#181）；默认浅色、名字不再提 参考款（#182）。
+  - 「未启用」在没同步到之前不下结论（#183）；冷启动骨架 / 断线提示（#170）。
+  - `/model` 菜单定成 `["default","fable-5-1[1m]","opus-4-6[1m]","sonnet[1m]","haiku"]`（#187）。
+  - 服务器：swap 8G→16G（`/swapfile2`，已进 fstab）。
+
+- ✅ **0.9.52：一次传多个 + 安装器能重拉（2026-09-01）**
+  - **附件一次能选多个**（用户要的）：安卓换 `GetMultipleContents`、iOS 换
+    `photosPicker(maxSelectionCount:)` + `fileImporter(allowsMultipleSelection:)`。
+    传的时候**顺序传不并发**（#172）：并发时每个协程算 `idx` 都读到同一份 `staged`，
+    五张全叫「图片1」；顺序传每轮读得到上一轮结果。失败**攒起来一次报**（「5 个里有 3 个没传上」），
+    界面上带「传着… 3/5」。
+  - ⚠️ iOS 顺手修了个还没露头的坑（#171）：相册给的每张都叫 `image.png`，
+    而远端路径是「秒级时间戳-文件名」—— 同一秒选的几张会写到**同一个路径**互相覆盖。
+    改成毫秒 + 文件名带批内序号。
+  - **「点拉起安装器没反应」**（#173）：那个绿按钮是 `MorphButton` 的**成功态**，
+    `clickable(enabled = Idle || Fail)` —— **根本不可点**，而文案写着「拉起安装器」。
+    真根因更深：下载跑在 app scope 上要好几分钟，下完那一刻用户多半已经切出去了，
+    而 **Android 10 起后台不许起 Activity，`startActivity` 静默失败**。
+    现在 `MorphButton` 有 `okTap`，`UpdateDownloader` 留着下好的文件（`ready`）+ `installNow()`，
+    回到这屏点一下就再拉一次，**不用重下 28 MB**。文案改成「已下好 · 点一下安装」。
+  - ⚠️ **iOS 那两处界面改动没有编译验证过** —— `swift build` 在 Linux 上只编 `YxiKit`，
+    SwiftUI 那个 target 只能在 Mac / GitHub macOS runner 上编（#160 就是这么漏的）。
+    逻辑层 314 个测试全过，但界面要 push 触发 iOS CI 才算数。
+
+- ✅ **0.9.50 / 0.9.51：四个用户报的 bug + 一次我自己造成的事故（2026-09-01）**
+  - **一键收拾以前收的是它自己**（#165）：`ps -eo args=` 会把执行扫描的那条 awk 列出来，
+    而它命令行里写着 `GradleDaemon` —— 于是把自己认成 Gradle 守护进程。
+    用户看到的「可以收拾 1 类 · 约 7 MB」就是它自己那三个临时 shell。**这按钮从上线起是空的。**
+  - **新增两类可收拾的**：「闲置会话」和「一直霸着 CPU 的进程」。
+    会话走 `cloud-forget`（移出自动恢复名单 + 杀，**对话存档保留**），不按 pid 杀 ——
+    否则 `cloud-watchdog` 15 秒就把它 `--resume` 拉回来。
+  - ⚠️⚠️ **我用 tmux 的 `session_activity` 判闲置，杀掉了用户正在用的 `cc-hexingyang`**（#166）。
+    那个时间戳没人 attach 时不更新，而这条坑 `SessionProbe.lastActivityOf` 的注释里是我自己写的。
+    代码里改成 `max(tmux 活动, 转录 mtime)`、转录按 sessionId 找、busy/waiting 跳过、
+    **查不到就不列（fail-closed）**。
+  - **会话 cd 过就再也找不到转录**（#167）：改成按 `sessionId` 找（`~/.claude/sessions/`
+    下那些 json 里有 `tmux` 和 `sessionId`，转录文件名就是 `<sessionId>.jsonl`）。
+  - **`[Image: …]` 冒充用户说话**（#168）：那些消息带 `isMeta: true`，图片注解整条丢、
+    其余画成「系统消息」。
+  - **冷启动一块空看板**（#170）：`Recent` 落盘（带时间戳，>24h 不给），
+    断线时摆上次那份并标「N 分钟前的状态」；**真的一无所有**才画 `BoardSkeleton`
+    （骨架卡片跟真卡片同形同位，关了系统动画就不扫光）。
+  - ⚠️ 踩了个 Kotlin 的坑（#169）：**块注释会嵌套**，注释里写 `sessions/*.json`
+    那个 `/*` 开了内层注释，把整个文件吃掉了，报错却指向几十行外的 `{`。
+
+- ✅ **官网换成真机截图 + 参考款 配色（2026-09-01）**：`yxi.keuury.com` 首屏那台手机、
+  以及滚动走廊的四个场景（看板 / 审批 / 分组 / 体检），原来都是**手写 HTML 画的仿真界面**，
+  现在换成**真截图** —— 安卓模拟器跑真 App、连演示账号 `demo@本机`、拍下来的
+  `/var/www/yxi/shots/{board,approve,group,health}.webp`（600×1300，各 25~36 KB，共 110 KB）。
+  相框改成 `aspect-ratio:1080/2340`，跟截图同比例，所以一个像素都没裁。配色是 参考款那套
+  （`#346BF0` / `#4893FC` / `#BD99FE`，渐变只用在标题第二行和主按钮两处）。
+  ⚠️ 加 `/shots/` 踩了两个坑，都记在 TROUBLESHOOTING：**#162** 那份 snippet 是白名单，
+  不登记的路径一律 404；**#163** Cloudflare 连 404 都缓 4 小时，改文件名比清缓存省事。
+  ⚠️ **截图怎么拍见 #164** —— 这台机器 steal 50%，模拟器一被点就 ANR，
+  能改 prefs 就别点屏幕（比如切分组视图是写 `shared_prefs/yxi.xml` 的 `boardview:demo`）。
+  ⚠️ 演示数据是**编的**：`demo` 用户的 `~/.claude/sessions/*.json`（会话状态，看板**优先读这份**）、
+  `~/.cloud-status/*.json`、`~/.yxi/events.jsonl`（卡片上那句「在干什么」）、`~/.yxi/groups.json`
+  和五个 tmux 会话，里面没有任何真实客户 / 项目名。**要重拍先刷新这些时间戳**，
+  否则卡片上会写「18 小时前」。
 
 ## 读写信息在哪
 | 路径 | 性质 |
@@ -710,9 +784,17 @@
 |---|---|
 | `YxiKit`（SSH / 密钥 / 主机存储 / 转录解析 / 屏幕解析 / 配置 / 实验室） | ✅ **真编译真测试**，158 条全绿（Linux 上跑） |
 | `Yxi`（SwiftUI 全部界面） | ✅ **在 GitHub 的 macOS runner 上真编译、装进 iPhone 16 模拟器、逐页截图** |
+| 本轮（0.9.64）补的界面：缩略图 / 光晕 / 滑入 / 按住说话 / 新图标 / 浅色默认 | ✅ **在用户的 Mac 上 `xcodebuild` 真编译过**（#196 的流程）；❌ 没进过模拟器、没截过图 |
 | 真机 SSH / SFTP / tmux | ✅ **CI 里连的是真 sshd**（见下）——不是假数据 |
 | 分发（装到用户手机上） | ❌ 仍然需要开发者账号或每 7 天重签，见下面三条硬约束 |
 | 推送 | ❌ 未做 |
+
+**iOS 这轮补齐了什么（2026-09-02，0.9.64 / build 108）**：附件缩略图（`AttachThumb.swift`，
+`YxiKit.Attachments.parseRefs` 有测试）；对话页背景光 `ThinkingGlow.swift`（参数同安卓）；新条目滑入
+（`.transition(.rise)`）；按住说话 `MicHold.swift`（系统 `SFSpeechRecognizer` 离线识别，**不扛安卓那个
+150MB 模型**，只填输入框不发送；Info.plist 加了麦克风/语音两条）；App 图标（`App/Assets.xcassets`，
+单张 1024）；配色改成浅/深两套动态色、**默认浅色**（设置页「外观」切，终端永远深底）。
+⚠️ Linux 上的 xcodegen 现在会崩（#196），**工程在 Mac 上生成**。
 
 在 Linux 上验逻辑层（秒级，日常就用它）：
 ```bash
@@ -797,7 +879,7 @@ macOS runner 编译 → 起 iPhone 16 模拟器 → 装上去 → **在 runner �
 | D19 | **用量显示，按服务器关联** | 数据源 = `ccusage`（`remote-dev-station/bin/cc-quota` 已在用）读本机 `~/.claude`，**天然按服务器分，零关联工作**。转录里每条 assistant 消息自带完整 `usage` + `model` → **本地算钱，不调 API**。<br>两层：主机列表紧凑条 / 会话看板详情卡。中转站余额记 P2（token 留服务器，不进 App）。PRD 附录 K |
 | D18 | **悬浮排列的会话切换** | 像手机后台：卡片轮播 + `capture-pane` 实时缩略预览。与列表视图并存（`[列表│悬浮]`）。<br>⚠️ **上滑 = 归档，不杀 tmux 会话**（不可逆操作绝不能是滑动手势；杀会话要长按+二次确认）。PRD 附录 J.3 |
 | D17 | **滑动切卡的视差过渡** | 三层不同速度：焦点卡 1.0x / 邻居 0.86x+缩放+压暗 / 背景 0.3x。`ViewPager2` + 自定义 `PageTransformer`，无额外依赖。<br>⚠️ **必须尊重系统「移除动画」设置**——对前庭障碍用户视差会引发不适。PRD 附录 J.2 |
-| D16b | **视觉方向定为 Material 3 深色** | 用户说想学 Gemini。Gemini 好看是因为它是 M3 Expressive 的样板实现，而 M3 是 Google 公开给第三方用的设计系统 → 学 M3 正当，**未克隆 Gemini 界面**。PRD 附录 J.1 |
+| D16b | **视觉方向定为 Material 3 深色** | 用户说想学 参考款。参考款 好看是因为它是 M3 Expressive 的样板实现，而 M3 是 Google 公开给第三方用的设计系统 → 学 M3 正当，**未克隆 参考款 界面**。PRD 附录 J.1 |
 | D16 | **D-Pad 方向键盘** | 圆形四向 + 中央 Enter，两个上角可配置槽位（抄 Moshi 逆向所得）。我们加：对话模式也能唤出、长按连发、按住拖动持续导航。<br>⭐ **顺手兜底 Phase 3 的 AskUserQuestion 选项风险**——TUI 菜单本来就是 ↑↓+Enter。PRD 附录 I |
 | D15 | **推翻服务器侧的过度设计**（用户质疑「为什么要 agent」） | **唯一必须装的是 `yxi-hook`**（Claude Code 只调 settings.json 里的 hook，SSH 替代不了）。<br>`yxi-inbox` 守护删掉 → 换成追加写的 `~/.yxi/events.jsonl` + `tail -f`。<br>`yxi-agent` 降级成**可选脚本**，只为省往返，不是能不能用的前提。<br>服务器侧 ~340 行 + systemd + unix socket → **~140 行 + 两个文件路径**。PRD 附录 H |
 | D14 | **文件浏览与阅读**，作为第三个模式 | `[终端│对话│文件]`。**走 SFTP → 不需要 `yxi-agent`**，任何 SSH 主机可用。md 支持「渲染 ⇄ 源码」切换（用户说的「人类易读模式」）、图片、JSON 折叠树、代码高亮。**P0 只读**。<br>渲染库 Markwon，**与对话模式共用一套**。PRD 附录 G |
@@ -832,7 +914,7 @@ macOS runner 编译 → 起 iPhone 16 模拟器 → 装上去 → **在 runner �
 - ⭐ **ConnectBot 不「更老」**，是 Kotlin + Compose + DI（`compose.bom` / `material3` / `navigation.compose`，`data/ di/ service/ transport/ ui/`）
 - **Phase 1 照着 ConnectBot 的 `transport/` 写**：`AbsTransport.kt` / `TransportFactory.kt` / **`SSH.kt` 60 KB**（Apache-2.0 可直接抄）。它还有 `JumpHostProxyData.kt` **跳板机**支持 → 我们记为 P1
 - **SSH 库仍选 `mwiede/jsch`**，理由变硬：`org.connectbot:sshlib` 搜不到 `SFTPv3Client`，而我们的文件模式刚需 SFTP（Phase 1.1 实测确认）
-- ⭐ **`tuchg/Lucarne` 的 `agent-sessions` crate 比我们的 Chat View 设计更周到**（支持 claude/codex/copilot/cursor/gemini/grok/pi 七家）：原始层与语义层严格分开、`Unknown` 有升级纪律、shell 语义在解析层就抽出来。**三条都该抄**，见 PRD 附录 B.4
+- ⭐ **`tuchg/Lucarne` 的 `agent-sessions` crate 比我们的 Chat View 设计更周到**（支持 claude/codex/copilot/cursor/参考款/grok/pi 七家）：原始层与语义层严格分开、`Unknown` 有升级纪律、shell 语义在解析层就抽出来。**三条都该抄**，见 PRD 附录 B.4
 
 ## GitHub 耦合
 - 仓库：**`liang-senbei/yxi`（私有）**。⚠️ `/root/src/CLAUDE.md`（含明文密码，权限 600）**在父目录、不在本仓**，不会被提交。

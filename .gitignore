@@ -41,3 +41,6 @@ android/local.properties
 ios/.build/
 ios/**/.build/
 .swiftpm/
+
+# sherpa-onnx 的 AAR（47MB，dev/fetch-libs.sh 下）
+android/app/libs/*.aar

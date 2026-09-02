@@ -15,12 +15,25 @@ android {
         targetSdk = 37
         // ⚠️ versionCode 是**更新检查唯一比较的东西**，每次发包必须 +1。
         // versionName 只给人看。
-        versionCode = 92
-        versionName = "0.9.48"
+        versionCode = 108
+        versionName = "0.9.64"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // ⚠️ **只留 arm64-v8a。** sherpa-onnx 的 AAR 带四套原生库，加起来 120MB；
+        // 全带上 APK 会从 28MB 涨到 150MB 以上。2017 年以后的安卓手机全是 arm64，
+        // 只留它 = 只多 30MB。
+        // ⚠️ **代价：模拟器（x86_64）上没有语音**。那是开发用的，真机不受影响 ——
+        // 但在模拟器上验语音功能会看到「这台设备不支持」，别以为是代码坏了。
+        ndk { abiFilters += "arm64-v8a" }
     }
 
     buildTypes {
+        // ⚠️ **debug 补回 x86_64，不然模拟器上装不了了。**
+        // release 只留 arm64（省 90MB），但模拟器是 x86_64 —— 只留 arm64 的话
+        // `adb install` 直接拒绝，开发时连界面都看不到一眼。
+        // buildType 的 abiFilters 跟 defaultConfig 的是**并集**，所以 debug = arm64 + x86_64。
+        getByName("debug") { ndk { abiFilters += "x86_64" } }
+
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -50,6 +63,10 @@ dependencies {
     implementation(libs.markdown.m3)
     implementation(libs.bouncycastle)
     implementation(libs.kotlinx.coroutines.android)
+
+    // 手机上直接做语音识别（sherpa-onnx + SenseVoice）。
+    // ⚠️ AAR **不进 git**（47MB），`dev/fetch-libs.sh` 下。见 android/app/libs/README。
+    implementation(fileTree("libs") { include("*.aar") })
 
     // 仪器测试：KnownHosts 的分支表要在真机上跑，因为它依赖 android.util.Base64
     androidTestImplementation(libs.androidx.test.junit)

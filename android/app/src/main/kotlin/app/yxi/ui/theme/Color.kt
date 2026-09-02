@@ -41,6 +41,6 @@ val DiffAddBg: Color @Composable @ReadOnlyComposable get() = LocalPalette.curren
 val DiffDelFg: Color @Composable @ReadOnlyComposable get() = LocalPalette.current.DiffDelFg
 val DiffDelBg: Color @Composable @ReadOnlyComposable get() = LocalPalette.current.DiffDelBg
 
-/** 终端永远深底 —— ANSI 彩色输出在浅底上读不了。见 [GeminiPalette] 的注释。 */
+/** 终端永远深底 —— ANSI 彩色输出在浅底上读不了。见 [LightPalette] 的注释。 */
 val TerminalBg = Color(0xFF100E0B)
 val TerminalFg = Color(0xFFEBE1D9)

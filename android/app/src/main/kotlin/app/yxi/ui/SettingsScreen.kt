@@ -212,6 +212,54 @@ fun SettingsScreen(
             }
         }
 
+        // 语音识别 —— **在这台手机上算**，不联网、不依赖服务器、不依赖 Google 服务。
+        // ⚠️ 模型不打进 APK（解开 229MB），要用才下。
+        run {
+            val asr = app.yxi.agent.AsrModel
+            LaunchedEffect(Unit) { asr.refresh(ctx) }
+            val supported = app.yxi.agent.OnDeviceAsr.supported
+            Card(
+                t("语音识别"), Glyph.Mic,
+                subtitle = when {
+                    !supported -> t("这台设备不支持（只打包了 arm64）")
+                    asr.installed -> t("已就绪 · 在手机上识别，离线也能用")
+                    asr.progress >= 0f -> t("下载中 %d%%").format((asr.progress * 100).toInt())
+                    else -> t("没下模型 · 现在用的是系统识别")
+                },
+            ) {
+                Hint2(
+                    t("识别**在这台手机上**做：不联网、不经过服务器、也不依赖 Google 服务。" +
+                        "模型是开源的 SenseVoice，中英粤日都认、自带标点。")
+                )
+                if (!supported) {
+                    Hint2(t("⚠️ 只打包了 arm64 的原生库（模拟器和很老的机器用不了），这台机器会继续用系统识别。"))
+                } else if (asr.installed) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Surface(
+                            color = SurfaceContainerHigh, shape = Pill,
+                            modifier = Modifier.clip(Pill).clickable { asr.remove(ctx) },
+                        ) {
+                            Text(
+                                t("删掉模型（腾出约 %d MB）").format(230),
+                                Modifier.padding(16.dp, 9.dp),
+                                style = MaterialTheme.typography.labelLarge, color = Muted,
+                            )
+                        }
+                    }
+                } else {
+                    MorphButton(
+                        phase = if (asr.progress >= 0f) MorphPhase.Run
+                        else if (asr.error != null) MorphPhase.Fail else MorphPhase.Idle,
+                        label = t("下载模型（%d MB）").format(app.yxi.agent.AsrModel.SIZE_MB),
+                        modifier = Modifier.fillMaxWidth(), height = 46.dp,
+                        msg = asr.error.orEmpty(),
+                        progress = asr.progress,
+                    ) { asr.start(ctx) }
+                    Hint2(t("⚠️ 下载走流量，建议连 Wi-Fi。下好之后就一直在手机上，换服务器也不用重下。"))
+                }
+            }
+        }
+
         Card(t("界面风格"), Glyph.Palette, subtitle = Skin.style.label) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Skin.Style.entries.forEach { st ->
@@ -351,10 +399,10 @@ private fun DevCard(ctx: Context, host: Host?, store: HostStore, keys: KeyManage
 }
 
 /**
- * 设置里的一节。**照 Gemini 的样子做**：左边一个线性引导图标，右边一段内容，
+ * 设置里的一节。**照参考款 的样子做**：左边一个线性引导图标，右边一段内容，
  * 标题更粗、留白更松。
  *
- * ⚠️ 卡片底色用得很淡（`SurfaceContainerLow`）—— Gemini 靠留白和图标分节，
+ * ⚠️ 卡片底色用得很淡（`SurfaceContainerLow`）—— 参考款靠留白和图标分节，
  * 不靠重描边。深色主题下它就是比页面底稍亮一点的一块，浅色主题下是白卡。
  */
 @Composable

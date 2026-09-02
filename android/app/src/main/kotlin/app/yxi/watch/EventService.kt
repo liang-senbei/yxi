@@ -45,6 +45,18 @@ import kotlin.math.absoluteValue
  */
 class EventService : Service() {
 
+    /**
+     * 通知里那个方块大图标。
+     * ⚠️ **不传的话 ROM 会拿启动器图标的缓存顶上** —— 换了 logo 之后通知里还是旧的橙色箭头
+     * （用户截图为证）。显式给一张，就不看 ROM 脸色。
+     * ⚠️ `remember` 不了（不是 Compose），用 lazy 缓一份 —— 每条通知重新解码 192px 的 PNG 不值。
+     */
+    private val largeIconBmp by lazy {
+        android.graphics.BitmapFactory.decodeResource(resources, R.drawable.ic_notif_large)
+    }
+    private fun largeIcon(): android.graphics.Bitmap? = largeIconBmp
+
+
     internal val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     /** 活着的连接，按 hostId。点通知按钮时要用它送键，不能为此再连一次。 */
     private val live = java.util.concurrent.ConcurrentHashMap<String, SshSession>()
@@ -210,6 +222,7 @@ class EventService : Service() {
         val what = promptTitle ?: preview.takeIf { it.isNotBlank() } ?: detail.takeIf { it.isNotBlank() } ?: waitLine
         val b = NotificationCompat.Builder(this, CH_NEEDS)
             .setSmallIcon(R.drawable.ic_stat_yxi)
+            .setLargeIcon(largeIcon())
             .setContentTitle(t("%s 需要你").format(short))
             .setContentText(what)                     // 折叠时就看得到「要你决定什么」，不再只是「等你决定」
             .setContentIntent(pi)
@@ -275,6 +288,7 @@ class EventService : Service() {
         val line = preview.takeIf { it.isNotBlank() } ?: host.alias
         val b = NotificationCompat.Builder(this, CH_DONE)
             .setSmallIcon(R.drawable.ic_stat_yxi)
+            .setLargeIcon(largeIcon())
             .setContentTitle(t("%s 干完了").format(short))
             .setContentText(line)
             .setStyle(NotificationCompat.BigTextStyle().bigText(
@@ -435,6 +449,7 @@ class EventService : Service() {
             9_001,
             NotificationCompat.Builder(this, CH_DONE)
                 .setSmallIcon(R.drawable.ic_stat_yxi)
+            .setLargeIcon(largeIcon())
                 .setContentTitle(text)
                 .setAutoCancel(true)
                 .build(),
@@ -485,6 +500,7 @@ class EventService : Service() {
         val who = waiting.toList().sorted()
         val b = NotificationCompat.Builder(this, CH_ONGOING)
             .setSmallIcon(R.drawable.ic_stat_yxi)
+            .setLargeIcon(largeIcon())
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .setContentIntent(
@@ -503,8 +519,11 @@ class EventService : Service() {
                 .setContentText(if (workingCount > 0) who.joinToString("、") + t(" · %d 在跑").format(workingCount)
                 else who.joinToString("、"))
                 // 有事的时候才上色：颜色是提示，天天亮着就不是提示了
+                // ⚠️ 用浅色主题的主色（跟 App 里发送键、分组 chip 同一个蓝）。
+                //    原来是老品牌那个铜色 —— 换了 logo 之后 ROM 把小图标涂成铜色画在深棕方块里，
+                //    看着就是「旧的样子」（用户截图为证）。
                 .setColorized(true)
-                .setColor(0xFFE08B57.toInt())
+                .setColor(0xFF0B57D0.toInt())
             promote(b)
         }
         return b.build()

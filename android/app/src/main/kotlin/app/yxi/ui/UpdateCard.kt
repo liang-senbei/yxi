@@ -40,6 +40,23 @@ object UpdateDownloader {
     var progress by mutableFloatStateOf(-1f); private set
     var message by mutableStateOf(""); private set
 
+    /**
+     * 已经下好、等着装的那个包。null = 还没有。
+     *
+     * ⚠️ **留着它是为了能再拉一次安装器。** 用户报过「点击拉起安装器没反应」——
+     * 病根是那时候成功态的按钮**根本不可点**，而它的字写着「拉起安装器」。
+     * 系统安装器被误关、被 ROM 拦一次、或者装到一半退出来，都得能再来一次；
+     * 重下一遍 28 MB 只为了再弹一个框，纯属浪费。
+     */
+    var ready by mutableStateOf<File?>(null); private set
+
+    /** 再把安装器拉一次（包已经在本地）。失败就把原因写进 [message]。 */
+    fun installNow(ctx: Context) {
+        val f = ready ?: return
+        val why = install(ctx.applicationContext, f)
+        if (why != null) { message = why.take(40); phase = MorphPhase.Fail }
+    }
+
     fun start(ctx: Context, ssh: SshSession?, update: Update) {
         if (phase == MorphPhase.Run && forVersion == update.versionCode) return   // 已经在下这版了，别重开
         val app = ctx.applicationContext
@@ -65,8 +82,15 @@ object UpdateDownloader {
                 }
                 // ⚠️ 大小对不上就别装 —— 半个 APK 比不更新糟得多
                 if (got != update.sizeBytes) throw RuntimeException(t("下载不完整（%d/%d），没装").format(got, update.sizeBytes))
+                ready = f
+                // ⚠️ **这一下不一定拉得起来，而且失败是静默的。**
+                // 下载跑在 app scope 上（切页面不断，这是对的），28 MB 在手机网络下要几分钟 ——
+                // 下完那一刻用户很可能已经切出去了。而 Android 10 起**后台不许起 Activity**：
+                // `startActivity` 不抛异常、也不返回失败，**就是什么都不发生**。
+                // 所以这里拉一次是「顺手」，真正的保障是上面那个 `ready` ——
+                // 用户回到这一屏，点那个按钮再拉一次（那时 App 在前台，一定拉得起来）。
                 install(app, f)?.let { throw RuntimeException(it) }
-                t("拉起安装器")
+                t("已下好 · 点一下安装")
             }
             r.onSuccess { message = it; phase = MorphPhase.Ok }
                 .onFailure { message = (it.message ?: t("下载失败")).take(40); phase = MorphPhase.Fail }
@@ -102,7 +126,12 @@ fun UpdateBanner(ssh: SshSession?, update: Update?, onDone: () -> Unit) {
                     modifier = Modifier.weight(1f), height = 46.dp,
                     msg = if (mine) UpdateDownloader.message else "",
                     progress = if (mine) UpdateDownloader.progress else -1f,
-                ) { UpdateDownloader.start(ctx, ssh, update) }
+                    // 下好之后这个按钮还得能点 —— 安装器被误关 / 被 ROM 拦掉都要能再来一次
+                    okTap = mine && UpdateDownloader.ready != null,
+                ) {
+                    if (mine && UpdateDownloader.phase == MorphPhase.Ok) UpdateDownloader.installNow(ctx)
+                    else UpdateDownloader.start(ctx, ssh, update)
+                }
                 OutlinedButton(onDone, shape = Pill, modifier = Modifier.height(46.dp)) { Text(t("以后")) }
             }
         }

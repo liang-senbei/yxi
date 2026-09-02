@@ -71,6 +71,47 @@ object Attachments {
         }
     }
 
+    /**
+     * 用户消息里被 [header] 贴上去的那一条附件引用。
+     *
+     * @param label 界面上那个名字（`图片1` / `附件2`）
+     * @param path 远端绝对路径
+     * @param name 文件名（拉不到图时显示它，比整条路径有用）
+     */
+    data class Ref(val label: String, val path: String, val isImage: Boolean) {
+        val name: String get() = path.substringAfterLast('/')
+    }
+
+    /**
+     * 把 [header] 贴上去的那几行从正文里摘出来。
+     *
+     * ⚠️ **只认开头连续的那几行。** 附件头永远在最前面（[header] 就是这么拼的），
+     * 而正文里完全可能出现同样长相的一行（比如用户在讲「[图片1] 是哪张」）——
+     * 一路扫到底会把正文里的句子也吃掉。
+     *
+     * ⚠️ 图片还是附件**按扩展名判**，不按标签判：标签是本地化的（`图片1`/`Image 1`），
+     * 换个语言看历史消息就全认不出来了。
+     *
+     * @return (附件们, 剩下的正文)
+     */
+    fun parseRefs(text: String): Pair<List<Ref>, String> {
+        val re = Regex("""^\[([^\]]+)]\s+(/\S+)\s*$""")
+        val refs = ArrayList<Ref>()
+        val lines = text.lines()
+        var i = 0
+        while (i < lines.size) {
+            val m = re.find(lines[i]) ?: break
+            val path = m.groupValues[2]
+            val ext = path.substringAfterLast('.', "").lowercase()
+            refs += Ref(m.groupValues[1], path, ext in IMAGE_EXT)
+            i++
+        }
+        if (refs.isEmpty()) return emptyList<Ref>() to text
+        return refs to lines.drop(i).joinToString("\n").trim()
+    }
+
+    private val IMAGE_EXT = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "heif")
+
     /** 发送时贴在正文前面的路径映射。没有附件就返回空串。 */
     fun header(staged: List<Staged>): String =
         if (staged.isEmpty()) "" else

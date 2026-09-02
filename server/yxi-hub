@@ -55,9 +55,19 @@ print("\n".join(g for g,m in d.get("groups",{}).items() if sys.argv[2] in m))' "
 # ⚠️ **必须分两步**：文本用 `-l`（字面）送，回车单独送。
 #    合成一条的话，文本里出现 "Enter" 这种字会被 send-keys 当按键名解析。
 #    （Yxi 手机端 SessionProbe.send 踩过同一个坑，这里保持一致。）
+#
+# ⚠️⚠️ **两步之间必须隔一下，否则多行消息发不出去。**
+#    Claude Code 的输入框认「括号粘贴」：一大块文本连着来，它按**粘贴**处理，
+#    而粘贴块里的换行是**字面换行不是提交**。紧跟在后面的 Enter 会被算进那一块，
+#    于是整段话原样躺在输入框里**没发出去** —— 用户报的就是这个（截图里
+#    `[同组 cc-logto] …` 整段挂在 `❯` 后面）。
+#    实测：背靠背发 3 行 → 留在框里；中间 `sleep 0.4` → 正常提交。
+#    ⚠️ 单行消息不会触发（不够长，不当粘贴），所以这个坑只有 agent 之间
+#    发长消息时才露头 —— 手测「你好」是测不出来的。
 push() {
   local target="$1" text="$2"
   tmux send-keys -t "$target" -l "$text"
+  sleep 0.4
   tmux send-keys -t "$target" Enter
   printf '%s\t%s -> %s\t%s\n' "$(date -Iseconds)" "${3:-?}" "$target" "$text" >> "$LOG"
 }

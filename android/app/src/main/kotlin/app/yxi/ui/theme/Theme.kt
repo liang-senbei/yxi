@@ -62,7 +62,7 @@ private fun schemeOf(p: Palette) = if (p.light) {
 }
 
 /**
- * Gemini 那套的排版：**正文更大、行距更松**。
+ * 参考款那套的排版：**正文更大、行距更松**。
  *
  * ⚠️ 只有配色像还不够 —— 截图里最直观的差别其实是**呼吸感**：
  * 正文 16sp 但行高给到 26sp。照抄颜色不改行距，看着还是「另一个 app」。
@@ -76,7 +76,7 @@ private val AiryType = Typography().let { d ->
 
 /**
  * ⚠️ **终端不跟着变浅。** ANSI 彩色输出按深底配的，浅底上黄/亮绿几乎看不见。
- * 所以浅色风格下切到终端会有一下明暗跳变 —— 自觉的取舍（见 [GeminiPalette]）。
+ * 所以浅色风格下切到终端会有一下明暗跳变 —— 自觉的取舍（见 [LightPalette]）。
  */
 @Composable
 fun YxiTheme(content: @Composable () -> Unit) {

@@ -56,6 +56,21 @@ private val Pill = RoundedCornerShape(100.dp)
  * `~/.cloud-status` 下的状态文件都是现成的（后者由 `cc-state` 写，早就在跑）。
  * ⚠️ 注意：Kotlin 的块注释**可嵌套**，注释里别写含 `/` 紧跟 `*` 的路径（见 TROUBLESHOOTING #23）。
  */
+
+/**
+ * 「这份数据是多久以前的」。断线时摆在横幅上，让人一眼知道屏幕上是旧的。
+ * ⚠️ 拿不到时间戳就只说「旧数据」——**不编一个数字**，编的比不说更误导。
+ */
+private fun staleText(at: Long): String {
+    if (at <= 0) return t("旧数据")
+    val min = ((System.currentTimeMillis() / 1000 - at) / 60).coerceAtLeast(0)
+    return when {
+        min < 1 -> t("刚刚的状态")
+        min < 60 -> t("%d 分钟前的状态").format(min)
+        else -> t("%d 小时前的状态").format(min / 60)
+    }
+}
+
 @Composable
 fun SessionsScreen(
     store: HostStore,
@@ -104,6 +119,24 @@ fun SessionsScreen(
     var replyTo by remember { mutableStateOf<Session?>(null) }
     var newSession by remember { mutableStateOf(false) }
 
+    /**
+     * 这次连上之后有没有成功刷过。没有 = 屏幕上这份是**上一次**的，得标「N 分钟前」。
+     */
+    var fresh by remember(host.id) { mutableStateOf(false) }
+
+    // ⚠️ **冷启动别给一块空看板。** 安卓会在后台把进程杀掉，用户再点开时
+    // 内存里那份没了、SSH 还在重连（他那台手机在三个出口 IP 之间跳，每跳一次都要重连），
+    // 于是屏幕上只剩「连接断了，正在重连…」和一个空列表 —— 看着像会话全没了。
+    // 先把落盘那份摆出来。
+    // ⚠️ 旧数据**必须看得出是旧的**。Recent 原来的注释「看到一屏几小时前的假状态比空着更误导」
+    // 是对的 —— 所以是**标明白**，不是装作实时。这跟 #151/#154 是同一条教训。
+    LaunchedEffect(host.id) {
+        if (sessions.isEmpty()) {
+            val cached = app.yxi.agent.Recent.load(ctx, host.id)
+            if (cached.isNotEmpty()) onSessions(cached)
+        }
+    }
+
     LaunchedEffect(connectError) { connectError?.let { status = it } }
 
     LaunchedEffect(ssh) {
@@ -118,8 +151,9 @@ fun SessionsScreen(
                     // ⚠️ 顺手存一份给工作区左上角那个下拉用（[app.yxi.agent.Recent]）——
                     // 它原来是「点了才去抓」，打开菜单要干等一趟 SSH 往返
                     .onSuccess {
-                        app.yxi.agent.Recent.put(host.id, it.sessions)
+                        app.yxi.agent.Recent.put(ctx, host.id, it.sessions)
                         onSessions(it.sessions); groups = it.groups; status = ""
+                        fresh = true
                     }
                     .onFailure {
                         if (it is kotlinx.coroutines.CancellationException) throw it
@@ -261,7 +295,11 @@ fun SessionsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        connectError.lineSequence().first(),
+                        // ⚠️ 屏幕上摆着旧数据就**必须说出来**，否则用户会拿几分钟前的
+                        // 状态去做决定（以为「它还在跑」，其实早停了）。
+                        if (!fresh && sessions.isNotEmpty())
+                            connectError.lineSequence().first() + " · " + staleText(app.yxi.agent.Recent.at(host.id))
+                        else connectError.lineSequence().first(),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onErrorContainer,
                         modifier = Modifier.weight(1f),
@@ -301,6 +339,47 @@ fun SessionsScreen(
             contentPadding = PaddingValues(14.dp, 4.dp, 14.dp, 20.dp),
             verticalArrangement = Arrangement.spacedBy(9.dp),
         ) {
+            // ⚠️ **一无所有的时候画骨架，不要留白。** 用户报过：刚进 app 是一块空白
+            // 加一行「连接中…」，十几个跑着的会话一个不见 —— 第一反应是「会话没了」。
+            // ⚠️ 有缓存就不画：那时候该摆**上一次的真数据** + 标「N 分钟前」（#170）。
+            //    骨架只管「真的什么都没有」这一种情况（第一次连这台机器 / 缓存过期）。
+            // ⚠️ **一无所有的时候，三种情况三种画法，唯独不能留白。**
+            //  · 还在连 → 骨架（跟真卡片同形同位，数据来了是填进去不是换一屏）
+            //  · 连不上 → **一句话说清楚**。骨架的意思是「马上就来」，而连接已经
+            //    明确失败了；一直闪着的假卡片会让人以为还在加载，那是撒谎。
+            //  · 连上了、真的没有会话 → 走下面正常的空列表
+            // ⚠️ 用户报过两次「一进来就显示这个」—— 他真正在问的是
+            //    **「我的会话是不是没了」**。所以这句话必须先回答这个，
+            //    而不是重复横幅上已经写着的「正在重连」。
+            // ⚠️ 两个条件缺一不可：
+            //  · `sessions.isEmpty()` —— **真的没东西可显示**。有缓存看板时（#170）
+            //    该把旧数据摆出来并标「N 分钟前」，在上面盖个骨架是画蛇添足。
+            //  · `!fresh` —— 这一轮还没同步到。同步过、真的一个会话都没有，
+            //    那是正常的空看板，不该一直转圈。
+            // ⚠️ 「未启用」不算「有东西可显示」—— 它是**推论**，见上面。
+            //    所以判据看的是 `sessions`（真会话表），不是屏幕上有没有卡片。
+            if (sessions.isEmpty() && !fresh) {
+                if (connectError == null) item(key = "skeleton") { BoardSkeleton() }
+                else item(key = "offline") {
+                    Column(
+                        Modifier.fillMaxWidth().padding(8.dp, 28.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            t("还没读到会话"),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            t("服务器上的会话没受影响，还在跑 —— 只是这会儿读不到。连上就回来。"),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.outline,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        )
+                    }
+                }
+            }
             // ⚠️ 置顶的**从原来的组里拿出来**单独放最上面。留在原组只加个图标的话，
             // 会话一多（实测 22 个）照样要翻半天才找到 —— 那就等于没置顶
             // ⚠️ 置顶按**保存的次序**排（不是 sessions 的顺序）—— 拖动排的就是它。
@@ -433,7 +512,13 @@ fun SessionsScreen(
             // ── 未启用：置顶过、但现在没在跑的 ──
             // ⚠️ 放在**最后**：它们不占注意力，只是「随时能拉回来」。
             // 放前面会让每天都看的活会话被一堆睡着的挤下去。
-            val dormant = faved.filter { it !in byName }.sorted()
+            // ⚠️⚠️ **「未启用」是个推论，不是事实。**
+            // 它的定义是「收藏了、但不在当前会话表里」—— 而会话表在还没同步到之前是**空的**，
+            // 于是每一个收藏都被算成「没启动」。用户报的就是这个：一进 App 看到
+            // 「未启用 5」，anchor / begirl / logto 全在里面，**而它们明明都跑着**。
+            // 比难看更糟的是它**会骗人去点「唤起」**，而那个会话本来就在跑。
+            // 所以：**没拿到真数据（`fresh`）之前，一条都不列。** 不知道就说不知道。
+            val dormant = if (fresh) faved.filter { it !in byName }.sorted() else emptyList()
             if (dormant.isNotEmpty()) {
                 item(key = "h-dormant") {
                     Row(
@@ -524,7 +609,7 @@ fun SessionsScreen(
                     // ⚠️ 正在干活/正在等你的，要**额外说一句** —— 这两种状态下杀掉最可能丢东西
                     if (busy) Text(
                         if (s0.state == SessionState.Working) t("⚠️ 它**正在干活**，现在杀会丢掉这一轮还没写完的东西。")
-                        else t("⚠️ 它**正在等你回答**，杀掉这个问题就没了。"),
+                        else t("⚠️ 它正在等你回答，杀掉这个问题就没了。"),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.error,
                     )

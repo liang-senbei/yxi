@@ -286,7 +286,11 @@ object Transcript {
 
             when (type) {
                 "user" -> {
-                    parseUser(msg, d.optJSONObject("toolUseResult"), uuid, calls, out, said)
+                    parseUser(
+                        msg, d.optJSONObject("toolUseResult"), uuid, calls, out, said,
+                        // ⚠️ Claude Code 给「不是用户打的」消息打了 isMeta —— 见 [parseUser]
+                        isMeta = d.optBoolean("isMeta", false),
+                    )
                     // ⚠️ **切完模型、但它还没回话时，标签也得跟着变。**
                     // 顶栏那个模型名来自「最后一条 assistant 消息」的 model —— 切换不会改写旧消息，
                     // 所以不认这一步的话，用户切了模型还看见旧名字，会以为没切成（用户报过）。
@@ -397,6 +401,13 @@ object Transcript {
     private val FROM = Regex("""(?:from|teammate_id|agent_id)="([^"]+)"""")
 
     /** 认出来就返回（类别, 谁发的），否则 null。 */
+    /**
+     * 读图之后 Claude Code 追加的坐标注解，形如
+     * `[Image: original 1264x2800, displayed at 903x2000. Multiply coordinates by 1.40 to map to original image.]`。
+     * 纯粹是给模型换算坐标用的，**对话里一点意义都没有** —— 整条丢掉。
+     */
+    private val IMAGE_NOTE = Regex("""^\[Image: original \d+x\d+[^\n]*]${'$'}""")
+
     private fun injectedOf(text: String): Pair<String, String?>? {
         for ((tag, label) in INJECTED) {
             val i = text.indexOf("<$tag")
@@ -407,19 +418,44 @@ object Transcript {
         return null
     }
 
+    /**
+     * ⚠️ **`isMeta` 的消息不是用户打的，绝不能画成用户气泡。**
+     *
+     * Claude Code 把一批「role 是 user、但人没说过」的东西也写成 user 消息，
+     * 统一带 `isMeta: true`：读图后的坐标注解、Stop 钩子回执、目标复查、
+     * skill 载入说明、`<local-command-caveat>`……
+     * 照直渲染就是**凭空替用户说话** —— 用户报的就是这个：
+     * 他从没打过那句 `[Image: original 1264x2800, displayed at 903x2000. …]`，
+     * 手机上却整整齐齐一个蓝气泡。这份转录里 91 条 isMeta，62 条是图片注解。
+     *
+     * 处理分三档：
+     *  · 带 `<agent-message>` 之类标签的 → 照旧走 [ChatItem.Injected]（那些**有内容**，
+     *    比如别的会话发来的消息，用户是要看的）；
+     *  · 图片坐标注解 → **直接丢**。它是给模型看的渲染参数，对话里没有任何意义；
+     *  · 其余 isMeta → 当系统消息画，别混进用户说的话里。
+     *
+     * ⚠️ 而且 isMeta 的文本**不能进 `said`**：那是排队消息的出队判据（#76），
+     * 拿系统文本去配对会把用户真正排队的那条误判成「已经说过了」。
+     */
     private fun parseUser(
         msg: JSONObject, meta: JSONObject?, uuid: String,
         calls: MutableMap<String, Int>, out: MutableList<ChatItem>,
         said: MutableSet<String>,
+        isMeta: Boolean = false,
     ) {
         fun said(key: String, t: String) {
             val inj = injectedOf(t)
-            if (inj == null) {
-                out += ChatItem.UserText(key, t)
-                said += t.trim()     // 出队判据要用（#76）
-            } else {
+            if (inj != null) {
                 out += ChatItem.Injected(key, inj.first, inj.second, t)
+                return
             }
+            if (isMeta) {
+                if (IMAGE_NOTE.matches(t.trim())) return
+                out += ChatItem.Injected(key, t("系统消息"), null, t)
+                return
+            }
+            out += ChatItem.UserText(key, t)
+            said += t.trim()     // 出队判据要用（#76）
         }
         when (val c = msg.opt("content")) {
             is String -> if (c.isNotBlank()) said(uuid, c)

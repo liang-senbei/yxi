@@ -464,7 +464,7 @@ private fun HostQuota(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        t("这些都是缓存和跑飞的搜索，收掉不会丢任何东西。你的会话、编辑器、tmux 一概不碰。"),
+                        t("缓存和跑飞的进程收掉不丢东西。会话那一类会真的关掉 —— 但对话存档留着，之后还能接回来。"),
                         style = MaterialTheme.typography.labelSmall, color = Dim,
                     )
                     Column(
@@ -492,7 +492,13 @@ private fun HostQuota(
                                         Text(junkText(what), style = MaterialTheme.typography.labelLarge)
                                         Text(
                                             // 最久的那个跑了多久 —— 判断「是不是跑飞了」看这个
-                                            t("%d 个 · %d MB · 最久跑了 %d 分钟").format(
+                                            // ⚠️ 会话那类 ageSec 是「多久没动过」不是「跑了多久」，
+                                            // 照进程的话术写会把「闲了 17 天」说成「跑了 17 天」，正好反了
+                                            if (what == "idle")
+                                                t("%d 个 · %d MB · 最久 %d 天没动过").format(
+                                                    items.size, mb, (items.maxOf { it.ageSec }) / 86400,
+                                                )
+                                            else t("%d 个 · %d MB · 最久跑了 %d 分钟").format(
                                                 items.size, mb, (items.maxOf { it.ageSec }) / 60,
                                             ),
                                             style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
@@ -1005,5 +1011,7 @@ private fun junkText(code: String): String = when (code) {
     "gradle" -> t("Gradle 编译守护进程")
     "kotlin" -> t("Kotlin 编译守护进程")
     "rg" -> t("跑飞的 rg 全盘搜索")
+    "hog" -> t("一直霸着 CPU 的进程")
+    "idle" -> t("很久没动过的会话")
     else -> code
 }

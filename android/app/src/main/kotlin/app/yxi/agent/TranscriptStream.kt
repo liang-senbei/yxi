@@ -17,13 +17,39 @@ import kotlinx.coroutines.flow.flowOn
 object TranscriptStream {
 
     /**
-     * 找出某个 cwd 对应的最新转录文件。
-     * 没有就返回 null（这个会话里可能压根没跑过 Claude Code）。
+     * 找出这个会话的最新转录文件。没有就返回 null。
+     *
+     * ⚠️⚠️ **按 sessionId 找，别只按目录找。**
+     *
+     * Claude Code 的转录目录是拿**启动时**那个目录的名字拼的，而
+     * `pane_current_path` 是**此刻**的目录 —— 会话里 `cd` 一下，两者就永久对不上。
+     * 用户报的就是这个：`cc-hexingyang` 在 `/root/src/workspace/hexingyang` 启动、
+     * 后来 `cd` 进了 `unitree_rl_mjlab-main`，于是对话页一直显示
+     * 「这个会话里没找到 Claude Code 的转录」，而转录一直好好地在原来那个目录里写着。
+     *
+     * `~/.claude/sessions/` 下那些 json 里有 `tmux`（会话名）和 `sessionId`，
+     * 而转录文件名就是 `<sessionId>.jsonl` —— 这条链是精确的，不受 cd 影响。
+     *
+     * ⚠️ **找不到 sessionId 才退回按目录找**（老路径）。不往父目录爬：
+     * `/a/b/c` 爬到 `/a/b` 很可能撞上**另一个会话**的转录，
+     * 显示错人的对话比显示「没找到」糟得多。
+     *
+     * @param session tmux 会话名（如 `cc-mail`）。给空就只走按目录那条老路。
      */
-    suspend fun latestFor(ssh: SshSession, cwd: String): String? {
-        val dir = "\$HOME/.claude/projects/" + Transcript.projectDirOf(cwd)
-        val out = ssh.exec("ls -t $dir/*.jsonl 2>/dev/null | head -1").trim()
-        return out.takeIf { it.isNotEmpty() && it.endsWith(".jsonl") }
+    suspend fun latestFor(ssh: SshSession, cwd: String, session: String = ""): String? {
+        val q = session.replace("'", "'\\''")
+        val dir = Transcript.projectDirOf(cwd)
+        val out = ssh.exec(
+            "p=\"\$HOME/.claude/projects\"; n='$q'; " +
+                "if [ -n \"\$n\" ]; then " +
+                "m=\$(grep -l \"\\\"tmux\\\":\\\"\$n:\" \"\$HOME\"/.claude/sessions/*.json 2>/dev/null | head -1); " +
+                "if [ -n \"\$m\" ]; then " +
+                "s=\$(sed -n 's/.*\"sessionId\":\"\\([^\"]*\\)\".*/\\1/p' \"\$m\" 2>/dev/null | head -1); " +
+                "if [ -n \"\$s\" ]; then r=\$(ls -t \"\$p\"/*/\"\$s\".jsonl 2>/dev/null | head -1); " +
+                "[ -n \"\$r\" ] && { printf '%s\\n' \"\$r\"; exit 0; }; fi; fi; fi; " +
+                "ls -t \"\$p/$dir\"/*.jsonl 2>/dev/null | head -1"
+        ).trim()
+        return out.lineSequence().map { it.trim() }.firstOrNull { it.endsWith(".jsonl") }
     }
 
     /**

@@ -1,9 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 只是启动窗口的底色，避免冷启动闪白；真正的主题在 Compose 里（Theme.kt） -->
-    <style name="Theme.Yxi" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">#16130F</item>
-        <item name="android:statusBarColor">#16130F</item>
-        <item name="android:navigationBarColor">#16130F</item>
+    <!-- 只是启动窗口的底色，避免冷启动闪一下；真正的主题在 Compose 里（Theme.kt）。
+         ⚠️ **跟着默认风格走。** 默认改成浅色之后，这里再留深色底就是
+         「先黑一下再变白」—— 正是这个 style 当初为了避免才存在的那种闪。
+         ⚠️ 选了深色的人会反过来先白一下。取默认那一侧，因为多数人看到的是默认。
+         ⚠️ 浅底必须配 `windowLightStatusBar=true`，不然状态栏图标是白的、在白底上看不见。 -->
+    <style name="Theme.Yxi" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#FFFFFF</item>
+        <item name="android:statusBarColor">#FFFFFF</item>
+        <item name="android:navigationBarColor">#FFFFFF</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
     </style>
 </resources>

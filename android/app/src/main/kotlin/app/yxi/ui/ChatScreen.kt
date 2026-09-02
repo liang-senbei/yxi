@@ -24,6 +24,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.material3.*
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.background
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -106,67 +111,86 @@ fun ChatScreen(
     /** 正在放大看的那张附件图。null = 没在看 */
     var preview by remember { mutableStateOf<app.yxi.agent.Attachments.Staged?>(null) }
 
+    /** 这一批还剩几个没传完。用来画「传着… 2/5」，也是「有没有在传」的判据。 */
+    var batchTotal by remember(sessionName) { mutableIntStateOf(0) }
+
     // 选文件（图片和任意文件走同一个选择器，类型看 MIME）
+    //
+    // ⚠️ **可以一次选多个**（用户要的）。用 `GetMultipleContents` 不是 `GetContent`：
+    // 一张一张选、传完再点加号再选，五张图就是五轮操作 —— 手机上这个代价很实在。
     val pick = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.GetContent()
-    ) { uri ->
-        val u = uri ?: return@rememberLauncherForActivityResult
+        androidx.activity.result.contract.ActivityResultContracts.GetMultipleContents()
+    ) { uris ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
         val s0 = ssh ?: return@rememberLauncherForActivityResult
         scope.launch {
-            uploading++
-            // ⚠️ **先把字节读进内存，再谈传。** 读文件本身可能失败（授权过期、文件没了），
-            // 那跟「传失败」是两码事，要分开报，否则用户不知道是手机侧还是网络侧的问题。
-            val bytes = withContext(Dispatchers.IO) {
-                app.yxi.ssh.catching {
-                    ctx.contentResolver.openInputStream(u)?.use { it.readBytes() }
-                }.getOrNull()
-            }
-            if (bytes == null || bytes.isEmpty()) {
-                android.widget.Toast.makeText(ctx, t("这个文件读不出来 —— 换一张试试"), android.widget.Toast.LENGTH_LONG).show()
-                uploading--; return@launch
-            }
-            val cr = ctx.contentResolver
-            val mime = cr.getType(u).orEmpty()
-            val isImage = mime.startsWith("image/")
-            val name = queryName(ctx, u) ?: (if (isImage) "image" else "file")
-            val idx = staged.count { it.isImage == isImage } + 1
-            val stamp = java.text.SimpleDateFormat("MMdd-HHmmss", java.util.Locale.US)
-                .format(java.util.Date())
-
-            // ⚠️ **每次开一条新 SFTP 通道，别复用共享那条。**
-            // 病根就在复用：那条通道空闲久了会被服务器关掉、或上一次操作出错后进了坏状态，
-            // 之后每次 `put` 都失败 —— 而原来的代码**没有 onFailure，失败是静默的**，
-            // 用户只看到「没反应」，于是一点再点（原话：附件上传要好几次才能成功）。
-            // 新通道保证是好的；开一条就一个来回，比起传一整张图可以忽略。
-            //
-            // ⚠️ 还是**试两次**：新通道也可能撞上网络抖动，重开再来一次，
-            // 两次都不行才报错 —— 报出真原因，不再让人瞎点。
+            uploading += uris.size
+            batchTotal += uris.size
+            // ⚠️ **一批里的失败要攒起来一次说。** 五张里坏了三张就弹三个 Toast，
+            // 后面的把前面的顶掉，用户只看见最后一条 —— 等于没报。
+            var failed = 0
             var lastErr: Throwable? = null
-            var ok: app.yxi.agent.Attachments.Staged? = null
-            repeat(2) { attempt ->
-                if (ok != null) return@repeat
-                val fresh = app.yxi.ssh.catching { s0.openSftp() }.getOrNull()
-                if (fresh == null) { lastErr = IllegalStateException(t("开不了 SFTP 通道")); return@repeat }
-                try {
-                    ok = app.yxi.agent.Attachments.upload(fresh, sessionName, name, bytes, idx, isImage, stamp)
-                        .copy(localUri = u.toString())
-                } catch (e: Throwable) {
-                    if (e is kotlinx.coroutines.CancellationException) throw e
-                    lastErr = e
-                } finally {
-                    runCatching { fresh.close() }
+            // ⚠️ **一个一个传，不并发。** 序号（`图片1` `图片2`）要连得上，
+            // 而并发时每个协程算 `idx` 都读到同一份 `staged`，五张全叫「图片1」——
+            // 那正是 #156 那个撞号 bug 的老家。顺序传的话每轮都读得到上一轮的结果。
+            for (u in uris) {
+                // ⚠️ **先把字节读进内存，再谈传。** 读文件本身可能失败（授权过期、文件没了），
+                // 那跟「传失败」是两码事，要分开报，否则用户不知道是手机侧还是网络侧的问题。
+                val bytes = withContext(Dispatchers.IO) {
+                    app.yxi.ssh.catching {
+                        ctx.contentResolver.openInputStream(u)?.use { it.readBytes() }
+                    }.getOrNull()
                 }
+                if (bytes == null || bytes.isEmpty()) {
+                    failed++; lastErr = IllegalStateException(t("这个文件读不出来"))
+                    uploading--; continue
+                }
+                val cr = ctx.contentResolver
+                val mime = cr.getType(u).orEmpty()
+                val isImage = mime.startsWith("image/")
+                val name = queryName(ctx, u) ?: (if (isImage) "image" else "file")
+                // 顺序传，所以这里读到的 `staged` 已经含上一轮的结果，序号自然递增
+                val idx = staged.count { it.isImage == isImage } + 1
+                val stamp = java.text.SimpleDateFormat("MMdd-HHmmss", java.util.Locale.US)
+                    .format(java.util.Date())
+
+                // ⚠️ **每次开一条新 SFTP 通道，别复用共享那条。**
+                // 病根就在复用：那条通道空闲久了会被服务器关掉、或上一次操作出错后进了坏状态，
+                // 之后每次 `put` 都失败 —— 而原来的代码**没有 onFailure，失败是静默的**，
+                // 用户只看到「没反应」，于是一点再点（原话：附件上传要好几次才能成功）。
+                // 新通道保证是好的；开一条就一个来回，比起传一整张图可以忽略。
+                //
+                // ⚠️ 还是**试两次**：新通道也可能撞上网络抖动，重开再来一次，
+                // 两次都不行才算这个失败 —— 报出真原因，不再让人瞎点。
+                var ok: app.yxi.agent.Attachments.Staged? = null
+                repeat(2) {
+                    if (ok != null) return@repeat
+                    val fresh = app.yxi.ssh.catching { s0.openSftp() }.getOrNull()
+                    if (fresh == null) { lastErr = IllegalStateException(t("开不了 SFTP 通道")); return@repeat }
+                    try {
+                        ok = app.yxi.agent.Attachments.upload(fresh, sessionName, name, bytes, idx, isImage, stamp)
+                            .copy(localUri = u.toString())
+                    } catch (e: Throwable) {
+                        if (e is kotlinx.coroutines.CancellationException) throw e
+                        lastErr = e
+                    } finally {
+                        runCatching { fresh.close() }
+                    }
+                }
+                if (ok != null) staged = app.yxi.agent.Attachments.renumber(staged + ok!!)
+                else failed++
+                uploading--
             }
-            if (ok != null) {
-                staged = app.yxi.agent.Attachments.renumber(staged + ok!!)
-                runCatching { app.yxi.agent.Attachments.sweep(s0) }   // 顺手清 3 天前的
-            } else {
-                android.widget.Toast.makeText(
-                    ctx, t("传失败：%s").format(app.yxi.ssh.Sftp.explain(lastErr ?: RuntimeException())),
-                    android.widget.Toast.LENGTH_LONG,
-                ).show()
-            }
-            uploading--
+            if (uploading == 0) batchTotal = 0
+            runCatching { app.yxi.agent.Attachments.sweep(s0) }   // 顺手清 3 天前的
+            if (failed > 0) android.widget.Toast.makeText(
+                ctx,
+                // 一个也没成 vs 部分成功，说法不一样 —— 后者要让人知道**哪些还在附件条上**
+                if (failed == uris.size) t("传失败：%s").format(app.yxi.ssh.Sftp.explain(lastErr ?: RuntimeException()))
+                else t("%d 个里有 %d 个没传上：%s").format(
+                    uris.size, failed, app.yxi.ssh.Sftp.explain(lastErr ?: RuntimeException())),
+                android.widget.Toast.LENGTH_LONG,
+            ).show()
         }
     }
 
@@ -180,6 +204,50 @@ fun ChatScreen(
         }
     }
 
+    /**
+     * 语音走哪条路。**三层，从好到差**：
+     *  ① [onDevice] —— 手机上算。不联网、不依赖服务器、离线可用，模型下好了就走它。
+     *  ② [serverAsr] —— 服务器上有 `yxi-asr`。准，但要那台机器装过。
+     *  ③ 都没有 —— 退回系统的 `RecognizerIntent`（**它自己不识别**，只是转交给
+     *     手机上的识别器 App；GMS 关掉的手机上一个都没有，那按钮就是死的，见 #152）。
+     */
+    var onDevice by remember { mutableStateOf(app.yxi.agent.OnDeviceAsr.ready(ctx) && app.yxi.agent.OnDeviceAsr.supported) }
+    var serverAsr by remember(ssh) { mutableStateOf(false) }
+    /** 正在录音 */
+    var recording by remember { mutableStateOf(false) }
+    /** 正在识别（传上去 + 跑模型，实测 3~5 秒） */
+    var asrBusy by remember { mutableStateOf(false) }
+    val recorder = remember { Recorder() }
+    var hasMic by remember {
+        mutableStateOf(
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                ctx, android.Manifest.permission.RECORD_AUDIO
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        )
+    }
+    val askMic = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasMic = granted
+        if (!granted) android.widget.Toast.makeText(
+            ctx, t("没给录音权限，用不了按住说话"), android.widget.Toast.LENGTH_LONG,
+        ).show()
+    }
+    // ⚠️ **一条连接只探一次。** 它是一条 exec，本身不贵，但每次点麦克风都问一遍
+    // 就是每次多一个来回的延迟 —— 而这个答案在一条连接的生命周期里不会变。
+    LaunchedEffect(ssh, app.yxi.agent.AsrModel.installed) {
+        onDevice = app.yxi.agent.OnDeviceAsr.ready(ctx) && app.yxi.agent.OnDeviceAsr.supported
+        // ⚠️ 手机上能算就不问服务器了 —— 省一个来回，也别去把服务器那个守护叫醒
+        if (onDevice) return@LaunchedEffect
+        val s0 = ssh ?: return@LaunchedEffect
+        serverAsr = app.yxi.agent.Voice.available(s0)
+    }
+    // ⚠️ 界面没了要把录音停掉，否则麦克风一直被占着（别的 app 也用不了）。
+    // ⚠️ 顺手把识别器放掉 —— 它压着几百 MB，常驻会让安卓在内存紧张时直接杀掉整个 App。
+    DisposableEffect(Unit) {
+        onDispose { runCatching { recorder.stop() }; app.yxi.agent.OnDeviceAsr.release() }
+    }
+
     // 语音：走系统的识别界面（`RecognizerIntent`）。国产 ROM 有自家实现，接口一样。
     // ⚠️ **结果只填进输入框，绝不直接发** —— 识别错一个字，在服务器上就是另一条命令。
     val listen = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -191,6 +259,23 @@ fun ChatScreen(
         if (said.isNotBlank()) draft = (draft.trimEnd() + " " + said).trim()
     }
     var items by remember { mutableStateOf<List<ChatItem>>(emptyList()) }
+    /**
+     * 进对话页时已经在的那批条目的 key。之后**新出现**的才做滑入淡入
+     * —— 初始那几百条一起滑入是灾难，而且 从参考款抄的也只是「新消息进来」那一下。
+     * null = 还没拿到第一批。
+     */
+    var seenKeys by remember(sessionName) { mutableStateOf<Set<String>?>(null) }
+    val motionOn = remember {
+        runCatching {
+            android.provider.Settings.Global.getFloat(
+                ctx.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f,
+            ) != 0f
+        }.getOrDefault(true)
+    }
+    LaunchedEffect(items.isNotEmpty(), sessionName) {
+        // 第一批到手就记下来；之后不再动 —— 新条目的 key 不在里面，就该动画
+        if (seenKeys == null && items.isNotEmpty()) seenKeys = items.map { it.key }.toSet()
+    }
     var status by remember { mutableStateOf<String?>(t("连接中…")) }
 
     var pending by remember { mutableStateOf<Pending?>(null) }
@@ -261,7 +346,9 @@ fun ChatScreen(
             if (items.isEmpty()) status = t("连接断了，正在重连…")
             return@LaunchedEffect
         }
-        val file = TranscriptStream.latestFor(s, cwd)
+        // ⚠️ 会话名必须传 —— 转录按 sessionId 找，不按目录找。
+        // 只给 cwd 的话，会话里 cd 过一次就再也找不到（用户报的 hexingyang 就是）。
+        val file = TranscriptStream.latestFor(s, cwd, sessionName.orEmpty())
         if (file == null) {
             status = t("这个会话里没找到 Claude Code 的转录\n（%s）").format(cwd)
             return@LaunchedEffect
@@ -396,7 +483,16 @@ fun ChatScreen(
         }
     }
 
-    Column(modifier.fillMaxSize()) {
+    // ⚠️ 光晕铺**整页**、画在最底下。原来它只在列表那个 Box 里，到列表底边就截止，
+    // 快捷语和输入框在外面、是平底 —— 待机聚光最亮的地方正好压在那条边上，
+    // 用户划了条红线指着那道色差。参考款的聚光是在输入框**背后**的，本来就该铺到底。
+    Box(modifier.fillMaxSize()) {
+    ThinkingGlow(
+        busy = live.busy, waiting = pending != null,
+        // 回答正在到达（最后一条是助手的且还在忙）→ 光退下去让位给正文
+        streaming = live.busy && items.lastOrNull() is ChatItem.AssistantText,
+    )
+    Column(Modifier.fillMaxSize()) {
         // 标题和路径由 Workspace 的头部管，这里只在出问题时说一句
         status?.let {
             Text(
@@ -553,8 +649,19 @@ fun ChatScreen(
                 verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
                 items(items.size, key = { items[it].key }) { i ->
+                    // 只给「加载完之后才出现」的条目做进入动画 —— 初始那几百条一起滑入是灾难
+                    val fresh = seenKeys != null && items[i].key !in seenKeys!!
+                    EnterUp(animate = fresh && motionOn) {
                     Item(
                         items[i],
+                        ssh = ssh,
+                        // 点缩略图 = 全屏看那张图。复用发送前的那个预览器，
+                        // 只是这次图在远端 —— [preview] 认 remotePath，本地 uri 留空。
+                        onOpenRef = { r ->
+                            if (r.isImage) preview = app.yxi.agent.Attachments.Staged(
+                                label = r.label, remotePath = r.path, isImage = true,
+                            )
+                        },
                         onCopy = { copy(ctx, it) },
                         onPopQueue = {
                             // ⚠️ 原文取**转录里的**，不是屏幕上刮的（[SessionProbe.popQueue] 的注释）
@@ -572,6 +679,7 @@ fun ChatScreen(
                             }
                         },
                     )
+                    }   // EnterUp
                 }
             }
 
@@ -767,8 +875,11 @@ fun ChatScreen(
                         }
                     }
                 }
+                // 一批多个的时候报进度 —— 五张图传两分钟，光一个「传着…」看不出还剩多少
                 if (uploading > 0) Text(
-                    t("传着…"), Modifier.padding(8.dp, 8.dp),
+                    if (batchTotal > 1) t("传着… %d/%d").format(batchTotal - uploading + 1, batchTotal)
+                    else t("传着…"),
+                    Modifier.padding(8.dp, 8.dp),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.outline,
                 )
@@ -786,7 +897,7 @@ fun ChatScreen(
         // ⚠️ **整条是一个胶囊，不是四个圆按钮排排站。** 原来是 📎 🎤 输入框 ↑ 四块分开，
         // 每块之间 10dp 空隙，视觉上是「一排控件」而不是「一个输入区」；
         // 而且两个 emoji 图标跟界面里其余的线性图标不是一路。
-        // 现在按 Gemini 那种做法收成一条：+ · 文字 · 🎤 · 发送，边界一条，里面才分格。
+        // 现在按 参考款那种做法收成一条：+ · 文字 · 🎤 · 发送，边界一条，里面才分格。
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainer,
             shape = Pill,
@@ -802,7 +913,53 @@ fun ChatScreen(
                     Spacer(Modifier.width(10.dp))
                 }
                 Box(Modifier.weight(1f)) { BasicTextFieldRow(draft) { draft = it } }
-                FlatIcon(Glyph.Mic, t("语音输入")) {
+                // 语音：**服务器上有 `yxi-asr` 就按住说话**（识别在你自己的机器上跑，
+                // 准得多、也不经过任何云 API）；没装就退回系统那个识别界面。
+                if (onDevice || serverAsr) MicHold(
+                    recording = recording,
+                    busy = asrBusy,
+                    onStart = {
+                        if (!hasMic) { askMic.launch(android.Manifest.permission.RECORD_AUDIO); false }
+                        else recorder.start().let { why ->
+                            if (why != null) {
+                                android.widget.Toast.makeText(ctx, why, android.widget.Toast.LENGTH_LONG).show()
+                                false
+                            } else true
+                        }
+                    },
+                    onStop = {
+                        val pcm = recorder.stop()
+                        // ⚠️ 太短的 [Recorder.stop] 已经丢掉了 —— 这里**不要报错**：
+                        //    误触不是错误，不该弹东西吓人
+                        if (pcm != null) scope.launch {
+                            asrBusy = true
+                            val said = if (onDevice) {
+                                // ① 手机上算 —— 不联网、不依赖服务器，最快也最省事
+                                app.yxi.agent.OnDeviceAsr.transcribe(ctx, pcm) { why ->
+                                    android.widget.Toast.makeText(ctx, why, android.widget.Toast.LENGTH_LONG).show()
+                                }
+                            } else {
+                                // ② 退回服务端识别：拼个 wav 传上去
+                                val s0 = ssh
+                                if (s0 == null) {
+                                    android.widget.Toast.makeText(ctx, t("还没连上"), android.widget.Toast.LENGTH_SHORT).show()
+                                    null
+                                } else {
+                                    val f = Recorder.toWav(ctx, pcm)
+                                    val r = app.yxi.agent.Voice.transcribe(s0, f) { why ->
+                                        android.widget.Toast.makeText(ctx, why, android.widget.Toast.LENGTH_LONG).show()
+                                    }
+                                    runCatching { f.delete() }
+                                    r
+                                }
+                            }
+                            // ⚠️ **只填进输入框，绝不直接发** —— 识别错一个字，
+                            //    在服务器上就是另一条命令。三条路都守这一条。
+                            if (!said.isNullOrBlank()) draft = (draft.trimEnd() + " " + said).trim()
+                            asrBusy = false
+                        }
+                    },
+                ) else FlatIcon(Glyph.Mic, t("语音输入")) {
                     // ⚠️ **没有语音识别时要说一声。** 原来只是 `runCatching { launch }` ——
                     // 兜住了不崩，但**失败完全静默**：点了麦克风什么都不发生，一个字的解释都没有。
                     // 这不是边角情况：用户的荣耀 **GMS 是关的**，实测把识别服务禁掉之后
@@ -833,6 +990,9 @@ fun ChatScreen(
                     modifier = Modifier.size(44.dp).clip(CircleShape).clickable(enabled = canSend) {
                         // 附件的路径映射贴在正文前面 —— Claude 自己去读那些文件
                         val t = (app.yxi.agent.Attachments.header(staged) + draft.trim()).trim()
+                        // ⚠️ **先把本地那份种进缩略图缓存，再清 staged。** 图就在这台手机上，
+                        // 发出去的气泡第一帧就该是图 —— 不是先一条路径、等 SFTP 拉回来再变。
+                        Thumbs.seed(ctx, staged)
                         draft = ""; staged = emptyList()
                         // ⚠️ 立刻清盘上那份 —— 只清内存的话，防抖那 600ms 里退出去，
                         // 下次进来发过的话又冒出来一遍
@@ -856,6 +1016,7 @@ fun ChatScreen(
             }
         }
     }
+    }   // Box：光晕 + 整页
 
     // `/model` 选单。
     //
@@ -950,16 +1111,29 @@ fun ChatScreen(
         )
     }
 
-    // 附件图片放大看。⚠️ 读的是**手机本地**那份（[Attachments.Staged.localUri]）——
-    // 文件是刚从这台手机传上去的，再从服务器拉回来是白跑一趟。
+    // 附件图片放大看。
+    // ⚠️ **两条路，缺一不可。**
+    //  · 刚选好还没发：本地那份（`localUri`）—— 文件就在这台手机上，
+    //    再从服务器拉回来是白跑一趟。
+    //  · **已经发出去的**（点消息里的缩略图进来）：`localUri` 是空的，
+    //    因为那条消息是从转录读回来的，只有远端路径。
+    //    原来只走本地那条，于是点缩略图必然弹「读不出来了 —— 授权可能已经失效」，
+    //    而那句话还是错的（不是授权问题，是压根没去拿）。用户报的就是这个。
     preview?.let { a ->
         val uri = a.localUri
-        val bytes by androidx.compose.runtime.produceState<ByteArray?>(null, uri) {
-            value = uri?.let {
-                withContext(Dispatchers.IO) {
+        val bytes by androidx.compose.runtime.produceState<ByteArray?>(null, uri, a.remotePath, ssh) {
+            value = withContext(Dispatchers.IO) {
+                uri?.let {
                     app.yxi.ssh.catching {
                         ctx.contentResolver.openInputStream(android.net.Uri.parse(it))?.use { s -> s.readBytes() }
                     }.getOrNull()
+                } ?: run {
+                    // 远端那份。⚠️ 上限 12MB —— 放大看要的是清楚，比缩略图那 8MB 宽一点，
+                    // 但也不能为一张原图把 App 拖死。
+                    val s0 = ssh ?: return@run null
+                    val sftp = app.yxi.ssh.catching { s0.openSftp() }.getOrNull() ?: return@run null
+                    try { app.yxi.ssh.catching { sftp.read(a.remotePath, 12 shl 20) }.getOrNull() }
+                    finally { runCatching { sftp.close() } }
                 }
             }
         }
@@ -973,7 +1147,11 @@ fun ChatScreen(
                         color = MaterialTheme.colorScheme.outline,
                     )
                     bytes?.let { ImageBody(it) } ?: Text(
-                        t("读不出来了 —— 这张图的授权可能已经失效"),
+                        // ⚠️ 原来这句写死「授权可能已经失效」—— 那只对本地那条路成立。
+                        // 已发出去的图拉不到，绝大多数是**暂存区 3 天清掉了**。
+                        // 说错原因比不说更糟：用户会去翻权限设置，翻半天没有用。
+                        if (a.localUri != null) t("读不出来了 —— 这张图的授权可能已经失效")
+                        else t("这张图已经不在服务器上了（暂存区只留 3 天）"),
                         Modifier.padding(14.dp, 10.dp, 14.dp, 16.dp),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.outline,
@@ -985,6 +1163,69 @@ fun ChatScreen(
 }
 
 /** 胶囊里那种「无底色、点得动」的图标按钮。 */
+/**
+ * 按住说话的麦克风。
+ *
+ * ⚠️ **按住不是点一下。** 点一下开始、再点一下结束的话，用户没法确认自己录没录上；
+ * 按住的语义是「手指在 = 在录」，松开就是说完了 —— 这也是所有语音输入的通用手势，
+ * 不用教。
+ *
+ * ⚠️ **`onStart` 返回 false 时不进入录音态。** 没给权限、麦克风被占着都会走这条，
+ * 那时候按钮不能变红 —— 变了就是在骗人「我在录」。
+ *
+ * ⚠️ 识别期间按钮变成转圈**且不可按**：实测传 + 跑模型要 3~5 秒，
+ * 这几秒里再按一次会开一条新录音，把上一条的结果冲掉。
+ */
+@Composable
+private fun MicHold(
+    recording: Boolean,
+    busy: Boolean,
+    onStart: () -> Boolean,
+    onStop: () -> Unit,
+) {
+    val on = recording
+    Box(
+        Modifier.size(44.dp).clip(CircleShape)
+            .background(
+                if (on) MaterialTheme.colorScheme.errorContainer else Color.Transparent,
+                CircleShape,
+            )
+            .then(
+                if (busy) Modifier
+                else Modifier.pointerInput(Unit) {
+                    // ⚠️ 用 `awaitEachGesture` 那一套，跟 [DPad] 里的按住逻辑同一个写法 ——
+                    // 这个版本的 foundation 里就有它，而且行为可控：
+                    // **手指抬起或手势被取消都算松开**，否则一滑出按钮就永远停不下来，
+                    // 麦克风一直开着（别的 app 也用不了）。
+                    awaitEachGesture {
+                        awaitFirstDown()
+                        if (!onStart()) return@awaitEachGesture
+                        while (true) {
+                            val ev = awaitPointerEvent()
+                            val ch = ev.changes.firstOrNull() ?: break
+                            if (!ch.pressed) break
+                            ch.consume()
+                        }
+                        onStop()
+                    }
+                }
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        when {
+            busy -> CircularProgressIndicator(
+                Modifier.size(20.dp), strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            else -> GlyphIcon(
+                Glyph.Mic,
+                if (on) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                22.dp,
+            )
+        }
+    }
+}
+
 @Composable
 private fun FlatIcon(path: String, label: String, onTap: () -> Unit) {
     Box(
@@ -1034,28 +1275,58 @@ private fun copy(ctx: android.content.Context, text: String) {
 }
 
 @Composable
-private fun Item(item: ChatItem, onCopy: (String) -> Unit, onPopQueue: () -> Unit) = when (item) {
-    is ChatItem.UserText -> UserBubble(item.text, onCopy)
-    is ChatItem.Queued -> QueuedBubble(item.text, onCopy, onPopQueue)
+private fun Item(
+    item: ChatItem,
+    onCopy: (String) -> Unit,
+    onPopQueue: () -> Unit,
+    // 缩略图要从服务器拉图 —— 所以这一层得拿得到连接
+    ssh: app.yxi.ssh.SshSession? = null,
+    onOpenRef: (app.yxi.agent.Attachments.Ref) -> Unit = {},
+) = when (item) {
+    is ChatItem.UserText -> UserBubble(item.text, onCopy, ssh, onOpenRef)
+    is ChatItem.Queued -> QueuedBubble(item.text, onCopy, onPopQueue, ssh, onOpenRef)
     is ChatItem.Injected -> InjectedCard(item)
     is ChatItem.ApiError -> ApiErrorCard(item.text)
     // ⚠️ AI 的输出**不做长按菜单，做原生文本选择** —— 想要的多半是里面的一个 URL
     // 或者一段命令，整段复制反而要回头再删。SelectionContainer 给的是系统那套
     // 选择手柄 + 复制条，长按即起，双击选词。
     // （代价：长按被选择消费掉了，所以这一支不能再挂 combinedClickable。）
-    is ChatItem.AssistantText -> androidx.compose.foundation.text.selection.SelectionContainer {
-        // ⚠️ `remember`：一条长回复每次重组都重扫一遍正则不划算，而它只跟原文有关
-        val md = remember(item.markdown) { app.yxi.agent.Linkify.apply(item.markdown) }
-        Markdown(
-            md,
-            // ⚠️ 一定要传 —— 库默认把 `##` 渲染成 45sp（正文的 3 倍）。见 [yxiMarkdown]
-            typography = yxiMarkdown(),
-            // 表格换成自己画的：横向滚动 + 单元格换行，不再一堆省略号（见 [MarkdownScrollTable]）
-            components = com.mikepenz.markdown.compose.components.markdownComponents(
-                table = { MarkdownScrollTable(it) },
-            ),
-            modifier = Modifier.fillMaxWidth(),
-        )
+    is ChatItem.AssistantText -> Column(Modifier.fillMaxWidth()) {
+        androidx.compose.foundation.text.selection.SelectionContainer {
+            // ⚠️ `remember`：一条长回复每次重组都重扫一遍正则不划算，而它只跟原文有关
+            val md = remember(item.markdown) { app.yxi.agent.Linkify.apply(item.markdown) }
+            Markdown(
+                md,
+                // ⚠️ 一定要传 —— 库默认把 `##` 渲染成 45sp（正文的 3 倍）。见 [yxiMarkdown]
+                typography = yxiMarkdown(),
+                // 表格换成自己画的：横向滚动 + 单元格换行，不再一堆省略号（见 [MarkdownScrollTable]）
+                components = com.mikepenz.markdown.compose.components.markdownComponents(
+                    table = { MarkdownScrollTable(it) },
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        // ⚠️ **必须有一条不依赖系统选择工具栏的复制路径。**
+        // 用户报的：在 AI 回复里选中文字，弹出来的工具栏**只有「全选」没有「复制」**。
+        // 那条工具栏是 Compose 的 `SelectionManager` 给的 —— 它拿不到可复制的文本时
+        // 就只画「全选」，而 Markdown 那个库的排版组件不一定都注册进了选择区。
+        // 这个我在开发机上复现不了（要真机 + 那个渲染器），所以**不赌它能修好**：
+        // 直接给一颗按钮，把整段原文塞进剪贴板。选择手柄照旧留着，能用最好。
+        //
+        // ⚠️ 不做成长按 —— 长按已经归文本选择了，抢过去等于把「选一句」这个更细的能力废掉。
+        Row(Modifier.fillMaxWidth().padding(top = 2.dp), horizontalArrangement = Arrangement.End) {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainer, shape = Pill,
+                modifier = Modifier.clip(Pill).clickable { onCopy(item.markdown) },
+            ) {
+                Text(
+                    t("复制整段"),
+                    Modifier.padding(10.dp, 4.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+            }
+        }
     }
     is ChatItem.Thinking -> ThinkingRow(item.text)
     is ChatItem.ToolCall -> ToolCard(item)
@@ -1143,25 +1414,46 @@ private fun ApiErrorCard(text: String) {
 
 /** 你说过的话。长按 → 复制整段。 */
 @Composable
-private fun UserBubble(text: String, onCopy: (String) -> Unit) {
+private fun UserBubble(
+    text: String,
+    onCopy: (String) -> Unit,
+    ssh: app.yxi.ssh.SshSession? = null,
+    onOpenRef: (app.yxi.agent.Attachments.Ref) -> Unit = {},
+) {
+    // ⚠️ **把附件那几行从正文里摘出来单独画。** 发出去之后气泡里是
+    // `[图片1] /root/src/tmp/xxx/0902-091207-IMG_....jpg` —— 一条又长又没用的路径
+    // 占四行，而用户想看的是**那张图**（他的原话：要像参考款一样出个缩略图）。
+    // ⚠️ `remember`：正则跟原文一一对应，每次重组重扫一遍不划算。
+    val (refs, body) = remember(text) { app.yxi.agent.Attachments.parseRefs(text) }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         var menu by remember { mutableStateOf(false) }
         Box(Modifier.fillMaxWidth(0.85f)) {
+          Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            // 缩略图在气泡**外面上方** —— 跟参考款一样。放进气泡里的话，
+            // 图和文字共用那个圆角背景，一张竖图会把气泡撑成一条，很难看。
+            if (refs.isNotEmpty()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    refs.forEach { AttachThumb(it, ssh, onOpenRef) }
+                }
+            }
+            // ⚠️ 只有附件、没打字时**不画空气泡**（很常见：直接发一张图）
+            if (body.isNotBlank() || refs.isEmpty())
             Surface(
                 color = MaterialTheme.colorScheme.primaryContainer,
                 shape = RoundedCornerShape(26.dp, 26.dp, 8.dp, 26.dp),
-                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp, 26.dp, 8.dp, 26.dp)).combinedClickable(
+                modifier = Modifier.clip(RoundedCornerShape(26.dp, 26.dp, 8.dp, 26.dp)).combinedClickable(
                     onClick = {},
                     onLongClick = { menu = true },
                 ),
             ) {
                 Text(
-                    text,
+                    body.ifBlank { text },
                     Modifier.padding(18.dp, 14.dp),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
             }
+          }
             DropdownMenu(menu, { menu = false }) {
                 DropdownMenuItem(
                     text = { Text(t("复制整段")) },
@@ -1180,10 +1472,23 @@ private fun UserBubble(text: String, onCopy: (String) -> Unit) {
  * 用户以为压根没发出去，然后重复发一遍 —— 后者我们已经遇到了。
  */
 @Composable
-private fun QueuedBubble(text: String, onCopy: (String) -> Unit, onPopQueue: () -> Unit) {
+private fun QueuedBubble(
+    text: String,
+    onCopy: (String) -> Unit,
+    onPopQueue: () -> Unit,
+    ssh: app.yxi.ssh.SshSession? = null,
+    onOpenRef: (app.yxi.agent.Attachments.Ref) -> Unit = {},
+) {
+    // ⚠️ 跟 [UserBubble] 一样把附件摘出来画缩略图 —— 原来这里画的是原文，
+    // 「排队中」时是一条路径、入了转录才变成图，用户说「有点割裂」。
+    val (refs, body) = remember(text) { app.yxi.agent.Attachments.parseRefs(text) }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         var menu by remember { mutableStateOf(false) }
         Box(Modifier.fillMaxWidth(0.85f)) {
+        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (refs.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            refs.forEach { AttachThumb(it, ssh, onOpenRef) }
+        }
         Surface(
             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.30f),
             shape = RoundedCornerShape(26.dp, 26.dp, 8.dp, 26.dp),
@@ -1203,12 +1508,13 @@ private fun QueuedBubble(text: String, onCopy: (String) -> Unit, onPopQueue: () 
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text,
+                    body.ifBlank { text },
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
                 )
             }
         }
+        }   // Column
         DropdownMenu(menu, { menu = false }) {
             DropdownMenuItem(
                 text = { Text(t("复制整段")) },

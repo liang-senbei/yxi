@@ -59,10 +59,10 @@ val YxiPalette = Palette(
 )
 
 /**
- * 照着 Gemini 手机版调的浅色。
+ * 照着 参考款手机版调的浅色。
  *
  * ⚠️ **这套是按用户给的截图取的**，几个特征值：
- *   · 纯白页面底，卡片/气泡是那种偏蓝的浅灰 `#F0F4F9`（Gemini 的招牌色）
+ *   · 纯白页面底，卡片/气泡是那种偏蓝的浅灰 `#F0F4F9`（参考款的招牌色）
  *   · 行内代码比卡片再深一档 `#E9EEF6`，圆角药丸 —— 截图里最显眼的就是这个
  *   · 强调色是 Google 蓝 `#0B57D0`
  *
@@ -70,7 +70,7 @@ val YxiPalette = Palette(
  * 所以终端永远深底（见 [app.yxi.ui.Workspace] 里传给 `TerminalView` 的那两个颜色），
  * 代价是浅色主题下切到终端会有一下明暗跳变 —— 这是自觉的取舍，不是 bug。
  */
-val GeminiPalette = Palette(
+val LightPalette = Palette(
     Surface = Color(0xFFFFFFFF),
     SurfaceContainerLowest = Color(0xFFF8FAFD),
     SurfaceContainerLow = Color(0xFFF0F4F9),
@@ -88,7 +88,7 @@ val GeminiPalette = Palette(
     OnCopper = Color(0xFFFFFFFF),
     // ⚠️ 这个色同时是「你的消息气泡」和「选中的胶囊」。
     // 取成跟卡片一样的 #F0F4F9 的话，**选中态就消失了** —— 截图上两个胶囊长得一模一样。
-    // Gemini 选中态用的正是这个浅蓝，一举两得。
+    // 参考款 选中态用的正是这个浅蓝，一举两得。
     CopperContainer = Color(0xFFD3E3FD),
     OnCopperContainer = Color(0xFF041E49),
     Teal = Color(0xFF0B8043),

@@ -192,9 +192,21 @@ object Health {
 
     // ────────────── 一键修复 ──────────────
 
-    /** 一个可以安全收掉的东西。 */
-    /** @param what 代号：gradle / kotlin / rg（话术在 UI 层） */
-    data class Junk(val pid: Int, val rssKb: Long, val ageSec: Long, val what: String)
+    /**
+     * 一个可以安全收掉的东西。
+     *
+     * @param what 代号：gradle / kotlin / rg / hog / idle（话术在 UI 层）
+     * @param session 只有 `idle` 有：要收掉的 tmux 会话名。**非空就走会话那条路，不按 pid 杀** ——
+     *   见 [killCommand]。
+     * @param ageSec 进程类是「跑了多久」，`idle` 是「多久没动过」。
+     */
+    data class Junk(
+        val pid: Int,
+        val rssKb: Long,
+        val ageSec: Long,
+        val what: String,
+        val session: String = "",
+    )
 
     /**
      * 找出**可以安全收掉**的东西。
@@ -209,16 +221,68 @@ object Health {
      * `sshd`（杀了你自己就断线了）、编辑器本体。
      * 一键修复要是能弄丢东西，它就不是「方便」，是陷阱。
      */
+    /**
+     * ⚠️⚠️ **「闲置」不能只看 `tmux session_activity`。**
+     *
+     * 那个值**在没人 attach 时不随输出更新** —— 一个正跑着的会话可以显示「3 天没动」。
+     * 本文件隔壁的 [SessionProbe.lastActivityOf] 早就写过这条，我还是照着它清理过一次
+     * 用户正在用的会话（`cc-hexingyang`：tmux 说闲了 3.9 天，转录 15 分钟前还在写）。
+     * **让一个「一键收拾」按钮杀掉用户正在跑的活，是这个功能最坏的失败方式。**
+     *
+     * 现在按 `max(tmux 活动, 转录 mtime)` 判，转录按 **sessionId** 找 ——
+     * 不按目录找，因为会话 `cd` 之后 cwd 会漂（见 [Transcript]）。
+     *
+     * ⚠️ **查不到就不列（fail-closed）。** 解析不出 sessionId、找不到对应转录、
+     * 或者 Claude Code 自己报着 busy / waiting —— 一律跳过。
+     * 解析出错的后果只能是「少列几个」，绝不能是「多杀一个」。
+     */
     val SCAN_COMMAND: String = """
-        ps -eo pid=,rss=,etimes=,args= 2>/dev/null | awk '
-          {
-            pid=${'$'}1; rss=${'$'}2; age=${'$'}3
-            line=""; for (i=4; i<=NF; i++) line = line ${'$'}i " "
+        { ps -eo pid=,ppid=,rss= 2>/dev/null
+          echo '--yxiscan--'
+          ps -eo pid=,rss=,etimes=,pcpu=,args= 2>/dev/null
+          echo '--yxiscan--'
+          find "${'$'}HOME/.claude/projects" -maxdepth 2 -name '*.jsonl' -printf '%f\t%T@\n' 2>/dev/null
+          echo '--yxiscan--'
+          awk 1 "${'$'}HOME"/.claude/sessions/*.json 2>/dev/null
+          echo '--yxiscan--'
+          tmux list-sessions -F '#{session_name}|#{session_activity}|#{session_attached}|#{pane_pid}' 2>/dev/null
+        } | awk -v NOW="${'$'}(date +%s)" '
+          /^--yxiscan--${'$'}/ { sec++; next }
+          sec==0 { rss[${'$'}1]=${'$'}3; kid[${'$'}2] = kid[${'$'}2] " " ${'$'}1; next }
+          sec==1 {
+            pid=${'$'}1; r=${'$'}2; age=${'$'}3; cpu=${'$'}4+0
+            line=""; for (i=5; i<=NF; i++) line = line ${'$'}i " "
+            if (line ~ /yxiscan/) next
             what=""
-            if (line ~ /GradleDaemon/)            what="gradle"
+            if (line ~ /GradleDaemon/)             what="gradle"
             else if (line ~ /KotlinCompileDaemon/) what="kotlin"
             else if (line ~ /(^|\/)rg( |${'$'})/ && age > 600) what="rg"
-            if (what != "") printf "%s\t%s\t%s\t%s\n", pid, rss, age, what
+            else if (cpu >= 50 && age >= 1800 && line !~ /claude|tmux|sshd|systemd|\/init|Xtigervnc|Xvnc|vncserver|dockerd|containerd|[ \/]node |[ \/]java |nginx|postgres|mysqld|mongod|redis/) what="hog"
+            if (what != "") printf "%s\t%s\t%s\t%s\t\n", pid, r, age, what
+            next
+          }
+          sec==2 { sub(/\.jsonl${'$'}/, "", ${'$'}1); t=${'$'}2+0; if (t > trm[${'$'}1]) trm[${'$'}1]=t; next }
+          sec==3 {
+            if (!match(${'$'}0, /"tmux":"[^":]+/)) next
+            tn = substr(${'$'}0, RSTART+8, RLENGTH-8)
+            sid=""; if (match(${'$'}0, /"sessionId":"[^"]+"/)) sid = substr(${'$'}0, RSTART+13, RLENGTH-14)
+            st="";  if (match(${'$'}0, /"status":"[^"]+"/))    st  = substr(${'$'}0, RSTART+10, RLENGTH-11)
+            ssid[tn]=sid; sst[tn]=st
+            next
+          }
+          sec==4 {
+            n=split(${'$'}0, f, "|"); if (n != 4) next
+            name=f[1]
+            if (f[3]+0 != 0) next
+            if (sst[name] == "busy" || sst[name] == "waiting") next
+            sid = ssid[name]
+            if (sid == "" || !(sid in trm)) next
+            last = trm[sid]; if (f[2]+0 > last) last = f[2]+0
+            idle = NOW - last; if (idle < 259200) next
+            t=0; q[1]=f[4]+0; h=1; e=1
+            while (h <= e) { p=q[h++]; t += rss[p]+0
+              m=split(kid[p], c, " "); for (j=1; j<=m; j++) if (c[j] != "") q[++e]=c[j] }
+            printf "0\t%s\t%s\tidle\t%s\n", t, idle, name
           }'
     """.trimIndent()
 
@@ -228,21 +292,50 @@ object Health {
             val p = line.split('\t')
             if (p.size < 4) return@mapNotNull null
             val pid = p[0].trim().toIntOrNull() ?: return@mapNotNull null
-            Junk(pid, p[1].trim().toLongOrNull() ?: 0, p[2].trim().toLongOrNull() ?: 0, p[3].trim())
+            val what = p[3].trim()
+            val session = p.getOrNull(4)?.trim().orEmpty()
+            // ⚠️ 两种行的必要字段不一样，缺了就整行丢掉：
+            //   会话行没有名字 → 生成的命令会 `kill-session -t ''`，杀不掉也说不清；
+            //   进程行没有真 pid → 更糟，[killCommand] 会把它算进 kill 列表。
+            if (what.isEmpty()) return@mapNotNull null
+            if (what == "idle" && session.isEmpty()) return@mapNotNull null
+            if (what != "idle" && pid <= 1) return@mapNotNull null
+            Junk(pid, p[1].trim().toLongOrNull() ?: 0, p[2].trim().toLongOrNull() ?: 0, what, session)
         }.toList()
 
     /**
      * 收掉这些。
      *
-     * ⚠️ **先 TERM 再 KILL**，中间等 2 秒：Gradle 收到 TERM 会把缓存写完再退，
-     * 直接 -9 会留下坏掉的构建缓存，下次编译报一堆莫名其妙的错。
+     * ⚠️ **两条路，别混。**
+     *  · 进程类（gradle / kotlin / rg / hog）：**先 TERM 再 KILL**，中间等 2 秒。
+     *    Gradle 收到 TERM 会把缓存写完再退，直接 -9 会留下坏掉的构建缓存。
+     *  · 会话类（idle）：**按会话名收，不按 pid 杀**。一个会话底下是
+     *    「shell → claude → 一堆子进程」，挨个 kill 会把 shell 杀在 claude 前头，
+     *    留下一个挂在 init 底下、内存照占的孤儿。`tmux kill-session` 一次收干净。
+     *
+     * ⚠️ **有 `cloud-forget` 就先用它。** remote-dev-station 那套机器上有个
+     * `cloud-watchdog` 定时器，**每 15 秒把「登记过但没在跑」的会话 `claude --resume` 拉回来** ——
+     * 只 `tmux kill-session` 的话，十几秒后它原样复活，用户按了半天以为没生效。
+     * `cloud-forget` 是先移出恢复名单再杀，而且**保留对话存档**（日后照样能 resume）。
+     * 没装那套的机器上 `command -v` 直接落空，退回 `tmux kill-session`，行为不变。
+     *
      * ⚠️ pid 只从 [junkFrom] 来 —— **不接受界面传任意数字**，
      * 免得哪天改 UI 时把一个能杀任何进程的口子留在那儿。
      */
     fun killCommand(junk: List<Junk>): String? {
-        val pids = junk.map { it.pid }.filter { it > 1 }.distinct()
-        if (pids.isEmpty()) return null
-        val list = pids.joinToString(" ")
-        return "kill -TERM $list 2>/dev/null; sleep 2; kill -KILL $list 2>/dev/null; true"
+        val pids = junk.filter { it.session.isEmpty() }.map { it.pid }.filter { it > 1 }.distinct()
+        val sessions = junk.mapNotNull { it.session.takeIf(String::isNotBlank) }.distinct()
+        if (pids.isEmpty() && sessions.isEmpty()) return null
+        val parts = ArrayList<String>()
+        if (pids.isNotEmpty()) {
+            val list = pids.joinToString(" ")
+            parts += "kill -TERM $list 2>/dev/null; sleep 2; kill -KILL $list 2>/dev/null"
+        }
+        sessions.forEach { name ->
+            val q = "'" + name.replace("'", "'\\''") + "'"
+            parts += "if command -v cloud-forget >/dev/null 2>&1; then cloud-forget $q >/dev/null 2>&1; " +
+                "else tmux kill-session -t $q 2>/dev/null; fi"
+        }
+        return parts.joinToString("; ") + "; true"
     }
 }

@@ -27,6 +27,10 @@
          ⚠️ 只是「拉起安装器」，装不装还是系统和用户说了算 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- 按住说话。⚠️ 识别跑在**用户自己的服务器**上（server/yxi-asr），
+         录音只是上传的原料，App 不往任何云服务发音频。 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
     <application
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
