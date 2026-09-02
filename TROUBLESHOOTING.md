@@ -4228,3 +4228,13 @@ SFTP 读到一半就取消，永远到不了「显示」那一步。**在会被�
 - **App 侧补上了（0.9.79）**：「拉起」走 `Dirs.createCommand(resume = true)` —— 在 shell 里按 `~/.claude/projects/<路径非字母数字换成 ->/`
   找最近那份 `<uuid>.jsonl`，有就 `claude --resume <uuid>`，没有才裸起。只跑了 bootstrap.sh 的客户机器也能接回；
   本机的 `claude` 是 cloud-enter 包装，参数到不了二进制，靠上面那条修法。Codex 不接（`codex resume --last` 没历史会报错）。
+
+## #219 用 Archify 给项目画「可验证架构图」推进实验室：三个坑
+
+- **要 Node**：`node bin/archify.mjs`，本机 Node 18 能跑；只跑了 bootstrap.sh 的客户机器没有 Node，提示词里写了「没有就自己写 SVG / HTML」。
+- **出的 HTML 引 Google 字体**（JetBrains Mono 的 `<link>` / `@import`），`yxi-lab check` 直接 ✗。deliver 之后把这些引用剥掉（正则删 `fonts.googleapis` / `fonts.gstatic`），
+  回落系统等宽字体；剩下的 `http://www.w3.org/2000/svg` 是 SVG 命名空间，不是外链。约 700KB，在 1MB 限制内。
+- **showcase 校验极严**：连线穿过无关节点、两条线交叉、标签压节点都算 error，手排 `pos` 几乎必挂。
+  用 `layout: {mode: grid, cols, cellW, gapX, gapY}` + `row/col` 让它自己排，连线按**真实路径**归并（手机只连 sshd，别从手机拉五条线进服务器），
+  标签压节点按它给的 `labelDy` / `labelAt` 建议改。standard 档比 showcase 松，试作用 standard 就够。
+- 手机上看：它是桌面尺寸的页，卡片预览只能看个轮廓，得全屏 + 捏合放大（0.9.80 起 WebView 开了缩放）。

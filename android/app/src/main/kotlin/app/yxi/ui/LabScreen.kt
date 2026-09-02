@@ -6,6 +6,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -13,7 +14,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -23,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -73,7 +79,11 @@ private fun beijing(at: Long): String {
  * ⚠️ **实验室跟着服务器走**（用户定的，D26）：内容全在连着那台的 `~/.yxi/lab/`，
  * 置顶 / 采纳也按主机分开存 —— 两台服务器的实验室互不相干，App 里更不嵌任何实验室内容。
  */
-fun LabScreen(ssh: SshSession? = null, host: app.yxi.ssh.Host? = null, modifier: Modifier = Modifier) {
+fun LabScreen(
+    ssh: SshSession? = null, host: app.yxi.ssh.Host? = null, modifier: Modifier = Modifier,
+    /** 工作区里当前那个会话 —— 「画图 / 更新」默认派给它 */
+    sessionName: String? = null,
+) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var raw by remember { mutableStateOf<List<LabRemote.Item>?>(null) }
@@ -82,6 +92,15 @@ fun LabScreen(ssh: SshSession? = null, host: app.yxi.ssh.Host? = null, modifier:
     var pins by remember(hostId) { mutableStateOf(LabPins.get(ctx, hostId)) }
     var openCat by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableIntStateOf(0) }
+    /** 三个按钮开的那个框：kind = verify / draw / update */
+    var ask by remember { mutableStateOf<LabAsk?>(null) }
+    /** 派出去了 —— 顶上写一行、并且每 20 秒自己刷一次（最多 10 分钟），画好了就出现 */
+    var sentTo by remember { mutableStateOf<String?>(null) }
+    var sentAt by remember { mutableIntStateOf(0) }
+    LaunchedEffect(sentAt) {
+        if (sentAt == 0) return@LaunchedEffect
+        repeat(30) { kotlinx.coroutines.delay(20_000); reload++ }
+    }
 
     LaunchedEffect(ssh, reload) {
         raw = null
@@ -106,6 +125,22 @@ fun LabScreen(ssh: SshSession? = null, host: app.yxi.ssh.Host? = null, modifier:
             .sortedWith(compareByDescending<LabCat> { it.key in pins }.thenByDescending { it.latestAt })
     }
 
+    ask?.let { a ->
+        LabAskDialog(
+            a, sessionName = sessionName,
+            sessions = app.yxi.agent.Recent.get(hostId).map { it.name },
+            onClose = { ask = null },
+            onSend = { target, text ->
+                ask = null
+                val s = ssh ?: return@LabAskDialog
+                scope.launch {
+                    app.yxi.agent.SessionProbe.send(s, target, text)
+                    sentTo = target; sentAt++
+                }
+            },
+        )
+    }
+
     // ── 栏目详情 ──
     val cat = openCat?.let { k -> cats.firstOrNull { it.key == k } }
     if (openCat != null) {
@@ -115,6 +150,7 @@ fun LabScreen(ssh: SshSession? = null, host: app.yxi.ssh.Host? = null, modifier:
             onBack = { openCat = null },
             onApprove = ::toggleApprove,
             onDelete = { id -> delete(listOf(id)) },
+            onUpdate = { ask = LabAsk("update", it) },
             ssh = ssh, modifier = modifier,
         )
         return
@@ -133,6 +169,28 @@ fun LabScreen(ssh: SshSession? = null, host: app.yxi.ssh.Host? = null, modifier:
                 modifier = Modifier.clip(Pill).clickable { reload++ }) {
                 Text(t("↻ 刷新"), Modifier.padding(14.dp, 8.dp), style = MaterialTheme.typography.labelMedium)
             }
+        }
+        // 让 agent 画图的两个入口（D29）。点了弹框：可选填提示词，不填就默认执行；派给当前会话。
+        Row(
+            Modifier.fillMaxWidth().padding(18.dp, 0.dp, 18.dp, 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
+        ) {
+            listOf("verify" to t("查明并画出来"), "draw" to t("把结构画成图")).forEach { (k, label) ->
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer, shape = Pill,
+                    modifier = Modifier.clip(Pill).clickable(enabled = ssh != null) { ask = LabAsk(k) },
+                ) {
+                    Text(label, Modifier.padding(14.dp, 8.dp), style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
+            }
+        }
+        sentTo?.let {
+            Text(
+                t("已派给 %s —— 画好会出现在这里（每 20 秒自动刷一次）").format(app.yxi.agent.Session.shortOf(it)),
+                Modifier.padding(18.dp, 0.dp, 18.dp, 6.dp),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary,
+            )
         }
         when {
             list == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -246,6 +304,7 @@ private fun ActionCell(label: String, bg: Color, fg: Color, onClick: () -> Unit)
 private fun CategoryDetail(
     title: String, cat: LabCat?, approved: Set<String>,
     onBack: () -> Unit, onApprove: (String) -> Unit, onDelete: (String) -> Unit,
+    onUpdate: (LabRemote.Item) -> Unit,
     ssh: SshSession?, modifier: Modifier = Modifier,
 ) {
     Column(modifier.fillMaxSize()) {
@@ -267,7 +326,7 @@ private fun CategoryDetail(
         ) {
             items(itemsList, key = { it.id }) { item ->
                 SwipeActions(pinned = false, onPin = { }, onDelete = { onDelete(item.id) }, content = {
-                    LabItemCard(item, ssh, approved = item.id in approved, onApprove = { onApprove(item.id) })
+                    LabItemCard(item, ssh, approved = item.id in approved, onApprove = { onApprove(item.id) }, onUpdate = { onUpdate(item) })
                 })
             }
         }
@@ -282,7 +341,7 @@ private fun CategoryDetail(
  * 改的是 `yxi-lab`（`yxi-lab spec` 是契约）。
  */
 @Composable
-private fun LabItemCard(item: LabRemote.Item, ssh: SshSession?, approved: Boolean, onApprove: () -> Unit) {
+private fun LabItemCard(item: LabRemote.Item, ssh: SshSession?, approved: Boolean, onApprove: () -> Unit, onUpdate: () -> Unit = {}) {
     var full by remember(item.id) { mutableStateOf(false) }
     Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = MaterialTheme.shapes.large,
         modifier = Modifier.fillMaxWidth()) {
@@ -336,6 +395,14 @@ private fun LabItemCard(item: LabRemote.Item, ssh: SshSession?, approved: Boolea
                     Text(t("全屏"), Modifier.padding(16.dp, 9.dp), style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                // 更新：让 agent 按项目现状把这一张重画、原位替换（D29）
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = Pill,
+                    modifier = Modifier.clip(Pill).clickable(onClick = onUpdate),
+                ) {
+                    Text(t("更新"), Modifier.padding(16.dp, 9.dp), style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 Spacer(Modifier.weight(1f))
             }
             if (item.file.isNotBlank()) SubmitButton(
@@ -381,7 +448,8 @@ private fun LabItemCard(item: LabRemote.Item, ssh: SshSession?, approved: Boolea
 private fun LabItemPreview(item: LabRemote.Item, ssh: SshSession?, full: Boolean = false) {
     val fill = if (full) Modifier.fillMaxSize() else Modifier.fillMaxSize()
     when (item.type) {
-        "html" -> {
+        // SVG 也走这条：BitmapFactory 解不开 SVG，包一层 HTML 交给 WebView 画，全屏还能捏合放大
+        "html", "svg" -> {
             // ⚠️ 键上 ssh：连接换过一条（手机上重连是常态）之后，老的 produceState 还拿着死连接的空结果不动，
             // 卡片就永远是白的。空串 = 读失败，**说出来**，别灌一个空页面进 WebView 装作在加载。
             val html by produceState<String?>(null, item.id, ssh) { value = LabRemote.text(ssh, item.file).ifBlank { null } ?: "" }
@@ -394,7 +462,7 @@ private fun LabItemPreview(item: LabRemote.Item, ssh: SshSession?, full: Boolean
                         modifier = Modifier.padding(16.dp))
                 }
                 else -> Box(fill) {
-                    val h = html!!
+                    val h = if (item.type == "svg") svgPage(html!!) else html!!
                     androidx.compose.ui.viewinterop.AndroidView(
                         factory = { c -> android.webkit.WebView(c).apply {
                             // ⚠️⚠️ **真正的根因（#209，模拟器上叠层实测）。** Compose 的 AndroidView 默认给 View
@@ -411,6 +479,8 @@ private fun LabItemPreview(item: LabRemote.Item, ssh: SshSession?, full: Boolean
                             // 屏幕上一片白（模拟器上叠层实测 css=356x0）。true = 认页面的 viewport meta。#209
                             settings.useWideViewPort = true; settings.loadWithOverviewMode = true
                             settings.mediaPlaybackRequiresUserGesture = false
+                            // 架构图之类是桌面尺寸的页，手机上要能捏合放大（全屏看的时候尤其）
+                            settings.setSupportZoom(true); settings.builtInZoomControls = true; settings.displayZoomControls = false
                             setBackgroundColor(android.graphics.Color.WHITE)
                             // 页面里的 JS 报错直接显示在卡片上 —— 手机上没法开 DevTools，这是唯一的眼睛
                             webChromeClient = object : android.webkit.WebChromeClient() {
@@ -457,12 +527,25 @@ private fun LabItemPreview(item: LabRemote.Item, ssh: SshSession?, full: Boolean
                 )
             } ?: PreviewLoading()
         }
-        "image", "svg" -> {
+        "image" -> {
             val b by produceState<ByteArray?>(null, item.id, ssh) { value = LabRemote.bytes(ssh, item.file) }
             val bmp = remember(b) { b?.let { runCatching { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull() } }
             bmp?.let {
                 // ⚠️ Fit 不是 FillWidth：竖图按宽铺开会比框高，被裁掉一截（用户：「有些展示不全」）
-                Image(it.asImageBitmap(), null, fill.clip(RoundedCornerShape(12.dp)),
+                // 全屏时可以捏合放大、拖着看（用户：「全屏模式下要支持滑动预览」）—— 架构图那种大图不放大看不清
+                var scale by remember(item.id) { mutableStateOf(1f) }
+                var offset by remember(item.id) { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+                val zoomable = if (full) Modifier
+                    .pointerInput(item.id) {
+                        detectTransformGestures { _, pan, zoom, _ ->
+                            scale = (scale * zoom).coerceIn(1f, 8f)
+                            offset = if (scale <= 1f) androidx.compose.ui.geometry.Offset.Zero else offset + pan
+                        }
+                    }
+                    .graphicsLayer {
+                        scaleX = scale; scaleY = scale; translationX = offset.x; translationY = offset.y
+                    } else Modifier
+                Image(it.asImageBitmap(), null, fill.clip(RoundedCornerShape(12.dp)).then(zoomable),
                     contentScale = ContentScale.Fit)
             } ?: PreviewLoading()
         }
@@ -493,3 +576,76 @@ private object LabPins {
         return cur
     }
 }
+
+/** 三个按钮开的框要做什么：verify / draw / update（update 带那一项）。⚠️ 带前缀：SshConnect.kt 里有个 private Ask，同包同名会撞（#210） */
+internal data class LabAsk(val kind: String, val item: LabRemote.Item? = null)
+
+/**
+ * 「画图 / 更新」的框：一段可选的提示词（不填 = 默认执行）+ 派给哪个会话。
+ * 发出去的是 [app.yxi.agent.LabPrompts] 拼好的整段话，走 tmux send-keys 进那个会话。
+ */
+@Composable
+private fun LabAskDialog(
+    ask: LabAsk, sessionName: String?, sessions: List<String>,
+    onClose: () -> Unit, onSend: (String, String) -> Unit,
+) {
+    var extra by remember { mutableStateOf("") }
+    var target by remember { mutableStateOf(sessionName ?: sessions.firstOrNull()) }
+    val title = when (ask.kind) {
+        "verify" -> t("查明并画出来"); "draw" -> t("把结构画成图")
+        else -> t("更新《%s》").format(ask.item?.title ?: "")
+    }
+    val hint = when (ask.kind) {
+        "verify" -> t("不填就默认：把当前项目查明并画成可验证架构图（confirmed / inferred / unknown / conflict + 证据）")
+        "draw" -> t("不填就默认：把这个项目的模块关系画成依赖图。填了就按你说的画（流程 / 时序 / ER / C4 / Gantt…）")
+        else -> t("不填就默认：按项目现状重画这一张、原位替换。填了就加上你的要求")
+    }
+    val candidates = (listOfNotNull(sessionName) + sessions).distinct().take(8)
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text(title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    extra, { extra = it }, Modifier.fillMaxWidth(), minLines = 2, maxLines = 5,
+                    label = { Text(t("提示词（可不填）")) }, placeholder = { Text(hint, style = MaterialTheme.typography.bodySmall) },
+                )
+                Text(t("派给哪个会话"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
+                if (candidates.isEmpty()) Text(t("这台机器上还没有会话 —— 先去看板 ＋ 开一个"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    candidates.forEach { n ->
+                        val on = n == target
+                        Surface(
+                            color = if (on) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                            shape = Pill, modifier = Modifier.clip(Pill).clickable { target = n },
+                        ) {
+                            Text(app.yxi.agent.Session.shortOf(n), Modifier.padding(12.dp, 7.dp), style = MaterialTheme.typography.labelMedium,
+                                color = if (on) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface)
+                        }
+                    }
+                }
+                Text(
+                    t("会把一整段任务说明发进那个会话，agent 在服务器上画、用 yxi-lab 推回来。App 里不带任何技能。"),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = target != null, onClick = {
+                val tgt = target ?: return@TextButton
+                val text = when (ask.kind) {
+                    "verify" -> app.yxi.agent.LabPrompts.verify(extra)
+                    "draw" -> app.yxi.agent.LabPrompts.draw(extra)
+                    else -> app.yxi.agent.LabPrompts.update(ask.item ?: return@TextButton, extra)
+                }
+                onSend(tgt, text)
+            }) { Text(if (extra.isBlank()) t("默认执行") else t("发过去")) }
+        },
+        dismissButton = { TextButton(onClick = onClose) { Text(t("算了")) } },
+    )
+}
+
+/** SVG 文件包成一页离线 HTML：按宽铺满、背景白，其余交给 WebView（缩放、滚动都是现成的）。 */
+private fun svgPage(svg: String): String =
+    "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
+        "<style>html,body{margin:0;background:#fff}svg{display:block;width:100%;height:auto}</style></head><body>" + svg + "</body></html>"

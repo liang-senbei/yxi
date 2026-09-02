@@ -636,6 +636,11 @@
   ⚠️ **App 内更新走 SFTP**（连的那台的 `~/.yxi/`），跟 hk13 这套 HTTP 分发**互不相干**，改这边不影响升级。
 - ✅ **yxi-hub 多组成员（2026-09-02）**：一个会话在多个组里时，`who`/`context` 按组分开列、`say` 的消息带共同组名
   `[同组 组名 · 谁]`、`all` 必须指明组（#211）。服务器侧改动，已装到本机 `~/.local/bin/yxi-hub`。
+- ✅ **0.9.80（2026-09-02）—— 实验室「让 agent 画图」（D29）**：页顶「查明并画出来」「把结构画成图」+ 卡片「更新」，
+  弹框里可填提示词（不填默认执行）、选派给哪个会话，发出去后每 20 秒自动刷 10 分钟。提示词在 `agent/LabPrompts.kt`，
+  规矩跟 `yxi-lab spec` 一致；服务器侧新增 `yxi-lab update <id> <文件>`（原位替换，id 不变）。全屏：图片捏合缩放 + 拖动，
+  网页开 WebView 缩放；SVG 改走 WebView（原来 BitmapFactory 解不开）。**试作**：用 Archify 给 Yxi 画了一张架构图推在本机实验室「架构图」组
+  （Node 18 能跑；要剥 Google 字体引用；showcase 校验很严，改了四轮）。
 - ✅ **0.9.79（2026-09-02）—— 装机做「傻瓜化」**（用户要的）：
   · **探测框**（`ProbeDialog`）：现探 tmux / Claude Code / Codex 装没装、登没登录、系统与架构、有没有 Node（不需要）；
     下面一张表单 **都装 / 只装 Claude Code / 只装 Codex** + 「一键装机」，**默认不执行**。`bootstrap.sh` 用 `YXI_NO_CODEX=1` / `YXI_NO_CLAUDE=1` 跳过。
@@ -936,6 +941,7 @@ macOS runner 编译 → 起 iPhone 16 模拟器 → 装上去 → **在 runner �
 
 | # | 决定 | 理由 / 出处 |
 |---|---|---|
+| D29 | **实验室加三个「让 agent 画图」的入口（架构调整，D27 之内的例外）：页顶「查明并画出来」（architecture-verifier）「把结构画成图」（diagram-generator），每张卡「更新」；点了把一整段任务说明发进会话（可附提示词，不附 = 默认执行），agent 在服务器上画、`yxi-lab add / update` 推回来。App 仍不带任何技能、渲染器或内容；全屏可捏合缩放拖动** | 用户 2026-09-02：「实验室里预制 architecture-verifier / diagram-generator … 点击直接驱动 AI 把该会话变成可视化架构图 … 做一个按键方便按项目更新来更新图表，也可以输入部分提示词，不输入就默认执行 … 全屏模式下支持滑动预览」。技能本体在服务器（Archify 需要 Node；MIT），`yxi-lab update <id>` 原位替换。 |
 | D28 | **Codex 是二等公民：会话按前缀分开（`cc-` Claude / `cx-` Codex），Codex 只有终端 + 登录，不做对话视图、状态源和通知；新机器从手机一键装机（`bootstrap.sh` 公网分发，不依赖 Node.js）** | 用户 2026-09-02 站在新客户视角问：「没装 claude code 也没装 codex 会显示什么 / 有没有一键装机（客户连 nodejs 都没有怎么办）/ 会话要不要按 codex 和 claude 分开 / 支持两家认证」。Codex 的转录格式、钩子跟 Claude Code 都不通用，先把「能装、能开、能看、能登录」做扎实；对话视图 / 通知等用户要了再做。 |
 | D27 | **实验室 App 端冻结：不允许直接修改，只提供 `yxi-lab` 接口（`spec` / `template` / `check` / `add --aspect`）。以后 AI 生成新内容只推、不改 App；除非实验室架构本身要调整，且那要用户先拍板** | 用户 2026-09-02：「实验室需要规范，模板和 UI/UX 做好，给出 API 接口方便后面的 AI 生成上传展示，不要每次改一遍实验室」。契约在 `server/LAB.md`（= `yxi-lab spec`）。 |
 | D26 | **实验室跟着服务器走：每台服务器各自一个实验室，互相隔离；实验室里的内容永远不嵌进 App** | 用户 2026-09-02 拍板。内容在各台的 `~/.yxi/lab/`，置顶/采纳按主机分开存；App 只放定稿（D25 的延伸）。 |

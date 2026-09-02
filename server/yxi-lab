@@ -5,6 +5,7 @@
 #   yxi-lab template [--aspect 1:1]       出一个合规的网页动画骨架，填 draw() 就行
 #   yxi-lab check <文件>                  推之前校验：单文件、无外链、有 viewport、大小
 #   yxi-lab add <文件> [标题] [说明] [由谁] [--aspect W:H] [--group 组]
+#   yxi-lab update <id> <文件> [说明]      原位替换某一项（id / 标题 / 组不变，手机上置顶采纳都还在）
 #   yxi-lab note <标题> [正文] [由谁] [--group 组]
 #   yxi-lab list | rm <id> | clear | approved
 #
@@ -86,6 +87,32 @@ d.insert(0, {"id":i,"title":title,"type":typ,"file":fn,"desc":desc,"by":by,"at":
 json.dump(d, open(man,"w"), ensure_ascii=False, indent=1)
 PY
     echo "✓ 放进实验室：$title（$type${ASPECT:+，$ASPECT}${GROUP:+，组=$GROUP}，id=$id）—— 手机 App → 实验室 → 刷新"
+    ;;
+  update)
+    # 手机上「更新」按钮那条路：agent 重画之后推回**同一个 id**，App 原位刷新，置顶 / 采纳不丢
+    id="${2:?用法: yxi-lab update <id> <文件> [说明]}"; src="${3:?用法: yxi-lab update <id> <文件> [说明]}"; desc="${4:-}"; at="$(date +%s)"
+    check_file "$src" || { echo "✗ 没推。按上面的提示改好再 update" >&2; exit 1; }
+    type="$(type_of "$src")"; ext="$(echo "${src##*.}" | tr 'A-Z' 'a-z')"; [ "$ext" = htm ] && ext=html
+    fname="$id-$at.$ext"
+    cp "$src" "$LAB/$fname"
+    python3 - "$MAN" "$LAB" "$id" "$type" "$fname" "$desc" "$at" "$ASPECT" <<'PY'
+import json,sys,os
+man,lab,i,typ,fn,desc,at,aspect=sys.argv[1:9]
+d=json.load(open(man)); hit=None
+for x in d:
+    if x['id']==i: hit=x
+if hit is None:
+    print("✗ 没有这个 id：", i); sys.exit(1)
+old=hit.get('file')
+hit.update({"type":typ,"file":fn,"at":int(at)})
+if desc: hit["desc"]=desc
+if aspect: hit["aspect"]=aspect
+if old and old!=fn:
+    try: os.remove(os.path.join(lab,old))
+    except OSError: pass
+json.dump(d, open(man,"w"), ensure_ascii=False, indent=1)
+print("✓ 原位更新：", hit['title'], "（id 不变）—— 手机 App → 实验室 → 刷新")
+PY
     ;;
   note)
     title="${2:?用法: yxi-lab note <标题> [正文] [由谁] [--group 组]}"; desc="${3:-}"; by="${4:-$BY}"; at="$(date +%s)"
