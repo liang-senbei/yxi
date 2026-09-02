@@ -4122,3 +4122,21 @@ CSS 单位全部是 0。`innerHeight` 照样报 View 的高度，所以只看 JS
 
 **修法**：按文件加前缀（`VortexField` / `StardustDust` / `SparkleSparks`）。
 ⚠️ 让多个 agent 照一份骨架写同类文件时，规格里写明「顶层 class 名带方案前缀」。
+
+## #211 一个会话在两个组里：它知道自己在两个组，但分不清谁是哪个组的、消息也不带组名
+
+**用户问**：cc-logto 被编进了 infra 和 omggrow 两个组，它知道吗？协作时分得清是哪个组的 agent 在跟它说话吗？
+
+**原状**（2026-09-02 前）：
+- 知道在两个组：SessionStart 的 `yxi-hub context` 说「在「infra、omggrow」组里」，手机编组时每个组也各发一条通知。
+- **分不清**：同组名单是两个组**并成一串**列的（cc-boomassets、cc-omggrow_acquire、cc-omggrow_order），没说谁属于哪个组；
+  `yxi-hub say` 送过去的消息只有 `[同组 发件人]`，**不带组名**；`yxi-hub all` 会把话**同时发到它所有组**的所有人。
+  三处叠起来，多组成员确实会串。
+
+**修法**（`server/yxi-hub`，只改服务器侧，不用发版）：
+- `who` / `context` **按组分开列**：「infra」组：cc-boomassets；「omggrow」组：cc-omggrow_acquire、cc-omggrow_order；
+  多组成员的 context 里多一句「收到的消息前面是 `[同组 组名 · 谁]`，照着组名区分」。
+- `say` 的消息改成 `[同组 <两人共同的组> · 发件人]`（共同在多个组就 `a/b`）。
+- `all` 在多个组里时**必须指明组**：`yxi-hub all <组名> "话"`，不指明就拒绝并列出你的组；只在一个组里照旧。
+- 测试：`YXI_GROUPS_FILE=<临时表> ` + 一个临时 tmux 会话名，`who / context / all` 三条都跑过。
+⚠️ 已在跑的会话要**重开**（或自己跑一次 `yxi-hub who`）才看得到新的 context；hook 只在 SessionStart 注入。
