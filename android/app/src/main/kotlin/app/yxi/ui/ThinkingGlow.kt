@@ -133,3 +133,37 @@ private fun pastel(hue: Float): Color {
 private fun InfiniteTransition.wave(ms: Int): State<Float> = animateFloat(
     0f, 1f, InfiniteRepeatableSpec(tween(ms, easing = LinearEasing), RepeatMode.Reverse), label = "w$ms",
 )
+
+/**
+ * 输入框的底：跟 [ThinkingGlow] **同一套色相**、同样 6 秒一圈，横向淡淡地铺一层。
+ * 光晕忙的时候在页面顶部，输入框离得远，用户说「输入框也要是渐变背景」—— 这层就是给它的。
+ * ⚠️ 透明度压得很低（浅色 0.38 / 深色 0.22）：它是底色不是主角，字要读得清。
+ */
+@Composable
+fun glowBrush(busy: Boolean, waiting: Boolean): Brush {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val motion = remember {
+        runCatching {
+            Settings.Global.getFloat(ctx.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) != 0f
+        }.getOrDefault(true)
+    }
+    val tr = rememberInfiniteTransition(label = "pill")
+    val hueT by tr.animateFloat(
+        0f, 1f, InfiniteRepeatableSpec(tween(6000, easing = LinearEasing), RepeatMode.Restart), label = "pillHue",
+    )
+    val drift by tr.wave(9100)
+    val light = !androidx.compose.foundation.isSystemInDarkTheme() ||
+        app.yxi.ui.theme.LocalPalette.current.light
+    val a = if (light) 0.38f else 0.22f
+    val hues: List<Color> = when {
+        waiting -> listOf(Color(0xFFFFC46B), Color(0xFFFFAF9B), Color(0xFFFFE0A3))
+        busy && motion -> List(3) { i -> pastel((210f - 300f * hueT + i * 28f + 360f) % 360f) }
+        busy -> listOf(Color(0xFF8FD8C6), Color(0xFF9EC8F0), Color(0xFFC9E6D8))
+        else -> listOf(Color(0xFF9EC8F0), Color(0xFFC9E0F7), Color(0xFFA8D8E8))
+    }
+    val d = if (motion) drift else .5f
+    return Brush.horizontalGradient(
+        hues.map { it.copy(alpha = a) },
+        startX = -400f * d, endX = 1400f + 400f * d,
+    )
+}

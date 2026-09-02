@@ -32,6 +32,8 @@ struct ChatScreen: View {
     @State private var peek: String?
     /// 按住说话
     @StateObject private var voice = Dictation()
+    /// 展开了的工具卡组
+    @State private var openGroups: Set<String> = []
 
     private let bottomID = "yxi.chat.bottom"
     private let space = "yxi.chat.space"
@@ -146,9 +148,17 @@ struct ChatScreen: View {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 18) {
                             let files = backend as? FileService
-                            ForEach(model.items) { item in
-                                ItemView(item: item, files: files, onOpen: { ref in peek = ref.path })
-                                    .transition(.rise)
+                            // 连着的同名工具卡合成一张（用户：「满屏都是 bash」），点开才铺开
+                            ForEach(ChatRow.group(model.items)) { row in
+                                switch row {
+                                case let .group(calls):
+                                    ToolGroupCard(calls: calls, open: openGroups.contains(row.id)) {
+                                        if openGroups.contains(row.id) { openGroups.remove(row.id) } else { openGroups.insert(row.id) }
+                                    }
+                                case let .one(item):
+                                    ItemView(item: item, files: files, onOpen: { ref in peek = ref.path })
+                                        .transition(.rise)
+                                }
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -291,7 +301,8 @@ struct ChatScreen: View {
                 .foregroundStyle(Yx.onSurface)
                 .tint(Yx.copper)
                 .padding(.horizontal, 20).padding(.vertical, 15)
-                .background(Yx.container, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+                // ⚠️ 底色不是死的：跟页面光晕同一套色相淡淡地流过去（用户：「输入框也要是渐变背景」）
+                .background(GlowPill(busy: model.live.busy, waiting: model.pending != nil))
 
             // 按住说话（识别在手机上做）。结果**只填进输入框、绝不直接发** ——
             // 识别错一个字，在服务器上就是另一条命令（PRD 附录 E.2）。

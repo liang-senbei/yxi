@@ -634,6 +634,9 @@
   ⏳ **就差 HTTPS**：要 `dl.keuury.com` A→64.90.25.56 的 DNS 记录（R2 令牌改不了 DNS，见 #123），
   记录一通就 certbot 签证书（hk13 已有 certbot，别的站在用）。在此之前站是活的、只是 HTTP + 靠 IP:8899 访问。
   ⚠️ **App 内更新走 SFTP**（连的那台的 `~/.yxi/`），跟 hk13 这套 HTTP 分发**互不相干**，改这边不影响升级。
+- ✅ **0.9.66（2026-09-02）**：连着 ≥3 条同名、已完成的工具卡合成一张（`groupToolRuns` /
+  iOS `ChatRow.group`），点开铺开，进行中和出错的不合；输入框底色跟页面光晕同一套色相流动
+  （`glowBrush` / iOS `GlowPill`）；GitHub 登录 `BROWSER=true`（#199）。两端都编过。
 - ✅ **0.9.65（2026-09-02）**：配置页分成「连接」和「Agent 配置」两块。「连接」（`agent/Connect.kt` +
   `ui/ConnectPanel.kt`）：GitHub 设备码登录（git + GitHub MCP 一起）、二十来个公开远程 MCP
   （Notion / Linear / Sentry / Jira / Stripe / Zapier / Vercel / Figma …）一键 `claude mcp add` + `login`，

@@ -126,3 +126,59 @@ private struct Tween {
         return from + (to - from) * e
     }
 }
+
+
+/// 输入框的底：跟 [ThinkingGlow] 同一套色相、同样 6 秒一圈，横向淡淡地铺一层。
+/// 光晕忙的时候在页面顶部，输入框离得远 —— 这层就是给它的。
+/// ⚠️ 透明度压得很低（浅色 0.38 / 深色 0.22）：它是底色不是主角，字要读得清。
+struct GlowPill: View {
+    let busy: Bool
+    let waiting: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        TimelineView(.animation(paused: reduceMotion)) { tl in
+            let t = tl.date.timeIntervalSinceReferenceDate
+            let hueT = t.truncatingRemainder(dividingBy: 6) / 6
+            let drift: Double = reduceMotion ? 0.5 : {
+                let p = (t * 1000).truncatingRemainder(dividingBy: 18200) / 9100
+                return p <= 1 ? p : 2 - p
+            }()
+            let a = scheme == .dark ? 0.22 : 0.38
+            let hues: [Color] = waiting
+                ? [Color(hex: 0xFFC46B), Color(hex: 0xFFAF9B), Color(hex: 0xFFE0A3)]
+                : busy && !reduceMotion
+                    ? (0..<3).map { GlowPill.pastel((210 - 300 * hueT + Double($0) * 28 + 360).truncatingRemainder(dividingBy: 360)) }
+                    : busy ? [Color(hex: 0x8FD8C6), Color(hex: 0x9EC8F0), Color(hex: 0xC9E6D8)]
+                           : [Color(hex: 0x9EC8F0), Color(hex: 0xC9E0F7), Color(hex: 0xA8D8E8)]
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .fill(Yx.container)
+                .overlay(
+                    LinearGradient(colors: hues.map { $0.opacity(a) },
+                                   startPoint: UnitPoint(x: -0.4 * drift, y: 0.5),
+                                   endPoint: UnitPoint(x: 1 + 0.4 * drift, y: 0.5))
+                    .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                )
+        }
+    }
+
+    /// HSL → 粉彩色，跟 ThinkingGlow 里那份一样（s .62 / l .80）
+    static func pastel(_ hue: Double) -> Color {
+        let hue = hue < 0 ? hue + 360 : hue
+        let s = 0.62, l = 0.80
+        let c = (1 - abs(2 * l - 1)) * s
+        let x = c * (1 - abs((hue / 60).truncatingRemainder(dividingBy: 2) - 1))
+        let m = l - c / 2
+        let (r, g, b): (Double, Double, Double)
+        switch hue {
+        case ..<60: (r, g, b) = (c, x, 0)
+        case ..<120: (r, g, b) = (x, c, 0)
+        case ..<180: (r, g, b) = (0, c, x)
+        case ..<240: (r, g, b) = (0, x, c)
+        case ..<300: (r, g, b) = (x, 0, c)
+        default: (r, g, b) = (c, 0, x)
+        }
+        return Color(.sRGB, red: r + m, green: g + m, blue: b + m, opacity: 1)
+    }
+}

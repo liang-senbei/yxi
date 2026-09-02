@@ -110,7 +110,7 @@ public enum Connect {
     public static func ghLoginStart() -> String {
         let t = tmux(for: "github")
         return "tmux kill-session -t '\(t)' 2>/dev/null; tmux new-session -d -s '\(t)' -x 120 -y 30 "
-            + "'gh auth login -h github.com -p https -w; echo __DONE__$?; sleep 900'"
+            + "'BROWSER=true gh auth login -h github.com -p https -w; echo __DONE__$?; sleep 900'"
     }
     public static func ghAsksGit(_ pane: String) -> Bool { pane.contains("(Y/n)") }
     public static func ghCode(_ pane: String) -> String? { first(#"one-time code: ([A-Z0-9]{4}-[A-Z0-9]{4})"#, in: pane) }

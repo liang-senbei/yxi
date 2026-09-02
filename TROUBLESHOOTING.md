@@ -3967,3 +3967,29 @@ ssh mac 'cd ~/yxi-build && ./tools/xcodegen/bin/xcodegen generate && xcodebuild 
    把 `echo __DONE__$?` 接在命令后面，手机只认这个标记，不猜屏幕文案。
 
 所有地址都在服务器上用 MCP `initialize` 探过：401 = 在线要认证，200 = 免认证（Hugging Face / Context7 / DeepWiki）。
+
+## #199 `gh auth login -w` 在服务器上真的会开浏览器 —— 设 `BROWSER=true`
+
+**症状**：测 GitHub 设备码流程时，对「Press Enter to open … in your browser」回了个 Enter，
+服务器上 VNC 桌面（`cloud-vnc.service`，DISPLAY=:1）里**真弹出一个 Chrome**，吃掉半个核。
+
+**根因**：`gh` 用 `$BROWSER`（没有就 xdg-open）开 URL，这台机器有 X 桌面，就开成功了。
+`claude mcp login` 有 `--no-browser`，`gh` 没有对应开关。
+
+**修法**：`BROWSER=true gh auth login …`（`true` 是那个什么都不做的命令）。gh「打开」成功后照常轮询。
+手机端 `Connect.ghLoginStart()` 已带上。⚠️ 凡是在服务器上代用户跑「会开浏览器」的 CLI，都先想这一条。
+
+## #200 我把用户的服务器搞卡了 —— 模拟器 + gradle 在用户干活的时候一起跑
+
+**症状**（用户：「你先看看现在服务器的状态为什么那么卡」）：load 24，CPU steal 35%，
+手机 App 上一串 `Read timed out` / 「连接断了，正在重连」。
+
+**根因**：我为了做冒烟测试起了 Android 模拟器（qemu 占 2 个多核 + 4GB），同时还跑了两轮 gradle；
+这台机器本来就有三四成的 steal（宿主超卖），一点余量都没有。**用户在这台机器上实时干活。**
+
+**修法 / 规矩**：
+- 模拟器**只在用户明确不在用的时候**起，用完立刻 `adb emu kill`；日常验证靠编译 + 真机。
+- 起任何重活之前先看一眼：`uptime` + `top -bn1 | grep %Cpu`（看 `st`）；steal 已经 > 25% 就别加码。
+- 杀自己的进程别用 `pkill -f`（会匹配到自己的 shell，退出码 144，#见上文）：
+  `ps -eo pid,args | awk '/qemu-system-x86_64-headless/ && !/awk/ {print $1}' | xargs -r kill`。
+- VNC 桌面里那个 Chrome 是 `cloud-vnc.service` 的（给客户做网页登录用的），**不是我们的，别碰**。

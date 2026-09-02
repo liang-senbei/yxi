@@ -127,7 +127,7 @@ object Connect {
     fun ghLoginStart(): String {
         val t = tmuxFor("github")
         return "tmux kill-session -t '$t' 2>/dev/null; tmux new-session -d -s '$t' -x 120 -y 30 " +
-            "'gh auth login -h github.com -p https -w; echo __DONE__\$?; sleep 900'"
+            "'BROWSER=true gh auth login -h github.com -p https -w; echo __DONE__\$?; sleep 900'"
     }
 
     /** 屏幕上是不是还在问「Authenticate Git with your GitHub credentials? (Y/n)」—— 要回一个 Enter（= Yes，让 git 也用它） */

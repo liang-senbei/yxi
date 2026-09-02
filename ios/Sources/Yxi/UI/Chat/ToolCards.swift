@@ -78,7 +78,7 @@ struct ToolCardView: View {
 
     /// 折叠时那一行摘要 —— **必须能认出「这是哪一条」**，否则折叠就等于全删了。
     /// 命令取第一行、文件取文件名（全路径在手机上一行也放不下）。
-    private var summary: String {
+    var summary: String {
         let i = call.input
         let raw: String
         if i["command"].exists          { raw = i["command"].string }
@@ -94,7 +94,7 @@ struct ToolCardView: View {
             .first { !$0.isEmpty } ?? ""
     }
 
-    private var accent: Color {
+    var accent: Color {
         switch call.name {
         case "Bash": return Yx.copper
         case "Edit", "Write": return Yx.teal
@@ -524,4 +524,80 @@ private func exitCode(_ s: String?) -> String? {
     guard let s, s.hasPrefix("Exit code ") else { return nil }
     let digits = s.dropFirst("Exit code ".count).prefix(while: \.isNumber)
     return digits.isEmpty ? nil : String(digits)
+}
+
+
+// MARK: - 一串同名工具卡合成一张
+
+/// **一串同名工具卡片合成一张。** 一个回合里连着七八条 Bash / Read，满屏都是同一个词
+/// （用户原话：「能不能合成一个总的 bash，点击总的会展开小的」）。
+///
+/// 规则在 [ChatRow.group]：连续 ≥ 3 条同名、已完成、没出错的工具卡才合；
+/// 最后一条还在跑的不合进去（进行中的要看得见）。合起来那张只有一行：
+/// 工具名 × 条数 · 第一条的摘要 · 状态。点一下展开成原来的小卡片。
+struct ToolGroupCard: View {
+    let calls: [ToolCall]
+    let open: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        let first = ToolCardView(call: calls[0])
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Text(calls[0].name).font(.system(size: 13, weight: .medium)).foregroundStyle(first.accent)
+                Chip(text: "× \(calls.count)", color: first.accent)
+                Text(open ? "" : first.summary)
+                    .font(.mono(12)).foregroundStyle(Yx.dim)
+                    .lineLimit(1).truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text(open ? "收起" : "完成").font(.mono(12)).foregroundStyle(Yx.dim)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { withAnimation(.easeInOut(duration: 0.18)) { onToggle() } }
+            if open {
+                ForEach(calls) { ToolCardView(call: $0) }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, open ? 8 : 16).padding(.vertical, open ? 8 : 11)
+        .background(Yx.low, in: RoundedRectangle(cornerRadius: Yx.cardRadius, style: .continuous))
+    }
+}
+
+/// 列表里的一行：要么一条内容，要么一串合起来的工具卡。
+enum ChatRow: Identifiable {
+    case one(ChatItem)
+    case group([ToolCall])
+
+    var id: String {
+        switch self {
+        case let .one(i): return i.id
+        case let .group(c): return "group-" + c[0].id
+        }
+    }
+
+    /// 这些不是噪音，一条都不许被合掉。
+    static let neverGroup: Set<String> = ["AskUserQuestion", "ExitPlanMode", "TodoWrite"]
+
+    /// 把连续 ≥ `min` 条同名、已完成、没出错的工具卡合成一组。纯函数。
+    static func group(_ items: [ChatItem], min: Int = 3) -> [ChatRow] {
+        var out: [ChatRow] = []
+        out.reserveCapacity(items.count)
+        var i = 0
+        func call(_ it: ChatItem) -> ToolCall? {
+            if case let .tool(c) = it, c.result != nil, !c.isError, !neverGroup.contains(c.name) { return c }
+            return nil
+        }
+        while i < items.count {
+            if let c0 = call(items[i]) {
+                var j = i
+                var run: [ToolCall] = []
+                while j < items.count, let c = call(items[j]), c.name == c0.name { run.append(c); j += 1 }
+                if run.count >= min { out.append(.group(run)); i = j; continue }
+            }
+            out.append(.one(items[i]))
+            i += 1
+        }
+        return out
+    }
 }

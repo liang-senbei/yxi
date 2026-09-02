@@ -455,3 +455,82 @@ fun PendingCard(
         }
     }
 }
+
+
+/**
+ * **一串同名工具卡片合成一张。** 一个回合里连着七八条 Bash / Read，满屏都是同一个词
+ * （用户原话：「能不能合成一个总的 bash，点击总的会展开小的」）。
+ *
+ * 规则在 [groupToolRuns]：连续 ≥ 3 条同名工具卡才合；**最后一条还在跑的不合进去**
+ * （进行中的那条要看得见）；出错的一串不合（失败才是要看的）。
+ * 合起来那张只有一行：工具名 × 条数 · 第一条到最后一条的摘要 · 状态。点一下展开成原来的小卡片。
+ */
+@Composable
+fun ToolGroupCard(calls: List<ChatItem.ToolCall>, open: Boolean, onToggle: () -> Unit) {
+    Surface(color = SurfaceContainerLow, shape = MaterialTheme.shapes.large) {
+        Column(Modifier.fillMaxWidth()) {
+            Row(
+                Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(16.dp, 11.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(calls.first().name, style = MaterialTheme.typography.labelLarge, color = accent(calls.first().name))
+                Chip("× ${calls.size}", accent(calls.first().name))
+                Text(
+                    if (open) "" else summary(calls.first()),
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = Mono),
+                    color = Dim, maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    if (open) t("收起") else t("完成"),
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = Mono), color = Dim,
+                )
+            }
+            if (open) Column(
+                Modifier.padding(8.dp, 0.dp, 8.dp, 8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                calls.forEach { ToolCard(it) }
+            }
+        }
+    }
+}
+
+/** 列表里的一行：要么一条内容，要么一串合起来的工具卡。 */
+sealed interface ChatRow {
+    val key: String
+    data class One(val item: ChatItem) : ChatRow { override val key get() = item.key }
+    data class Group(val calls: List<ChatItem.ToolCall>) : ChatRow { override val key get() = "group-" + calls.first().key }
+}
+
+/**
+ * 把连续 ≥ [min] 条**同名、已完成、没出错**的工具卡合成一组。
+ * ⚠️ 纯函数，别在这里碰任何状态；展开与否由界面按 [ChatRow.key] 记。
+ */
+fun groupToolRuns(items: List<ChatItem>, min: Int = 3): List<ChatRow> {
+    val out = ArrayList<ChatRow>(items.size)
+    var i = 0
+    while (i < items.size) {
+        val it0 = items[i]
+        if (it0 is ChatItem.ToolCall && it0.result != null && !it0.isError && it0.name !in NEVER_GROUP) {
+            var j = i
+            while (j < items.size) {
+                val c = items[j] as? ChatItem.ToolCall ?: break
+                if (c.name != it0.name || c.result == null || c.isError) break
+                j++
+            }
+            if (j - i >= min) {
+                out += ChatRow.Group(items.subList(i, j).map { it as ChatItem.ToolCall })
+                i = j
+                continue
+            }
+        }
+        out += ChatRow.One(it0)
+        i++
+    }
+    return out
+}
+
+/** 这些不是噪音，一条都不许被合掉。 */
+private val NEVER_GROUP = setOf("AskUserQuestion", "ExitPlanMode", "TodoWrite")

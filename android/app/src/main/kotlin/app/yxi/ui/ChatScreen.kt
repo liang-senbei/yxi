@@ -265,6 +265,7 @@ fun ChatScreen(
      * null = 还没拿到第一批。
      */
     var seenKeys by remember(sessionName) { mutableStateOf<Set<String>?>(null) }
+    val openGroups = remember { mutableStateListOf<String>() }
     val motionOn = remember {
         runCatching {
             android.provider.Settings.Global.getFloat(
@@ -642,18 +643,28 @@ fun ChatScreen(
             androidx.compose.ui.platform.LocalUriHandler provides uri,
         ) {
         Box(Modifier.weight(1f)) {
+            // 连着的同名工具卡合成一张（用户：「满屏都是 bash」），点开才铺开
+            val rows = remember(items) { groupToolRuns(items) }
             LazyColumn(
                 Modifier.fillMaxSize(),
                 state = listState,
                 contentPadding = PaddingValues(16.dp, 6.dp, 16.dp, 16.dp),
                 verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
-                items(items.size, key = { items[it].key }) { i ->
+                items(rows.size, key = { rows[it].key }) { i ->
+                    val row = rows[i]
+                    if (row is ChatRow.Group) {
+                        ToolGroupCard(row.calls, open = row.key in openGroups) {
+                            if (row.key in openGroups) openGroups.remove(row.key) else openGroups.add(row.key)
+                        }
+                        return@items
+                    }
+                    val item = (row as ChatRow.One).item
                     // 只给「加载完之后才出现」的条目做进入动画 —— 初始那几百条一起滑入是灾难
-                    val fresh = seenKeys != null && items[i].key !in seenKeys!!
+                    val fresh = seenKeys != null && item.key !in seenKeys!!
                     EnterUp(animate = fresh && motionOn) {
                     Item(
-                        items[i],
+                        item,
                         ssh = ssh,
                         // 点缩略图 = 全屏看那张图。复用发送前的那个预览器，
                         // 只是这次图在远端 —— [preview] 认 remotePath，本地 uri 留空。
@@ -898,10 +909,15 @@ fun ChatScreen(
         // 每块之间 10dp 空隙，视觉上是「一排控件」而不是「一个输入区」；
         // 而且两个 emoji 图标跟界面里其余的线性图标不是一路。
         // 现在按 参考款那种做法收成一条：+ · 文字 · 🎤 · 发送，边界一条，里面才分格。
+        // ⚠️ 底色不是死的：跟页面光晕**同一套色相**淡淡地流过去（用户：「输入框也要是渐变背景」）。
+        // 光晕忙的时候在页面顶部，输入框离得远，这层自己的渐变让它不至于是一块平灰。
         Surface(
-            color = MaterialTheme.colorScheme.surfaceContainer,
+            color = Color.Transparent,
             shape = Pill,
-            modifier = Modifier.fillMaxWidth().padding(14.dp, 6.dp, 14.dp, 18.dp).heightIn(min = 56.dp),
+            modifier = Modifier.fillMaxWidth().padding(14.dp, 6.dp, 14.dp, 18.dp).heightIn(min = 56.dp)
+                .clip(Pill)
+                .background(MaterialTheme.colorScheme.surfaceContainer)
+                .background(glowBrush(busy = live.busy, waiting = pending != null)),
         ) {
             Row(
                 Modifier.padding(6.dp, 4.dp),

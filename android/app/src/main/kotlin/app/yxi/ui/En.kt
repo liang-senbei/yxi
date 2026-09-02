@@ -704,5 +704,6 @@ internal object En {
         "读任何 GitHub 仓库的文档" to "Docs for any GitHub repo",
         "只有 claude.ai 订阅登录才有（claude.ai 连接器），用 API key 的没有" to "Only with a claude.ai subscription login (claude.ai connectors); not available with an API key",
         "浏览器插件只配同一台电脑上的 Claude Code，远程服务器用不了" to "The browser extension only pairs with Claude Code on the same computer; not usable from a remote server",
+        "收起" to "Collapse",
     )
 }
