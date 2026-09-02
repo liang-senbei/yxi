@@ -49,7 +49,6 @@ object Splash {
 
     val variants: List<Variant> = listOf(
         Variant("brush", "笔触书写", "像毛笔从左往右把 Yunxi 写出来，前沿带一点渗墨") { SplashBrush(it) },
-        Variant("bloom", "光晕绽放", "对话页那四团粉彩光从中心绽放，Y 先弹出来，再化成整个字") { SplashBloom(it) },
         Variant("ink", "墨迹落定", "一笔墨从空中落到纸上、渗开、定住，再扫过一道光") { SplashInk(it) },
         Variant("particles", "粒子聚合", "几百个小点从四面八方飞进来拼成 Yunxi，再化成真正的字") { SplashParticles(it) },
         Variant("drop", "Y 落下，字展开", "Y 从上面落下弹两下、起一圈涟漪，然后整个字向右展开") { SplashDrop(it) },
@@ -60,7 +59,8 @@ object Splash {
      * ⚠️ **实验室是「服务器推过来给用户审」的地方，不是 App 写死的**（用户定的规矩）—— 所以这里
      * 没有 App 内的选择器；null = 还没定，冷启动不播。
      */
-    val DEFAULT_KEY: String? = null
+    // 用户 2026-09-02 在实验室里定的：粒子聚合上；笔触书写 / 墨迹落定 / Y 落下留着备用；光晕绽放淘汰（文件已删）
+    val DEFAULT_KEY: String? = "particles"
 
     fun chosen(ctx: Context): Variant? = variants.firstOrNull { it.key == DEFAULT_KEY }
 }

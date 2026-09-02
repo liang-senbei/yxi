@@ -69,12 +69,17 @@ private fun beijing(at: Long): String {
 }
 
 @Composable
-fun LabScreen(ssh: SshSession? = null, modifier: Modifier = Modifier) {
+/**
+ * ⚠️ **实验室跟着服务器走**（用户定的，D26）：内容全在连着那台的 `~/.yxi/lab/`，
+ * 置顶 / 采纳也按主机分开存 —— 两台服务器的实验室互不相干，App 里更不嵌任何实验室内容。
+ */
+fun LabScreen(ssh: SshSession? = null, host: app.yxi.ssh.Host? = null, modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var raw by remember { mutableStateOf<List<LabRemote.Item>?>(null) }
     var approved by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var pins by remember { mutableStateOf(LabPins.get(ctx)) }
+    val hostId = host?.id ?: ""
+    var pins by remember(hostId) { mutableStateOf(LabPins.get(ctx, hostId)) }
     var openCat by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableIntStateOf(0) }
 
@@ -120,7 +125,8 @@ fun LabScreen(ssh: SshSession? = null, modifier: Modifier = Modifier) {
         Row(Modifier.fillMaxWidth().padding(18.dp, 14.dp, 18.dp, 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(t("实验室"), style = MaterialTheme.typography.headlineSmall)
-                Text(t("agent 产出的东西 · 按类型分栏 · 左滑置顶/删除"),
+                Text(
+                    (host?.alias?.let { t("%s 这台的 · ").format(it) } ?: "") + t("agent 产出的东西 · 按类型分栏 · 左滑置顶/删除"),
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
             }
             Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = Pill,
@@ -145,7 +151,7 @@ fun LabScreen(ssh: SshSession? = null, modifier: Modifier = Modifier) {
                 items(cats, key = { it.key }) { c ->
                     SwipeActions(
                         pinned = c.key in pins,
-                        onPin = { pins = LabPins.toggle(ctx, c.key) },
+                        onPin = { pins = LabPins.toggle(ctx, hostId, c.key) },
                         onDelete = { delete(c.items.map { it.id }) },
                     ) {
                         CategoryRow(c, pinned = c.key in pins) { openCat = c.key }
@@ -379,13 +385,15 @@ private fun PreviewLoading() {
 }
 
 /** 置顶的栏目（按类型 key）。本地存 —— 是每台设备自己的偏好，跟别人无关。 */
+/** 栏目置顶。⚠️ **按主机分开存**：两台服务器的实验室是两个实验室（D26）。 */
 private object LabPins {
     private fun p(ctx: Context) = ctx.getSharedPreferences("yxi", Context.MODE_PRIVATE)
-    fun get(ctx: Context): Set<String> = p(ctx).getStringSet("lab_cat_pins", emptySet())!!.toSet()
-    fun toggle(ctx: Context, key: String): Set<String> {
-        val cur = get(ctx).toMutableSet()
+    private fun k(hostId: String) = "lab_cat_pins:" + hostId
+    fun get(ctx: Context, hostId: String): Set<String> = p(ctx).getStringSet(k(hostId), emptySet())!!.toSet()
+    fun toggle(ctx: Context, hostId: String, key: String): Set<String> {
+        val cur = get(ctx, hostId).toMutableSet()
         if (!cur.add(key)) cur.remove(key)
-        p(ctx).edit().putStringSet("lab_cat_pins", cur).apply()
+        p(ctx).edit().putStringSet(k(hostId), cur).apply()
         return cur
     }
 }

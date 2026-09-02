@@ -732,5 +732,6 @@ internal object En {
         "几百个小点从四面八方飞进来拼成 Yunxi，再化成真正的字" to "Hundreds of dots fly in from all sides to form Yunxi, then become the real word",
         "Y 落下，字展开" to "Y drops, word unfolds",
         "Y 从上面落下弹两下、起一圈涟漪，然后整个字向右展开" to "The Y drops in and bounces twice with a ripple, then the word unfolds to the right",
+        "%s 这台的 · " to "%s · ",
     )
 }

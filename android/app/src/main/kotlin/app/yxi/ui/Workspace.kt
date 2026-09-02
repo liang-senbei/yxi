@@ -548,7 +548,7 @@ fun Workspace(
                     sftp, cwd, jumpTo, onJumped = { jumpTo = null }, Modifier.fillMaxSize(),
                 )
                 // 实验室：UI 实验台。多数 demo 纯本地；「审核勾选」要 ssh 把结果写回服务器。
-                Mode.Lab -> LabScreen(ssh, Modifier.fillMaxSize())
+                Mode.Lab -> LabScreen(ssh, host, Modifier.fillMaxSize())
             }
             if (mode == Mode.Terminal && dpad) {
                 DPad(
