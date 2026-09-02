@@ -167,8 +167,10 @@ fun FileViewer(sftp: Sftp?, path: String, onBack: () -> Unit, modifier: Modifier
             when {
                 ext in IMAGES -> ImageBody(b)
                 ext == "md" && !source -> Column(Modifier.verticalScroll(rememberScrollState()).padding(18.dp, 4.dp, 18.dp, 28.dp)) {
+                    // ⚠️ HTML 写的 <img> 渲染器不认，整段被当成 HTML 块吞掉 —— 先转成 Markdown 图（#208）
+                    val md = remember(b) { app.yxi.agent.MarkdownFix.apply(b.decodeToString()) }
                     Markdown(
-                        b.decodeToString(),
+                        md,
                         typography = yxiMarkdown(),           // 默认标题 57sp，文档在手机上同样不能这么排
                         modifier = Modifier.fillMaxWidth(),   // 库的默认是 fillMaxSize()，会把滚动撑坏
                         imageTransformer = remember(sftp, path) { SftpImages(sftp, Paths.dirOf(path)) },

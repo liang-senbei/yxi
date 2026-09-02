@@ -4059,6 +4059,12 @@ ssh mac 'cd ~/yxi-build && ./tools/xcodegen/bin/xcodegen generate && xcodebuild 
 用户之前刚为这个骂过（#200）。
 
 **结论**：**本机不再用模拟器验证界面**。宿主 steal 三四成 + 纯软件 GPU，模拟器跑个动画就把机器拖死。
+**替代（已建好，2026-09-02）**：**用户的 Mac 上有一套完整的 Android 模拟器环境**（Apple 芯片硬件加速，30 秒开机，
+不吃这台服务器）：`~/yxi-build/android-sdk`（JDK 17 在 `~/yxi-build/tools/jdk`，arm64 系统镜像，AVD 叫 `yxi`），
+驾驶脚本 `~/yxi-build/mac-emu.sh`：`start | seed | restart | shot <png> | tap x y | swipe … | log | stop`。
+流程：`scp` debug 包到 `~/yxi-build/Yxi-debug.apk` → `mac-emu.sh start` → `seed`（装包、写 hosts.json 指向
+216.36.108.147、从 logcat 取公钥）→ 把公钥以 `yxi@emulator` 追加进本机 authorized_keys → `restart` → `tap/shot`。
+用完 `stop` + 把那行公钥删掉。整套约 5.6GB，都在用户 Mac 的 `~/yxi-build` 里。
 替代路线：① 把诊断做进 App —— WebView 的 `onConsoleMessage` 把 JS 报错直接显示在卡片上，
 读不到内容也说出来，用户截图就是 DevTools；② 网页本身在服务器的 VNC 桌面 Chrome 里用 `data:text/html;base64`
 （源是 null，跟 WebView 一样）真时间跑一遍再截图（`import -window root`）。
@@ -4072,3 +4078,36 @@ ssh mac 'cd ~/yxi-build && ./tools/xcodegen/bin/xcodegen generate && xcodebuild 
 2. **WebView 刚建出来是 0×0 就 load**：页面首帧读到的 `innerWidth/innerHeight` 是 0，画布 0×0；
    页面若只在启动时读一次尺寸、不监听 resize，就永远空着。现在 `post {}` 到布局定了再 load，
    契约里也要求页面监听 resize（`yxi-lab check` 会提醒）。
+
+## #208 文件预览里 Markdown 的图全没了 —— 文档用的是 HTML `<img>`，渲染器只认 `![]()`
+
+**症状**（用户：unitree_rl_mjlab 里的 md「为什么没渲染出图片」）：thesis.md / README_zh.md 一张图都不显示，文字正常。
+
+**根因**：这些文档为了控制宽度和居中，图写成 `<img src="figs/x.png" width="900" />`，外面常再套
+`<p align="center">` / `<div>`。我们用的 Markdown 渲染器只认 `![alt](src)`；整行 `<img …>` 按 CommonMark
+是 HTML 块，被原样吞掉，`SftpImages`（按 SFTP 取相对路径的图）根本没机会被调用。
+
+**修法**：渲染前过一遍 `MarkdownFix.apply()`：`<img>` → `![alt](src)`；剥掉 `<p>/<div>/<center>` 这类壳
+（不剥的话整段还是 HTML 块）；`<b>` → `**`，`<br>` → 换行。别的 HTML 不碰。
+⚠️ GIF 走 `BitmapFactory` 只显示第一帧 —— 文档里的演示 GIF 是静态的，够看，不为它引库。
+
+## #209 实验室网页预览白板的**真正根因**：Compose 给 WebView 的 layoutParams 是 wrap_content → 100vh = 0
+
+**症状**：所有动画网页在实验室卡片里只剩底下那行「点一下重播」，画布一片白；手机和 Mac 模拟器上一样；
+页面没有任何 JS 报错；同一页面在桌面 Chrome（用 `data:text/html` 模拟 null 源）正常。
+
+**怎么定位的**（#205 #207 那几条都是真问题但都不是它）：往实验室推了两个诊断页 —— 一个把
+`innerWidth/innerHeight/dpr/visualViewport/100vh/100%/svh/dvh` 打在页面上，一个把点阵波场原页加一层叠层
+（视口、画布后备尺寸、CSS 尺寸、图片加载状态、`window.onerror`）。叠层给出铁证：
+`innerHeight=356`、画布后备 935×935、图片已加载、JS 在跑，**但 canvas 的 CSS 高度 = 0**；
+诊断页进一步确认 `100vh = 100% = 100svh = 100dvh = 0`，而 `html.clientHeight = 356`。
+
+**根因**：`AndroidView` 建出来的 View 默认 `layoutParams` 是 `WRAP_CONTENT`。Android WebView 一看自己的
+高度是 wrap_content，就告诉 Chromium「视口高度不限」（它要靠内容算自己多高），于是页面里所有按视口高度算的
+CSS 单位全部是 0。`innerHeight` 照样报 View 的高度，所以只看 JS 数字完全发现不了。
+
+**修法**：factory 里 `layoutParams = ViewGroup.LayoutParams(MATCH_PARENT, MATCH_PARENT)`。一行。
+同时保留 #207 的「等布局定了再 load」和 `useWideViewPort=true`（false 时布局视口也没高度）。
+⚠️ 通则：**Compose 里放 WebView，第一件事就是把 layoutParams 设成 match_parent**。
+⚠️ 排查网页在 WebView 里的问题，最快的路是**把诊断信息打在页面上**（叠层 / onerror）再截图，
+而不是猜 WebView 的设置 —— 这次光猜设置就发了三版（0.9.71～0.9.73）没打中。

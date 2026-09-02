@@ -397,9 +397,19 @@ private fun LabItemPreview(item: LabRemote.Item, ssh: SshSession?, full: Boolean
                     val h = html!!
                     androidx.compose.ui.viewinterop.AndroidView(
                         factory = { c -> android.webkit.WebView(c).apply {
+                            // ⚠️⚠️ **真正的根因（#209，模拟器上叠层实测）。** Compose 的 AndroidView 默认给 View
+                            // 的 layoutParams 是 wrap_content；WebView 一看高度是 wrap_content，就告诉 Chromium
+                            // 「视口高度不限」—— 于是页面里 100vh / 100% / svh / dvh **全部算成 0**（innerHeight
+                            // 却照样是 356）。画布后备 935×935 画得好好的，CSS 高度 0，屏幕上一片白。
+                            // 设成 match_parent，WebView 才按 View 的实际高度当视口。
+                            layoutParams = android.view.ViewGroup.LayoutParams(
+                                android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
                             settings.javaScriptEnabled = true
                             settings.allowFileAccess = false; settings.allowContentAccess = false
-                            settings.useWideViewPort = false; settings.loadWithOverviewMode = false
+                            // ⚠️ **必须 true。** false 的时候 WebView 走「老式布局」：布局视口没有高度，
+                            // 页面里的 100vh 算成 0 —— 画布后备 935×935 画得好好的，CSS 高度却是 0，
+                            // 屏幕上一片白（模拟器上叠层实测 css=356x0）。true = 认页面的 viewport meta。#209
+                            settings.useWideViewPort = true; settings.loadWithOverviewMode = true
                             settings.mediaPlaybackRequiresUserGesture = false
                             setBackgroundColor(android.graphics.Color.WHITE)
                             // 页面里的 JS 报错直接显示在卡片上 —— 手机上没法开 DevTools，这是唯一的眼睛
@@ -410,10 +420,15 @@ private fun LabItemPreview(item: LabRemote.Item, ssh: SshSession?, full: Boolean
                                     return true
                                 }
                             }
-                            // ⚠️ **等布局定了再加载。** WebView 刚建出来是 0×0，页面这时候读到的
-                            // innerWidth/innerHeight 是 0，画布就 0×0；等到有尺寸再 load，首帧就对。
-                            androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(this, null)
-                            post { loadDataWithBaseURL(null, h, "text/html", "utf-8", null) }
+                            // ⚠️⚠️ **必须等 View 真有了尺寸再加载页面。** 模拟器上抓到的根因（#209）：
+                            // WebView 还是 0×0 时 Chromium 给页面的视口是 1424（可见区的 4 倍），动画页
+                            // 那一刻按 1424 建画布，3700px 见方超过瓦片内存上限不画；而且这个宽内容会把
+                            // 布局视口一直撑在 1424，之后有了尺寸也回不来。`post {}` 不够（那时还没布局），
+                            // 要挂在 onLayoutChange 上，宽高都 > 0 才 load，且只 load 一次。
+                            var loaded = false
+                            fun loadOnce() { if (!loaded && width > 0 && height > 0) { loaded = true; loadDataWithBaseURL(null, h, "text/html", "utf-8", null) } }
+                            addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> loadOnce() }
+                            post { loadOnce() }
                         } },
                         update = { },
                         modifier = Modifier.fillMaxSize(),
