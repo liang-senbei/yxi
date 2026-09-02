@@ -634,6 +634,9 @@
   ⏳ **就差 HTTPS**：要 `dl.keuury.com` A→64.90.25.56 的 DNS 记录（R2 令牌改不了 DNS，见 #123），
   记录一通就 certbot 签证书（hk13 已有 certbot，别的站在用）。在此之前站是活的、只是 HTTP + 靠 IP:8899 访问。
   ⚠️ **App 内更新走 SFTP**（连的那台的 `~/.yxi/`），跟 hk13 这套 HTTP 分发**互不相干**，改这边不影响升级。
+- ✅ **0.9.75（2026-09-02）**：开屏动效**四款随机轮播**（`Splash.ROTATION`：粒子聚合 / 星尘汇聚 / 旋涡 / 星点闪现，
+  不连续重复；用户在实验室里选的），三款新原生实现 `SplashStardust/Vortex/Sparkle.kt`（子代理从网页版移植），
+  Mac 模拟器里冷启动五次截帧验证过。笔触书写 / 墨迹落定 / Y 落下留着备用。
 - ✅ **0.9.74（2026-09-02）**：实验室网页预览**真修好了，Mac 模拟器里验证过**（#209：WebView layoutParams 要
   match_parent，否则 100vh = 0）。⚠️ 界面验证以后走**用户 Mac 上的模拟器**（`~/yxi-build/mac-emu.sh`，#206），本机不起模拟器。
 - ✅ **0.9.73（2026-09-02）**：文件预览里 Markdown 的 HTML `<img>` 也能显示（`agent/MarkdownFix.kt`，#208）。

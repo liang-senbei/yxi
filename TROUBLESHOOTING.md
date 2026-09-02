@@ -4111,3 +4111,14 @@ CSS 单位全部是 0。`innerHeight` 照样报 View 的高度，所以只看 JS
 ⚠️ 通则：**Compose 里放 WebView，第一件事就是把 layoutParams 设成 match_parent**。
 ⚠️ 排查网页在 WebView 里的问题，最快的路是**把诊断信息打在页面上**（叠层 / onerror）再截图，
 而不是猜 WebView 的设置 —— 这次光猜设置就发了三版（0.9.71～0.9.73）没打中。
+
+## #210 同一个包里两个文件各自 `private class Field` —— Kotlin 报 Redeclaration
+
+**症状**：三个子代理照着 `SplashParticles.kt` 的骨架各写一个开屏方案，都顺手抄了 `private class Field(...)`。
+编译报 `SplashParticles.kt:118 Redeclaration`，另一个文件里 `field.bw` / `field.t0` 全部 Unresolved（它解析到了别人的 Field）。
+
+**根因**：顶层 `private` 类只是「文件内可见」，但**它编译出来的 JVM 类名是全包名**（`app.yxi.ui.splash.Field`），
+两个文件撞名就是重声明。顶层 private **函数 / 常量**不会撞（各自进 `XxxKt` 类），类会。
+
+**修法**：按文件加前缀（`VortexField` / `StardustDust` / `SparkleSparks`）。
+⚠️ 让多个 agent 照一份骨架写同类文件时，规格里写明「顶层 class 名带方案前缀」。

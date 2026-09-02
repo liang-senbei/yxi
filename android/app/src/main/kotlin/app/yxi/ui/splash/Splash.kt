@@ -51,18 +51,28 @@ object Splash {
         Variant("brush", "笔触书写", "像毛笔从左往右把 Yunxi 写出来，前沿带一点渗墨") { SplashBrush(it) },
         Variant("ink", "墨迹落定", "一笔墨从空中落到纸上、渗开、定住，再扫过一道光") { SplashInk(it) },
         Variant("particles", "粒子聚合", "几百个小点从四面八方飞进来拼成 Yunxi，再化成真正的字") { SplashParticles(it) },
+        Variant("stardust", "星尘汇聚", "发光的星尘打着旋落定，Gemini 火花的蓝紫粉渐变，落定褪成墨黑再扫一道高光") { SplashStardust(it) },
+        Variant("vortex", "旋涡", "从屏幕外螺旋旋进来带拖尾，飞行中颜色沿色相流动，落定褪成墨黑") { SplashVortex(it) },
+        Variant("sparkle", "星点闪现", "粒子不飞，一颗颗在原位亮起来，一部分是四角星 ✦，最后笔画尖端闪几颗大 ✦") { SplashSparkle(it) },
         Variant("drop", "Y 落下，字展开", "Y 从上面落下弹两下、起一圈涟漪，然后整个字向右展开") { SplashDrop(it) },
     )
 
     /**
-     * 用户在实验室里采纳的那个方案（网页版预览走 yxi-lab 推上去，采纳之后我把这里改成对应的 key 发版）。
-     * ⚠️ **实验室是「服务器推过来给用户审」的地方，不是 App 写死的**（用户定的规矩）—— 所以这里
-     * 没有 App 内的选择器；null = 还没定，冷启动不播。
+     * 冷启动播哪个：**四款随机轮播**（用户 2026-09-02 在实验室里定的：粒子聚合 + 星尘汇聚 + 旋涡 + 星点闪现）。
+     * 笔触书写 / 墨迹落定 / Y 落下留着备用，不在轮播里。
+     * ⚠️ 实验室是「服务器推过来给用户审」的地方，App 里没有选择器 —— 改轮播名单就改这里发版。
      */
-    // 用户 2026-09-02 在实验室里定的：粒子聚合上；笔触书写 / 墨迹落定 / Y 落下留着备用；光晕绽放淘汰（文件已删）
-    val DEFAULT_KEY: String? = "particles"
+    val ROTATION = listOf("particles", "stardust", "vortex", "sparkle")
 
-    fun chosen(ctx: Context): Variant? = variants.firstOrNull { it.key == DEFAULT_KEY }
+    /** 每次冷启动随机挑一个，**不重复上一次**（连着两次一样看着像坏了）。 */
+    fun chosen(ctx: Context): Variant? {
+        val prefs = ctx.getSharedPreferences("yxi", Context.MODE_PRIVATE)
+        val last = prefs.getString("splash.last", null)
+        val pool = ROTATION.filter { it != last }.ifEmpty { ROTATION }
+        val key = pool.random()
+        prefs.edit().putString("splash.last", key).apply()
+        return variants.firstOrNull { it.key == key }
+    }
 }
 
 /**
