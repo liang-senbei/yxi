@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Yunxi · sparkle</title>
+<style>
+html,body{margin:0;height:100%;background:#fff;overflow:hidden}
+canvas{display:block;width:100vw;height:100vh;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+#hint{position:fixed;left:0;right:0;bottom:10px;text-align:center;font:12px/1 system-ui,-apple-system,"PingFang SC","Noto Sans CJK SC",sans-serif;color:#b5b5b5;pointer-events:none;user-select:none}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hint">点一下重播</div>
+<script>
+(function(){
+'use strict';
+var LOGO='data:image/png;base64,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';
+var IW=564, IH=349;                                   // logo 像素尺寸
+var cv=document.getElementById('c'), ctx=cv.getContext('2d');
+var TAU=Math.PI*2, HPI=Math.PI/2, QPI=Math.PI/4;
+
+// ---- 时间线 (ms)
+var T_GLINT=1300, T_FADE0=1700, T_FADE1=2100, T_END=2200, T_HOLD=2000;
+var POP=220, FADE=400;                                // 弹出时长 / 褪成墨色时长
+
+// ---- 粒子仓库（sample() 只填一次）
+var N=0, img, pos, t0, rad, rot, kind, col;
+// glint：笔画尖端，图像坐标 / 屏幕坐标 / 起始时刻
+var G=0, gImg=new Float32Array(8), gPos=new Float32Array(8), gT=new Float32Array(4);
+
+// ---- 调色板：16 个 x 分桶 × 9 级褪色（火花渐变 → 墨黑），draw 里只查表不拼字符串
+var STOPS=[[0x42,0x85,0xF4],[0x9B,0x72,0xCB],[0xD9,0x65,0x70]], INK=0x11, pal=[];
+for(var b=0;b<16;b++){
+  var fx=(b+0.5)/16, seg=fx<0.5?0:1, u=(fx-seg*0.5)*2, c0=STOPS[seg], c1=STOPS[seg+1];
+  for(var s=0;s<9;s++){
+    var k=s/8, ch=[0,0,0];
+    for(var j=0;j<3;j++) ch[j]=Math.round((c0[j]+(c1[j]-c0[j])*u)*(1-k)+INK*k);
+    pal.push('rgb('+ch[0]+','+ch[1]+','+ch[2]+')');
+  }
+}
+
+// ---- 采样：离屏 canvas 读 alpha，每 5px 取一点，随机丢掉一半多一点（落在 600~900），抖 ±2px
+function sample(image){
+  var oc=document.createElement('canvas'); oc.width=IW; oc.height=IH;
+  var o=oc.getContext('2d'); o.drawImage(image,0,0);
+  var d=o.getImageData(0,0,IW,IH).data;
+  var xs=[], ys=[], ex=[], ey=[], ev=[], cs=[], sn=[], k, x, y;
+  for(k=0;k<8;k++){ ex.push(0); ey.push(0); ev.push(-1e9); cs.push(Math.cos(k*QPI)); sn.push(Math.sin(k*QPI)); }
+  for(y=0;y<IH;y+=5) for(x=0;x<IW;x+=5){
+    if(d[(y*IW+x)*4+3]<=128) continue;
+    for(k=0;k<8;k++){ var v=x*cs[k]+y*sn[k]; if(v>ev[k]){ ev[k]=v; ex[k]=x; ey[k]=y; } }   // 8 个方向的最远点
+    if(Math.random()>=0.42) continue;
+    xs.push(x+Math.random()*4-2); ys.push(y+Math.random()*4-2);
+  }
+  N=xs.length;
+  img=new Float32Array(N*2); pos=new Float32Array(N*2);
+  t0=new Float32Array(N); rad=new Float32Array(N); rot=new Float32Array(N);
+  kind=new Uint8Array(N); col=new Uint8Array(N);
+  for(var i=0;i<N;i++){
+    img[i*2]=xs[i]; img[i*2+1]=ys[i];
+    kind[i]=Math.random()<0.08?1:0;                    // 8% 四角星
+    rad[i]=(0.75+Math.random()*0.4)*(kind[i]?2.5:1);
+    rot[i]=Math.random()*TAU;
+    col[i]=Math.min(15,(xs[i]/IW*16)|0);
+  }
+  shuffleTimes();
+  // glint 落点 = 8 个方向的最远点里互相隔 ≥110px 的前 4 个（就是笔画尖端），按 x 排序、从左到右错开
+  var sel=[];
+  for(k=0;k<8&&sel.length<4;k++){
+    var ok=true;
+    for(j=0;j<sel.length;j++){ var dx=ex[k]-sel[j][0], dy=ey[k]-sel[j][1]; if(dx*dx+dy*dy<110*110){ ok=false; break; } }
+    if(ok) sel.push([ex[k],ey[k]]);
+  }
+  sel.sort(function(a,b){ return a[0]-b[0]; });
+  G=sel.length;
+  for(k=0;k<G;k++){ gImg[k*2]=sel[k][0]; gImg[k*2+1]=sel[k][1]; gT[k]=T_GLINT+k*80; }
+}
+function shuffleTimes(){                               // 出现时刻 0~1200ms，左边先亮
+  for(var i=0;i<N;i++) t0[i]=(img[i*2]/IW)*700+Math.random()*500;
+}
+
+// ---- 布局：logo 宽 = 屏宽 58%，水平居中，中心在 45% 屏高
+var W=0,H=0, rx=0,ry=0,rw=0,rh=0, unit=1, glow=null;
+function layout(){
+  W=window.innerWidth; H=window.innerHeight;
+  var dpr=Math.min(window.devicePixelRatio||1,3);
+  cv.width=Math.round(W*dpr); cv.height=Math.round(H*dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  rw=W*0.58; rh=rw*IH/IW; rx=(W-rw)/2; ry=H*0.45-rh/2;
+  unit=rw/IW*4.2;                                      // 普通点半径 ≈ 1.1~1.6px（预览尺寸下）
+  for(var i=0;i<N;i++){ pos[i*2]=rx+img[i*2]/IW*rw; pos[i*2+1]=ry+img[i*2+1]/IH*rh; }
+  for(i=0;i<G;i++){ gPos[i*2]=rx+gImg[i*2]/IW*rw; gPos[i*2+1]=ry+gImg[i*2+1]/IH*rh; }
+  glow=ctx.createRadialGradient(W/2,H*1.02,0,W/2,H*1.02,Math.max(W,H)*0.6);
+  glow.addColorStop(0,'rgba(66,133,244,0.12)'); glow.addColorStop(1,'rgba(66,133,244,0)');
+}
+
+// ---- 四角星 ✦：四个尖角，腰部内收（控制点略过圆心，腰 ≈ 0.31r）
+function star(x,y,r,a){
+  ctx.moveTo(x+r*Math.cos(a), y+r*Math.sin(a));
+  for(var i=1;i<=4;i++){
+    var am=a+(i-0.5)*HPI, ai=a+i*HPI;
+    ctx.quadraticCurveTo(x-r*0.08*Math.cos(am), y-r*0.08*Math.sin(am), x+r*Math.cos(ai), y+r*Math.sin(ai));
+  }
+}
+
+// ---- 逐帧
+var start=0, logo=new Image();
+function frame(now){
+  if(W!==window.innerWidth||H!==window.innerHeight) layout();
+  var t=now-start;
+  if(t>T_END+T_HOLD){ restart(now); t=0; }
+  var i, x, y, r, age;
+
+  ctx.globalAlpha=1; ctx.fillStyle='#fff'; ctx.fillRect(0,0,W,H);
+  ctx.globalAlpha=Math.min(1,t/500); ctx.fillStyle=glow; ctx.fillRect(0,0,W,H);
+
+  var f=t<T_FADE0?0:t>=T_FADE1?1:(t-T_FADE0)/(T_FADE1-T_FADE0); f=f*f*(3-2*f);
+  var layer=1-f;
+  if(layer>0){
+    // 已定型的点：一条 path 一次 fill
+    ctx.beginPath();
+    for(i=0;i<N;i++){
+      age=t-t0[i]; if(age<FADE) continue;
+      x=pos[i*2]; y=pos[i*2+1]; r=rad[i]*unit;
+      if(kind[i]) star(x,y,r,rot[i]+QPI); else { ctx.moveTo(x+r,y); ctx.arc(x,y,r,0,TAU); }
+    }
+    ctx.globalAlpha=layer; ctx.fillStyle='#111'; ctx.fill();
+    // 正在闪现的点：半径 0 → 1.6 → 1（back-out 形状，220ms），alpha 100ms 内到 1，400ms 内褪成墨色
+    for(i=0;i<N;i++){
+      age=t-t0[i]; if(age<0||age>=FADE) continue;
+      var p=age<POP?age/POP:1, sc=p<1?p*(8.7+p*(-14.4+6.7*p)):1;
+      x=pos[i*2]; y=pos[i*2+1]; r=rad[i]*unit*sc;
+      ctx.globalAlpha=layer*(age<100?age/100:1);
+      ctx.fillStyle=pal[col[i]*9+(age<100?0:((age-100)/(FADE-100)*8)|0)];
+      ctx.beginPath();
+      if(kind[i]) star(x,y,r,rot[i]+QPI*(1-(1-p)*(1-p))); else ctx.arc(x,y,r,0,TAU);
+      ctx.fill();
+    }
+    // glint：笔画尖端的白色 ✦，半径 8/10px，alpha 0→0.9→0，350ms，下面垫一颗淡蓝光晕
+    for(i=0;i<G;i++){
+      var q=(t-gT[i])/350; if(q<=0||q>=1) continue;
+      var a=Math.sin(q*Math.PI)*0.9, R=(8+(i&1)*2)*(0.55+0.45*(1-(1-q)*(1-q))), ang=q*0.5;
+      x=gPos[i*2]; y=gPos[i*2+1];
+      ctx.globalAlpha=layer*a*0.35; ctx.fillStyle='#8ab4f8'; ctx.beginPath(); star(x,y,R*1.7,ang); ctx.fill();
+      ctx.globalAlpha=layer*a; ctx.fillStyle='#fff'; ctx.beginPath(); star(x,y,R,ang); ctx.fill();
+    }
+  }
+  if(f>0){ ctx.globalAlpha=f; ctx.drawImage(logo,rx,ry,rw,rh); }
+  requestAnimationFrame(frame);
+}
+function restart(now){ start=now; shuffleTimes(); }
+cv.addEventListener('pointerdown', function(){ restart(performance.now()); }, {passive:true});
+
+logo.onload=function(){
+  sample(logo);
+  layout();
+  start=performance.now();
+  requestAnimationFrame(frame);
+};
+logo.src=LOGO;
+})();
+window.addEventListener('resize', layout);
+</script>
+</body>
+</html>
