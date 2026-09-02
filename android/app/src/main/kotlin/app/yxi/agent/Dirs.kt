@@ -74,9 +74,11 @@ object Dirs {
      *
      * 两边都过一遍 `cd && pwd -P`，免得 `/root/src` 这种软链把比较搞砸。
      */
-    fun createCommand(dir: String, session: String): String {
+    fun createCommand(dir: String, session: String, agent: String = "claude"): String {
         val d = q(dir.trimEnd('/').ifBlank { "/" })
         val n = q(session)
+        // 跑哪个 agent：claude / codex。⚠️ 只认这两个，别的一律退回 claude —— 这行最终是 send-keys 进 shell 的
+        val a = if (agent == "codex") "codex" else "claude"
         return """
             d='$d'; n='$n'
             mkdir -p "${'$'}d" 2>/dev/null
@@ -90,7 +92,7 @@ object Dirs {
               tmux kill-session -t "${'$'}n" 2>/dev/null
               echo "$TAG:wrongdir:${'$'}got"; exit 0
             fi
-            tmux send-keys -t "${'$'}n" 'claude' Enter
+            tmux send-keys -t "${'$'}n" '$a' Enter
             echo '$TAG:ok'
         """.trimIndent()
     }

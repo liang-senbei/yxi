@@ -197,9 +197,34 @@ if [ "${1:-}" = "--publish" ]; then
       fi
       rm -f "$TMPAPK"
     fi
+    publish_server || true
   fi
   exit 0
 fi
+
+# ────────────────────────────────────────────────────────────────
+# --publish-server：把服务器侧那几个脚本推到公网下载页，给**新客户的一键装机**用：
+#   https://yxi.keuury.com/bootstrap.sh          ← 客户在自己服务器上 `curl … | bash`，或手机上点「一键装机」
+#   https://yxi.keuury.com/server/{install.sh,yxi-hook,yxi-hub,yxi-lab}   ← bootstrap 从这儿下
+# ⚠️ 仓库是私有的，客户拿不到 git；这几个文件里没有任何密钥，公开无妨。
+# `--publish`（发 APK）结束时也会顺手跑一遍 —— 手机上那版 App 和它依赖的服务器脚本要一起发。
+# ────────────────────────────────────────────────────────────────
+publish_server() {
+  local here; here="$(cd "$(dirname "$0")" && pwd)"
+  if ! ssh -o BatchMode=yes -o ConnectTimeout=8 hk13 true 2>/dev/null; then
+    echo "  ⚠️ 连不上 hk13，服务器侧脚本没发到公网。"; return 1
+  fi
+  ssh hk13 "mkdir -p /var/www/yxi/server"
+  scp -q "$here/install.sh" "$here/yxi-hook" "$here/yxi-hub" "$here/yxi-lab" hk13:/var/www/yxi/server/
+  scp -q "$here/bootstrap.sh" hk13:/var/www/yxi/bootstrap.sh
+  # 传完校验（#69 的教训：传完不校验 = 没传）
+  local a b
+  a=$(sha256sum "$here/bootstrap.sh" | cut -d" " -f1)
+  b=$(curl -fsS --max-time 30 https://yxi.keuury.com/bootstrap.sh | sha256sum | cut -d" " -f1)
+  if [ "$a" = "$b" ]; then echo "  · 服务器侧脚本已发到公网（bootstrap.sh sha256 ${a:0:12}…）"
+  else echo "  ❌ 公网上的 bootstrap.sh 对不上（CDN 缓存？）：本地 ${a:0:12}… ≠ 公网 ${b:0:12}…"; return 1; fi
+}
+if [ "${1:-}" = "--publish-server" ]; then publish_server; exit $?; fi
 
 if [ "${1:-}" = "--uninstall" ]; then uninstall; exit 0; fi
 

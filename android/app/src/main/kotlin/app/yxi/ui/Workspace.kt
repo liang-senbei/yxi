@@ -102,7 +102,11 @@ fun Workspace(
     /** null = 还没查；"" = 有转录；非空 = 没有的原因 */
     var chatBlocked by remember(host.id, sessionName) { mutableStateOf<String?>(null) }
     var mode by remember(host.id) {
-        mutableStateOf(initial ?: Prefs.mode(ctx, host.id, startSession) ?: Mode.Chat)
+        mutableStateOf(
+            (initial ?: Prefs.mode(ctx, host.id, startSession) ?: Mode.Chat)
+                // Codex 会话没有对话视图（转录是 Claude Code 的格式），默认落到终端
+                .let { if (it == Mode.Chat && startSession?.startsWith("cx-") == true) Mode.Terminal else it },
+        )
     }
     var switcher by remember { mutableStateOf(false) }
     /**
@@ -224,6 +228,7 @@ fun Workspace(
             status = null
             chatBlocked = when {
                 sessionName == null -> t("没有指定会话")
+                sessionName.orEmpty().startsWith("cx-") -> t("Codex 会话没有对话视图 —— 用终端")
                 TranscriptStream.latestFor(it, cwd, sessionName.orEmpty()) == null -> t("这个会话里没跑过 Claude Code")
                 else -> ""
             }
@@ -244,6 +249,7 @@ fun Workspace(
         // 对话模式要有转录才有内容可渲染。没有就置灰**并说明原因** —— 灰着不说话最气人
         chatBlocked = when {
             sessionName == null -> t("没有指定会话")
+            sessionName.orEmpty().startsWith("cx-") -> t("Codex 会话没有对话视图 —— 用终端")
             TranscriptStream.latestFor(ssh!!, cwd, sessionName.orEmpty()) == null -> t("这个会话里没跑过 Claude Code")
             else -> ""
         }
@@ -410,7 +416,7 @@ fun Workspace(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
-                        sessionName?.removePrefix("cc-") ?: host.alias,
+                        sessionName?.let { app.yxi.agent.Session.shortOf(it) } ?: host.alias,
                         style = MaterialTheme.typography.titleMedium, maxLines = 1,
                     )
                     Text("▾", style = MaterialTheme.typography.labelMedium, color = Muted)

@@ -39,9 +39,22 @@ data class Session(
     /** cc-state 写的一句话：「运行命令: …」「等待你(决策/输入)」之类 */
     val detail: String,
     val stateTs: Double,
+    /** 窗格里正在跑的命令（tmux `pane_current_command`）：claude / codex / bash … */
+    val cmd: String = "",
 ) {
-    /** 去掉 `cc-` 前缀的短名，界面上用 */
-    val short get() = name.removePrefix("cc-")
+    /** 去掉 `cc-` / `cx-` 前缀的短名，界面上用 */
+    val short get() = shortOf(name)
+    /**
+     * 这个会话里跑的是谁。**Codex 按名字前缀 `cx-` 或窗格里正在跑的命令认**（手机上开的用前缀，
+     * 用户自己在终端里 `tmux new -s foo` 然后跑 codex 的靠命令名）；其余一律当 Claude —— 老行为不变。
+     */
+    val agent: String get() = if (name.startsWith("cx-") || cmd == "codex") "codex" else "claude"
+    val isCodex get() = agent == "codex"
+
+    companion object {
+        /** 手机上开的会话：Claude 叫 `cc-<目录>`，Codex 叫 `cx-<目录>`。界面上都只显示目录名。 */
+        fun shortOf(name: String) = name.removePrefix("cc-").removePrefix("cx-")
+    }
 }
 
 /**
@@ -66,7 +79,7 @@ object SessionProbe {
         m=$MARKER
         s(){ printf '%s\t%s\n' "${'$'}m" "${'$'}1"; }
         s tmux_begin
-        tmux list-sessions -F '#{session_name}|#{session_windows}|#{session_activity}|#{session_attached}|#{pane_current_path}' 2>/dev/null || true
+        tmux list-sessions -F '#{session_name}|#{session_windows}|#{session_activity}|#{session_attached}|#{pane_current_path}|#{pane_current_command}' 2>/dev/null || true
         s tmux_end
         s ev_begin
         tail -n 200 ${'$'}HOME/.yxi/events.jsonl 2>/dev/null || true
@@ -89,10 +102,19 @@ object SessionProbe {
         # 分组表（手机写、组里的 agent 读）。就一个小文件，几乎不花时间。
         cat ${'$'}HOME/.yxi/groups.json 2>/dev/null || true
         s gp_end
+        s tool_begin
+        # 这台机器上装了什么：没 tmux / 没 claude 也没 codex 的新机器，看板要画「一键装机」而不是空白
+        command -v tmux claude codex 2>/dev/null || true
+        s tool_end
     """.trimIndent()
 
     /** 一次抓取拿到的全部东西：会话 + 分组表。 */
-    data class Snap(val sessions: List<Session>, val groups: Groups.Table)
+    data class Snap(
+        val sessions: List<Session>,
+        val groups: Groups.Table,
+        /** 这台机器上装了什么（`tmux` / `claude` / `codex` 的子集）。看板据此画「一键装机」。 */
+        val tools: Set<String> = emptySet(),
+    )
 
     /**
      * 只要会话。**七个调用点都只关心这个**，所以保持原样别动它们 ——
@@ -195,6 +217,9 @@ object SessionProbe {
             val p = line.split('|')
             if (p.size < 5) return@mapNotNull null
             val name = p[0]
+            // ⚠️ 手机自己起的内部会话（GitHub / MCP / Claude / Codex 登录用的 `yxi-auth-*`）不上看板 ——
+            // 它们跑完 `sleep 900` 自己就没了，摆出来只会让人以为多了两个空闲会话去杀。
+            if (name.startsWith("yxi-auth-")) return@mapNotNull null
             // Claude Code 自己那份优先；没有才退回 cc-state（我们自己机器上才有）
             val st = ccStates[name] ?: states[name]
             Session(
@@ -207,9 +232,12 @@ object SessionProbe {
                 // 状态源给的 detail 优先（它更「此刻」）；空了才用 hook 那句摘要
                 detail = st?.second?.takeIf { it.isNotBlank() } ?: evPreview[name].orEmpty(),
                 stateTs = st?.third ?: 0.0,
+                cmd = p.getOrNull(5).orEmpty(),
             )
         }.toList(),
             Groups.parse(extract(out, "gp")),
+            tools = extract(out, "tool").lineSequence()
+                .map { it.trim().substringAfterLast('/') }.filter { it.isNotEmpty() }.toSet(),
         )
     }
 

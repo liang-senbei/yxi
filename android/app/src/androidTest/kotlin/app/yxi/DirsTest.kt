@@ -82,4 +82,11 @@ class DirsTest {
         // 开错地方要把它跑去哪儿了说出来
         assertEquals("/root", (Dirs.madeFrom("${Dirs.TAG}:wrongdir:/root") as Dirs.Made.Failed).detail)
     }
+
+    @Test fun 开会话_跑哪个agent() {
+        assertTrue(Dirs.createCommand("/a", "cc-a").contains("'claude' Enter"))
+        assertTrue(Dirs.createCommand("/a", "cx-a", "codex").contains("'codex' Enter"))
+        // 只认两个名字：别的一律退回 claude —— 这行是要 send-keys 进 shell 的
+        assertTrue(Dirs.createCommand("/a", "cc-a", "rm -rf /").contains("'claude' Enter"))
+    }
 }

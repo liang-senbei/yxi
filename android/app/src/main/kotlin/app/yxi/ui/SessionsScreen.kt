@@ -120,6 +120,10 @@ fun SessionsScreen(
     // 「回它一句」目标 —— 非空就弹底部输入框，送键到那个会话（不进对话）
     var replyTo by remember { mutableStateOf<Session?>(null) }
     var newSession by remember { mutableStateOf(false) }
+    /** 「一键装机」的进度框 */
+    var setup by remember { mutableStateOf(false) }
+    /** 这台机器上装了什么（tmux / claude / codex）；null = 还没同步过 */
+    var tools by remember(host.id) { mutableStateOf<Set<String>?>(null) }
 
     /**
      * 这次连上之后有没有成功刷过。没有 = 屏幕上这份是**上一次**的，得标「N 分钟前」。
@@ -154,7 +158,7 @@ fun SessionsScreen(
                     // 它原来是「点了才去抓」，打开菜单要干等一趟 SSH 往返
                     .onSuccess {
                         app.yxi.agent.Recent.put(ctx, host.id, it.sessions)
-                        onSessions(it.sessions); groups = it.groups; status = ""
+                        onSessions(it.sessions); groups = it.groups; tools = it.tools; status = ""
                         fresh = true
                     }
                     .onFailure {
@@ -327,7 +331,7 @@ fun SessionsScreen(
                 if (ssh == null) onRetry() else scope.launch {
                     val s = ssh
                     if (s != null) runCatching { SessionProbe.snapshotFull(s) }
-                        .onSuccess { onSessions(it.sessions); groups = it.groups; status = "" }
+                        .onSuccess { onSessions(it.sessions); groups = it.groups; tools = it.tools; status = "" }
                     // 转一下让人看见它确实动了 —— 一闪而过的刷新等于没反馈
                     delay(400)
                 }
@@ -381,6 +385,11 @@ fun SessionsScreen(
                         )
                     }
                 }
+            }
+            // 新机器：连上了、也同步过了，但 claude 和 codex 一个都没有 —— 空看板不解释等于坏了。
+            // 画一张「一键装机」卡（[SetupCard]），装完这张卡自己消失。
+            tools?.let { tl ->
+                if (fresh && "claude" !in tl && "codex" !in tl) item(key = "setup") { SetupCard("tmux" !in tl) { setup = true } }
             }
             // ⚠️ 置顶的**从原来的组里拿出来**单独放最上面。留在原组只加个图标的话，
             // 会话一多（实测 22 个）照样要翻半天才找到 —— 那就等于没置顶
@@ -545,7 +554,7 @@ fun SessionsScreen(
                         onWake = {
                             val s0 = ssh ?: return@DormantCard
                             scope.launch {
-                                status = t("在拉起 %s…").format(n.removePrefix("cc-"))
+                                status = t("在拉起 %s…").format(Session.shortOf(n))
                                 // ⚠️ 复用 ＋ 号那套：会建目录、而且**回头核对真的开在那儿**
                                 //    （tmux 对不存在的目录会假装成功然后开在 $HOME，见 Dirs）
                                 val made = app.yxi.ssh.catching {
@@ -601,7 +610,7 @@ fun SessionsScreen(
         val busy = s0.state == SessionState.Working || s0.state == SessionState.NeedsYou
         AlertDialog(
             onDismissRequest = { killing = null },
-            title = { Text(t("终止 %s？").format(s0.name.removePrefix("cc-"))) },
+            title = { Text(t("终止 %s？").format(s0.short)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
@@ -666,25 +675,36 @@ fun SessionsScreen(
         )
     }
 
+    if (setup) SetupDialog(ssh) { ok ->
+        setup = false
+        // 装好了立刻刷一遍：那张「一键装机」卡要马上消失，＋ 才能开会话
+        val s = ssh
+        if (ok == true && s != null) scope.launch {
+            runCatching { SessionProbe.snapshotFull(s) }
+                .onSuccess { onSessions(it.sessions); groups = it.groups; tools = it.tools }
+        }
+    }
+
     if (newSession) {
         NewSessionDialog(
             ssh = ssh,
+            tools = tools.orEmpty(),
             // ⚠️ **传的是「已经开着会话的目录」，用来把它们从候选里剔掉** ——
             // 原来这个参数传的是同一批目录、却当成「推荐去处」列出来，正好反了：
             // 点进去只会跳回同一个会话，这个入口等于什么也没做。
             taken = sessions.map { it.cwd },
             onDismiss = { newSession = false },
-            onCreate = { dir ->
+            onCreate = { dir, agent ->
                 newSession = false
                 val s = ssh ?: return@NewSessionDialog
                 val base = dir.trimEnd('/').substringAfterLast('/').ifBlank { "work" }
                     .filter { it.isLetterOrDigit() || it in "._-" }.ifBlank { "work" }
-                val full = "cc-$base"
+                val full = (if (agent == "codex") "cx-" else "cc-") + base
                 scope.launch {
                     // ⚠️ **不信 tmux 的退出码。** 目录不存在时它照样返回 0，然后开在 $HOME ——
                     // 见 Dirs.createCommand。这里只认它自己回报的那行结果，
                     // 开成了才跳进去；没开成就把原因摆在会话页顶上，别让人对着空会话猜。
-                    val made = app.yxi.ssh.catching { s.exec(app.yxi.agent.Dirs.createCommand(dir, full)) }
+                    val made = app.yxi.ssh.catching { s.exec(app.yxi.agent.Dirs.createCommand(dir, full, agent)) }
                         .map { app.yxi.agent.Dirs.madeFrom(it) }
                         .getOrElse { app.yxi.agent.Dirs.Made.Failed("unknown", it.message.orEmpty()) }
                     when (made) {
@@ -904,6 +924,11 @@ private fun SessionCard(
             // 第一行：状态点 · 名字 ……… 多久没动 · 已连 · ☆ · 图钉
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Box(Modifier.size(7.dp).clip(CircleShape).background(dot))
+                // Codex 会话标一下：它没有对话视图、没有等你/干活中的状态源，点开是终端
+                if (s.isCodex) Text(
+                    "Codex", Modifier.clip(Pill).background(MaterialTheme.colorScheme.tertiaryContainer).padding(7.dp, 1.dp),
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
                 Text(
                     s.short, style = MaterialTheme.typography.titleMedium, maxLines = 1,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
@@ -936,9 +961,10 @@ private fun SessionCard(
                 }
             }
             // 第二行：它此刻的话（Claude Code 自己的状态词），一行省略
-            if (s.detail.isNotEmpty()) {
+            val detail = s.detail.ifEmpty { if (s.isCodex) t("Codex 会话 —— 状态和对话在终端里看") else "" }
+            if (detail.isNotEmpty()) {
                 Text(
-                    s.detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     modifier = Modifier.padding(start = 13.dp),
                 )
@@ -1054,10 +1080,14 @@ private fun NewSessionDialog(
     ssh: SshSession?,
     /** 已经开着会话的目录 —— 这些**不出现在候选里** */
     taken: List<String>,
+    /** 这台机器上装了什么 —— 两个 agent 都有才给选；只有一个就用那个 */
+    tools: Set<String>,
     onDismiss: () -> Unit,
-    onCreate: (String) -> Unit,
+    /** (目录, agent)；agent = claude / codex */
+    onCreate: (String, String) -> Unit,
 ) {
     var path by remember { mutableStateOf("") }
+    var agent by remember { mutableStateOf(if ("claude" !in tools && "codex" in tools) "codex" else "claude") }
     var dirs by remember { mutableStateOf<List<String>?>(null) }   // null = 还在找
 
     // 去服务器上问「工作区里还有哪些目录没开会话」。
@@ -1078,9 +1108,24 @@ private fun NewSessionDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    t("选一个还没开会话的目录，会在那儿开一个会话并把 claude 跑起来。"),
+                    t("选一个还没开会话的目录，会在那儿开一个会话并把 %s 跑起来。").format(agent),
                     style = MaterialTheme.typography.labelSmall, color = Dim,
                 )
+                // 两个 agent 都装了才让选。⚠️ 只装了一个就别摆一个灰按钮在那儿 —— 那是「为什么点不了」的来源
+                if ("claude" in tools && "codex" in tools) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("claude" to "Claude Code", "codex" to "Codex").forEach { (k, label) ->
+                        val on = agent == k
+                        Surface(
+                            color = if (on) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                            shape = Pill, modifier = Modifier.clip(Pill).clickable { agent = k },
+                        ) {
+                            Text(
+                                label, Modifier.padding(14.dp, 7.dp), style = MaterialTheme.typography.labelLarge,
+                                color = if (on) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                    }
+                }
                 when {
                     dirs == null -> Text(
                         t("找目录中…"),
@@ -1099,7 +1144,7 @@ private fun NewSessionDialog(
                         dirs!!.forEach { dir ->
                             Surface(
                                 color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = Pill,
-                                modifier = Modifier.fillMaxWidth().clip(Pill).clickable { onCreate(dir) },
+                                modifier = Modifier.fillMaxWidth().clip(Pill).clickable { onCreate(dir, agent) },
                             ) {
                                 Column(Modifier.padding(14.dp, 8.dp)) {
                                     Text(
@@ -1125,7 +1170,7 @@ private fun NewSessionDialog(
             }
         },
         confirmButton = {
-            TextButton(enabled = path.isNotBlank(), onClick = { onCreate(path.trim()) }) { Text(t("开起来")) }
+            TextButton(enabled = path.isNotBlank(), onClick = { onCreate(path.trim(), agent) }) { Text(t("开起来")) }
         },
         dismissButton = { TextButton(onDismiss) { Text(t("取消")) } },
     )
@@ -1365,7 +1410,7 @@ private fun DormantCard(name: String, cwd: String?, onWake: () -> Unit, onForget
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Column(Modifier.weight(1f)) {
-                Text(name.removePrefix("cc-"), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(Session.shortOf(name), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
                     // ⚠️ 没记住 cwd 的（老版本置顶的）要**说清楚**会开在 $HOME，
                     // 不然点下去开错地方，用户以为「唤起」坏了

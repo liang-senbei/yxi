@@ -24,7 +24,7 @@ import app.yxi.ssh.SshSession
  */
 object Connect {
 
-    enum class Kind { GH, MCP, INFO }
+    enum class Kind { AGENT, GH, MCP, INFO }
 
     data class Service(
         val key: String,
@@ -40,6 +40,9 @@ object Connect {
 
     /** ⚠️ 地址都在服务器上探过活（2026-09-02，401 = 在线要认证，200 = 免认证）。 */
     val CATALOG = listOf(
+        // 两个 agent 自己的登录放最上面：没登录，下面接什么都白搭
+        Service("claude", "Claude Code", "Anthropic 的 agent —— 用 Claude 订阅或 Console 账号登录", kind = Kind.AGENT),
+        Service("codex", "Codex", "OpenAI 的 agent —— 用 ChatGPT 账号登录（设备码）", kind = Kind.AGENT),
         Service("github", "GitHub", "git 推拉、仓库 / PR / Issue", kind = Kind.GH),
         Service("notion", "Notion", "读写页面和数据库", "https://mcp.notion.com/mcp"),
         Service("linear", "Linear", "工单", "https://mcp.linear.app/mcp"),
@@ -71,13 +74,26 @@ object Connect {
         val ghUser: String? = null,
         val ghInstalled: Boolean = true,
         val claudeInstalled: Boolean = true,
+        /** Claude Code 登录的账号（邮箱，拿不到就是订阅类型）；null = 没登录 */
+        val claudeUser: String? = null,
+        val codexInstalled: Boolean = true,
+        val codexLogged: Boolean = false,
+        /** 登录流程和会话都跑在 tmux 里 —— 没有它这一页大半点不了 */
+        val tmuxInstalled: Boolean = true,
         /** MCP 名 → 状态 */
         val mcp: Map<String, State> = emptyMap(),
     ) {
         fun of(s: Service): State = when (s.kind) {
+            Kind.AGENT -> if (if (s.key == "claude") claudeUser != null else codexLogged) State.CONNECTED else State.ABSENT
             Kind.GH -> if (ghUser != null) State.CONNECTED else State.ABSENT
             Kind.MCP -> mcp[s.key] ?: State.ABSENT
             Kind.INFO -> State.ABSENT
+        }
+
+        /** 这一行的东西装了没（只有 agent 那两行会「没装」；没装就给「安装」按钮） */
+        fun installed(s: Service): Boolean = when (s.kind) {
+            Kind.AGENT -> if (s.key == "claude") claudeInstalled else codexInstalled
+            else -> true
         }
     }
 
@@ -86,11 +102,24 @@ object Connect {
     /** 一趟拿全部：gh 登了没、Claude Code 的 MCP 各是什么状态。⚠️ `claude mcp list` 会挨个探活，几秒。 */
     const val STATUS_COMMAND =
         "echo __GH__; command -v gh >/dev/null 2>&1 && gh auth status -h github.com 2>&1 || echo NO_GH; " +
-            "echo __MCP__; command -v claude >/dev/null 2>&1 && claude mcp list 2>/dev/null || echo NO_CLAUDE; echo __END__"
+            "echo __MCP__; command -v claude >/dev/null 2>&1 && claude mcp list 2>/dev/null || echo NO_CLAUDE; " +
+            // ⚠️ 登没登录的命令**退出码非零**（没登录时），不能像上面那样 `||` —— 会把「没登录」错报成「没装」
+            "echo __CLAUDE__; if command -v claude >/dev/null 2>&1; then claude auth status --json 2>/dev/null; else echo NO_CLAUDE; fi; " +
+            "echo __CODEX__; if command -v codex >/dev/null 2>&1; then codex login status 2>/dev/null; else echo NO_CODEX; fi; " +
+            "echo __TMUX__; command -v tmux >/dev/null 2>&1 || echo NO_TMUX; echo __END__"
 
     fun parseStatus(out: String): Status {
         val gh = out.substringAfter("__GH__", "").substringBefore("__MCP__")
-        val mcpText = out.substringAfter("__MCP__", "").substringBefore("__END__")
+        val mcpText = out.substringAfter("__MCP__", "").substringBefore("__CLAUDE__")
+        val claudeText = out.substringAfter("__CLAUDE__", "").substringBefore("__CODEX__")
+        val codexText = out.substringAfter("__CODEX__", "").substringBefore("__TMUX__")
+        val tmuxText = out.substringAfter("__TMUX__", "").substringBefore("__END__")
+        // `claude auth status --json`：{"loggedIn":true,"authMethod":"claude.ai","email":"…","subscriptionType":"max",…}
+        val claudeUser = runCatching {
+            val j = org.json.JSONObject(claudeText.trim())
+            if (!j.optBoolean("loggedIn")) null
+            else j.optString("email").ifBlank { j.optString("subscriptionType").ifBlank { j.optString("authMethod").ifBlank { "已登录" } } }
+        }.getOrNull()
         val user = Regex("""Logged in to github\.com account (\S+)""").find(gh)?.groupValues?.get(1)
         val mcp = HashMap<String, State>()
         for (line in mcpText.lines()) {
@@ -106,6 +135,11 @@ object Connect {
             ghUser = user,
             ghInstalled = !gh.contains("NO_GH"),
             claudeInstalled = !mcpText.contains("NO_CLAUDE"),
+            claudeUser = claudeUser,
+            codexInstalled = !codexText.contains("NO_CODEX"),
+            // `codex login status`：「Logged in using ChatGPT」/「Logged in using an API key」/「Not logged in」
+            codexLogged = codexText.contains("Logged in", ignoreCase = true) && !codexText.contains("Not logged in", ignoreCase = true),
+            tmuxInstalled = !tmuxText.contains("NO_TMUX"),
             mcp = mcp,
         )
     }
@@ -151,6 +185,46 @@ object Connect {
             "--header \"Authorization: Bearer \$T\" >/dev/null 2>&1; fi; echo ok"
 
     fun ghLogout() = "gh auth logout -h github.com >/dev/null 2>&1; claude mcp remove -s user github >/dev/null 2>&1; echo ok"
+
+    // ── 两个 agent 自己的登录 ──
+    //
+    // Claude Code：`claude auth login` 在没浏览器的机器上打一条授权 URL，用户在手机浏览器里登录，
+    // 页面**给一串码**（redirect_uri 指向 platform.claude.com/oauth/code/callback，不是 localhost），
+    // 粘回终端的「Paste code here if prompted >」。所以它不走端口转发，走「粘码」。
+    // ⚠️ `env -u DISPLAY BROWSER=true`：这台机器要是有 VNC 桌面，它会真去开一个 Chrome（#199 那一族）。
+    //
+    // Codex：`codex login --device-auth`，屏幕上给 auth.openai.com/codex/device + 一次性码，跟 GitHub 同款流程。
+
+    fun claudeLoginStart(): String {
+        val t = tmuxFor("claude")
+        return "tmux kill-session -t '$t' 2>/dev/null; tmux new-session -d -s '$t' -x 220 -y 40 " +
+            "'env -u DISPLAY BROWSER=true claude auth login; echo __DONE__\$?; sleep 900'"
+    }
+
+    /** 屏幕上的授权 URL（`…/oauth/authorize?…`），没出来就 null。⚠️ 域名别写死：本月它从 claude.ai 换成了 claude.com/cai。 */
+    fun claudeUrl(pane: String): String? =
+        Regex("""https://\S*oauth/authorize\?\S+""").find(pane)?.value?.trimEnd('.', ',', ')')
+
+    fun codexLoginStart(): String {
+        val t = tmuxFor("codex")
+        return "tmux kill-session -t '$t' 2>/dev/null; tmux new-session -d -s '$t' -x 120 -y 30 " +
+            "'env -u DISPLAY BROWSER=true codex login --device-auth; echo __DONE__\$?; sleep 900'"
+    }
+
+    /**
+     * Codex 的一次性码：
+     * ```
+     * 2. Enter this one-time code (expires in 15 minutes)
+     *    QUUK-AW27Q
+     * ```
+     * ⚠️ 码在**下一行**，而且是 4-5 位（GitHub 是 4-4），别拿 [ghCode] 那条正则去套。
+     */
+    fun codexCode(pane: String): String? =
+        Regex("""one-time code[^\n]*\n\s*([A-Z0-9]{4,6}-[A-Z0-9]{4,6})""").find(pane)?.groupValues?.get(1)
+    const val CODEX_DEVICE_URL = "https://auth.openai.com/codex/device"
+
+    fun agentLogout(key: String) =
+        if (key == "claude") "claude auth logout >/dev/null 2>&1; echo ok" else "codex logout >/dev/null 2>&1; echo ok"
 
     /** 加一个远程 MCP（用户级，所有项目都有）。已存在就当成功。 */
     fun mcpAdd(s: Service): String =

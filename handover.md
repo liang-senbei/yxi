@@ -636,6 +636,19 @@
   ⚠️ **App 内更新走 SFTP**（连的那台的 `~/.yxi/`），跟 hk13 这套 HTTP 分发**互不相干**，改这边不影响升级。
 - ✅ **yxi-hub 多组成员（2026-09-02）**：一个会话在多个组里时，`who`/`context` 按组分开列、`say` 的消息带共同组名
   `[同组 组名 · 谁]`、`all` 必须指明组（#211）。服务器侧改动，已装到本机 `~/.local/bin/yxi-hub`。
+- ✅ **0.9.78（2026-09-02）—— 新客户开箱 + Codex**：
+  · **一键装机**：`server/bootstrap.sh`（公网 `https://yxi.keuury.com/bootstrap.sh`，`./server/install.sh --publish-server` 发布，
+    `--publish` 发 APK 时也顺手发）—— tmux / curl / git / python3（系统包）+ Claude Code（官方原生安装器）+ Codex（GitHub 静态二进制）
+    + Yxi 服务器侧工具，**不需要 Node.js**，幂等。手机端：看板同步后发现 claude / codex 都没有 → 「一键装机」卡（`SetupCard`），
+    手机自己从公网取脚本、heredoc 塞进服务器、nohup 跑、每秒 tail 日志（`agent/Setup.kt`，#215）。全新 Ubuntu 24.04 容器实测装通（#216）。
+  · **Codex 会话**：命名 `cx-<目录>`（Claude 是 `cc-`），窗格里跑的命令是 `codex` 也认；看板卡片标「Codex」芯片、
+    点开默认终端、对话页置灰并说明；「＋」开会话时两个都装了才给选。**没有**状态源 / 通知 / 对话视图（yxi-hook 是 Claude Code 的钩子）。
+  · **登录从手机做**：「配置 → 连接」最上面两行 Claude Code / Codex：没装→「安装」（同一个装机框），装了→「登录」：
+    Claude 是 `claude auth login` 打 URL、页面给码、粘回去；Codex 是 `codex login --device-auth` 设备码（#217）。已登录显示账号、可「退出」。
+  · exec 一律先 `export PATH=$HOME/.local/bin:$PATH`（非交互 ssh 不读 .profile，装在那儿的 claude / codex 原来探不到）。
+  · **Mac 模拟器对着干净容器全程验过**：装机卡 → 装机框（1 分钟装完）→ 卡片消失 → 连接面板两行「登录」→ Codex 设备码出来、
+    Claude 给码框出来（粘错码服务器那头报 Invalid code，App 提示重粘）→ ＋ 选 Codex 开 `cx-demo` → 直接进终端见 Codex 登录菜单 →
+    看板卡片带「Codex」芯片；内部 `yxi-auth-*` 会话不再上看板。真登录（要用户账号）没验，只验到给码/给 URL 那一步。
 - ✅ **0.9.77（2026-09-02）**：文件浏览大目录不卡（#213）、换目录清屏；Markdown 图片按大小分流（#214：>8MB 不加载，
   其余占位慢加载、降采样）。
 - ✅ **0.9.76（2026-09-02）**：文件预览里 Markdown 图片**真显示了**（#212：图片缓存挂在 FileViewer 作用域上，
@@ -916,6 +929,7 @@ macOS runner 编译 → 起 iPhone 16 模拟器 → 装上去 → **在 runner �
 
 | # | 决定 | 理由 / 出处 |
 |---|---|---|
+| D28 | **Codex 是二等公民：会话按前缀分开（`cc-` Claude / `cx-` Codex），Codex 只有终端 + 登录，不做对话视图、状态源和通知；新机器从手机一键装机（`bootstrap.sh` 公网分发，不依赖 Node.js）** | 用户 2026-09-02 站在新客户视角问：「没装 claude code 也没装 codex 会显示什么 / 有没有一键装机（客户连 nodejs 都没有怎么办）/ 会话要不要按 codex 和 claude 分开 / 支持两家认证」。Codex 的转录格式、钩子跟 Claude Code 都不通用，先把「能装、能开、能看、能登录」做扎实；对话视图 / 通知等用户要了再做。 |
 | D27 | **实验室 App 端冻结：不允许直接修改，只提供 `yxi-lab` 接口（`spec` / `template` / `check` / `add --aspect`）。以后 AI 生成新内容只推、不改 App；除非实验室架构本身要调整，且那要用户先拍板** | 用户 2026-09-02：「实验室需要规范，模板和 UI/UX 做好，给出 API 接口方便后面的 AI 生成上传展示，不要每次改一遍实验室」。契约在 `server/LAB.md`（= `yxi-lab spec`）。 |
 | D26 | **实验室跟着服务器走：每台服务器各自一个实验室，互相隔离；实验室里的内容永远不嵌进 App** | 用户 2026-09-02 拍板。内容在各台的 `~/.yxi/lab/`，置顶/采纳按主机分开存；App 只放定稿（D25 的延伸）。 |
 | D25 | **给用户审的东西一律走实验室推送（`yxi-lab add`），不写进 App** | 用户 2026-09-02 重申（开屏动效那次我写进 App 被打回，#204）。审的东西不发版、可随时推撤；App 只放定稿。 |

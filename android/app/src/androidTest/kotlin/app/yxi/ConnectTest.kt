@@ -22,6 +22,16 @@ class ConnectTest {
         notion: https://mcp.notion.com/mcp (HTTP) - ! Needs authentication
         github: https://api.githubcopilot.com/mcp/ (HTTP) - ✓ Connected
         sentry: https://mcp.sentry.dev/mcp (HTTP) - ✗ Failed to connect
+        __CLAUDE__
+        {
+          "loggedIn": true,
+          "authMethod": "claude.ai",
+          "apiProvider": "firstParty",
+          "email": "someone@example.com",
+          "subscriptionType": "max"
+        }
+        __CODEX__
+        Logged in using ChatGPT
         __END__
     """.trimIndent()
 
@@ -32,6 +42,49 @@ class ConnectTest {
         assertEquals(Connect.State.CONNECTED, s.mcp["github"])
         assertEquals(Connect.State.FAILED, s.mcp["sentry"])
         assertTrue(s.ghInstalled && s.claudeInstalled)
+        assertEquals("someone@example.com", s.claudeUser)
+        assertTrue(s.codexInstalled && s.codexLogged && s.tmuxInstalled)
+    }
+
+    @Test fun 状态_新机器_什么都没装() {
+        val s = Connect.parseStatus("__GH__\nNO_GH\n__MCP__\nNO_CLAUDE\n__CLAUDE__\nNO_CLAUDE\n__CODEX__\nNO_CODEX\n__TMUX__\nNO_TMUX\n__END__\n")
+        assertTrue(!s.claudeInstalled && !s.codexInstalled && !s.tmuxInstalled)
+        assertNull(s.claudeUser)
+        assertEquals(Connect.State.ABSENT, s.of(Connect.CATALOG.first { it.key == "claude" }))
+        assertTrue(!s.installed(Connect.CATALOG.first { it.key == "codex" }))
+    }
+
+    @Test fun 状态_装了没登录() {
+        val s = Connect.parseStatus(
+            "__GH__\nNO_GH\n__MCP__\n__CLAUDE__\n{\"loggedIn\": false, \"authMethod\": \"none\"}\n__CODEX__\nNot logged in\n__TMUX__\n__END__\n"
+        )
+        assertTrue(s.claudeInstalled && s.codexInstalled && s.tmuxInstalled)
+        assertNull(s.claudeUser)
+        assertTrue(!s.codexLogged)
+    }
+
+    /** 2026-09-02 服务器上 `codex login --device-auth` 的原文 */
+    @Test fun codex_一次性码_在下一行() {
+        val pane = """
+            Follow these steps to sign in with ChatGPT using device code authorization:
+            1. Open this link in your browser and sign in to your account
+               https://auth.openai.com/codex/device
+            2. Enter this one-time code (expires in 15 minutes)
+               QUUK-AW27Q
+            Continue only if you started this login in Codex.
+        """.trimIndent()
+        assertEquals("QUUK-AW27Q", Connect.codexCode(pane))
+        assertNull(Connect.codexCode("Welcome to Codex"))
+    }
+
+    /** 2026-09-02 `claude auth login` 无浏览器时的原文（域名已经从 claude.ai 换成 claude.com/cai） */
+    @Test fun claude_登录地址() {
+        val pane = "Opening browser to sign in…\nIf the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&scope=user%3Aprofile\nPaste code here if prompted > "
+        assertEquals(
+            "https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&scope=user%3Aprofile",
+            Connect.claudeUrl(pane),
+        )
+        assertNull(Connect.claudeUrl("Paste code here if prompted >"))
     }
 
     @Test fun 状态_没装的机器() {

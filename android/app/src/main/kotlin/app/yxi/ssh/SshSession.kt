@@ -318,6 +318,12 @@ class SshSession(
         }
     }
 
+    /**
+     * ⚠️ **非交互的 ssh 命令不读 `.profile`**，于是 `~/.local/bin`（claude / codex 装在那儿）不在 PATH 里 ——
+     * 表现是「终端里 claude 明明能跑，App 却说没装」。每条 exec 前先把它补上，一处解决三十多个调用点。
+     */
+    private fun withPath(command: String) = "export PATH=\"\$HOME/.local/bin:\$PATH\"; $command"
+
     suspend fun exec(command: String): String = withContext(Dispatchers.IO) { chanLock.withLock {
         // ⚠️ **连接半路死掉是手机上的常态，不是 bug** —— 锁屏、切基站、服务器掐空闲连接，
         // 下一条 exec 就撞上 `Broken pipe` / `session is down`。这异常从协程里逸出 =
@@ -328,7 +334,7 @@ class SshSession(
         try {
             val s = session ?: return@withLock ""
             val ch = s.openChannel("exec") as com.jcraft.jsch.ChannelExec
-            ch.setCommand(command)
+            ch.setCommand(withPath(command))
             val out = ch.inputStream
             ch.connect(10_000)
             val text = out.readBytes().decodeToString()

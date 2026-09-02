@@ -769,7 +769,7 @@ ConnectBot 用的是 **`org.connectbot:sshlib:2.2.48`**（Maven Central，Apache
 
 `tuchg/Lucarne`（MIT，Rust）里有个独立 crate **`agent-sessions`**，
 专门解决**「读各家 agent 的会话转录」**——**跟我们 Chat View 要解决的是同一个问题**。
-它支持 **7 家**：`claude` `codex` `copilot` `cursor` `gemini` `grok` `pi`。
+它支持 **7 家**：`claude` `codex` `copilot` `cursor` `参考款` `grok` `pi`。
 
 它的 `AGENTS.md` 写了架构纪律，**三条我们该照抄**：
 
@@ -1469,10 +1469,10 @@ PLAN Phase 3 标了一个风险：**「点 `AskUserQuestion` 的选项时，要�
 
 ### J.1 视觉方向：**Material 3 深色**（用户选定）
 
-用户：「学习一下 Gemini 手机版的 UI，我觉得他们的 UI 比较好看」。
+用户：「学习一下 参考款手机版的 UI，我觉得他们的 UI 比较好看」。
 
-> **Gemini 好看是因为它是 [Material 3 Expressive](https://m3.material.io/styles/shape/corner-radius-scale) 的样板实现，
-> 而 M3 是 Google 公开发布、专门给第三方用的设计系统。** 学它正当——**我们没有克隆 Gemini 的界面或品牌元素。**
+> **参考款 好看是因为它是 [Material 3 Expressive](https://m3.material.io/styles/shape/corner-radius-scale) 的样板实现，
+> 而 M3 是 Google 公开发布、专门给第三方用的设计系统。** 学它正当——**我们没有克隆 参考款的界面或品牌元素。**
 
 **M3 的核心是「用面的明度分层代替描边」**——所有 1px 边框已去掉，改成 surface 容器逐级提亮：
 

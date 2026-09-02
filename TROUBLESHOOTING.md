@@ -4175,3 +4175,37 @@ SFTP 读到一半就取消，永远到不了「显示」那一步。**在会被�
 后台读、按 1600px 降采样解码（4000px 的图原样解码几十 MB，几张就 OOM）、读完原地换掉，版面不跳。
 ⚠️ 渲染器按「像素 ÷ 密度」定图宽、FillWidth 不放大过原尺寸 —— 占位图要画宽（1800px），否则只有六成宽。
 模拟器验证：36KB 立刻出、8MB 三十秒后出、19MB 显示太大没加载。
+
+## #215 一键装机：全新 Ubuntu 镜像里 curl / wget / python3 一个都没有，`curl … | bash` 在最需要它的机器上恰恰跑不了
+
+**症状**：手机上点「一键装机」，10 秒就报「装好了」，什么都没装。日志只有一行 `wget: command not found`。
+**根因**：① 手机那条命令是「让服务器自己 curl / wget 脚本再 pipe 进 bash」，而 `ubuntu:24.04` 干净镜像里两个都没有（python3 也没有）；
+② `( … | bash )` 的退出码是管道**右边** bash 的 —— 左边命令不存在、右边读到空输入照样退出 0，于是 `__DONE__0`，手机以为成了。
+**修法**：手机自己 HTTPS 取脚本（它刚查过更新，有网），heredoc 写到 `~/.yxi/bootstrap.sh` 再 `nohup bash` 跑；
+取不到才退回服务器侧 curl / wget，而且那条加 `set -o pipefail`。脚本自己第一步用 apt / dnf / apk 把 curl 装上。
+⚠️ 教训：**「服务器上总有 curl」是错的假设**；验收装机脚本要用**干净镜像**（podman `ubuntu:24.04`），在自己机器上跑一遍不算数。
+
+## #216 在本机开容器做「新客户」测试：podman 缺 netavark、端口 2223 撞上反向隧道
+
+**症状**：`podman run -p 2223:22` 报 `netavark: No such file or directory`；换成 host 网络后 `ssh -p 2223 127.0.0.1` 一直 Permission denied。
+**根因**：Ubuntu 24.04 的 podman 包不带 netavark（要另装）；而 `127.0.0.1:2223` 本来就有本机 sshd 的反向隧道监听
+（remote-dev-station 那套），我 ssh 到的其实是那头的机器。
+**修法**：`--network=host` + 容器里 sshd 改 `Port 22022`（先 `ss -ltn` 确认没人用）；模拟器 hosts.json 多一台 `fresh`（同一 IP、22022 口）。
+本机没有 docker，`apt install podman` 即可（不起守护进程）。测完 `podman rm -f yxi-fresh yxi-fresh2`。⚠️ 别碰 2222 / 2223 —— 那是隧道。
+⚠️ **云厂商防火墙只放 22 / 8443**：容器 sshd 听在 22022 上、本机 `ss` 看得见，Mac 上 `nc` 却是 closed。
+绕法不动防火墙：本机 `ssh -f -N -R 22022:127.0.0.1:22022 mac` 反向隧道到 Mac 的回环，模拟器里主机填 **10.0.2.2:22022**
+（模拟器的 10.0.2.2 = 宿主机回环）。给模拟器塞 hosts.json 时注意 `json.dumps` 默认带空格，sed 别按无空格的写。
+
+## #217 从手机登录 Claude Code / Codex：两家的无浏览器流程长得不一样
+
+- **Claude Code**（2.1.258）：`claude auth login` 没浏览器时打一条 URL，`redirect_uri` 指向 **platform.claude.com/oauth/code/callback**，
+  不是 localhost —— 所以**不能**像 MCP 那样转发端口；用户在页面登录后拿到一串**码**，粘回终端的 `Paste code here if prompted >`。
+  域名已从 `claude.ai/oauth/authorize` 换成 `claude.com/cai/oauth/authorize`，正则别写死域名（`https://\S*oauth/authorize\?\S+`）。
+  要加 `env -u DISPLAY BROWSER=true`：有 VNC 桌面的机器它会真开一个 Chrome（#199 那一族）。
+- **Codex**（0.152）：`codex login --device-auth` → `https://auth.openai.com/codex/device` + 一次性码，**码在下一行、4-5 位**（`QUUK-AW27Q`），
+  GitHub 那条 `one-time code: XXXX-XXXX` 正则套不上。`codex login status` 没登录时退出码 1、打 `Not logged in`；
+  `claude auth status --json` 没登录也退出 1 —— 状态命令**不能**写成 `cmd || echo NO_X`，会把「没登录」错报成「没装」。
+- 两家都不需要 Node：Claude 官方原生安装器（`curl -fsSL https://claude.ai/install.sh | bash`），Codex 用 GitHub release 的
+  `codex-<arch>-unknown-linux-musl.tar.gz`（92MB 静态二进制，解开 250MB）。npm 那条路只是历史。
+- 公网站点 nginx 是白名单式放行（`location / { return 404; }` 收尾），新文件要在 `/etc/nginx/snippets/yxi-dl.conf` 里加 location
+  （`/bootstrap.sh`、`/server/`，带 `Cache-Control: no-cache` 免得 CDN 缓存旧脚本），否则 scp 上去了照样 404。

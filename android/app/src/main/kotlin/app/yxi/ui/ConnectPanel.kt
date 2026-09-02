@@ -62,6 +62,7 @@ fun ConnectPanel(ssh: SshSession?, host: app.yxi.ssh.Host) {
     var flow by remember { mutableStateOf<Flow?>(null) }
     var custom by remember { mutableStateOf(false) }
     var confirmDrop by remember { mutableStateOf<Connect.Service?>(null) }
+    var setup by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
 
@@ -89,19 +90,26 @@ fun ConnectPanel(ssh: SshSession?, host: app.yxi.ssh.Host) {
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
                 )
             }
-            if (!st.claudeInstalled) item {
+            if (!st.tmuxInstalled) item {
+                Note(t("这台机器上没有 tmux —— 登录和会话都靠它。点上面「安装」一键装机，会一起装上。"))
+            } else if (!st.claudeInstalled) item {
                 Note(t("这台机器上没有 claude 命令，MCP 那几项接不了；GitHub 仍然可以。"))
             }
             items(Connect.CATALOG, key = { it.key }) { s ->
                 ServiceRow(
                     s, st.of(s),
-                    enabled = when (s.kind) {
+                    // 登录流程全跑在 tmux 里：没 tmux 一律点不了（「安装」除外，它不靠 tmux）
+                    enabled = st.tmuxInstalled && when (s.kind) {
+                        Connect.Kind.AGENT -> true
                         Connect.Kind.GH -> st.ghInstalled
                         Connect.Kind.MCP -> st.claudeInstalled
                         Connect.Kind.INFO -> false
                     },
+                    installed = st.installed(s),
+                    extra = if (s.kind == Connect.Kind.AGENT && s.key == "claude") st.claudeUser else null,
                     onConnect = { flow = Flow(ssh, s, scope) { tick++ } },
                     onDrop = { confirmDrop = s },
+                    onInstall = { setup = true },
                 )
             }
             item {
@@ -125,6 +133,8 @@ fun ConnectPanel(ssh: SshSession?, host: app.yxi.ssh.Host) {
         })
     }
 
+    if (setup) SetupDialog(ssh) { setup = false; tick++ }
+
     if (custom) CustomMcpDialog(onCancel = { custom = false }) { name, url ->
         custom = false
         val s = Connect.Service(name, name, url, url, if (url.endsWith("/sse")) "sse" else "http")
@@ -135,12 +145,26 @@ fun ConnectPanel(ssh: SshSession?, host: app.yxi.ssh.Host) {
         AlertDialog(
             onDismissRequest = { confirmDrop = null },
             title = { Text(t("断开 %s？").format(s.name)) },
-            text = { Text(if (s.kind == Connect.Kind.GH) t("会退出 gh 的登录，git 推拉和 GitHub MCP 一起失效。") else t("会从 Claude Code 的配置里删掉这个 MCP。")) },
+            text = {
+                Text(
+                    when (s.kind) {
+                        Connect.Kind.AGENT -> t("会退出这台机器上 %s 的登录，会话里再用得重新登。").format(s.name)
+                        Connect.Kind.GH -> t("会退出 gh 的登录，git 推拉和 GitHub MCP 一起失效。")
+                        else -> t("会从 Claude Code 的配置里删掉这个 MCP。")
+                    },
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     confirmDrop = null
                     scope.launch {
-                        ssh?.exec(if (s.kind == Connect.Kind.GH) Connect.ghLogout() else Connect.mcpRemove(s.key))
+                        ssh?.exec(
+                            when (s.kind) {
+                                Connect.Kind.AGENT -> Connect.agentLogout(s.key)
+                                Connect.Kind.GH -> Connect.ghLogout()
+                                else -> Connect.mcpRemove(s.key)
+                            },
+                        )
                         tick++
                     }
                 }) { Text(t("断开"), color = MaterialTheme.colorScheme.error) }
@@ -163,6 +187,11 @@ private fun Note(text: String) {
 private fun ServiceRow(
     s: Connect.Service, state: Connect.State, enabled: Boolean,
     onConnect: () -> Unit, onDrop: () -> Unit,
+    /** 没装 → 按钮变「安装」（一键装机），状态芯片写「没装」 */
+    installed: Boolean = true,
+    /** 附在说明后面的一小段（登录的账号之类） */
+    extra: String? = null,
+    onInstall: () -> Unit = {},
 ) {
     val info = s.kind == Connect.Kind.INFO
     Surface(
@@ -175,35 +204,49 @@ private fun ServiceRow(
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(s.name, style = MaterialTheme.typography.titleSmall,
                         color = if (info) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface)
-                    when (state) {
-                        Connect.State.CONNECTED -> Chip(t("已连接"), MaterialTheme.colorScheme.primary)
-                        Connect.State.NEEDS_AUTH -> Chip(t("要登录"), MaterialTheme.colorScheme.tertiary)
-                        Connect.State.FAILED -> Chip(t("连不上"), MaterialTheme.colorScheme.error)
-                        Connect.State.ABSENT -> {}
+                    when {
+                        !installed -> Chip(t("没装"), MaterialTheme.colorScheme.outline)
+                        state == Connect.State.CONNECTED ->
+                            Chip(if (s.kind == Connect.Kind.AGENT) t("已登录") else t("已连接"), MaterialTheme.colorScheme.primary)
+                        state == Connect.State.NEEDS_AUTH -> Chip(t("要登录"), MaterialTheme.colorScheme.tertiary)
+                        state == Connect.State.FAILED -> Chip(t("连不上"), MaterialTheme.colorScheme.error)
+                        else -> {}
                     }
                 }
-                Text(t(s.what), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                Text(
+                    t(s.what) + (extra?.let { " · $it" } ?: ""),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
+                )
             }
             if (!info) {
                 Spacer(Modifier.width(10.dp))
                 val label = when {
-                    state == Connect.State.CONNECTED -> t("断开")
+                    !installed -> t("安装")
+                    state == Connect.State.CONNECTED -> if (s.kind == Connect.Kind.AGENT) t("退出") else t("断开")
                     s.noAuth -> t("加上")
-                    state == Connect.State.NEEDS_AUTH -> t("登录")
+                    state == Connect.State.NEEDS_AUTH || s.kind == Connect.Kind.AGENT -> t("登录")
                     else -> t("连接")
                 }
                 val primary = state != Connect.State.CONNECTED
+                // 「安装」不靠 tmux，没 tmux 也要能点 —— 它正是把 tmux 装上的那条路
+                val active = enabled || !installed
                 Text(
                     label,
                     Modifier.clip(RoundedCornerShape(100.dp))
                         .background(
-                            if (primary && enabled) MaterialTheme.colorScheme.primary
+                            if (primary && active) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.surfaceContainerHigh,
                         )
-                        .clickable(enabled = enabled) { if (state == Connect.State.CONNECTED) onDrop() else onConnect() }
+                        .clickable(enabled = active) {
+                            when {
+                                !installed -> onInstall()
+                                state == Connect.State.CONNECTED -> onDrop()
+                                else -> onConnect()
+                            }
+                        }
                         .padding(16.dp, 9.dp),
                     style = MaterialTheme.typography.labelLarge,
-                    color = if (primary && enabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (primary && active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
@@ -236,8 +279,11 @@ class Flow(
         data class Working(val what: String) : Step()
         /** GitHub：码 + 去哪输 */
         data class Code(val code: String, val url: String) : Step()
-        /** MCP：授权页 + 回调端口是否已转发 */
-        data class Authorize(val url: String, val forwarded: Boolean) : Step()
+        /**
+         * MCP：授权页 + 回调端口是否已转发。
+         * Claude Code 登录也用它，但 [code] = true：授权完页面**给一串码**，粘回来（不是 localhost 地址）。
+         */
+        data class Authorize(val url: String, val forwarded: Boolean, val code: Boolean = false) : Step()
         data class Done(val ok: Boolean, val message: String) : Step()
     }
 
@@ -245,6 +291,8 @@ class Flow(
         private set
     /** 用户已经点过「去认证」—— 之后步骤框只显示「等着」 */
     var opened by mutableStateOf(false)
+    /** 粘回去的码被拒了之类的提示（空 = 没有）。⚠️ 没有它，粘错码只会看到输入框被清空、什么都不说（模拟器实测）。 */
+    var hint by mutableStateOf("")
     private var job: Job? = null
     private var port: Int? = null
     private val tmux = Connect.tmuxFor(service.key)
@@ -253,10 +301,45 @@ class Flow(
 
     private suspend fun run() {
         when (service.kind) {
+            Connect.Kind.AGENT -> if (service.key == "claude") claude() else codex()
             Connect.Kind.GH -> gh()
             Connect.Kind.MCP -> mcp()
             Connect.Kind.INFO -> step = Step.Done(false, "")
         }
+    }
+
+    /** Claude Code：起 `claude auth login` → 等授权 URL → 用户登录、页面给码 → 粘回去 → 等 `__DONE__` */
+    private suspend fun claude() {
+        step = Step.Working(t("在服务器上起 Claude Code 登录…"))
+        ssh.exec(Connect.claudeLoginStart())
+        var url: String? = null
+        for (i in 0 until 40) {
+            delay(500)
+            val pane = ssh.exec(Connect.peekCommand(tmux))
+            url = Connect.claudeUrl(pane)
+            if (url != null) break
+            Connect.parseDone(pane)?.let { if (!it) { step = Step.Done(false, Connect.failReason(pane)); return } }
+        }
+        val u = url ?: run { step = Step.Done(false, t("没拿到登录地址（这台机器装了 claude 吗？）")); return }
+        step = Step.Authorize(u, forwarded = false, code = true)
+        waitDone { t("Claude Code 登录好了，会话里直接能用") }
+    }
+
+    /** Codex：起 `codex login --device-auth` → 屏幕上等一次性码 → 用户去 auth.openai.com/codex/device 输码 → 等 `__DONE__` */
+    private suspend fun codex() {
+        step = Step.Working(t("在服务器上起 Codex 登录…"))
+        ssh.exec(Connect.codexLoginStart())
+        var code: String? = null
+        for (i in 0 until 60) {
+            delay(500)
+            val pane = ssh.exec(Connect.peekCommand(tmux))
+            code = Connect.codexCode(pane)
+            if (code != null) break
+            Connect.parseDone(pane)?.let { if (!it) { step = Step.Done(false, Connect.failReason(pane)); return } }
+        }
+        val c = code ?: run { step = Step.Done(false, t("Codex 没给出一次性码（这台机器装了 codex 吗？）")); return }
+        step = Step.Code(c, Connect.CODEX_DEVICE_URL)
+        waitDone { t("Codex 登录好了，会话里直接能用") }
     }
 
     private suspend fun gh() {
@@ -311,6 +394,9 @@ class Flow(
         for (i in 0 until 400) {
             delay(1500)
             val pane = ssh.exec(Connect.peekCommand(tmux))
+            // 登录成功后有的工具会停在「Press Enter to continue」—— 替用户按了，不然要等到超时
+            if (pane.contains("Press Enter to continue")) ssh.exec(Connect.enterCommand(tmux))
+            if (pane.contains("Invalid code")) hint = t("码不对 —— 回页面把整串码重新复制一遍")
             when (Connect.parseDone(pane)) {
                 true -> { val msg = after(); finish(); step = Step.Done(true, msg); onChanged(); return }
                 false -> { finish(); step = Step.Done(false, Connect.failReason(pane)); return }
@@ -353,25 +439,32 @@ private fun FlowDialog(f: Flow, onClose: () -> Unit, onOpen: (String) -> Unit, o
                         Text(step.what)
                     }
                     is Flow.Step.Code -> {
-                        Text(t("GitHub 页面会要一个一次性码。点下面按钮：码已复制、页面已打开，粘进去按确认就行。"))
+                        Text(t("%s 页面会要一个一次性码。点下面按钮：码已复制、页面已打开，粘进去按确认就行。").format(f.service.name))
                         Text(step.code, fontFamily = FontFamily.Monospace, fontSize = 26.sp, fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary)
                         Text(
-                            if (f.opened) t("等 GitHub 那边确认…（确认完这里会自己变）") else t("码 15 分钟内有效"),
+                            if (f.opened) t("等 %s 那边确认…（确认完这里会自己变）").format(f.service.name) else t("码 15 分钟内有效"),
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
                         )
                     }
                     is Flow.Step.Authorize -> {
                         Text(
-                            if (step.forwarded) t("在浏览器里登录并同意。同意之后页面会自己跳回来，这里会显示接上了。")
-                            else t("在浏览器里登录并同意。同意之后浏览器会停在一个打不开的 localhost 页面 —— 把地址栏那串地址复制过来粘到下面。"),
+                            when {
+                                step.code -> t("在浏览器里登录并同意。之后页面会给你一串码 —— 复制过来粘到下面。")
+                                step.forwarded -> t("在浏览器里登录并同意。同意之后页面会自己跳回来，这里会显示接上了。")
+                                else -> t("在浏览器里登录并同意。同意之后浏览器会停在一个打不开的 localhost 页面 —— 把地址栏那串地址复制过来粘到下面。")
+                            },
                         )
                         if (f.opened) Text(t("等浏览器那边授权…"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
                         OutlinedTextField(
                             pasted, { pasted = it }, Modifier.fillMaxWidth(),
-                            label = { Text(t("跳不回来？把 localhost 开头的地址粘这儿")) }, singleLine = true,
+                            label = { Text(if (step.code) t("把页面给的那串码粘这儿") else t("跳不回来？把 localhost 开头的地址粘这儿")) },
+                            singleLine = true,
                         )
-                        if (pasted.startsWith("http")) TextButton(onClick = { f.paste(pasted.trim()); pasted = "" }) { Text(t("交上去")) }
+                        if (f.hint.isNotEmpty()) Text(f.hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                        if (if (step.code) pasted.isNotBlank() else pasted.startsWith("http")) {
+                            TextButton(onClick = { f.hint = ""; f.paste(pasted.trim()); pasted = "" }) { Text(t("交上去")) }
+                        }
                     }
                     is Flow.Step.Done -> Text(step.message, color = if (step.ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
                 }
@@ -379,7 +472,7 @@ private fun FlowDialog(f: Flow, onClose: () -> Unit, onOpen: (String) -> Unit, o
         },
         confirmButton = {
             when (step) {
-                is Flow.Step.Code -> TextButton(onClick = { onCopy(step.code); f.opened = true; onOpen(step.url) }) { Text(t("复制码并打开 GitHub")) }
+                is Flow.Step.Code -> TextButton(onClick = { onCopy(step.code); f.opened = true; onOpen(step.url) }) { Text(t("复制码并打开 %s").format(f.service.name)) }
                 is Flow.Step.Authorize -> TextButton(onClick = { f.opened = true; onOpen(step.url) }) { Text(t("去浏览器授权")) }
                 is Flow.Step.Done -> TextButton(onClick = onClose) { Text(t("好")) }
                 is Flow.Step.Working -> {}
