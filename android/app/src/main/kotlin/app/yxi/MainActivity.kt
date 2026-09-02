@@ -73,6 +73,8 @@ class MainActivity : ComponentActivity() {
         app.yxi.watch.EventService.sync(this, store.hosts.value.any { it.watch })
 
         setContent {
+            androidx.compose.foundation.layout.Box {
+
             YxiTheme {
                 val hosts by store.hosts.collectAsState()
                 var tab by remember { mutableStateOf(Tab.Sessions) }
@@ -185,6 +187,10 @@ class MainActivity : ComponentActivity() {
                         Tab.Settings -> SettingsScreen(store, keys, host, shared.session, shared.error, modifier = m)
                     }
                 }
+            }
+        
+            // 冷启动的开屏动效（实验室里挑中的那个）盖在最上面，播完让开
+            YxiTheme { app.yxi.ui.splash.SplashGate {} }
             }
         }
     }

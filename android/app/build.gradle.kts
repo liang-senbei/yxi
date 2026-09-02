@@ -15,8 +15,8 @@ android {
         targetSdk = 37
         // ⚠️ versionCode 是**更新检查唯一比较的东西**，每次发包必须 +1。
         // versionName 只给人看。
-        versionCode = 111
-        versionName = "0.9.67"
+        versionCode = 112
+        versionName = "0.9.68"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // ⚠️ **只留 arm64-v8a。** sherpa-onnx 的 AAR 带四套原生库，加起来 120MB；

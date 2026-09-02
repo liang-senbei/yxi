@@ -128,6 +128,8 @@ fun LabScreen(ssh: SshSession? = null, modifier: Modifier = Modifier) {
                 Text(t("↻ 刷新"), Modifier.padding(14.dp, 8.dp), style = MaterialTheme.typography.labelMedium)
             }
         }
+        // App 自己的待审项：开屏动效的几个方案（不是 agent 推上来的，所以不走 LabRemote）
+        app.yxi.ui.splash.SplashLabCard()
         when {
             list == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
