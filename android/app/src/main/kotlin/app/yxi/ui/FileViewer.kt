@@ -51,6 +51,7 @@ private val TEXTISH = setOf(
  */
 @Composable
 fun FileViewer(sftp: Sftp?, path: String, onBack: () -> Unit, modifier: Modifier = Modifier) {
+    val viewerScope = androidx.compose.runtime.rememberCoroutineScope()
     val ext = Paths.extOf(path)
     var bytes by remember(path) { mutableStateOf<ByteArray?>(null) }
     var error by remember(path) { mutableStateOf<String?>(null) }
@@ -173,7 +174,7 @@ fun FileViewer(sftp: Sftp?, path: String, onBack: () -> Unit, modifier: Modifier
                         md,
                         typography = yxiMarkdown(),           // 默认标题 57sp，文档在手机上同样不能这么排
                         modifier = Modifier.fillMaxWidth(),   // 库的默认是 fillMaxSize()，会把滚动撑坏
-                        imageTransformer = remember(sftp, path) { SftpImages(sftp, Paths.dirOf(path)) },
+                        imageTransformer = remember(sftp, path) { SftpImages(sftp, Paths.dirOf(path), viewerScope) },
                     )
                 }
                 (ext == "html" || ext == "htm") && !source -> HtmlBody(b.decodeToString())
@@ -264,17 +265,36 @@ private fun CodeBody(text: String, ext: String) {
  *
  * ⚠️ http(s) 链接直接放弃：这条路上根本没有网络，只有一条 SSH 连接。
  */
-private class SftpImages(private val sftp: Sftp?, private val baseDir: String) : ImageTransformer {
+private class SftpImages(
+    private val sftp: Sftp?, private val baseDir: String,
+    /** ⚠️ 必须是 FileViewer 那一层的 scope。加载不能挂在 transform 自己的组合上（见下） */
+    private val scope: kotlinx.coroutines.CoroutineScope,
+) : ImageTransformer {
+    // ⚠️⚠️ **不能在 transform 里 produceState。** 渲染器在组合期间反复重调 transform，每次都是新的
+    // 组合作用域 —— 上一版就是这么写的：日志里图片明明读回来了（35KB，600×243），紧接着
+    // 「The coroutine scope left the composition」，状态随组合一起被丢掉，再来一遍，永远显示不出来
+    // （模拟器里逮到的，#212）。所以缓存放在这个对象上：读一次，组合爱怎么重建都无所谓；
+    // 用 mutableStateMap 是为了读完能触发重组把图画出来。
+    private val done = androidx.compose.runtime.mutableStateMapOf<String, Painter>()
+    private val failed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val inflight = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
     @Composable
     override fun transform(link: String): ImageData? {
         if (link.startsWith("http://") || link.startsWith("https://") || link.startsWith("data:")) return null
-        val painter by androidx.compose.runtime.produceState<Painter?>(null, link, sftp) {
-            val s = sftp ?: return@produceState
-            value = runCatching { s.read(Paths.resolve(baseDir, link), 8 shl 20) }.getOrNull()
-                ?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
-                ?.asImageBitmap()
-                ?.let(::BitmapPainter)
+        done[link]?.let { return ImageData(painter = it, contentScale = ContentScale.FillWidth) }
+        if (link in failed || !inflight.add(link)) return null
+        val s = sftp ?: return null
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val path = Paths.resolve(baseDir, link)
+            val bmp = runCatching { s.read(path, 8 shl 20) }
+                .onFailure { android.util.Log.w("YxiMd", "img $link -> $path: ${it.message}") }
+                .getOrNull()?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                if (bmp != null) done[link] = BitmapPainter(bmp.asImageBitmap()) else failed += link
+                inflight -= link
+            }
         }
-        return painter?.let { ImageData(painter = it, contentScale = ContentScale.FillWidth) }
+        return null
     }
 }

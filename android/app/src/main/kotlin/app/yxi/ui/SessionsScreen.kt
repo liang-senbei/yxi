@@ -5,6 +5,8 @@ import androidx.compose.foundation.verticalScroll
 import app.yxi.ui.theme.Dim
 import android.content.Context
 import androidx.compose.foundation.background
+import app.yxi.ui.theme.Teal
+import app.yxi.ui.theme.Amber
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.animation.core.animateFloatAsState
@@ -878,139 +880,98 @@ private fun SessionCard(
     onLongPress: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
+    // 卡片瘦身（用户：「会话的条太宽了不好看」）：原来右侧竖着一列三颗 32dp 的按钮，
+    // 把卡片撑到四行高；现在 ☆ 和图钉收进标题行、「回一句」缩到路径那一行的末尾，
+    // 三行就够，高度少三分之一。每个功能仍然**看得见、点得着**（#91 的教训不能丢）。
+    // 小巧思：标题前一颗状态色点（等你=琥珀 / 干活=青 / 其余灰），不用看分组标题也知道它在干嘛；
+    // 「已经等了 N」做成小药丸，比一行蓝字更像一个信号。
+    val dot = when (s.state) {
+        SessionState.NeedsYou -> Amber
+        SessionState.Working -> Teal
+        else -> MaterialTheme.colorScheme.outlineVariant
+    }
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        shape = MaterialTheme.shapes.large,
+        shape = RoundedCornerShape(22.dp),
         shadowElevation = if (dragging) 8.dp else 0.dp,
         // ⚠️ **长按不在这里绑发消息** —— 长按归「拖动排序」，由外面的 Modifier 接管。
-        // 轻点 = 进对话；右侧气泡按钮 = 不进对话直接回一句。两条路各自独立。
+        // 轻点 = 进对话；右下气泡按钮 = 不进对话直接回一句。两条路各自独立。
         modifier = modifier.fillMaxWidth().combinedClickable(
             enabled = openEnabled, onClick = onOpen, onLongClick = onLongPress,
         ),
     ) {
-        Row(
-            Modifier.padding(16.dp, 14.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(s.short, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                    // 多久没动了 —— 一眼看出哪些会话是新鲜的、哪些搁置了
-                    ago(s.lastActivity).takeIf { it.isNotEmpty() }?.let {
-                        Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
-                    }
-                    if (muted) {
-                        Text(
-                            t("🔕 静音"),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.outline,
-                        )
-                    }
-                    if (s.attached) {
-                        Text(
-                            t("已连"),
-                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                            color = MaterialTheme.colorScheme.outline,
-                        )
-                    }
-                }
-                if (s.detail.isNotEmpty()) {
-                    Text(
-                        s.detail,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                    )
-                }
-                // ⚠️ **「卡了多久」比「多久没动」重要得多。**
-                //
-                // 20 个会话时真正的失败模式不是「看不过来」，是**有东西悄悄卡死了没人发现**。
-                // 实测本机有会话卡在对话框上 8.4 天、另一个 4.6 天，完全没人管。
-                //
-                // ⚠️ 用 `stateTs`（状态**跃迁**的时刻）不是 `lastActivity`：
-                // 后者是 tmux 活动/转录 mtime，会被无关的刷新带着走（#130 抱怨的就是它俩）。
-                // 状态跃迁时刻才是「它从什么时候开始等你的」。
-                if (s.state == SessionState.NeedsYou && s.stateTs > 0) {
-                    val w = waited(s.stateTs.toLong())
-                    if (w.isNotEmpty()) {
-                        Text(
-                            t("已经等了 %s").format(w),
-                            style = MaterialTheme.typography.labelSmall,
-                            // 等久了要显眼 —— 这正是最容易被漏掉的那一类
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                }
+        Column(Modifier.padding(16.dp, 11.dp, 10.dp, 10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            // 第一行：状态点 · 名字 ……… 多久没动 · 已连 · ☆ · 图钉
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Box(Modifier.size(7.dp).clip(CircleShape).background(dot))
                 Text(
-                    s.cwd,
-                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                    color = MaterialTheme.colorScheme.outline,
-                    maxLines = 1,
+                    s.short, style = MaterialTheme.typography.titleMedium, maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                 )
-            }
-            // 右侧竖排：图钉在上，回它一句在下（用户要「别针下面再加一个按钮」）。
-            // ⚠️ 这两个 Box 各自 `clickable` 会**消费**掉点击，不会冒泡到 Surface 的 onOpen ——
-            // 所以点图钉/点气泡都不会顺带把对话打开（跟图钉一直以来的行为一致）。
-            Column(
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                // ★ 收藏。⚠️ **跟图钉放同一列**：找得到图钉的人自然就找得到它。
-                // 上一版只做了右滑，用户第一句就是「我没看见收藏的按钮」——
-                // 三颗按钮从 36dp 收到 32dp，卡片几乎不变高，比让功能藏起来划算。
-                // 空心 ☆ = 没收藏，实心 ★ = 收藏了；状态一眼可见，不用点开才知道。
+                val meta = listOfNotNull(
+                    ago(s.lastActivity).takeIf { it.isNotEmpty() },
+                    if (muted) t("静音") else null,
+                    if (s.attached) t("已连") else null,
+                ).joinToString(" · ")
+                if (meta.isNotEmpty()) Text(meta, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 1)
+                // ☆ 收藏、图钉：28dp，跟标题同一行。⚠️ 各自 clickable 会消费点击，不会顺带开对话
                 Box(
-                    Modifier.size(32.dp).clip(CircleShape)
-                        .background(
-                            if (faved) MaterialTheme.colorScheme.secondaryContainer
-                            else Color.Transparent
-                        )
+                    Modifier.size(28.dp).clip(CircleShape)
+                        .background(if (faved) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
                         .clickable(onClick = onFav),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        if (faved) "★" else "☆",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = if (faved) MaterialTheme.colorScheme.onSecondaryContainer
-                        else MaterialTheme.colorScheme.outline,
+                        if (faved) "★" else "☆", style = MaterialTheme.typography.titleSmall,
+                        color = if (faved) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.outline,
                     )
                 }
-                // 图钉一直在（不是只在置顶时才出现）—— 只在置顶时显示的话用户不知道有这功能。
-                // ⚠️ **不用 emoji 📌**：各机型不一、粗细对不上、不跟主题变色。矢量图钉，置顶才上色。
                 Box(
-                    Modifier.size(32.dp).clip(CircleShape)
-                        .background(
-                            if (pinned) MaterialTheme.colorScheme.tertiaryContainer
-                            else Color.Transparent
-                        )
+                    Modifier.size(28.dp).clip(CircleShape)
+                        .background(if (pinned) MaterialTheme.colorScheme.tertiaryContainer else Color.Transparent)
                         .clickable(onClick = onPin),
                     contentAlignment = Alignment.Center,
                 ) {
-                    GlyphIcon(
-                        Glyph.Pin,
-                        if (pinned) MaterialTheme.colorScheme.onTertiaryContainer
-                        else MaterialTheme.colorScheme.outline,
-                        18.dp,
+                    GlyphIcon(Glyph.Pin, if (pinned) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.outline, 16.dp)
+                }
+            }
+            // 第二行：它此刻的话（Claude Code 自己的状态词），一行省略
+            if (s.detail.isNotEmpty()) {
+                Text(
+                    s.detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 13.dp),
+                )
+            }
+            // 第三行：等了多久（药丸）· 路径（中间省略）· 回一句
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(start = 13.dp)) {
+                // ⚠️ 用 `stateTs`（状态跃迁的时刻）不是 `lastActivity`：后者被无关刷新带着走（#130）
+                if (s.state == SessionState.NeedsYou && s.stateTs > 0) {
+                    val w = waited(s.stateTs.toLong())
+                    if (w.isNotEmpty()) Text(
+                        t("等了 %s").format(w),
+                        Modifier.clip(Pill).background(MaterialTheme.colorScheme.primaryContainer).padding(8.dp, 2.dp),
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer, maxLines = 1,
                     )
                 }
-                // 回它一句：淡底 + primary 气泡，一眼看出「可点」。点它弹底部输入框，直接送键。
+                Text(
+                    s.cwd, style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.outline, maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.MiddleEllipsis, modifier = Modifier.weight(1f),
+                )
+                // 回它一句：淡底 + primary 气泡，一眼看出「可点」。点它弹底部输入框，直接送键
                 Box(
-                    Modifier.size(32.dp).clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                    Modifier.size(28.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHighest)
                         .clickable(onClick = onReply),
                     contentAlignment = Alignment.Center,
                 ) {
-                    GlyphIcon(Glyph.Chat, MaterialTheme.colorScheme.primary, 18.dp)
+                    GlyphIcon(Glyph.Chat, MaterialTheme.colorScheme.primary, 15.dp)
                 }
             }
         }
     }
 }
-
-
-
-
 
 /**
  * 「回它一句」底部输入框 —— 不进对话，直接把这句送进那个 tmux 会话。

@@ -4140,3 +4140,18 @@ CSS 单位全部是 0。`innerHeight` 照样报 View 的高度，所以只看 JS
 - `all` 在多个组里时**必须指明组**：`yxi-hub all <组名> "话"`，不指明就拒绝并列出你的组；只在一个组里照旧。
 - 测试：`YXI_GROUPS_FILE=<临时表> ` + 一个临时 tmux 会话名，`who / context / all` 三条都跑过。
 ⚠️ 已在跑的会话要**重开**（或自己跑一次 `yxi-hub who`）才看得到新的 context；hook 只在 SessionStart 注入。
+
+## #212 Markdown 里的图**读回来了却画不出来** —— `ImageTransformer.transform` 里不能 produceState
+
+**症状**（模拟器里用测试文件验证 #208 时发现）：`![](a.png)` 和转过来的 `<img>` 都不显示；加日志后看到
+`img a.png -> …/a.png bytes=35965 bmp=600x243` 紧跟一条 `read failed: The coroutine scope left the composition`，
+如此反复。也就是说 **#208 那次只修了一半**：转换对了，加载那层从来没成功显示过（老的 `![]()` 也一样坏）。
+
+**根因**：`SftpImages.transform()` 是 `@Composable`，里面用 `produceState` 存加载结果。渲染器（mikepenz markdown）
+在组合期间反复重调 transform，每次都是新的组合作用域 —— 上一个的 state 连同它的协程一起被丢掉，
+SFTP 读到一半就取消，永远到不了「显示」那一步。**在会被反复重建的组合里放异步状态，等于没放。**
+
+**修法**：缓存放在 `SftpImages` 这个对象上（`mutableStateMapOf` 存成功的 painter，读完触发重组），
+加载挂在 FileViewer 那一层的 `rememberCoroutineScope()` 上，`transform` 只查表、不做事。
+模拟器里 Markdown / HTML 相对路径 / HTML 绝对路径三种写法都出图了。
+⚠️ 排查方法同 #209：**先加日志看数据到底走到了哪一步**，别对着代码猜。

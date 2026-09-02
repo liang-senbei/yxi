@@ -738,5 +738,6 @@ internal object En {
         "全屏" to "Full screen",
         "读不到这条内容（连接断了？）—— 点上面的刷新" to "Couldn't load this item (connection dropped?) — tap refresh above",
         "页面报错：%s" to "Page error: %s",
+        "等了 %s" to "waited %s",
     )
 }
