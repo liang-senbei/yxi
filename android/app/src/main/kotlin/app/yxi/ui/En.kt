@@ -736,5 +736,7 @@ internal object En {
         "✓ 已采纳" to "✓ Adopted",
         "采纳" to "Adopt",
         "全屏" to "Full screen",
+        "读不到这条内容（连接断了？）—— 点上面的刷新" to "Couldn't load this item (connection dropped?) — tap refresh above",
+        "页面报错：%s" to "Page error: %s",
     )
 }

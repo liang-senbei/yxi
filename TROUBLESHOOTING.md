@@ -4051,3 +4051,24 @@ ssh mac 'cd ~/yxi-build && ./tools/xcodegen/bin/xcodegen generate && xcodebuild 
 （网页默认 1:1、视频 16:9）；网页契约里要求监听 `resize`（`yxi-lab check` 会提醒）。
 顺手：图片改 `ContentScale.Fit`（原来 FillWidth 把竖图裁掉一截，就是「展示不全」）；加了全屏。
 ⚠️ 通则：`AndroidView.update` 里只放「把状态同步给 View」的幂等操作，**任何有副作用的（加载、播放、重置）都不许放**。
+
+## #206 这台机器上模拟器已经不可用了 —— 哪怕 `-cores 2`，一开就 load 20+
+
+**症状**：为了看实验室 WebView 到底怎么了，起模拟器（`-cores 2 -memory 2048`）。60 秒开机没问题，
+但 App 一跑（粒子开屏 + 软件渲染 swiftshader）load 从 1 飙到 23，adb 直接 `error: closed`，一张截图都没拿到。
+用户之前刚为这个骂过（#200）。
+
+**结论**：**本机不再用模拟器验证界面**。宿主 steal 三四成 + 纯软件 GPU，模拟器跑个动画就把机器拖死。
+替代路线：① 把诊断做进 App —— WebView 的 `onConsoleMessage` 把 JS 报错直接显示在卡片上，
+读不到内容也说出来，用户截图就是 DevTools；② 网页本身在服务器的 VNC 桌面 Chrome 里用 `data:text/html;base64`
+（源是 null，跟 WebView 一样）真时间跑一遍再截图（`import -window root`）。
+⚠️ 用完记得把 `yxi@emulator` 那行从 `~/.ssh/authorized_keys` 里删掉。
+
+## #207 实验室网页预览白板的另外两条根因（0.9.72 一起修）
+
+在 #205（update 反复重载）之外还有两条，都是「看着像页面坏了，其实是 App 没把内容送对」：
+1. **`produceState` 只键 `item.id`**：手机上重连是常态，连接换过一条之后老的 state 还抱着死连接返回的空串，
+   `loadDataWithBaseURL` 灌进去一个空页面 —— 白的，什么提示都没有。现在键上 `ssh`，空串当失败说出来。
+2. **WebView 刚建出来是 0×0 就 load**：页面首帧读到的 `innerWidth/innerHeight` 是 0，画布 0×0；
+   页面若只在启动时读一次尺寸、不监听 resize，就永远空着。现在 `post {}` 到布局定了再 load，
+   契约里也要求页面监听 resize（`yxi-lab check` 会提醒）。

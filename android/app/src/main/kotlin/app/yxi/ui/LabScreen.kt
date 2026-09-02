@@ -382,27 +382,52 @@ private fun LabItemPreview(item: LabRemote.Item, ssh: SshSession?, full: Boolean
     val fill = if (full) Modifier.fillMaxSize() else Modifier.fillMaxSize()
     when (item.type) {
         "html" -> {
-            val html by produceState<String?>(null, item.id) { value = LabRemote.text(ssh, item.file) }
-            html?.let { h ->
-                // ⚠️ **只在 factory 里加载一次。** 原来写在 update 里，而 update 每次重组都会跑
-                // （滚一下列表、任何状态变一下），页面就被反复重载 —— 动画永远停在第一帧，
-                // 等图的页面干脆一片空白（用户截图：点阵波场那张白的）。TROUBLESHOOTING #205
-                androidx.compose.ui.viewinterop.AndroidView(
-                    factory = { c -> android.webkit.WebView(c).apply {
-                        settings.javaScriptEnabled = true
-                        settings.allowFileAccess = false; settings.allowContentAccess = false
-                        settings.useWideViewPort = false; settings.loadWithOverviewMode = false
-                        settings.mediaPlaybackRequiresUserGesture = false
-                        setBackgroundColor(android.graphics.Color.WHITE)
-                        loadDataWithBaseURL(null, h, "text/html", "utf-8", null)
-                    } },
-                    update = { },
-                    modifier = fill,
-                )
-            } ?: PreviewLoading()
+            // ⚠️ 键上 ssh：连接换过一条（手机上重连是常态）之后，老的 produceState 还拿着死连接的空结果不动，
+            // 卡片就永远是白的。空串 = 读失败，**说出来**，别灌一个空页面进 WebView 装作在加载。
+            val html by produceState<String?>(null, item.id, ssh) { value = LabRemote.text(ssh, item.file).ifBlank { null } ?: "" }
+            var jsError by remember(item.id) { mutableStateOf<String?>(null) }
+            when {
+                html == null -> PreviewLoading()
+                html!!.isEmpty() -> Box(fill, contentAlignment = Alignment.Center) {
+                    Text(t("读不到这条内容（连接断了？）—— 点上面的刷新"), style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier = Modifier.padding(16.dp))
+                }
+                else -> Box(fill) {
+                    val h = html!!
+                    androidx.compose.ui.viewinterop.AndroidView(
+                        factory = { c -> android.webkit.WebView(c).apply {
+                            settings.javaScriptEnabled = true
+                            settings.allowFileAccess = false; settings.allowContentAccess = false
+                            settings.useWideViewPort = false; settings.loadWithOverviewMode = false
+                            settings.mediaPlaybackRequiresUserGesture = false
+                            setBackgroundColor(android.graphics.Color.WHITE)
+                            // 页面里的 JS 报错直接显示在卡片上 —— 手机上没法开 DevTools，这是唯一的眼睛
+                            webChromeClient = object : android.webkit.WebChromeClient() {
+                                override fun onConsoleMessage(m: android.webkit.ConsoleMessage): Boolean {
+                                    if (m.messageLevel() == android.webkit.ConsoleMessage.MessageLevel.ERROR)
+                                        jsError = "${m.message()} (line ${m.lineNumber()})"
+                                    return true
+                                }
+                            }
+                            // ⚠️ **等布局定了再加载。** WebView 刚建出来是 0×0，页面这时候读到的
+                            // innerWidth/innerHeight 是 0，画布就 0×0；等到有尺寸再 load，首帧就对。
+                            androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(this, null)
+                            post { loadDataWithBaseURL(null, h, "text/html", "utf-8", null) }
+                        } },
+                        update = { },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    jsError?.let { e ->
+                        Text(t("页面报错：%s").format(e), Modifier.align(Alignment.BottomStart).fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.errorContainer).padding(8.dp, 4.dp),
+                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onErrorContainer, maxLines = 3)
+                    }
+                }
+            }
         }
         "gif" -> {
-            val b by produceState<ByteArray?>(null, item.id) { value = LabRemote.bytes(ssh, item.file) }
+            val b by produceState<ByteArray?>(null, item.id, ssh) { value = LabRemote.bytes(ssh, item.file) }
             b?.let { bytes ->
                 androidx.compose.ui.viewinterop.AndroidView(
                     factory = { c -> android.widget.ImageView(c).apply {
@@ -418,7 +443,7 @@ private fun LabItemPreview(item: LabRemote.Item, ssh: SshSession?, full: Boolean
             } ?: PreviewLoading()
         }
         "image", "svg" -> {
-            val b by produceState<ByteArray?>(null, item.id) { value = LabRemote.bytes(ssh, item.file) }
+            val b by produceState<ByteArray?>(null, item.id, ssh) { value = LabRemote.bytes(ssh, item.file) }
             val bmp = remember(b) { b?.let { runCatching { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull() } }
             bmp?.let {
                 // ⚠️ Fit 不是 FillWidth：竖图按宽铺开会比框高，被裁掉一截（用户：「有些展示不全」）
