@@ -88,5 +88,17 @@ class DirsTest {
         assertTrue(Dirs.createCommand("/a", "cx-a", "codex").contains("'codex' Enter"))
         // 只认两个名字：别的一律退回 claude —— 这行是要 send-keys 进 shell 的
         assertTrue(Dirs.createCommand("/a", "cc-a", "rm -rf /").contains("'claude' Enter"))
+        // 不传 agent 就看名字前缀：拉起歇掉的 cx- 收藏要跑的是 codex
+        assertTrue(Dirs.createCommand("/a", "cx-a").contains("'codex' Enter"))
+    }
+
+    @Test fun 拉起_接最近那份转录() {
+        val c = Dirs.createCommand("/root/src/x", "cc-x", resume = true)
+        assertTrue(c.contains("claude --resume"))
+        assertTrue(c.contains("/.claude/projects/"))
+        // 没转录就裸起，别把 --resume 空着送出去
+        assertTrue(c.contains("else tmux send-keys -t \"${'$'}n\" 'claude' Enter"))
+        // Codex 不接：没历史时 `codex resume --last` 会报错
+        assertTrue(!Dirs.createCommand("/a", "cx-a", resume = true).contains("--resume"))
     }
 }

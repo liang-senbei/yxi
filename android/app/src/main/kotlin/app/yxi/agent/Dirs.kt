@@ -74,11 +74,29 @@ object Dirs {
      *
      * 两边都过一遍 `cd && pwd -P`，免得 `/root/src` 这种软链把比较搞砸。
      */
-    fun createCommand(dir: String, session: String, agent: String = "claude"): String {
+    fun createCommand(
+        dir: String, session: String,
+        /** 跑哪个 agent：claude / codex；null = 按会话名前缀（`cx-` = codex）*/
+        agent: String? = null,
+        /**
+         * 「拉起」歇掉的会话时传 true：接上这个目录里**最近那份转录**（`claude --resume <uuid>`），
+         * 不是开一个全新对话。⚠️ #218：只跑了 bootstrap.sh 的机器上 `claude` 是裸二进制，没有 cloud-enter
+         * 那套登记表帮它接 —— App 不传 `--resume` 的话「拉起」永远是新对话，对话页却还显示旧转录。
+         * 转录目录名 = 路径里非字母数字全换成 `-`（跟 [Transcript.projectDirOf] 一致）。
+         * Codex 没有这条（`codex resume --last` 在没历史时会报错），照旧裸起。
+         */
+        resume: Boolean = false,
+    ): String {
         val d = q(dir.trimEnd('/').ifBlank { "/" })
         val n = q(session)
-        // 跑哪个 agent：claude / codex。⚠️ 只认这两个，别的一律退回 claude —— 这行最终是 send-keys 进 shell 的
-        val a = if (agent == "codex") "codex" else "claude"
+        // ⚠️ 只认这两个，别的一律退回 claude —— 这行最终是 send-keys 进 shell 的
+        val a = if (agent == "codex" || (agent == null && session.startsWith("cx-"))) "codex" else "claude"
+        val launch = if (resume && a == "claude") """
+            enc=${'$'}(printf %s "${'$'}want" | sed 's/[^A-Za-z0-9]/-/g')
+            u=${'$'}(ls -t "${'$'}HOME/.claude/projects/${'$'}enc"/????????-????-????-????-????????????.jsonl 2>/dev/null | head -1)
+            u=${'$'}{u##*/}; u=${'$'}{u%.jsonl}
+            if [ -n "${'$'}u" ]; then tmux send-keys -t "${'$'}n" "claude --resume ${'$'}u" Enter; else tmux send-keys -t "${'$'}n" 'claude' Enter; fi
+        """.trimIndent() else """tmux send-keys -t "${'$'}n" '$a' Enter"""
         return """
             d='$d'; n='$n'
             mkdir -p "${'$'}d" 2>/dev/null
@@ -92,7 +110,7 @@ object Dirs {
               tmux kill-session -t "${'$'}n" 2>/dev/null
               echo "$TAG:wrongdir:${'$'}got"; exit 0
             fi
-            tmux send-keys -t "${'$'}n" '$a' Enter
+            $launch
             echo '$TAG:ok'
         """.trimIndent()
     }

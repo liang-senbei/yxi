@@ -642,6 +642,7 @@
   · 三个入口：看板（什么都没装 → 装机卡；装了但没有会话在跑 claude / codex → 一行「探测 →」）、
     **主机页长按面板常驻「探测 / 装机」**（现连现探，关框断开）、「＋」开会话时没装的那个 agent 写「没装，点我去装」。
   · 「配置 → 连接」里每行的「安装」只装那一个。
+  · 「拉起」歇掉的 Claude 收藏时接上该目录最近的转录（`claude --resume <uuid>`，#218），裸装 claude 的客户机器也能接回。
 - ✅ **0.9.78（2026-09-02）—— 新客户开箱 + Codex**：
   · **一键装机**：`server/bootstrap.sh`（公网 `https://yxi.keuury.com/bootstrap.sh`，`./server/install.sh --publish-server` 发布，
     `--publish` 发 APK 时也顺手发）—— tmux / curl / git / python3（系统包）+ Claude Code（官方原生安装器）+ Codex（GitHub 静态二进制）

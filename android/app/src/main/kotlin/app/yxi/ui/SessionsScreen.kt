@@ -563,7 +563,7 @@ fun SessionsScreen(
                                 // ⚠️ 复用 ＋ 号那套：会建目录、而且**回头核对真的开在那儿**
                                 //    （tmux 对不存在的目录会假装成功然后开在 $HOME，见 Dirs）
                                 val made = app.yxi.ssh.catching {
-                                    s0.exec(app.yxi.agent.Dirs.createCommand(cwd ?: "~", n))
+                                    s0.exec(app.yxi.agent.Dirs.createCommand(cwd ?: "~", n, resume = true))
                                 }.map { app.yxi.agent.Dirs.madeFrom(it) }
                                     .getOrElse { app.yxi.agent.Dirs.Made.Failed("unknown", it.message.orEmpty()) }
                                 if (made is app.yxi.agent.Dirs.Made.Failed) {

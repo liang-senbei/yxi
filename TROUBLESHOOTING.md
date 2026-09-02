@@ -4209,3 +4209,22 @@ SFTP 读到一半就取消，永远到不了「显示」那一步。**在会被�
   `codex-<arch>-unknown-linux-musl.tar.gz`（92MB 静态二进制，解开 250MB）。npm 那条路只是历史。
 - 公网站点 nginx 是白名单式放行（`location / { return 404; }` 收尾），新文件要在 `/etc/nginx/snippets/yxi-dl.conf` 里加 location
   （`/bootstrap.sh`、`/server/`，带 `Cache-Control: no-cache` 免得 CDN 缓存旧脚本），否则 scp 上去了照样 404。
+
+## #218 手机上「拉起」歇掉的会话 → 对话页显示旧转录、终端却是空白新会话：tmux 里敲 `claude` 从不带 `--resume`
+- 症状：cc-Yxi 被 SessionEnd 结束（17:24:05，三个后台任务同一毫秒死，`~/.yxi/events.jsonl` 里有那条 SessionEnd），卡片进「未启用」；
+  点「拉起」→ 终端里是一个**没有历史的新对话**，对话页却还显示旧转录（TranscriptStream 按登记/本地缓存找到的是旧 jsonl）。用户原话：
+  「对话里面显示的是截图的样子但是我们终端里面是空的」。
+- 根因：「拉起」= `Dirs.createCommand`：`tmux new-session -d -s cc-Yxi -c <dir>` + `send-keys claude`。bashrc 的 `claude` 函数 → `cloud-enter`，
+  它**在 tmux 里那条分支只 `exec claude`，从不查登记表**——只有 tmux 外「离线但有登记」那条分支才 `cc-sessions resolve` 补 `--resume`。
+  watchdog 也不救：SessionEnd 让 `cc-state` 打了 `ended=true`，`recoverable` 按设计过滤主动退出的。两边都不接 → 全新对话；
+  新对话的 SessionStart 钩子随手把登记 uuid 覆盖成自己的，旧 uuid 只剩 `~/.claude/projects/<目录>/` 里按 mtime 找。
+- 修法：`remote-dev-station/bin/cloud-enter` tmux 内分支按当前 `#{session_name}` 查 `cc-sessions resolve`，有就补 `--resume`
+  （resolve 不看 ended，和 tmux 外那条一致）。本机已 cp 到 `~/.local/bin/cloud-enter`。**App 侧不用改也改不了**——`claude` 函数吞掉所有参数，
+  App 敲 `claude --resume x` 到不了二进制。
+- 天花板：只有装了 remote-dev-station 那套（cc-state 登记 + cloud-enter）的机器才有「拉起即接回」。只跑 `bootstrap.sh` 的新客户机没有登记表、
+  `claude` 是裸二进制，「拉起」永远是新对话——要做得在 App 侧按 `~/.claude/projects/<目录编码>/` 最新 jsonl 传 `--resume`（同目录双开有风险），等真需要再做。
+- 找回旧对话：`tmux respawn-pane -k -t '=cc-Yxi:' "cd <dir> && IS_SANDBOX=1 claude --effort max --resume <旧uuid> -n Yxi --dangerously-skip-permissions"`。
+  **别指望先改登记表再「拉起」**：（窗格目标要写 `=cc-Yxi:` 带冒号，光 `=cc-Yxi` 会报 can't find pane）当前会话被杀时它自己的 SessionEnd 钩子会把登记 uuid 又写回自己的，改了白改。
+- **App 侧补上了（0.9.79）**：「拉起」走 `Dirs.createCommand(resume = true)` —— 在 shell 里按 `~/.claude/projects/<路径非字母数字换成 ->/`
+  找最近那份 `<uuid>.jsonl`，有就 `claude --resume <uuid>`，没有才裸起。只跑了 bootstrap.sh 的客户机器也能接回；
+  本机的 `claude` 是 cloud-enter 包装，参数到不了二进制，靠上面那条修法。Codex 不接（`codex resume --last` 没历史会报错）。
