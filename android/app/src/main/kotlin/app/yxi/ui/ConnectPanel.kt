@@ -63,6 +63,7 @@ fun ConnectPanel(ssh: SshSession?, host: app.yxi.ssh.Host) {
     var custom by remember { mutableStateOf(false) }
     var confirmDrop by remember { mutableStateOf<Connect.Service?>(null) }
     var setup by remember { mutableStateOf(false) }
+    var setupOnly by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
 
@@ -109,7 +110,7 @@ fun ConnectPanel(ssh: SshSession?, host: app.yxi.ssh.Host) {
                     extra = if (s.kind == Connect.Kind.AGENT && s.key == "claude") st.claudeUser else null,
                     onConnect = { flow = Flow(ssh, s, scope) { tick++ } },
                     onDrop = { confirmDrop = s },
-                    onInstall = { setup = true },
+                    onInstall = { setupOnly = s.key; setup = true },
                 )
             }
             item {
@@ -133,7 +134,7 @@ fun ConnectPanel(ssh: SshSession?, host: app.yxi.ssh.Host) {
         })
     }
 
-    if (setup) SetupDialog(ssh) { setup = false; tick++ }
+    if (setup) SetupDialog(ssh, claude = setupOnly != "codex", codex = setupOnly != "claude") { setup = false; setupOnly = null; tick++ }
 
     if (custom) CustomMcpDialog(onCancel = { custom = false }) { name, url ->
         custom = false

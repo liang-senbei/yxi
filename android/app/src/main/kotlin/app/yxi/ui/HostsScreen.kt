@@ -251,6 +251,8 @@ private fun HostQuota(
     /** 勾了哪几**类**要收拾。⚠️ 默认空 —— 这是杀进程，让人主动勾比让人记得取消安全。 */
     var picked by remember(h.id) { mutableStateOf<Set<String>>(emptySet()) }
     var fixing by remember(h.id) { mutableStateOf(false) }
+    /** 「探测 / 装机」框（用户要的常驻入口，**默认不执行**） */
+    var probe by remember(h.id) { mutableStateOf(false) }
 
     LaunchedEffect(h.id, refreshAt) {
         healthBusy = true; healthNote = null
@@ -439,11 +441,33 @@ private fun HostQuota(
             }
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = Pill,
+                modifier = Modifier.clip(Pill).clickable { probe = true },
+            ) {
+                Text(t("探测 / 装机"), Modifier.padding(14.dp, 7.dp), style = MaterialTheme.typography.labelMedium, color = Muted)
+            }
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = Pill,
                 modifier = Modifier.clip(Pill).clickable(onClick = onEdit),
             ) {
                 Text(t("改主机"), Modifier.padding(14.dp, 7.dp), style = MaterialTheme.typography.labelMedium, color = Muted)
             }
         }
+    }
+
+    // 探测 / 装机：主机页平时不保连接，这一下现连，关框就断（跟额度一个路子）
+    if (probe) {
+        val sess = remember { mutableStateOf<app.yxi.ssh.SshSession?>(null) }
+        var perr by remember { mutableStateOf<String?>(null) }
+        LaunchedEffect(Unit) {
+            val c = connect() ?: run { perr = t("这台主机还没有可用的认证方式"); return@LaunchedEffect }
+            val e = runCatching { c.session.connect() }.exceptionOrNull()
+            if (e != null) { if (e is kotlinx.coroutines.CancellationException) throw e; perr = c.explain(e); return@LaunchedEffect }
+            sess.value = c.session
+        }
+        androidx.compose.runtime.DisposableEffect(Unit) {
+            onDispose { sess.value?.let { s0 -> scope.launch { runCatching { s0.disconnect() } } } }
+        }
+        ProbeDialog(sess.value, error = perr) { probe = false }
     }
 
     // ⚠️ **杀之前把要杀的逐条摆出来。** 一键修复要是能弄丢东西，

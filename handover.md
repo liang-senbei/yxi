@@ -636,6 +636,12 @@
   ⚠️ **App 内更新走 SFTP**（连的那台的 `~/.yxi/`），跟 hk13 这套 HTTP 分发**互不相干**，改这边不影响升级。
 - ✅ **yxi-hub 多组成员（2026-09-02）**：一个会话在多个组里时，`who`/`context` 按组分开列、`say` 的消息带共同组名
   `[同组 组名 · 谁]`、`all` 必须指明组（#211）。服务器侧改动，已装到本机 `~/.local/bin/yxi-hub`。
+- ✅ **0.9.79（2026-09-02）—— 装机做「傻瓜化」**（用户要的）：
+  · **探测框**（`ProbeDialog`）：现探 tmux / Claude Code / Codex 装没装、登没登录、系统与架构、有没有 Node（不需要）；
+    下面一张表单 **都装 / 只装 Claude Code / 只装 Codex** + 「一键装机」，**默认不执行**。`bootstrap.sh` 用 `YXI_NO_CODEX=1` / `YXI_NO_CLAUDE=1` 跳过。
+  · 三个入口：看板（什么都没装 → 装机卡；装了但没有会话在跑 claude / codex → 一行「探测 →」）、
+    **主机页长按面板常驻「探测 / 装机」**（现连现探，关框断开）、「＋」开会话时没装的那个 agent 写「没装，点我去装」。
+  · 「配置 → 连接」里每行的「安装」只装那一个。
 - ✅ **0.9.78（2026-09-02）—— 新客户开箱 + Codex**：
   · **一键装机**：`server/bootstrap.sh`（公网 `https://yxi.keuury.com/bootstrap.sh`，`./server/install.sh --publish-server` 发布，
     `--publish` 发 APK 时也顺手发）—— tmux / curl / git / python3（系统包）+ Claude Code（官方原生安装器）+ Codex（GitHub 静态二进制）

@@ -2,6 +2,7 @@ package app.yxi.agent
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
 /**
  * 从手机上给一台**什么都没装**的服务器一键装机：跑 `server/bootstrap.sh`
@@ -18,11 +19,71 @@ object Setup {
     const val URL = "https://yxi.keuury.com/bootstrap.sh"
     private const val LOG = "\$HOME/.yxi/setup.log"
 
+    // ── 探活 ──
+
+    /**
+     * 这台机器装了什么、登没登录、什么系统。用户要的「探测 Claude 与 Codex」按钮走它。
+     * ⚠️ 别掺 `claude mcp list`（会挨个探活 MCP，几秒）—— 这条只读本地文件，秒回。
+     */
+    const val PROBE_COMMAND =
+        "echo __TMUX__; command -v tmux >/dev/null 2>&1 && tmux -V 2>/dev/null || echo NO; " +
+            "echo __CLAUDE__; if command -v claude >/dev/null 2>&1; then claude --version 2>/dev/null | head -1; " +
+            "claude auth status --json 2>/dev/null; else echo NO; fi; " +
+            "echo __CODEX__; if command -v codex >/dev/null 2>&1; then codex --version 2>/dev/null; codex login status 2>&1; else echo NO; fi; " +
+            "echo __NODE__; command -v node >/dev/null 2>&1 && node --version 2>/dev/null || echo NO; " +
+            "echo __OS__; (. /etc/os-release 2>/dev/null && echo \"\$PRETTY_NAME\"); uname -m; id -u; echo __END__"
+
+    data class Probe(
+        /** 版本串；null = 没装 */
+        val tmux: String?,
+        val claude: String?,
+        /** 登录的账号（邮箱 / 订阅档）；null = 没登录或没装 */
+        val claudeUser: String?,
+        val codex: String?,
+        val codexLogged: Boolean,
+        val node: String?,
+        val os: String,
+        val arch: String,
+        val root: Boolean,
+    ) {
+        val claudeInstalled get() = claude != null
+        val codexInstalled get() = codex != null
+        val nothing get() = claude == null && codex == null
+    }
+
+    /** 读 [PROBE_COMMAND] 的输出。缺结尾标记（连接半断）= null。 */
+    fun parseProbe(out: String): Probe? {
+        if (!out.contains("__END__")) return null
+        fun sec(a: String, b: String) = out.substringAfter(a, "").substringBefore(b).trim()
+        fun ver(s: String): String? = s.lines().map { it.trim() }.firstOrNull { it.isNotEmpty() }?.takeIf { it != "NO" }
+        val cl = sec("__CLAUDE__", "__CODEX__")
+        val cx = sec("__CODEX__", "__NODE__")
+        val osLines = sec("__OS__", "__END__").lines().map { it.trim() }.filter { it.isNotEmpty() }
+        val claudeUser = runCatching {
+            val j = JSONObject(cl.substring(cl.indexOf('{')))
+            if (!j.optBoolean("loggedIn")) null
+            else j.optString("email").ifBlank { j.optString("subscriptionType").ifBlank { j.optString("authMethod").ifBlank { "已登录" } } }
+        }.getOrNull()
+        return Probe(
+            tmux = ver(sec("__TMUX__", "__CLAUDE__"))?.removePrefix("tmux "),
+            claude = ver(cl)?.removeSuffix(" (Claude Code)"),
+            claudeUser = claudeUser,
+            codex = ver(cx)?.removePrefix("codex-cli "),
+            codexLogged = cx.contains("Logged in", ignoreCase = true) && !cx.contains("Not logged in", ignoreCase = true),
+            node = ver(sec("__NODE__", "__OS__")),
+            os = osLines.getOrNull(0).orEmpty(),
+            arch = osLines.getOrNull(1).orEmpty(),
+            root = osLines.getOrNull(2) == "0",
+        )
+    }
+
+    // ── 装机 ──
+
     /**
      * 手机**自己**去公网把脚本拿下来，再从 SSH 塞进服务器。
      *
      * ⚠️ **为什么不让服务器自己 curl。** 全新的 Ubuntu 24.04 镜像里 curl、wget、python3 **一个都没有**
-     * （容器里实测，#216）—— 「服务器上 curl 一下」这条路在最需要它的机器上恰恰走不通。
+     * （容器里实测，#215）—— 「服务器上 curl 一下」这条路在最需要它的机器上恰恰走不通。
      * 手机有网（它刚查过更新），脚本才 6KB，走 heredoc 过去最稳。拿不到（手机没外网）再退回服务器侧 curl / wget。
      * @return 脚本原文；null = 没拿到
      */
@@ -38,15 +99,17 @@ object Setup {
 
     /**
      * 起装机。有脚本原文就 heredoc 写到 `~/.yxi/bootstrap.sh` 再跑；没有就让服务器自己 curl / wget。
+     * [claude] / [codex] = 装哪个（用户的表单：都装 / 只装一个）；tmux 和 Yxi 钩子总是装。
      * ⚠️ `$?` 在单引号里，由内层 bash 求值；退路那条要 `pipefail` —— 否则 curl 都没有、管道右边的 bash 读到空输入
-     *    照样退出 0，手机上会看到一个「装好了」（#216 第一次就是这么骗过去的）。
+     *    照样退出 0，手机上会看到一个「装好了」（#215 第一次就是这么骗过去的）。
      */
-    fun startCommand(script: String?): String {
+    fun startCommand(script: String?, claude: Boolean = true, codex: Boolean = true): String {
+        val env = (if (codex) "" else "YXI_NO_CODEX=1 ") + (if (claude) "" else "YXI_NO_CLAUDE=1 ")
         val run = if (script != null) {
             "cat > \$HOME/.yxi/bootstrap.sh <<'$EOF'\n$script\n$EOF\n" +
-                "nohup bash -c 'bash \$HOME/.yxi/bootstrap.sh; echo __DONE__\$?' >> $LOG 2>&1 </dev/null & "
+                "nohup bash -c '${env}bash \$HOME/.yxi/bootstrap.sh; echo __DONE__\$?' >> $LOG 2>&1 </dev/null & "
         } else {
-            "nohup bash -c 'set -o pipefail; ( (command -v curl >/dev/null 2>&1 && curl -fsSL $URL || wget -qO- $URL) | bash ); " +
+            "nohup bash -c 'set -o pipefail; ( (command -v curl >/dev/null 2>&1 && curl -fsSL $URL || wget -qO- $URL) | ${env}bash ); " +
                 "echo __DONE__\$?' >> $LOG 2>&1 </dev/null & "
         }
         return "mkdir -p \$HOME/.yxi; : > $LOG; ${run}echo started"

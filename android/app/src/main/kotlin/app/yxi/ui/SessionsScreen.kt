@@ -120,8 +120,11 @@ fun SessionsScreen(
     // 「回它一句」目标 —— 非空就弹底部输入框，送键到那个会话（不进对话）
     var replyTo by remember { mutableStateOf<Session?>(null) }
     var newSession by remember { mutableStateOf(false) }
-    /** 「一键装机」的进度框 */
+    /** 「一键装机」的进度框；[setupOnly] = 只装某一个（claude / codex），null = 都装 */
     var setup by remember { mutableStateOf(false) }
+    var setupOnly by remember { mutableStateOf<String?>(null) }
+    /** 「探测 Claude Code / Codex」框 */
+    var probe by remember { mutableStateOf(false) }
     /** 这台机器上装了什么（tmux / claude / codex）；null = 还没同步过 */
     var tools by remember(host.id) { mutableStateOf<Set<String>?>(null) }
 
@@ -389,7 +392,9 @@ fun SessionsScreen(
             // 新机器：连上了、也同步过了，但 claude 和 codex 一个都没有 —— 空看板不解释等于坏了。
             // 画一张「一键装机」卡（[SetupCard]），装完这张卡自己消失。
             tools?.let { tl ->
-                if (fresh && "claude" !in tl && "codex" !in tl) item(key = "setup") { SetupCard("tmux" !in tl) { setup = true } }
+                if (fresh && "claude" !in tl && "codex" !in tl) item(key = "setup") { SetupCard("tmux" !in tl) { probe = true } }
+                // 装是装了、但没有一个会话在跑 claude / codex（刚装完、或全停了）—— 给一个探测入口，**默认不动**
+                else if (fresh && sessions.none { it.cmd in AGENT_CMDS }) item(key = "probe") { ProbeRow { probe = true } }
             }
             // ⚠️ 置顶的**从原来的组里拿出来**单独放最上面。留在原组只加个图标的话，
             // 会话一多（实测 22 个）照样要翻半天才找到 —— 那就等于没置顶
@@ -675,15 +680,19 @@ fun SessionsScreen(
         )
     }
 
-    if (setup) SetupDialog(ssh) { ok ->
-        setup = false
-        // 装好了立刻刷一遍：那张「一键装机」卡要马上消失，＋ 才能开会话
+    // 装完 / 探完立刻刷一遍：那张「一键装机」卡要马上消失，＋ 才能开会话
+    val resync = {
         val s = ssh
-        if (ok == true && s != null) scope.launch {
+        if (s != null) scope.launch {
             runCatching { SessionProbe.snapshotFull(s) }
                 .onSuccess { onSessions(it.sessions); groups = it.groups; tools = it.tools }
         }
     }
+    if (setup) SetupDialog(ssh, claude = setupOnly != "codex", codex = setupOnly != "claude") { ok ->
+        setup = false; setupOnly = null
+        if (ok == true) resync()
+    }
+    if (probe) ProbeDialog(ssh) { probe = false; resync() }
 
     if (newSession) {
         NewSessionDialog(
@@ -694,6 +703,7 @@ fun SessionsScreen(
             // 点进去只会跳回同一个会话，这个入口等于什么也没做。
             taken = sessions.map { it.cwd },
             onDismiss = { newSession = false },
+            onInstall = { k -> newSession = false; setupOnly = k; setup = true },
             onCreate = { dir, agent ->
                 newSession = false
                 val s = ssh ?: return@NewSessionDialog
@@ -1085,6 +1095,8 @@ private fun NewSessionDialog(
     onDismiss: () -> Unit,
     /** (目录, agent)；agent = claude / codex */
     onCreate: (String, String) -> Unit,
+    /** 点到没装的那个 agent → 去装它 */
+    onInstall: (String) -> Unit = {},
 ) {
     var path by remember { mutableStateOf("") }
     var agent by remember { mutableStateOf(if ("claude" !in tools && "codex" in tools) "codex" else "claude") }
@@ -1111,17 +1123,24 @@ private fun NewSessionDialog(
                     t("选一个还没开会话的目录，会在那儿开一个会话并把 %s 跑起来。").format(agent),
                     style = MaterialTheme.typography.labelSmall, color = Dim,
                 )
-                // 两个 agent 都装了才让选。⚠️ 只装了一个就别摆一个灰按钮在那儿 —— 那是「为什么点不了」的来源
-                if ("claude" in tools && "codex" in tools) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // 两个都列出来（用户要的：加号里能选 cc 或 codex）。没装的那个不是灰掉不解释，
+                // 而是写明「没装，点我去装」—— 点了直接开装机框
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf("claude" to "Claude Code", "codex" to "Codex").forEach { (k, label) ->
-                        val on = agent == k
+                        val has = k in tools
+                        val on = agent == k && has
                         Surface(
                             color = if (on) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
-                            shape = Pill, modifier = Modifier.clip(Pill).clickable { agent = k },
+                            shape = Pill, modifier = Modifier.clip(Pill).clickable { if (has) agent = k else onInstall(k) },
                         ) {
                             Text(
-                                label, Modifier.padding(14.dp, 7.dp), style = MaterialTheme.typography.labelLarge,
-                                color = if (on) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface,
+                                if (has) label else t("%s · 没装，点我去装").format(label),
+                                Modifier.padding(14.dp, 7.dp), style = MaterialTheme.typography.labelLarge,
+                                color = when {
+                                    on -> MaterialTheme.colorScheme.onSecondaryContainer
+                                    has -> MaterialTheme.colorScheme.onSurface
+                                    else -> Dim
+                                },
                             )
                         }
                     }
@@ -1183,6 +1202,9 @@ private fun NewSessionDialog(
  * 按分组看回答「这摊活儿都谁在干」。所以是切换，不是取代。
  */
 internal enum class BoardView { State, Group }
+
+/** 窗格里跑着这些命令 = 有 agent 在跑（npm 装的 claude 是 node 进程） */
+private val AGENT_CMDS = setOf("claude", "codex", "node")
 
 internal object Board {
     private fun p(ctx: android.content.Context) =
