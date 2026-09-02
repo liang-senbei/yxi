@@ -1,0 +1,256 @@
+#!/usr/bin/env bash
+# yxi-lab —— Yxi 手机实验室的**正式接口**。任何 agent 想给用户看/审东西，只走这一个命令。
+#
+#   yxi-lab spec                          先看契约（内容格式、尺寸、能不能联网、怎么审）
+#   yxi-lab template [--aspect 1:1]       出一个合规的网页动画骨架，填 draw() 就行
+#   yxi-lab check <文件>                  推之前校验：单文件、无外链、有 viewport、大小
+#   yxi-lab add <文件> [标题] [说明] [由谁] [--aspect W:H] [--group 组]
+#   yxi-lab note <标题> [正文] [由谁] [--group 组]
+#   yxi-lab list | rm <id> | clear | approved
+#
+# 内容落在**连的那台服务器**的 ~/.yxi/lab/（manifest.json + 素材）。每台服务器各自一个实验室，
+# 互不相干；App 只是读它，**实验室内容永远不嵌进 App**（用户定的规矩，handover D25/D26/D27）。
+set -euo pipefail
+LAB="$HOME/.yxi/lab"; MAN="$LAB/manifest.json"
+mkdir -p "$LAB"; [ -f "$MAN" ] || echo "[]" > "$MAN"
+
+# ── 选项（位置无关）：--aspect W:H · --group 名 · --by 谁 · --allow-net ──
+ASPECT=""; GROUP=""; BY=""; ALLOW_NET=0; pos=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --aspect) ASPECT="${2:-}"; shift 2 ;;
+    --group) GROUP="${2:-}"; shift 2 ;;
+    --by) BY="${2:-}"; shift 2 ;;
+    --allow-net) ALLOW_NET=1; shift ;;
+    *) pos+=("$1"); shift ;;
+  esac
+done
+set -- "${pos[@]:-}"
+cmd="${1:-help}"
+
+type_of() {   # 扩展名 → 类型
+  local ext; ext="$(echo "${1##*.}" | tr 'A-Z' 'a-z')"
+  case "$ext" in
+    gif) echo gif ;; png|jpg|jpeg|webp|bmp) echo image ;; svg) echo svg ;;
+    html|htm) echo html ;; mp4|webm|mov) echo video ;; md|markdown|txt) echo note ;; *) echo image ;;
+  esac
+}
+
+# ── 校验：推之前跑一遍。手机上 WebView 是沙箱：不给文件、不给 content://，外网靠不住 ──
+check_file() {   # $1 文件；返回非 0 = 有硬伤
+  python3 - "$1" "$ALLOW_NET" <<'PY'
+import sys, os, re
+f, allow_net = sys.argv[1], sys.argv[2] == "1"
+bad, warn = [], []
+if not os.path.isfile(f): print(f"✗ 读不到文件：{f}"); sys.exit(1)
+size = os.path.getsize(f); ext = f.rsplit(".", 1)[-1].lower()
+typ = {"gif":"gif","png":"image","jpg":"image","jpeg":"image","webp":"image","bmp":"image","svg":"svg",
+       "html":"html","htm":"html","mp4":"video","webm":"video","mov":"video","md":"note","markdown":"note","txt":"note"}.get(ext)
+if typ is None: bad.append(f"不认识的扩展名 .{ext}（认：png jpg webp gif svg html mp4 webm md txt）")
+if size > 3 * 1024 * 1024: warn.append(f"{size/1048576:.1f}MB 偏大，手机上加载会慢（图/GIF 走 base64 经 SSH，>3MB 会很慢）")
+if typ == "html":
+    t = open(f, encoding="utf-8", errors="replace").read()
+    if size > 1024 * 1024: bad.append("网页超过 1MB —— 它是经 SSH 整段拉回来的，压一压（图用 data URI 但别放大图）")
+    if 'name="viewport"' not in t: bad.append('缺 <meta name="viewport" content="width=device-width, initial-scale=1">，手机上会按 980px 桌面版排')
+    ext_refs = re.findall(r'(?:src|href)\s*=\s*["\']?(https?://[^"\'\s>]+)', t) + re.findall(r'url\((https?://[^)]+)\)', t)
+    if ext_refs and not allow_net: bad.append("引用了外部资源（" + ", ".join(ext_refs[:3]) + "…）：预览是离线沙箱，全部内联成 data URI；确实要联网加 --allow-net")
+    if re.search(r'<script[^>]+src=', t): bad.append("<script src=…> 外部脚本：内联进来")
+    if "yxi-aspect" not in t and not sys.argv[0]: pass
+    if "requestAnimationFrame" in t and "resize" not in t: warn.append("用了 requestAnimationFrame 但没监听 resize：WebView 首帧尺寸可能是 0，画布会空着（模板里有 fit()）")
+    if "getUserMedia" in t or "localStorage" in t: warn.append("用了 getUserMedia/localStorage：沙箱里没有")
+for w in warn: print("⚠️ " + w)
+for b in bad: print("✗ " + b)
+if not bad: print(f"✓ {os.path.basename(f)}：{typ}，{size/1024:.0f}KB，可以推")
+sys.exit(1 if bad else 0)
+PY
+}
+
+case "$cmd" in
+  add)
+    src="${2:?用法: yxi-lab add <文件> [标题] [说明] [由谁] [--aspect W:H] [--group 组]}"
+    title="${3:-$(basename "$src")}"; desc="${4:-}"; by="${5:-$BY}"; at="$(date +%s)"
+    check_file "$src" || { echo "✗ 没推。按上面的提示改好再 add（或者 yxi-lab check <文件> 先看）" >&2; exit 1; }
+    type="$(type_of "$src")"; ext="$(echo "${src##*.}" | tr 'A-Z' 'a-z')"; [ "$ext" = htm ] && ext=html
+    # 比例：--aspect > 网页里的 <meta name="yxi-aspect"> > 按类型默认（网页 1:1、视频 16:9、图片按原图）
+    if [ -z "$ASPECT" ] && [ "$type" = html ]; then
+      ASPECT="$(grep -o 'name="yxi-aspect"[^>]*content="[^"]*"' "$src" 2>/dev/null | grep -o 'content="[^"]*"' | head -1 | cut -d'"' -f2 || true)"
+    fi
+    if [ -z "$ASPECT" ]; then case "$type" in html) ASPECT="1:1" ;; video) ASPECT="16:9" ;; *) ASPECT="" ;; esac; fi
+    id="a-$at-$$-$RANDOM"; fname="$id.$ext"
+    cp "$src" "$LAB/$fname"
+    python3 - "$MAN" "$id" "$title" "$type" "$fname" "$desc" "$by" "$at" "$ASPECT" "$GROUP" <<'PY'
+import json,sys
+man,i,title,typ,fn,desc,by,at,aspect,group=sys.argv[1:11]
+d=json.load(open(man))
+d.insert(0, {"id":i,"title":title,"type":typ,"file":fn,"desc":desc,"by":by,"at":int(at),"aspect":aspect,"group":group})
+json.dump(d, open(man,"w"), ensure_ascii=False, indent=1)
+PY
+    echo "✓ 放进实验室：$title（$type${ASPECT:+，$ASPECT}${GROUP:+，组=$GROUP}，id=$id）—— 手机 App → 实验室 → 刷新"
+    ;;
+  note)
+    title="${2:?用法: yxi-lab note <标题> [正文] [由谁] [--group 组]}"; desc="${3:-}"; by="${4:-$BY}"; at="$(date +%s)"
+    id="n-$at-$$-$RANDOM"
+    python3 - "$MAN" "$id" "$title" "$desc" "$by" "$at" "$GROUP" <<'PY'
+import json,sys
+man,i,title,desc,by,at,group=sys.argv[1:8]
+d=json.load(open(man)); d.insert(0, {"id":i,"title":title,"type":"note","file":"","desc":desc,"by":by,"at":int(at),"aspect":"","group":group})
+json.dump(d, open(man,"w"), ensure_ascii=False, indent=1)
+PY
+    echo "✓ 放了条笔记：$title"
+    ;;
+  check)
+    f="${2:?用法: yxi-lab check <文件>}"; check_file "$f"
+    ;;
+  list)
+    python3 -c "
+import json
+for x in json.load(open('$MAN')):
+    print(x['id'],'|',x['type'],'|',x.get('aspect','') or '-','|',(x.get('group') or '-'),'|',x['title'])" 2>/dev/null || echo "(空)"
+    ;;
+  rm)
+    id="${2:?用法: yxi-lab rm <id>}"
+    python3 - "$MAN" "$LAB" "$id" <<'PY'
+import json,sys,os
+man,lab,i=sys.argv[1:4]
+d=json.load(open(man)); keep=[]
+for x in d:
+    if x['id']==i:
+        if x.get('file'):
+            try: os.remove(os.path.join(lab,x['file']))
+            except OSError: pass
+    else: keep.append(x)
+json.dump(keep, open(man,"w"), ensure_ascii=False, indent=1); print("删了", i)
+PY
+    ;;
+  clear)
+    echo "[]" > "$MAN"; find "$LAB" -maxdepth 1 -type f ! -name manifest.json -delete 2>/dev/null || true
+    echo "清空实验室"
+    ;;
+  approved)
+    f="$HOME/.yxi/lab-approvals.txt"
+    if [ ! -s "$f" ]; then echo "(还没勾选审核)"; exit 0; fi
+    python3 - "$MAN" "$f" <<'PY'
+import json,sys
+man,appf=sys.argv[1:3]
+items={x["id"]:x for x in json.load(open(man))}
+print("用户审核通过的：")
+for line in open(appf):
+    i=line.strip()
+    if not i: continue
+    x=items.get(i)
+    if x: print(f"  ✓ {x['title']}  [{x['id']}]" + (f"  {x['file']}" if x.get('file') else ""))
+    else: print(f"  ✓ {i}（已不在 manifest 里）")
+PY
+    ;;
+  template)
+    a="${ASPECT:-1:1}"
+    cat <<TPL
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- 预览框的宽高比。1:1 / 9:16 / 16:9 / 4:3；不写按 1:1。手机上预览区约 330×(330×高/宽) CSS px，全屏时铺满 -->
+<meta name="yxi-aspect" content="$a">
+<title>动效名</title>
+<style>
+  html,body{margin:0;height:100%;background:#fff;overflow:hidden}
+  canvas{display:block;width:100vw;height:100vh}
+  #hint{position:fixed;left:0;right:0;bottom:10px;text-align:center;font:12px system-ui,sans-serif;color:#9aa0a6;pointer-events:none}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hint">点一下重播</div>
+<script>
+// ===== 约定（yxi-lab spec 里有全文）=====
+// · 单文件、离线：图用 data URI 内联，不引用任何 http(s) 资源、不引用外部脚本/字体
+// · 不需要用户手势就开始动；播完停 2 秒自动重播；点一下立刻重播
+// · 尺寸从 fit() 读，且必须监听 resize：WebView 首帧尺寸可能是 0
+// · 每帧别分配对象；几百个粒子用 Float32Array
+var cv = document.getElementById('c'), ctx = cv.getContext('2d'), W = 0, H = 0;
+function fit() {
+  var d = window.devicePixelRatio || 1;
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = Math.round(W * d); cv.height = Math.round(H * d);
+  ctx.setTransform(d, 0, 0, d, 0, 0);
+}
+window.addEventListener('resize', fit); fit();
+
+var TOTAL = 2000, HOLD = 2000, t0 = 0;
+function draw(t) {               // t：0..TOTAL 毫秒。在这里画你的动效
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+  // 示例：一个圆从左滑到右
+  var p = Math.min(1, t / TOTAL);
+  ctx.fillStyle = '#0B57D0'; ctx.beginPath(); ctx.arc(W * (0.2 + 0.6 * p), H * 0.45, 12, 0, 6.283); ctx.fill();
+}
+function loop(now) {
+  if (!t0) t0 = now;
+  var t = now - t0;
+  if (t >= TOTAL + HOLD) { t0 = now; t = 0; }
+  draw(Math.min(t, TOTAL));
+  requestAnimationFrame(loop);
+}
+document.addEventListener('pointerdown', function () { t0 = 0; });
+requestAnimationFrame(loop);     // 有图的话：在 img.onload 里再 requestAnimationFrame(loop)
+</script>
+</body>
+</html>
+TPL
+    ;;
+  spec)
+    cat <<'SPEC'
+# Yxi 实验室 · 内容契约（给 agent 看的）
+
+实验室 = 服务器上的 `~/.yxi/lab/`（manifest.json + 素材文件），手机 App 只读它。
+每台服务器各自一个实验室，互不相干；**实验室内容永远不嵌进 App**。所以：想给用户看/审东西，
+不改 App，只用 `yxi-lab`。
+
+## 流程
+1. 产出一个文件（网页 / 图 / GIF / 视频 / 文本）。网页先 `yxi-lab template > x.html` 拿骨架。
+2. `yxi-lab check x.html` 校验；有 ✗ 就改。
+3. `yxi-lab add x.html "标题" "一句说明" "由谁生成" --aspect 1:1 --group 组名`
+4. 提醒用户：手机 App → 实验室 → 刷新。
+5. 用户勾「采纳」后 `yxi-lab approved` 看结果；不要的 `yxi-lab rm <id>`。
+
+## 类型与展示
+| type  | 文件            | 手机上怎么显示                                   | aspect 默认 |
+|-------|-----------------|--------------------------------------------------|-------------|
+| html  | .html           | WebView（JS 开、离线沙箱），按 aspect 定预览框，可全屏 | 1:1 |
+| image | .png .jpg .webp | 整图等比缩放，不裁；可全屏、可存相册               | 原图 |
+| gif   | .gif            | 动图播放；可存相册                                | 原图 |
+| video | .mp4 .webm      | 可播放；可存相册                                  | 16:9 |
+| note  | .md .txt 或 note | 只显示文字                                       | —  |
+
+预览框宽 ≈ 手机宽 − 56dp（约 330dp），高 = 宽 × aspect。全屏时铺满整屏。
+
+## 网页（html）硬规矩
+- **单文件、离线**：图片用 data URI 内联；不引用 http(s) 资源、不引用外部脚本 / 字体 / CSS（沙箱里拿不到，`check` 会拦）。
+- 有 `<meta name="viewport" content="width=device-width, initial-scale=1">`；`<meta name="yxi-aspect" content="9:16">` 声明比例。
+- 尺寸从 `innerWidth/innerHeight` 读并**监听 resize**（WebView 首帧可能是 0×0）；按 devicePixelRatio 设画布。
+- 不依赖用户手势开始；播完停 2 秒自动重播；点一下立刻重播；底部一行「点一下重播」小字。
+- ≤ 1MB。每帧别分配对象。不用 localStorage / getUserMedia / fetch。
+- 允许：canvas 2D、CSS 动画、requestAnimationFrame、getImageData（同文档 data URI 图不污染画布）。
+
+## manifest.json 一条
+{"id":"a-…","title":"…","type":"html","file":"a-….html","desc":"一句话","by":"谁","at":1788340000,"aspect":"1:1","group":"开屏动效"}
+
+## 审核
+用户在手机上勾「采纳」→ 服务器 `~/.yxi/lab-approvals.txt` 里一行一个 id → `yxi-lab approved` 对着 manifest 打印标题。
+SPEC
+    ;;
+  *)
+    cat <<'EOF'
+yxi-lab —— Yxi 手机实验室的接口（agent 给用户看/审东西只走它）
+
+  yxi-lab spec                         契约：类型、尺寸、离线沙箱、怎么审
+  yxi-lab template [--aspect 1:1]      合规的网页动画骨架，填 draw() 就行
+  yxi-lab check <文件>                 推之前校验（单文件 / 无外链 / viewport / 大小）
+  yxi-lab add <文件> [标题] [说明] [由谁] [--aspect W:H] [--group 组]
+  yxi-lab note <标题> [正文] [由谁] [--group 组]
+  yxi-lab list · rm <id> · clear · approved
+
+推完提醒用户：手机 App → 实验室 → 刷新。
+EOF
+    ;;
+esac

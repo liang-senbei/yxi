@@ -733,5 +733,8 @@ internal object En {
         "Y 落下，字展开" to "Y drops, word unfolds",
         "Y 从上面落下弹两下、起一圈涟漪，然后整个字向右展开" to "The Y drops in and bounces twice with a ripple, then the word unfolds to the right",
         "%s 这台的 · " to "%s · ",
+        "✓ 已采纳" to "✓ Adopted",
+        "采纳" to "Adopt",
+        "全屏" to "Full screen",
     )
 }

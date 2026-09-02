@@ -4038,3 +4038,16 @@ ssh mac 'cd ~/yxi-build && ./tools/xcodegen/bin/xcodegen generate && xcodebuild 
 单文件 HTML（logo 用 data URI 内联，WebView 预览区约 330×340，循环播），`yxi-lab add` 推上去；
 用户在实验室勾「采纳」，`yxi-lab approved` 看到是哪个，再把 `DEFAULT_KEY` 改成它发版。
 ⚠️ 以后凡是「给用户挑 / 给用户看效果」的东西，先问一句：能不能做成一个文件推到实验室？能就别碰 App。
+
+## #205 实验室里网页预览一片空白 / 动画停在第一帧 —— `AndroidView.update` 每次重组都在重载页面
+
+**症状**（用户截图）：「粒子 B · 点阵波场」卡片里只有底部一行「点一下重播」，画布全白；有的动画一直停在第一帧。
+
+**根因**：WebView 的 `loadDataWithBaseURL` 写在 `AndroidView(update = { … })` 里。`update` 是**每次重组都跑**的
+（滚一下列表、勾一下采纳、任何状态变一下），页面就被反复重载。等图 onload 才开始画的页面永远等不到那一刻。
+另一个次要原因：预览框用 `heightIn(max)`，WebView 首帧尺寸不定，`innerHeight` 可能是 0，画布 0×0。
+
+**修法**：加载放进 `factory`（只跑一次），`update` 留空；预览框按 manifest 里的 `aspect` **定死高度**
+（网页默认 1:1、视频 16:9）；网页契约里要求监听 `resize`（`yxi-lab check` 会提醒）。
+顺手：图片改 `ContentScale.Fit`（原来 FillWidth 把竖图裁掉一截，就是「展示不全」）；加了全屏。
+⚠️ 通则：`AndroidView.update` 里只放「把状态同步给 View」的幂等操作，**任何有副作用的（加载、播放、重置）都不许放**。

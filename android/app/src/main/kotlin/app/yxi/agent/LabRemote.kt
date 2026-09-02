@@ -29,7 +29,20 @@ object LabRemote {
         val by: String = "",
         /** 生成时间，unix 秒。0 = 老数据没记 */
         val at: Long = 0L,
+        /** 预览框宽高比，如 "1:1" / "9:16"（`yxi-lab add --aspect`）。空 = 按类型默认 / 原图 */
+        val aspect: String = "",
+        /** 同一批的归组名（`--group`），如「开屏动效」 */
+        val group: String = "",
     ) {
+        /** 宽/高。null = 用原图比例（图 / GIF）。网页没写按 1:1，视频按 16:9。 */
+        val ratio: Float? get() {
+            val m = Regex("""^\s*(\d+(?:\.\d+)?)\s*[:/x]\s*(\d+(?:\.\d+)?)\s*$""").find(aspect)
+            if (m != null) {
+                val w = m.groupValues[1].toFloat(); val h = m.groupValues[2].toFloat()
+                if (w > 0 && h > 0) return w / h
+            }
+            return when (type) { "html" -> 1f; "video" -> 16f / 9f; else -> null }
+        }
         /** 归到哪个栏目（按 type）。key 用于分组，name 是显示名。 */
         val catKey: String get() = when (type) {
             "image" -> "image"; "svg" -> "svg"; "gif" -> "gif"; "video" -> "video"; "html" -> "html"; else -> "note"
@@ -48,6 +61,7 @@ object LabRemote {
                     o.optString("id", "remote-$i"), o.optString("title", "?"),
                     o.optString("type", "note"), o.optString("file"), o.optString("desc"),
                     by = o.optString("by"), at = o.optLong("at", 0L),
+                    aspect = o.optString("aspect"), group = o.optString("group"),
                 )
             }
         }.getOrDefault(emptyList())

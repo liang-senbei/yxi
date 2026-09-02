@@ -206,6 +206,8 @@ if [ "${1:-}" = "--uninstall" ]; then uninstall; exit 0; fi
 mkdir -p "$BIN_DIR" "$EVENTS_DIR"
 install -m 755 "$HOOK_SRC" "$HOOK_DST"
 [ -f "$HUB_SRC" ] && install -m 755 "$HUB_SRC" "$HUB_DST"
+# 实验室接口：agent 给用户看/审东西只走它（yxi-lab spec 看契约）
+LAB_SRC="$(cd "$(dirname "$0")" && pwd)/yxi-lab"; [ -f "$LAB_SRC" ] && install -m 755 "$LAB_SRC" "${BIN_DIR}/yxi-lab"
 touch "$EVENTS"; chmod 600 "$EVENTS"
 echo "· 装好 $HOOK_DST"
 
