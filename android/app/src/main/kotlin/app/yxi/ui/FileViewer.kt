@@ -52,6 +52,7 @@ private val TEXTISH = setOf(
 @Composable
 fun FileViewer(sftp: Sftp?, path: String, onBack: () -> Unit, modifier: Modifier = Modifier) {
     val viewerScope = androidx.compose.runtime.rememberCoroutineScope()
+    val dens = androidx.compose.ui.platform.LocalDensity.current.density
     val ext = Paths.extOf(path)
     var bytes by remember(path) { mutableStateOf<ByteArray?>(null) }
     var error by remember(path) { mutableStateOf<String?>(null) }
@@ -174,7 +175,7 @@ fun FileViewer(sftp: Sftp?, path: String, onBack: () -> Unit, modifier: Modifier
                         md,
                         typography = yxiMarkdown(),           // 默认标题 57sp，文档在手机上同样不能这么排
                         modifier = Modifier.fillMaxWidth(),   // 库的默认是 fillMaxSize()，会把滚动撑坏
-                        imageTransformer = remember(sftp, path) { SftpImages(sftp, Paths.dirOf(path), viewerScope) },
+                        imageTransformer = remember(sftp, path) { SftpImages(sftp, Paths.dirOf(path), viewerScope, dens) },
                     )
                 }
                 (ext == "html" || ext == "htm") && !source -> HtmlBody(b.decodeToString())
@@ -269,32 +270,66 @@ private class SftpImages(
     private val sftp: Sftp?, private val baseDir: String,
     /** ⚠️ 必须是 FileViewer 那一层的 scope。加载不能挂在 transform 自己的组合上（见下） */
     private val scope: kotlinx.coroutines.CoroutineScope,
+    private val density: Float,
 ) : ImageTransformer {
     // ⚠️⚠️ **不能在 transform 里 produceState。** 渲染器在组合期间反复重调 transform，每次都是新的
-    // 组合作用域 —— 上一版就是这么写的：日志里图片明明读回来了（35KB，600×243），紧接着
-    // 「The coroutine scope left the composition」，状态随组合一起被丢掉，再来一遍，永远显示不出来
-    // （模拟器里逮到的，#212）。所以缓存放在这个对象上：读一次，组合爱怎么重建都无所谓；
-    // 用 mutableStateMap 是为了读完能触发重组把图画出来。
+    // 组合作用域 —— 状态随组合一起被丢掉，读到一半就取消，永远显示不出来（#212）。
+    // 缓存放在这个对象上：读一次，组合爱怎么重建都无所谓；mutableStateMap 让读完能触发重组。
     private val done = androidx.compose.runtime.mutableStateMapOf<String, Painter>()
-    private val failed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val inflight = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    /** 加载中 / 太大没加载 的占位图（一张小位图上画一行字），按文案缓存 */
+    private val placeholders = HashMap<String, Painter>()
 
     @Composable
     override fun transform(link: String): ImageData? {
         if (link.startsWith("http://") || link.startsWith("https://") || link.startsWith("data:")) return null
         done[link]?.let { return ImageData(painter = it, contentScale = ContentScale.FillWidth) }
-        if (link in failed || !inflight.add(link)) return null
         val s = sftp ?: return null
-        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+        if (inflight.add(link)) scope.launch(kotlinx.coroutines.Dispatchers.IO) {
             val path = Paths.resolve(baseDir, link)
-            val bmp = runCatching { s.read(path, 8 shl 20) }
-                .onFailure { android.util.Log.w("YxiMd", "img $link -> $path: ${it.message}") }
-                .getOrNull()?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                if (bmp != null) done[link] = BitmapPainter(bmp.asImageBitmap()) else failed += link
-                inflight -= link
+            // ⚠️ **先看大小再决定。** 用户定的：太大就不加载，其余的放那慢慢加载（#214）。
+            // 一张 20MB 的图从 SFTP 拉回来要一分钟，还把通道锁住让别的操作全排队。
+            val size = runCatching { s.size(path) }.getOrDefault(-1L)
+            val painter: Painter = when {
+                size > TOO_BIG -> placeholder(t("图片 %d MB，太大没加载").format(size shr 20))
+                else -> {
+                    val bytes = runCatching { s.read(path, TOO_BIG.toInt()) }
+                        .onFailure { android.util.Log.w("YxiMd", "img $link -> $path: ${it.message}") }.getOrNull()
+                    // 降采样：4000px 宽的图在手机上只需要 1600px，原样解码几十 MB 内存，几张就 OOM
+                    val bmp = bytes?.let { decodeScaled(it, 1600) }
+                    bmp?.let { BitmapPainter(it.asImageBitmap()) } ?: placeholder(t("图片读不到：%s").format(link.substringAfterLast('/')))
+                }
             }
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { done[link] = painter; inflight -= link }
         }
-        return null
+        // 还在读：给一块灰底占位，位置先占住，图到了原地换掉（不会一跳一跳）
+        return ImageData(painter = placeholder(t("加载中…")), contentScale = ContentScale.FillWidth)
     }
+
+    private fun decodeScaled(bytes: ByteArray, maxSide: Int): android.graphics.Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        var sample = 1
+        while (bounds.outWidth / sample > maxSide || bounds.outHeight / sample > maxSide) sample *= 2
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
+    }
+
+    /** 一张 16:9 的浅灰位图，中间一行字。同一句只画一次。 */
+    private fun placeholder(text: String): Painter = synchronized(placeholders) {
+        placeholders.getOrPut(text) {
+            // ⚠️ 渲染器按「像素 ÷ 密度」定图的宽，FillWidth 不会把图放大到超过它自己的尺寸 ——
+            // 640px 的占位在 2.6 倍屏上只有六成宽，左边一块灰。画宽一点（1800px ≈ 690dp）就铺满了。
+            val w = 1800; val h = 420
+            val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+            val c = android.graphics.Canvas(bmp)
+            c.drawColor(0xFFEEF1F5.toInt())
+            val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                color = 0xFF7A7F87.toInt(); textSize = 54f; textAlign = android.graphics.Paint.Align.CENTER
+            }
+            c.drawText(text, w / 2f, h / 2f + 19f, paint)
+            BitmapPainter(bmp.asImageBitmap())
+        }
+    }
+
+    private companion object { const val TOO_BIG = 8L shl 20 }
 }

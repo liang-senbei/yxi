@@ -80,14 +80,19 @@ fun FilesScreen(
 
     LaunchedEffect(dir, sftp) {
         val s = sftp ?: return@LaunchedEffect
-        status = null
-        app.yxi.ssh.catching { s.list(dir) }
+        // ⚠️ 换目录先清屏 + 「读取中」。原来旧列表一直挂着等新列表 —— 通道被上一个慢操作占着时，
+        // 面包屑已经变了、列表还是上一个目录的，用户以为点了没反应（#213）。
+        val target = dir
+        entries = emptyList(); status = t("读取中…")
+        app.yxi.ssh.catching { s.list(target) }
             .onSuccess {
+                if (dir != target) return@onSuccess      // 等的时候用户又点走了，这份不是他要的
                 entries = it
+                status = if (it.size >= Sftp.MAX_ENTRIES) t("目录太大，只列了前 %d 项").format(Sftp.MAX_ENTRIES) else null
                 recent.remove(dir); recent.add(0, dir)
                 while (recent.size > 8) recent.removeAt(recent.lastIndex)
             }
-            .onFailure { entries = emptyList(); status = Sftp.explain(it) }
+            .onFailure { if (dir == target) { entries = emptyList(); status = Sftp.explain(it) } }
     }
 
     open?.let { file ->
@@ -150,7 +155,16 @@ fun FilesScreen(
                 Row(
                     Modifier.fillMaxWidth()
                         .clickable {
-                            if (e.isDir) dir = Paths.resolve(dir, e.name) else open = Paths.resolve(dir, e.name)
+                            val p = Paths.resolve(dir, e.name)
+                            when {
+                                e.isDir -> dir = p
+                                // 列目录时没来得及解引用的链接：点开那一刻再问一次它是不是目录
+                                e.isLink -> scope.launch {
+                                    val s = sftp ?: return@launch
+                                    if (app.yxi.ssh.catching { s.isDir(p) }.getOrDefault(false)) dir = p else open = p
+                                }
+                                else -> open = p
+                            }
                         }
                         .padding(20.dp, 13.dp),
                     verticalAlignment = Alignment.CenterVertically,

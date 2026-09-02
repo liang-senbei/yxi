@@ -40,23 +40,37 @@ class Sftp internal constructor(private val ch: ChannelSftp, private val lock: M
         val isLink: Boolean = false,
     )
 
-    /** 列一个目录。目录在前、再按名字排；`.` 和 `..` 不返回。 */
+    /**
+     * 列一个目录。目录在前、再按名字排；`.` 和 `..` 不返回。
+     *
+     * ⚠️ **大目录不能慢。** 原来每个符号链接都 `stat` 一次解引用（看它指不指向目录），
+     * 一次 stat 一个来回 —— `/tmp` 五千多项、几百个链接，列一次要几分钟，而且整个通道被锁住，
+     * 后面的所有操作都排队（用户看到的是「点面包屑没反应」，#213）。
+     * 现在：只解引用前 [MAX_LINK_STAT] 个链接，其余当文件、标 isLink，点开时再判（[isDir]）；
+     * 超过 [MAX_ENTRIES] 项截断，界面提示。
+     */
     suspend fun list(path: String): List<Entry> = withContext(Dispatchers.IO) {
         lock.withLock {
-            @Suppress("UNCHECKED_CAST")
-            val raw = ch.ls(path) as java.util.Vector<ChannelSftp.LsEntry>
+            // ⚠️ 用 selector 边收边数，到上限就 BREAK —— 五千项的目录要几十个来回，
+            // `ls(path)` 一次性收全等于把这些来回全走完；停在 3000 项能省掉一半以上。
+            val raw = ArrayList<ChannelSftp.LsEntry>(512)
+            ch.ls(path, ChannelSftp.LsEntrySelector { e ->
+                if (e.filename != "." && e.filename != "..") raw += e
+                if (raw.size >= MAX_ENTRIES) ChannelSftp.LsEntrySelector.BREAK else ChannelSftp.LsEntrySelector.CONTINUE
+            })
+            var statLeft = MAX_LINK_STAT
             raw.asSequence()
                 .filter { it.filename != "." && it.filename != ".." }
                 .map { e ->
                     val a = e.attrs
-                    // 符号链接指向目录时，lstat 说它是链接不是目录 —— 点进去才对，
-                    // 所以额外 stat 一次解引用。解不开（悬空链接）就当普通文件
                     val dir = if (a.isLink) {
-                        runCatching { ch.stat("$path/${e.filename}").isDir }.getOrDefault(false)
+                        if (statLeft > 0) { statLeft--; runCatching { ch.stat("$path/${e.filename}").isDir }.getOrDefault(false) }
+                        else false
                     } else a.isDir
                     Entry(e.filename, dir, a.size, a.mTime, a.isLink)
                 }
                 .sortedWith(compareByDescending<Entry> { it.isDir }.thenBy { it.name.lowercase() })
+                .take(MAX_ENTRIES)
                 .toList()
         }
     }
@@ -136,6 +150,11 @@ class Sftp internal constructor(private val ch: ChannelSftp, private val lock: M
     fun close() = runCatching { ch.disconnect() }.let { }
 
     companion object {
+        /** 列目录时最多解引用几个符号链接（每个一趟往返） */
+        const val MAX_LINK_STAT = 24
+        /** 一个目录最多列几项 —— 手机上翻不完，列全了只会卡 */
+        const val MAX_ENTRIES = 3000
+
         /** 报错文案：SFTP 的异常消息经常只有个错误码。 */
         fun explain(e: Throwable): String = when {
             e is SftpException && e.id == ChannelSftp.SSH_FX_NO_SUCH_FILE -> t("没有这个文件或目录")

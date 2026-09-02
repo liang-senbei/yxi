@@ -739,5 +739,9 @@ internal object En {
         "读不到这条内容（连接断了？）—— 点上面的刷新" to "Couldn't load this item (connection dropped?) — tap refresh above",
         "页面报错：%s" to "Page error: %s",
         "等了 %s" to "waited %s",
+        "目录太大，只列了前 %d 项" to "Directory too large; showing the first %d entries",
+        "图片 %d MB，太大没加载" to "Image is %d MB, too large to load",
+        "图片读不到：%s" to "Couldn't load image: %s",
+        "加载中…" to "Loading…",
     )
 }
