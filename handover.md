@@ -638,7 +638,9 @@
   `ui/ConnectPanel.kt`）：GitHub 设备码登录（git + GitHub MCP 一起）、二十来个公开远程 MCP
   （Notion / Linear / Sentry / Jira / Stripe / Zapier / Vercel / Figma …）一键 `claude mcp add` + `login`，
   回调靠 SSH 端口转发接到手机（#198）；免认证的 Context7 / DeepWiki / Hugging Face 直接加；自定义地址。
-  Gmail / Slack / 日历只在 claude.ai 订阅登录下有，面板里说明了。⏳ iOS 还没有这块。
+  Gmail / Slack / 日历只在 claude.ai 订阅登录下有，面板里说明了。
+  iOS 同步有了（`YxiKit/Agent/Connect.swift` 有测试 + `UI/Config/ConnectPanel.swift`，Mac 上编过）——
+  ⚠️ iOS **没做端口转发**（Citadel 只给积木），MCP 授权完要把 localhost 地址粘回来。
 - ✅ **0.9.60 ~ 0.9.64（2026-09-02）**：终止走 `cloud-forget`（#188）；通知图标换新 logo + 官网换 logo/favicon（#189）；
   附件发出去第一帧就是缩略图（#190）；**照参考款 录像逐帧抄的动效**：光晕待机在底部、忙了迁到顶部、
   干活中色相循环、回答到达退掉，新消息滑入淡入（#191）。`/model` 菜单只在会话启动时读配置（#187）。

@@ -19,7 +19,20 @@ struct ConfigScreen: View {
 
     private var runner: ShellRunner? { app.live?.link.service as? ShellRunner }
 
+    /// 「连接」（把第三方服务接给 agent）/「Agent 配置」（原来那棵配置树）
+    @State private var panel = "connect"
+
     var body: some View {
+        VStack(spacing: 0) {
+        Picker("", selection: $panel) {
+            Text("连接").tag("connect")
+            Text("Agent 配置").tag("agent")
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal, 16).padding(.vertical, 8)
+        if panel == "connect" {
+            ConnectPanel(runner: runner)
+        } else {
         Group {
             if loading {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -46,6 +59,8 @@ struct ConfigScreen: View {
                 }
                 .listStyle(.insetGrouped)
             }
+        }
+        }
         }
         .navigationTitle("配置")
         .background(Yx.surface)
