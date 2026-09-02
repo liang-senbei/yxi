@@ -705,5 +705,14 @@ internal object En {
         "只有 claude.ai 订阅登录才有（claude.ai 连接器），用 API key 的没有" to "Only with a claude.ai subscription login (claude.ai connectors); not available with an API key",
         "浏览器插件只配同一台电脑上的 Claude Code，远程服务器用不了" to "The browser extension only pairs with Claude Code on the same computer; not usable from a remote server",
         "收起" to "Collapse",
+        "弹窗提醒（横幅）" to "Pop-up alerts (banner)",
+        "会弹" to "Pops up",
+        "这条频道被降级了，通知只会进列表不弹出来。点「去开启」，把重要程度调回「高」并打开横幅。" to "This channel was demoted, so alerts only land in the list. Tap Enable, set importance back to High and turn banners on.",
+        "发一条试试" to "Send a test",
+        "弹一条" to "Test it",
+        "正常情况下它会像微信来消息一样弹在屏幕顶上、震两下；锁屏时会点亮屏幕。没弹出来就是上面哪一项没放行。" to "Normally it pops up at the top like a chat message and buzzes twice; on the lock screen it wakes the display. If nothing pops up, one of the items above is still blocked.",
+        "演示机 需要你（这是试的）" to "Demo host needs you (test)",
+        "Claude 停下来等你的时候，就是这样弹出来。" to "This is how it looks when Claude stops and waits for you.",
+        "抓回来的不完整（连接可能半断了）" to "Incomplete snapshot (the connection may be half-dead)",
     )
 }

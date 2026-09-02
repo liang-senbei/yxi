@@ -103,6 +103,12 @@ object SessionProbe {
 
     suspend fun snapshotFull(session: SshSession): Snap {
         val out = session.exec(SCRIPT)
+        // ⚠️ **输出不完整就报错，别当成「零个会话」。** 连接半断的时候 exec 会带着半截
+        // （或空的）输出回来，原来 [extract] 安静地返回 ""，解析出零个会话、还标成 fresh ——
+        // 看板上所有收藏立刻全变「未启用」（用户截图：断线重连时只剩「未启用 5」）。
+        // 标记对不齐 = 这一趟作废，上一份继续摆着、连接横幅照常显示。
+        if (!out.contains("$MARKER\ttmux_begin") || !out.contains("$MARKER\ttmux_end"))
+            error(t("抓回来的不完整（连接可能半断了）"))
         val tmux = extract(out, "tmux")
         val status = extract(out, "status")
         // 转录最后写入时间 —— **「上次对话」的真来源**（见 [lastActivityOf]）

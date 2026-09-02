@@ -562,9 +562,11 @@ class EventService : Service() {
             getSystemService(NotificationManager::class.java).canUseFullScreenIntent()
         }.getOrDefault(false)
 
-    private fun channels() {
+    private fun channels() = ensureChannels(this)
+
+    private fun channelsImpl(ctx: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        val nm = getSystemService(NotificationManager::class.java)
+        val nm = ctx.getSystemService(NotificationManager::class.java)
         // 拆成两条频道：不只是分类，更是给「触感词汇表」和「单独静音 / 免打扰」留的抓手 ——
         // 系统里能分别调「Claude 找你」和「干完了」。震动写在频道上（频道创建后改不动，所以是新 id）。
         nm.createNotificationChannel(
@@ -593,6 +595,50 @@ class EventService : Service() {
     }
 
     companion object {
+        /** 频道要在**发第一条之前**存在；设置页的「试一下」和「弹窗」检查也要用，所以放这儿。 */
+        fun ensureChannels(ctx: Context) = runCatching { EventService().channelsImpl(ctx) }.getOrDefault(Unit)
+
+        /** 「Claude 找你」这条频道现在还会不会弹到屏幕顶上（用户可能在系统里把它降级了）。 */
+        fun bannerOn(ctx: Context): Boolean = runCatching {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return true
+            val nm = ctx.getSystemService(NotificationManager::class.java)
+            val ch = nm.getNotificationChannel(CH_NEEDS) ?: return true       // 还没建 = 建出来就是 HIGH
+            ch.importance >= NotificationManager.IMPORTANCE_HIGH
+        }.getOrDefault(true)
+
+        /** 跳到「Claude 找你」这条频道的系统设置页 —— 横幅 / 声音 / 震动都在那儿开。 */
+        fun openBannerSettings(ctx: Context) {
+            ensureChannels(ctx)
+            val i = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                    .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName)
+                    .putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, CH_NEEDS)
+            else Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName)
+            runCatching { ctx.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        }
+
+        /**
+         * 发一条真的「Claude 找你」给用户看 —— 用户问「是不是像微信那样弹窗」，
+         * 与其解释，不如让他当场看一眼。走的就是正式那条频道和优先级。
+         */
+        fun testNotify(ctx: Context) {
+            ensureChannels(ctx)
+            val open = Intent(ctx, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP }
+            val pi = PendingIntent.getActivity(ctx, 7, open, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            val b = NotificationCompat.Builder(ctx, CH_NEEDS)
+                .setSmallIcon(R.drawable.ic_stat_yxi)
+                .setLargeIcon(runCatching { android.graphics.BitmapFactory.decodeResource(ctx.resources, R.drawable.ic_notif_large) }.getOrNull())
+                .setContentTitle(t("演示机 需要你（这是试的）"))
+                .setContentText(t("Claude 停下来等你的时候，就是这样弹出来。"))
+                .setContentIntent(pi)
+                .setAutoCancel(true)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(Notification.CATEGORY_CALL)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            runCatching { androidx.core.app.NotificationManagerCompat.from(ctx).notify(7, b.build()) }
+        }
+
         private const val CH_NEEDS = "yxi.needs"
         private const val CH_DONE = "yxi.done"
         private const val CH_ONGOING = "yxi.ongoing"

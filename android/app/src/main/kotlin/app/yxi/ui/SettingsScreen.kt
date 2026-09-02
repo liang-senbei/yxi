@@ -195,6 +195,22 @@ fun SettingsScreen(
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
             }
+            // 「像微信那样弹在屏幕顶上」靠的是「Claude 找你」这条频道的重要级（HIGH）。
+            // 用户在系统里把它降过级、或者荣耀把横幅关了，就只进列表不弹 —— 这一行把它摆出来。
+            val banner = app.yxi.watch.EventService.bannerOn(ctx)
+            StatusRow(t("弹窗提醒（横幅）"), banner, ok = t("会弹")) { app.yxi.watch.EventService.openBannerSettings(ctx) }
+            if (!banner) Hint2(t("这条频道被降级了，通知只会进列表不弹出来。点「去开启」，把重要程度调回「高」并打开横幅。"))
+            // 与其解释「会不会弹」，不如当场弹一条给用户看
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(t("发一条试试"), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                Surface(
+                    color = CopperContainer, shape = Pill,
+                    modifier = Modifier.clip(Pill).clickable { app.yxi.watch.EventService.testNotify(ctx) },
+                ) {
+                    Text(t("弹一条"), Modifier.padding(12.dp, 5.dp), style = MaterialTheme.typography.labelSmall, color = OnCopperContainer)
+                }
+            }
+            Hint2(t("正常情况下它会像微信来消息一样弹在屏幕顶上、震两下；锁屏时会点亮屏幕。没弹出来就是上面哪一项没放行。"))
             StatusRow(t("后台不受限制"), battery) { askIgnoreBattery(ctx) }
             if (!battery) {
                 // ⚠️ 荣耀/华为的「电池优化白名单」只是**其中一道**。真正掐后台的是
@@ -510,8 +526,11 @@ private fun ignoringBattery(ctx: Context): Boolean = runCatching {
 }.getOrDefault(true)
 
 private fun notificationsOn(ctx: Context): Boolean = runCatching {
-    if (Build.VERSION.SDK_INT < 33) true
-    else ctx.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+    // ⚠️ 只查 POST_NOTIFICATIONS 不够：用户在系统里把 App 的通知整个关掉时权限仍然是「已授予」。
+    // `areNotificationsEnabled` 才是「现在到底发不发得出去」。
+    val enabled = androidx.core.app.NotificationManagerCompat.from(ctx).areNotificationsEnabled()
+    if (Build.VERSION.SDK_INT < 33) enabled
+    else enabled && ctx.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
         android.content.pm.PackageManager.PERMISSION_GRANTED
 }.getOrDefault(true)
 

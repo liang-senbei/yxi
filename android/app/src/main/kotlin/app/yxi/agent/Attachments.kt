@@ -85,9 +85,11 @@ object Attachments {
     /**
      * 把 [header] 贴上去的那几行从正文里摘出来。
      *
-     * ⚠️ **只认开头连续的那几行。** 附件头永远在最前面（[header] 就是这么拼的），
-     * 而正文里完全可能出现同样长相的一行（比如用户在讲「[图片1] 是哪张」）——
-     * 一路扫到底会把正文里的句子也吃掉。
+     * ⚠️ **整段里任何一行都认，不只认开头。** 原来只认开头连续的几行，理由是怕吃掉正文里
+     * 长得像的句子 —— 但真实情况是：用户趁 Claude 忙的时候连发两条，第二条带图，
+     * Claude Code 把排队的两条**合成一条**送进去，附件头就落在了两段正文中间，
+     * 于是图片渲染不出来、路径原样躺在气泡里（用户截图报的）。
+     * 正则本身已经很严（`[标签] /绝对路径`，整行只有这个），正文里撞上的概率可以忽略。
      *
      * ⚠️ 图片还是附件**按扩展名判**，不按标签判：标签是本地化的（`图片1`/`Image 1`），
      * 换个语言看历史消息就全认不出来了。
@@ -97,17 +99,16 @@ object Attachments {
     fun parseRefs(text: String): Pair<List<Ref>, String> {
         val re = Regex("""^\[([^\]]+)]\s+(/\S+)\s*$""")
         val refs = ArrayList<Ref>()
-        val lines = text.lines()
-        var i = 0
-        while (i < lines.size) {
-            val m = re.find(lines[i]) ?: break
+        val body = ArrayList<String>()
+        for (line in text.lines()) {
+            val m = re.find(line)
+            if (m == null) { body += line; continue }
             val path = m.groupValues[2]
             val ext = path.substringAfterLast('.', "").lowercase()
             refs += Ref(m.groupValues[1], path, ext in IMAGE_EXT)
-            i++
         }
         if (refs.isEmpty()) return emptyList<Ref>() to text
-        return refs to lines.drop(i).joinToString("\n").trim()
+        return refs to body.joinToString("\n").trim()
     }
 
     private val IMAGE_EXT = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "heif")
