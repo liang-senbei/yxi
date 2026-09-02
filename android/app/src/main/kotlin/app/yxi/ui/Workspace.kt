@@ -384,9 +384,12 @@ fun Workspace(
 
     // ⚠️ `imePadding()` 不能省：`enableEdgeToEdge` 下窗口是铺满的，
     // 软键盘弹起来会**盖住键盘工具条** —— 而 esc / tab / ^C 恰恰是打字时最需要的那几个键。
+    // 页眉能收起：收起只留会话名那一行（用户要的：「收缩的时候只显示项目名称」），
+    // 路径和模式切换都藏起来，给对话多让出一截屏幕。记在 prefs 里，下次进来照旧。
+    var folded by remember { mutableStateOf(Prefs.folded(ctx)) }
     Column(modifier.fillMaxSize().imePadding()) {
         Row(
-            Modifier.fillMaxWidth().padding(14.dp, 10.dp, 14.dp, 8.dp),
+            Modifier.fillMaxWidth().padding(14.dp, if (folded) 6.dp else 10.dp, 14.dp, if (folded) 4.dp else 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -412,7 +415,7 @@ fun Workspace(
                     )
                     Text("▾", style = MaterialTheme.typography.labelMedium, color = Muted)
                 }
-                Text(
+                if (!folded || status != null) Text(
                     status ?: cwd,
                     style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                     color = Dim, maxLines = 1,
@@ -492,9 +495,19 @@ fun Workspace(
                         }
                     }
             }
+            // 收 / 展页眉
+            Surface(
+                color = SurfaceContainer, shape = Pill,
+                modifier = Modifier.clip(Pill).clickable { folded = !folded; Prefs.setFolded(ctx, folded) },
+            ) {
+                Text(
+                    if (folded) "﹀" else "︿", Modifier.padding(12.dp, 8.dp),
+                    style = MaterialTheme.typography.labelLarge, color = Muted,
+                )
+            }
         }
 
-        ModeSwitcher(mode, chatBlocked) { mode = it }
+        if (!folded) ModeSwitcher(mode, chatBlocked) { mode = it }
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (mode) {
@@ -704,6 +717,9 @@ private object Prefs {
         p(ctx).getString(key(hostId, session), null)?.let { n -> Mode.entries.firstOrNull { it.name == n } }
     fun setMode(ctx: Context, hostId: String, session: String?, m: Mode) =
         p(ctx).edit().putString(key(hostId, session), m.name).apply()
+    /** 页眉收起了没 —— 全局一份，不按会话分：这是「我喜欢怎么看」，不是会话的属性 */
+    fun folded(ctx: Context) = p(ctx).getBoolean("header.folded", false)
+    fun setFolded(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("header.folded", v).apply()
 }
 
 /**

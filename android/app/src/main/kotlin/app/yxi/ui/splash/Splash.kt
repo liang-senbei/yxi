@@ -55,17 +55,14 @@ object Splash {
         Variant("drop", "Y 落下，字展开", "Y 从上面落下弹两下、起一圈涟漪，然后整个字向右展开") { SplashDrop(it) },
     )
 
-    private const val KEY = "splash"
+    /**
+     * 用户在实验室里采纳的那个方案（网页版预览走 yxi-lab 推上去，采纳之后我把这里改成对应的 key 发版）。
+     * ⚠️ **实验室是「服务器推过来给用户审」的地方，不是 App 写死的**（用户定的规矩）—— 所以这里
+     * 没有 App 内的选择器；null = 还没定，冷启动不播。
+     */
+    val DEFAULT_KEY: String? = null
 
-    /** 用户挑中的方案；null = 没挑，冷启动不播 */
-    fun chosen(ctx: Context): Variant? {
-        val k = ctx.getSharedPreferences("yxi", Context.MODE_PRIVATE).getString(KEY, null) ?: return null
-        return variants.firstOrNull { it.key == k }
-    }
-
-    fun choose(ctx: Context, key: String?) {
-        ctx.getSharedPreferences("yxi", Context.MODE_PRIVATE).edit().putString(KEY, key).apply()
-    }
+    fun chosen(ctx: Context): Variant? = variants.firstOrNull { it.key == DEFAULT_KEY }
 }
 
 /**
@@ -105,79 +102,4 @@ fun SplashPlayer(variant: Splash.Variant, onClose: () -> Unit) {
             )
         }
     }
-}
-
-/**
- * 实验室里那张「开屏动效」卡：列出所有方案，每个能播、能选。
- * ⚠️ 这是 App 自己的东西，不是 agent 推上来的；放在实验室是因为用户就在这儿审东西。
- */
-@Composable
-fun SplashLabCard() {
-    val ctx = LocalContext.current
-    var open by remember { mutableStateOf(true) }
-    var playing by remember { mutableStateOf<Splash.Variant?>(null) }
-    var chosen by remember { mutableStateOf(Splash.chosen(ctx)?.key) }
-    val pill = RoundedCornerShape(100.dp)
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        shape = MaterialTheme.shapes.large,
-        modifier = Modifier.fillMaxWidth().padding(14.dp, 6.dp, 14.dp, 4.dp),
-    ) {
-        Column(Modifier.fillMaxWidth()) {
-            Row(
-                Modifier.fillMaxWidth().clickable { open = !open }.padding(16.dp, 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(t("开屏动效 · 待你审"), style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        chosen?.let { k -> t("现在用的：%s").format(t(Splash.variants.first { it.key == k }.name)) }
-                            ?: t("%d 个方案，一个都还没定 —— 冷启动暂时不播").format(Splash.variants.size),
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
-                    )
-                }
-                Text(if (open) "▾" else "▸", color = MaterialTheme.colorScheme.outline)
-            }
-            if (open) Column(Modifier.padding(8.dp, 0.dp, 8.dp, 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Splash.variants.forEach { v ->
-                    val on = chosen == v.key
-                    Row(
-                        Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium)
-                            .background(if (on) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer)
-                            .padding(12.dp, 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(t(v.name), style = MaterialTheme.typography.bodyLarge,
-                                color = if (on) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface)
-                            Text(t(v.blurb), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            t("播放"),
-                            Modifier.clip(pill).background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                                .clickable { playing = v }.padding(12.dp, 7.dp),
-                            style = MaterialTheme.typography.labelMedium,
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            if (on) t("用着") else t("就用这个"),
-                            Modifier.clip(pill)
-                                .background(if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh)
-                                .clickable { chosen = if (on) null else v.key; Splash.choose(ctx, chosen) }
-                                .padding(12.dp, 7.dp),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = if (on) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-                        )
-                    }
-                }
-                Text(
-                    t("选中的那个会在冷启动时播一遍；再点一次「用着」就取消。"),
-                    Modifier.padding(8.dp, 4.dp, 8.dp, 0.dp),
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
-                )
-            }
-        }
-    }
-    playing?.let { v -> SplashPlayer(v) { playing = null } }
 }
