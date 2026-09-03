@@ -31,6 +31,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontFamily
@@ -202,6 +203,9 @@ fun SessionsScreen(
     // 根 = 会话目录的上一级；选中后只列该目录下（含更深层）的会话。记在本机、按主机分开。
     var dirFilter by remember(host.id) { mutableStateOf(Board.dir(ctx, host.id)) }
     var dirMenu by remember { mutableStateOf(false) }
+    // 搜会话（用户要的，跟目录筛选叠加）：会话名 / 目录 / 状态词里含关键字就算。不记住，关掉就清
+    var query by remember(host.id) { mutableStateOf("") }
+    var searching by remember(host.id) { mutableStateOf(false) }
     val allSessions = sessions
     // 可选的层级 = 会话目录的**每一级祖先**（/opt、/opt/workspace、/root、/root/src、/root/src/workspace…），各带个数；
     // 粗到只看 /root 下的、细到只看 /root/src/workspace 下的都行（用户要的），按路径排、缩进显示层级
@@ -211,9 +215,10 @@ fun SessionsScreen(
         n
     }
     @Suppress("NAME_SHADOWING")
-    val sessions = remember(allSessions, dirFilter) {
+    val sessions = remember(allSessions, dirFilter, query) {
         val d = dirFilter
-        if (d == null) allSessions else allSessions.filter { under(it.cwd, d) }
+        val q = query.trim()
+        allSessions.filter { (d == null || under(it.cwd, d)) && (q.isEmpty() || it.matches(q)) }
     }
 
     Column(modifier.fillMaxSize()) {
@@ -240,6 +245,7 @@ fun SessionsScreen(
                 Text(
                     when {
                         status.isNotEmpty() -> status
+                        query.isNotBlank() -> t("%d 个匹配「%s」 · 共 %d 个").format(sessions.size, query.trim(), allSessions.size)
                         dirFilter != null -> t("%d 个在 %s 下 · 共 %d 个").format(sessions.size, dirFilter, allSessions.size)
                         else -> t("%d 个会话 · 点一下进对话").format(sessions.size)
                     },
@@ -285,6 +291,24 @@ fun SessionsScreen(
                             if (view == BoardView.Group) t("分组") else t("状态"),
                             style = MaterialTheme.typography.labelLarge,
                             color = if (view == BoardView.Group) MaterialTheme.colorScheme.onSecondaryContainer
+                            else MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+                // 搜索：点一下在顶栏下面展开输入框；再点或 ✕ 收起并清空
+                Surface(
+                    color = if (searching || query.isNotBlank()) MaterialTheme.colorScheme.secondaryContainer
+                    else MaterialTheme.colorScheme.surfaceContainer,
+                    shape = Pill,
+                    modifier = Modifier.height(44.dp).clip(Pill).clickable {
+                        searching = !searching
+                        if (!searching) query = ""
+                    },
+                ) {
+                    Box(Modifier.padding(horizontal = 14.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                        Text(
+                            t("搜索"), style = MaterialTheme.typography.labelLarge,
+                            color = if (searching || query.isNotBlank()) MaterialTheme.colorScheme.onSecondaryContainer
                             else MaterialTheme.colorScheme.onSurface,
                         )
                     }
@@ -344,6 +368,22 @@ fun SessionsScreen(
             }
         }
 
+        if (searching) {
+            val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+            OutlinedTextField(
+                query, { query = it },
+                Modifier.fillMaxWidth().padding(14.dp, 0.dp, 14.dp, 8.dp).focusRequester(focus),
+                singleLine = true, shape = Pill,
+                placeholder = { Text(t("搜会话名 / 目录 / 状态词")) },
+                trailingIcon = {
+                    Text(
+                        "✕", Modifier.clip(CircleShape).clickable { query = ""; searching = false }.padding(10.dp),
+                        style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.outline,
+                    )
+                },
+            )
+            LaunchedEffect(Unit) { focus.requestFocus() }
+        }
         // 用量卡固定在列表上方 —— 它是「今天还能干多少」的背景信息，
         // 不该跟着会话列表一起滚走
         update?.let {
@@ -601,6 +641,7 @@ fun SessionsScreen(
             val aliveNames = allSessions.map { it.name }.toSet()
             val dormant = if (fresh) faved.filter { it !in aliveNames }
                 .filter { n -> dirFilter?.let { d -> Favorites.cwdOf(ctx, host.id, n)?.let { c -> under(c, d) } ?: false } ?: true }
+                .filter { n -> query.isBlank() || n.contains(query.trim(), ignoreCase = true) }
                 .sorted() else emptyList()
             if (dormant.isNotEmpty()) {
                 item(key = "h-dormant") {
@@ -1547,3 +1588,7 @@ internal fun ancestorsOf(cwd: String): List<String> {
 /** [cwd] 在 [root] 这棵树下（含更深层）。 */
 internal fun under(cwd: String, root: String): Boolean =
     root == "/" || cwd == root || cwd.startsWith(root.trimEnd('/') + "/")
+
+/** 搜索命中：会话名（含短名）/ 目录 / 状态词里任一含关键字（不分大小写）。 */
+internal fun Session.matches(q: String): Boolean =
+    name.contains(q, true) || cwd.contains(q, true) || detail.contains(q, true)
