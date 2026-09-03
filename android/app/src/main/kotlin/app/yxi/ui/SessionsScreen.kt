@@ -198,6 +198,18 @@ fun SessionsScreen(
     // **判据：谁建的谁收。** 这个界面是拿参数拿到的 ssh，那就不归它收。
     DisposableEffect(host.id) { onDispose { sftp?.close() } }
 
+    // ── 按根目录筛（用户要的：把某棵树下的 agent 单独拎出来，比如只看 /opt/workspace 的）──
+    // 根 = 会话目录的上一级；选中后只列该目录下（含更深层）的会话。记在本机、按主机分开。
+    var dirFilter by remember(host.id) { mutableStateOf(Board.dir(ctx, host.id)) }
+    var dirMenu by remember { mutableStateOf(false) }
+    val allSessions = sessions
+    val roots = remember(allSessions) { allSessions.groupingBy { rootOf(it.cwd) }.eachCount().toSortedMap() }
+    @Suppress("NAME_SHADOWING")
+    val sessions = remember(allSessions, dirFilter) {
+        val d = dirFilter
+        if (d == null) allSessions else allSessions.filter { under(it.cwd, d) }
+    }
+
     Column(modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(18.dp, 14.dp, 18.dp, 10.dp), verticalAlignment = Alignment.CenterVertically) {
             var hostMenu by remember { mutableStateOf(false) }
@@ -220,7 +232,11 @@ fun SessionsScreen(
                     }
                 }
                 Text(
-                    if (status.isEmpty()) t("%d 个会话 · 点一下进对话").format(sessions.size) else status,
+                    when {
+                        status.isNotEmpty() -> status
+                        dirFilter != null -> t("%d 个在 %s 下 · 共 %d 个").format(sessions.size, dirFilter, allSessions.size)
+                        else -> t("%d 个会话 · 点一下进对话").format(sessions.size)
+                    },
                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                     color = MaterialTheme.colorScheme.outline,
                     maxLines = 1,   // 窄屏上会折成两行把下面顶下去
@@ -265,6 +281,43 @@ fun SessionsScreen(
                             color = if (view == BoardView.Group) MaterialTheme.colorScheme.onSecondaryContainer
                             else MaterialTheme.colorScheme.onSurface,
                         )
+                    }
+                }
+                // 目录筛选：点开列出各根目录（带个数），选一个只看它下面的；「全部」清掉
+                Box {
+                    Surface(
+                        color = if (dirFilter != null) MaterialTheme.colorScheme.secondaryContainer
+                        else MaterialTheme.colorScheme.surfaceContainer,
+                        shape = Pill,
+                        modifier = Modifier.height(44.dp).clip(Pill).clickable { dirMenu = true },
+                    ) {
+                        Box(Modifier.padding(horizontal = 14.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                            Text(
+                                dirFilter?.let { it.substringAfterLast('/').ifEmpty { "/" } } ?: t("目录"),
+                                style = MaterialTheme.typography.labelLarge, maxLines = 1,
+                                color = if (dirFilter != null) MaterialTheme.colorScheme.onSecondaryContainer
+                                else MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                    }
+                    DropdownMenu(dirMenu, { dirMenu = false }) {
+                        DropdownMenuItem(
+                            text = { Text(t("全部目录") + if (dirFilter == null) "  ✓" else "") },
+                            onClick = { dirMenu = false; dirFilter = null; Board.setDir(ctx, host.id, null) },
+                        )
+                        roots.forEach { (root, n) ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(root + if (dirFilter == root) "  ✓" else "", maxLines = 1,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.MiddleEllipsis)
+                                        Text(t("%d 个会话").format(n), style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.outline)
+                                    }
+                                },
+                                onClick = { dirMenu = false; dirFilter = root; Board.setDir(ctx, host.id, root) },
+                            )
+                        }
                     }
                 }
                 listOf(t("文件") to onOpenFiles, t("终端") to { onOpenTerminal(null, ".") }).forEach { (label, go) ->
@@ -534,7 +587,10 @@ fun SessionsScreen(
             // 「未启用 5」，anchor / begirl / logto 全在里面，**而它们明明都跑着**。
             // 比难看更糟的是它**会骗人去点「唤起」**，而那个会话本来就在跑。
             // 所以：**没拿到真数据（`fresh`）之前，一条都不列。** 不知道就说不知道。
-            val dormant = if (fresh) faved.filter { it !in byName }.sorted() else emptyList()
+            val aliveNames = allSessions.map { it.name }.toSet()
+            val dormant = if (fresh) faved.filter { it !in aliveNames }
+                .filter { n -> dirFilter?.let { d -> Favorites.cwdOf(ctx, host.id, n)?.let { c -> under(c, d) } ?: false } ?: true }
+                .sorted() else emptyList()
             if (dormant.isNotEmpty()) {
                 item(key = "h-dormant") {
                     Row(
@@ -1210,11 +1266,19 @@ internal object Board {
     private fun p(ctx: android.content.Context) =
         ctx.getSharedPreferences("yxi", android.content.Context.MODE_PRIVATE)
 
+    // ⚠️ 默认**分组**视图（用户 2026-09-03 定的）：没切过就按分组看；切过的按记住的来
     fun view(ctx: android.content.Context, hostId: String): BoardView =
-        if (p(ctx).getString("boardview:$hostId", "") == "group") BoardView.Group else BoardView.State
+        if (p(ctx).getString("boardview:$hostId", "") == "state") BoardView.State else BoardView.Group
 
     fun setView(ctx: android.content.Context, hostId: String, v: BoardView) =
         p(ctx).edit().putString("boardview:$hostId", if (v == BoardView.Group) "group" else "state").apply()
+
+    /** 看板按哪个根目录筛；null = 全部 */
+    fun dir(ctx: android.content.Context, hostId: String): String? =
+        p(ctx).getString("boarddir:$hostId", null)?.takeIf { it.isNotBlank() }
+
+    fun setDir(ctx: android.content.Context, hostId: String, d: String?) =
+        p(ctx).edit().putString("boarddir:$hostId", d ?: "").apply()
 
     /** 收起来的组名。⚠️ 存的是「收起的」不是「展开的」—— 新建的组默认展开。 */
     fun collapsed(ctx: android.content.Context, hostId: String): Set<String> =
@@ -1459,3 +1523,10 @@ private fun DormantCard(name: String, cwd: String?, onWake: () -> Unit, onForget
         }
     }
 }
+
+/** 会话目录的上一级：`/opt/workspace/foo` → `/opt/workspace`；`/root` → `/`。 */
+internal fun rootOf(cwd: String): String = cwd.trimEnd('/').substringBeforeLast('/', "").ifEmpty { "/" }
+
+/** [cwd] 在 [root] 这棵树下（含更深层）。 */
+internal fun under(cwd: String, root: String): Boolean =
+    root == "/" || cwd == root || cwd.startsWith(root.trimEnd('/') + "/")
