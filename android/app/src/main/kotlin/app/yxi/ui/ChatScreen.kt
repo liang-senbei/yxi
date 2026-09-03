@@ -930,11 +930,14 @@ fun ChatScreen(
         // 现在按 参考款那种做法收成一条：+ · 文字 · 🎤 · 发送，边界一条，里面才分格。
         // ⚠️ 底色不是死的：跟页面光晕**同一套色相**淡淡地流过去（用户：「输入框也要是渐变背景」）。
         // 光晕忙的时候在页面顶部，输入框离得远，这层自己的渐变让它不至于是一块平灰。
+        // ⚠️ 输入框**有上限**：打一大段话原来会把整屏占满，前面的对话一行都看不见（用户截图）。
+        //    最多 7 行，超了在框里自己滚。圆角用 28dp 不用 Pill：单行还是胶囊，多行不会变成一个巨大的椭圆。
+        val composerShape = RoundedCornerShape(28.dp)
         Surface(
             color = Color.Transparent,
-            shape = Pill,
+            shape = composerShape,
             modifier = Modifier.fillMaxWidth().padding(14.dp, 6.dp, 14.dp, 18.dp).heightIn(min = 56.dp)
-                .clip(Pill)
+                .clip(composerShape)
                 .background(MaterialTheme.colorScheme.surfaceContainer)
                 .background(glowBrush(busy = live.busy, waiting = pending != null)),
         ) {
@@ -1281,6 +1284,8 @@ private fun BasicTextFieldRow(value: String, onValue: (String) -> Unit) {
     androidx.compose.foundation.text.BasicTextField(
         value, onValue,
         modifier = Modifier.padding(20.dp, 15.dp).fillMaxWidth(),
+        // 最多 7 行，多了在框里滚 —— 别把对话顶没了
+        maxLines = 7,
         textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
         cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
         decorationBox = { inner ->
