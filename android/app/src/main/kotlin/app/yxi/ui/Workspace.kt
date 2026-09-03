@@ -5,6 +5,11 @@ import android.os.Looper
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.draggable
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -396,9 +401,18 @@ fun Workspace(
     // 光晕垫在**整个工作区**底下：页眉、模式条、正文都在它上面（原来只在对话页那块，页眉是平底，用户圈出来要一起带上）
     var glow by remember(host.id) { mutableStateOf(Triple(false, false, false)) }
     var stats by remember(host.id) { mutableStateOf(Prefs.stats(ctx)) }
+    /** 对话页上划收起页眉（学 X），下滑展开；换模式就复位 */
+    var barsHidden by remember(host.id) { mutableStateOf(false) }
+    LaunchedEffect(mode) { barsHidden = false }
     Box(modifier.fillMaxSize()) {
     if (mode == Mode.Chat) ThinkingGlow(busy = glow.first, waiting = glow.second, streaming = glow.third)
     Column(Modifier.fillMaxSize().imePadding()) {
+        // 学 X：对话页上划时页眉和模式条一起收起，下滑展开（ChatScreen 通过 onBars 报方向）
+        AnimatedVisibility(
+            visible = !barsHidden,
+            enter = slideInVertically { -it } + fadeIn(), exit = slideOutVertically { -it } + fadeOut(),
+        ) {
+        Column {
         Row(
             Modifier.fillMaxWidth().padding(14.dp, if (folded) 6.dp else 10.dp, 14.dp, if (folded) 4.dp else 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -530,6 +544,8 @@ fun Workspace(
         }
 
         if (!folded) ModeSwitcher(mode, chatBlocked) { mode = it }
+        }
+        }
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (mode) {
@@ -566,6 +582,7 @@ fun Workspace(
                     onOpenPath = { p -> jumpTo = p; mode = Mode.Files },
                     onGlow = { b, w, st -> glow = Triple(b, w, st) },
                     showStats = stats,
+                    onBars = { barsHidden = it },
                     modifier = Modifier.fillMaxSize(),
                 )
                 Mode.Files -> FilesScreen(

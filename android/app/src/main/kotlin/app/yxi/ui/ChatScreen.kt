@@ -1,6 +1,15 @@
 package app.yxi.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.clickable
 import app.yxi.ui.theme.Amber
 import app.yxi.ui.theme.Copper
@@ -76,6 +85,8 @@ fun ChatScreen(
     onGlow: (Boolean, Boolean, Boolean) -> Unit = { _, _, _ -> },
     /** 顶上那条「⚡模式 / 模型 / 思考 / 上下文 / 今日」显不显示 —— 由页眉上的 ⚡ 按钮开关（用户：常驻太难看） */
     showStats: Boolean = true,
+    /** 上划收起 / 下滑展开（学 X）：true = 收起。页眉在 Workspace 那边，靠这个回调同步 */
+    onBars: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -303,6 +314,27 @@ fun ChatScreen(
     /** 送键前那一刻的指纹 —— 屏幕推过来后指纹变了就说明动作生效了，可以解锁。 */
     var awaitingFp by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
+    // ── 学 X：上划（往下读）把页眉和输入栏收起来，下滑再展开；到底了、或键盘开着，一律展开 ──
+    // ⚠️ 用 nestedScroll 的 onPreScroll 看手势方向，不看列表位置：方向一换就重新累计，过 28dp 才动，
+    //    免得手指抖一下两条栏就上下乱跳。
+    var barsHidden by remember(sessionName) { mutableStateOf(false) }
+    var barsAcc by remember { mutableFloatStateOf(0f) }
+    val barsThreshold = with(LocalDensity.current) { 28.dp.toPx() }
+    val barsConn = remember(barsThreshold) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: androidx.compose.ui.geometry.Offset, source: NestedScrollSource): androidx.compose.ui.geometry.Offset {
+                val dy = available.y
+                if (dy == 0f) return androidx.compose.ui.geometry.Offset.Zero
+                barsAcc = if ((dy < 0f) == (barsAcc < 0f)) barsAcc + dy else dy
+                if (barsAcc < -barsThreshold && !barsHidden) barsHidden = true      // 上划：收
+                if (barsAcc > barsThreshold && barsHidden) barsHidden = false       // 下滑：展开
+                return androidx.compose.ui.geometry.Offset.Zero
+            }
+        }
+    }
+    LaunchedEffect(Unit) { snapshotFlow { listState.atBottom }.collect { if (it) barsHidden = false } }
+    LaunchedEffect(barsHidden) { onBars(barsHidden) }
+    val imeOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     // 历史灌完了没。灌的过程中一律瞬移到底，不做动画（见下面的 LaunchedEffect）
     var settled by remember(sessionName) { mutableStateOf(false) }
     // 「粘在底部」：在底部就跟着新消息走；手动往上翻就停；点 ↓ 会重新粘上。
@@ -656,7 +688,7 @@ fun ChatScreen(
         androidx.compose.runtime.CompositionLocalProvider(
             androidx.compose.ui.platform.LocalUriHandler provides uri,
         ) {
-        Box(Modifier.weight(1f)) {
+        Box(Modifier.weight(1f).nestedScroll(barsConn)) {
             // 连着的同名工具卡合成一张（用户：「满屏都是 bash」），点开才铺开
             val rows = remember(items) { groupToolRuns(items) }
             LazyColumn(
@@ -928,6 +960,12 @@ fun ChatScreen(
             }
         }
 
+        // 上划收起、下滑展开（学 X）。键盘开着时永远在 —— 正打字呢不能把输入框收走
+        AnimatedVisibility(
+            visible = !barsHidden || imeOpen,
+            enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut(),
+        ) {
+        Column {
         // 常用语 chip：没打字时才露出来，点一下填进草稿，省掉手机打字
         if (draft.isBlank()) {
             SnippetChips(onPick = { draft = it },
@@ -1069,6 +1107,8 @@ fun ChatScreen(
                     }
                 }
             }
+        }
+        }
         }
     }
     }   // Box：光晕 + 整页
