@@ -1,5 +1,26 @@
 package app.yxi
 
+import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import android.Manifest
 import android.content.Intent as AndroidIntent
 import android.content.pm.PackageManager
@@ -139,7 +160,29 @@ class MainActivity : ComponentActivity() {
                     return@YxiTheme
                 }
 
+                // ── 侧边栏（学 Threads：左上角 ☰ 或从左边缘划，抽屉从左滑入，主页面被推向右）──
+                // ⚠️ 抽屉里放什么用户还没定（2026-09-04），先把壳做出来：主机切换 + 版本。
+                val drawer = rememberDrawerState(DrawerValue.Closed)
+                val drawerScope = rememberCoroutineScope()
+                val drawerWidth = 300.dp
+                val drawerWidthPx = with(LocalDensity.current) { drawerWidth.toPx() }
+                ModalNavigationDrawer(
+                    drawerState = drawer,
+                    scrimColor = Color.Black.copy(alpha = 0.12f),
+                    drawerContent = {
+                        ModalDrawerSheet(Modifier.width(drawerWidth), drawerShape = RoundedCornerShape(0.dp, 28.dp, 28.dp, 0.dp)) {
+                            YxiDrawer(
+                                hosts = hosts, current = host,
+                                onPickHost = { hostId = it.id; tab = Tab.Sessions; drawerScope.launch { drawer.close() } },
+                                onTab = { tab = it; drawerScope.launch { drawer.close() } },
+                            )
+                        }
+                    },
+                ) {
+                // 主页面跟着抽屉一起被推开（Threads 那种「推」，不是盖在上面）：偏移 = 抽屉已滑出的宽度 × 0.85
+                val push = drawer.currentOffset.let { if (it.isNaN()) -drawerWidthPx else it }
                 Scaffold(
+                    modifier = Modifier.offset { androidx.compose.ui.unit.IntOffset(((drawerWidthPx + push).coerceAtLeast(0f) * 0.85f).roundToInt(), 0) },
                     bottomBar = {
                         NavigationBar {
                             Tab.entries.forEach { t ->
@@ -170,6 +213,7 @@ class MainActivity : ComponentActivity() {
                                 onOpenTerminal = { sn, cwd -> work = Work(host, sn, cwd, Mode.Terminal) },
                                 onOpenChat = { sn, cwd -> work = Work(host, sn, cwd, null) },
                                 onOpenFiles = { work = Work(host, null, ".", Mode.Files) },
+                                onMenu = { drawerScope.launch { drawer.open() } },
                                 modifier = m,
                             )
                         }
@@ -187,6 +231,7 @@ class MainActivity : ComponentActivity() {
                         Tab.Settings -> SettingsScreen(store, keys, host, shared.session, shared.error, modifier = m)
                     }
                 }
+                }   // ModalNavigationDrawer
             }
         
             // 冷启动的开屏动效（实验室里挑中的那个）盖在最上面，播完让开
@@ -208,5 +253,47 @@ private fun EmptyHint(title: String, sub: String, modifier: Modifier) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             Text(sub, style = MaterialTheme.typography.bodySmall, color = app.yxi.ui.theme.Dim)
         }
+    }
+}
+
+/**
+ * 侧边栏内容。⚠️ 用户 2026-09-04 原话：「先做这个功能，具体放什么我还没有想好」——
+ * 所以这里只放确定有用的：品牌 + 主机切换 + 几个入口 + 版本。以后往下加。
+ */
+@Composable
+private fun YxiDrawer(hosts: List<Host>, current: Host?, onPickHost: (Host) -> Unit, onTab: (Tab) -> Unit) {
+    Column(Modifier.fillMaxSize().padding(20.dp, 28.dp, 20.dp, 20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Yxi", style = MaterialTheme.typography.headlineMedium)
+        Text(
+            t("v%s · 手机上的指挥台").format(BuildConfig.VERSION_NAME),
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
+        )
+        Spacer(Modifier.height(18.dp))
+        Text(t("主机"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
+        hosts.forEach { h ->
+            val on = h.id == current?.id
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                    .background(if (on) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+                    .clickable { onPickHost(h) }.padding(12.dp, 10.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Box(Modifier.size(9.dp).clip(CircleShape).background(app.yxi.ui.hostColor(h.id)))
+                Text(h.alias, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                if (on) Text("✓", color = MaterialTheme.colorScheme.onSecondaryContainer)
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        listOf(Tab.Hosts, Tab.Config, Tab.Settings).forEach { tb ->
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable { onTab(tb) }.padding(12.dp, 10.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(tb.icon, style = MaterialTheme.typography.titleMedium)
+                Text(tb.label, style = MaterialTheme.typography.bodyLarge)
+            }
+        }
+        Spacer(Modifier.weight(1f))
+        Text(t("这里放什么，等你定"), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
     }
 }

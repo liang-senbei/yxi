@@ -799,6 +799,8 @@ internal object En {
         "要按住说话，松开才识别" to "Hold to talk, release to transcribe",
         "目录" to "Folder",
         "全部目录" to "All folders",
+        "v%s · 手机上的指挥台" to "v%s · your servers, in your pocket",
+        "这里放什么，等你定" to "What goes here is up to you",
         "搜索" to "Search",
         "搜会话名 / 目录 / 状态词" to "Search by session, folder or status",
         "%d 个匹配「%s」 · 共 %d 个" to "%d match “%s” · %d in total",

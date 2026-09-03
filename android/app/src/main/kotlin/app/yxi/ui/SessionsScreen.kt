@@ -93,6 +93,8 @@ fun SessionsScreen(
     onOpenTerminal: (String?, String) -> Unit,
     onOpenChat: (String, String) -> Unit,
     onOpenFiles: () -> Unit,
+    /** 左上角 ☰：拉出侧边栏（学 Threads，抽屉里放什么用户还没定） */
+    onMenu: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -222,8 +224,13 @@ fun SessionsScreen(
     }
 
     Column(modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(18.dp, 14.dp, 18.dp, 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(10.dp, 14.dp, 18.dp, 10.dp), verticalAlignment = Alignment.CenterVertically) {
             var hostMenu by remember { mutableStateOf(false) }
+            // ☰ 侧边栏（学 Threads 左上角那个）。从左边缘划也能拉出来
+            Text(
+                "☰", Modifier.clip(CircleShape).clickable(onClick = onMenu).padding(8.dp, 4.dp),
+                style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Column(Modifier.weight(1f)) {
                 Row(
                     Modifier.clickable(enabled = hosts.size > 1) { hostMenu = true },
