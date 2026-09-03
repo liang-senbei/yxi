@@ -816,7 +816,7 @@
 - `design/review/serve.py` —— stdlib http.server，只读画板 + 一个写 pins 的接口
 - `design/review/build.py` —— 把 `design/*.dc.html` 的画板抽出来拼成单页，
   ⚠️ **各文件的 `<style>` 必须作用域隔离**（Terminal 和 DPad 都定义了 `.k`，不隔离会互相覆盖）
-- systemd `yxi-review.service`（开机自起）· ufw 放行 8899
+- systemd `yxi-review.service` —— **2026-09-03 已按用户要求关停并取消自启**（实验室接管了审核，D25/D26；pins.json 自 8/22 没动过）。要用回：`systemctl enable --now yxi-review`。
 - ⚠️ **token 在 `design/review/.token`，已 gitignore**。页面无敏感内容、不执行任何东西、
   路径穿越和越界 POST 都返回 404
 
