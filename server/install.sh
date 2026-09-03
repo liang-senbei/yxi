@@ -206,7 +206,7 @@ if [ "${1:-}" = "--publish" ]; then
     if command -v curl >/dev/null && command -v aapt2 >/dev/null 2>&1 || [ -x /opt/android-sdk/build-tools/37.0.0/aapt2 ]; then
       AAPT=$(command -v aapt2 || echo /opt/android-sdk/build-tools/37.0.0/aapt2)
       TMPAPK=$(mktemp); BASE="https://yxi.keuury.com/$(cat "$TOKEN")"
-      if curl -fsS --max-time 180 -o "$TMPAPK" "$BASE/$VER_APK"; then
+      if curl -fsS --max-time 900 -o "$TMPAPK" "$BASE/$VER_APK"; then
         GOT=$("$AAPT" dump badging "$TMPAPK" 2>/dev/null | grep -oE "versionCode='[0-9]+'" | grep -oE '[0-9]+')
         if [ "$GOT" = "$CODE" ]; then
           echo "  · 公网真下一遍：versionCode $GOT ✓"
