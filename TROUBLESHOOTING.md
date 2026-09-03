@@ -4277,3 +4277,14 @@ SFTP 读到一半就取消，永远到不了「显示」那一步。**在会被�
 **修法**：`install.sh --publish` 现在先用 aapt2 读包里的 versionCode，跟参数对不上直接拒发；签名后的检查也要 `[ "$IN" = "$CODE" ] || exit`。
 判编译成败看 `[gradle exit N]` 和 `BUILD FAILED`，别只数 `e:` 行。
 **善后**：公网清单和下载按钮改回 132、删掉错误的 133 文件、本机清单回滚 —— 都在 #223 当天做了，公网上没停留超过 10 分钟。
+
+## #224 输入框里的字删不掉（0.9.92）：if/else 两种排版各放了一个 BasicTextField
+
+**症状**：打了几行字之后退格没反应、字删不掉，怎么点都不动。
+**根因**：0.9.92 学 Gemini 做「一行一排 / 多行两段」两种排版，写成 `if (lines <= 1) Row { BasicTextField } else Column { BasicTextField }` ——
+行数跨过 1↔2 时 Compose 认为是**另一个**组合位置，旧实例销毁、新实例重建，输入法的组合 / 选区状态还挂在死掉的那个上，
+后面的按键作用在幽灵实例上。边界处还会因为删一个字又换回去，来回抽。
+**修法**：`remember { movableContentOf<String> { d -> BasicTextFieldRow(d, …) } }`，同一个实例在两种排版间**搬家**（内部状态跟着走）；
+多行排版一旦进入就粘住，直到清空才回单行。另给了两个逃生口：多行排版里的「清空」，开发者卡片里的「清空所有输入框草稿」
+（草稿存在 SharedPreferences 的 `draft:*`，`Drafts.clearAll`）。
+⚠️ 通用教训：**受控组件（文本框、WebView、播放器）别放在 if/else 的不同分支里**，要换布局用 movableContentOf 或固定槽位。

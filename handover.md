@@ -637,6 +637,11 @@
 - ✅ **yxi-hub 多组成员（2026-09-02）**：一个会话在多个组里时，`who`/`context` 按组分开列、`say` 的消息带共同组名
   `[同组 组名 · 谁]`、`all` 必须指明组（#211）。服务器侧改动，已装到本机 `~/.local/bin/yxi-hub`。
 - ✅ **下载站隐私政策 / 服务条款页（2026-09-04）**：Google 登录同意屏幕要的 `https://yxi.keuury.com/privacy` `/terms`（cc-logto_yxi 代老板提的）。源在仓库 `site/privacy.html` `site/terms.html`，线上在 hk13 `/var/www/yxi/`，nginx 显式 location 在 `snippets/yxi-dl.conf`。中英双语、短；改内容改那两个文件再 scp 上去。
+- ✅ **0.9.94（2026-09-04）**：修 0.9.92 引入的「输入框文字删不掉」（#224：单行 / 多行两支各一个 BasicTextField，换排版就换实例）——改 movableContentOf 同一实例搬家、多行排版粘住到清空；多行排版加「清空」；开发者卡片加「清空所有输入框草稿」逃生口。
+- ✅ **0.9.93（2026-09-04）—— 组规**（用户：想给分组「注入」指令，不知道放 hook 还是 CLAUDE.md、不想先建文件）：
+  `groups.json` 加 `rules{组名: 文本}`，服务器 `yxi-hub context`（SessionStart 钩子，startup / resume / clear / compact 都触发）把本组组规
+  跟同组名单一起注入；新增 `yxi-hub rules` 给 agent 自查。手机：分组视图每个组头旁「组规」药丸 → 编辑框，保存 / 存并发给在跑的成员
+  （`Groups.tellRule` 走 send-keys）。不建文件、不改 CLAUDE.md。
 - ✅ **0.9.92（2026-09-04）**：状态栏跟 App 融为一体（用户对比 Gemini 截图）：工作区不再吃状态栏 inset，光晕铺到最顶上，页眉自己 `statusBarsPadding`；状态栏区域盖一层底色→透明的渐变，页眉收起后正文滑到状态栏下面会被压淡；主题里的白色 statusBarColor 改透明。
 - ✅ **0.9.91（2026-09-04）**：输入区学 Gemini（用户截图）：整块（快捷语 + 附件条 + 输入胶囊）**悬浮**在对话上面，底下的字从淡渐变里透出、列表底部按输入区实际高度留白；胶囊更圆（32dp）带阴影、底色 surface；打多行时换成两段式：文字在上占满、＋ / 🎤 / 发送沉到下面一排。
 - ✅ **0.9.90（2026-09-04）**：学 Threads 的侧边栏（用户发视频）：看板左上角 ☰ 或从左边缘划，抽屉从左滑入、主页面被推向右（`ModalNavigationDrawer` + 按 currentOffset 偏移 Scaffold）。抽屉里**放什么用户还没定**，先放：品牌 + 版本、主机切换、主机/配置/设置入口。

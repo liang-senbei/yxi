@@ -20,7 +20,14 @@ import org.json.JSONObject
 object Groups {
 
     /** 分组表。组名 → 成员会话名（带 `cc-` 前缀，跟 tmux 里一致）。 */
-    data class Table(val groups: Map<String, List<String>> = emptyMap()) {
+    data class Table(
+        val groups: Map<String, List<String>> = emptyMap(),
+        /**
+         * 组规：组名 → 一段话。每个会话开始时（含 resume / compact）由服务器上的 `yxi-hub context`
+         * 注入给本组每个会话 —— 用户要的「给分组注入指令」，不用建文件、不用改 CLAUDE.md，手机上编辑即生效。
+         */
+        val rules: Map<String, String> = emptyMap(),
+    ) {
 
         /** 这个会话在哪几个组里。 */
         fun of(session: String): List<String> =
@@ -32,16 +39,20 @@ object Groups {
 
         /** 一个会话都没编进去的组也留着 —— 用户建了组还没往里放人，别给它删了。 */
         fun withMember(group: String, session: String): Table =
-            Table(groups + (group to ((groups[group] ?: emptyList()) + session).distinct()))
+            copy(groups = groups + (group to ((groups[group] ?: emptyList()) + session).distinct()))
 
         fun withoutMember(group: String, session: String): Table =
-            Table(groups + (group to (groups[group] ?: emptyList()).filter { it != session }))
+            copy(groups = groups + (group to (groups[group] ?: emptyList()).filter { it != session }))
 
-        fun withoutGroup(group: String): Table = Table(groups - group)
+        fun withoutGroup(group: String): Table = copy(groups = groups - group, rules = rules - group)
 
         /** 建一个空组。已经有了就原样返回。 */
         fun withGroup(group: String): Table =
-            if (group in groups) this else Table(groups + (group to emptyList()))
+            if (group in groups) this else copy(groups = groups + (group to emptyList()))
+
+        /** 设组规；空串 = 删掉 */
+        fun withRule(group: String, text: String): Table =
+            copy(rules = if (text.isBlank()) rules - group else rules + (group to text.trim()))
     }
 
     private const val VERSION = 1
@@ -57,13 +68,16 @@ object Groups {
         val txt = raw.trim()
         if (txt.isEmpty()) return Table()
         return runCatching {
-            val o = JSONObject(txt).optJSONObject("groups") ?: return Table()
+            val root = JSONObject(txt)
+            val o = root.optJSONObject("groups") ?: return Table()
             val m = LinkedHashMap<String, List<String>>()
             o.keys().forEach { k ->
                 val arr = o.optJSONArray(k) ?: JSONArray()
                 m[k] = (0 until arr.length()).mapNotNull { arr.optString(it).takeIf { s -> s.isNotBlank() } }
             }
-            Table(m)
+            val r = LinkedHashMap<String, String>()
+            root.optJSONObject("rules")?.let { ro -> ro.keys().forEach { k -> ro.optString(k).takeIf { it.isNotBlank() }?.let { r[k] = it } } }
+            Table(m, r)
         }.getOrDefault(Table())
     }
 
@@ -71,6 +85,9 @@ object Groups {
         JSONObject().put("v", VERSION).put(
             "groups",
             JSONObject().also { o -> t.groups.forEach { (k, v) -> o.put(k, JSONArray(v)) } },
+        ).put(
+            "rules",
+            JSONObject().also { o -> t.rules.forEach { (k, v) -> o.put(k, v) } },
         ).toString()
 
     /**
@@ -114,4 +131,13 @@ object Groups {
         }
         return n
     }
+}
+
+/** 组规改了，顺手发给组里正在跑的会话（下次会话开始也会自动注入，这是「现在就生效」那条路）。返回发了几个。 */
+suspend fun tellRule(session: SshSession, t: Groups.Table, group: String): Int {
+    val text = t.rules[group].orEmpty().trim()
+    val members = t.groups[group].orEmpty()
+    if (text.isEmpty() || members.isEmpty()) return 0
+    members.forEach { SessionProbe.send(session, it, "[Yxi 组规更新 · $group] 从现在起本组的规矩：\n$text") }
+    return members.size
 }

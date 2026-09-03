@@ -327,6 +327,7 @@ fun ChatScreen(
     var composerH by remember { mutableIntStateOf(0) }
     /** 输入框现在几行 —— 多行时换成 Gemini 那种两段式（文字在上、按钮在下） */
     var lines by remember(sessionName) { mutableIntStateOf(1) }
+    var multi by remember(sessionName) { mutableStateOf(false) }
     var barsAcc by remember { mutableFloatStateOf(0f) }
     val barsThreshold = with(LocalDensity.current) { 28.dp.toPx() }
     val barsConn = remember(barsThreshold) {
@@ -1002,14 +1003,26 @@ fun ChatScreen(
                 }
                         }
             // 学 Gemini 打了很多字的样子：一行时四件套一排；多行时文字在上占满、按钮沉到下面一排
-            if (lines <= 1) Row(Modifier.padding(6.dp, 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            // ⚠️ **同一个输入框实例在两种排版间搬家，不是销毁重建。** 0.9.92 是 if/else 两支各放一个 BasicTextField，
+            //    行数一过 1↔2 就换实例，输入法的组合状态还挂在死掉的那个上 —— 用户：「输了文字删不掉了」（#224）。
+            //    movableContentOf 让它带着内部状态（选区、组合）整个搬过去。多行排版一旦进入就粘住到清空，免得在边界来回跳。
+            val field = remember { movableContentOf<String> { d -> BasicTextFieldRow(d, onLines = { lines = it }) { draft = it } } }
+            LaunchedEffect(lines, draft) { multi = if (draft.isBlank()) false else (multi || lines > 1) }
+            if (!multi) Row(Modifier.padding(6.dp, 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 plusBtn()
-                Box(Modifier.weight(1f)) { BasicTextFieldRow(draft, onLines = { lines = it }) { draft = it } }
+                Box(Modifier.weight(1f)) { field(draft) }
                 micBtn(); sendBtn()
             } else Column(Modifier.padding(6.dp, 6.dp, 6.dp, 4.dp)) {
-                Box(Modifier.fillMaxWidth()) { BasicTextFieldRow(draft, onLines = { lines = it }) { draft = it } }
+                Box(Modifier.fillMaxWidth()) { field(draft) }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    plusBtn(); Spacer(Modifier.weight(1f)); micBtn(); sendBtn()
+                    plusBtn()
+                    // 长文写歪了一键清空（也是输入框卡住时的逃生口）
+                    Text(
+                        t("清空"),
+                        Modifier.clip(Pill).clickable { draft = ""; Drafts.set(ctx, hostId, sessionName, "") }.padding(12.dp, 8.dp),
+                        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline,
+                    )
+                    Spacer(Modifier.weight(1f)); micBtn(); sendBtn()
                 }
             }
 

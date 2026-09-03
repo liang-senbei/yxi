@@ -113,6 +113,8 @@ fun SessionsScreen(
     var collapsed by remember(host.id) { mutableStateOf(Board.collapsed(ctx, host.id)) }
     var groups by remember(host.id) { mutableStateOf(app.yxi.agent.Groups.Table()) }
     /// 正在给哪个会话选组
+    /** 正在编辑哪个组的组规 */
+    var ruleFor by remember { mutableStateOf<String?>(null) }
     var grouping by remember { mutableStateOf<Session?>(null) }
     /** 要终止哪个会话（滑动后弹确认框）。null = 没在问 */
     var killing by remember { mutableStateOf<Session?>(null) }
@@ -557,10 +559,15 @@ fun SessionsScreen(
                     val label = g ?: t("没编组")
                     val shut = label in collapsed
                     item(key = "gh-$label") {
-                        GroupNameHeader(label, members.size, shut) {
-                            collapsed = if (shut) collapsed - label else collapsed + label
-                            Board.setCollapsed(ctx, host.id, collapsed)
-                        }
+                        GroupNameHeader(
+                            label, members.size, shut,
+                            onToggle = {
+                                collapsed = if (shut) collapsed - label else collapsed + label
+                                Board.setCollapsed(ctx, host.id, collapsed)
+                            },
+                            hasRule = g?.let { groups.rules[it].orEmpty().isNotBlank() },
+                            onRule = { g?.let { ruleFor = it } },
+                        )
                     }
                     if (!shut) items(members.size, key = { "$label/${members[it].name}" }) { i ->
                         SwipeCard(
@@ -767,6 +774,30 @@ fun SessionsScreen(
                 }
             },
             dismissButton = { TextButton({ killing = null }) { Text(t("算了")) } },
+        )
+    }
+
+    ruleFor?.let { g ->
+        GroupRuleDialog(
+            group = g, initial = groups.rules[g].orEmpty(), members = groups.groups[g].orEmpty().size,
+            onDismiss = { ruleFor = null },
+            onSave = { text, tellNow ->
+                ruleFor = null
+                val table = groups.withRule(g, text)
+                groups = table
+                val s = ssh ?: return@GroupRuleDialog
+                scope.launch {
+                    runCatching {
+                        app.yxi.agent.Groups.save(s, table)
+                        val n = if (tellNow) app.yxi.agent.tellRule(s, table, g) else 0
+                        status = if (n > 0) t("「%s」组规已存，并发给了 %d 个在跑的会话").format(g, n)
+                        else t("「%s」组规已存，本组会话下次开始时生效").format(g)
+                    }.onFailure {
+                        if (it is kotlinx.coroutines.CancellationException) throw it
+                        status = t("组规没存上：%s").format(it.message ?: "")
+                    }
+                }
+            },
         )
     }
 
@@ -1354,6 +1385,9 @@ internal fun GroupNameHeader(
     n: Int,
     collapsed: Boolean,
     onToggle: () -> Unit,
+    /** 这个组有没有组规（有就把「组规」两个字点亮）；null = 不是真的组（「没编组」那一栏），不给入口 */
+    hasRule: Boolean? = null,
+    onRule: () -> Unit = {},
 ) {
     Row(
         Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).clickable(onClick = onToggle)
@@ -1371,6 +1405,15 @@ internal fun GroupNameHeader(
             color = MaterialTheme.colorScheme.outline,
         )
         Text(name, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
+        // 组规：点开编辑这个组的规矩（每个会话开始时自动注入，用户要的「给分组注入指令」）
+        if (hasRule != null) Text(
+            if (hasRule) t("组规 ✓") else t("组规"),
+            Modifier.clip(Pill)
+                .background(if (hasRule) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainer)
+                .clickable(onClick = onRule).padding(9.dp, 2.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = if (hasRule) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         Text(
             "$n",
             style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
@@ -1599,3 +1642,45 @@ internal fun under(cwd: String, root: String): Boolean =
 /** 搜索命中：会话名（含短名）/ 目录 / 状态词里任一含关键字（不分大小写）。 */
 internal fun Session.matches(q: String): Boolean =
     name.contains(q, true) || cwd.contains(q, true) || detail.contains(q, true)
+
+/**
+ * 组规编辑框。用户 2026-09-04 原话：想给某个分组「注入」指令（比如「架构 / 密钥类信息按组归档到 E:\资料」），
+ * 不知道该放 hook 还是 CLAUDE.md、也不想先建文件。答案：存在服务器的 groups.json 里，`yxi-hub context`
+ * 在每个会话开始时（startup / resume / clear / compact）注入 —— 手机上写完就完事，不碰任何文件。
+ */
+@Composable
+private fun GroupRuleDialog(
+    group: String, initial: String, members: Int,
+    onDismiss: () -> Unit,
+    /** (文本, 现在就发给在跑的) */
+    onSave: (String, Boolean) -> Unit,
+) {
+    var text by remember(group) { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(t("「%s」的组规").format(group)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    t("写给这个组每个 agent 的话。每个会话开始时（含接回、/compact 之后）自动注入，不用建文件、不用改 CLAUDE.md。"),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
+                )
+                OutlinedTextField(
+                    text, { text = it }, Modifier.fillMaxWidth(), minLines = 5, maxLines = 12,
+                    placeholder = { Text(t("例：遇到值得记录的架构信息 / 密钥位置，按分组归档到 E:\\资料，方便各项目取用。")) },
+                )
+                Text(
+                    t("空着保存 = 删掉这条组规。agent 里随时能用 yxi-hub rules 看自己组的组规。"),
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline,
+                )
+            }
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (members > 0 && text.isNotBlank()) TextButton(onClick = { onSave(text, true) }) { Text(t("存并发给在跑的 %d 个").format(members)) }
+                TextButton(onClick = { onSave(text, false) }) { Text(t("保存")) }
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(t("算了")) } },
+    )
+}

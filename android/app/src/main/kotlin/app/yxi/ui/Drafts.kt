@@ -31,4 +31,11 @@ internal object Drafts {
         if (text.isBlank()) e.remove(key(hostId, session)) else e.putString(key(hostId, session), text)
         e.apply()
     }
+
+    /** 开发者模式里的逃生口：输入框卡住、草稿删不掉时，把所有会话的草稿一次清光。返回清了几条。 */
+    fun clearAll(ctx: Context): Int {
+        val sp = p(ctx); val keys = sp.all.keys.filter { it.startsWith("draft:") }
+        val e = sp.edit(); keys.forEach { e.remove(it) }; e.apply()
+        return keys.size
+    }
 }

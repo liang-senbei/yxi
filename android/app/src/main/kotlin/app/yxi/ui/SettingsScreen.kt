@@ -398,6 +398,14 @@ private fun DevCard(ctx: Context, host: Host?, store: HostStore, keys: KeyManage
                 ) { Text(if (copied) t("已复制") else t("复制")) }
             }
         }
+        // 逃生口（用户 2026-09-04：输入框里的字删不掉了，要一个能处理异常的按钮）：清掉所有会话的草稿。
+        // 输入框的文字就是草稿，清了再进对话就是空的。不动服务器、不动会话。
+        var cleared by remember { mutableStateOf<Int?>(null) }
+        Button(
+            onClick = { cleared = Drafts.clearAll(ctx) },
+            shape = Pill, modifier = Modifier.fillMaxWidth().height(44.dp),
+            colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(),
+        ) { Text(cleared?.let { t("清掉了 %d 条草稿，重进对话就是空的").format(it) } ?: t("清空所有输入框草稿（输入框卡住时用）")) }
         if (report.isNotEmpty()) {
             Surface(color = SurfaceContainerHigh, shape = MaterialTheme.shapes.medium) {
                 // 诊断文本很长，给它自己的滚动区，别把整页撑成一条

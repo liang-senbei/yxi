@@ -107,31 +107,46 @@ case "${1:-who}" in
   # ⚠️ **没编组就什么都不输出**（连 JSON 都不出）—— 不在组里的会话零开销。
   context)
     [ -n "$self" ] || exit 0
-    m="$(mates "$self")"
-    [ -n "$m" ] || exit 0
-    # ⚠️ 用换行分隔传给 python 去拼。**不能用 `paste -sd、`** ——
-    #    `paste -d` 只吃单字节分隔符，多字节的「、」会被截成半个字符（实测出乱码）。
-    bg="$(mates_by_group "$self")"
-    python3 - "$self" "$bg" <<'PY'
+    [ -r "$GROUPS_FILE" ] || exit 0
+    # ⚠️ 同组名单 + 组规一起注入。组规是手机上「分组」里写的（groups.json 的 rules），
+    #    每次 SessionStart（startup / resume / clear / compact）都重新读 —— 改了组规，下一次会话开始就生效。
+    python3 - "$self" "$GROUPS_FILE" <<'PY'
 import json, sys
-me = sys.argv[1]
-rows = [l.split("\t", 1) for l in sys.argv[2].splitlines() if "\t" in l]
+me, f = sys.argv[1], sys.argv[2]
+try: d = json.load(open(f))
+except Exception: sys.exit(0)
+groups = d.get("groups", {}) or {}; rules = d.get("rules", {}) or {}
+rows = [(g, "、".join(x for x in m if x != me)) for g, m in groups.items() if me in m]
+if not rows: sys.exit(0)
 multi = len(rows) > 1
-# 按组分开说：一个会话在几个组里，就说几遍「哪个组、有谁」—— 混在一起说，agent 分不清谁是哪个组的
-lines = "；".join("「" + g + "」组：" + (m if m else "（就你一个）") for g, m in rows)
-txt = (
-    "【同组协作】你是 " + me + "，" + ("在 " + str(len(rows)) + " 个组里 —— " if multi else "") + lines + "。\n"
-    "需要跟他们配合时，用 `yxi-hub say <名字> \"内容\"` 直接发给对方"
-    "（对方会在自己的输入框里收到，前面标着组名和你的名字）；"
-    + ("`yxi-hub all <组名> \"内容\"` 发给某一个组的所有人（你在多个组里，必须指明组）；"
-       if multi else "`yxi-hub all \"内容\"` 发给同组所有人；")
-    + "`yxi-hub who` 查当前组员。**只能发给同组的**。\n"
-    + ("收到的消息前面是 `[同组 组名 · 谁]`，照着组名区分是哪边的事，别串。\n" if multi else "")
-    + "别为了发消息去抄别人的 tmux —— 用这个命令就行。"
-)
+parts = []
+if any(m for _, m in rows):
+    lines = "；".join("「" + g + "」组：" + (m if m else "（就你一个）") for g, m in rows)
+    parts.append(
+        "【同组协作】你是 " + me + "，" + ("在 " + str(len(rows)) + " 个组里 —— " if multi else "") + lines + "。\n"
+        "需要跟他们配合时，用 `yxi-hub say <名字> \"内容\"` 直接发给对方"
+        "（对方会在自己的输入框里收到，前面标着组名和你的名字）；"
+        + ("`yxi-hub all <组名> \"内容\"` 发给某一个组的所有人（你在多个组里，必须指明组）；"
+           if multi else "`yxi-hub all \"内容\"` 发给同组所有人；")
+        + "`yxi-hub who` 查当前组员。**只能发给同组的**。\n"
+        + ("收到的消息前面是 `[同组 组名 · 谁]`，照着组名区分是哪边的事，别串。\n" if multi else "")
+        + "别为了发消息去抄别人的 tmux —— 用这个命令就行。")
+for g, _ in rows:
+    r = (rules.get(g) or "").strip()
+    if r: parts.append("【组规 · " + g + "】（用户在手机上给这个组定的，本组每个会话开始都会看到，照办）\n" + r)
+if not parts: sys.exit(0)
 print(json.dumps({"hookSpecificOutput": {
-    "hookEventName": "SessionStart", "additionalContext": txt}}, ensure_ascii=False))
+    "hookEventName": "SessionStart", "additionalContext": "\n\n".join(parts)}}, ensure_ascii=False))
 PY
+    ;;
+  rules)
+    # 看我所在各组的组规（跟 SessionStart 注入的是同一份）
+    [ -n "$self" ] || { echo "不在 tmux 里，认不出我是谁"; exit 1; }
+    [ -r "$GROUPS_FILE" ] || { echo "(没有分组表)"; exit 0; }
+    python3 -c 'import json,sys
+d=json.load(open(sys.argv[1])); me=sys.argv[2]
+for g,m in (d.get("groups") or {}).items():
+    if me in m: print("组「"+g+"」组规：\n"+((d.get("rules") or {}).get(g) or "(没写)")+"\n")' "$GROUPS_FILE" "$self"
     ;;
   who)
     if [ -z "$self" ]; then echo "不在 tmux 里，认不出我是谁"; exit 1; fi
