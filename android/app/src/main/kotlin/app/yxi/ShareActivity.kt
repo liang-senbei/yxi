@@ -44,17 +44,22 @@ class ShareActivity : ComponentActivity() {
         super.onCreate(b)
         I18n.load(this)
         val text = intent?.getStringExtra(Intent.EXTRA_TEXT)
-        val uri: Uri? =
+        // ⚠️ 相册里一次分享多张走的是 SEND_MULTIPLE，EXTRA_STREAM 是个列表 —— 原来只认单个，多选进不来
+        val uris: List<Uri> = if (intent?.action == Intent.ACTION_SEND_MULTIPLE) {
+            (if (Build.VERSION.SDK_INT >= 33) intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+            else @Suppress("DEPRECATION") intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)).orEmpty()
+        } else listOfNotNull(
             if (Build.VERSION.SDK_INT >= 33) intent?.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
             else @Suppress("DEPRECATION") intent?.getParcelableExtra(Intent.EXTRA_STREAM)
+        )
         val store = HostStore(applicationContext)
         val keys = KeyManager(applicationContext)
-        setContent { YxiTheme { SharePicker(store, keys, text, uri) { finish() } } }
+        setContent { YxiTheme { SharePicker(store, keys, text, uris) { finish() } } }
     }
 }
 
 @Composable
-private fun SharePicker(store: HostStore, keys: KeyManager, text: String?, uri: Uri?, onDone: () -> Unit) {
+private fun SharePicker(store: HostStore, keys: KeyManager, text: String?, uris: List<Uri>, onDone: () -> Unit) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     var host by remember { mutableStateOf<Host?>(null) }
@@ -95,17 +100,22 @@ private fun SharePicker(store: HostStore, keys: KeyManager, text: String?, uri: 
             val s = ssh ?: return@launch
             val ok = withContext(Dispatchers.IO) {
                 runCatching {
-                    if (uri != null) {
-                        // 图/文件：SFTP 传上去，正文贴路径映射（跟 App 里附件一个路子）
-                        val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@runCatching false
-                        val mime = ctx.contentResolver.getType(uri).orEmpty()
-                        val isImage = mime.startsWith("image/")
-                        val name = uri.lastPathSegment?.substringAfterLast('/') ?: if (isImage) "image" else "file"
-                        val stamp = java.text.SimpleDateFormat("MMdd-HHmmss", java.util.Locale.US).format(java.util.Date())
+                    if (uris.isNotEmpty()) {
+                        // 图/文件：SFTP 传上去，正文贴路径映射（跟 App 里附件一个路子）。多个就顺序传、一条消息带全部
                         val sftp = s.openSftp()
-                        val staged = try { Attachments.upload(sftp, target.name, name, bytes, 1, isImage, stamp) }
-                        finally { runCatching { sftp.close() } }
-                        SessionProbe.send(s, target.name, Attachments.header(listOf(staged)) + (text ?: t("看看这个")))
+                        val staged = ArrayList<Attachments.Staged>()
+                        try {
+                            for (uri in uris) {
+                                val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: continue
+                                val mime = ctx.contentResolver.getType(uri).orEmpty()
+                                val isImage = mime.startsWith("image/")
+                                val name = uri.lastPathSegment?.substringAfterLast('/') ?: if (isImage) "image" else "file"
+                                val stamp = java.text.SimpleDateFormat("MMdd-HHmmss-SSS", java.util.Locale.US).format(java.util.Date())
+                                staged += Attachments.upload(sftp, target.name, name, bytes, staged.count { it.isImage == isImage } + 1, isImage, stamp)
+                            }
+                        } finally { runCatching { sftp.close() } }
+                        if (staged.isEmpty()) return@runCatching false
+                        SessionProbe.send(s, target.name, Attachments.header(Attachments.renumber(staged)) + (text ?: t("看看这个")))
                         true
                     } else if (!text.isNullOrBlank()) {
                         SessionProbe.send(s, target.name, text)
@@ -124,7 +134,9 @@ private fun SharePicker(store: HostStore, keys: KeyManager, text: String?, uri: 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).padding(18.dp, 14.dp)) {
             Text(t("分享到哪个会话"), style = MaterialTheme.typography.headlineSmall)
-            val preview = uri?.let { t("[文件] ") + (it.lastPathSegment ?: "") } ?: text.orEmpty()
+            val preview = if (uris.isNotEmpty())
+                t("[文件] ") + (uris.first().lastPathSegment ?: "") + (if (uris.size > 1) t("（共 %d 个）").format(uris.size) else "")
+            else text.orEmpty()
             if (preview.isNotBlank()) Text(
                 preview, Modifier.padding(top = 6.dp), maxLines = 2,
                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),

@@ -64,6 +64,13 @@
                 <data android:mimeType="image/*" />
                 <data android:mimeType="application/*" />
             </intent-filter>
+            <!-- 相册里一次分享多张：SEND_MULTIPLE，EXTRA_STREAM 是列表 -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="application/*" />
+            </intent-filter>
         </activity>
 
         <!-- 把下载到私有目录的 APK 交给系统安装器 —— 不经过任何共享存储 -->

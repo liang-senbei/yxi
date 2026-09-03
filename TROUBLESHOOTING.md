@@ -4238,3 +4238,13 @@ SFTP 读到一半就取消，永远到不了「显示」那一步。**在会被�
   用 `layout: {mode: grid, cols, cellW, gapX, gapY}` + `row/col` 让它自己排，连线按**真实路径**归并（手机只连 sshd，别从手机拉五条线进服务器），
   标签压节点按它给的 `labelDy` / `labelAt` 建议改。standard 档比 showcase 松，试作用 standard 就够。
 - 手机上看：它是桌面尺寸的页，卡片预览只能看个轮廓，得全屏 + 捏合放大（0.9.80 起 WebView 开了缩放）。
+
+## #220 「一次上传多个有 bug」：两条路各一个坑
+
+- **分享面板多选进不来**：manifest 只注册了 `ACTION_SEND`，相册里勾多张分享走的是 `ACTION_SEND_MULTIPLE`（`EXTRA_STREAM` 是 `ArrayList<Uri>`），
+  Yxi 要么不出现在分享面板里、要么只拿到一张。修法：补 `SEND_MULTIPLE` 的 intent-filter，`ShareActivity` 按列表顺序传、`renumber` 后一条消息带全部。
+- **App 内多选看不见、停不下来**：原来一批是一条协程顺序传，界面只有一句「传着… n/m」，单个文件既没有卡片也没法取消，
+  中途离开对话页整批悄悄没了。修法：选中即出卡，每个文件各自协程 + Mutex 排队；取消靠 jsch 的 `SftpProgressMonitor.count` 返回 false
+  （它没有干净的 cancel，中止是抛 SftpException，按 `cancelled` 标记区分），并 `rm` 掉传了一半的远端文件；时间戳加毫秒，
+  同一秒选中的同名文件不再互相覆盖。
+- ⚠️ 仍有的天花板：`Upload` 的协程挂在对话页的 scope 上，**离开对话页 = 取消在传的**；要后台上传得挪到 app 级 scope（跟自更新那条一个路子）。

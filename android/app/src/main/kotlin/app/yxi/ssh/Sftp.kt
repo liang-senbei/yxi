@@ -119,8 +119,30 @@ class Sftp internal constructor(private val ch: ChannelSftp, private val lock: M
         }
 
     /** 写一个文件（目录要先存在）。附件上传用。 */
-    suspend fun write(path: String, bytes: ByteArray) = withContext(Dispatchers.IO) {
-        lock.withLock { ch.put(java.io.ByteArrayInputStream(bytes), path, ChannelSftp.OVERWRITE) }
+    /**
+     * 写一个文件。[progress] 每传一块回调一次 `(已传, 总数)`，**返回 false 就中止**（jsch 的
+     * `SftpProgressMonitor.count` 语义）—— 附件条上那个 ✕ 靠它把正在传的那一个停下来。
+     * ⚠️ 中止是抛 SftpException 出来的（jsch 没有干净的取消），调用方按 cancelled 标记区分。
+     */
+    suspend fun write(path: String, bytes: ByteArray, progress: ((Long, Long) -> Boolean)? = null) = withContext(Dispatchers.IO) {
+        lock.withLock {
+            if (progress == null) ch.put(java.io.ByteArrayInputStream(bytes), path, ChannelSftp.OVERWRITE)
+            else {
+                val total = bytes.size.toLong()
+                var done = 0L
+                val mon = object : com.jcraft.jsch.SftpProgressMonitor {
+                    override fun init(op: Int, src: String?, dest: String?, max: Long) { done = 0 }
+                    override fun count(n: Long): Boolean { done += n; return progress(done, total) }
+                    override fun end() {}
+                }
+                ch.put(java.io.ByteArrayInputStream(bytes), path, mon, ChannelSftp.OVERWRITE)
+            }
+        }
+    }
+
+    /** 删一个文件（取消上传时把传了一半的那个收掉）。不存在也不报错。 */
+    suspend fun rm(path: String) = withContext(Dispatchers.IO) {
+        lock.withLock { runCatching { ch.rm(path) } }
     }
 
     suspend fun mkdirs(path: String) = withContext(Dispatchers.IO) {

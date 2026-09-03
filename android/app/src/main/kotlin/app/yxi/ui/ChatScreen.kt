@@ -48,6 +48,7 @@ import com.mikepenz.markdown.m3.Markdown
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 private val Pill = RoundedCornerShape(100.dp)
@@ -92,11 +93,14 @@ fun ChatScreen(
         onDispose { Drafts.set(ctx, hostId, sessionName, draft) }
     }
     /**
-     * 正在传的张数。
-     * ⚠️ **是计数不是布尔。** 原来是布尔：第一张传完就置 false，
-     * 而第二张还在传 —— 界面上那句「上传中」提前消失，用户以为完事了。
+     * 正在传 / 传失败的附件，一个一张小卡（名字 + 进度环 + ✕）。
+     * ⚠️ **每个文件各自一个协程、各自能取消**（用户要的：上传中要有 ✕ 取消**该文件**）。
+     * 原来一批多个是一条协程顺序传、只有一句「传着… n/m」—— 单个文件既看不见也停不下来，
+     * 中途切走整批悄悄没了。现在：选中即出卡，传完变成 [staged] 里的标签，失败留在卡上点一下重试。
+     * 仍然**一个一个传**（Mutex 排队）：序号要连得上，SFTP 通道也不吃并发。
      */
-    var uploading by remember { mutableIntStateOf(0) }
+    val queue = remember(sessionName) { mutableStateListOf<Upload>() }
+    val uploadLock = remember(sessionName) { kotlinx.coroutines.sync.Mutex() }
     /**
      * 这个会话此刻占多少上下文。⚠️ 顺着转录一起解出来的，**不额外跑一趟服务器**。
      * 名字不叫 `ctx` —— 这个文件里 `ctx` 已经是 `LocalContext`。
@@ -111,86 +115,69 @@ fun ChatScreen(
     /** 正在放大看的那张附件图。null = 没在看 */
     var preview by remember { mutableStateOf<app.yxi.agent.Attachments.Staged?>(null) }
 
-    /** 这一批还剩几个没传完。用来画「传着… 2/5」，也是「有没有在传」的判据。 */
-    var batchTotal by remember(sessionName) { mutableIntStateOf(0) }
-
     // 选文件（图片和任意文件走同一个选择器，类型看 MIME）
     //
     // ⚠️ **可以一次选多个**（用户要的）。用 `GetMultipleContents` 不是 `GetContent`：
     // 一张一张选、传完再点加号再选，五张图就是五轮操作 —— 手机上这个代价很实在。
-    val pick = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.GetMultipleContents()
-    ) { uris ->
-        if (uris.isEmpty()) return@rememberLauncherForActivityResult
-        val s0 = ssh ?: return@rememberLauncherForActivityResult
-        scope.launch {
-            uploading += uris.size
-            batchTotal += uris.size
-            // ⚠️ **一批里的失败要攒起来一次说。** 五张里坏了三张就弹三个 Toast，
-            // 后面的把前面的顶掉，用户只看见最后一条 —— 等于没报。
-            var failed = 0
-            var lastErr: Throwable? = null
-            // ⚠️ **一个一个传，不并发。** 序号（`图片1` `图片2`）要连得上，
-            // 而并发时每个协程算 `idx` 都读到同一份 `staged`，五张全叫「图片1」——
-            // 那正是 #156 那个撞号 bug 的老家。顺序传的话每轮都读得到上一轮的结果。
-            for (u in uris) {
-                // ⚠️ **先把字节读进内存，再谈传。** 读文件本身可能失败（授权过期、文件没了），
-                // 那跟「传失败」是两码事，要分开报，否则用户不知道是手机侧还是网络侧的问题。
-                val bytes = withContext(Dispatchers.IO) {
-                    app.yxi.ssh.catching {
-                        ctx.contentResolver.openInputStream(u)?.use { it.readBytes() }
-                    }.getOrNull()
-                }
-                if (bytes == null || bytes.isEmpty()) {
-                    failed++; lastErr = IllegalStateException(t("这个文件读不出来"))
-                    uploading--; continue
-                }
-                val cr = ctx.contentResolver
-                val mime = cr.getType(u).orEmpty()
-                val isImage = mime.startsWith("image/")
-                val name = queryName(ctx, u) ?: (if (isImage) "image" else "file")
-                // 顺序传，所以这里读到的 `staged` 已经含上一轮的结果，序号自然递增
-                val idx = staged.count { it.isImage == isImage } + 1
-                val stamp = java.text.SimpleDateFormat("MMdd-HHmmss", java.util.Locale.US)
-                    .format(java.util.Date())
-
-                // ⚠️ **每次开一条新 SFTP 通道，别复用共享那条。**
-                // 病根就在复用：那条通道空闲久了会被服务器关掉、或上一次操作出错后进了坏状态，
-                // 之后每次 `put` 都失败 —— 而原来的代码**没有 onFailure，失败是静默的**，
-                // 用户只看到「没反应」，于是一点再点（原话：附件上传要好几次才能成功）。
-                // 新通道保证是好的；开一条就一个来回，比起传一整张图可以忽略。
-                //
-                // ⚠️ 还是**试两次**：新通道也可能撞上网络抖动，重开再来一次，
-                // 两次都不行才算这个失败 —— 报出真原因，不再让人瞎点。
+    fun startUpload(up: Upload) {
+        val s0 = ssh ?: run { up.error = t("还没连上"); return }
+        up.error = null; up.progress = 0f; up.cancelled = false
+        up.job = scope.launch {
+            // ⚠️ **先把字节读进内存，再谈传。** 读文件本身可能失败（授权过期、文件没了），
+            // 那跟「传失败」是两码事，要分开报。
+            val bytes = withContext(Dispatchers.IO) {
+                app.yxi.ssh.catching { ctx.contentResolver.openInputStream(up.uri)?.use { it.readBytes() } }.getOrNull()
+            }
+            if (bytes == null || bytes.isEmpty()) { up.error = t("这个文件读不出来"); return@launch }
+            // 排队：一个一个传，序号才连得上（并发时每个协程读到同一份 staged，五张全叫「图片1」，#156）
+            uploadLock.withLock {
+                if (up.cancelled) return@withLock
+                val idx = staged.count { it.isImage == up.isImage } + 1
+                val stamp = java.text.SimpleDateFormat("MMdd-HHmmss-SSS", java.util.Locale.US).format(java.util.Date())
+                val path = app.yxi.agent.Attachments.remotePath(sessionName, up.name, stamp)
+                // ⚠️ **每次开一条新 SFTP 通道，别复用共享那条。** 复用的那条空闲久了会被服务器关掉、
+                // 或上一次出错后进了坏状态，之后每次 put 都失败 —— 原话「附件上传要好几次才能成功」。
+                // 还是试两次：新通道也可能撞上网络抖动。
                 var ok: app.yxi.agent.Attachments.Staged? = null
+                var lastErr: Throwable? = null
                 repeat(2) {
-                    if (ok != null) return@repeat
+                    if (ok != null || up.cancelled) return@repeat
                     val fresh = app.yxi.ssh.catching { s0.openSftp() }.getOrNull()
                     if (fresh == null) { lastErr = IllegalStateException(t("开不了 SFTP 通道")); return@repeat }
                     try {
-                        ok = app.yxi.agent.Attachments.upload(fresh, sessionName, name, bytes, idx, isImage, stamp)
-                            .copy(localUri = u.toString())
+                        ok = app.yxi.agent.Attachments.upload(fresh, sessionName, up.name, bytes, idx, up.isImage, stamp) { done, total ->
+                            up.progress = if (total > 0) done.toFloat() / total else 0f
+                            !up.cancelled          // ✕ 按下去这里返回 false，jsch 就停
+                        }.copy(localUri = up.uri.toString())
                     } catch (e: Throwable) {
                         if (e is kotlinx.coroutines.CancellationException) throw e
                         lastErr = e
+                        // 取消 / 失败：传了一半的那个别留在服务器上
+                        runCatching { fresh.rm(path) }
                     } finally {
                         runCatching { fresh.close() }
                     }
                 }
-                if (ok != null) staged = app.yxi.agent.Attachments.renumber(staged + ok!!)
-                else failed++
-                uploading--
+                when {
+                    up.cancelled -> {}
+                    ok != null -> { staged = app.yxi.agent.Attachments.renumber(staged + ok!!); queue.remove(up) }
+                    else -> up.error = app.yxi.ssh.Sftp.explain(lastErr ?: RuntimeException())
+                }
             }
-            if (uploading == 0) batchTotal = 0
             runCatching { app.yxi.agent.Attachments.sweep(s0) }   // 顺手清 3 天前的
-            if (failed > 0) android.widget.Toast.makeText(
-                ctx,
-                // 一个也没成 vs 部分成功，说法不一样 —— 后者要让人知道**哪些还在附件条上**
-                if (failed == uris.size) t("传失败：%s").format(app.yxi.ssh.Sftp.explain(lastErr ?: RuntimeException()))
-                else t("%d 个里有 %d 个没传上：%s").format(
-                    uris.size, failed, app.yxi.ssh.Sftp.explain(lastErr ?: RuntimeException())),
-                android.widget.Toast.LENGTH_LONG,
-            ).show()
+        }
+    }
+    val pick = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.GetMultipleContents()
+    ) { uris ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        // 选中的每一个先出卡，再各自开传 —— 用户立刻看到「都进来了、各自传到哪」
+        for (u in uris) {
+            val mime = ctx.contentResolver.getType(u).orEmpty()
+            val isImage = mime.startsWith("image/")
+            val up = Upload(u, queryName(ctx, u) ?: (if (isImage) "image" else "file"), isImage)
+            queue += up
+            startUpload(up)
         }
     }
 
@@ -856,7 +843,7 @@ fun ChatScreen(
             }
         }
 
-        if (staged.isNotEmpty() || uploading > 0) {
+        if (staged.isNotEmpty() || queue.isNotEmpty()) {
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(16.dp, 0.dp, 16.dp, 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -886,14 +873,31 @@ fun ChatScreen(
                         }
                     }
                 }
-                // 一批多个的时候报进度 —— 五张图传两分钟，光一个「传着…」看不出还剩多少
-                if (uploading > 0) Text(
-                    if (batchTotal > 1) t("传着… %d/%d").format(batchTotal - uploading + 1, batchTotal)
-                    else t("传着…"),
-                    Modifier.padding(8.dp, 8.dp),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.outline,
-                )
+                // 还在传 / 传失败的：名字 + 进度环（失败变红字，点名字重试）+ ✕（取消这一个）
+                queue.forEach { up ->
+                    Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = Pill) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (up.error == null) androidx.compose.material3.CircularProgressIndicator(
+                                progress = { up.progress }, modifier = Modifier.padding(start = 10.dp).size(14.dp), strokeWidth = 2.dp,
+                            )
+                            Text(
+                                if (up.error == null) up.name.take(14) else t("%s · 失败，点我重试").format(up.name.take(10)),
+                                Modifier.clickable(enabled = up.error != null) { startUpload(up) }.padding(8.dp, 6.dp, 6.dp, 6.dp),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (up.error == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+                                maxLines = 1,
+                            )
+                            Text(
+                                "✕",
+                                Modifier.clickable {
+                                    up.cancelled = true; up.job?.cancel(); queue.remove(up)
+                                }.padding(6.dp, 6.dp, 12.dp, 6.dp),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -998,7 +1002,8 @@ fun ChatScreen(
                         ).show()
                     }
                 }
-                val canSend = draft.isNotBlank() || staged.isNotEmpty()
+                // ⚠️ 还有在传的先别发：发了它们就不在这条消息里了，用户以为丢了
+                val canSend = (draft.isNotBlank() || staged.isNotEmpty()) && queue.none { it.error == null }
                 Surface(
                     color = if (canSend) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -1765,4 +1770,16 @@ private suspend fun waitScreenChange(
         delay(60)
     }
     return get()
+}
+
+
+/**
+ * 附件条上「还在传」的一个。[cancelled] 是给 SFTP 进度回调看的开关；[job] 是它自己的协程，✕ 只取消它。
+ * ⚠️ 用 class 不用 data class：它是可变状态，放进 mutableStateListOf 要按引用比。
+ */
+internal class Upload(val uri: android.net.Uri, val name: String, val isImage: Boolean) {
+    var progress by mutableStateOf(0f)
+    var error by mutableStateOf<String?>(null)
+    @Volatile var cancelled = false
+    var job: kotlinx.coroutines.Job? = null
 }

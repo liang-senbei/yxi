@@ -794,6 +794,8 @@ internal object En {
         "在装：%s（几分钟）" to "Installing: %s (a few minutes)",
         "%s · 没装，点我去装" to "%s · not installed, tap to install",
         "探测 / 装机" to "Probe / install",
+        "%s · 失败，点我重试" to "%s · failed, tap to retry",
+        "（共 %d 个）" to " (%d in total)",
         "查明并画出来" to "Discover and diagram",
         "把结构画成图" to "Draw what I describe",
         "已派给 %s —— 画好会出现在这里（每 20 秒自动刷一次）" to "Sent to %s — it will appear here when done (auto-refresh every 20 s)",

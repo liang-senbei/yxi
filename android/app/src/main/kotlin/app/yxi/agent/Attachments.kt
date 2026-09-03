@@ -42,13 +42,20 @@ object Attachments {
     suspend fun upload(
         sftp: Sftp, session: String, name: String, bytes: ByteArray,
         index: Int, isImage: Boolean, stamp: String,
+        /** 进度 `(已传, 总数)`，返回 false 中止（见 [Sftp.write]） */
+        progress: ((Long, Long) -> Boolean)? = null,
     ): Staged {
         val dir = dirFor(session)
         sftp.mkdirs(dir)
-        val safe = name.replace(Regex("""[^A-Za-z0-9._-]"""), "_").takeLast(60).ifBlank { "file" }
-        val path = "$dir/$stamp-$safe"
-        sftp.write(path, bytes)
+        val path = remotePath(session, name, stamp)
+        sftp.write(path, bytes, progress)
         return Staged(if (isImage) t("图片%d").format(index) else t("附件%d").format(index), path, isImage)
+    }
+
+    /** 上传落在服务器上的路径。单独拿出来是为了**取消时能删掉传了一半的那个**。 */
+    fun remotePath(session: String, name: String, stamp: String): String {
+        val safe = name.replace(Regex("""[^A-Za-z0-9._-]"""), "_").takeLast(60).ifBlank { "file" }
+        return dirFor(session) + "/" + stamp + "-" + safe
     }
 
     /**
