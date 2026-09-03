@@ -129,6 +129,17 @@ if [ "${1:-}" = "--publish" ]; then
   APK="${2:?用法: $0 --publish <apk> <versionCode> <versionName> [说明]}"
   CODE="${3:?缺 versionCode}"; NAME="${4:?缺 versionName}"; NOTES="${5:-}"
   [ -f "$APK" ] || { echo "找不到 $APK"; exit 1; }
+  # ⚠️ **包里的 versionCode 必须等于要发的那个数。** 踩过（TROUBLESHOOTING #223）：编译其实失败了、
+  #    旧包还躺在 outputs 里，签名脚本照样把它签成新版本号发了出去 —— 清单说 133、包是 132，
+  #    手机永远提示「有更新」却装不上新东西。有 aapt2 就在发之前对一遍，对不上直接拒。
+  AAPT_CHK=$(command -v aapt2 || echo /opt/android-sdk/build-tools/37.0.0/aapt2)
+  if [ -x "$AAPT_CHK" ]; then
+    IN_APK=$("$AAPT_CHK" dump badging "$APK" 2>/dev/null | grep -oE "versionCode='[0-9]+'" | grep -oE '[0-9]+')
+    if [ -n "$IN_APK" ] && [ "$IN_APK" != "$CODE" ]; then
+      echo "❌ 包里的 versionCode 是 $IN_APK，不是 $CODE —— 这不是你要发的那个包（编译失败了？）。没发。"
+      exit 1
+    fi
+  fi
   mkdir -p "$EVENTS_DIR"
   install -m 644 "$APK" "$EVENTS_DIR/Yxi.apk"
   # ⚠️ **清单里的文件名带版本号**（`Yxi-78.apk`）。

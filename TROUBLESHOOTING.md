@@ -4267,3 +4267,13 @@ SFTP 读到一半就取消，永远到不了「显示」那一步。**在会被�
 `install.sh --publish` 这串字，`pgrep -f` 永远能匹配到自己（和别的等待脚本），于是永远等。跟 `pkill -f` 自杀（exit 144）是同一族。
 **修法**：判「有没有发布在跑」用锁：`flock -n /tmp/.yxi-publish.lock true`（install.sh 本来就拿这把锁）；非要用 pgrep 就写
 `pgrep -f "instal[l].sh --publish"`（方括号让模式串本身不匹配模式）。
+
+## #223 发出去一个「清单 133、包 132」的版本：编译失败没看见，旧包被签成了新号
+
+**症状**：0.9.89 发布中途发现签好的包 `versionCode='132'`；公网清单已经翻到 133、指向一个内容是 0.9.88 的文件。
+装了 0.9.88 的手机会永远提示「有更新」、装完还是 0.9.88。
+**根因**：① 编译其实失败了（`compileReleaseKotlin` 报错），但我看结果只 `grep -c "^e: "`，这次的报错格式不带 `e:`，被当成 0 个错误；
+② 签名脚本对着 `outputs/apk/release/app-release-unsigned.apk` 签，那是上一版留下的旧包；③ `aapt2 dump badging` 打出了 132，我只打印没校验。
+**修法**：`install.sh --publish` 现在先用 aapt2 读包里的 versionCode，跟参数对不上直接拒发；签名后的检查也要 `[ "$IN" = "$CODE" ] || exit`。
+判编译成败看 `[gradle exit N]` 和 `BUILD FAILED`，别只数 `e:` 行。
+**善后**：公网清单和下载按钮改回 132、删掉错误的 133 文件、本机清单回滚 —— 都在 #223 当天做了，公网上没停留超过 10 分钟。
