@@ -349,6 +349,13 @@ fun ChatScreen(
             if (items.isEmpty()) status = t("连接断了，正在重连…")
             return@LaunchedEffect
         }
+        // ⚠️ **进过的对话留在内存里**（[app.yxi.agent.ChatMemory]）：重进先把上次的条目原样摆出来、
+        // 再只拉增量。原来每次都从头找文件、拉 0.5MB 首屏、再灌 4MB 历史 —— 用户：「退出去再进要等好久」。
+        val memKey = app.yxi.agent.ChatMemory.key(hostId, sessionName)
+        val remembered = app.yxi.agent.ChatMemory.get(memKey)?.takeIf { it.items.isNotEmpty() }
+        if (remembered != null) {
+            items = remembered.items; remembered.ctx?.let { ctxUse = it }; status = null; settled = true
+        }
         // ⚠️ 会话名必须传 —— 转录按 sessionId 找，不按目录找。
         // 只给 cwd 的话，会话里 cd 过一次就再也找不到（用户报的 hexingyang 就是）。
         val file = TranscriptStream.latestFor(s, cwd, sessionName.orEmpty())
@@ -356,62 +363,62 @@ fun ChatScreen(
             status = t("这个会话里没找到 Claude Code 的转录\n（%s）").format(cwd)
             return@LaunchedEffect
         }
-        // ⚠️ **有东西看之前别把提示清掉。** 原来这里先 `status = null` 再去拉 0.58 MB，
-        // 那几秒钟正好是「上面没提示、下面没内容」的纯白屏。
-        status = if (items.isEmpty()) t("正在载入对话…") else null
-
-        // ⚠️ **先画最新的一屏，再补历史。** `tail -n 800` 从最老那条开始吐、
-        // 最新的最后才到，所以完整那次要等 4.17 MB 传完你才看得见最新内容。
-        // 这里先要 60 行（0.58 MB，一个来回），立刻有东西看；
-        // 下面那条完整流回来之后整体替换。
-        runCatching { TranscriptStream.head(s, file) }
-            .onSuccess { head ->
-                if (head.isNotEmpty()) {
-                    // ⚠️ 用 `Incremental` 而不是 `Transcript.parse` —— 后者不给 ctx。
-                    // 只靠下面那条流的话，**会话闲着时上下文永远显示不出来**：
-                    // `tail -f` 只送新行，没有新的 assistant 消息就没有 usage。
-                    val inc0 = Transcript.Incremental()
-                    items = withContext(Dispatchers.Default) {
-                        inc0.add(head.asSequence()); inc0.snapshot()
+        val entry: app.yxi.agent.ChatMemory.Entry
+        if (remembered != null && remembered.file == file) {
+            entry = remembered
+        } else {
+            // 第一次进（或转录文件换了：/clear、换了 uuid）：老路 —— 先画最新一屏，再灌历史
+            // ⚠️ **有东西看之前别把提示清掉。** 原来这里先 `status = null` 再去拉 0.58 MB，
+            // 那几秒钟正好是「上面没提示、下面没内容」的纯白屏。
+            status = if (items.isEmpty()) t("正在载入对话…") else null
+            // ⚠️ **先画最新的一屏，再补历史。** `tail -n 800` 从最老那条开始吐、
+            // 最新的最后才到，所以完整那次要等 4.17 MB 传完你才看得见最新内容。
+            // 这里先要 60 行（0.58 MB，一个来回），立刻有东西看；下面那条完整流回来之后整体替换。
+            runCatching { TranscriptStream.head(s, file) }
+                .onSuccess { head ->
+                    if (head.isNotEmpty()) {
+                        // ⚠️ 用 `Incremental` 而不是 `Transcript.parse` —— 后者不给 ctx。
+                        val inc0 = Transcript.Incremental()
+                        items = withContext(Dispatchers.Default) {
+                            inc0.add(head.asSequence()); inc0.snapshot()
+                        }
+                        inc0.ctx?.let { ctxUse = it }
+                        // 存下来，下次冷启动能立刻画出这几条
+                        app.yxi.agent.TranscriptCache.save(ctx, sessionName, cwd, head)
                     }
-                    inc0.ctx?.let { ctxUse = it }
-                    // 存下来，下次从后台切回来能立刻画出这几条
-                    app.yxi.agent.TranscriptCache.save(ctx, sessionName, cwd, head)
+                    status = null
                 }
-                status = null
+                .onFailure {
+                    if (it is kotlinx.coroutines.CancellationException) throw it
+                    if (items.isEmpty()) status = t("载入失败：%s").format(it.message ?: "")
+                }
+            // 历史从最后 400 行的字节起点开始跟随（不是 `tail -n`）：这样读到哪个字节是算得出来的，下次接着读
+            val start = TranscriptStream.tailStart(s, file, 400)?.second ?: 0L
+            entry = app.yxi.agent.ChatMemory.Entry(file, Transcript.Incremental()).also {
+                it.offset = start
+                app.yxi.agent.ChatMemory.put(memKey, it)
             }
-            .onFailure {
-                if (it is kotlinx.coroutines.CancellationException) throw it
-                if (items.isEmpty()) status = t("载入失败：%s").format(it.message ?: "")
-            }
+        }
+        val fresh = entry !== remembered
 
         // 攒一批再解析：tail 一上来就吐几百行，逐行重解会把 UI 卡住。
-        //
-        // ⚠️ **节流必须有「尾随刷新」。** 第一版写成「距上次解析超过 250ms 才解析」，
-        // 结果是：tail 把历史一次性吐完（都在同一个 250ms 窗口里），只有第一行触发了解析，
-        // 剩下的全被吞掉，然后 tail 阻塞等新内容 —— **界面永远停在第一行的解析结果**。
-        // 现象是「忙的会话正常、闲的会话永远空白」，最容易被当成偶发问题。
-        // 现在改成：收行的只管往 buf 里塞并标脏，另一个协程定时把脏的刷出来。
-        // ⚠️ **只喂新行。** 老做法是每 300ms 把整个缓冲从头重解 ——
-        // 实测真实会话 `tail -n 800` 是 4.17 MB，等于**每秒重嚼三次 4 MB**，
-        // 会话越长越慢。见 TROUBLESHOOTING #86。
-        // ⚠️ **历史悄悄在后台灌，界面一直停在 head（最新一屏），不给用户看「从旧滚到新」。**
-        // 病根：流是 `tail -n N` 从**最老**开始吐的，原来每来一批就 `items = inc.snapshot()`，
-        // head 的最新内容立刻被「只含最老几行」的快照顶掉 —— 用户眼睁睁看着旧对话先加载、
-        // 一路滚到新（原话：加载旧的对话先，又慢）。
-        // 改成：inc 在后台默默攒，等它**追上 head 的最新那条**（key 对上）才把完整列表交出来；
-        // 在那之前界面就是 head，稳稳停在最新。key 是 uuid，稳定，所以交接时最新那屏无缝不跳。
-        val headLastKey = items.lastOrNull()?.key
-        var caughtUp = headLastKey == null
-        val inc = Transcript.Incremental()
+        // ⚠️ **节流必须有「尾随刷新」**（TROUBLESHOOTING #86）：收行的只管往 buf 里塞，另一个协程定时刷。
+        // ⚠️ **只喂新行**，不从头重解（#86）。
+        // ⚠️ 第一次进：历史悄悄在后台灌，界面停在 head（最新一屏），等 inc **追上 head 的最新那条**（key 对上）
+        //    才交出完整列表，不给用户看「从旧滚到新」。重进：inc 里已经是完整的，来一批换一批。
+        val headLastKey = if (fresh) items.lastOrNull()?.key else null
+        var caughtUp = !fresh || headLastKey == null
+        val inc = entry.inc
         val pending = ArrayList<String>()
+        var pendingBytes = 0L
         // ⚠️ 收行和刷新是两个协程。`toList()` 和 `clear()` 之间来一行就会**丢**，所以都在同一把锁里。
         val lock = Any()
         launch {
             while (true) {
                 delay(300)
-                val batch = synchronized(lock) {
-                    if (pending.isEmpty()) emptyList() else pending.toList().also { pending.clear() }
+                val (batch, bytes) = synchronized(lock) {
+                    if (pending.isEmpty()) emptyList<String>() to 0L
+                    else (pending.toList() to pendingBytes).also { pending.clear(); pendingBytes = 0L }
                 }
                 if (batch.isEmpty()) {
                     // 一个空转周期 = 历史灌完。兜底：万一始终没匹配上 head 的 key，也把完整的放出来
@@ -425,18 +432,21 @@ fun ChatScreen(
                 val snap = withContext(Dispatchers.Default) {
                     inc.add(batch.asSequence()); inc.snapshot()
                 }
-                // 还没追上 head 就先不换（继续显示 head=最新）；追上了才交出完整列表、之后每批都跟着更新
+                entry.offset += bytes
                 if (!caughtUp && headLastKey != null && snap.any { it.key == headLastKey }) caughtUp = true
-                if (caughtUp) { items = snap; inc.ctx?.let { ctxUse = it } }
+                if (caughtUp) {
+                    items = snap; inc.ctx?.let { ctxUse = it }
+                    entry.items = snap; entry.ctx = inc.ctx
+                }
             }
         }
         // ⚠️ 连接半路断了，`openExecStream` 会抛「session is down」——从这个 LaunchedEffect
-        // 里逸出就是**闪退**（看聊天时连接抖一下就崩，见 TROUBLESHOOTING #125）。
-        // catching 兜住（取消照抛，切页面照常），断了让看门狗重连，effect 会随 ssh 变化重启。
+        // 里逸出就是**闪退**（#125）。catching 兜住（取消照抛，切页面照常），断了让看门狗重连。
         app.yxi.ssh.catching {
-            // backlog 从 800 收到 400：head 已经把最新一屏立刻显示了，历史在后台灌，
-            // 400 行向上翻足够，传输/解析减半，追上得更快。
-            TranscriptStream.stream(s, file, backlog = 400).collect { line -> synchronized(lock) { pending += line } }
+            TranscriptStream.streamFrom(s, file, entry.offset).collect { line ->
+                // ⚠️ 字节数按 UTF-8 算再加一个换行 —— 这是下次 `tail -c +N` 的起点，算错就会漏行或重行
+                synchronized(lock) { pending += line; pendingBytes += line.toByteArray().size + 1 }
+            }
         }
     }
     // ⚠️ 「此刻在等你选」这件事**只有屏幕知道** —— tool_use 要等工具跑完才落进转录。

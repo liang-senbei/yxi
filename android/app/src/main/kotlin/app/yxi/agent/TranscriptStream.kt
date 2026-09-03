@@ -72,8 +72,32 @@ object TranscriptStream {
      * 用 `tail -n N -f`：**先给历史再跟随**，这样打开界面就有内容，
      * 不用等 Claude 下一次说话。
      */
-    fun stream(ssh: SshSession, file: String, backlog: Int = 800): Flow<String> = flow {
-        val shell = ssh.openExecStream(SshSession.follow("tail -n $backlog -f '$file'"))
+    /**
+     * 最后 [backlog] 行从哪个字节开始：返回 (文件大小, 起点)。一趟 exec 两个数一起拿。
+     * ⚠️ 起点是 0 起的字节位置；`tail -c +N` 是 1 起的，[streamFrom] 里会 +1。
+     */
+    suspend fun tailStart(ssh: SshSession, file: String, backlog: Int): Pair<Long, Long>? {
+        val out = ssh.exec(
+            "f='$file'; s=\$(stat -c %s \"\$f\" 2>/dev/null || echo 0); b=\$(tail -n $backlog \"\$f\" 2>/dev/null | wc -c); echo \$s \$b"
+        ).trim()
+        val parts = out.split(Regex("\\s+"))
+        val size = parts.getOrNull(0)?.toLongOrNull() ?: return null
+        val bytes = parts.getOrNull(1)?.toLongOrNull() ?: return null
+        return size to (size - bytes).coerceAtLeast(0)
+    }
+
+    /**
+     * 从字节位置 [offset]（0 起）开始持续跟随 —— **重进对话只拉增量**（[ChatMemory]）。
+     * 文件要是被重写得比 offset 还短，`tail -c` 什么都不吐、等它长回来；那种情况上层按「转录文件换了」处理。
+     */
+    fun streamFrom(ssh: SshSession, file: String, offset: Long): Flow<String> =
+        follow(ssh, "tail -c +${offset + 1} -f '$file'")
+
+    fun stream(ssh: SshSession, file: String, backlog: Int = 800): Flow<String> =
+        follow(ssh, "tail -n $backlog -f '$file'")
+
+    private fun follow(ssh: SshSession, cmd: String): Flow<String> = flow {
+        val shell = ssh.openExecStream(SshSession.follow(cmd))
         // ⚠️ **取消协程不会打断阻塞在 readLine() 上的线程** —— 它不是挂起点。
         // 不主动关通道的话，`finally` 永远轮不到执行，线程和远端进程一起挂着。
         val onCancel = kotlin.coroutines.coroutineContext[kotlinx.coroutines.Job]
