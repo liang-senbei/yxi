@@ -395,6 +395,7 @@ fun Workspace(
     var folded by remember { mutableStateOf(Prefs.folded(ctx)) }
     // 光晕垫在**整个工作区**底下：页眉、模式条、正文都在它上面（原来只在对话页那块，页眉是平底，用户圈出来要一起带上）
     var glow by remember(host.id) { mutableStateOf(Triple(false, false, false)) }
+    var stats by remember(host.id) { mutableStateOf(Prefs.stats(ctx)) }
     Box(modifier.fillMaxSize()) {
     if (mode == Mode.Chat) ThinkingGlow(busy = glow.first, waiting = glow.second, streaming = glow.third)
     Column(Modifier.fillMaxSize().imePadding()) {
@@ -505,6 +506,17 @@ fun Workspace(
                         }
                     }
             }
+            // ⚡ 展开 / 收起对话页顶上那条状态（模式 / 模型 / 思考 / 上下文 / 今日）。
+            // 用户：「那行字常驻怪难看的，做成页眉旁边一个按钮，点开再显示、顺便切换」。默认收着，记住选择。
+            if (mode == Mode.Chat) Surface(
+                color = if (stats) SurfaceContainerHigh else SurfaceContainer, shape = Pill,
+                modifier = Modifier.clip(Pill).clickable { stats = !stats; Prefs.setStats(ctx, stats) },
+            ) {
+                Text(
+                    "⚡", Modifier.padding(12.dp, 8.dp),
+                    style = MaterialTheme.typography.labelLarge, color = if (stats) Copper else Muted,
+                )
+            }
             // 收 / 展页眉
             Surface(
                 color = SurfaceContainer, shape = Pill,
@@ -553,6 +565,7 @@ fun Workspace(
                     ssh, sftp, sessionName.orEmpty(), cwd, host.id,
                     onOpenPath = { p -> jumpTo = p; mode = Mode.Files },
                     onGlow = { b, w, st -> glow = Triple(b, w, st) },
+                    showStats = stats,
                     modifier = Modifier.fillMaxSize(),
                 )
                 Mode.Files -> FilesScreen(
@@ -733,6 +746,9 @@ private object Prefs {
     /** 页眉收起了没 —— 全局一份，不按会话分：这是「我喜欢怎么看」，不是会话的属性 */
     fun folded(ctx: Context) = p(ctx).getBoolean("header.folded", false)
     fun setFolded(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("header.folded", v).apply()
+    /** 对话页顶上那条状态默认收着（用户嫌难看），点了 ⚡ 才展开 */
+    fun stats(ctx: Context): Boolean = p(ctx).getBoolean("header.stats", false)
+    fun setStats(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("header.stats", v).apply()
 }
 
 /**

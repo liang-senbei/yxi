@@ -74,6 +74,8 @@ fun ChatScreen(
     onOpenPath: (String) -> Unit = {},
     /** 光晕状态 (忙, 等你, 回答正在到达)：光晕由 Workspace 画（要铺到页眉那一截），这里只报状态 */
     onGlow: (Boolean, Boolean, Boolean) -> Unit = { _, _, _ -> },
+    /** 顶上那条「⚡模式 / 模型 / 思考 / 上下文 / 今日」显不显示 —— 由页眉上的 ⚡ 按钮开关（用户：常驻太难看） */
+    showStats: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -515,7 +517,7 @@ fun ChatScreen(
         //
         // ⚠️ **拿不到就整行不画**，不显示 0、不显示「未知」——
         // 额度和花费显示一个假的比不显示危险得多，你会照着它决定今天开不开大活。
-        if (ctxUse != null || todayUse != null) {
+        if (showStats && (ctxUse != null || todayUse != null)) {
             Row(
                 // ⚠️ **必须能横滑。** 这一行现在有五格（⚡模式 / 模型 / 思考强度·模式 / 上下文 / 今日），
                 // 窄屏放不下就会把左边的挤没 —— 加了「模式」这格之后风险是实打实的。
