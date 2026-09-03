@@ -795,6 +795,8 @@ internal object En {
         "%s · 没装，点我去装" to "%s · not installed, tap to install",
         "探测 / 装机" to "Probe / install",
         "%s · 失败，点我重试" to "%s · failed, tap to retry",
+        "语音识别就绪：按住麦克风说话，松开就识别（点一下不行）" to "Voice input ready: hold the mic to talk and release to transcribe (a tap does nothing)",
+        "要按住说话，松开才识别" to "Hold to talk, release to transcribe",
         "（共 %d 个）" to " (%d in total)",
         "查明并画出来" to "Discover and diagram",
         "把结构画成图" to "Draw what I describe",

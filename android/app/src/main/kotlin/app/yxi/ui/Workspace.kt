@@ -393,7 +393,11 @@ fun Workspace(
     // 页眉能收起：收起只留会话名那一行（用户要的：「收缩的时候只显示项目名称」），
     // 路径和模式切换都藏起来，给对话多让出一截屏幕。记在 prefs 里，下次进来照旧。
     var folded by remember { mutableStateOf(Prefs.folded(ctx)) }
-    Column(modifier.fillMaxSize().imePadding()) {
+    // 光晕垫在**整个工作区**底下：页眉、模式条、正文都在它上面（原来只在对话页那块，页眉是平底，用户圈出来要一起带上）
+    var glow by remember(host.id) { mutableStateOf(Triple(false, false, false)) }
+    Box(modifier.fillMaxSize()) {
+    if (mode == Mode.Chat) ThinkingGlow(busy = glow.first, waiting = glow.second, streaming = glow.third)
+    Column(Modifier.fillMaxSize().imePadding()) {
         Row(
             Modifier.fillMaxWidth().padding(14.dp, if (folded) 6.dp else 10.dp, 14.dp, if (folded) 4.dp else 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -548,6 +552,7 @@ fun Workspace(
                 Mode.Chat -> ChatScreen(
                     ssh, sftp, sessionName.orEmpty(), cwd, host.id,
                     onOpenPath = { p -> jumpTo = p; mode = Mode.Files },
+                    onGlow = { b, w, st -> glow = Triple(b, w, st) },
                     modifier = Modifier.fillMaxSize(),
                 )
                 Mode.Files -> FilesScreen(
@@ -604,6 +609,7 @@ fun Workspace(
                 send = { bytes -> scope.launch { shell?.write(bytes) } },
             )
         }
+    }
     }
     // ⚠️ **终端模式下语音必须先确认。**
     // 识别错一个字，在服务器上就是**另一条命令**。对话模式还能在输入框里改，
@@ -676,7 +682,8 @@ fun Workspace(
 private fun ModeSwitcher(mode: Mode, chatBlocked: String?, onPick: (Mode) -> Unit) {
     var why by remember { mutableStateOf<String?>(null) }
     Surface(
-        color = SurfaceContainer, shape = Pill,
+        // 半透明：光晕铺到页眉之后，这条实心灰会像一道横杠把光切断
+        color = SurfaceContainer.copy(alpha = 0.55f), shape = Pill,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp),
     ) {
         Row(Modifier.padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {

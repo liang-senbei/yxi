@@ -72,6 +72,8 @@ fun ChatScreen(
     hostId: String,
     /** 点了 AI 回复里的文件路径。见 [app.yxi.agent.Linkify] */
     onOpenPath: (String) -> Unit = {},
+    /** 光晕状态 (忙, 等你, 回答正在到达)：光晕由 Workspace 画（要铺到页眉那一截），这里只报状态 */
+    onGlow: (Boolean, Boolean, Boolean) -> Unit = { _, _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -222,6 +224,17 @@ fun ChatScreen(
     }
     // ⚠️ **一条连接只探一次。** 它是一条 exec，本身不贵，但每次点麦克风都问一遍
     // 就是每次多一个来回的延迟 —— 而这个答案在一条连接的生命周期里不会变。
+    // ⚠️ 模型一装好，麦克风就从「点一下开系统识别」变成「按住说话」—— 手势变了得说一声，
+    //    不然用户照旧点一下，录了 50ms 被当误触丢掉，什么都不发生（用户原话：「下了模型语音就没用了」）。
+    var holdHintAt by remember { mutableStateOf(0L) }
+    LaunchedEffect(onDevice, serverAsr) {
+        if (!(onDevice || serverAsr)) return@LaunchedEffect
+        val p = ctx.getSharedPreferences("yxi", android.content.Context.MODE_PRIVATE)
+        if (!p.getBoolean("hint.holdmic", false)) {
+            android.widget.Toast.makeText(ctx, t("语音识别就绪：按住麦克风说话，松开就识别（点一下不行）"), android.widget.Toast.LENGTH_LONG).show()
+            p.edit().putBoolean("hint.holdmic", true).apply()
+        }
+    }
     LaunchedEffect(ssh, app.yxi.agent.AsrModel.installed) {
         onDevice = app.yxi.agent.OnDeviceAsr.ready(ctx) && app.yxi.agent.OnDeviceAsr.supported
         // ⚠️ 手机上能算就不问服务器了 —— 省一个来回，也别去把服务器那个守护叫醒
@@ -474,12 +487,14 @@ fun ChatScreen(
     // ⚠️ 光晕铺**整页**、画在最底下。原来它只在列表那个 Box 里，到列表底边就截止，
     // 快捷语和输入框在外面、是平底 —— 待机聚光最亮的地方正好压在那条边上，
     // 用户划了条红线指着那道色差。参考款的聚光是在输入框**背后**的，本来就该铺到底。
+    // ⚠️ 光晕现在由 Workspace 画在**整个工作区**底下（用户：「顶部的终端/对话/文件/实验室和 Yxi 那部分也要带上」），
+    //    这里只把三个状态报上去；离开对话页时报一次全 false，别让光留在别的模式里。
+    val glowBusy = live.busy
+    val glowWait = pending != null
+    val glowStream = live.busy && items.lastOrNull() is ChatItem.AssistantText
+    LaunchedEffect(glowBusy, glowWait, glowStream) { onGlow(glowBusy, glowWait, glowStream) }
+    DisposableEffect(Unit) { onDispose { onGlow(false, false, false) } }
     Box(modifier.fillMaxSize()) {
-    ThinkingGlow(
-        busy = live.busy, waiting = pending != null,
-        // 回答正在到达（最后一条是助手的且还在忙）→ 光退下去让位给正文
-        streaming = live.busy && items.lastOrNull() is ChatItem.AssistantText,
-    )
     Column(Modifier.fillMaxSize()) {
         // 标题和路径由 Workspace 的头部管，这里只在出问题时说一句
         status?.let {
@@ -939,6 +954,7 @@ fun ChatScreen(
                     recording = recording,
                     busy = asrBusy,
                     onStart = {
+                        holdHintAt = System.currentTimeMillis()
                         if (!hasMic) { askMic.launch(android.Manifest.permission.RECORD_AUDIO); false }
                         else recorder.start().let { why ->
                             if (why != null) {
@@ -949,8 +965,11 @@ fun ChatScreen(
                     },
                     onStop = {
                         val pcm = recorder.stop()
-                        // ⚠️ 太短的 [Recorder.stop] 已经丢掉了 —— 这里**不要报错**：
-                        //    误触不是错误，不该弹东西吓人
+                        // ⚠️ 太短的 [Recorder.stop] 已经丢掉了 —— 不当错误报，但**点一下**（不到 300ms）要提示
+                        //    「要按住」：这是从系统识别切到按住说话之后最常见的困惑
+                        if (pcm == null && System.currentTimeMillis() - holdHintAt < 300) {
+                            android.widget.Toast.makeText(ctx, t("要按住说话，松开才识别"), android.widget.Toast.LENGTH_SHORT).show()
+                        }
                         if (pcm != null) scope.launch {
                             asrBusy = true
                             val said = if (onDevice) {
