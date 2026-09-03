@@ -153,7 +153,9 @@ class MainActivity : ComponentActivity() {
                             Workspace(
                                 store, keys, w.host, w.session, w.cwd, w.mode,
                                 preconnected = warm.session,
-                                modifier = Modifier.padding(p),
+                                // ⚠️ 只吃底部的 inset，不吃状态栏那段（学 Gemini：状态栏跟 App 融为一体，光晕铺到最顶上，
+                                //    内容滑到状态栏下面时用一层淡渐变压一下）。页眉自己 statusBarsPadding。
+                                modifier = Modifier.padding(bottom = p.calculateBottomPadding()),
                             )
                         }
                     }

@@ -7,7 +7,7 @@
          ⚠️ 浅底必须配 `windowLightStatusBar=true`，不然状态栏图标是白的、在白底上看不见。 -->
     <style name="Theme.Yxi" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">#FFFFFF</item>
-        <item name="android:statusBarColor">#FFFFFF</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">#FFFFFF</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowLightNavigationBar">true</item>

@@ -17,6 +17,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.windowInsetsTopHeight
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.platform.LocalContext
@@ -412,7 +418,7 @@ fun Workspace(
             visible = !barsHidden,
             enter = slideInVertically { -it } + fadeIn(), exit = slideOutVertically { -it } + fadeOut(),
         ) {
-        Column {
+        Column(Modifier.statusBarsPadding()) {
         Row(
             Modifier.fillMaxWidth().padding(14.dp, if (folded) 6.dp else 10.dp, 14.dp, if (folded) 4.dp else 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -640,6 +646,11 @@ fun Workspace(
             )
         }
     }
+    // 状态栏那一条：内容（页眉收起时是对话正文）滑到它下面会被这层从底色到透明的渐变压淡 —— Gemini 那种「融为一体」
+    Box(
+        Modifier.align(Alignment.TopCenter).fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars)
+            .background(Brush.verticalGradient(0f to MaterialTheme.colorScheme.background.copy(alpha = 0.92f), 1f to MaterialTheme.colorScheme.background.copy(alpha = 0f))),
+    )
     }
     // ⚠️ **终端模式下语音必须先确认。**
     // 识别错一个字，在服务器上就是**另一条命令**。对话模式还能在输入框里改，

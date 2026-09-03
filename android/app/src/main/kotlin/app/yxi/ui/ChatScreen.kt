@@ -41,6 +41,10 @@ import androidx.compose.foundation.background
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -319,6 +323,10 @@ fun ChatScreen(
     // ⚠️ 用 nestedScroll 的 onPreScroll 看手势方向，不看列表位置：方向一换就重新累计，过 28dp 才动，
     //    免得手指抖一下两条栏就上下乱跳。
     var barsHidden by remember(sessionName) { mutableStateOf(false) }
+    /** 输入区（含快捷语、附件条）的实际高度：列表底部留这么多，不然最后一条被悬浮的输入框盖住 */
+    var composerH by remember { mutableIntStateOf(0) }
+    /** 输入框现在几行 —— 多行时换成 Gemini 那种两段式（文字在上、按钮在下） */
+    var lines by remember(sessionName) { mutableIntStateOf(1) }
     var barsAcc by remember { mutableFloatStateOf(0f) }
     val barsThreshold = with(LocalDensity.current) { 28.dp.toPx() }
     val barsConn = remember(barsThreshold) {
@@ -336,6 +344,7 @@ fun ChatScreen(
     LaunchedEffect(Unit) { snapshotFlow { listState.atBottom }.collect { if (it) barsHidden = false } }
     LaunchedEffect(barsHidden) { onBars(barsHidden) }
     val imeOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    val composerPad = if (barsHidden && !imeOpen) 8.dp else with(LocalDensity.current) { composerH.toDp() }
     // 历史灌完了没。灌的过程中一律瞬移到底，不做动画（见下面的 LaunchedEffect）
     var settled by remember(sessionName) { mutableStateOf(false) }
     // 「粘在底部」：在底部就跟着新消息走；手动往上翻就停；点 ↓ 会重新粘上。
@@ -695,7 +704,7 @@ fun ChatScreen(
             LazyColumn(
                 Modifier.fillMaxSize(),
                 state = listState,
-                contentPadding = PaddingValues(16.dp, 6.dp, 16.dp, 16.dp),
+                contentPadding = PaddingValues(16.dp, 6.dp, 16.dp, composerPad + 8.dp),
                 verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
                 items(rows.size, key = { rows[it].key }) { i ->
@@ -751,7 +760,7 @@ fun ChatScreen(
                 visible = away,
                 enter = androidx.compose.animation.fadeIn(),
                 exit = androidx.compose.animation.fadeOut(),
-                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = composerPad + 12.dp),
             ) {
                 Surface(
                     color = MaterialTheme.colorScheme.secondaryContainer,
@@ -778,131 +787,21 @@ fun ChatScreen(
                     }
                 }
             }
-        }
-        }   // CompositionLocalProvider(LocalUriHandler)
-
-        // ⚠️ **三选一，而且「不知道」必须占一个位置。**
-        // 少了中间那条的话，没连上/没同步跟「闲着」长得一模一样，
-        // 用户会把一屏旧内容当成当前状态。
-        when {
-            ssh == null -> SyncNote(t("连接断了，正在重连…"))
-            !synced -> SyncNote(t("正在取这个会话此刻的状态…"))
-            live.busy -> LiveStatus(live.status, onStop = {
-                val s0 = ssh
-                if (s0 != null) scope.launch { runCatching { SessionProbe.sendKey(s0, sessionName, "Escape") } }
-            })
-        }
-
-        pending?.let { p ->
-            Box(Modifier.padding(14.dp, 0.dp, 14.dp, 8.dp)) {
-                PendingCard(
-                    p, busy,
-                    onPick = { o ->
-                        val doSend: () -> Unit = {
-                            scope.launch {
-                                busy = true
-                                // 送屏幕上写的那个数字本身，**不是列表下标**
-                                awaitingFp = p.fingerprint
-                                ssh?.let { SessionProbe.sendKey(it, sessionName, o.number.toString()) }
-                                // 新屏由推流送达并解锁；这里只兜底，防万一没推过来卡住
-                                delay(4000)
-                                if (awaitingFp == p.fingerprint) { awaitingFp = null; busy = false }
-                            }
-                        }
-                        // 危险审批（rm -rf / force-push / drop table …）先验一道指纹，防口袋误触
-                        if (Risky.matches(p.title + " " + o.label)) Biometric.gate(ctx, o.label, doSend) else doSend()
-                    },
-                    onDiff = {
-                        diffText = t("读取中…")
-                        scope.launch { diffText = fetchGitDiff(ssh, cwd) }
-                    },
-                    // ←/→ 在问题之间走（真实 TUI 支持，脚注写着 Tab/Arrow keys to navigate）
-                    onPrev = {
-                        scope.launch {
-                            busy = true
-                            awaitingFp = p.fingerprint
-                            ssh?.let { SessionProbe.sendKey(it, sessionName, "Left") }
-                            delay(4000)
-                            if (awaitingFp == p.fingerprint) { awaitingFp = null; busy = false }
-                        }
-                    },
-                    onNext = {
-                        scope.launch {
-                            busy = true
-                            awaitingFp = p.fingerprint
-                            ssh?.let { SessionProbe.sendKey(it, sessionName, "Right") }
-                            delay(4000)
-                            if (awaitingFp == p.fingerprint) { awaitingFp = null; busy = false }
-                        }
-                    },
-                    onSubmit = {
-                        scope.launch {
-                            busy = true
-                            val s0 = ssh
-                            if (s0 != null) {
-                                // ⚠️ **不能硬编码「Right 一次就是 Submit 页」** —— 那只在停在最后一题时成立。
-                                // 一路往右走，直到屏幕自己变成复核页，再选「Submit answers」。
-                                var cur = p
-                                repeat(6) {
-                                    if (cur.review) return@repeat
-                                    SessionProbe.sendKey(s0, sessionName, "Right")
-                                    cur = waitScreenChange(cur.fingerprint) { pending } ?: cur
-                                }
-                                if (cur.review) {
-                                    val submit = cur.options.firstOrNull { it.label.startsWith("Submit") }
-                                    SessionProbe.sendKey(s0, sessionName, (submit?.number ?: 1).toString())
-                                    waitScreenChange(cur.fingerprint) { pending }
-                                }
-                            }
-                            busy = false
-                        }
-                    },
-                )
-            }
-        }
-
-        DiffSheet(diffText) { diffText = null }
-
-        // 斜杠命令提示。手机上把 `/compact` 一个字母一个字母敲出来太痛苦了 —— 点一下就好。
-        //
-        // ⚠️ **不拦任何输入。** 这只是个填字条，选中就是把名字塞进草稿，
-        // 送出去的还是 `tmux send-keys`，由 Claude Code 自己的命令面板处理。
-        // 所以你自己写的斜杠命令照打照样能用，只是没提示。
-        val hints = app.yxi.agent.Slash.suggest(draft)
-        if (hints.isNotEmpty()) {
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                shape = RoundedCornerShape(22.dp),
-                modifier = Modifier.fillMaxWidth().padding(14.dp, 0.dp, 14.dp, 8.dp),
-            ) {
-                // ⚠️ 高度必须封顶：只打一个 `/` 时候选是全部二十来条，
-                // 不封顶会把整个对话区顶出屏幕。
-                LazyColumn(Modifier.heightIn(max = 232.dp)) {
-                    items(hints, key = { it.name }) { c ->
-                        Row(
-                            Modifier.fillMaxWidth()
-                                .clickable { draft = "/" + c.name }
-                                .padding(18.dp, 11.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                "/" + c.name,
-                                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                            Spacer(Modifier.width(12.dp))
-                            Text(
-                                c.hint,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.outline,
-                                maxLines = 1,
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
+                // 上划收起、下滑展开（学 X）。键盘开着时永远在 —— 正打字呢不能把输入框收走
+        // ⚠️ 不用 AnimatedVisibility：Box 里套着外层 Column 的作用域，Kotlin 会挑中 ColumnScope 那个重载然后报
+        //    「不能用隐式接收者调用」；而且它收起时会把输入框卸掉、焦点和光标全丢。改成整块平移 + 淡出，组合树不动。
+        val hideFrac by animateFloatAsState(if (!barsHidden || imeOpen) 0f else 1f, tween(220), label = "composerHide")
+        Box(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .graphicsLayer { translationY = size.height * hideFrac; alpha = 1f - hideFrac },
+        ) {
+        // 学 Gemini：整块**悬浮**在对话上面，底下的字从一层淡淡的渐变里透出来；高度报给列表当底部留白
+        val fadeTo = MaterialTheme.colorScheme.background.copy(alpha = 0.88f)
+        Column(
+            Modifier.fillMaxWidth()
+                .onSizeChanged { composerH = it.height }
+                .background(Brush.verticalGradient(0f to Color.Transparent, 0.4f to fadeTo, 1f to fadeTo)),
+        ) {
         if (staged.isNotEmpty() || queue.isNotEmpty()) {
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(16.dp, 0.dp, 16.dp, 6.dp),
@@ -960,13 +859,6 @@ fun ChatScreen(
                 }
             }
         }
-
-        // 上划收起、下滑展开（学 X）。键盘开着时永远在 —— 正打字呢不能把输入框收走
-        AnimatedVisibility(
-            visible = !barsHidden || imeOpen,
-            enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut(),
-        ) {
-        Column {
         // 常用语 chip：没打字时才露出来，点一下填进草稿，省掉手机打字
         if (draft.isBlank()) {
             SnippetChips(onPick = { draft = it },
@@ -983,25 +875,24 @@ fun ChatScreen(
         // 光晕忙的时候在页面顶部，输入框离得远，这层自己的渐变让它不至于是一块平灰。
         // ⚠️ 输入框**有上限**：打一大段话原来会把整屏占满，前面的对话一行都看不见（用户截图）。
         //    最多 7 行，超了在框里自己滚。圆角用 28dp 不用 Pill：单行还是胶囊，多行不会变成一个巨大的椭圆。
-        val composerShape = RoundedCornerShape(28.dp)
+        val composerShape = RoundedCornerShape(32.dp)   // 学 Gemini：更圆
         Surface(
             color = Color.Transparent,
             shape = composerShape,
-            modifier = Modifier.fillMaxWidth().padding(14.dp, 6.dp, 14.dp, 18.dp).heightIn(min = 56.dp)
+            shadowElevation = 3.dp,
+            modifier = Modifier.fillMaxWidth().padding(14.dp, 6.dp, 14.dp, 14.dp).heightIn(min = 60.dp)
                 .clip(composerShape)
-                .background(MaterialTheme.colorScheme.surfaceContainer)
+                .background(MaterialTheme.colorScheme.surface)
                 .background(glowBrush(busy = live.busy, waiting = pending != null)),
         ) {
-            Row(
-                Modifier.padding(6.dp, 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+            val plusBtn: @Composable () -> Unit = {
                 if (sftp != null) {
                     FlatIcon(Glyph.Plus, t("加附件")) { pick.launch("*/*") }
                 } else {
                     Spacer(Modifier.width(10.dp))
                 }
-                Box(Modifier.weight(1f)) { BasicTextFieldRow(draft) { draft = it } }
+            }
+            val micBtn: @Composable () -> Unit = {
                 // 语音：**服务器上有 `yxi-asr` 就按住说话**（识别在你自己的机器上跑，
                 // 准得多、也不经过任何云 API）；没装就退回系统那个识别界面。
                 if (onDevice || serverAsr) MicHold(
@@ -1076,6 +967,8 @@ fun ChatScreen(
                     }
                 }
                 // ⚠️ 还有在传的先别发：发了它们就不在这条消息里了，用户以为丢了
+            }
+            val sendBtn: @Composable () -> Unit = {
                 val canSend = (draft.isNotBlank() || staged.isNotEmpty()) && queue.none { it.error == null }
                 Surface(
                     color = if (canSend) MaterialTheme.colorScheme.primary
@@ -1107,10 +1000,24 @@ fun ChatScreen(
                         )
                     }
                 }
+                        }
+            // 学 Gemini 打了很多字的样子：一行时四件套一排；多行时文字在上占满、按钮沉到下面一排
+            if (lines <= 1) Row(Modifier.padding(6.dp, 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                plusBtn()
+                Box(Modifier.weight(1f)) { BasicTextFieldRow(draft, onLines = { lines = it }) { draft = it } }
+                micBtn(); sendBtn()
+            } else Column(Modifier.padding(6.dp, 6.dp, 6.dp, 4.dp)) {
+                Box(Modifier.fillMaxWidth()) { BasicTextFieldRow(draft, onLines = { lines = it }) { draft = it } }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    plusBtn(); Spacer(Modifier.weight(1f)); micBtn(); sendBtn()
+                }
             }
+
         }
         }
         }
+        }
+        }   // CompositionLocalProvider(LocalUriHandler)
     }
     }   // Box：光晕 + 整页
 
@@ -1333,10 +1240,11 @@ private fun FlatIcon(path: String, label: String, onTap: () -> Unit) {
 }
 
 @Composable
-private fun BasicTextFieldRow(value: String, onValue: (String) -> Unit) {
+private fun BasicTextFieldRow(value: String, onLines: (Int) -> Unit = {}, onValue: (String) -> Unit) {
     androidx.compose.foundation.text.BasicTextField(
         value, onValue,
         modifier = Modifier.padding(20.dp, 15.dp).fillMaxWidth(),
+        onTextLayout = { onLines(if (value.isEmpty()) 1 else it.lineCount) },
         // 最多 7 行，多了在框里滚 —— 别把对话顶没了
         maxLines = 7,
         textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
