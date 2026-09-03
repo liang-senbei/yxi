@@ -203,7 +203,13 @@ fun SessionsScreen(
     var dirFilter by remember(host.id) { mutableStateOf(Board.dir(ctx, host.id)) }
     var dirMenu by remember { mutableStateOf(false) }
     val allSessions = sessions
-    val roots = remember(allSessions) { allSessions.groupingBy { rootOf(it.cwd) }.eachCount().toSortedMap() }
+    // 可选的层级 = 会话目录的**每一级祖先**（/opt、/opt/workspace、/root、/root/src、/root/src/workspace…），各带个数；
+    // 粗到只看 /root 下的、细到只看 /root/src/workspace 下的都行（用户要的），按路径排、缩进显示层级
+    val roots = remember(allSessions) {
+        val n = java.util.TreeMap<String, Int>()
+        allSessions.forEach { sess -> ancestorsOf(sess.cwd).forEach { a -> n[a] = (n[a] ?: 0) + 1 } }
+        n
+    }
     @Suppress("NAME_SHADOWING")
     val sessions = remember(allSessions, dirFilter) {
         val d = dirFilter
@@ -308,11 +314,16 @@ fun SessionsScreen(
                         roots.forEach { (root, n) ->
                             DropdownMenuItem(
                                 text = {
-                                    Column {
-                                        Text(root + if (dirFilter == root) "  ✓" else "", maxLines = 1,
-                                            overflow = androidx.compose.ui.text.style.TextOverflow.MiddleEllipsis)
-                                        Text(t("%d 个会话").format(n), style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.outline)
+                                    // 按深度缩进：/root → /root/src → /root/src/workspace 一眼看出是一棵树
+                                    val depth = root.count { it == '/' } - 1
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Spacer(Modifier.width((depth * 14).dp))
+                                        Column {
+                                            Text(root.substringAfterLast('/') + if (dirFilter == root) "  ✓" else "", maxLines = 1)
+                                            Text(t("%d 个会话").format(n) + " · " + root, style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.outline, maxLines = 1,
+                                                overflow = androidx.compose.ui.text.style.TextOverflow.MiddleEllipsis)
+                                        }
                                     }
                                 },
                                 onClick = { dirMenu = false; dirFilter = root; Board.setDir(ctx, host.id, root) },
@@ -1526,6 +1537,12 @@ private fun DormantCard(name: String, cwd: String?, onWake: () -> Unit, onForget
 
 /** 会话目录的上一级：`/opt/workspace/foo` → `/opt/workspace`；`/root` → `/`。 */
 internal fun rootOf(cwd: String): String = cwd.trimEnd('/').substringBeforeLast('/', "").ifEmpty { "/" }
+
+/** 会话目录的每一级祖先（不含 `/` 和它自己）：`/root/src/workspace/foo` → `/root`、`/root/src`、`/root/src/workspace`。 */
+internal fun ancestorsOf(cwd: String): List<String> {
+    val parts = cwd.trimEnd('/').split('/').filter { it.isNotEmpty() }
+    return (1 until parts.size).map { "/" + parts.take(it).joinToString("/") }
+}
 
 /** [cwd] 在 [root] 这棵树下（含更深层）。 */
 internal fun under(cwd: String, root: String): Boolean =
