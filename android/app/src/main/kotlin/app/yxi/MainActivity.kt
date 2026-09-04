@@ -177,6 +177,12 @@ class MainActivity : ComponentActivity() {
                 var wish by remember { mutableStateOf(false) }
                 var activity by remember { mutableStateOf(false) }
                 var editMe by remember { mutableStateOf(false) }
+                // 盖在主界面上的那些整页。**加新的整页就往这两处加**，别散着写。
+                val overlay = member || prefs || tickets || trend || mail || wish || activity
+                fun closeOverlays() {
+                    member = false; prefs = false; tickets = false
+                    trend = false; mail = false; wish = false; activity = false
+                }
                 BackHandler(enabled = work != null || member || prefs || tickets || trend || mail || wish || activity || tab != Tab.Sessions) {
                     when {
                         work != null -> work = null      // 工作区 → 回标签页
@@ -268,10 +274,15 @@ class MainActivity : ComponentActivity() {
                         NavigationBar {
                             Tab.entries.forEach { t ->
                                 NavigationBarItem(
-                                    selected = tab == t && !member,
-                                    // ⚠️ **先退出会员中心那一层**。原来盖在上面的整页不理会底部导航，
-                                    //    点「主机」纹丝不动（用户报的）。
-                                    onClick = { member = false; tab = t },
+                                    selected = tab == t && !overlay,
+                                    // ⚠️⚠️ **点底部导航要先把盖在上面的那一层收掉。**
+                                    //    这些整页（会员中心 / 设置 / 工单 / 趋势 / 邮件 / 祈愿 / 活动中心）都是
+                                    //    `return@Scaffold` 直接接管画面的，不收掉的话底部导航点了纹丝不动 ——
+                                    //    用户得先返回再点，两步才走得动一步。
+                                    //    ⚠️ 2026-09-04 这个坑犯了**两次**：第一次只有会员中心，修了；
+                                    //    后来加了六个新页面又全带回来了。**以后新增整页浮层，这一行必须一起加**，
+                                    //    所以收敛成一个 `closeOverlays()`，别再散着写。
+                                    onClick = { closeOverlays(); tab = t },
                                     icon = { app.yxi.ui.YxiIcon(t.ico, size = 22.dp) },
                                     label = { Text(t.label, style = MaterialTheme.typography.labelMedium) },
                                 )

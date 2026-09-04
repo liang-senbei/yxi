@@ -22,7 +22,20 @@ import org.json.JSONObject
 object Wish {
 
     /** 奖池。[pityAt] = 多少抽必出稀有；⚠️ 这个数**只在这里**有，`/api/me` 里不重复放。 */
-    data class Pool(val name: String, val version: String, val pityAt: Int, val items: List<Item>)
+    data class Pool(
+        val name: String,
+        val version: String,
+        val pityAt: Int,
+        val items: List<Item>,
+        /**
+         * **这个人自己的价**（ultra 十连 9，其余 10）。
+         * ⚠️ **照抄服务端给的数，别自己乘 0.9** —— 客户端算折扣 = 改包就能白嫖；
+         * 而且 cc-logto_yxi 实现时踩到过「页面说 9、实际扣 10」（两处判据不一致），
+         * 唯一不出错的办法就是**显示的和扣的是同一个数**。
+         */
+        val tenPullCost: Int = 10,
+        val singlePullCost: Int = 1,
+    )
 
     /** 奖池里的一项。[rate] 是服务端给的中奖率（0~1），只用来公示。 */
     data class Item(
@@ -56,6 +69,8 @@ object Wish {
         val pityRemaining: Int,
         val drawId: Long,
         val replay: Boolean,
+        /** 这一次**真扣了**几张曦光（服务端算的，含 ultra 折扣） */
+        val cost: Int = 0,
     )
 
     /** 签到状态。[calendar] 最近 30 天，新到旧。 */
@@ -65,6 +80,8 @@ object Wish {
         val nextReward: String,
         val calendar: List<Boolean>,
         val replay: Boolean = false,
+        /** 签完之后手上有几张曦光 —— 服务端顺带给的，**拿它就地更新，别等下一次 /api/me** */
+        val tickets: Int = -1,
     )
 
     suspend fun pool(ctx: Context): Pool? = withContext(Dispatchers.IO) {
@@ -74,6 +91,8 @@ object Wish {
                 name = o.optString("name"),
                 version = o.optString("version"),
                 pityAt = o.optInt("pityAt"),
+                tenPullCost = o.optInt("tenPullCost", 10),
+                singlePullCost = o.optInt("singlePullCost", 1),
                 items = o.optJSONArray("items").list {
                     Item(
                         it.optString("id"), it.optString("name"), it.optString("rarity"),
@@ -108,7 +127,29 @@ object Wish {
                 pityRemaining = o.optInt("pityRemaining"),
                 drawId = o.optLong("drawId"),
                 replay = o.optBoolean("replay"),
+                cost = o.optInt("cost"),
             )
+        }.getOrNull()
+    }
+
+    /**
+     * 我拥有哪些角色 / 装扮。
+     *
+     * ⚠️⚠️ **归属存服务端，不存本机**（cc-logto_yxi 2026-09-04 定的，理由很硬）：
+     * 素材在包里没问题，但「有没有」只能是服务端说了算 —— 今天刚因为换签名密钥
+     * 让所有人卸载重装过一次，本地存的收藏那会儿就全没了。**收藏是抽卡的全部意义。**
+     *
+     * @return null = 拿不到（没登录 / 接口没上线）。**别把「拿不到」当成「一张都没有」**，
+     *   那会让人以为收藏丢了。
+     */
+    suspend fun collection(ctx: Context): Set<String>? = withContext(Dispatchers.IO) {
+        val o = Account.apiGet(ctx, "/api/wish/collection") ?: return@withContext null
+        runCatching {
+            val a = o.optJSONArray("items") ?: o.optJSONArray("owned")
+            (0 until (a?.length() ?: 0)).mapNotNull { i ->
+                a?.optJSONObject(i)?.optString("id")?.takeIf { it.isNotEmpty() }
+                    ?: a?.optString(i)?.takeIf { it.isNotEmpty() }
+            }.toSet()
         }.getOrNull()
     }
 
@@ -141,7 +182,13 @@ object Wish {
             // GET 给的是 [{date, checked}]，POST 不带日历
             calendar = o.optJSONArray("calendar").list { it.optBoolean("checked") },
             replay = o.optBoolean("replay"),
-        )
+            tickets = o.optInt("tickets", -1),
+        ).also { ci ->
+            // ⚠️ **签到发的曦光要立刻回灌到 [Account.me]**。不然「签到拿了 1 张曦光」之后
+            //    切到祈愿页还是「曦光 ×0」，按钮点不动 —— 实测就是这个表现。
+            //    真相源仍然是服务端，这里只是把它刚给的数字就地用上，不等下一次 /api/me。
+            if (ci.tickets >= 0) Account.me?.let { m -> Account.setTickets(m.tickets, ci.tickets) }
+        }
     }.getOrNull()
 
     private inline fun <T> JSONArray?.list(f: (JSONObject) -> T): List<T> =

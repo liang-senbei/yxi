@@ -559,6 +559,7 @@ fun SessionsScreen(
                             pinned = rest
                             Pinned.set(ctx, host.id, pinned)
                         },
+                        onMenu = onMenu,
                     )
                 }
             }
@@ -603,6 +604,7 @@ fun SessionsScreen(
                                 pinned = if (n in pinned) pinned - n else pinned + n
                                 Pinned.set(ctx, host.id, pinned)
                             },
+                            onOpenDrawer = onMenu,
                             modifier = Modifier.animateItem(),
                         ) {
                         SessionCard(
@@ -642,6 +644,7 @@ fun SessionsScreen(
                                 pinned = if (n in pinned) pinned - n else pinned + n
                                 Pinned.set(ctx, host.id, pinned)
                             },
+                            onOpenDrawer = onMenu,
                             modifier = Modifier.animateItem(),
                         ) {
                         SessionCard(
@@ -969,6 +972,8 @@ private fun ReorderablePinned(
     onFav: (Session) -> Unit,
     onKill: (Session) -> Unit,
     onReorder: (from: Int, to: Int) -> Unit,
+    /** 右滑到位 = 打开侧边栏（跟没置顶那些卡一样） */
+    onMenu: () -> Unit = {},
 ) {
     // 置顶区也要能左滑（图钉图标去掉了，取消置顶只剩这条路）
     var swipedTop by remember { mutableStateOf<String?>(null) }
@@ -996,6 +1001,7 @@ private fun ReorderablePinned(
                 onAskKill = { onKill(sess) },
                 onToggleFav = { onFav(sess) },
                 onTogglePin = { onUnpin(sess) },
+                onOpenDrawer = onMenu,
             ) {
             SessionCard(
                     sess,
@@ -1549,8 +1555,10 @@ internal fun GroupPicker(
 /**
  * 会话卡片 + **左滑露出一排按钮**（收藏 / 置顶 / 终止）。
  *
- * ⚠️ **右滑不做任何事** —— 那一下要留给侧边栏（用户 2026-09-04：「我不要右滑收藏的功能，
- * 我只需要右滑直接进入那个侧边栏」）。所以这里只认左滑，右滑一律不消费手势，交给上面的抽屉。
+ * ⚠️ **右滑 = 打开侧边栏**（用户 2026-09-04 两次要求：先是「不要右滑收藏」，
+ * 后来又要「右滑要有跟手的动效，再往右一点就打开侧边栏」）。
+ * 所以右滑**卡片跟着走一点**（阻尼 0.45、最多 110dp），左边露出 ☰ ——
+ * 手势必须看得见，不然没人猜得到（design/STYLE.md 第 0 条）。松手过阈值就开抽屉。
  * 收藏 / 置顶仍然在左滑那排按钮里，一个都没少。
  * 以前是「左滑到底 = 弹终止确认框」，误触就把确认框糊你脸上；现在左滑只是**把面板拉出来**，
  * 按哪个是另一下。终止仍然走确认框 —— 杀掉 = 里面跑着的 Claude 一起没。
@@ -1566,11 +1574,15 @@ private fun SwipeCard(
     onAskKill: () -> Unit,
     onToggleFav: () -> Unit,
     onTogglePin: () -> Unit,
+    /** 右滑到位 = 打开侧边栏 */
+    onOpenDrawer: () -> Unit = {},
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
     val density = androidx.compose.ui.platform.LocalDensity.current
     val panelPx = with(density) { 222.dp.toPx() }
+    val pullMax = with(density) { 110.dp.toPx() }      // 右滑最多跟到这儿
+    val openAt = with(density) { 64.dp.toPx() }        // 过了这个就开抽屉
     val x = remember { androidx.compose.animation.core.Animatable(0f) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(open) { if (!open && x.value != 0f) x.animateTo(0f, androidx.compose.animation.core.tween(220)) }
@@ -1594,20 +1606,42 @@ private fun SwipeCard(
                 MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer,
             ) { onOpen(false); onAskKill() }
         }
+        // 右滑时左边露出来的提示：拉得越开越清楚，过了阈值变成主色 —— 「再往右就开了」
+        if (x.value > 2f) Row(
+            Modifier.matchParentSize().padding(start = 18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val k = (x.value / openAt).coerceIn(0f, 1f)
+            YxiIcon(
+                Ico.Sliders, 22.dp,
+                if (x.value >= openAt) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = k),
+            )
+        }
         Box(
             Modifier
                 .offset { androidx.compose.ui.unit.IntOffset(x.value.roundToInt(), 0) }
                 .draggable(
                     orientation = androidx.compose.foundation.gestures.Orientation.Horizontal,
-                    // ⚠️ 上限钉死在 0：卡片**永远不往右动**，右滑那一下留给侧边栏
+                    // 左滑：1:1 跟手拉出按钮面板。右滑：**带阻尼**跟一点点（0.45），最多 110dp ——
+                    // 阻尼是为了让人感觉到「这不是在拖卡片，是在拉别的东西出来」。
                     state = androidx.compose.foundation.gestures.rememberDraggableState { d ->
-                        scope.launch { x.snapTo((x.value + d).coerceIn(-panelPx, 0f)) }
+                        scope.launch {
+                            val next = if (x.value >= 0f && d > 0f) x.value + d * 0.45f else x.value + d
+                            x.snapTo(next.coerceIn(-panelPx, pullMax))
+                        }
                     },
                     onDragStopped = {
-                        if (x.value <= -panelPx * 0.4f) {
-                            onOpen(true); x.animateTo(-panelPx, androidx.compose.animation.core.tween(200))
-                        } else {
-                            onOpen(false); x.animateTo(0f, androidx.compose.animation.core.tween(200))
+                        when {
+                            x.value <= -panelPx * 0.4f -> {
+                                onOpen(true); x.animateTo(-panelPx, androidx.compose.animation.core.tween(200))
+                            }
+                            x.value >= openAt -> {
+                                // 先弹回去再开 —— 抽屉滑出来的时候卡片不该还歪着
+                                x.animateTo(0f, androidx.compose.animation.core.tween(180))
+                                onOpenDrawer()
+                            }
+                            else -> { onOpen(false); x.animateTo(0f, androidx.compose.animation.core.tween(200)) }
                         }
                     },
                 ),

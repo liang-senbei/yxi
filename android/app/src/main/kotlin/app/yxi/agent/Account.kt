@@ -110,6 +110,15 @@ object Account {
      */
     var signedOutWhy by mutableStateOf<String?>(null)
 
+    /**
+     * 就地更新手上的曦光数。
+     * ⚠️ 只给「服务端刚刚在别的接口里告诉我们新值」的场合用（签到、抽奖的返回值），
+     * **不是让客户端自己算**。真相源永远是服务端。
+     */
+    fun setTickets(@Suppress("UNUSED_PARAMETER") old: Int, now: Int) {
+        me = me?.copy(tickets = now)
+    }
+
     private fun p(ctx: Context) = ctx.getSharedPreferences("yxi", Context.MODE_PRIVATE)
 
     /** 进程起来时调一次：把上次的登录状态和资料摆出来，界面不用等网络 */

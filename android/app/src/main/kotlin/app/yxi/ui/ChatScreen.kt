@@ -156,6 +156,7 @@ fun ChatScreen(
         val s0 = ssh ?: run { up.error = t("还没连上"); return }
         up.error = null; up.progress = 0f; up.cancelled = false
         up.job = scope.launch {
+            try {
             // ⚠️ **先把字节读进内存，再谈传。** 读文件本身可能失败（授权过期、文件没了），
             // 那跟「传失败」是两码事，要分开报。
             val bytes = withContext(Dispatchers.IO) {
@@ -198,6 +199,16 @@ fun ChatScreen(
                 }
             }
             runCatching { app.yxi.agent.Attachments.sweep(s0) }   // 顺手清 3 天前的
+            } finally {
+                // ⚠️⚠️ **任何退出路径都必须让这张卡进入终态。**
+                //    留在队列里而 `error == null` 意味着「还在传」，而发送按钮的条件是
+                //    `queue.none { it.error == null }` —— 于是这张卡会把发送**永久变灰**，
+                //    屏幕上还不给任何理由（用户 2026-09-04：「点发送在对话里没有发送出去」）。
+                //    协程被取消（切页面、进程回收）时最容易撞上：那时候下面那个 when 根本不会执行。
+                if (!up.cancelled && up.error == null && queue.contains(up)) {
+                    up.error = t("传输中断了")
+                }
+            }
         }
     }
     val pick = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -1057,12 +1068,28 @@ fun ChatScreen(
                 // ⚠️ 还有在传的先别发：发了它们就不在这条消息里了，用户以为丢了
             }
             val sendBtn: @Composable () -> Unit = {
-                val canSend = (draft.isNotBlank() || staged.isNotEmpty()) && queue.none { it.error == null }
+                val busyUp = queue.count { it.error == null }
+                val hasWord = draft.isNotBlank() || staged.isNotEmpty()
+                val canSend = hasWord && busyUp == 0
                 Surface(
                     color = if (canSend) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.surfaceContainerHigh,
                     shape = CircleShape,
-                    modifier = Modifier.size(44.dp).clip(CircleShape).clickable(enabled = canSend) {
+                    // ⚠️ **变灰的按钮也要点得动。** 原来 `enabled = canSend`：还有附件在传的时候，
+                    //    点发送**什么都不发生、也不说为什么** —— 这正是 STYLE.md 里那条
+                    //    「一切失败都要说出来」禁止的。现在点了会说清在等什么。
+                    modifier = Modifier.size(44.dp).clip(CircleShape).clickable {
+                        if (!canSend) {
+                            android.widget.Toast.makeText(
+                                ctx,
+                                when {
+                                    busyUp > 0 -> t("还有 %d 个附件在传，传完再发 —— 现在发它们就不在这条消息里了").format(busyUp)
+                                    else -> t("先写点什么，或者加个附件")
+                                },
+                                android.widget.Toast.LENGTH_SHORT,
+                            ).show()
+                            return@clickable
+                        }
                         // 附件的路径映射贴在正文前面 —— Claude 自己去读那些文件
                         val t = (app.yxi.agent.Attachments.header(staged) + draft.trim()).trim()
                         // ⚠️ **先把本地那份种进缩略图缓存，再清 staged。** 图就在这台手机上，
@@ -1521,13 +1548,21 @@ private fun Item(
     is ChatItem.Unknown -> Unit   // 兜底：不认识的块静默跳过，不要在界面上留垃圾
 }
 
+/** 跳到「最后一条内部再往下这么多像素」——Compose 会夹到列表真正的末尾，长条目的尾巴也能露出来。 */
+private const val END_OFFSET = 100_000
+
 /**
  * 滚到**真正的末尾**。
  *
  * ⚠️ `scrollToItem(last)` 只是把最后一条的**顶部**对齐视口顶部 ——
- * 那条要是比一屏长（长回复很常见），尾巴还在屏幕外。
- * 传个巨大的 `scrollOffset` 也不可靠。老老实实滚到滚不动为止。
+ * 那条要是比一屏长（长回复很常见），尾巴还在屏幕外。所以要带 [END_OFFSET]，
+ * 再靠下面 `repeat` 里的第一支（看得见最后一条时补差值）把剩下的几十像素找齐。
  * 次数封顶，免得内容还在增长时转不出来。
+ *
+ * ⚠️ **看不见最后一条的那两支，以前是两个空 `{}`** —— 也就是「离底部远」时这个函数
+ * 一下都不滚，空转 30 帧就退出。用户报的「点了 ↓ 完全没反应」就是它：
+ * ↓ 按钮只在**不在底部**时才出现，那时最后一条基本都不可见，正好落进空分支。
+ * 改动的时候别把有 `when` 分支写成空的，编译器不会管。
  */
 private suspend fun androidx.compose.foundation.lazy.LazyListState.scrollToEnd(smooth: Boolean = false) {
     repeat(30) {
@@ -1549,9 +1584,11 @@ private suspend fun androidx.compose.foundation.lazy.LazyListState.scrollToEnd(s
             //    每批瞬移一两百像素 —— 眼睛看到的就是「一闪一闪一跳一跳」（用户第三次报同一个现象）。
             //    滑 170ms 就成了「往下滚了一段」，是运动不是闪。远了才瞬移（点 ↓ 从半山腰跳底部那种）。
             smooth && lastVis != null && last - lastVis.index <= 4 -> {
+                animateScrollToItem(last, END_OFFSET)
             }
             // 大 offset 会被夹到列表真正的末尾，一次到位
             else -> {
+                scrollToItem(last, END_OFFSET)
             }
         }
         androidx.compose.runtime.withFrameNanos { }   // 等这次布局落定再看还差多少

@@ -93,45 +93,102 @@ private fun SharePicker(store: HostStore, keys: KeyManager, text: String?, uris:
         onDispose { if (owned) runCatching { ssh?.disconnect() } }
     }
 
+    /**
+     * 送进某个会话。
+     *
+     * ⚠️⚠️ **上传和发送要分开报，不能一个 runCatching 包住整段。**
+     * 原来是 `runCatching { 传完所有文件; 发消息 }.getOrDefault(false)` —— 只要最后那一步
+     * `send` 抛了，整段就是 `false`，界面只说一句「没送出去」。
+     * 而**文件其实已经全传上去了**。用户 2026-09-04 分享 9 张图，看到的是「9 张全失败」，
+     * 实际上服务器上 9 个文件一个不少，只是那条消息没进会话（他后来在终端里补发的）。
+     *
+     * ⚠️ 为什么 send 会挂：这个页面**借的是盯梢服务那条长连接**（[EventService.liveConn]）。
+     * SFTP 每次开新通道所以没事，而 `exec` 用的是同一条会话 —— 那条空闲久了会被服务器收掉，
+     * 表现就是 `channel is not opened`（本机日志里见过）。所以 send 失败要**换一条新连接重试**。
+     */
     fun sendTo(target: Session) {
         if (sending) return
         sending = true
         scope.launch {
-            val s = ssh ?: return@launch
-            val ok = withContext(Dispatchers.IO) {
-                runCatching {
-                    if (uris.isNotEmpty()) {
-                        // 图/文件：SFTP 传上去，正文贴路径映射（跟 App 里附件一个路子）。多个就顺序传、一条消息带全部
-                        val sftp = s.openSftp()
-                        val staged = ArrayList<Attachments.Staged>()
-                        try {
-                            for (uri in uris) {
-                                // ⚠️ 只收 content:。别的 App 能显式 Intent 打过来塞 `file:///data/data/app.yxi/…`，
-                                //    而 openInputStream 用的是**我们自己的 UID** —— 等于替它读我们的私有文件
-                                //    （confused deputy，2026-09-04 安全审计）。
-                                if (uri.scheme != "content") continue
-                                val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: continue
-                                val mime = ctx.contentResolver.getType(uri).orEmpty()
-                                val isImage = mime.startsWith("image/")
-                                val name = uri.lastPathSegment?.substringAfterLast('/') ?: if (isImage) "image" else "file"
-                                val stamp = java.text.SimpleDateFormat("MMdd-HHmmss-SSS", java.util.Locale.US).format(java.util.Date())
-                                staged += Attachments.upload(sftp, target.name, name, bytes, staged.count { it.isImage == isImage } + 1, isImage, stamp)
+            val s = ssh ?: run { sending = false; return@launch }
+            var uploaded = 0
+            var failed = 0
+            var firstErr: String? = null
+            val staged = ArrayList<Attachments.Staged>()
+
+            withContext(Dispatchers.IO) {
+                if (uris.isEmpty()) return@withContext
+                val sftp = runCatching { s.openSftp() }.getOrNull()
+                if (sftp == null) { firstErr = t("开不了 SFTP 通道"); failed = uris.size; return@withContext }
+                try {
+                    for (uri in uris) {
+                        // ⚠️ 只收 content:。别的 App 能显式 Intent 打过来塞 `file:///data/data/app.yxi/…`，
+                        //    而 openInputStream 用的是**我们自己的 UID** —— 等于替它读我们的私有文件
+                        //    （confused deputy，2026-09-04 安全审计）。
+                        if (uri.scheme != "content") { failed++; continue }
+                        // ⚠️ **一张失败不能拖垮其余的**：每张各自 try，失败只记一笔继续下一张。
+                        val one = runCatching {
+                            val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                                ?: error(t("这个文件读不出来"))
+                            val mime = ctx.contentResolver.getType(uri).orEmpty()
+                            val isImage = mime.startsWith("image/")
+                            val name = uri.lastPathSegment?.substringAfterLast('/') ?: if (isImage) "image" else "file"
+                            val stamp = java.text.SimpleDateFormat("MMdd-HHmmss-SSS", java.util.Locale.US).format(java.util.Date())
+                            Attachments.upload(
+                                sftp, target.name, name, bytes,
+                                staged.count { it.isImage == isImage } + 1, isImage, stamp,
+                            )
+                        }
+                        one.getOrNull()?.let { staged += it; uploaded++ }
+                            ?: run {
+                                failed++
+                                if (firstErr == null) {
+                                    firstErr = one.exceptionOrNull()?.let { app.yxi.ssh.Sftp.explain(it) }
+                                }
                             }
-                        } finally { runCatching { sftp.close() } }
-                        if (staged.isEmpty()) return@runCatching false
-                        SessionProbe.send(s, target.name, Attachments.header(Attachments.renumber(staged)) + (text ?: t("看看这个")))
-                        true
-                    } else if (!text.isNullOrBlank()) {
-                        SessionProbe.send(s, target.name, text)
-                        true
-                    } else false
-                }.getOrDefault(false)
+                    }
+                } finally { runCatching { sftp.close() } }
             }
-            android.widget.Toast.makeText(
-                ctx, if (ok) t("已送进 %s").format(target.short) else t("没送出去"),
-                android.widget.Toast.LENGTH_SHORT,
-            ).show()
-            onDone()
+
+            val body = if (staged.isEmpty()) text.orEmpty()
+            else Attachments.header(Attachments.renumber(staged)) + (text ?: t("看看这个"))
+
+            var sent = false
+            var sendErr: String? = null
+            if (body.isNotBlank()) {
+                withContext(Dispatchers.IO) {
+                    // 先用借来的那条；挂了就**自己开一条新的**再试一次（借来的可能早被服务器收掉了）
+                    sent = runCatching { SessionProbe.send(s, target.name, body); true }.getOrElse {
+                        sendErr = it.message
+                        val h = host
+                        // 自己开一条新的（跟这个页面最初连主机是同一套写法）
+                        val fresh = if (h == null) null else runCatching {
+                            val cfg = store.configFor(h, keys) ?: return@runCatching null
+                            val sess = SshSession(cfg, KnownHosts(store, h.id, null))
+                            sess.connect(); sess
+                        }.getOrNull()
+                        if (fresh == null) false
+                        else try {
+                            SessionProbe.send(fresh, target.name, body); sendErr = null; true
+                        } catch (e: Throwable) {
+                            sendErr = e.message; false
+                        } finally { runCatching { fresh.disconnect() } }
+                    }
+                }
+            }
+
+            // ⚠️ **如实说清到底成了几步。** 「没送出去」这四个字最坑：文件明明传上去了，
+            //    用户以为要重来一遍，于是又传一遍（服务器上就有了两份）。
+            val msg = when {
+                sent && failed == 0 -> t("已送进 %s").format(target.short)
+                sent -> t("已送进 %s —— 但有 %d 个文件没传上去（%s）").format(target.short, failed, firstErr.orEmpty())
+                uploaded > 0 -> t("%d 个文件已经传上去了，但消息没发出去：%s —— 直接在 App 里发一句就行，文件不用重传")
+                    .format(uploaded, sendErr ?: t("连接断了"))
+                else -> t("没送出去：%s").format(firstErr ?: sendErr ?: t("连接断了"))
+            }
+            android.widget.Toast.makeText(ctx, msg, android.widget.Toast.LENGTH_LONG).show()
+            sending = false
+            if (sent) onDone()
         }
     }
 
