@@ -388,8 +388,9 @@ private fun WishResult(d: Wish.Draw, onClose: () -> Unit) {
                 // 红色档：整张立绘顶上来
                 if (hero != null && rank(best.rarity) >= 3) {
                     val hp = ((ms - 1250f) / 520f).coerceIn(0f, 1f)
+                    // ⚠️ 出货那一下也用**整张 16:9**，不裁（老板要求，同卡牌库）
                     if (hp > 0f) Box(
-                        Modifier.fillMaxWidth(0.72f).aspectRatio(0.72f)
+                        Modifier.fillMaxWidth(0.94f).aspectRatio(16f / 9f)
                             .clip(RoundedCornerShape(20.dp))
                             .graphicsLayer {
                                 alpha = hp
@@ -400,7 +401,7 @@ private fun WishResult(d: Wish.Draw, onClose: () -> Unit) {
                         androidx.compose.foundation.Image(
                             painter = androidx.compose.ui.res.painterResource(hero.art),
                             contentDescription = null,
-                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                            contentScale = androidx.compose.ui.layout.ContentScale.Fit,
                             modifier = Modifier.fillMaxSize(),
                         )
                         Box(

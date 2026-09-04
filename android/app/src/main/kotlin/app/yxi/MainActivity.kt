@@ -212,7 +212,13 @@ class MainActivity : ComponentActivity() {
                 work?.let { w ->
                     ModalNavigationDrawer(
                         drawerState = drawer,
-                        gesturesEnabled = false,
+                        // ⚠️⚠️ **开着的时候必须放开手势，否则关不掉**（用户 2026-09-04 截图报的：
+                        //    「在会话里点开侧边栏就关不掉，得退回首页才能关」）。
+                        //    Material3 里**遮罩层的「点外面关闭」是跟 gesturesEnabled 绑在一起的** ——
+                        //    一律 false 的话，点外面、往左滑，两条关闭路径同时没了，只剩返回键。
+                        //    当初关掉是为了**开**：会话里从左边缘右滑归系统的「右滑返回」，抢了两个都不好使。
+                        //    那条理由只针对「关着的时候」。所以按状态给：关着禁、开着放。
+                        gesturesEnabled = drawer.isOpen,
                         scrimColor = Color.Black.copy(alpha = 0.12f),
                         drawerContent = {
                             ModalDrawerSheet(Modifier.width(drawerWidth), drawerShape = RoundedCornerShape(0.dp, 28.dp, 28.dp, 0.dp)) {

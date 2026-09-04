@@ -63,8 +63,11 @@ fun CardLibrary(owned: Set<String> = emptySet(), live: Boolean = false, modifier
                 )
             }
         }
+        // ⚠️ **一列横版，不是两列竖版**（老板 2026-09-04：「我给你上传的图片，你不要截图、
+        //    不要截一部分出来，要保证它是完整的」）。原图实测全是 **16:9 横构图**（2752×1536 一类，
+        //    比例 1.7917），所以卡面也必须是 16:9 —— 竖版卡放横图，要么裁要么留一大片黑边。
         LazyVerticalGrid(
-            GridCells.Fixed(2),
+            GridCells.Fixed(1),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(14.dp, 4.dp, 14.dp, 24.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -74,7 +77,7 @@ fun CardLibrary(owned: Set<String> = emptySet(), live: Boolean = false, modifier
                 Surface(
                     color = Color.Transparent,
                     shape = RoundedCornerShape(20.dp),
-                    modifier = Modifier.aspectRatio(0.72f).clip(RoundedCornerShape(20.dp))
+                    modifier = Modifier.aspectRatio(16f / 9f).clip(RoundedCornerShape(20.dp))
                         .clickable { open = c },
                 ) {
                     Box(Modifier.background(cardBrush(c, !has))) {
@@ -91,9 +94,13 @@ fun CardLibrary(owned: Set<String> = emptySet(), live: Boolean = false, modifier
                                 c.crown,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = Color(0xE6FFFFFF),
+                                modifier = Modifier.align(Alignment.Start),
                             )
                             Spacer(Modifier.height(1.dp))
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Column(
+                                Modifier.align(Alignment.Start),
+                                horizontalAlignment = Alignment.Start,
+                            ) {
                                 Text(
                                     if (has) c.name else "？？",
                                     style = MaterialTheme.typography.titleMedium,
@@ -135,7 +142,9 @@ private fun CardFace(c: Crown, has: Boolean) {
             androidx.compose.foundation.Image(
                 painter = androidx.compose.ui.res.painterResource(c.art),
                 contentDescription = null,
-                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                // ⚠️ **Fit 不是 Crop**：容器就是 16:9、图也是 16:9，两者本该正好对上；
+                //    用 Fit 是为了**万一比例有零点几的出入也绝不裁**（老板要的是「完整」）。
+                contentScale = androidx.compose.ui.layout.ContentScale.Fit,
                 modifier = Modifier.fillMaxSize(),
                 colorFilter = if (has) null else androidx.compose.ui.graphics.ColorFilter.colorMatrix(
                     androidx.compose.ui.graphics.ColorMatrix().apply { setToSaturation(0f) },
@@ -185,7 +194,7 @@ private fun CrownDetail(c: Crown, has: Boolean, onClose: () -> Unit) {
                         color = Color(0xE6FFFFFF),
                     )
                     Box(
-                        Modifier.fillMaxWidth().aspectRatio(0.86f)
+                        Modifier.fillMaxWidth().aspectRatio(16f / 9f)
                             .clip(RoundedCornerShape(18.dp)),
                     ) { CardFace(c, has) }
                     Text(

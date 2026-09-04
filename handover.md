@@ -31,6 +31,15 @@
 往 `sshd_config` 写 `Port` 无效且会跟 socket 抢端口把 22 一起搞挂。见 TROUBLESHOOTING #67。
 
 ## 进度
+- ✅ **1.1.2（versionCode 158）已发布**（2026-09-04）：
+  - **立绘改成整图不裁**（老板：「不要截图、不要截一部分出来，要保证它是完整的」）。
+    ⚠️ 量过：九张原图**全是 16:9 横构图**（1.7917），**不是 9:16** —— 老板自己也不确定，别硬套。
+    卡面重做成 960×536 整图（九张 626KB，比裁过的还小），卡牌库从两列竖版改成**一列横版 16:9**，
+    渲染 `Crop` → **`Fit`**。教训见 TROUBLESHOOTING #251（先看素材再定版式）。
+    ⚠️ **原图在 `/root/src/tmp/Yxi/0904-23*.png`，那是附件暂存区、3 天自动清**。
+    cc-logto_yxi 已把 1100 宽的缩图收进 `logto_yxi/design/art/`。要长期用从那儿取。
+  - 修 **#250 会话里点开侧边栏关不掉** —— Material3 的「点遮罩关闭」跟 `gesturesEnabled` 绑在一起，
+    一律 false 把开和关一起掐了。改成 `gesturesEnabled = drawer.isOpen`。
 - ✅ **1.1.1（versionCode 157）已发布**（2026-09-04）：**祈愿记录页**（`ui/WishHistory.kt`，
   由 cc-Yxi_pilot 写，我接的入口和译文）。一次祈愿一张卡，四档颜色跟抽卡当场一致 ——
   ⚠️ 为此把 `WishScreen` 的 `rank/rarityColor/rarityLabel` 从 private 开成 internal：
