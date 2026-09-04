@@ -15,27 +15,48 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
+import app.yxi.agent.Account
+import kotlinx.coroutines.launch
 
 /**
- * 会员中心 —— pro / ultra 两档（用户 2026-09-04 拍板，QQ 侧边栏那个「会员中心」的位置）。
+ * 会员中心 —— 档位 / 到期 / 这个月还能改几次 / 兑换码。
  *
- * ⚠️ **这一版只是「有什么」，还不能买**：账号和订阅在 logto 那边做（已同步过去），
- * 价格也没定。所以按钮是「即将开放」，不做假的下单流程 —— 让人点了没反应比不给按钮更糟。
+ * ⚠️ **整页就是 `GET /api/me` 的渲染**（cc-logto_yxi 的会员服务）。等级是 Logto 角色说了算，
+ * 配额和到期是服务端算的 —— App 这边一个数都不自己推。
+ * ⚠️ 还不能买：支付没做。所以两档只写「有什么」，按钮是「即将开放」，
+ * 但**兑换码是真的能用**（默认 31 天）。
  */
 @Composable
 fun MemberScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    val tier = Me.tier(ctx)
+    val scope = rememberCoroutineScope()
+    val me = Account.me
+    val tier = me?.tier ?: Account.Tier.Free
+    var loading by remember { mutableStateOf(false) }
+    // 进来拉一次最新的（会员到期、配额都可能在别处变了）
+    LaunchedEffect(Unit) {
+        if (Account.signedIn) { loading = true; Account.refresh(ctx); loading = false }
+    }
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp, 12.dp, 18.dp, 24.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(
@@ -48,41 +69,126 @@ fun MemberScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             MeAvatar(52.dp)
             Column(Modifier.weight(1f)) {
-                Text(Me.name(ctx).ifBlank { t("还没设昵称") }, style = MaterialTheme.typography.titleMedium)
                 Text(
-                    when (tier) {
-                        Me.Tier.Free -> t("当前：免费版")
-                        Me.Tier.Pro -> t("当前：Pro")
-                        Me.Tier.Ultra -> t("当前：Ultra")
-                    },
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
+                    Me.name(ctx).ifBlank { if (Account.signedIn) t("还没设昵称") else t("还没登录") },
+                    style = MaterialTheme.typography.titleMedium,
                 )
+                val line = when {
+                    !Account.signedIn -> t("登录后才能看会员状态")
+                    tier == Account.Tier.Free -> t("当前：免费版")
+                    me?.neverExpires == true -> t("当前：%s · 永久").format(tier.name)
+                    me?.expiresAt != null -> t("当前：%s · %s 到期").format(tier.name, me.expiresAt.take(10))
+                    else -> t("当前：%s").format(tier.name)
+                }
+                Text(line, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
             }
+            if (!Account.signedIn) Button({ Account.startLogin(ctx) }, shape = RoundedCornerShape(50)) { Text(t("登录")) }
         }
+        if (Account.signedIn && me != null) {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                when {
+                    me.quotaRemaining == null -> t("资料改多少次都行")
+                    else -> t("这个月还能改 %d 次资料").format(me.quotaRemaining) +
+                        (me.nextRefreshAt?.take(10)?.let { " · " + t("%s 恢复").format(it) } ?: "")
+                },
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
+            )
+        }
+        Spacer(Modifier.height(16.dp))
+        RedeemBox()
         Spacer(Modifier.height(18.dp))
         Plan(
             name = t("免费版"), tagline = t("一台机器，够用"),
-            accent = MaterialTheme.colorScheme.outline, own = tier == Me.Tier.Free,
-            lines = listOf(t("1 台主机"), t("会话看板 + 对话 + 终端"), t("本机语音转写")),
+            accent = MaterialTheme.colorScheme.outline, own = tier == Account.Tier.Free,
+            lines = listOf(t("1 台主机"), t("会话看板 + 对话 + 终端"), t("本机语音转写"), t("资料每月能改 1 次")),
         )
         Spacer(Modifier.height(12.dp))
         Plan(
             name = "Pro", tagline = t("多机器盯梢，随手就批"),
-            accent = Color(0xFF4C8DF6), own = tier == Me.Tier.Pro,
-            lines = listOf(t("主机不限台"), t("后台盯梢 + 通知里直接批"), t("实验室：让 agent 画图"), t("分组与组规同步")),
+            accent = Color(0xFF4C8DF6), own = tier == Account.Tier.Pro,
+            lines = listOf(t("主机不限台"), t("后台盯梢 + 通知里直接批"), t("实验室：让 agent 画图"), t("资料每月能改 2 次")),
         )
         Spacer(Modifier.height(12.dp))
         Plan(
             name = "Ultra", tagline = t("整队 agent 一起带"),
-            accent = Color(0xFFB07CFF), own = tier == Me.Tier.Ultra,
-            lines = listOf(t("Pro 的全部"), t("多设备同步"), t("实验室额度更高"), t("优先支持")),
+            accent = Color(0xFFB07CFF), own = tier == Account.Tier.Ultra,
+            lines = listOf(t("Pro 的全部"), t("多设备同步"), t("实验室额度更高"), t("资料改多少次都行")),
         )
         Spacer(Modifier.height(16.dp))
         Text(
-            t("订阅还没开放 —— 先把两档能有什么摆在这儿，价格定了再说。"),
+            t("还不能直接买 —— 先用兑换码。价格定了会在这儿开。"),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
         )
+        if (Account.signedIn) {
+            Spacer(Modifier.height(18.dp))
+            TextButton({ Account.signOut(ctx) }) { Text(t("退出登录"), color = MaterialTheme.colorScheme.error) }
+        }
     }
+}
+
+/**
+ * 兑换码。⚠️ 输入自动大写 + 自动补连字符：码里没有 0O1IL，手输很容易打错格式。
+ * ⚠️ 同一个人重兑同一张码是**安全的**（服务端幂等，不重复加天数）—— 断网重试不用怕。
+ */
+@Composable
+fun RedeemBox(modifier: Modifier = Modifier) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var code by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var msg by remember { mutableStateOf<String?>(null) }
+    var ok by remember { mutableStateOf(false) }
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = RoundedCornerShape(20.dp),
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(16.dp, 14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                YxiIcon(Ico.Crown, size = 20.dp, tint = Color(0xFFE8912D))
+                Text(t("兑换码"), style = MaterialTheme.typography.titleMedium)
+            }
+            OutlinedTextField(
+                code, { code = tidyCode(it) },
+                placeholder = { Text("YXI-XXXX-XXXX-XXXX") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Characters,
+                ),
+            )
+            msg?.let {
+                Text(
+                    it, style = MaterialTheme.typography.bodySmall,
+                    color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                )
+            }
+            Button(
+                enabled = !busy && code.length >= 8,
+                onClick = {
+                    if (!Account.signedIn) { msg = t("先登录再兑换"); ok = false; return@Button }
+                    busy = true; msg = null
+                    scope.launch {
+                        val r = Account.redeem(ctx, code.trim())
+                        busy = false
+                        ok = r.isSuccess
+                        msg = r.getOrNull() ?: r.exceptionOrNull()?.message
+                        if (r.isSuccess) code = ""
+                    }
+                },
+                shape = RoundedCornerShape(50), modifier = Modifier.fillMaxWidth(),
+            ) { Text(if (busy) t("兑换中…") else t("兑换")) }
+        }
+    }
+}
+
+/** 大写、去掉乱七八糟的字符、每 4 位补一个连字符（YXI-XXXX-XXXX-XXXX） */
+private fun tidyCode(raw: String): String {
+    val body = raw.uppercase().filter { it.isLetterOrDigit() }.take(15)
+    if (body.length <= 3) return body
+    val rest = body.drop(3).chunked(4)
+    return (listOf(body.take(3)) + rest).joinToString("-")
 }
 
 @Composable

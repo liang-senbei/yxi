@@ -637,17 +637,19 @@
 - ✅ **yxi-hub 多组成员（2026-09-02）**：一个会话在多个组里时，`who`/`context` 按组分开列、`say` 的消息带共同组名
   `[同组 组名 · 谁]`、`all` 必须指明组（#211）。服务器侧改动，已装到本机 `~/.local/bin/yxi-hub`。
 - ✅ **下载站隐私政策 / 服务条款页（2026-09-04）**：Google 登录同意屏幕要的 `https://yxi.keuury.com/privacy` `/terms`（cc-logto_yxi 代老板提的）。源在仓库 `site/privacy.html` `site/terms.html`，线上在 hk13 `/var/www/yxi/`，nginx 显式 location 在 `snippets/yxi-dl.conf`。中英双语、短；改内容改那两个文件再 scp 上去。
-- 🔜 **账号 / 会员（等 App 接 Logto + 小后端）**：cc-logto_yxi 那边两条消息（2026-09-04），后一条**改了写路径**：
-  **登录和读取照做**：Logto Native App `g6ydpvvn833z0ua19n6hz` + PKCE + 回调 `io.yxi.app://callback`；
-  scopes `openid offline_access profile email custom_data roles`；
-  **等级 = Logto 角色**（不是 customData）：`ultra` > `pro` > 都没有 = free；从 `id_token.roles` 判。
-  昵称 = `name`，头像 = `picture`，签名 = `/oidc/me` 的 `custom_data.signature`。uid = Logto 的 12 位 `sub`，不可变。
-  ⚠️ **写资料先别做**：老板定了「免费档每月 1 号刷新一次修改额度、pro 每月 1/15 号各一次、ultra 不限」，
-  还要做会员到期和兑换码（默认 31 天）—— 配额 / 到期 / 兑换码都是**服务端说了算**的东西，
-  Logto 的 Account API 没有配额概念、customData 又是用户自己可写的，所以 **直接 PATCH `/api/my-account` 这条路作废**。
-  改成经一个小后端中转（logto_yxi 建，我们不碰 M2M 凭据）：形状大致 `POST <后端>/profile {nickname?,signature?,avatar?}`
-  带用户的 access token，返回剩余额度和下次刷新时间；`GET /me` 返回 tier + 到期 + 剩余额度，会员中心直接渲染它。
-  App 现在 `ui/Me.kt` 是**纯本地**版（昵称/签名/头像存手机、档位写死 free）—— 接入时当**本地缓存**，以服务端为准。
+- ✅ **1.0.0（2026-09-04）—— 账号登录 + 会员中心接上后端**（cc-logto_yxi 的会员服务已上线）：
+  **登录**：Logto OIDC + PKCE，**手写的，没引 SDK**（离线构建加不了依赖）——
+  `agent/Account.kt`：`/oidc/auth` 拉浏览器 → `io.yxi.app://callback`（manifest 里的 intent-filter，MainActivity 是 singleTask 走 onNewIntent）
+  → `/oidc/token` 换 access/refresh/id token，存 App 私有 SharedPreferences；access 快过期自动用 refresh 续，续不上就当掉登录。
+  ⚠️ 回调必须校 `state`（对不上直接扔，实测拿假回调打过：不存任何 token）。
+  **会员服务**（base `https://api.yxi.keuury.com`，Bearer 用户 access token）：
+  `GET /api/me` = 会员中心整页（档位 / 到期 / 配额 / 资料）；`PATCH /api/me/profile` 改昵称+签名；`POST /api/me/redeem` 兑换码。
+  ⚠️ **一次提交算一次配额**（免费每月 1 次、pro 每月 2 次、ultra 不限）→ 编辑框是「一起改、一次保存」。
+  ⚠️ **必须发真正的 PATCH**：试过 `POST + X-HTTP-Method-Override` → 服务端 404（只有 PATCH 路由）。
+  ⚠️ `quota.remaining: null` = ultra 不限；用 `optInt` 读会得到 0（= 用完了），意思正好反过来，必须先 `isNull` 判。
+  兑换码输入自动大写 + 每 4 位补连字符；同一个人重兑同一张码服务端幂等（`replay:true`，不重复加天数），文案照实说。
+  **还没做**：自定义头像上传（等 Logto 配 R2；现在只显示社交注册带来的头像）、支付（所以档位卡片是「即将开放」，
+  升级只能靠兑换码）。契约全文在 hk13:/root/src/workplace/logto_yxi/handover.md「会员服务」一节。
 - ✅ **0.9.99（2026-09-04）—— 会话卡的手势和标记全改**（用户拍板）：
   **左滑 = 拉出一排按钮**（收藏 / 置顶 / 终止），不再是「滑到底直接弹终止确认框」；**右滑 = 快捷收藏**（不变）。
   一次只开一张（开关状态在父层）；面板开着时点卡片先收起，不会顺手进对话。终止仍然走确认框。

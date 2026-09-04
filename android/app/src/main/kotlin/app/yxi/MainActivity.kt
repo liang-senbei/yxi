@@ -70,8 +70,13 @@ class MainActivity : ComponentActivity() {
     private val askNotify =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* 拒了就静悄悄 */ }
 
+    /** 浏览器登录完会跳回 `io.yxi.app://callback?code=…`（manifest 里那条 intent-filter） */
+    private fun readAuth(i: AndroidIntent?) {
+        i?.data?.let { if (it.scheme == "io.yxi.app") app.yxi.agent.Account.pendingCallback = it }
+    }
+
     override fun onNewIntent(intent: AndroidIntent) {
-        super.onNewIntent(intent); readJump(intent)
+        super.onNewIntent(intent); readJump(intent); readAuth(intent)
     }
 
     private fun readJump(i: AndroidIntent?) {
@@ -87,7 +92,9 @@ class MainActivity : ComponentActivity() {
         val prefs = getSharedPreferences("yxi", MODE_PRIVATE)
         app.yxi.ui.I18n.load(this)
         app.yxi.ui.Skin.load(this)
+        app.yxi.agent.Account.load(this)
         readJump(intent)
+        readAuth(intent)
 
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -96,6 +103,18 @@ class MainActivity : ComponentActivity() {
         app.yxi.watch.EventService.sync(this, store.hosts.value.any { it.watch })
 
         setContent {
+            // 登录回调：拿 code 换 token，成功了顺手把资料拉回来
+            val authUri = app.yxi.agent.Account.pendingCallback
+            LaunchedEffect(authUri) {
+                val u = authUri ?: return@LaunchedEffect
+                app.yxi.agent.Account.pendingCallback = null
+                val err = app.yxi.agent.Account.finishLogin(this@MainActivity, u)
+                android.widget.Toast.makeText(
+                    this@MainActivity,
+                    err ?: t("登录好了"),
+                    android.widget.Toast.LENGTH_SHORT,
+                ).show()
+            }
             androidx.compose.foundation.layout.Box {
 
             YxiTheme {
@@ -292,7 +311,9 @@ private fun YxiDrawer(
             app.yxi.ui.MeAvatar(56.dp)
             Column(Modifier.weight(1f)) {
                 Text(
-                    app.yxi.ui.Me.name(ctx).ifBlank { t("点这里起个名") },
+                    app.yxi.ui.Me.name(ctx).ifBlank {
+                        if (app.yxi.agent.Account.signedIn) t("点这里起个名") else t("点这里登录")
+                    },
                     style = MaterialTheme.typography.titleMedium, maxLines = 1,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
@@ -328,7 +349,15 @@ private fun YxiDrawer(
         // ── 功能入口（QQ 那种：彩色细线图标 + 标题 + 右边一个 ›）
         DrawerRow(app.yxi.ui.Ico.Server, t("主机"), Color(0xFF4C8DF6)) { onTab(Tab.Hosts) }
         DrawerRow(app.yxi.ui.Ico.Sliders, t("配置"), Color(0xFF35B6A0)) { onTab(Tab.Config) }
-        DrawerRow(app.yxi.ui.Ico.Crown, t("会员中心"), Color(0xFFE8912D), tail = "Pro · Ultra", onClick = onMember)
+        DrawerRow(
+            app.yxi.ui.Ico.Crown, t("会员中心"), Color(0xFFE8912D),
+            // 登录了就把档位摆出来，没登录写「未登录」—— 这一行是账号状态最显眼的地方
+            tail = when {
+                !app.yxi.agent.Account.signedIn -> t("未登录")
+                else -> app.yxi.agent.Account.me?.tier?.name ?: "Free"
+            },
+            onClick = onMember,
+        )
         Spacer(Modifier.weight(1f))
         // ── 最底下那一行：设置 / 夜间（学 QQ）
         androidx.compose.material3.HorizontalDivider(Modifier.padding(horizontal = 18.dp))

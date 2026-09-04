@@ -4345,3 +4345,15 @@ LazyColumn 里条目滚出屏幕会被**销毁**，滚回来重新组合，`fres
 
 **顺带**：⚠️ **在软件渲染的模拟器上量不出「动画顺不顺」** —— 应用只渲染个位数帧率，170ms 的动画就是一两帧，
 逐帧看跟瞬移一样。判断动画有没有生效要看日志（分支 + 参数），不要看录屏帧。
+
+## #229 会员服务对接的三个坑（都在发版前撞掉了）
+
+1. **`POST + X-HTTP-Method-Override: PATCH` 不管用**：服务端只注册了 PATCH 路由，POST 直接 404
+   （`curl -X POST` 试出来的，401 才说明路由在）。必须发真正的 PATCH ——
+   Android 的 HttpURLConnection 是 OkHttp 实现的、认 PATCH；兜底再用反射改 `method` 字段。
+   ⚠️ **对接别人的接口，先用 curl 把每个方法打一遍看状态码**：401 = 路由在只是没带票，404 = 你走错门了。
+2. **`quota.remaining: null` 用 `optInt` 读会变成 0**：契约里 null 是「ultra 不限」，0 是「用完了」—— 意思正好相反，
+   界面会给不限的用户显示「这个月改不了了」。JSON 里**可空的数字必须先 `isNull` 判**。
+3. **OAuth 回调一定要校 `state`**：不校的话任何 App 都能拿 `io.yxi.app://callback?code=…` 塞给你。
+   实测用 `adb shell am start -a VIEW -d "io.yxi.app://callback?code=fake&state=wrong"` 打了一发，
+   校验生效（不存任何 token）—— 这条验证很便宜，值得每次都做。

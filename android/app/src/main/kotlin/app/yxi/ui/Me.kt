@@ -17,111 +17,163 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import app.yxi.agent.Account
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
- * 「我」—— 头像 / 昵称 / 个性签名 / 订阅档位。
+ * 「我」—— 头像 / 昵称 / 个性签名。
  *
- * ⚠️ **全在本机**。这一版没有账号系统（logto 那边在做），所以昵称签名头像都只存在这台手机上，
- * 档位固定是 [Tier.Free]。等账号接上，这里换成从服务端读，界面不用动。
- * ⚠️ 头像存成 `filesDir/avatar.png`，进来时压到 256px —— 相册里随手一张就是几 MB，
- * 原图塞进 SharedPreferences 或者每次解码全尺寸都是自找卡顿。
+ * ⚠️ **登录之后以服务端为准**（会员服务 `GET /api/me`）。没登录时才用本机存的那份 ——
+ * 那是 0.9.97 的过渡版，现在只当「还没登录时也有个名字可看」。
+ * ⚠️ **改资料要扣配额**（免费档每月 1 次、pro 每月 2 次、ultra 不限），所以编辑框是
+ * 「一起改、一次保存」：一次提交算一次，不管改了几个字段。
  */
 object Me {
-    enum class Tier { Free, Pro, Ultra }
 
     private fun p(ctx: Context) = ctx.getSharedPreferences("yxi", Context.MODE_PRIVATE)
 
-    /** 改了任何一项就 +1 —— 界面读它来重新画（头像是文件，不是状态，得手动通知） */
+    /** 本机那份改了就 +1，界面重画（头像是文件不是状态，得手动通知） */
     val rev = mutableIntStateOf(0)
 
-    fun name(ctx: Context): String = p(ctx).getString("me.name", "").orEmpty()
-    fun sign(ctx: Context): String = p(ctx).getString("me.sign", "").orEmpty()
-    fun tier(ctx: Context): Tier =
-        runCatching { Tier.valueOf(p(ctx).getString("me.tier", "Free")!!) }.getOrDefault(Tier.Free)
+    /** 显示用的昵称：登录了用服务端的，没登录用本机的 */
+    fun name(ctx: Context): String =
+        Account.me?.nickname?.takeIf { it.isNotBlank() } ?: p(ctx).getString("me.name", "").orEmpty()
 
-    fun set(ctx: Context, name: String, sign: String) {
+    fun sign(ctx: Context): String =
+        Account.me?.signature?.takeIf { it.isNotBlank() } ?: p(ctx).getString("me.sign", "").orEmpty()
+
+    fun setLocal(ctx: Context, name: String, sign: String) {
         p(ctx).edit().putString("me.name", name.trim()).putString("me.sign", sign.trim()).apply()
         rev.intValue++
     }
 
-    fun avatar(ctx: Context): File = File(ctx.filesDir, "avatar.png")
+    fun avatarFile(ctx: Context): File = File(ctx.filesDir, "avatar.png")
 
-    /** 相册选的图存成头像。压到 256px 见方，失败就当没选（不弹错，用户会自己再点一次）。 */
-    fun setAvatar(ctx: Context, uri: android.net.Uri) {
-        runCatching {
-            val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return
-            val src = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return
-            val side = minOf(src.width, src.height)
-            val square = android.graphics.Bitmap.createBitmap(
-                src, (src.width - side) / 2, (src.height - side) / 2, side, side,
-            )
-            val small = android.graphics.Bitmap.createScaledBitmap(square, 256, 256, true)
-            avatar(ctx).outputStream().use { small.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
-            rev.intValue++
-        }
-    }
+    /** 服务端头像下下来存本地，按 URL 分文件名 —— 每次进 App 重下一遍没必要 */
+    fun cachedRemote(ctx: Context, url: String): File =
+        File(ctx.cacheDir, "avatar-" + url.hashCode().toString(16) + ".img")
 }
 
-/** 圆头像：有图就画图，没有就画个占位小人 */
+/** 圆头像：服务端的 > 本机存的 > 占位小人 */
 @Composable
-fun MeAvatar(size: androidx.compose.ui.unit.Dp = 56.dp, modifier: Modifier = Modifier) {
+fun MeAvatar(size: Dp = 56.dp, modifier: Modifier = Modifier) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val rev = Me.rev.intValue
-    val bmp = remember(rev) {
-        val f = Me.avatar(ctx)
-        if (f.exists()) runCatching { BitmapFactory.decodeFile(f.path)?.asImageBitmap() }.getOrNull() else null
+    val url = Account.me?.avatar
+    var bmp by remember(rev, url) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(rev, url) {
+        bmp = withContext(Dispatchers.IO) {
+            runCatching {
+                if (url != null) {
+                    val f = Me.cachedRemote(ctx, url)
+                    if (!f.exists() || f.length() == 0L) {
+                        java.net.URL(url).openStream().use { input -> f.outputStream().use { input.copyTo(it) } }
+                    }
+                    BitmapFactory.decodeFile(f.path)?.asImageBitmap()
+                } else {
+                    Me.avatarFile(ctx).takeIf { it.exists() }?.let { BitmapFactory.decodeFile(it.path)?.asImageBitmap() }
+                }
+            }.getOrNull()
+        }
     }
     Box(
         modifier.size(size).clip(CircleShape).background(MaterialTheme.colorScheme.secondaryContainer),
         contentAlignment = Alignment.Center,
     ) {
-        if (bmp != null) androidx.compose.foundation.Image(
-            bmp, contentDescription = null,
-            modifier = Modifier.size(size), contentScale = ContentScale.Crop,
+        val b = bmp
+        if (b != null) androidx.compose.foundation.Image(
+            b, contentDescription = null, modifier = Modifier.size(size), contentScale = ContentScale.Crop,
         ) else YxiIcon(Ico.Person, size = size * 0.55f, tint = MaterialTheme.colorScheme.onSecondaryContainer)
     }
 }
 
-/** 编辑「我」：昵称 + 个性签名 + 换头像 */
+/**
+ * 编辑「我」。登录了就写服务端（一次保存 = 一次配额），没登录只存本机 + 给个登录入口。
+ *
+ * ⚠️ 头像现在**改不了**：Logto 只存 URL，自定义上传要等对象存储（R2）配好；
+ * 社交注册那次带过来的头像会自己显示。不做「点了没反应」的假按钮。
+ */
 @Composable
 fun MeDialog(onClose: () -> Unit) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    val signed = Account.signedIn
     var name by remember { mutableStateOf(Me.name(ctx)) }
     var sign by remember { mutableStateOf(Me.sign(ctx)) }
-    val pick = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.GetContent(),
-    ) { uri -> if (uri != null) Me.setAvatar(ctx, uri) }
+    var busy by remember { mutableStateOf(false) }
+    var err by remember { mutableStateOf<String?>(null) }
+    val q = Account.me
     AlertDialog(
-        onDismissRequest = onClose,
+        onDismissRequest = { if (!busy) onClose() },
         title = { Text(t("我")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        MeAvatar(72.dp, Modifier.clickable { pick.launch("image/*") })
-                        Text(
-                            t("点头像换一张"), Modifier.padding(top = 6.dp),
-                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline,
-                        )
-                    }
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { MeAvatar(72.dp) }
+                OutlinedTextField(
+                    name, { if (it.length <= 24) name = it }, label = { Text(t("昵称")) }, singleLine = true,
+                    supportingText = { Text(t("1–24 个字")) },
+                )
+                OutlinedTextField(
+                    sign, { if (it.length <= 60) sign = it }, label = { Text(t("个性签名")) }, maxLines = 3,
+                    supportingText = { Text(t("最多 60 个字")) },
+                )
+                if (signed && q != null) Text(
+                    when {
+                        q.quotaRemaining == null -> t("改多少次都行")
+                        else -> t("这个月还能改 %d 次").format(q.quotaRemaining) +
+                            (q.nextRefreshAt?.take(10)?.let { " · " + t("%s 恢复").format(it) } ?: "")
+                    },
+                    style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline,
+                )
+                if (!signed) Text(
+                    t("还没登录 —— 现在改只存在这台手机上"),
+                    style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline,
+                )
+                err?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 }
-                OutlinedTextField(name, { name = it }, label = { Text(t("昵称")) }, singleLine = true)
-                OutlinedTextField(sign, { sign = it }, label = { Text(t("个性签名")) }, maxLines = 3)
             }
         },
-        confirmButton = { TextButton({ Me.set(ctx, name, sign); onClose() }) { Text(t("保存")) } },
-        dismissButton = { TextButton(onClose) { Text(t("取消")) } },
+        confirmButton = {
+            TextButton(
+                enabled = !busy,
+                onClick = {
+                    if (!signed) { Me.setLocal(ctx, name, sign); onClose(); return@TextButton }
+                    busy = true; err = null
+                    scope.launch {
+                        // ⚠️ 一次提交算一次配额 —— 所以昵称和签名一起发，没改的字段不发
+                        val e = Account.saveProfile(
+                            ctx,
+                            nickname = name.trim().takeIf { it != q?.nickname },
+                            signature = sign.trim().takeIf { it != q?.signature },
+                        )
+                        busy = false
+                        if (e == null) onClose() else err = e
+                    }
+                },
+            ) { Text(if (busy) t("保存中…") else t("保存")) }
+        },
+        dismissButton = {
+            if (!signed) TextButton({ Account.startLogin(ctx); onClose() }) { Text(t("登录")) }
+            else TextButton({ if (!busy) onClose() }) { Text(t("取消")) }
+        },
     )
 }
