@@ -17,6 +17,11 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -165,5 +170,97 @@ fun glowBrush(busy: Boolean, waiting: Boolean): Brush {
     return Brush.horizontalGradient(
         hues.map { it.copy(alpha = a) },
         startX = -400f * d, endX = 1400f + 400f * d,
+    )
+}
+
+/**
+ * 输入框的**玻璃壳**（用户 2026-09-04：要玻璃质感、立体、呼吸灯、色差变换、流动特效）。
+ *
+ * 几层，从下到上：
+ *  · 外圈呼吸光晕：画在形状**外面**一圈，随 [busy] / [waiting] 换色，2.6 秒一呼一吸
+ *    ⚠️ **不用 elevation**。0.9.92 用「透明 Surface + shadowElevation」，阴影从透明面里透出来，
+ *    就是用户看到的「一大片黑色阴影里面有白色」（#225）。光晕自己画，想多亮就多亮，还能呼吸。
+ *  · 半透明底（玻璃）+ [glowBrush] 那层色相流动（6 秒一圈）
+ *  · 顶部高光 / 底部微暗 → 立体；一道斜向光带 3.8 秒扫一遍 → 流动
+ *  · 1.2dp 渐变细边 → 玻璃边缘
+ * 系统关了动画：全部定住。
+ */
+@Composable
+fun GlassPill(
+    busy: Boolean, waiting: Boolean,
+    modifier: Modifier = Modifier,
+    content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit,
+) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val motion = remember {
+        runCatching {
+            Settings.Global.getFloat(ctx.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) != 0f
+        }.getOrDefault(true)
+    }
+    val tr = rememberInfiniteTransition(label = "glass")
+    val breathRaw by tr.animateFloat(
+        0f, 1f, InfiniteRepeatableSpec(tween(2600, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "breath",
+    )
+    val sheenRaw by tr.animateFloat(
+        -0.7f, 1.7f, InfiniteRepeatableSpec(tween(3800, easing = LinearEasing), RepeatMode.Restart), label = "sheen",
+    )
+    val b = if (motion) breathRaw else 0.5f
+    val sh = if (motion) sheenRaw else 3f
+    val light = !androidx.compose.foundation.isSystemInDarkTheme() || app.yxi.ui.theme.LocalPalette.current.light
+    val halo = when {
+        waiting -> Color(0xFFFFB84D)
+        busy -> Color(0xFF6FB7FF)
+        else -> Color(0xFF9EC8F0)
+    }
+    val fill = if (light) Color.White.copy(alpha = 0.80f) else Color(0xFF1C1C21).copy(alpha = 0.74f)
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(32.dp)
+    val glow = glowBrush(busy, waiting)
+    androidx.compose.foundation.layout.Box(
+        modifier
+            .drawBehind {
+                val pad = 10.dp.toPx()
+                drawRoundRect(
+                    brush = Brush.radialGradient(
+                        listOf(halo.copy(alpha = 0.12f + 0.20f * b), Color.Transparent),
+                        center = Offset(size.width / 2f, size.height / 2f), radius = size.width * 0.75f,
+                    ),
+                    topLeft = Offset(-pad, -pad),
+                    size = androidx.compose.ui.geometry.Size(size.width + 2 * pad, size.height + 2 * pad),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(32.dp.toPx() + pad),
+                )
+            }
+            .clip(shape)
+            .background(fill)
+            .background(glow)
+            .drawWithContent {
+                drawContent()
+                val w = size.width; val h = size.height
+                // 立体：上亮下暗
+                drawRect(
+                    Brush.verticalGradient(
+                        0f to Color.White.copy(alpha = if (light) 0.42f else 0.10f),
+                        0.55f to Color.Transparent,
+                        1f to Color.Black.copy(alpha = if (light) 0.045f else 0.22f),
+                    ),
+                )
+                // 流动：一道斜向光带扫过去
+                val band = 0.20f * (0.5f + 0.5f * b)
+                drawRect(
+                    Brush.linearGradient(
+                        0f to Color.Transparent, 0.42f to Color.White.copy(alpha = band),
+                        0.58f to Color.White.copy(alpha = band), 1f to Color.Transparent,
+                        start = Offset(w * (sh - 0.6f), 0f), end = Offset(w * (sh + 0.15f), h),
+                    ),
+                )
+                // 玻璃边
+                drawRoundRect(
+                    brush = Brush.linearGradient(
+                        listOf(Color.White.copy(alpha = if (light) 0.95f else 0.35f), halo.copy(alpha = 0.30f + 0.40f * b)),
+                    ),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(32.dp.toPx()),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.2.dp.toPx()),
+                )
+            },
+        content = content,
     )
 }

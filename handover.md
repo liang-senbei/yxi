@@ -637,6 +637,9 @@
 - ✅ **yxi-hub 多组成员（2026-09-02）**：一个会话在多个组里时，`who`/`context` 按组分开列、`say` 的消息带共同组名
   `[同组 组名 · 谁]`、`all` 必须指明组（#211）。服务器侧改动，已装到本机 `~/.local/bin/yxi-hub`。
 - ✅ **下载站隐私政策 / 服务条款页（2026-09-04）**：Google 登录同意屏幕要的 `https://yxi.keuury.com/privacy` `/terms`（cc-logto_yxi 代老板提的）。源在仓库 `site/privacy.html` `site/terms.html`，线上在 hk13 `/var/www/yxi/`，nginx 显式 location 在 `snippets/yxi-dl.conf`。中英双语、短；改内容改那两个文件再 scp 上去。
+- ✅ **0.9.95（2026-09-04）—— 用户录屏里的一串**：① 收起方向反了 → 改成下滑收、上滑展开、到底展开；② 页眉收起时顶上留白 → 对话模式页眉悬浮
+  （movableContentOf 在 Column / 顶部叠层之间搬家），正文按 topInset 动画下移，收起时滑到状态栏底下；③ 输入框「黑色阴影里一块白」→ 透明 Surface + elevation 的
+  阴影透出来（#225），改成自画呼吸光晕；④ 输入框做成 **玻璃壳** `GlassPill`：半透明底 + 色相流动 + 上亮下暗立体 + 斜向光带扫过 + 渐变细边 + 外圈呼吸光；⑤ 点 ↓ 跳底部之后按钮一直闪（#226：底部留白跟着栏变 + 程序滚动也走 nestedScroll，自激）。
 - ✅ **0.9.94（2026-09-04）**：修 0.9.92 引入的「输入框文字删不掉」（#224：单行 / 多行两支各一个 BasicTextField，换排版就换实例）——改 movableContentOf 同一实例搬家、多行排版粘住到清空；多行排版加「清空」；开发者卡片加「清空所有输入框草稿」逃生口。
 - ✅ **0.9.93（2026-09-04）—— 组规**（用户：想给分组「注入」指令，不知道放 hook 还是 CLAUDE.md、不想先建文件）：
   `groups.json` 加 `rules{组名: 文本}`，服务器 `yxi-hub context`（SessionStart 钩子，startup / resume / clear / compact 都触发）把本组组规

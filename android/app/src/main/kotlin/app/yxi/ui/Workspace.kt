@@ -17,6 +17,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.windowInsetsTopHeight
@@ -410,148 +414,160 @@ fun Workspace(
     /** 对话页上划收起页眉（学 X），下滑展开；换模式就复位 */
     var barsHidden by remember(host.id) { mutableStateOf(false) }
     LaunchedEffect(mode) { barsHidden = false }
+    var headerH by remember(host.id) { mutableIntStateOf(0) }
+    val topInset by animateDpAsState(
+        if (barsHidden) 0.dp else with(LocalDensity.current) { headerH.toDp() }, tween(220), label = "topInset",
+    )
+    val header = remember {
+        movableContentOf {
+        AnimatedVisibility(
+                visible = !barsHidden,
+                enter = slideInVertically { -it } + fadeIn(), exit = slideOutVertically { -it } + fadeOut(),
+            ) {
+            Column(Modifier.statusBarsPadding()) {
+            Row(
+                Modifier.fillMaxWidth().padding(14.dp, if (folded) 6.dp else 10.dp, 14.dp, if (folded) 4.dp else 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                // 点会话名 = 唤出悬浮排列。换会话是这个 app 最高频的动作，
+                // 不该让人退回看板再滚一遍列表
+                Box(Modifier.weight(1f)) {
+                Column(
+                    // ⚠️ **「下拉开着时再点一次换成卡片墙」这条实测走不通** ——
+                    // Android 的 DropdownMenu 会盖一层全屏透明遮罩，第二次点被它吃掉，
+                    // 只会触发 onDismissRequest 关菜单，**根本碰不到标题**。
+                    // 写了也是死代码，所以改成：点 = 下拉（置顶那几个），
+                    // **长按 = 直接开卡片墙**，另外下拉里也留了「全部会话…」。
+                    Modifier.combinedClickable(
+                        enabled = ssh != null,
+                        onClick = { menu = true },
+                        onLongClick = { switcher = true },
+                    ),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            sessionName?.let { app.yxi.agent.Session.shortOf(it) } ?: host.alias,
+                            style = MaterialTheme.typography.titleMedium, maxLines = 1,
+                        )
+                        Text("▾", style = MaterialTheme.typography.labelMedium, color = Muted)
+                    }
+                    if (!folded || status != null) Text(
+                        status ?: cwd,
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        color = Dim, maxLines = 1,
+                    )
+                }
+    
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    // ⚠️ **复制路径放第一项。** 用户要的是「把这个会话的目录粘到别处去」——
+                    // 而路径就显示在头部那行、点它弹的就是这个菜单，所以放在这儿是最短的路。
+                    // 不做成「点路径直接复制」：那块地方的点击已经归这个菜单了，
+                    // 抢过去会让「切会话」这个更常用的动作失灵。
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text(t("复制路径"), style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    cwd,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                    color = Dim, maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.MiddleEllipsis,
+                                )
+                            }
+                        },
+                        onClick = {
+                            menu = false
+                            app.yxi.ui.DevMode.copy(ctx, cwd, "path")
+                            android.widget.Toast.makeText(ctx, t("路径已复制"), android.widget.Toast.LENGTH_SHORT).show()
+                        },
+                    )
+                    HorizontalDivider()
+                    if (quick.isEmpty()) {
+                        DropdownMenuItem(
+                            text = { Text(t("还没有置顶的会话"), style = MaterialTheme.typography.bodySmall, color = Dim) },
+                            onClick = { menu = false; switcher = true },
+                        )
+                    } else quick.forEach { sess ->
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(sess.short, style = MaterialTheme.typography.bodyMedium)
+                                    if (sess.detail.isNotEmpty()) Text(
+                                        sess.detail,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Dim, maxLines = 1,
+                                    )
+                                }
+                            },
+                            trailingIcon = { if (sess.name == sessionName) Text("✓", color = Muted) },
+                            onClick = {
+                                menu = false
+                                // ⚠️ 只改这两个值 —— 跟卡片墙走同一条路，不重建连接
+                                sessionName = sess.name
+                                cwd = sess.cwd
+                            },
+                        )
+                    }
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text(t("全部会话…"), style = MaterialTheme.typography.bodyMedium, color = Muted) },
+                        onClick = { menu = false; switcher = true },
+                    )
+                }
+                }
+                if (mode == Mode.Terminal) {
+                    listOf("⌨" to (bar to { bar = !bar }), "✛" to (dpad to { dpad = !dpad }))
+                        .forEach { (icon, st) ->
+                            val (on, toggle) = st
+                            Surface(
+                                color = if (on) SurfaceContainerHigh else SurfaceContainer, shape = Pill,
+                                modifier = Modifier.clip(Pill).clickable(onClick = toggle),
+                            ) {
+                                Text(
+                                    icon, Modifier.padding(12.dp, 8.dp),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = if (on) Copper else Muted,
+                                )
+                            }
+                        }
+                }
+                // ⚡ 展开 / 收起对话页顶上那条状态（模式 / 模型 / 思考 / 上下文 / 今日）。
+                // 用户：「那行字常驻怪难看的，做成页眉旁边一个按钮，点开再显示、顺便切换」。默认收着，记住选择。
+                if (mode == Mode.Chat) Surface(
+                    color = if (stats) SurfaceContainerHigh else SurfaceContainer, shape = Pill,
+                    modifier = Modifier.clip(Pill).clickable { stats = !stats; Prefs.setStats(ctx, stats) },
+                ) {
+                    Text(
+                        "⚡", Modifier.padding(12.dp, 8.dp),
+                        style = MaterialTheme.typography.labelLarge, color = if (stats) Copper else Muted,
+                    )
+                }
+                // 收 / 展页眉
+                Surface(
+                    color = SurfaceContainer, shape = Pill,
+                    modifier = Modifier.clip(Pill).clickable { folded = !folded; Prefs.setFolded(ctx, folded) },
+                ) {
+                    Text(
+                        if (folded) "﹀" else "︿", Modifier.padding(12.dp, 8.dp),
+                        style = MaterialTheme.typography.labelLarge, color = Muted,
+                    )
+                }
+            }
+    
+            if (!folded) ModeSwitcher(mode, chatBlocked) { mode = it }
+            }
+            }
+    
+        }
+    }
     Box(modifier.fillMaxSize()) {
     if (mode == Mode.Chat) ThinkingGlow(busy = glow.first, waiting = glow.second, streaming = glow.third)
     Column(Modifier.fillMaxSize().imePadding()) {
         // 学 X：对话页上划时页眉和模式条一起收起，下滑展开（ChatScreen 通过 onBars 报方向）
-        AnimatedVisibility(
-            visible = !barsHidden,
-            enter = slideInVertically { -it } + fadeIn(), exit = slideOutVertically { -it } + fadeOut(),
-        ) {
-        Column(Modifier.statusBarsPadding()) {
-        Row(
-            Modifier.fillMaxWidth().padding(14.dp, if (folded) 6.dp else 10.dp, 14.dp, if (folded) 4.dp else 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            // 点会话名 = 唤出悬浮排列。换会话是这个 app 最高频的动作，
-            // 不该让人退回看板再滚一遍列表
-            Box(Modifier.weight(1f)) {
-            Column(
-                // ⚠️ **「下拉开着时再点一次换成卡片墙」这条实测走不通** ——
-                // Android 的 DropdownMenu 会盖一层全屏透明遮罩，第二次点被它吃掉，
-                // 只会触发 onDismissRequest 关菜单，**根本碰不到标题**。
-                // 写了也是死代码，所以改成：点 = 下拉（置顶那几个），
-                // **长按 = 直接开卡片墙**，另外下拉里也留了「全部会话…」。
-                Modifier.combinedClickable(
-                    enabled = ssh != null,
-                    onClick = { menu = true },
-                    onLongClick = { switcher = true },
-                ),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        sessionName?.let { app.yxi.agent.Session.shortOf(it) } ?: host.alias,
-                        style = MaterialTheme.typography.titleMedium, maxLines = 1,
-                    )
-                    Text("▾", style = MaterialTheme.typography.labelMedium, color = Muted)
-                }
-                if (!folded || status != null) Text(
-                    status ?: cwd,
-                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                    color = Dim, maxLines = 1,
-                )
-            }
-
-            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                // ⚠️ **复制路径放第一项。** 用户要的是「把这个会话的目录粘到别处去」——
-                // 而路径就显示在头部那行、点它弹的就是这个菜单，所以放在这儿是最短的路。
-                // 不做成「点路径直接复制」：那块地方的点击已经归这个菜单了，
-                // 抢过去会让「切会话」这个更常用的动作失灵。
-                DropdownMenuItem(
-                    text = {
-                        Column {
-                            Text(t("复制路径"), style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                cwd,
-                                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                                color = Dim, maxLines = 1,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.MiddleEllipsis,
-                            )
-                        }
-                    },
-                    onClick = {
-                        menu = false
-                        app.yxi.ui.DevMode.copy(ctx, cwd, "path")
-                        android.widget.Toast.makeText(ctx, t("路径已复制"), android.widget.Toast.LENGTH_SHORT).show()
-                    },
-                )
-                HorizontalDivider()
-                if (quick.isEmpty()) {
-                    DropdownMenuItem(
-                        text = { Text(t("还没有置顶的会话"), style = MaterialTheme.typography.bodySmall, color = Dim) },
-                        onClick = { menu = false; switcher = true },
-                    )
-                } else quick.forEach { sess ->
-                    DropdownMenuItem(
-                        text = {
-                            Column {
-                                Text(sess.short, style = MaterialTheme.typography.bodyMedium)
-                                if (sess.detail.isNotEmpty()) Text(
-                                    sess.detail,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Dim, maxLines = 1,
-                                )
-                            }
-                        },
-                        trailingIcon = { if (sess.name == sessionName) Text("✓", color = Muted) },
-                        onClick = {
-                            menu = false
-                            // ⚠️ 只改这两个值 —— 跟卡片墙走同一条路，不重建连接
-                            sessionName = sess.name
-                            cwd = sess.cwd
-                        },
-                    )
-                }
-                HorizontalDivider()
-                DropdownMenuItem(
-                    text = { Text(t("全部会话…"), style = MaterialTheme.typography.bodyMedium, color = Muted) },
-                    onClick = { menu = false; switcher = true },
-                )
-            }
-            }
-            if (mode == Mode.Terminal) {
-                listOf("⌨" to (bar to { bar = !bar }), "✛" to (dpad to { dpad = !dpad }))
-                    .forEach { (icon, st) ->
-                        val (on, toggle) = st
-                        Surface(
-                            color = if (on) SurfaceContainerHigh else SurfaceContainer, shape = Pill,
-                            modifier = Modifier.clip(Pill).clickable(onClick = toggle),
-                        ) {
-                            Text(
-                                icon, Modifier.padding(12.dp, 8.dp),
-                                style = MaterialTheme.typography.labelLarge,
-                                color = if (on) Copper else Muted,
-                            )
-                        }
-                    }
-            }
-            // ⚡ 展开 / 收起对话页顶上那条状态（模式 / 模型 / 思考 / 上下文 / 今日）。
-            // 用户：「那行字常驻怪难看的，做成页眉旁边一个按钮，点开再显示、顺便切换」。默认收着，记住选择。
-            if (mode == Mode.Chat) Surface(
-                color = if (stats) SurfaceContainerHigh else SurfaceContainer, shape = Pill,
-                modifier = Modifier.clip(Pill).clickable { stats = !stats; Prefs.setStats(ctx, stats) },
-            ) {
-                Text(
-                    "⚡", Modifier.padding(12.dp, 8.dp),
-                    style = MaterialTheme.typography.labelLarge, color = if (stats) Copper else Muted,
-                )
-            }
-            // 收 / 展页眉
-            Surface(
-                color = SurfaceContainer, shape = Pill,
-                modifier = Modifier.clip(Pill).clickable { folded = !folded; Prefs.setFolded(ctx, folded) },
-            ) {
-                Text(
-                    if (folded) "﹀" else "︿", Modifier.padding(12.dp, 8.dp),
-                    style = MaterialTheme.typography.labelLarge, color = Muted,
-                )
-            }
-        }
-
-        if (!folded) ModeSwitcher(mode, chatBlocked) { mode = it }
-        }
-        }
+        // 对话模式：页眉悬浮在正文上面（收起时正文滑到状态栏底下，不留白，跟 X / Gemini 一样）；
+        // 其它模式：页眉照旧占位。同一份页眉靠 movableContentOf 在两处之间搬家。
+        if (mode != Mode.Chat) header()
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (mode) {
@@ -588,6 +604,7 @@ fun Workspace(
                     onOpenPath = { p -> jumpTo = p; mode = Mode.Files },
                     onGlow = { b, w, st -> glow = Triple(b, w, st) },
                     showStats = stats,
+                    topInset = if (mode == Mode.Chat) topInset else 0.dp,
                     onBars = { barsHidden = it },
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -646,6 +663,7 @@ fun Workspace(
             )
         }
     }
+    if (mode == Mode.Chat) Box(Modifier.align(Alignment.TopCenter).fillMaxWidth().onSizeChanged { headerH = it.height }) { header() }
     // 状态栏那一条：内容（页眉收起时是对话正文）滑到它下面会被这层从底色到透明的渐变压淡 —— Gemini 那种「融为一体」
     Box(
         Modifier.align(Alignment.TopCenter).fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars)

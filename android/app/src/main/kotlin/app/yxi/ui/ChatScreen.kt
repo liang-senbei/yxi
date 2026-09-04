@@ -92,6 +92,8 @@ fun ChatScreen(
     showStats: Boolean = true,
     /** 上划收起 / 下滑展开（学 X）：true = 收起。页眉在 Workspace 那边，靠这个回调同步 */
     onBars: (Boolean) -> Unit = {},
+    /** 页眉悬浮在上面时它的高度（收起时 0）：整页内容按它下移，收起时内容自然滑到状态栏底下（不留白） */
+    topInset: androidx.compose.ui.unit.Dp = 0.dp,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -334,10 +336,14 @@ fun ChatScreen(
         object : NestedScrollConnection {
             override fun onPreScroll(available: androidx.compose.ui.geometry.Offset, source: NestedScrollSource): androidx.compose.ui.geometry.Offset {
                 val dy = available.y
-                if (dy == 0f) return androidx.compose.ui.geometry.Offset.Zero
+                // ⚠️ **只认手指。** 程序滚动（点 ↓ 跳底部、新消息跟随）也会走这条 —— 那一下会把栏收起来，
+                //    紧接着「到底了就展开」又把它展开，一收一展就是用户看到的「↓ 一直闪」（#226）。
+                if (dy == 0f || source != NestedScrollSource.UserInput) return androidx.compose.ui.geometry.Offset.Zero
                 barsAcc = if ((dy < 0f) == (barsAcc < 0f)) barsAcc + dy else dy
-                if (barsAcc < -barsThreshold && !barsHidden) barsHidden = true      // 上划：收
-                if (barsAcc > barsThreshold && barsHidden) barsHidden = false       // 下滑：展开
+                // ⚠️ 方向按用户实测定：往下滑（回看历史）收起，往上滑（回到最新）展开；到底了一律展开。
+                //    0.9.89 写反了（用户：「上滑下滑搞反了」）。
+                if (barsAcc > barsThreshold && !barsHidden) barsHidden = true       // 下滑：收
+                if (barsAcc < -barsThreshold && barsHidden) barsHidden = false      // 上滑：展开
                 return androidx.compose.ui.geometry.Offset.Zero
             }
         }
@@ -345,7 +351,10 @@ fun ChatScreen(
     LaunchedEffect(Unit) { snapshotFlow { listState.atBottom }.collect { if (it) barsHidden = false } }
     LaunchedEffect(barsHidden) { onBars(barsHidden) }
     val imeOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
-    val composerPad = if (barsHidden && !imeOpen) 8.dp else with(LocalDensity.current) { composerH.toDp() }
+    // ⚠️ **恒定，不跟着 barsHidden 变。** 变的话：点 ↓ 到底 → 栏展开 → 底部留白变大 → 又能往下滚 →
+    //    「不在底部」→ ↓ 按钮重新冒出来还往上跳一截 —— 就是用户录到的「点了一直闪」（#226）。
+    //    收起时那段留白也看不见：一到底就自动展开了，收起状态下你本来就不在底部。
+    val composerPad = with(LocalDensity.current) { composerH.toDp() }
     // 历史灌完了没。灌的过程中一律瞬移到底，不做动画（见下面的 LaunchedEffect）
     var settled by remember(sessionName) { mutableStateOf(false) }
     // 「粘在底部」：在底部就跟着新消息走；手动往上翻就停；点 ↓ 会重新粘上。
@@ -550,7 +559,7 @@ fun ChatScreen(
     LaunchedEffect(glowBusy, glowWait, glowStream) { onGlow(glowBusy, glowWait, glowStream) }
     DisposableEffect(Unit) { onDispose { onGlow(false, false, false) } }
     Box(modifier.fillMaxSize()) {
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().padding(top = topInset)) {
         // 标题和路径由 Workspace 的头部管，这里只在出问题时说一句
         status?.let {
             Text(
@@ -876,15 +885,10 @@ fun ChatScreen(
         // 光晕忙的时候在页面顶部，输入框离得远，这层自己的渐变让它不至于是一块平灰。
         // ⚠️ 输入框**有上限**：打一大段话原来会把整屏占满，前面的对话一行都看不见（用户截图）。
         //    最多 7 行，超了在框里自己滚。圆角用 28dp 不用 Pill：单行还是胶囊，多行不会变成一个巨大的椭圆。
-        val composerShape = RoundedCornerShape(32.dp)   // 学 Gemini：更圆
-        Surface(
-            color = Color.Transparent,
-            shape = composerShape,
-            shadowElevation = 3.dp,
-            modifier = Modifier.fillMaxWidth().padding(14.dp, 6.dp, 14.dp, 14.dp).heightIn(min = 60.dp)
-                .clip(composerShape)
-                .background(MaterialTheme.colorScheme.surface)
-                .background(glowBrush(busy = live.busy, waiting = pending != null)),
+        // 玻璃壳：光晕 / 呼吸 / 流动都在 [GlassPill] 里（用户要的立体玻璃；也顺手修掉透明面 + elevation 的黑影，#225）
+        GlassPill(
+            busy = live.busy, waiting = pending != null,
+            modifier = Modifier.fillMaxWidth().padding(14.dp, 6.dp, 14.dp, 14.dp).heightIn(min = 60.dp),
         ) {
             val plusBtn: @Composable () -> Unit = {
                 if (sftp != null) {
