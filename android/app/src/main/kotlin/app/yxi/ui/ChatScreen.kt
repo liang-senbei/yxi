@@ -32,6 +32,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.material3.*
@@ -1090,8 +1093,25 @@ fun ChatScreen(
             // ⚠️ **同一个输入框实例在两种排版间搬家，不是销毁重建。** 0.9.92 是 if/else 两支各放一个 BasicTextField，
             //    行数一过 1↔2 就换实例，输入法的组合状态还挂在死掉的那个上 —— 用户：「输了文字删不掉了」（#224）。
             //    movableContentOf 让它带着内部状态（选区、组合）整个搬过去。多行排版一旦进入就粘住到清空，免得在边界来回跳。
-            val field = remember { movableContentOf<String> { d -> BasicTextFieldRow(d, onLines = { lines = it }) { draft = it } } }
+            //    ⚠️ **搬家会把焦点弄丢** —— `movableContentOf` 保住的是**状态**，不是焦点：
+            //    节点从 Row 里摘下来挂进 Column，焦点跟着断，**键盘当场收起来**。
+            //    表现正是用户说的「打着字键盘莫名其妙自己收起，概率不大」——
+            //    概率不大是因为 [multi] 是**粘住的**：一段草稿只在第一次换行那一下掉一次。
+            //    所以搬完要把焦点要回来（原来有焦点才要，别在没打字的时候强行弹键盘）。
+            val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+            var focused by remember { mutableStateOf(false) }
+            val field = remember {
+                movableContentOf<String> { d ->
+                    BasicTextFieldRow(d, focus, onFocus = { focused = it }, onLines = { lines = it }) { draft = it }
+                }
+            }
             LaunchedEffect(lines, draft) { multi = if (draft.isBlank()) false else (multi || lines > 1) }
+            LaunchedEffect(multi) {
+                if (!focused) return@LaunchedEffect
+                // 等这一帧的重组落地，节点重新挂上去才要得到焦点
+                withFrameNanos {}
+                runCatching { focus.requestFocus() }
+            }
             // 在录音：整条输入框换成波形 —— 这时候不需要键盘也不需要按钮
             if (recording) RecordingBar(recorder) {
                 val pcm = recorder.stop()
@@ -1387,10 +1407,18 @@ private fun FlatIcon(path: String, label: String, onTap: () -> Unit) {
 }
 
 @Composable
-private fun BasicTextFieldRow(value: String, onLines: (Int) -> Unit = {}, onValue: (String) -> Unit) {
+private fun BasicTextFieldRow(
+    value: String,
+    focus: androidx.compose.ui.focus.FocusRequester,
+    onFocus: (Boolean) -> Unit = {},
+    onLines: (Int) -> Unit = {},
+    onValue: (String) -> Unit,
+) {
     androidx.compose.foundation.text.BasicTextField(
         value, onValue,
-        modifier = Modifier.padding(20.dp, 15.dp).fillMaxWidth(),
+        modifier = Modifier.padding(20.dp, 15.dp).fillMaxWidth()
+            .focusRequester(focus)
+            .onFocusChanged { onFocus(it.isFocused) },
         onTextLayout = { onLines(if (value.isEmpty()) 1 else it.lineCount) },
         // 最多 7 行，多了在框里滚 —— 别把对话顶没了
         maxLines = 7,

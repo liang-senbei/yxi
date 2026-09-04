@@ -643,6 +643,16 @@ internal object En {
         "下载" to "Download",
         "下载中…" to "Downloading…",
         "模式" to "Mode",
+        "已登录" to "Signed in",
+        "你的 agent 在服务器上跑，你在这儿把关" to
+            "Your agents run on the server. You call the shots from here.",
+        "登录 / 注册" to "Sign in / Sign up",
+        "正在登录…" to "Signing in…",
+        "登录只用来认人 —— 会员额度、兑换和工单跟账号走。\n你连哪台服务器、密钥放在哪，都只在这台手机上。" to
+            "Signing in only identifies you — quota, redeem codes and tickets follow the account.\nWhich servers you connect to and where your keys live stay on this phone.",
+        "这台手机上没有能打开网页的应用 —— 登录要跳浏览器，装一个再来" to
+            "No app on this phone can open a web page. Signing in needs a browser — install one and try again.",
+        "登录失效了，重新登一次" to "Your session expired. Please sign in again.",
         "← 上一题" to "← Prev",
         "下一题 →" to "Next →",
         "确认提交" to "Confirm",

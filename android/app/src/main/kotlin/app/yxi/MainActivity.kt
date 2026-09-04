@@ -109,12 +109,19 @@ class MainActivity : ComponentActivity() {
         app.yxi.watch.EventService.sync(this, store.hosts.value.any { it.watch })
 
         setContent {
+            // 已登录就在进 App 时拉一次资料。
+            // ⚠️ 以前只有打开「会员中心」才拉 —— 结果刚登录完，「我的」和侧边栏都写着「未登录」。
+            //    刷新令牌是串行的（见 Account.refreshLock），这里多一次调用不会并发轮换。
+            LaunchedEffect(app.yxi.agent.Account.signedIn) {
+                if (app.yxi.agent.Account.signedIn) app.yxi.agent.Account.refresh(this@MainActivity)
+            }
             // 登录回调：拿 code 换 token，成功了顺手把资料拉回来
             val authUri = app.yxi.agent.Account.pendingCallback
             LaunchedEffect(authUri) {
                 val u = authUri ?: return@LaunchedEffect
                 app.yxi.agent.Account.pendingCallback = null
                 val err = app.yxi.agent.Account.finishLogin(this@MainActivity, u)
+                if (err == null) app.yxi.agent.Account.refresh(this@MainActivity)
                 android.widget.Toast.makeText(
                     this@MainActivity,
                     err ?: t("登录好了"),
@@ -300,7 +307,10 @@ class MainActivity : ComponentActivity() {
                 }   // ModalNavigationDrawer
             }
         
-            // 冷启动的开屏动效（实验室里挑中的那个）盖在最上面，播完让开
+            // 没登录就把整个 App 挡住（用户 2026-09-04：「没登录的不允许使用」）。
+            // ⚠️ 顺序：内容 → 登录门禁 → 开屏。开屏在最上面照播，播完落到登录页。
+            YxiTheme { app.yxi.ui.LoginGate() }
+            // 冷启动的开屏动效（按主题挑：深色显影 / 浅色随机翻面或聚合）盖在最上面，播完让开
             YxiTheme { app.yxi.ui.splash.SplashGate {} }
             }
         }
@@ -384,10 +394,12 @@ private fun YxiDrawer(
         DrawerRow(app.yxi.ui.Ico.Sliders, t("配置"), Color(0xFF35B6A0)) { onTab(Tab.Config) }
         DrawerRow(
             app.yxi.ui.Ico.Crown, t("会员中心"), Color(0xFFE8912D),
-            // 登录了就把档位摆出来，没登录写「未登录」—— 这一行是账号状态最显眼的地方
+            // 登录了就把档位摆出来，没登录写「未登录」—— 这一行是账号状态最显眼的地方。
+            // ⚠️ 登录了但资料还没拉回来时写「已登录」，**不能写 Free**（那是猜的，猜错就是骗人），
+            //    更不能写「未登录」（人明明登着）。
             tail = when {
                 !app.yxi.agent.Account.signedIn -> t("未登录")
-                else -> app.yxi.agent.Account.me?.tier?.name ?: "Free"
+                else -> app.yxi.agent.Account.me?.tier?.name ?: t("已登录")
             },
             onClick = onMember,
         )

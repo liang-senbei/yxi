@@ -162,10 +162,11 @@ private fun HostRow(
     var expandAt by remember(h.id) { mutableStateOf(0) }
     Surface(
         // ⚠️ **在用的那台要一眼认出来**（用户 2026-09-04：多台主机时当前在用的用不同颜色显示）。
-        //    底色换成强调色的容器 + 左边一条这台机器自己的色条（[hostColor] 从 id 派生，
-        //    跟看板、配置页那颗小圆点是同一个颜色，多机时「这是哪台」不用读字）。
-        color = if (current) MaterialTheme.colorScheme.secondaryContainer
-        else MaterialTheme.colorScheme.surfaceContainerLow,
+        //    ⚠️ 第一版是「强调色底 + 左边一条 [hostColor] 色条」，用户看了说
+        //    「竖线很丑，在用的主机用跟对话输入框一样的那套颜色就行」——
+        //    所以色条去掉了，底色改成**跟输入框同一条流动渐变**（[glowBrush]，见 design/STYLE.md §2.2）。
+        //    好处不只是好看：那股「气」在这个 App 里始终代表**此刻活着的那一个**，语义是一致的。
+        color = if (current) Color.Transparent else MaterialTheme.colorScheme.surfaceContainerLow,
         shape = MaterialTheme.shapes.large,
         modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.large).combinedClickable(
             onClick = onClick,
@@ -177,15 +178,10 @@ private fun HostRow(
     ) {
         Column(
             Modifier
-                .drawBehind {
-                    val w = 4.dp.toPx()
-                    drawRoundRect(
-                        androidx.compose.ui.graphics.SolidColor(hostColor(h.id)),
-                        topLeft = androidx.compose.ui.geometry.Offset(4.dp.toPx(), 3.dp.toPx()),
-                        size = androidx.compose.ui.geometry.Size(w, size.height - 6.dp.toPx()),
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(w / 2),
-                    )
-                }
+                .then(
+                    // 在用的那台：铺一层跟输入框同源的流动渐变，其余的什么都不画
+                    if (current) Modifier.background(glowBrush(busy = false, waiting = false)) else Modifier,
+                )
                 .padding(18.dp, 14.dp, 16.dp, 14.dp),
         ) {
         Row(verticalAlignment = Alignment.CenterVertically) {

@@ -18,6 +18,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -55,20 +56,31 @@ object Splash {
         Variant("vortex", "旋涡", "从屏幕外螺旋旋进来带拖尾，飞行中颜色沿色相流动，落定褪成墨黑") { SplashVortex(it) },
         Variant("sparkle", "星点闪现", "粒子不飞，一颗颗在原位亮起来，一部分是四角星 ✦，最后笔画尖端闪几颗大 ✦") { SplashSparkle(it) },
         Variant("drop", "Y 落下，字展开", "Y 从上面落下弹两下、起一圈涟漪，然后整个字向右展开") { SplashDrop(it) },
+        // ↓ 新品牌标记（两片花瓣）的三支。上面七支画的都是**上一版**的手写 Yunxi 字，已不在轮播里。
+        Variant("flip", "翻面", "logo 像卡片从侧面翻正，落定后一道斜光顺着 logo 的形状扫过") { SplashFlip(it) },
+        Variant("converge", "聚合", "几千个带原色的小方块飞进来拼成 logo，拼完换成清晰的原图") { SplashConverge(it) },
+        Variant("develop", "显影", "像相纸显影，logo 从底部的根被一圈长大的光扫出来（只在深色主题）") { SplashDevelop(it) },
     )
 
     /**
-     * 冷启动播哪个：**四款随机轮播**（用户 2026-09-02 在实验室里定的：粒子聚合 + 星尘汇聚 + 旋涡 + 星点闪现）。
-     * 笔触书写 / 墨迹落定 / Y 落下留着备用，不在轮播里。
-     * ⚠️ 实验室是「服务器推过来给用户审」的地方，App 里没有选择器 —— 改轮播名单就改这里发版。
+     * 冷启动播哪个 —— **按主题分，不是一锅随机**（用户 2026-09-04 定的）：
+     *
+     * · **深色**：只播「显影」。它靠暗底上那圈蓝白亮边，浅底上既看不见、隐喻也不成立。
+     * · **浅色**：在「翻面」和「聚合」之间随机。
+     *
+     * ⚠️ 上一版那四支（粒子聚合 / 星尘 / 旋涡 / 星点）画的是**手写 Yunxi 字**，是旧品牌，已下轮播。
+     *    换 logo 之后没同步换开屏，用户看到的还是老动画 —— 换品牌记得连开屏一起换。
+     * ⚠️ 实验室是「服务器推过来给用户审」的地方，App 里没有选择器 —— 改名单就改这里发版。
      */
-    val ROTATION = listOf("particles", "stardust", "vortex", "sparkle")
+    val DARK_ROTATION = listOf("develop")
+    val LIGHT_ROTATION = listOf("flip", "converge")
 
     /** 每次冷启动随机挑一个，**不重复上一次**（连着两次一样看着像坏了）。 */
-    fun chosen(ctx: Context): Variant? {
+    fun chosen(ctx: Context, dark: Boolean): Variant? {
+        val rotation = if (dark) DARK_ROTATION else LIGHT_ROTATION
         val prefs = ctx.getSharedPreferences("yxi", Context.MODE_PRIVATE)
         val last = prefs.getString("splash.last", null)
-        val pool = ROTATION.filter { it != last }.ifEmpty { ROTATION }
+        val pool = rotation.filter { it != last }.ifEmpty { rotation }
         val key = pool.random()
         prefs.edit().putString("splash.last", key).apply()
         return variants.firstOrNull { it.key == key }
@@ -82,7 +94,9 @@ object Splash {
 @Composable
 fun SplashGate(content: @Composable () -> Unit) {
     val ctx = LocalContext.current
-    val variant = remember { Splash.chosen(ctx) }
+    // 深浅由**当前皮肤的底色亮度**判断 —— 不用去问 Skin，谁改了主题这里都跟着对
+    val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    val variant = remember { Splash.chosen(ctx, dark) }
     var done by remember { mutableStateOf(variant == null) }
     content()
     if (!done && variant != null) {

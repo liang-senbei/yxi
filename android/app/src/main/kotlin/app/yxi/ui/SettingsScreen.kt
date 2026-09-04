@@ -144,7 +144,9 @@ fun SettingsScreen(
                 YxiIcon(Ico.Crown, size = 22.dp, tint = androidx.compose.ui.graphics.Color(0xFFE8912D))
                 Text(t("会员中心"), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    app.yxi.agent.Account.me?.tier?.name?.takeIf { app.yxi.agent.Account.signedIn } ?: t("未登录"),
+                    // ⚠️ 登录了但资料还没回来 → 「已登录」，别写成「未登录」（#240）
+                    if (!app.yxi.agent.Account.signedIn) t("未登录")
+                    else app.yxi.agent.Account.me?.tier?.name ?: t("已登录"),
                     style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline,
                 )
                 Text("›", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.outline)

@@ -1059,7 +1059,9 @@ private fun SessionCard(
     onReply: () -> Unit = {},
     // ⚠️ **卡片上不放 ☆ 和图钉了**（用户 2026-09-04：「收藏那个五角星标记去掉，置顶的图标也去掉，
     //    都放在左滑里面」）。收藏 / 置顶 / 终止 全在 [SwipeCard] 左滑露出的那排按钮里。
-    //    这两个只用来**画色条**：收藏一种色、置顶一种色、又收藏又置顶就是两色渐变（用户：用不同颜色标出来）。
+    //    这两个只用来**给卡片染个底**：收藏一种、置顶一种、又收藏又置顶就是两色渐变（用户：用不同颜色标出来）。
+    //    ⚠️ **不要画竖线**（用户 2026-09-04：「有一条竖线很丑，都取消竖线就行了」）——
+    //    主机页那条同一天一起去掉了。这个 App 表达状态一律靠**面**（底色 / 药丸），不靠线。
     faved: Boolean = false,
     pinned: Boolean = false,
     muted: Boolean = false,
@@ -1089,7 +1091,7 @@ private fun SessionCard(
         else -> MaterialTheme.colorScheme.outlineVariant
     }
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        color = Color.Transparent,
         shape = RoundedCornerShape(22.dp),
         shadowElevation = if (dragging) 8.dp else 0.dp,
         // ⚠️ **长按不在这里绑发消息** —— 长按归「拖动排序」，由外面的 Modifier 接管。
@@ -1098,31 +1100,21 @@ private fun SessionCard(
             enabled = openEnabled, onClick = onOpen, onLongClick = onLongPress,
         ),
     ) {
-        // 左边那条色条 = 这张卡的「身份」：收藏 / 置顶 / 两者都有。
-        // ⚠️ 跟卡里别的东西一个语言：圆角、低饱和、不抢字。画在 padding 外面（往左 12dp），
-        //    Surface 自己会按圆角裁掉溢出的部分。
-        val markFav = MaterialTheme.colorScheme.secondary
-        val markPin = MaterialTheme.colorScheme.tertiary
+        // 这张卡的「身份」= **整张卡的底色**，不是一条线：收藏一种、置顶一种、两者都有就是两色渐变。
+        // ⚠️ 染得很淡（往底色里掺 0.5）：一屏十几张卡，颜色一重就成了花被子，字也读不清了。
+        val base = MaterialTheme.colorScheme.surfaceContainerLow
+        val fav = androidx.compose.ui.graphics.lerp(base, MaterialTheme.colorScheme.secondaryContainer, 0.5f)
+        val pin = androidx.compose.ui.graphics.lerp(base, MaterialTheme.colorScheme.tertiaryContainer, 0.5f)
+        val skin = when {
+            faved && pinned -> Brush.horizontalGradient(listOf(pin, fav))
+            faved -> androidx.compose.ui.graphics.SolidColor(fav)
+            pinned -> androidx.compose.ui.graphics.SolidColor(pin)
+            else -> androidx.compose.ui.graphics.SolidColor(base)
+        }
         Column(
             Modifier
-                .drawBehind {
-                    if (!faved && !pinned) return@drawBehind
-                    val w = 4.dp.toPx()
-                    val brush = when {
-                        faved && pinned -> Brush.verticalGradient(listOf(markPin, markFav))
-                        faved -> androidx.compose.ui.graphics.SolidColor(markFav)
-                        else -> androidx.compose.ui.graphics.SolidColor(markPin)
-                    }
-                    // ⚠️ 画在卡**里面**（左边 4dp 处）。第一版画在 -12dp、想蹭到 padding 外面去 ——
-                    //    Surface 按圆角裁剪，直接被裁没了，屏幕上什么都没有。
-                    drawRoundRect(
-                        brush,
-                        topLeft = androidx.compose.ui.geometry.Offset(4.dp.toPx(), 3.dp.toPx()),
-                        size = androidx.compose.ui.geometry.Size(w, size.height - 6.dp.toPx()),
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(w / 2),
-                    )
-                }
-                .padding(if (faved || pinned) 18.dp else 16.dp, 11.dp, 10.dp, 10.dp),
+                .background(skin)
+                .padding(16.dp, 11.dp, 10.dp, 10.dp),
             verticalArrangement = Arrangement.spacedBy(5.dp),
         ) {
             // 第一行：状态点 · 名字 ……… 多久没动 · 已连

@@ -92,8 +92,13 @@ object Account {
 
     // ── 登录 ───────────────────────────────────────────────────────────────
 
-    /** 拉起浏览器去登录。回来的是 [REDIRECT]，由 MainActivity 接住交给 [finishLogin]。 */
-    fun startLogin(ctx: Context) {
+    /**
+     * 拉起浏览器去登录。回来的是 [REDIRECT]，由 MainActivity 接住交给 [finishLogin]。
+     * @return false = **浏览器都没拉起来**（设备上没有能开 http 的应用）。
+     *   ⚠️ 以前这里是 `runCatching {}` 吞掉的 —— 表现是「点了登录什么都没发生」，
+     *   而登录现在是进 App 的必经之路，静默失败等于 App 打不开（见 design/STYLE.md「一切失败都要说出来」）。
+     */
+    fun startLogin(ctx: Context): Boolean {
         val verifier = randomUrlSafe(64)
         val state = randomUrlSafe(16)
         p(ctx).edit().putString("auth.verifier", verifier).putString("auth.state", state).apply()
@@ -110,9 +115,9 @@ object Account {
             //    不然下次进 App 又要重新登一遍。
             .appendQueryParameter("prompt", "consent")
             .build()
-        runCatching {
+        return runCatching {
             ctx.startActivity(Intent(Intent.ACTION_VIEW, url).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        }
+        }.isSuccess
     }
 
     /** 浏览器回调回来：拿 code 换 token。@return 出错时的原因，成功返回 null */
@@ -173,12 +178,33 @@ object Account {
         e.apply()
     }
 
+    /**
+     * 刷新令牌的锁。
+     *
+     * ⚠️⚠️ **刷新必须串行，这不是优化是必需**（logto_yxi 2026-09-04 在 Logto 源码和真跑里确认）：
+     * 我们是 Native 公开客户端，`clientAuthMethod == none` 时 Logto **强制轮换** refresh token ——
+     * 每次刷新都发一个新的，旧的只有**约 5 秒宽限**；过了宽限再用旧的不只是失败，
+     * **整条授权当场被撤销**（刚发的新令牌也一起作废）。实测：rt1 刷新拿到 rt2 → 等 5 秒再用 rt1
+     * → 400 invalid_grant → **rt2 也变成 400**。
+     *
+     * 两个线程同时进来 = 一个成功、另一个拿着旧的重用，还会互相盖掉对方存下的新令牌。
+     * 冷启动同时打几个接口正是最容易撞的场景 —— 而现在没登录会被 [app.yxi.ui.LoginGate]
+     * 挡住整个 App，掉登录 = **App 打不开**。
+     */
+    private val refreshLock = Any()
+
     /** 拿一把还能用的 access token；快过期就先续。拿不到 = 没登录 / 续不上。 */
     private fun token(ctx: Context): String? {
         val sp = p(ctx)
         // 解不开 = 上一版存的明文 / 换过机器 → 当没登录，重登一次即可（不写迁移代码）
-        val acc = sp.getString("auth.access", null)?.let { runCatching { app.yxi.ssh.Vault.open(it) }.getOrNull() }
-        if (acc != null && System.currentTimeMillis() < sp.getLong("auth.exp", 0L) - 60_000L) return acc
+        fun cached() = sp.getString("auth.access", null)
+            ?.let { runCatching { app.yxi.ssh.Vault.open(it) }.getOrNull() }
+        fun stillGood() = System.currentTimeMillis() < sp.getLong("auth.exp", 0L) - 60_000L
+        cached()?.let { if (stillGood()) return it }
+        synchronized(refreshLock) {
+        // 拿到锁之后**再看一眼**：可能别的线程刚续过。少转一次就少一次踩宽限期的机会。
+        cached()?.let { if (stillGood()) return it }
+        val acc = cached()
         val rt = sp.getString("auth.refresh", null)
             ?.let { runCatching { app.yxi.ssh.Vault.open(it) }.getOrNull() } ?: return acc
         val (c, body) = form(
@@ -186,7 +212,8 @@ object Account {
             mapOf("grant_type" to "refresh_token", "refresh_token" to rt, "client_id" to APP_ID, "scope" to SCOPES),
         )
         if (c !in 200..299) {
-            // ⚠️ refresh 被拒（撤销 / 过期 / 账号被全局封）就是真的掉登录了，别装作还登着。
+            // ⚠️ refresh 被拒（撤销 / 过期 / 账号被全局封 / 旧令牌被重用过）就是真的掉登录了，
+            //    别装作还登着，**更不能拿同一个令牌重试** —— 重试就是又一次重用。
             //    ⚠️ 但**网络不通（code 0）不算**：那种时候把人登出是最坏的处理。
             if (c == 400 || c == 401) {
                 signOut(ctx)
@@ -194,8 +221,10 @@ object Account {
             }
             return null
         }
+        // ⚠️ 响应里的**新** refresh token 必须存回去（saveTokens 会存）。漏了它，下次就是拿旧的重用。
         saveTokens(ctx, JSONObject(body))
-        return sp.getString("auth.access", null)?.let { runCatching { app.yxi.ssh.Vault.open(it) }.getOrNull() }
+        return cached()
+        }
     }
 
     // ── 会员服务 ───────────────────────────────────────────────────────────
