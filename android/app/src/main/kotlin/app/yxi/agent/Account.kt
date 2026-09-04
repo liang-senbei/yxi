@@ -210,6 +210,17 @@ object Account {
 
     // ── 杂活 ───────────────────────────────────────────────────────────────
 
+    /**
+     * ⚠️ **契约里「正常就是 null」的字段**（logto_yxi 2026-09-04 明确给的，别再被咬第二次）：
+     *  · `membership.expiresAt` —— 没兑过码，或后台手工永久授予（那时 `neverExpires:true`）
+     *  · `quota.limit` / `remaining` / `nextRefreshAt` —— ultra 时全是 null（**先读 `unlimited`**，别拿 remaining 判断）
+     *  · `profile.nickname` / `avatar` / `signature` —— 用户没设过（社交注册的通常有昵称和头像）
+     *  · `profile.email` —— 只用社交登录、没绑邮箱的
+     * **恒定有值**：`userId`(=sub)、`tier`、`isAdmin`、`quota.unlimited`、`quota.used`。
+     *
+     * 所以：所有可空字符串走 [str]（`optString` 读 null 会给字符串 `"null"`，见 #230），
+     * 新用户四个 profile 字段可能全空 —— 界面每一处都得有空态（「点这里起个名」「写句个性签名」这些）。
+     */
     private fun parseMe(o: JSONObject): Me {
         val ms = o.optJSONObject("membership")
         val pr = o.optJSONObject("profile")

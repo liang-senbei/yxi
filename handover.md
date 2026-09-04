@@ -641,6 +641,11 @@
   **错误一律优先显示服务端的 `msg`**（中文、他们维护）。同一个 `409 code_redeemed` 会有两种 msg：
   「已经被别人使用了」（一码一人被抢）/「名额已经领完了」（限量码满）—— 本地写死一句必然说错，App 里的兜底文案
   只在服务端没给 msg 时才用。⚠️ **「你自己已经兑过这张码」不是错误**：那是 `200 + replay:true`，按成功显示，别弹成失败。
+  **哪些字段正常就是 null**（契约的一部分，写死解析的前提）：`membership.expiresAt`（没兑过码 / 永久授予时配 `neverExpires`）、
+  `quota.limit`+`remaining`+`nextRefreshAt`（ultra 全 null，**判断不限要看 `quota.unlimited`**）、
+  `profile.nickname`+`avatar`+`signature`+`email`（用户没设 / 没绑邮箱；社交注册的通常带昵称和头像）。
+  **恒定有值**：`userId`(=sub)、`tier`、`isAdmin`、`quota.unlimited`、`quota.used`。
+  → 新用户第一次进「我的」四个 profile 字段可能全空，界面每处都有空态；解析统一走 `Account.str()`（`optString` 读 null 给的是 `"null"`）。
   **接口已冻结**（logto_yxi 2026-09-04）：`GET /api/me`、`PATCH /api/me/profile`、`POST /api/me/redeem` 形状不再变，
   **只加字段、不改不删**，加之前会先说 —— 所以 App 这边解析可以按当前字段写死，不用做兼容分支。
   ⚠️ **测试账号已被删**（老板要求清掉所有验证账户，Logto 用户数 0、码 0）。要再联调**先跟 logto_yxi 说一声**，
