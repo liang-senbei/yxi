@@ -255,16 +255,19 @@ object Account {
     /** 服务端的错都带中文 msg / 有约定的 error 码，翻译成一句人话 */
     private fun httpErr(c: Int, body: String): String {
         val o = runCatching { JSONObject(body) }.getOrNull()
-        val err = o?.optString("error").orEmpty()
-        val msg = o?.optString("msg").orEmpty()
+        val err = o.str("error")
+        val msg = o.str("msg")
         return when {
+            // ⚠️ **服务端的 `msg` 优先**（logto_yxi 2026-09-04）：它是中文、由他们维护、
+            //    永远跟真实原因一致。比如同一个 409 会分「被别人使用了」和「名额已经领完了」——
+            //    本地写死一句就会说错。下面那些只是**服务端没给 msg 时**的兜底。
             msg.isNotEmpty() -> msg
             err == "quota_exhausted" -> {
                 val next = o?.optString("nextRefreshAt")?.take(10).orEmpty()
                 if (next.isEmpty()) "这个月的修改次数用完了" else "这个月的修改次数用完了，$next 恢复"
             }
             err == "code_not_found" -> "没有这张兑换码"
-            err == "code_redeemed" -> "这张码已经被兑过了"
+            err == "code_redeemed" -> "这张码已经被人兑走了"
             err == "code_disabled" -> "这张码被停用了"
             err == "code_expired" -> "这张码过期了"
             err == "code_not_started" -> "这张码还没生效"
