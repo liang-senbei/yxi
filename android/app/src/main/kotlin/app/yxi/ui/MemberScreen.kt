@@ -191,16 +191,18 @@ fun RedeemBox(modifier: Modifier = Modifier) {
                 YxiIcon(Ico.Crown, size = 20.dp, tint = Color(0xFFE8912D))
                 Text(t("兑换码"), style = MaterialTheme.typography.titleMedium)
             }
-            // ⚠️ **存的是「纯码」，连字符只是画出来的**（VisualTransformation）。
-            //    第一版是每敲一个字就把整串重排一遍再写回去 —— 输入快一点（或粘贴）就会**串位**：
-            //    实测用 adb 灌进去 18 个字符，9 个位置对不上。重写输入框的内容是要付代价的，
-            //    能用「只改显示」解决就别改值。
+            // ⚠️⚠️ **别替用户「整理」兑换码。**
+            //    这里原来做了两件自作聪明的事：把连字符全过滤掉、再按「3-4-4-4」重新画上，
+            //    发给服务端的也是重排后的串。结果是**只有恰好长成 `YXI-XXXX-XXXX-XXXX` 的码能兑**。
+            //    2026-09-04 实测：输入 `YXITEST-BAL-100`，框里变成 `YXI-TEST-BAL0-0` —— 这张码永远兑不掉。
+            //    码的形状是**服务端定的**，而且会变（后来加了余额券，段长根本不一样）。
+            //    客户端不认识这个格式，就不该假装认识：**原样收、原样发，让服务端去判**。
+            //    只保留三件无争议的事：转大写、去掉空白、限个长度。
             OutlinedTextField(
-                code, { code = it.uppercase().filter(Char::isLetterOrDigit).take(15) },
-                placeholder = { Text("YXI-XXXX-XXXX-XXXX") },
+                code, { v -> code = v.uppercase().filter { it.isLetterOrDigit() || it == '-' }.take(48) },
+                placeholder = { Text(t("粘贴或输入兑换码")) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
-                visualTransformation = DashedCode,
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                     capitalization = KeyboardCapitalization.Characters,
                 ),
@@ -217,7 +219,7 @@ fun RedeemBox(modifier: Modifier = Modifier) {
                     if (!Account.signedIn) { msg = t("先登录再兑换"); ok = false; return@Button }
                     busy = true; msg = null
                     scope.launch {
-                        val r = Account.redeem(ctx, tidyCode(code))
+                        val r = Account.redeem(ctx, code.trim())
                         busy = false
                         ok = r.isSuccess
                         msg = r.getOrNull() ?: r.exceptionOrNull()?.message
@@ -230,37 +232,6 @@ fun RedeemBox(modifier: Modifier = Modifier) {
     }
 }
 
-/** 把纯码画成 `YXI-XXXX-XXXX-XXXX`：只动显示，不动输入框里存的值 */
-private val DashedCode = androidx.compose.ui.text.input.VisualTransformation { text ->
-    val body = text.text
-    val shown = tidyCode(body)
-    androidx.compose.ui.text.input.TransformedText(
-        androidx.compose.ui.text.AnnotatedString(shown),
-        object : androidx.compose.ui.text.input.OffsetMapping {
-            // 前 3 位之后每 4 位多一个连字符
-            override fun originalToTransformed(offset: Int) = offset + when {
-                offset <= 3 -> 0
-                offset <= 7 -> 1
-                offset <= 11 -> 2
-                else -> 3
-            }
-            override fun transformedToOriginal(offset: Int) = offset - when {
-                offset <= 3 -> 0
-                offset <= 8 -> 1
-                offset <= 13 -> 2
-                else -> 3
-            }
-        },
-    )
-}
-
-/** 大写、去掉乱七八糟的字符、每 4 位补一个连字符（YXI-XXXX-XXXX-XXXX） */
-private fun tidyCode(raw: String): String {
-    val body = raw.uppercase().filter { it.isLetterOrDigit() }.take(15)
-    if (body.length <= 3) return body
-    val rest = body.drop(3).chunked(4)
-    return (listOf(body.take(3)) + rest).joinToString("-")
-}
 
 @Composable
 private fun Plan(
