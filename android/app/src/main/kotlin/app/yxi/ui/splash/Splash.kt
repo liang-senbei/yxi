@@ -19,6 +19,8 @@ import androidx.compose.material3.Text
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -102,6 +104,47 @@ fun SplashGate(content: @Composable () -> Unit) {
     if (!done && variant != null) {
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
             variant.content { done = true }
+            Greeting(Modifier.align(Alignment.BottomCenter))
+        }
+    }
+}
+
+/**
+ * 开屏上那句问候 + 昵称（老板 2026-09-05）。
+ *
+ * ⚠️⚠️ **一个网络请求都不发，因此不会让开屏慢哪怕一帧。**
+ * 昵称来自 [app.yxi.agent.Account.me]，那是 `Account.load()` 在 `onCreate` 里
+ * **从本机缓存同步读出来的**（`auth.me`，SharedPreferences）—— 走到这儿它已经在内存里了。
+ * 老板问的就是这个：「会不会有延迟？有延迟就不做。」答案是不会，**前提是这里永远不等** ——
+ * 以后谁也别在开屏上加「先拉一下资料再显示名字」，那就正好把这条毁了：
+ * 开屏是**给人看进度的**，它自己一旦要等，就成了进度本身。
+ *
+ * ⚠️ 没登录 / 还没拉过资料 → 昵称那行**直接不画**，不占位、不显示「加载中」、不写「用户」。
+ *    问候语单独一行也成立。
+ * ⚠️ 摆在**底部**不是紧贴图标下面：几种开屏方案（[SplashDrop] / [SplashInk] / …）
+ *    图标落点各不相同，贴着谁都会撞上某一种。
+ */
+@Composable
+private fun Greeting(modifier: Modifier = Modifier) {
+    val name = app.yxi.agent.Account.me?.nickname?.takeIf { it.isNotBlank() }
+    // 比图标晚一点浮出来 —— 跟图标同时出现会抢戏
+    val a = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(260)
+        a.animateTo(1f, androidx.compose.animation.core.tween(420))
+    }
+    Column(
+        modifier.padding(bottom = 78.dp).graphicsLayer { alpha = a.value },
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            "Have a nice day",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.outline,
+        )
+        if (name != null) {
+            Spacer(Modifier.padding(top = 3.dp))
+            Text(name, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
         }
     }
 }

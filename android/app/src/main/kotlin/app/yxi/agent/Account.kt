@@ -637,7 +637,20 @@ object Account {
     }
 
     /** 分 → 「¥12.34」。⚠️ 只在**显示的这一刻**除 100，别在别处提前转成小数。 */
-    private fun yuan(cents: Long): String = "¥" + "%.2f".format(cents / 100.0)
+    /**
+     * 分 → 「¥12.34」。⚠️ **余额可能是负数**（撤销兑换券能把它扣穿 —— 服务端只允许
+     * `reason=refund` 那条路扣成负数，用户主动消费仍然不许透支）。所以负号在**货币符号前面**：
+     * `-¥55.00`，不是 `¥-55.00` —— 后者读起来像这笔钱本身叫「-55」。
+     *
+     * ⚠️⚠️ **全项目只有这一份。** 2026-09-05 查出来时同一个语义写了**三份**、错了两份，
+     * 而且第三份在另一个包里还是 private —— 从 bug 现场根本数不出来。
+     * 教训（cc-Yxi_pilot）：**这类收敛做完要再 grep 函数名本身（`fun yuan`），不是 grep 使用现场**；
+     * 「同一个语义各写一份」的真实份数往往比你数出来的多一份。
+     *
+     * ⚠️ 放在 agent 层是因为**依赖方向**：agent 不能反过来 import ui，而 ui import agent 到处都是。
+     */
+    internal fun yuan(cents: Long): String =
+        (if (cents < 0L) "-¥" else "¥") + "%.2f".format(kotlin.math.abs(cents) / 100.0)
 
     private fun randomUrlSafe(n: Int): String {
         val b = ByteArray(n); SecureRandom().nextBytes(b); return b64url(b)

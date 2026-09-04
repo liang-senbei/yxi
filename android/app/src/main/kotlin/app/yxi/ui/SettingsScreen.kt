@@ -205,11 +205,16 @@ fun SettingsScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                val acc = app.yxi.agent.Account.me
                 YxiIcon(Ico.Wallet, size = 22.dp, tint = androidx.compose.ui.graphics.Color(0xFF35B6A0))
                 Column(Modifier.weight(1f)) {
                     Text(t("钱包"), style = MaterialTheme.typography.bodyLarge)
                     Text(
-                        t("充值还没开 · 以后可以用余额自动续会员"),
+                        // ⚠️ **余额可能是负的**（余额花光之后我们又撤销了一张余额券 —— 服务端
+                        //    只允许 reason=refund 那条路扣成负数，用户主动消费仍然不许透支）。
+                        //    欠着钱的人不该看到一句讲充值好处的话 —— 那会让他以为一切正常。
+                        if ((acc?.balanceCents ?: 0L) < 0L) t("有一笔兑换被撤销了 · 下次充值先抵这笔")
+                        else t("充值还没开 · 以后可以用余额自动续会员"),
                         style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline,
                     )
                 }
@@ -217,7 +222,6 @@ fun SettingsScreen(
                 //    别在别处提前转成 Double —— 字段名里带单位就是为了防这个（logto_yxi 2026-09-04）。
                 // ⚠️ 三态，别把后两个混成一个（#240 那个坑我在这儿又踩了一次）：
                 //    没登录 → 「未登录」；登录了但资料还没回来 → 「读取中」；拿到了才显示金额。
-                val acc = app.yxi.agent.Account.me
                 when {
                     !app.yxi.agent.Account.signedIn -> Text(
                         t("未登录"),
@@ -228,11 +232,14 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline,
                     )
                     else -> Text(
-                        "¥" + "%.2f".format(acc.balanceCents / 100.0),
+                        app.yxi.agent.Account.yuan(acc.balanceCents),
                         style = MaterialTheme.typography.titleSmall.copy(
                             fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                         ),
-                        color = MaterialTheme.colorScheme.onSurface,
+                        // 欠款用 error，不用 Amber —— Amber 在 STYLE.md §1.2 是「需要你动手」，
+                        // 挪用会稀释那个色；这里要说的是「这个数不对劲」，那是 error 的活
+                        color = if (acc.balanceCents < 0L) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurface,
                     )
                 }
                 Text("›", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.outline)

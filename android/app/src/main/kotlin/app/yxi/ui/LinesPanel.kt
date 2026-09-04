@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -60,10 +62,12 @@ import kotlinx.coroutines.launch
  */
 @Composable
 fun LinesPanel(ssh: SshSession?, host: Host?, sessions: List<Session>) {
-    val scope = rememberCoroutineScope()
+    val bg = rememberCoroutineScope()
     val key = host?.id
     var lines by remember(key) { mutableStateOf<List<Lines.Line>?>(null) }
-    var env by remember(key) { mutableStateOf<Lines.Env?>(null) }
+    var act by remember(key) { mutableStateOf<Lines.Active?>(null) }
+    /** 改谁：null = 整机；某个会话 = 只改它所在那个目录。 */
+    var scope by remember(key) { mutableStateOf<Session?>(null) }
     var loading by remember(key) { mutableStateOf(true) }
     var note by remember(key) { mutableStateOf("") }
     /** 排队中的那条：忙完自动落地。null = 没有排队。 */
@@ -71,29 +75,34 @@ fun LinesPanel(ssh: SshSession?, host: Host?, sessions: List<Session>) {
     var pendingDefault by remember(key) { mutableStateOf(false) }
     var edit by remember(key) { mutableStateOf<Lines.Line?>(null) }
 
-    val busy = sessions.count { it.state == SessionState.Working && !it.isCodex }
+    // 换整机要等所有 Claude 会话都闲下来；只换一个项目，就只等那一个。
+    val waitOn = scope?.let { s -> sessions.filter { it.name == s.name } } ?: sessions
+    val busy = waitOn.count { it.state == SessionState.Working && !it.isCodex }
     val hasCodex = sessions.any { it.isCodex }
+    // 能单独设线路的会话：跑 Claude 的、而且知道它在哪个目录
+    val scopables = sessions.filter { !it.isCodex && it.cwd.isNotBlank() }
 
     suspend fun reload() {
         lines = Lines.list(ssh)
-        env = Lines.current(ssh)
+        act = Lines.active(ssh, scope?.cwd)
     }
 
-    LaunchedEffect(ssh, key) {
+    LaunchedEffect(ssh, key, scope?.name) {
         loading = true
         reload()
         loading = false
     }
 
     suspend fun doApply(line: Lines.Line?) {
-        val err = Lines.apply(ssh, line)
+        val err = Lines.apply(ssh, line, scope?.cwd)
         if (err != null) { note = t("没换成：%s").format(err); return }
         reload()
         val probe = Lines.probe(ssh, line?.baseUrl.orEmpty())
+        val where = scope?.let { t("只给「%s」").format(it.short) } ?: t("整台机器")
         // ⚠️ 换端点之后第一次请求会**全量重读上下文**（缓存是按端点分的），又慢又贵。
         //    不说的话人会以为切换卡住了 —— 这是 cc-remote-dev-station 提醒的一条。
-        note = t("已换到「%s」· %s\n下一次请求就走新线路；那一次会重读整段对话，慢一点、贵一点，是正常的。")
-            .format(line?.name ?: t("默认"), probe)
+        note = t("%s已换到「%s」· %s\n下一次请求就走新线路；那一次会重读整段对话，慢一点、贵一点，是正常的。")
+            .format(where, line?.name ?: t("默认"), probe)
     }
 
     // 排队中的那条：一旦没有会话在干活，自动落地
@@ -109,7 +118,7 @@ fun LinesPanel(ssh: SshSession?, host: Host?, sessions: List<Session>) {
         if (busy > 0) {
             pending = line; pendingDefault = line == null
             note = t("这台机器上有 %d 个会话在干活 —— 已排队，跑完这一轮自动换。").format(busy)
-        } else scope.launch { doApply(line) }
+        } else bg.launch { doApply(line) }
     }
 
     edit?.let { e ->
@@ -118,7 +127,7 @@ fun LinesPanel(ssh: SshSession?, host: Host?, sessions: List<Session>) {
             onDismiss = { edit = null },
             onSave = { saved ->
                 edit = null
-                scope.launch {
+                bg.launch {
                     val cur = lines.orEmpty()
                     val next = if (cur.any { it.id == saved.id })
                         cur.map { if (it.id == saved.id) saved else it } else cur + saved
@@ -128,7 +137,7 @@ fun LinesPanel(ssh: SshSession?, host: Host?, sessions: List<Session>) {
             },
             onDelete = {
                 edit = null
-                scope.launch {
+                bg.launch {
                     note = Lines.saveList(ssh, lines.orEmpty().filter { it.id != e.id })
                         ?.let { t("没删掉：%s").format(it) }.orEmpty()
                     reload()
@@ -137,8 +146,11 @@ fun LinesPanel(ssh: SshSession?, host: Host?, sessions: List<Session>) {
         )
     }
 
-    val cur = env
+    val cur = act?.env
     Column(Modifier.fillMaxSize()) {
+        // 改谁。**先选范围再选线路** —— 不先说清改的是整机还是一个项目，
+        // 点下去那一下的影响面差一个数量级。
+        if (scopables.isNotEmpty()) ScopeBar(scopables, scope) { scope = it }
         LazyColumn(
             Modifier.fillMaxSize(),
             contentPadding = PaddingValues(14.dp, 4.dp, 14.dp, 24.dp),
@@ -192,6 +204,20 @@ fun LinesPanel(ssh: SshSession?, host: Host?, sessions: List<Session>) {
                             onPick = { pick(l) },
                             onEdit = { edit = l },
                         )
+                    }
+                    // 单独设过的项目才有得撤 —— 没设过的本来就在跟随整机，不给一个点了没反应的按钮
+                    if (act?.fromProject == true) scope?.let { sc ->
+                        item {
+                            FollowMachineRow {
+                                bg.launch {
+                                    val err = Lines.clearProject(ssh, sc.cwd)
+                                    note = err?.let { t("没撤掉：%s").format(it) }
+                                        ?: t("已撤掉「%s」的单独设置。\n⚠️ 这一步要重开那个会话才真正生效 —— 「跟随整机」只能靠把设置删掉来表达，而删掉不会热生效，旧值还留在那个进程里。")
+                                            .format(sc.short)
+                                    reload()
+                                }
+                            }
+                        }
                     }
                     if (cur != null && !cur.isDefault && lines.orEmpty().none { Lines.matches(it, cur) }) item {
                         // 真相源是 settings.json，不是我们的清单 —— 对不上就照实说，别假装是列表里某条
@@ -338,5 +364,64 @@ private fun Hint(text: String) {
         modifier = Modifier.fillMaxWidth(),
     ) {
         Text(text, Modifier.padding(16.dp, 14.dp), style = MaterialTheme.typography.bodySmall, color = Muted)
+    }
+}
+
+/**
+ * 改谁：整机，还是某一个项目。
+ *
+ * ⚠️ **先选范围再选线路。** 不先说清改的是整台机器还是一个目录，
+ * 点下去那一下的影响面差一个数量级 —— 整机是所有 agent 一起换。
+ */
+@Composable
+private fun ScopeBar(scopables: List<Session>, picked: Session?, onPick: (Session?) -> Unit) {
+    LazyRow(
+        Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(14.dp, 8.dp, 14.dp, 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item { ScopeChip(t("整台机器"), picked == null) { onPick(null) } }
+        items(scopables.size) { i ->
+            val s = scopables[i]
+            ScopeChip(s.short, picked?.name == s.name) { onPick(s) }
+        }
+    }
+}
+
+@Composable
+private fun ScopeChip(label: String, on: Boolean, onClick: () -> Unit) {
+    Text(
+        label,
+        Modifier.clip(RoundedCornerShape(100.dp))
+            .background(
+                if (on) MaterialTheme.colorScheme.primaryContainer
+                else MaterialTheme.colorScheme.surfaceContainerHigh,
+            )
+            .clickable(onClick = onClick)
+            .padding(14.dp, 7.dp),
+        style = MaterialTheme.typography.labelLarge,
+        color = if (on) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/**
+ * 撤掉这个项目的单独设置，回去跟随整机。
+ * ⚠️ 按钮上就写明「要重开会话」—— 这一个方向确实不热生效（见 [Lines.clearProject]），
+ * 不写的话人点完看不到变化，只会以为坏了。
+ */
+@Composable
+private fun FollowMachineRow(onClick: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick),
+    ) {
+        Column(Modifier.padding(16.dp, 12.dp)) {
+            Text(t("不再单独设置，跟随整机"), style = MaterialTheme.typography.labelLarge, color = Muted)
+            Text(
+                t("要重开这个会话才生效"),
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary,
+            )
+        }
     }
 }

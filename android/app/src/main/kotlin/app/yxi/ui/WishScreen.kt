@@ -324,17 +324,25 @@ fun WishScreen(modifier: Modifier = Modifier) {
 }
 
 /**
- * 抽卡结果的表演 —— 老板 2026-09-04：「抽奖动画要够吸引人」。三拍：
+ * 抽卡结果的表演 —— 老板 2026-09-04：「抽奖动画要够吸引人」、2026-09-05：「多学学米哈游」。
+ * 特效那五层在 [DropStage]（规格 `logto_yxi/design/drop-effect.md`），这里只管**时间轴和内容**：
  *
- *  1. **星轨**（0–900ms）：暗下来，一道光划过整屏，**颜色就是这一批里最高的稀有度**
- *     （蓝 → 紫 → 金 → 红）。这是整段唯一的悬念点：光一变红，人就知道出货了。
- *  2. **光爆**（900–1250ms）：星轨落到屏心炸开。
- *  3. **翻卡**（1250ms 起）：一张张翻出来，每张 140ms 错开；**红色档直接出立绘**。
+ * | 起 | 止 | 做什么 |
+ * |---:|---:|---|
+ * | 120 | 700 | 星轨划过 —— **颜色就是这一批里最高的稀有度**，整段唯一的悬念点 |
+ * | 680 | 1300 | 光爆 + 冲击波 |
+ * | 700 | 2600 | 粒子 + 神圣光柱 |
+ * | 1900 | 3000 | 立绘显形（红档），光效收干净 |
+ * | 3050 | 3570 | 小卡 / 文字落定 |
  *
+ * ⚠️⚠️ **悬念在划过来那 0.6 秒里，不在最后揭晓那一瞬** —— 这是米哈游那套最有效的一招。
+ *    所以星轨、光爆、光柱、粒子**四层必须同色**（[Tier]）：只染一层就是贴了个颜色。
+ * ⚠️⚠️ **落定那一帧必须干净**：[DONE] 之后 [DropStage] 一个像素都不画，
+ *    停住的画面只有完整立绘 + 几行普通字。**一直炫的东西看第二遍就烦。**
  * ⚠️ **结果在动画开始之前就定死了** —— 服务端摇的（见 [Wish]）。这里只是表演，
  *    颜色预告用的也是已经拿到的结果，不是「边演边摇」。
  * ⚠️ **随时点一下可以跳过**：好看归好看，第 20 次十连没人想再看一遍。
- * ⚠️ 系统关了动效就直接给最终画面（design/STYLE.md §2.4）。
+ * ⚠️ 系统关了动效走 [DropStage] 的 reduced 分支：只闪一下光爆，立绘直接淡入。
  */
 @Composable
 private fun WishResult(d: Wish.Draw, onClose: () -> Unit) {
@@ -346,7 +354,8 @@ private fun WishResult(d: Wish.Draw, onClose: () -> Unit) {
             ) != 0f
         }.getOrDefault(true)
     }
-    val total = 1250f + d.results.size * 140f + 300f
+    // ⚠️ 特效到 [DONE] 就收干净；小卡在那之后才落定，所以总长按小卡算
+    val total = DONE + 50f + d.results.size * 110f + 520f
     val clock = remember { Animatable(if (motion) 0f else 1f) }
     LaunchedEffect(Unit) { if (motion) clock.animateTo(1f, tween(total.toInt(), easing = LinearEasing)) }
     var skipped by remember { mutableStateOf(!motion) }
@@ -357,6 +366,7 @@ private fun WishResult(d: Wish.Draw, onClose: () -> Unit) {
     val best = d.results.maxByOrNull { rank(it.rarity) }
     val hero = best?.let { b -> CROWNS.firstOrNull { it.id == b.id } }
     val topColor = rarityColor(best?.rarity.orEmpty())
+    val tier = remember(best?.rarity) { Tier.of(best?.rarity.orEmpty()) }
 
     Dialog(
         onDismissRequest = onClose,
@@ -366,47 +376,10 @@ private fun WishResult(d: Wish.Draw, onClose: () -> Unit) {
             Modifier.fillMaxSize().background(Color(0xF20B0D12))
                 .clickable { if (ms >= total * 0.95f) onClose() else skipped = true },
         ) {
-            // ── ① 星轨 + ② 光爆
-            val trail = (ms / 900f).coerceIn(0f, 1f)
-            val burst = ((ms - 900f) / 350f).coerceIn(0f, 1f)
-            if (trail < 1f || burst < 1f) Canvas(Modifier.fillMaxSize()) {
-                val w = size.width; val h = size.height
-                if (trail > 0f && trail < 1f) {
-                    val e = TRAIL.transform(trail)
-                    // 从左下斜着划到屏心
-                    val x = -w * 0.2f + e * (w * 0.7f)
-                    val y = h * 1.05f - e * (h * 0.55f)
-                    // 拖尾：十来个逐渐变淡的点
-                    repeat(14) { i ->
-                        val k = i / 14f
-                        val tx = x - k * w * 0.34f
-                        val ty = y + k * h * 0.26f
-                        drawCircle(topColor, (10f - k * 8f) * density, Offset(tx, ty), alpha = (1f - k) * 0.9f)
-                    }
-                    drawCircle(Color.White, 7f * density, Offset(x, y))
-                }
-                if (burst > 0f) {
-                    val r = burst * size.minDimension * 0.75f
-                    drawCircle(
-                        Brush.radialGradient(
-                            listOf(topColor.copy(alpha = (1f - burst) * 0.75f), Color.Transparent),
-                            center = Offset(w / 2f, h * 0.5f), radius = r.coerceAtLeast(1f),
-                        ),
-                        radius = r, center = Offset(w / 2f, h * 0.5f),
-                    )
-                    repeat(24) { i ->
-                        val a = (PI2 * i / 24f)
-                        val rr = r * (0.55f + (i % 5) * 0.09f)
-                        drawCircle(
-                            topColor, (3.4f - burst * 2f).coerceAtLeast(0.5f) * density,
-                            Offset(w / 2f + kotlin.math.cos(a) * rr, h * 0.5f + kotlin.math.sin(a) * rr),
-                            alpha = (1f - burst) * 0.9f,
-                        )
-                    }
-                }
-            }
+            // ── 星轨 / 光爆 / 冲击波 / 粒子 / 光柱，全在 [DropStage] 里，四层同色
+            DropStage(tier, ms, reduced = !motion, modifier = Modifier.fillMaxSize())
 
-            // ── ③ 翻卡
+            // ── 立绘 / 小卡
             Column(
                 Modifier.fillMaxSize().padding(22.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -414,7 +387,8 @@ private fun WishResult(d: Wish.Draw, onClose: () -> Unit) {
             ) {
                 // 红色档：整张立绘顶上来
                 if (hero != null && rank(best.rarity) >= 3) {
-                    val hp = ((ms - 1250f) / 520f).coerceIn(0f, 1f)
+                    // 1900 起显形，到 DONE 正好满 —— 光效收干净的同一刻立绘刚好站定
+                    val hp = ((ms - 1900f) / (DONE - 1900f)).coerceIn(0f, 1f)
                     // ⚠️ 出货那一下也用**整张 16:9**，不裁（老板要求，同卡牌库）
                     if (hp > 0f) Box(
                         Modifier.fillMaxWidth(0.94f).aspectRatio(16f / 9f)
@@ -449,7 +423,9 @@ private fun WishResult(d: Wish.Draw, onClose: () -> Unit) {
                 // 其余：一行一张小卡
                 d.results.forEachIndexed { i, g ->
                     if (hero != null && g.id == hero.id && rank(g.rarity) >= 3) return@forEachIndexed
-                    val cp = ((ms - 1250f - i * 140f) / 300f).coerceIn(0f, 1f)
+                    // ⚠️ 小卡**等特效收干净之后**才翻（DONE + 50）——
+                    //    一边炸一边翻卡，两样都看不清
+                    val cp = ((ms - DONE - 50f - i * 110f) / 300f).coerceIn(0f, 1f)
                     if (cp <= 0f) return@forEachIndexed
                     val glow = rarityColor(g.rarity)
                     Surface(
@@ -499,8 +475,6 @@ private fun WishResult(d: Wish.Draw, onClose: () -> Unit) {
     }
 }
 
-private const val PI2 = 6.2831855f
-private val TRAIL = CubicBezierEasing(0.3f, 0f, 0.2f, 1f)
 
 /** 稀有度排序：蓝 1 < 紫 2 < 金 3 < 红 4。星轨的颜色取这一批里最高的那个。 */
 internal fun rank(r: String): Int = when (r) {
@@ -512,13 +486,14 @@ internal fun rank(r: String): Int = when (r) {
 
 private val FLIP = CubicBezierEasing(0.16f, 0.84f, 0.28f, 1.02f)
 
-/** 四档颜色，跟老板定的对齐：红=角色、金=曦光、紫=稀有装扮、蓝=普通装扮。 */
-internal fun rarityColor(r: String): Color = when (rank(r)) {
-    4 -> Color(0xFFFF5C6E)      // 红
-    3 -> Color(0xFFFFC24D)      // 金
-    2 -> Color(0xFFB07AE8)      // 紫
-    else -> Color(0xFF5FA8F5)   // 蓝
-}
+/**
+ * 四档颜色：红=角色、金=曦光、紫=稀有装扮、蓝=普通装扮。
+ * ⚠️ **只有 [Tier] 一处定义**（cc-logto_yxi 2026-09-05 定死的值）——
+ *    概率公示的圆点、小卡的字、特效那四层必须是同一组色，
+ *    分两处写迟早会变成「公示上是这个紫、抽出来是另一个紫」。
+ * ⚠️ 别跟 `STYLE.md` §1.4 的**会员档位色**混用，那是另一回事。
+ */
+internal fun rarityColor(r: String): Color = Tier.of(r).hi
 
 internal fun rarityLabel(r: String): String = when (rank(r)) {
     4 -> t("角色")

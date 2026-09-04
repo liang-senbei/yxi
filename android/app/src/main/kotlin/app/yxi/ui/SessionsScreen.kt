@@ -338,9 +338,15 @@ fun SessionsScreen(
                         shape = Pill,
                         modifier = Modifier.height(44.dp).clip(Pill).clickable { dirMenu = true },
                     ) {
+                        // ⚠️ 这颗按钮原来只写「目录」——功能一直在（按每一级祖先目录筛），
+                        //    但用户 2026-09-05 说「筛选怎么还没做」：他要找的是**动作**（筛选），
+                        //    看到的是**维度**（目录），于是从没往这儿点过。
+                        //    功能没变，只把名字改成人会去找的那个词。
+                        //    ⚠️ 试过配个漏斗图标 —— 顶栏那排本来就刚好排满，加了图标「筛选」
+                        //    就被挤出屏幕只剩一个「筛」（英文 Filter 更宽）。**词比图标要紧**，图标撤了。
                         Box(Modifier.padding(horizontal = 14.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
                             Text(
-                                dirFilter?.let { it.substringAfterLast('/').ifEmpty { "/" } } ?: t("目录"),
+                                dirFilter?.let { it.substringAfterLast('/').ifEmpty { "/" } } ?: t("筛选"),
                                 style = MaterialTheme.typography.labelLarge, maxLines = 1,
                                 color = if (dirFilter != null) MaterialTheme.colorScheme.onSecondaryContainer
                                 else MaterialTheme.colorScheme.onSurface,

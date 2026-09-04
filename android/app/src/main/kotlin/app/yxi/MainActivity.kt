@@ -63,6 +63,12 @@ private enum class Tab(private val zh: String, val ico: app.yxi.ui.Ico) {
     val label: String get() = t(zh)
 }
 
+/**
+ * 盖在标签页之上的**整页**。加一页就往这儿加一个值，再去 MainActivity 那个 `when` 里加一支 ——
+ * ⚠️ **没有第三处要同步**（这正是「点底部导航纹丝不动」那个 bug 复发三次的根）。
+ */
+private enum class Page { Member, Prefs, Tickets, Trend, Mail, Wish, Activity }
+
 /** 工作区。它是**盖在标签页之上的整屏**，不是第四个标签 —— 见 D22。 */
 private data class Work(val host: Host, val session: String?, val cwd: String, val mode: Mode?)
 
@@ -172,32 +178,26 @@ class MainActivity : ComponentActivity() {
                     mutableStateOf<List<app.yxi.agent.Session>>(emptyList())
                 }
 
-                var member by remember { mutableStateOf(false) }
+                /**
+                 * 盖在主界面上的那一页。⚠️⚠️ **一个状态，不是一堆布尔量。**
+                 *
+                 * 原来是 7 个 `var xxx by remember { false }` + 一个手写的 `overlay =  a || b || …`
+                 * + 一个手写的 `closeOverlays()`。**同一个 bug 因此复发了三次**
+                 * （「进了某一页，点底部导航纹丝不动」）—— 每加一页要记得改三处，
+                 * 漏一处就复发，而且漏的那一页自己看起来完全正常。
+                 *
+                 * 现在加一页 = 往 [Page] 里加一个枚举值 + 在下面 `when` 里加一支，**没有第二处要同步**：
+                 * 「盖着东西没有」是 `page != null`，「收掉」是 `page = null`，编译器帮着数。
+                 */
+                var page by remember { mutableStateOf<Page?>(null) }
                 // ⚠️ **「设置」和「我的」是两页**（用户 2026-09-04）：底部导航那一栏是「我的」（人），
                 //    侧边栏最底下那颗齿轮打开的才是「设置」（App）。工单中心也从设置里搬出来单独一页。
-                var prefs by remember { mutableStateOf(false) }
-                var tickets by remember { mutableStateOf(false) }
-                var trend by remember { mutableStateOf(false) }
-                var mail by remember { mutableStateOf(false) }
-                var wish by remember { mutableStateOf(false) }
-                var activity by remember { mutableStateOf(false) }
                 var editMe by remember { mutableStateOf(false) }
-                // 盖在主界面上的那些整页。**加新的整页就往这两处加**，别散着写。
-                val overlay = member || prefs || tickets || trend || mail || wish || activity
-                fun closeOverlays() {
-                    member = false; prefs = false; tickets = false
-                    trend = false; mail = false; wish = false; activity = false
-                }
-                BackHandler(enabled = work != null || member || prefs || tickets || trend || mail || wish || activity || tab != Tab.Sessions) {
+                val overlay = page != null
+                BackHandler(enabled = work != null || page != null || tab != Tab.Sessions) {
                     when {
                         work != null -> work = null      // 工作区 → 回标签页
-                        member -> member = false         // 会员中心 → 回去
-                        prefs -> prefs = false           // 设置 → 回去
-                        tickets -> tickets = false       // 工单中心 → 回去
-                        trend -> trend = false           // 趋势 → 回去
-                        mail -> mail = false             // 邮件 → 回去
-                        wish -> wish = false             // 祈愿 → 回去
-                        activity -> activity = false     // 活动中心 → 回去
+                        page != null -> page = null      // 任何一个整页 → 回去
                         else -> tab = Tab.Sessions       // 非默认标签 → 回会话
                     }
                 }
@@ -231,10 +231,10 @@ class MainActivity : ComponentActivity() {
                                     hosts = hosts, current = host,
                                     onPickHost = { hostId = it.id; work = null; tab = Tab.Sessions; drawerScope.launch { drawer.close() } },
                                     onTab = { tab = it; work = null; drawerScope.launch { drawer.close() } },
-                                    onMember = { member = true; work = null; drawerScope.launch { drawer.close() } },
+                                    onMember = { page = Page.Member; work = null; drawerScope.launch { drawer.close() } },
                                     onEditMe = { editMe = true; drawerScope.launch { drawer.close() } },
-                                    onPrefs = { prefs = true; work = null; drawerScope.launch { drawer.close() } },
-                                    onTickets = { tickets = true; work = null; drawerScope.launch { drawer.close() } },
+                                    onPrefs = { page = Page.Prefs; work = null; drawerScope.launch { drawer.close() } },
+                                    onTickets = { page = Page.Tickets; work = null; drawerScope.launch { drawer.close() } },
                                 )
                             }
                         },
@@ -269,10 +269,10 @@ class MainActivity : ComponentActivity() {
                                 hosts = hosts, current = host,
                                 onPickHost = { hostId = it.id; tab = Tab.Sessions; drawerScope.launch { drawer.close() } },
                                 onTab = { tab = it; drawerScope.launch { drawer.close() } },
-                                onMember = { member = true; drawerScope.launch { drawer.close() } },
+                                onMember = { page = Page.Member; drawerScope.launch { drawer.close() } },
                                 onEditMe = { editMe = true; drawerScope.launch { drawer.close() } },
-                                onPrefs = { prefs = true; drawerScope.launch { drawer.close() } },
-                                onTickets = { tickets = true; drawerScope.launch { drawer.close() } },
+                                onPrefs = { page = Page.Prefs; drawerScope.launch { drawer.close() } },
+                                onTickets = { page = Page.Tickets; drawerScope.launch { drawer.close() } },
                             )
                         }
                     },
@@ -286,14 +286,10 @@ class MainActivity : ComponentActivity() {
                             Tab.entries.forEach { t ->
                                 NavigationBarItem(
                                     selected = tab == t && !overlay,
-                                    // ⚠️⚠️ **点底部导航要先把盖在上面的那一层收掉。**
-                                    //    这些整页（会员中心 / 设置 / 工单 / 趋势 / 邮件 / 祈愿 / 活动中心）都是
-                                    //    `return@Scaffold` 直接接管画面的，不收掉的话底部导航点了纹丝不动 ——
-                                    //    用户得先返回再点，两步才走得动一步。
-                                    //    ⚠️ 2026-09-04 这个坑犯了**两次**：第一次只有会员中心，修了；
-                                    //    后来加了六个新页面又全带回来了。**以后新增整页浮层，这一行必须一起加**，
-                                    //    所以收敛成一个 `closeOverlays()`，别再散着写。
-                                    onClick = { closeOverlays(); tab = t },
+                                    // ⚠️⚠️ **点底部导航 = 无条件回到那个标签页。**
+                                    //    盖着的整页收掉、工作区也退出 —— 用户 2026-09-05 第三次报
+                                    //    「在某一页里点下面的导航不跳转」。收成一句赋值，不再有「漏了哪一个」。
+                                    onClick = { page = null; work = null; tab = t },
                                     icon = { app.yxi.ui.YxiIcon(t.ico, size = 22.dp) },
                                     label = { Text(t.label, style = MaterialTheme.typography.labelMedium) },
                                 )
@@ -302,36 +298,22 @@ class MainActivity : ComponentActivity() {
                     },
                 ) { p ->
                     val m = Modifier.padding(p)
-                    if (member) {
-                        app.yxi.ui.MemberScreen(onBack = { member = false }, modifier = m)
-                        return@Scaffold
-                    }
-                    if (prefs) {
-                        SettingsScreen(
-                            store, keys, host, shared.session, shared.error,
-                            onMember = { member = true; prefs = false }, mine = false, modifier = m,
-                        )
-                        return@Scaffold
-                    }
-                    if (tickets) {
-                        app.yxi.ui.TicketsScreen(shared.session, modifier = m)
-                        return@Scaffold
-                    }
-                    if (trend) {
-                        app.yxi.ui.TrendScreen(shared.session, modifier = m)
-                        return@Scaffold
-                    }
-                    if (mail) {
-                        app.yxi.ui.MailScreen(modifier = m)
-                        return@Scaffold
-                    }
-                    if (wish) {
-                        app.yxi.ui.WishScreen(modifier = m)
-                        return@Scaffold
-                    }
-                    if (activity) {
-                        app.yxi.ui.ActivityScreen(modifier = m)
-                        return@Scaffold
+                    // ⚠️ 一页一支，编译器会替你数（[Page] 加了值不处理这里就报错）
+                    when (page) {
+                        Page.Member -> { app.yxi.ui.MemberScreen(onBack = { page = null }, modifier = m); return@Scaffold }
+                        Page.Prefs -> {
+                            SettingsScreen(
+                                store, keys, host, shared.session, shared.error,
+                                onMember = { page = Page.Member }, mine = false, modifier = m,
+                            )
+                            return@Scaffold
+                        }
+                        Page.Tickets -> { app.yxi.ui.TicketsScreen(shared.session, modifier = m); return@Scaffold }
+                        Page.Trend -> { app.yxi.ui.TrendScreen(shared.session, modifier = m); return@Scaffold }
+                        Page.Mail -> { app.yxi.ui.MailScreen(modifier = m); return@Scaffold }
+                        Page.Wish -> { app.yxi.ui.WishScreen(modifier = m); return@Scaffold }
+                        Page.Activity -> { app.yxi.ui.ActivityScreen(modifier = m); return@Scaffold }
+                        null -> Unit
                     }
                     when (tab) {
                         Tab.Sessions -> if (host == null) {
@@ -372,10 +354,10 @@ class MainActivity : ComponentActivity() {
                         }
                         Tab.Settings -> SettingsScreen(
                             store, keys, host, shared.session, shared.error,
-                            onMember = { member = true }, mine = true,
-                            onPrefs = { prefs = true }, onTickets = { tickets = true },
-                            onTrend = { trend = true }, onMail = { mail = true },
-                            onWish = { wish = true }, onActivity = { activity = true }, modifier = m,
+                            onMember = { page = Page.Member }, mine = true,
+                            onPrefs = { page = Page.Prefs }, onTickets = { page = Page.Tickets },
+                            onTrend = { page = Page.Trend }, onMail = { page = Page.Mail },
+                            onWish = { page = Page.Wish }, onActivity = { page = Page.Activity }, modifier = m,
                         )
                     }
                 }

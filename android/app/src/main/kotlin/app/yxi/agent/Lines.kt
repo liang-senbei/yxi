@@ -63,6 +63,22 @@ object Lines {
     private fun settingsPath(home: String) = "$home/.claude/settings.json"
     private fun listPath(home: String) = "$home/.yxi/lines.json"
 
+    /**
+     * 改哪个文件。[cwd] = null 是**整机**（`~/.claude/settings.json`，那台机器上所有 agent 一起换）；
+     * 传目录就是**只管那个项目**（`<目录>/.claude/settings.local.json`）。
+     *
+     * 项目级优先于用户级，所以「整机默认走 A、某个项目走 B」是天然成立的。
+     *
+     * ⚠️ 用 `settings.local.json` 而不是 `settings.json`：后者是**项目里大家共用**的那份，
+     * 会进 git。钥匙绝不能写进会被提交的文件。`.local.json` 按约定是本机私有的。
+     *
+     * ⚠️ 项目级的 env 要那个目录**被信任过**才生效。用户自己天天在那个目录跑 agent，
+     * 早就信任了；但如果换了个从没跑过的目录，可能不吃 —— 所以换完那次探测很重要。
+     */
+    private suspend fun targetPath(ssh: SshSession?, cwd: String?): String? =
+        if (cwd == null) home(ssh)?.let { settingsPath(it) }
+        else cwd.trimEnd('/').ifBlank { null }?.let { "$it/.claude/settings.local.json" }
+
     // ── 线路清单 ────────────────────────────────────────────────────────────
 
     /** @return null = 拿不到（没连上）。空表 = 真的一条都没建过 —— 两件事，界面要分开说。 */
@@ -106,16 +122,39 @@ object Lines {
 
     // ── 当前走哪条 ──────────────────────────────────────────────────────────
 
-    /** 就地从 `settings.json` 反读。@return null = 拿不到（没连上 / 读不到文件）。 */
-    suspend fun current(ssh: SshSession?): Env? = withContext(Dispatchers.IO) {
-        val h = home(ssh) ?: return@withContext null
-        // 文件不存在是**正常**的（没设过任何 env），当成默认线路，不是「拿不到」
-        val raw = ConfigRemote.readFile(ssh, settingsPath(h)) ?: return@withContext Env("", "", "")
-        runCatching {
-            val env = JSONObject(raw).optJSONObject("env")
-            Env(env?.optString(BASE).orEmpty(), env?.optString(TOKEN).orEmpty(), env?.optString(KEY).orEmpty())
+    /** 这一刻真正生效的那套值，以及它是谁给的。 */
+    data class Active(val env: Env, val fromProject: Boolean)
+
+    /** 读某个文件里的那三个 key。文件不存在 = 没设过，返回 null（跟「读坏了」区分）。 */
+    private suspend fun envAt(ssh: SshSession?, path: String): Env? {
+        val raw = ConfigRemote.readFile(ssh, path) ?: return null
+        return runCatching {
+            val e = JSONObject(raw).optJSONObject("env") ?: return null
+            if (!e.has(BASE) && !e.has(TOKEN) && !e.has(KEY)) return null
+            Env(e.optString(BASE), e.optString(TOKEN), e.optString(KEY))
         }.getOrNull()
     }
+
+    /**
+     * 就地从配置文件反读**此刻真正生效**的那套。[cwd] 传目录就连项目级一起算。
+     *
+     * ⚠️ **不另存一份「当前用哪条」。** 存了就有第二个真相源 —— 用户在电脑上用 CC Switch
+     * 也切过、或者手动改过文件之后，界面会理直气壮地显示错的那条。
+     *
+     * @return null = 拿不到（没连上）。
+     */
+    suspend fun active(ssh: SshSession?, cwd: String? = null): Active? = withContext(Dispatchers.IO) {
+        val h = home(ssh) ?: return@withContext null
+        // 项目级压用户级。我们写的时候三个 key 一起写，所以覆盖是整体的，不会半边。
+        if (cwd != null) targetPath(ssh, cwd)?.let { p ->
+            envAt(ssh, p)?.let { return@withContext Active(it, true) }
+        }
+        // 文件不存在或没设过 env 都是**正常**的（就是默认线路），不是「拿不到」
+        Active(envAt(ssh, settingsPath(h)) ?: Env("", "", ""), false)
+    }
+
+    /** 整机那份。[LinesPanel] 用它显示「整机现在走哪条」。 */
+    suspend fun current(ssh: SshSession?): Env? = active(ssh, null)?.env
 
     /**
      * 这条线路是不是当前在用的那条。
@@ -134,10 +173,11 @@ object Lines {
      *
      * @return 出错原因；null = 成功。
      */
-    suspend fun apply(ssh: SshSession?, line: Line?): String? = withContext(Dispatchers.IO) {
+    suspend fun apply(ssh: SshSession?, line: Line?, cwd: String? = null): String? = withContext(Dispatchers.IO) {
         val s = ssh ?: return@withContext "没连上"
-        val h = home(s) ?: return@withContext "取不到家目录"
-        val path = settingsPath(h)
+        val path = targetPath(s, cwd) ?: return@withContext "取不到要改的文件路径"
+        // 项目级那个 .claude 目录可能还不存在，SFTP 不会替你建
+        if (cwd != null) s.exec("mkdir -p " + shq(cwd.trimEnd('/') + "/.claude"))
         val raw = ConfigRemote.readFile(s, path) ?: "{}"
         val root = runCatching { JSONObject(raw) }.getOrElse {
             return@withContext "settings.json 现在就是坏的（${it.message?.take(40)}），没敢动"
@@ -148,6 +188,30 @@ object Lines {
         env.put(TOKEN, line?.token.orEmpty())
         env.put(KEY, line?.apiKey.orEmpty())
         root.put("env", env)
+        ConfigRemote.save(s, path, root.toString(2))
+    }
+
+    /**
+     * 撤掉某个项目的单独设置，让它**回去跟随整机**。
+     *
+     * ⚠️⚠️ **这一个方向必须重开那个会话才生效。** 因为「跟随整机」只能靠**把 key 从文件里删掉**
+     * 来表达（写空串是「强制走默认线路」，不是「跟随整机」，两者含义不同），
+     * 而**删 key 是不热生效的** —— 旧值留在进程环境里（TROUBLESHOOTING #254）。
+     * 调用方必须把这句告诉用户，不能假装已经切回去了。
+     *
+     * @return 出错原因；null = 文件已改好（但仍需重开会话）。
+     */
+    suspend fun clearProject(ssh: SshSession?, cwd: String): String? = withContext(Dispatchers.IO) {
+        val s = ssh ?: return@withContext "没连上"
+        val path = targetPath(s, cwd) ?: return@withContext "路径不对"
+        val raw = ConfigRemote.readFile(s, path) ?: return@withContext null   // 本来就没有，等于已经跟随整机
+        val root = runCatching { JSONObject(raw) }.getOrElse {
+            return@withContext "这个项目的 settings.local.json 是坏的，没敢动"
+        }
+        root.optJSONObject("env")?.let { e ->
+            e.remove(BASE); e.remove(TOKEN); e.remove(KEY)
+            if (e.length() == 0) root.remove("env") else root.put("env", e)
+        }
         ConfigRemote.save(s, path, root.toString(2))
     }
 
@@ -180,4 +244,6 @@ object Lines {
     }
 
     fun newId(): String = "line-" + java.util.UUID.randomUUID().toString().take(8)
+
+    private fun shq(p: String) = "'" + p.replace("'", "'\\''") + "'"
 }

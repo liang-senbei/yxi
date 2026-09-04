@@ -90,12 +90,13 @@ fun RedeemSuccess(r: Account.Redeemed, onDone: () -> Unit) {
 
     val head = if (r.kind == "balance") t("余额到账") else t("Welcome to")
     val name = when {
-        r.kind == "balance" -> "¥" + "%.2f".format(r.amountCents / 100.0)
+        r.kind == "balance" -> app.yxi.agent.Account.yuan(r.amountCents)
         ultra -> "Yunxi Ultra"
         else -> "Yunxi Pro"
     }
     val sub = when {
-        r.kind == "balance" -> t("当前余额 ¥%s").format("%.2f".format(r.balanceCents / 100.0))
+        // 负数是**该显示**的（刚兑的券被撤销就会这样），只是负号要在 ¥ 前面 —— 见 [yuan]
+        r.kind == "balance" -> t("当前余额 %s").format(app.yxi.agent.Account.yuan(r.balanceCents))
         r.expiresAt.isNotBlank() -> t("会员有效期至 %s").format(r.expiresAt)
         else -> ""
     }
