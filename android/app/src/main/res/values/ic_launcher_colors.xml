@@ -1,4 +1,6 @@
 <resources>
-    <!-- 新 logo 自带的浅灰底 —— 墨迹是黑的，底必须浅，不然整个图标是一坨黑 -->
-    <color name="ic_launcher_bg">#E9E9E9</color>
+    <!-- 自适应图标的底色。⚠️ 新 logo（2026-09-04 用户定稿：两片渐变花瓣）是**透明底**的，
+         底色由这里给。挑了带一点点蓝的近白：纯白会把左边那片浅蓝花瓣的边缘吃掉，
+         原来的 #E9E9E9 灰又把整枚图标压得发闷。 -->
+    <color name="ic_launcher_bg">#F4F6FA</color>
 </resources>
