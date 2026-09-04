@@ -113,7 +113,12 @@ class MainActivity : ComponentActivity() {
             // ⚠️ 以前只有打开「会员中心」才拉 —— 结果刚登录完，「我的」和侧边栏都写着「未登录」。
             //    刷新令牌是串行的（见 Account.refreshLock），这里多一次调用不会并发轮换。
             LaunchedEffect(app.yxi.agent.Account.signedIn) {
-                if (app.yxi.agent.Account.signedIn) app.yxi.agent.Account.refresh(this@MainActivity)
+                if (app.yxi.agent.Account.signedIn) {
+                    app.yxi.agent.Account.refresh(this@MainActivity)
+                    // 装扮归属也同步一次。⚠️ [app.yxi.ui.Cosmetics.refresh] **只有真拿到才覆盖缓存** ——
+                    //    没网就原样保留，不然一次断网就把人的皮肤全下架。
+                    app.yxi.ui.Cosmetics.refresh(this@MainActivity)
+                }
             }
             // 登录回调：拿 code 换 token，成功了顺手把资料拉回来
             val authUri = app.yxi.agent.Account.pendingCallback

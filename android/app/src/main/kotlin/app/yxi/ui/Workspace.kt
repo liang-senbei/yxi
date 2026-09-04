@@ -158,8 +158,11 @@ fun Workspace(
     // ANSI 彩色输出是按深底配的：浅底上黄色、亮绿几乎看不见，而那恰恰是
     // 警告和 diff 用的颜色。代价是浅色风格下切到终端有一下明暗跳变 ——
     // 自觉的取舍，见 [app.yxi.ui.theme.LightPalette] 的注释。
-    val fg = app.yxi.ui.theme.TerminalFg
-    val bg = app.yxi.ui.theme.TerminalBg
+    // 终端配色可以换（祈愿抽到的装扮）。⚠️ 用带名字的 .fg/.bg，不是 Pair ——
+    // 两个同类型的 Color 装 Pair 里迟早被接反，而且**接反不报错**，只是终端变成白底黑字。
+    val term = Skins.terminal(ctx)
+    val fg = term.fg
+    val bg = term.bg
     val focus = remember { FocusRequester() }
     // 粘滞修饰键：工具条点了 Ctrl，下一个从软键盘来的字符带上 Ctrl（控件会自动清）
     val stickies = remember { app.yxi.term.StickyModifiers() }

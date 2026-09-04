@@ -1650,6 +1650,7 @@ private fun UserBubble(
     ssh: app.yxi.ssh.SshSession? = null,
     onOpenRef: (app.yxi.agent.Attachments.Ref) -> Unit = {},
 ) {
+    val bub = Skins.bubble(androidx.compose.ui.platform.LocalContext.current)
     // ⚠️ **把附件那几行从正文里摘出来单独画。** 发出去之后气泡里是
     // `[图片1] /root/src/tmp/xxx/0902-091207-IMG_....jpg` —— 一条又长又没用的路径
     // 占四行，而用户想看的是**那张图**（他的原话：要像参考款一样出个缩略图）。
@@ -1669,7 +1670,9 @@ private fun UserBubble(
             // ⚠️ 只有附件、没打字时**不画空气泡**（很常见：直接发一张图）
             if (body.isNotBlank() || refs.isEmpty())
             Surface(
-                color = MaterialTheme.colorScheme.primaryContainer,
+                // 气泡配色可以换。⚠️ **默认那套故意没有颜色**（id 为空）——
+                // 默认气泡必须跟着主题走，在 Skins 里塞一份固定色就等于把主题掀了。
+                color = if (bub.id.isEmpty()) MaterialTheme.colorScheme.primaryContainer else bub.bg,
                 shape = RoundedCornerShape(26.dp, 26.dp, 8.dp, 26.dp),
                 modifier = Modifier.clip(RoundedCornerShape(26.dp, 26.dp, 8.dp, 26.dp)).combinedClickable(
                     onClick = {},
@@ -1680,7 +1683,7 @@ private fun UserBubble(
                     body.ifBlank { text },
                     Modifier.padding(18.dp, 14.dp),
                     style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    color = if (bub.id.isEmpty()) MaterialTheme.colorScheme.onPrimaryContainer else bub.on,
                 )
             }
           }
