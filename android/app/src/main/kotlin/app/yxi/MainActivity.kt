@@ -52,7 +52,10 @@ import app.yxi.ui.theme.YxiTheme
 /** 底部导航的三格。⚠️ 只有 app 级的平级目的地能进来（决策 D22）。 */
 private enum class Tab(private val zh: String, val ico: app.yxi.ui.Ico) {
     Sessions("会话", app.yxi.ui.Ico.Chat), Hosts("主机", app.yxi.ui.Ico.Server),
-    Config("配置", app.yxi.ui.Ico.Sliders), Settings("设置", app.yxi.ui.Ico.Gear);
+    Config("配置", app.yxi.ui.Ico.Sliders),
+    // ⚠️ 用户 2026-09-04：「设置改为我的（Profile）」—— 这一栏现在是个人主页：
+    //    资料 + 会员 + 分组过的设置（学 QQ）。
+    Settings("我的", app.yxi.ui.Ico.Person);
 
     // ⚠️ **label 必须是 get() 而不是构造参数。** enum 常量的参数在**类初始化时求值一次**，
     // 之后换语言它不会跟着变 —— 现象是底部导航栏 / 模式切换条永远停在启动时那种语言，
@@ -216,8 +219,10 @@ class MainActivity : ComponentActivity() {
                         NavigationBar {
                             Tab.entries.forEach { t ->
                                 NavigationBarItem(
-                                    selected = tab == t,
-                                    onClick = { tab = t },
+                                    selected = tab == t && !member,
+                                    // ⚠️ **先退出会员中心那一层**。原来盖在上面的整页不理会底部导航，
+                                    //    点「主机」纹丝不动（用户报的）。
+                                    onClick = { member = false; tab = t },
                                     icon = { app.yxi.ui.YxiIcon(t.ico, size = 22.dp) },
                                     label = { Text(t.label, style = MaterialTheme.typography.labelMedium) },
                                 )
@@ -261,7 +266,10 @@ class MainActivity : ComponentActivity() {
                             app.yxi.ui.ConfigScreen(shared.session, host, hosts,
                                 onPickHost = { picked -> hostId = picked.id }, modifier = m)
                         }
-                        Tab.Settings -> SettingsScreen(store, keys, host, shared.session, shared.error, modifier = m)
+                        Tab.Settings -> SettingsScreen(
+                            store, keys, host, shared.session, shared.error,
+                            onMember = { member = true }, modifier = m,
+                        )
                     }
                 }
                 }   // ModalNavigationDrawer

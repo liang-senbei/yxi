@@ -23,6 +23,16 @@ import java.io.File
 object Voice {
 
     /**
+     * ⚠️ **非交互的 `ssh exec` 拿不到登录 shell 的 PATH。**
+     * `yxi-asr` 装在 `~/.local/bin`（pip install --user 的默认位置），
+     * 而 `ssh host "command -v yxi-asr"` 的 PATH 里**没有**这一条 ——
+     * 于是 App 一直判定「这台服务器没有语音识别」，默默退回系统识别；
+     * 而用户的手机 GMS 是关的，系统识别根本不存在 = 麦克风点了没反应。
+     * 服务器上明明装好了，界面上却像没装 —— 这种「装了等于没装」最难查。
+     */
+    private const val PATH_FIX = "export PATH=\"\$HOME/.local/bin:\$HOME/bin:/usr/local/bin:\$PATH\";"
+
+    /**
      * 录好的音频先落这儿。
      *
      * ⚠️ 用 [Attachments.ROOT] 下的子目录，**不写 `$HOME`** —— SFTP 没有 shell，
@@ -43,7 +53,7 @@ object Voice {
         // 摊在「用户按住说完话之后」是最难受的位置（他已经说完了，在等）。
         // `--warm` 只把守护 fork 出去就立刻返回（实测 0.15 秒），
         // 等用户真说完话，模型早装载好了：实测 9.0 秒 → 3.9 秒。
-        app.yxi.ssh.catching { ssh.exec("command -v yxi-asr >/dev/null && yxi-asr --warm 2>/dev/null") }
+        app.yxi.ssh.catching { ssh.exec("$PATH_FIX command -v yxi-asr >/dev/null && yxi-asr --warm 2>/dev/null") }
             .getOrDefault("").trim() == "ok"
 
     /**
@@ -71,7 +81,7 @@ object Voice {
         // 留下一个用户说过的话的录音 —— 那是不该留的东西。
         val q = remote.replace("'", "'\\''")
         val out = app.yxi.ssh.catching {
-            ssh.exec("yxi-asr '$q' 2>&1; rm -f '$q'")
+            ssh.exec("$PATH_FIX yxi-asr '$q' 2>&1; rm -f '$q'")
         }.getOrDefault("").trim()
 
         if (out.isEmpty()) { why(app.yxi.ui.t("没识别出东西")); return null }

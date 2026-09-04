@@ -15,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -41,6 +42,7 @@ private val Mono = FontFamily.Monospace
  * 而实际可能落后好几版、正带着已知的 bug 在用。
  */
 @Composable
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 fun SettingsScreen(
     store: HostStore,
     keys: KeyManager,
@@ -49,6 +51,8 @@ fun SettingsScreen(
     ssh: SshSession?,
     /** 界面此刻显示的连接错误 —— 诊断报告要带上它，见 [DevMode.diagnose] */
     connectError: String? = null,
+    /** 点「会员中心」跳过去（那一页在 MainActivity 那层管） */
+    onMember: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val ctx = LocalContext.current
@@ -72,7 +76,82 @@ fun SettingsScreen(
         modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text(t("设置"), style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(18.dp, 14.dp, 18.dp, 4.dp))
+        Text(t("我的"), style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(18.dp, 14.dp, 18.dp, 4.dp))
+
+        // ── 「我」：头像 / 昵称 / 签名（学 QQ 和 Gemini 的个人页：账号那块单独一张卡，摆最上面）
+        var editMe by remember { mutableStateOf(false) }
+        if (editMe) MeDialog { editMe = false }
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = RoundedCornerShape(22.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)
+                .clip(RoundedCornerShape(22.dp)).clickable { editMe = true },
+        ) {
+            Row(
+                Modifier.padding(16.dp, 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                MeAvatar(52.dp)
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        Me.name(ctx).ifBlank {
+                            if (app.yxi.agent.Account.signedIn) t("点这里起个名") else t("点这里登录")
+                        },
+                        style = MaterialTheme.typography.titleMedium, maxLines = 1,
+                    )
+                    Text(
+                        Me.sign(ctx).ifBlank { t("写句个性签名") },
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
+                        maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    )
+                    // UID：找客服、后台按它反查兑换记录都要（logto_yxi 2026-09-04）。
+                    // ⚠️ 用 Logto 的 `sub`（12 位、不可变），**不另造一套**。长按复制。
+                    app.yxi.agent.Account.me?.userId?.takeIf { it.isNotBlank() }?.let { uid ->
+                        Text(
+                            "UID $uid",
+                            Modifier.padding(top = 3.dp).combinedClickable(
+                                onClick = { editMe = true },
+                                onLongClick = {
+                                    val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                        as android.content.ClipboardManager
+                                    cm.setPrimaryClip(android.content.ClipData.newPlainText("uid", uid))
+                                    android.widget.Toast.makeText(ctx, t("UID 复制好了"), android.widget.Toast.LENGTH_SHORT).show()
+                                },
+                            ),
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            ),
+                            color = MaterialTheme.colorScheme.outline,
+                        )
+                    }
+                }
+                Text("›", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.outline)
+            }
+        }
+        // 会员那条单独一张（学 Gemini 的「升级到 AI Plus」）
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = RoundedCornerShape(22.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)
+                .clip(RoundedCornerShape(22.dp)).clickable { onMember() },
+        ) {
+            Row(
+                Modifier.padding(16.dp, 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                YxiIcon(Ico.Crown, size = 22.dp, tint = androidx.compose.ui.graphics.Color(0xFFE8912D))
+                Text(t("会员中心"), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    app.yxi.agent.Account.me?.tier?.name?.takeIf { app.yxi.agent.Account.signedIn } ?: t("未登录"),
+                    style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline,
+                )
+                Text("›", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.outline)
+            }
+        }
+
+        SectionLabel(t("反馈与版本"))
 
         // ── 工单中心 ───────────────────────────────────────────────
         // 哪里不好用随手记一条，落在**连着的那台服务器** `~/.yxi/tickets.jsonl`，
@@ -144,6 +223,7 @@ fun SettingsScreen(
         }
 
         // ── 公钥 ───────────────────────────────────────────────────
+        SectionLabel(t("手机功能"))
         Card(t("这台手机的公钥"), Glyph.Key, subtitle = t("贴进目标机就能免密连")) {
             Hint2(t("贴进目标机的 ~/.ssh/authorized_keys 就能免密连。撤销 = 删掉那一行。"))
             Button({ showKey = true }, shape = Pill, modifier = Modifier.fillMaxWidth().height(44.dp)) {
@@ -276,6 +356,7 @@ fun SettingsScreen(
             }
         }
 
+        SectionLabel(t("界面"))
         Card(t("界面风格"), Glyph.Palette, subtitle = Skin.style.label) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Skin.Style.entries.forEach { st ->
@@ -321,6 +402,7 @@ fun SettingsScreen(
 
         if (dev) DevCard(ctx, host, store, keys, connectError)
 
+        SectionLabel(t("关于与帮助"))
         Card(t("关于"), Glyph.Info, subtitle = t("Yxi —— 手机上的 Claude Code 指挥台")) {
             Hint2(
                 t("Yxi —— 手机上的 Claude Code 指挥台。\n") +
@@ -621,3 +703,14 @@ private fun beijingTime(at: Long): String = if (at <= 0) "" else runCatching {
     java.time.Instant.ofEpochSecond(at).atZone(java.time.ZoneId.of("Asia/Shanghai"))
         .format(java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm"))
 }.getOrDefault("")
+
+/** QQ 那种分组小标题：卡片上面一行小灰字，把一堆设置分出层次 */
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text,
+        Modifier.padding(24.dp, 10.dp, 24.dp, 0.dp),
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.outline,
+    )
+}

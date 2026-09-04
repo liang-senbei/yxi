@@ -28,6 +28,13 @@ class Recorder {
     private var total = 0
     @Volatile private var running = false
 
+    /**
+     * 当前这一小段的响度（0..1）。**波形要画真数据** ——
+     * 画个假的动画，用户就分不清「在录」和「麦克风被占着但界面还在动」。
+     */
+    @Volatile var level: Float = 0f
+        private set
+
     /** @return 出错原因；null = 开始录了 */
     @SuppressLint("MissingPermission")   // 调用方在按下之前已经要过权限
     fun start(): String? {
@@ -55,6 +62,10 @@ class Recorder {
                 while (running) {
                     val n = r.read(buf, 0, buf.size)
                     if (n <= 0) continue
+                    // 峰值（不是均方根）：说话的瞬间起伏更明显，画出来更像「有人在说」
+                    var peak = 0
+                    for (i in 0 until n) { val v = kotlin.math.abs(buf[i].toInt()); if (v > peak) peak = v }
+                    level = (peak / 32768f).coerceIn(0f, 1f)
                     synchronized(chunks) { chunks += buf.copyOf(n); total += n }
                 }
             }
@@ -76,7 +87,7 @@ class Recorder {
      */
     fun stop(): FloatArray? {
         val r = rec ?: return null
-        rec = null; running = false
+        rec = null; running = false; level = 0f
         runCatching { r.stop() }
         runCatching { worker?.join(500) }
         worker = null

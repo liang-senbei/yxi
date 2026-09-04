@@ -12,6 +12,14 @@ package app.yxi.ui
 internal object En {
     val map: Map<String, String> = mapOf(
         "语言" to "Language",
+        "UID 复制好了" to "UID copied",
+        "语音识别就绪：点一下麦克风开始说，再点一下结束" to "Voice input ready: tap the mic to start, tap again to stop",
+        "反馈与版本" to "Feedback & version",
+        "我的" to "Profile",
+        "手机功能" to "On this phone",
+        "界面" to "Appearance",
+        "关于与帮助" to "About & help",
+        "太短了，没录到东西" to "Too short — nothing recorded",
         "点这里登录" to "Tap to sign in",
         "登录好了" to "Signed in",
         "退出登录" to "Sign out",

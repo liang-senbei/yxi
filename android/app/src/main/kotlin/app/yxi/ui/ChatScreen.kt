@@ -256,7 +256,7 @@ fun ChatScreen(
         if (!(onDevice || serverAsr)) return@LaunchedEffect
         val p = ctx.getSharedPreferences("yxi", android.content.Context.MODE_PRIVATE)
         if (!p.getBoolean("hint.holdmic", false)) {
-            android.widget.Toast.makeText(ctx, t("语音识别就绪：按住麦克风说话，松开就识别（点一下不行）"), android.widget.Toast.LENGTH_LONG).show()
+            android.widget.Toast.makeText(ctx, t("语音识别就绪：点一下麦克风开始说，再点一下结束"), android.widget.Toast.LENGTH_LONG).show()
             p.edit().putBoolean("hint.holdmic", true).apply()
         }
     }
@@ -945,7 +945,7 @@ fun ChatScreen(
             val micBtn: @Composable () -> Unit = {
                 // 语音：**服务器上有 `yxi-asr` 就按住说话**（识别在你自己的机器上跑，
                 // 准得多、也不经过任何云 API）；没装就退回系统那个识别界面。
-                if (onDevice || serverAsr) MicHold(
+                if (onDevice || serverAsr) MicTap(
                     recording = recording,
                     busy = asrBusy,
                     onStart = {
@@ -955,15 +955,21 @@ fun ChatScreen(
                             if (why != null) {
                                 android.widget.Toast.makeText(ctx, why, android.widget.Toast.LENGTH_LONG).show()
                                 false
-                            } else true
+                            } else {
+                                // ⚠️ **这一行以前压根没有。** `recording` 一直是 false —— 麦克风变红、
+                                //    输入框变波形这些「正在录」的样子全都不生效（写的时候只传了状态，忘了置位）。
+                                recording = true
+                                true
+                            }
                         }
                     },
                     onStop = {
+                        recording = false
                         val pcm = recorder.stop()
                         // ⚠️ 太短的 [Recorder.stop] 已经丢掉了 —— 不当错误报，但**点一下**（不到 300ms）要提示
                         //    「要按住」：这是从系统识别切到按住说话之后最常见的困惑
                         if (pcm == null && System.currentTimeMillis() - holdHintAt < 300) {
-                            android.widget.Toast.makeText(ctx, t("要按住说话，松开才识别"), android.widget.Toast.LENGTH_SHORT).show()
+                            android.widget.Toast.makeText(ctx, t("太短了，没录到东西"), android.widget.Toast.LENGTH_SHORT).show()
                         }
                         if (pcm != null) scope.launch {
                             asrBusy = true
@@ -1057,7 +1063,31 @@ fun ChatScreen(
             //    movableContentOf 让它带着内部状态（选区、组合）整个搬过去。多行排版一旦进入就粘住到清空，免得在边界来回跳。
             val field = remember { movableContentOf<String> { d -> BasicTextFieldRow(d, onLines = { lines = it }) { draft = it } } }
             LaunchedEffect(lines, draft) { multi = if (draft.isBlank()) false else (multi || lines > 1) }
-            if (!multi) Row(Modifier.padding(6.dp, 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            // 在录音：整条输入框换成波形 —— 这时候不需要键盘也不需要按钮
+            if (recording) RecordingBar(recorder) {
+                val pcm = recorder.stop()
+                if (pcm != null) scope.launch {
+                    asrBusy = true
+                    val said = if (onDevice) {
+                        app.yxi.agent.OnDeviceAsr.transcribe(ctx, pcm) { why ->
+                            android.widget.Toast.makeText(ctx, why, android.widget.Toast.LENGTH_LONG).show()
+                        }
+                    } else {
+                        val s0 = ssh
+                        if (s0 == null) { android.widget.Toast.makeText(ctx, t("还没连上"), android.widget.Toast.LENGTH_SHORT).show(); null }
+                        else {
+                            val f = Recorder.toWav(ctx, pcm)
+                            val r = app.yxi.agent.Voice.transcribe(s0, f) { why ->
+                                android.widget.Toast.makeText(ctx, why, android.widget.Toast.LENGTH_LONG).show()
+                            }
+                            runCatching { f.delete() }; r
+                        }
+                    }
+                    if (!said.isNullOrBlank()) draft = (draft.trimEnd() + " " + said).trim()
+                    asrBusy = false
+                }
+                recording = false
+            } else if (!multi) Row(Modifier.padding(6.dp, 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 plusBtn()
                 Box(Modifier.weight(1f)) { field(draft) }
                 micBtn(); sendBtn()
@@ -1220,66 +1250,99 @@ fun ChatScreen(
     }
 }
 
-/** 胶囊里那种「无底色、点得动」的图标按钮。 */
 /**
- * 按住说话的麦克风。
+ * 麦克风：**点一下开始，再点一下结束**。
  *
- * ⚠️ **按住不是点一下。** 点一下开始、再点一下结束的话，用户没法确认自己录没录上；
- * 按住的语义是「手指在 = 在录」，松开就是说完了 —— 这也是所有语音输入的通用手势，
- * 不用教。
+ * ⚠️ 原来是按住说话。用户 2026-09-04：「长按说话实在是太麻烦了，应该是点按说话」——
+ * 手按着不能干别的（滚不动、看不了刚才那条），录长一点的内容尤其别扭。
+ * 点按的代价是「不知道有没有录上」，所以配套做了 [RecordingBar]：**输入框整条变成实时波形**，
+ * 波形动 = 真的在收音（数据来自 [Recorder.level]，不是假动画）。
  *
- * ⚠️ **`onStart` 返回 false 时不进入录音态。** 没给权限、麦克风被占着都会走这条，
- * 那时候按钮不能变红 —— 变了就是在骗人「我在录」。
- *
- * ⚠️ 识别期间按钮变成转圈**且不可按**：实测传 + 跑模型要 3~5 秒，
- * 这几秒里再按一次会开一条新录音，把上一条的结果冲掉。
+ * ⚠️ 识别期间转圈**且不可按**：传 + 跑模型要 3~5 秒，这几秒里再点一次会开新录音、冲掉上一条。
  */
 @Composable
-private fun MicHold(
+private fun MicTap(
     recording: Boolean,
     busy: Boolean,
     onStart: () -> Boolean,
     onStop: () -> Unit,
 ) {
-    val on = recording
     Box(
         Modifier.size(44.dp).clip(CircleShape)
-            .background(
-                if (on) MaterialTheme.colorScheme.errorContainer else Color.Transparent,
-                CircleShape,
-            )
+            .background(if (recording) MaterialTheme.colorScheme.errorContainer else Color.Transparent, CircleShape)
             .then(
                 if (busy) Modifier
-                else Modifier.pointerInput(Unit) {
-                    // ⚠️ 用 `awaitEachGesture` 那一套，跟 [DPad] 里的按住逻辑同一个写法 ——
-                    // 这个版本的 foundation 里就有它，而且行为可控：
-                    // **手指抬起或手势被取消都算松开**，否则一滑出按钮就永远停不下来，
-                    // 麦克风一直开着（别的 app 也用不了）。
-                    awaitEachGesture {
-                        awaitFirstDown()
-                        if (!onStart()) return@awaitEachGesture
-                        while (true) {
-                            val ev = awaitPointerEvent()
-                            val ch = ev.changes.firstOrNull() ?: break
-                            if (!ch.pressed) break
-                            ch.consume()
-                        }
-                        onStop()
-                    }
-                }
+                else Modifier.clickable { if (recording) onStop() else onStart() }
             ),
         contentAlignment = Alignment.Center,
     ) {
         when {
             busy -> CircularProgressIndicator(
-                Modifier.size(20.dp), strokeWidth = 2.dp,
-                color = MaterialTheme.colorScheme.primary,
+                Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary,
             )
-            else -> GlyphIcon(
-                Glyph.Mic,
-                if (on) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                22.dp,
+            recording -> Box(
+                // 在录：一个方块 = 停止（跟播放器一个语言，不用教）
+                Modifier.size(15.dp).clip(RoundedCornerShape(4.dp)).background(MaterialTheme.colorScheme.error),
             )
+            else -> GlyphIcon(Glyph.Mic, MaterialTheme.colorScheme.onSurfaceVariant, 22.dp)
+        }
+    }
+}
+
+/**
+ * 录音时输入框里的那一条：**实时波形 + 计时 + 点一下结束**。
+ *
+ * ⚠️ 波形画的是 [Recorder.level] 的历史（每 60ms 采一格），不是循环动画 ——
+ * 「有没有收到声音」这件事必须能从屏幕上看出来。麦克风被别的 app 占着时波形是平的，
+ * 一眼就知道不对。
+ */
+@Composable
+private fun RecordingBar(recorder: Recorder, onStop: () -> Unit) {
+    val bars = remember { mutableStateListOf<Float>() }
+    var ms by remember { mutableStateOf(0L) }
+    LaunchedEffect(Unit) {
+        val t0 = System.currentTimeMillis()
+        while (true) {
+            kotlinx.coroutines.delay(60)
+            bars += recorder.level
+            if (bars.size > 48) bars.removeAt(0)
+            ms = System.currentTimeMillis() - t0
+        }
+    }
+    val red = MaterialTheme.colorScheme.error
+    Row(
+        Modifier.fillMaxWidth().padding(20.dp, 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(Modifier.size(9.dp).clip(CircleShape).background(red))
+        androidx.compose.foundation.Canvas(Modifier.weight(1f).height(28.dp)) {
+            val n = 48
+            val w = size.width / n
+            val list = bars
+            for (i in 0 until n) {
+                val v = list.getOrElse(list.size - n + i) { 0f }
+                // 放大一点：正常说话的峰值也就 0.2~0.5，原样画几乎看不见
+                val h = (v * 3.2f).coerceIn(0.04f, 1f) * size.height
+                drawRoundRect(
+                    red.copy(alpha = 0.35f + 0.65f * (i.toFloat() / n)),
+                    topLeft = androidx.compose.ui.geometry.Offset(i * w + w * 0.2f, (size.height - h) / 2f),
+                    size = androidx.compose.ui.geometry.Size(w * 0.6f, h),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.3f),
+                )
+            }
+        }
+        Text(
+            "%d:%02d".format(ms / 60000, (ms / 1000) % 60),
+            style = MaterialTheme.typography.labelLarge.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+            color = MaterialTheme.colorScheme.outline,
+        )
+        Box(
+            Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.errorContainer)
+                .clickable(onClick = onStop),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(Modifier.size(14.dp).clip(RoundedCornerShape(4.dp)).background(red))
         }
     }
 }

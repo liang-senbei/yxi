@@ -4373,3 +4373,21 @@ LazyColumn 里条目滚出屏幕会被**销毁**，滚回来重新组合，`fres
 新值和状态回写互相追，字符顺序就乱了。
 **修法**：**存纯值，连字符只在显示层画**（`VisualTransformation` + `OffsetMapping`），输入框里的值一个字都不动。
 ⚠️ 通用：**格式化不要写回输入框的值**（手机号、卡号、兑换码都一样）。
+
+## #232 状态传了但从来没置位：录音态整个是死的
+
+**症状**：按住说话时麦克风不变红。查下去发现 `recording` 这个状态**在整个文件里只有读、没有写** ——
+写的时候把它当参数一路传下去了，却忘了在「录音真的开始了」那一步 `= true`。
+**根因**：布尔状态的「置位点」和「使用点」隔了三层（按钮 → 回调 → 录音器），漏一处编译器不会说话。
+**修法**：`recorder.start()` 成功那一支里置 true，`onStop` 里置 false。
+⚠️ 通用：**加了个状态就顺手搜一遍它被赋值几次**——只有初始值那一次，说明这个功能从没生效过。
+
+## #233 `~/.local/bin` 里的命令：非交互 ssh 找不到 = 「装了等于没装」
+
+**症状**：服务器上明明装了 `yxi-asr`，App 里语音还是走系统识别（而用户手机 GMS 关着，系统识别根本不存在，
+表现就是**麦克风点了没反应**）。
+**根因**：探测用的是 `ssh host "command -v yxi-asr"`。**非交互 `ssh exec` 不读 `~/.profile`/`~/.bashrc`**，
+PATH 只有 `/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`，而 `pip install --user` 装在 `~/.local/bin`。
+**修法**：所有远端命令前面加 `export PATH="$HOME/.local/bin:$HOME/bin:/usr/local/bin:$PATH";`。
+⚠️ 通用：**别用 `ssh host "command -v X"` 判断远端有没有 X** —— 交互 shell 找得到不代表 exec 找得到。
+自己验一下：`ssh host 'echo $PATH'` 跟你登上去 `echo $PATH` 是两个东西。

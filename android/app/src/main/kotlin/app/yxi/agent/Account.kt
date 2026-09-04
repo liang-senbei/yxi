@@ -267,6 +267,7 @@ object Account {
             err == "code_redeemed" -> "这张码已经被兑过了"
             err == "code_disabled" -> "这张码被停用了"
             err == "code_expired" -> "这张码过期了"
+            err == "code_not_started" -> "这张码还没生效"
             c == 401 -> "登录过期了，重新登一次"
             c == 429 -> "太频繁了，等一分钟再试"
             else -> "服务器返回 $c"
