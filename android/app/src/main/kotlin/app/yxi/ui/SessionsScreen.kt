@@ -13,9 +13,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import app.yxi.ui.theme.Copper
-import androidx.compose.material3.SwipeToDismissBox
-import androidx.compose.material3.SwipeToDismissBoxValue
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.ui.graphics.graphicsLayer
@@ -31,6 +28,14 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.animation.core.tween
+import kotlin.math.roundToInt
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.gestures.draggable
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -118,6 +123,8 @@ fun SessionsScreen(
     var grouping by remember { mutableStateOf<Session?>(null) }
     /** 要终止哪个会话（滑动后弹确认框）。null = 没在问 */
     var killing by remember { mutableStateOf<Session?>(null) }
+    /** 左滑面板开着的是哪张卡（一次只开一张） */
+    var swiped by remember { mutableStateOf<String?>(null) }
     /** 收藏了哪些。⚠️ **跟置顶各管各的** —— 置顶管位置，收藏管「还要不要它」。 */
     var faved by remember(host.id) { mutableStateOf(Favorites.get(ctx, host.id)) }
     var muted by remember(host.id) { mutableStateOf(Mute.get(ctx, host.id)) }
@@ -527,9 +534,17 @@ fun SessionsScreen(
                 item(key = "pinned-group") {
                     ReorderablePinned(
                         tops = tops,
+                        favedNames = faved,
                         onOpen = { onOpenChat(it.name, it.cwd) },
                         onReply = { replyTo = it },
                         onUnpin = { pinned = pinned - it.name; Pinned.set(ctx, host.id, pinned) },
+                        onFav = { sess ->
+                            val n = sess.name
+                            faved = if (n in faved) faved - n else faved + n
+                            Favorites.set(ctx, host.id, faved)
+                            if (n in faved) Favorites.remember(ctx, host.id, n, sess.cwd)
+                        },
+                        onKill = { killing = it },
                         onReorder = { from, to ->
                             // 在**完整的 pinned 列表**里挪（tops 可能因为会话被杀而比 pinned 短）
                             val names = tops.map { it.name }
@@ -572,6 +587,9 @@ fun SessionsScreen(
                     if (!shut) items(members.size, key = { "$label/${members[it].name}" }) { i ->
                         SwipeCard(
                             faved = members[i].name in faved,
+                            pinned = members[i].name in pinned,
+                            open = swiped == members[i].name,
+                            onOpen = { swiped = if (it) members[i].name else null },
                             onAskKill = { killing = members[i] },
                             onToggleFav = {
                                 val n = members[i].name
@@ -579,27 +597,21 @@ fun SessionsScreen(
                                 Favorites.set(ctx, host.id, faved)
                                 if (n in faved) Favorites.remember(ctx, host.id, n, members[i].cwd)
                             },
-                            modifier = Modifier.animateItem(),
-                        ) {
-                        SessionCard(
-                            members[i],
-                            onOpen = { onOpenChat(members[i].name, members[i].cwd) },
-                            onReply = { replyTo = members[i] },
-                            pinned = members[i].name in pinned,
-                            onPin = {
+                            onTogglePin = {
                                 val n = members[i].name
                                 pinned = if (n in pinned) pinned - n else pinned + n
                                 Pinned.set(ctx, host.id, pinned)
                             },
+                            modifier = Modifier.animateItem(),
+                        ) {
+                        SessionCard(
+                            members[i],
+                            faved = members[i].name in faved,
+                            pinned = members[i].name in pinned,
+                            onOpen = { onOpenChat(members[i].name, members[i].cwd) },
+                            onReply = { replyTo = members[i] },
                             onLongPress = { grouping = members[i] },
                             muted = members[i].name in muted,
-                            faved = members[i].name in faved,
-                            onFav = {
-                                val n = members[i].name
-                                faved = if (n in faved) faved - n else faved + n
-                                Favorites.set(ctx, host.id, faved)
-                                if (n in faved) Favorites.remember(ctx, host.id, n, members[i].cwd)
-                            },
                         )
                         }
                     }
@@ -614,6 +626,9 @@ fun SessionsScreen(
                         // 换组时滑过去而不是瞬移 —— 至少让用户看见「它动了」
                         SwipeCard(
                             faved = group[i].name in faved,
+                            pinned = group[i].name in pinned,
+                            open = swiped == group[i].name,
+                            onOpen = { swiped = if (it) group[i].name else null },
                             onAskKill = { killing = group[i] },
                             onToggleFav = {
                                 val n = group[i].name
@@ -621,23 +636,22 @@ fun SessionsScreen(
                                 Favorites.set(ctx, host.id, faved)
                                 if (n in faved) Favorites.remember(ctx, host.id, n, group[i].cwd)
                             },
+                            onTogglePin = {
+                                val n = group[i].name
+                                pinned = if (n in pinned) pinned - n else pinned + n
+                                Pinned.set(ctx, host.id, pinned)
+                            },
                             modifier = Modifier.animateItem(),
                         ) {
                         SessionCard(
                             group[i],
+                            faved = group[i].name in faved,
+                            pinned = group[i].name in pinned,
                             // 点卡片 = 进对话；气泡按钮 = 不进对话直接回一句
                             onOpen = { onOpenChat(group[i].name, group[i].cwd) },
                             onReply = { replyTo = group[i] },
-                            onPin = { pinned = pinned + group[i].name; Pinned.set(ctx, host.id, pinned) },
                             onLongPress = { grouping = group[i] },
                             muted = group[i].name in muted,
-                            faved = group[i].name in faved,
-                            onFav = {
-                                val n = group[i].name
-                                faved = if (n in faved) faved - n else faved + n
-                                Favorites.set(ctx, host.id, faved)
-                                if (n in faved) Favorites.remember(ctx, host.id, n, group[i].cwd)
-                            },
                         )
                         }
                     }
@@ -947,11 +961,16 @@ private fun GroupHeader(st: SessionState, n: Int) {
 @Composable
 private fun ReorderablePinned(
     tops: List<Session>,
+    favedNames: Set<String>,
     onOpen: (Session) -> Unit,
     onReply: (Session) -> Unit,
     onUnpin: (Session) -> Unit,
+    onFav: (Session) -> Unit,
+    onKill: (Session) -> Unit,
     onReorder: (from: Int, to: Int) -> Unit,
 ) {
+    // 置顶区也要能左滑（图钉图标去掉了，取消置顶只剩这条路）
+    var swipedTop by remember { mutableStateOf<String?>(null) }
     // 拖动中：哪一张被拎着、当前累计的竖直位移
     var dragIndex by remember { mutableStateOf(-1) }
     var dragBy by remember { mutableFloatStateOf(0f) }
@@ -968,49 +987,59 @@ private fun ReorderablePinned(
     Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
         tops.forEachIndexed { i, sess ->
             val isDragged = i == dragIndex
+            SwipeCard(
+                faved = sess.name in favedNames,
+                pinned = true,
+                open = swipedTop == sess.name,
+                onOpen = { swipedTop = if (it) sess.name else null },
+                onAskKill = { onKill(sess) },
+                onToggleFav = { onFav(sess) },
+                onTogglePin = { onUnpin(sess) },
+            ) {
             SessionCard(
-                sess, pinned = true,
-                dragging = isDragged,
-                // 只要有一张被拎起来（dragIndex>=0），就把点击关掉 —— 免得松手误开对话
-                openEnabled = dragIndex < 0,
-                onOpen = { onOpen(sess) },
-                onReply = { onReply(sess) },
-                onPin = { onUnpin(sess) },
-                modifier = Modifier
-                    .onSizeChanged { with(density) { slot = it.height.toFloat() + 9.dp.toPx() } }
-                    // 被拎起来的那张跟着手指走
-                    .then(
-                        if (isDragged)
-                            Modifier.graphicsLayer {
-                                translationY = dragBy
-                                alpha = 0.92f
-                            }
-                        else Modifier
-                    )
-                    // ⚠️ key 用 `i` 不用 `tops.size`：换位不该重启手势（会打断拖动），
-                    // 但每张卡要绑到自己那一格的 onDragStart。用 cur* 读最新数据，见上面注释。
-                    .pointerInput(i) {
-                        detectDragGesturesAfterLongPress(
-                            onDragStart = { dragIndex = i; dragBy = 0f },
-                            onDragEnd = { dragIndex = -1; dragBy = 0f },
-                            onDragCancel = { dragIndex = -1; dragBy = 0f },
-                        ) { change, delta ->
-                            change.consume()
-                            if (dragIndex >= 0 && slot > 0f) {
-                                dragBy += delta.y
-                                // 拖过一整格 → 跟那个方向的邻居换位。while 允许一次回调跨多格。
-                                while (dragBy >= slot && dragIndex < curTops.lastIndex) {
-                                    curReorder(dragIndex, dragIndex + 1)
-                                    dragIndex += 1; dragBy -= slot
+                    sess,
+                    pinned = true,
+                    dragging = isDragged,
+                    // 只要有一张被拎起来（dragIndex>=0），就把点击关掉 —— 免得松手误开对话
+                    openEnabled = dragIndex < 0,
+                    onOpen = { onOpen(sess) },
+                    onReply = { onReply(sess) },
+                    modifier = Modifier
+                        .onSizeChanged { with(density) { slot = it.height.toFloat() + 9.dp.toPx() } }
+                        // 被拎起来的那张跟着手指走
+                        .then(
+                            if (isDragged)
+                                Modifier.graphicsLayer {
+                                    translationY = dragBy
+                                    alpha = 0.92f
                                 }
-                                while (dragBy <= -slot && dragIndex > 0) {
-                                    curReorder(dragIndex, dragIndex - 1)
-                                    dragIndex -= 1; dragBy += slot
+                            else Modifier
+                        )
+                        // ⚠️ key 用 `i` 不用 `tops.size`：换位不该重启手势（会打断拖动），
+                        // 但每张卡要绑到自己那一格的 onDragStart。用 cur* 读最新数据，见上面注释。
+                        .pointerInput(i) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { dragIndex = i; dragBy = 0f },
+                                onDragEnd = { dragIndex = -1; dragBy = 0f },
+                                onDragCancel = { dragIndex = -1; dragBy = 0f },
+                            ) { change, delta ->
+                                change.consume()
+                                if (dragIndex >= 0 && slot > 0f) {
+                                    dragBy += delta.y
+                                    // 拖过一整格 → 跟那个方向的邻居换位。while 允许一次回调跨多格。
+                                    while (dragBy >= slot && dragIndex < curTops.lastIndex) {
+                                        curReorder(dragIndex, dragIndex + 1)
+                                        dragIndex += 1; dragBy -= slot
+                                    }
+                                    while (dragBy <= -slot && dragIndex > 0) {
+                                        curReorder(dragIndex, dragIndex - 1)
+                                        dragIndex -= 1; dragBy += slot
+                                    }
                                 }
                             }
-                        }
-                    },
-            )
+                        },
+                )
+            }
         }
         Text(
             t("长按卡片拖动可以改置顶次序"),
@@ -1028,18 +1057,11 @@ private fun SessionCard(
     onOpen: () -> Unit,
     /** 图钉下面那个气泡按钮 = **不进对话直接回一句**（0.8.8 加回来，用户要求）。 */
     onReply: () -> Unit = {},
-    pinned: Boolean = false,
-    onPin: () -> Unit = {},
-    /**
-     * 收藏了没。
-     *
-     * ⚠️ **必须是看得见、点得着的按钮。** 上一版我只做了右滑 + 一颗纯展示的星，
-     * 理由是「卡片右列塞不下第三颗」。结果用户第一句话就是「我没看见收藏的按钮」——
-     * 一个没有可见入口的手势等于不存在，滑动时那行提示只有**已经知道要滑**的人才看得到。
-     * 省 30dp 不值得让一个功能找不到。
-     */
+    // ⚠️ **卡片上不放 ☆ 和图钉了**（用户 2026-09-04：「收藏那个五角星标记去掉，置顶的图标也去掉，
+    //    都放在左滑里面」）。收藏 / 置顶 / 终止 全在 [SwipeCard] 左滑露出的那排按钮里。
+    //    这两个只用来**画色条**：收藏一种色、置顶一种色、又收藏又置顶就是两色渐变（用户：用不同颜色标出来）。
     faved: Boolean = false,
-    onFav: () -> Unit = {},
+    pinned: Boolean = false,
     muted: Boolean = false,
     /** 拖动排序时给卡片加一层「被拎起来」的样子（抬高 + 微微透明）。 */
     dragging: Boolean = false,
@@ -1076,8 +1098,34 @@ private fun SessionCard(
             enabled = openEnabled, onClick = onOpen, onLongClick = onLongPress,
         ),
     ) {
-        Column(Modifier.padding(16.dp, 11.dp, 10.dp, 10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            // 第一行：状态点 · 名字 ……… 多久没动 · 已连 · ☆ · 图钉
+        // 左边那条色条 = 这张卡的「身份」：收藏 / 置顶 / 两者都有。
+        // ⚠️ 跟卡里别的东西一个语言：圆角、低饱和、不抢字。画在 padding 外面（往左 12dp），
+        //    Surface 自己会按圆角裁掉溢出的部分。
+        val markFav = MaterialTheme.colorScheme.secondary
+        val markPin = MaterialTheme.colorScheme.tertiary
+        Column(
+            Modifier
+                .drawBehind {
+                    if (!faved && !pinned) return@drawBehind
+                    val w = 4.dp.toPx()
+                    val brush = when {
+                        faved && pinned -> Brush.verticalGradient(listOf(markPin, markFav))
+                        faved -> androidx.compose.ui.graphics.SolidColor(markFav)
+                        else -> androidx.compose.ui.graphics.SolidColor(markPin)
+                    }
+                    // ⚠️ 画在卡**里面**（左边 4dp 处）。第一版画在 -12dp、想蹭到 padding 外面去 ——
+                    //    Surface 按圆角裁剪，直接被裁没了，屏幕上什么都没有。
+                    drawRoundRect(
+                        brush,
+                        topLeft = androidx.compose.ui.geometry.Offset(4.dp.toPx(), 3.dp.toPx()),
+                        size = androidx.compose.ui.geometry.Size(w, size.height - 6.dp.toPx()),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(w / 2),
+                    )
+                }
+                .padding(if (faved || pinned) 18.dp else 16.dp, 11.dp, 10.dp, 10.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            // 第一行：状态点 · 名字 ……… 多久没动 · 已连
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Box(Modifier.size(7.dp).clip(CircleShape).background(dot))
                 // Codex 会话标一下：它没有对话视图、没有等你/干活中的状态源，点开是终端
@@ -1095,26 +1143,6 @@ private fun SessionCard(
                     if (s.attached) t("已连") else null,
                 ).joinToString(" · ")
                 if (meta.isNotEmpty()) Text(meta, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 1)
-                // ☆ 收藏、图钉：28dp，跟标题同一行。⚠️ 各自 clickable 会消费点击，不会顺带开对话
-                Box(
-                    Modifier.size(28.dp).clip(CircleShape)
-                        .background(if (faved) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
-                        .clickable(onClick = onFav),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        if (faved) "★" else "☆", style = MaterialTheme.typography.titleSmall,
-                        color = if (faved) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.outline,
-                    )
-                }
-                Box(
-                    Modifier.size(28.dp).clip(CircleShape)
-                        .background(if (pinned) MaterialTheme.colorScheme.tertiaryContainer else Color.Transparent)
-                        .clickable(onClick = onPin),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    GlyphIcon(Glyph.Pin, if (pinned) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.outline, 16.dp)
-                }
             }
             // 第二行：它此刻的话（Claude Code 自己的状态词），一行省略
             val detail = s.detail.ifEmpty { if (s.isCodex) t("Codex 会话 —— 状态和对话在终端里看") else "" }
@@ -1519,63 +1547,106 @@ internal fun GroupPicker(
 }
 
 /**
- * 会话卡片 + **左滑终止**。
+ * 会话卡片 + **左滑露出一排按钮**（收藏 / 置顶 / 终止），**右滑快捷收藏**。
  *
- * ⚠️ **滑到底不直接杀，只是把确认框弹出来。**
- * `confirmValueChange` 一律返回 false —— 卡片弹回原位，动作交给对话框。
- * 杀一个会话 = 里面跑着的 Claude 一起没、没存的东西不会自己保存，
- * 这种事不能由一个可能是误触的手势独自决定。
+ * ⚠️ 用户 2026-09-04 定的：「左滑改为打开侧边栏，右滑直接显示终止或者收藏；
+ * 收藏那个五角星标记去掉，置顶的图标也去掉，都放在左滑里面」。
+ * 以前是「左滑到底 = 弹终止确认框」，误触就把确认框糊你脸上；现在左滑只是**把面板拉出来**，
+ * 按哪个是另一下。终止仍然走确认框 —— 杀掉 = 里面跑着的 Claude 一起没。
+ *
+ * ⚠️ 一次只开一张：开关状态放在**父层**（[open] / [onOpen]），不然滑开好几张都赖着不收。
  */
 @Composable
 private fun SwipeCard(
     faved: Boolean,
+    pinned: Boolean,
+    open: Boolean,
+    onOpen: (Boolean) -> Unit,
     onAskKill: () -> Unit,
     onToggleFav: () -> Unit,
+    onTogglePin: () -> Unit,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
-    val state = rememberSwipeToDismissBoxState(
-        confirmValueChange = {
-            when (it) {
-                // ⚠️ **左滑不直接杀，只把确认框弹出来。** 返回 false 让卡片弹回原位。
-                // 杀一个会话 = 里面跑着的 Claude 一起没，这种事不能由一个可能是误触的手势独自决定。
-                SwipeToDismissBoxValue.EndToStart -> onAskKill()
-                // 右滑收藏可以就地生效 —— 它只是个标记，点错了再滑一次就回来了。
-                SwipeToDismissBoxValue.StartToEnd -> onToggleFav()
-                else -> Unit
-            }
-            false
-        },
-    )
-    SwipeToDismissBox(
-        state = state,
-        modifier = modifier,
-        backgroundContent = {
-            // ⚠️ **背景要说清这一下会干什么**，而且左右不同色。
-            // 「右滑收藏」这种手势没人猜得到，滑到一半看见字才知道 ——
-            // 这是它唯一的发现途径。
-            val toStart = state.dismissDirection == SwipeToDismissBoxValue.EndToStart
-            Surface(
-                color = if (toStart) MaterialTheme.colorScheme.errorContainer
-                else MaterialTheme.colorScheme.secondaryContainer,
-                shape = MaterialTheme.shapes.large,
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                Row(
-                    Modifier.fillMaxSize().padding(horizontal = 22.dp),
-                    horizontalArrangement = if (toStart) Arrangement.End else Arrangement.Start,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        if (toStart) t("终止") else if (faved) t("取消收藏") else t("收藏"),
-                        style = MaterialTheme.typography.titleSmall,
-                        color = if (toStart) MaterialTheme.colorScheme.onErrorContainer
-                        else MaterialTheme.colorScheme.onSecondaryContainer,
-                    )
-                }
-            }
-        },
-    ) { content() }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val panelPx = with(density) { 222.dp.toPx() }
+    val favPx = with(density) { 92.dp.toPx() }        // 右滑超过这么多 = 收藏
+    val x = remember { androidx.compose.animation.core.Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(open) { if (!open && x.value != 0f) x.animateTo(0f, androidx.compose.animation.core.tween(220)) }
+    Box(modifier) {
+        // 背后那排按钮（贴右边，左滑才露出来）
+        Row(
+            Modifier.matchParentSize().padding(end = 2.dp),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SwipeAct(
+                if (faved) t("取消收藏") else t("收藏"),
+                MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer,
+            ) { onToggleFav(); onOpen(false) }
+            SwipeAct(
+                if (pinned) t("取消置顶") else t("置顶"),
+                MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer,
+            ) { onTogglePin(); onOpen(false) }
+            SwipeAct(
+                t("终止"),
+                MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer,
+            ) { onOpen(false); onAskKill() }
+        }
+        // 右滑时左边露出的提示 —— 这种手势没人猜得到，滑到一半看见字才知道
+        if (x.value > 2f) Row(
+            Modifier.matchParentSize().padding(start = 22.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                if (faved) t("取消收藏") else t("收藏"),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = (x.value / favPx).coerceIn(0f, 1f)),
+            )
+        }
+        Box(
+            Modifier
+                .offset { androidx.compose.ui.unit.IntOffset(x.value.roundToInt(), 0) }
+                .draggable(
+                    orientation = androidx.compose.foundation.gestures.Orientation.Horizontal,
+                    state = androidx.compose.foundation.gestures.rememberDraggableState { d ->
+                        scope.launch { x.snapTo((x.value + d).coerceIn(-panelPx, favPx * 1.25f)) }
+                    },
+                    onDragStopped = {
+                        when {
+                            x.value <= -panelPx * 0.4f -> { onOpen(true); x.animateTo(-panelPx, androidx.compose.animation.core.tween(200)) }
+                            x.value >= favPx -> { onToggleFav(); onOpen(false); x.animateTo(0f, androidx.compose.animation.core.tween(220)) }
+                            else -> { onOpen(false); x.animateTo(0f, androidx.compose.animation.core.tween(200)) }
+                        }
+                    },
+                ),
+        ) {
+            content()
+            // 面板开着时点卡片 = 先收起来，别顺手进了对话
+            if (open) Box(
+                Modifier.matchParentSize().clickable(
+                    indication = null,
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                ) { onOpen(false) },
+            )
+        }
+    }
+}
+
+/** 左滑面板里的一颗按钮 */
+@Composable
+private fun SwipeAct(label: String, bg: Color, fg: Color, onClick: () -> Unit) {
+    Box(
+        Modifier.padding(start = 6.dp).width(68.dp).fillMaxHeight()
+            .clip(MaterialTheme.shapes.large).background(bg).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label, style = MaterialTheme.typography.labelMedium, color = fg, maxLines = 2,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+    }
 }
 
 /**

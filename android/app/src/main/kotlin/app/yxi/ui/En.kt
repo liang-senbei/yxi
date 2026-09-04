@@ -12,6 +12,7 @@ package app.yxi.ui
 internal object En {
     val map: Map<String, String> = mapOf(
         "语言" to "Language",
+        "取消置顶" to "Unpin",
         "这是上次的内容，正在取最新…" to "Showing the last snapshot — fetching the latest…",
         "点这里起个名" to "Tap to set a name",
         "写句个性签名" to "Add a status",
