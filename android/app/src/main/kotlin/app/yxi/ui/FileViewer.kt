@@ -233,6 +233,26 @@ private fun HtmlBody(html: String) {
                 settings.javaScriptEnabled = false
                 settings.allowFileAccess = false
                 settings.allowContentAccess = false
+                // ⚠️ **不透明源不等于断网**（旧注释把这条写反了）：JS 关着，但
+                //    `<img src=https://…>` / `<link rel=stylesheet>` / `<meta refresh>` 照发照跳 ——
+                //    服务器上放个 README.html，攻击者就拿到「用户此刻打开了哪个文件、从哪个 IP」的实时信标。
+                //    预览远端文件只需要本地内容，那就断网（2026-09-04 安全审计）。
+                settings.blockNetworkLoads = true
+                webViewClient = object : android.webkit.WebViewClient() {
+                    override fun shouldOverrideUrlLoading(
+                        v: android.webkit.WebView,
+                        r: android.webkit.WebResourceRequest,
+                    ) = true
+
+                    override fun shouldInterceptRequest(
+                        v: android.webkit.WebView,
+                        r: android.webkit.WebResourceRequest,
+                    ): android.webkit.WebResourceResponse? =
+                        if (r.url.scheme == "data") null
+                        else android.webkit.WebResourceResponse(
+                            "text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)),
+                        )
+                }
                 settings.builtInZoomControls = true      // 手机上看桌面宽度的页面，得能捏
                 settings.displayZoomControls = false
                 settings.useWideViewPort = true
@@ -240,7 +260,7 @@ private fun HtmlBody(html: String) {
                 setBackgroundColor(android.graphics.Color.WHITE)  // 网页自己多半假设白底
             }
         },
-        update = { it.loadDataWithBaseURL(null, html, "text/html", "utf-8", null) },
+        update = { it.loadDataWithBaseURL(null, WebFence.wrap(html), "text/html", "utf-8", null) },
         modifier = Modifier.fillMaxSize(),
     )
 }

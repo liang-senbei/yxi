@@ -113,7 +113,8 @@ class EventService : Service() {
                 wait = 2_000L
                 stream(s, host)
             }.onFailure {
-                Log.w("YxiWatch", "${host.alias}（${host.display}）断了：${it.message}")
+                // ⚠️ 用别名，别用 display（user@host:port）—— 后者会进用户发出去的 bugreport
+                Log.w("YxiWatch", "${host.alias} 断了：${it.message}")
             }
             live.remove(host.id)
             runCatching { ssh?.disconnect() }
@@ -152,7 +153,12 @@ class EventService : Service() {
         if (ts <= seen) return                       // 补历史时把看过的滤掉
         setLastSeen(host.id, ts)
 
-        val full = e.optString("session")
+        // ⚠️ **这是本次审计里最要命的一条的源头**：`~/.yxi/events.jsonl` 是服务器上的 agent
+        //    自己就能写的文件，而这个名字会一路流进 `tmux capture-pane -t '…'`，
+        //    由**常驻服务自动触发、不需要用户点任何东西**。被提示词注入的 agent 因此能
+        //    驱使手机在服务器上执行未经审批的命令 —— 正好绕开这个产品存在的全部理由。
+        //    名字不合白名单的事件整条丢掉（fail-closed）。
+        val full = e.optString("session").takeIf { app.yxi.ssh.Shell.safeName(it) } ?: return
         val session = full.removePrefix("cc-")
         val kind = e.optString("kind")
         if (kind == "end") return                    // 会话结束不值得把手机点亮
@@ -243,7 +249,20 @@ class EventService : Service() {
             //    亮屏时按普通消息发 —— 悬浮条自己 5 秒左右收起，通知**照样留在状态栏**。
             //    ⚠️ 安卓没有「设置悬浮条停留几秒」的接口，能控的只有「别把它标成来电」。
             .setCategory(if (asleep()) Notification.CATEGORY_CALL else Notification.CATEGORY_MESSAGE)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            // ⚠️ **正文不上锁屏**（2026-09-04 安全审计）：以前整条是 PUBLIC，而那个标志的语义是
+            //    「这条不敏感，永远显示」——它**压过用户系统里设的「仅解锁后显示敏感内容」**。
+            //    配上黑屏点亮屏幕，等于把 Claude 最后那段话和项目绝对路径摆给旁边所有人看。
+            //    现在：锁屏上只给一个「谁在等你」的 public 版本，正文解锁后才露。
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(
+                NotificationCompat.Builder(this, CH_NEEDS)
+                    .setSmallIcon(R.drawable.ic_stat_yxi)
+                    .setContentTitle(t("%s 需要你").format(short))
+                    .setContentIntent(pi)
+                    .setCategory(if (asleep()) Notification.CATEGORY_CALL else Notification.CATEGORY_MESSAGE)
+                    .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                    .build(),
+            )
         // **锁屏上把屏幕点亮。**
         //
         // ⚠️ 光有 PRIORITY_HIGH 不够：手机躺在桌上黑着屏时，普通高优先级通知
@@ -600,14 +619,14 @@ class EventService : Service() {
                 // ⚠️ **频道上也要放开。** Android 8 起频道的锁屏可见性会盖过单条通知的
                 // `setVisibility` —— 只在通知上设的话，锁屏可能只显示「内容已隐藏」，
                 // 而「一眼看清它要批什么」正是这条通知存在的理由。
-                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                lockscreenVisibility = Notification.VISIBILITY_PRIVATE
             }
         )
         nm.createNotificationChannel(
             NotificationChannel(CH_DONE, t("干完了"), NotificationManager.IMPORTANCE_DEFAULT).apply {
                 description = t("会话干完了")
                 enableVibration(true); vibrationPattern = longArrayOf(0, 28)            // 轻轻一下 = 完事了
-                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                lockscreenVisibility = Notification.VISIBILITY_PRIVATE
             }
         )
         nm.createNotificationChannel(

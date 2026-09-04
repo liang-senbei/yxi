@@ -15,8 +15,8 @@ android {
         targetSdk = 37
         // ⚠️ versionCode 是**更新检查唯一比较的东西**，每次发包必须 +1。
         // versionName 只给人看。
-        versionCode = 149
-        versionName = "1.0.5"
+        versionCode = 150
+        versionName = "1.0.6"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // ⚠️ **只留 arm64-v8a。** sherpa-onnx 的 AAR 带四套原生库，加起来 120MB；
@@ -27,6 +27,22 @@ android {
         ndk { abiFilters += "arm64-v8a" }
     }
 
+    // ⚠️ **签名是构建的一部分，不是仓库外一个脚本的事**（2026-09-04 安全审计后改）。
+    //    密钥和口令都在仓库外：`~/.secrets/yxi-release.jks` + `~/.secrets/yxi-release-store.pass`（都是 600）。
+    //    ⚠️ 拿不到密钥时**不配置签名**（而不是报错）：别人 clone 下来照样能 assembleDebug。
+    signingConfigs {
+        val ks = File(System.getProperty("user.home"), ".secrets/yxi-release.jks")
+        val pwFile = File(System.getProperty("user.home"), ".secrets/yxi-release-store.pass")
+        if (ks.exists() && pwFile.exists()) {
+            create("release") {
+                storeFile = ks
+                storePassword = pwFile.readText().trim()
+                keyAlias = "yxi"
+                keyPassword = pwFile.readText().trim()
+            }
+        }
+    }
+
     buildTypes {
         // ⚠️ **debug 补回 x86_64，不然模拟器上装不了了。**
         // release 只留 arm64（省 90MB），但模拟器是 x86_64 —— 只留 arm64 的话
@@ -35,7 +51,15 @@ android {
         getByName("debug") { ndk { abiFilters += "x86_64" } }
 
         release {
-            isMinifyEnabled = false
+            // 有密钥就直接签好（省掉「忘了签 / 签到旧包上」那类事故，见 #223）
+            signingConfig = signingConfigs.findByName("release")
+            // ⚠️ **开混淆和资源压缩**（2026-09-04 安全审计，老板点名要「反反编译」）。
+            //    以前 1793 个全限定类名、方法名、.kt 源文件名原样出厂，jadx 能还原到接近源码。
+            //    ⚠️ 规则见 proguard-rules.pro —— jsch / BouncyCastle / sherpa-onnx 三样靠名字找类，
+            //       keep 漏一个就是「SSH 连不上 / 生成密钥失败 / 语音一按就崩」，而且编译一路绿灯。
+            //       改完必须跑一遍 E2E，别信「编过了」。
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }

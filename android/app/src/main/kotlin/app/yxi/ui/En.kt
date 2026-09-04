@@ -12,6 +12,8 @@ package app.yxi.ui
 internal object En {
     val map: Map<String, String> = mapOf(
         "语言" to "Language",
+        "包对不上（校验失败），没装 —— 换个网络再试一次" to "Checksum mismatch — not installed. Try another network.",
+        "这个包的签名跟本机不一致，没装" to "That package is signed by someone else — not installed.",
         "免费档最多绑 2 台" to "Free plan: up to 2 hosts",
         "再加就要 Pro 或 Ultra —— 它们不限台数。\n（主机和密钥一直只存在这台手机上，这条限制也只在手机上判。）" to "Pro or Ultra removes the limit.\n(Hosts and keys never leave this phone — this check runs on the phone too.)",
         "这个账号被封禁了" to "This account is banned",
@@ -640,7 +642,7 @@ internal object En {
         "开起来" to "Start",
         "下载" to "Download",
         "下载中…" to "Downloading…",
-        "⚡模式" to "⚡Mode",
+        "模式" to "Mode",
         "← 上一题" to "← Prev",
         "下一题 →" to "Next →",
         "确认提交" to "Confirm",

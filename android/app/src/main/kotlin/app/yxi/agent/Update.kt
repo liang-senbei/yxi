@@ -28,6 +28,8 @@ data class Update(
     val remotePath: String,
     val notes: String,
     val sizeBytes: Long,
+    /** 清单给的 APK sha256（十六进制小写）。空 = 老服务器还没带，装之前只能靠大小 —— 会在界面上说清楚。 */
+    val sha256: String = "",
     /** 公网直链。非空 = 走 HTTP 下载（[Source.Public]）。 */
     val url: String = "",
 ) {
@@ -86,7 +88,7 @@ data class Update(
             val size = runCatching { httpSize(url) }.getOrDefault(-1L)
             if (size <= 0) return@withContext Result.Failed(t("下载页上没有安装包"))
             Result.Newer(
-                Update(code, o.optString("versionName", code.toString()), "", o.optString("notes"), size, url)
+                Update(code, o.optString("versionName", code.toString()), "", o.optString("notes"), size, o.optString("sha256"), url)
             )
         }
 

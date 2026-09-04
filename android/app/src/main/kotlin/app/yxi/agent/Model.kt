@@ -136,15 +136,15 @@ object Model {
      * **必须滚回去**，否则下面 [pick] 按相对步数算光标就全错了。
      */
     suspend fun open(ssh: SshSession, target: String): List<Choice>? {
-        if (!borrowable(ssh.exec("tmux capture-pane -p -t '$target'"))) return null
-        ssh.exec("tmux send-keys -t '$target' -l '/model'")
-        ssh.exec("tmux send-keys -t '$target' Enter")
+        if (!borrowable(ssh.exec("tmux capture-pane -p -t ${app.yxi.ssh.Shell.q(target)}"))) return null
+        ssh.exec("tmux send-keys -t ${app.yxi.ssh.Shell.q(target)} -l '/model'")
+        ssh.exec("tmux send-keys -t ${app.yxi.ssh.Shell.q(target)} Enter")
 
         var screen = ""
         var got: List<Choice>? = null
         repeat(4) {
             kotlinx.coroutines.delay(900)
-            screen = ssh.exec("tmux capture-pane -p -t '$target'")
+            screen = ssh.exec("tmux capture-pane -p -t ${app.yxi.ssh.Shell.q(target)}")
             got = parse(screen)
             if (got != null) return@repeat
         }
@@ -157,12 +157,12 @@ object Model {
         val all = LinkedHashMap<Int, Choice>()
         first.forEach { all[it.number] = it }
         repeat(hidden) {
-            ssh.exec("tmux send-keys -t '$target' Down")
+            ssh.exec("tmux send-keys -t ${app.yxi.ssh.Shell.q(target)} Down")
             kotlinx.coroutines.delay(180)
-            parse(ssh.exec("tmux capture-pane -p -t '$target'"))?.forEach { all[it.number] = it }
+            parse(ssh.exec("tmux capture-pane -p -t ${app.yxi.ssh.Shell.q(target)}"))?.forEach { all[it.number] = it }
         }
         // ⚠️ 滚回去，让光标停在原来那一项上 —— [pick] 的相对步数依赖这个前提
-        repeat(hidden) { ssh.exec("tmux send-keys -t '$target' Up") }
+        repeat(hidden) { ssh.exec("tmux send-keys -t ${app.yxi.ssh.Shell.q(target)} Up") }
         return all.values.sortedBy { it.number }
     }
 
@@ -176,17 +176,17 @@ object Model {
      */
     suspend fun pick(ssh: SshSession, target: String, from: Int, to: Int, asDefault: Boolean) {
         if (asDefault) {
-            ssh.exec("tmux send-keys -t '$target' '$to'")
+            ssh.exec("tmux send-keys -t ${app.yxi.ssh.Shell.q(target)} '$to'")
             return
         }
         val steps = to - from
         val key = if (steps > 0) "Down" else "Up"
-        repeat(kotlin.math.abs(steps)) { ssh.exec("tmux send-keys -t '$target' $key") }
-        ssh.exec("tmux send-keys -t '$target' 's'")
+        repeat(kotlin.math.abs(steps)) { ssh.exec("tmux send-keys -t ${app.yxi.ssh.Shell.q(target)} $key") }
+        ssh.exec("tmux send-keys -t ${app.yxi.ssh.Shell.q(target)} 's'")
     }
 
     /** 关掉选单不做任何改动。⚠️ **取消也必须发** —— 面板不关，抓屏会一直看到它。 */
     suspend fun cancel(ssh: SshSession, target: String) {
-        ssh.exec("tmux send-keys -t '$target' Escape")
+        ssh.exec("tmux send-keys -t ${app.yxi.ssh.Shell.q(target)} Escape")
     }
 }

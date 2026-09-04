@@ -96,6 +96,9 @@ class MainActivity : ComponentActivity() {
         app.yxi.ui.I18n.load(this)
         app.yxi.ui.Skin.load(this)
         app.yxi.agent.Account.load(this)
+        // ⚠️ 只挡**多任务卡片**的系统快照（它把对话内容存进 /data/system_ce/，我们清不掉）。
+        //    故意不加 FLAG_SECURE：用户录屏是我们主要的 bug 输入来源，加了他只会说「录不了」。
+        if (Build.VERSION.SDK_INT >= 33) runCatching { setRecentsScreenshotEnabled(false) }
         readJump(intent)
         readAuth(intent)
 

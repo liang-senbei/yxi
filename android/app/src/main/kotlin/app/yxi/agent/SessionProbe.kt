@@ -220,6 +220,10 @@ object SessionProbe {
             // ⚠️ 手机自己起的内部会话（GitHub / MCP / Claude / Codex 登录用的 `yxi-auth-*`）不上看板 ——
             // 它们跑完 `sleep 900` 自己就没了，摆出来只会让人以为多了两个空闲会话去杀。
             if (name.startsWith("yxi-auth-")) return@mapNotNull null
+            // ⚠️ **信任边界**：会话名会被拼进后面一堆 `tmux -t '…'` 命令里。
+            //    名字里带单引号/分号的（服务器上任何人都能 `tmux new -s "x'; rm -rf ~; :'"`）整条丢掉，
+            //    宁可看板上少一个也不能让它流进命令行。见 ssh/Shell.kt。
+            if (!app.yxi.ssh.Shell.safeName(name)) return@mapNotNull null
             // Claude Code 自己那份优先；没有才退回 cc-state（我们自己机器上才有）
             val st = ccStates[name] ?: states[name]
             Session(
@@ -301,7 +305,7 @@ object SessionProbe {
         // ⚠️ 仍然是两条 `send-keys`：合成一条的话，文本里出现 "Enter" 这种字
         // 会被 send-keys 当按键名解析。
         // ⚠️ 带附件的消息一定是多行（头部一行路径 + 正文），所以这条路上多行是常态不是特例。
-        session.exec("tmux send-keys -t '$target' -l '$q'; sleep 0.4; tmux send-keys -t '$target' Enter")
+        session.exec("tmux send-keys -t ${app.yxi.ssh.Shell.q(target)} -l '$q'; sleep 0.4; tmux send-keys -t ${app.yxi.ssh.Shell.q(target)} Enter")
     }
 
     /**
@@ -389,7 +393,7 @@ object SessionProbe {
      */
     suspend fun sendKey(session: SshSession, target: String, key: String): Boolean {
         if (!SAFE_KEY.matches(key)) return false
-        session.exec("tmux send-keys -t '$target' '$key'")
+        session.exec("tmux send-keys -t ${app.yxi.ssh.Shell.q(target)} '$key'")
         return true
     }
 
@@ -411,13 +415,13 @@ object SessionProbe {
      * 认错了气泡就永远挂着。
      */
     suspend fun popQueue(session: SshSession, target: String) {
-        session.exec("tmux send-keys -t '$target' Up")
-        session.exec("tmux send-keys -t '$target' C-u")
+        session.exec("tmux send-keys -t ${app.yxi.ssh.Shell.q(target)} Up")
+        session.exec("tmux send-keys -t ${app.yxi.ssh.Shell.q(target)} C-u")
     }
 
     /** 抓某个会话最近 n 行屏幕，看板上做预览。 */
     suspend fun peek(session: SshSession, target: String, lines: Int = 40): String =
-        session.exec("tmux capture-pane -p -t '$target' 2>/dev/null | tail -$lines")
+        session.exec("tmux capture-pane -p -t ${app.yxi.ssh.Shell.q(target)} 2>/dev/null | tail -$lines")
 
     /**
      * 终止一个会话 —— 等于在服务器上 `tmux kill-session`。

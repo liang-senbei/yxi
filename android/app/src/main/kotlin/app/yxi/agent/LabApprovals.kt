@@ -27,7 +27,7 @@ object LabApprovals {
     suspend fun set(ssh: SshSession?, id: String, on: Boolean) {
         ssh ?: return
         val s = safe(id)
-        if (on) ssh.exec("mkdir -p \$HOME/.yxi 2>/dev/null; grep -qxF '$s' $F 2>/dev/null || echo '$s' >> $F")
-        else ssh.exec("[ -f $F ] && grep -vxF '$s' $F > $F.tmp 2>/dev/null && mv $F.tmp $F || true")
+        if (on) ssh.exec("mkdir -p \$HOME/.yxi 2>/dev/null; grep -qxF ${app.yxi.ssh.Shell.q(s)} $F 2>/dev/null || echo ${app.yxi.ssh.Shell.q(s)} >> $F")
+        else ssh.exec("[ -f $F ] && grep -vxF ${app.yxi.ssh.Shell.q(s)} $F > $F.tmp 2>/dev/null && mv $F.tmp $F || true")
     }
 }

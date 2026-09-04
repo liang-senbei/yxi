@@ -140,16 +140,35 @@ object Account {
         null
     }
 
+    /**
+     * ⚠️ 退出登录要**同时告诉服务端**。以前只删本机的键：手机借人/卖二手前点了退出，
+     * (a) 之前泄漏过的 refresh token 依然有效，(b) 浏览器里的 Logto 会话还在 ——
+     * 下一个人点「登录」，不问密码就登进上一个人的账号。
+     */
     fun signOut(ctx: Context) {
+        val rt = p(ctx).getString("auth.refresh", null)
+            ?.let { runCatching { app.yxi.ssh.Vault.open(it) }.getOrNull() }
+        if (rt != null) Thread {
+            // 尽力而为：吊销失败也照样本地删干净，不能因为没网就退不出去
+            runCatching { form("$AUTH/oidc/token/revocation", mapOf("token" to rt, "client_id" to APP_ID)) }
+        }.start()
         signedOutWhy = null
-        p(ctx).edit().remove("auth.access").remove("auth.refresh").remove("auth.exp").remove("auth.me").apply()
+        p(ctx).edit().remove("auth.verifier").remove("auth.state").remove("auth.access").remove("auth.refresh").remove("auth.exp").remove("auth.me").apply()
         signedIn = false; me = null
     }
 
+    /**
+     * ⚠️ **令牌必须加密落盘**（2026-09-04 安全审计）。以前是明文 SharedPreferences，
+     * 而同一个 App 里 SSH 私钥和主机密码早就走 [app.yxi.ssh.Vault]（Keystore AES-GCM）了。
+     * 讽刺的是：**加密的那些换机带不走**（Keystore 密钥不进备份），
+     * **唯独明文的 refresh token 换机后照样能用** —— 荣耀「手机克隆」/云备份一搬，账号就没了。
+     */
     private fun saveTokens(ctx: Context, o: JSONObject) {
         val e = p(ctx).edit()
-        o.optString("access_token").takeIf { it.isNotEmpty() }?.let { e.putString("auth.access", it) }
-        o.optString("refresh_token").takeIf { it.isNotEmpty() }?.let { e.putString("auth.refresh", it) }
+        o.optString("access_token").takeIf { it.isNotEmpty() }
+            ?.let { e.putString("auth.access", app.yxi.ssh.Vault.seal(it)) }
+        o.optString("refresh_token").takeIf { it.isNotEmpty() }
+            ?.let { e.putString("auth.refresh", app.yxi.ssh.Vault.seal(it)) }
         e.putLong("auth.exp", System.currentTimeMillis() + o.optLong("expires_in", 3600L) * 1000L)
         e.apply()
     }
@@ -157,9 +176,11 @@ object Account {
     /** 拿一把还能用的 access token；快过期就先续。拿不到 = 没登录 / 续不上。 */
     private fun token(ctx: Context): String? {
         val sp = p(ctx)
-        val acc = sp.getString("auth.access", null)
+        // 解不开 = 上一版存的明文 / 换过机器 → 当没登录，重登一次即可（不写迁移代码）
+        val acc = sp.getString("auth.access", null)?.let { runCatching { app.yxi.ssh.Vault.open(it) }.getOrNull() }
         if (acc != null && System.currentTimeMillis() < sp.getLong("auth.exp", 0L) - 60_000L) return acc
-        val rt = sp.getString("auth.refresh", null) ?: return acc
+        val rt = sp.getString("auth.refresh", null)
+            ?.let { runCatching { app.yxi.ssh.Vault.open(it) }.getOrNull() } ?: return acc
         val (c, body) = form(
             "$AUTH/oidc/token",
             mapOf("grant_type" to "refresh_token", "refresh_token" to rt, "client_id" to APP_ID, "scope" to SCOPES),
@@ -174,7 +195,7 @@ object Account {
             return null
         }
         saveTokens(ctx, JSONObject(body))
-        return sp.getString("auth.access", null)
+        return sp.getString("auth.access", null)?.let { runCatching { app.yxi.ssh.Vault.open(it) }.getOrNull() }
     }
 
     // ── 会员服务 ───────────────────────────────────────────────────────────

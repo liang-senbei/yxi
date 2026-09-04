@@ -64,7 +64,7 @@ object UpdateDownloader {
         scope.launch {
             val r = runCatching {
                 val f = File(app.cacheDir, "update/Yxi.apk")
-                val got = if (update.fromPublic) {
+                val (got, sum) = if (update.fromPublic) {
                     // ⚠️ **默认走公网下载页** —— 这样换个客户也能在 App 里更新，
                     // 不需要他自己的服务器上放包（那要我们能登他机器，耦合太深）。
                     downloadHttp(update.url, f) { n ->
@@ -75,13 +75,29 @@ object UpdateDownloader {
                     val s = ssh ?: throw RuntimeException(t("没连上"))
                     val sftp = s.openSftp()
                     try {
-                        sftp.download(update.remotePath, f) { n ->
+                        val n0 = sftp.download(update.remotePath, f) { n ->
                             progress = (n.toFloat() / update.sizeBytes).coerceIn(0f, 1f)
+                        }
+                        // SFTP 那条路下完再算一遍（走的是用户自己的机器，包不大时可接受）
+                        n0 to f.inputStream().use { ins ->
+                            val md = java.security.MessageDigest.getInstance("SHA-256")
+                            val buf = ByteArray(64 * 1024)
+                            while (true) { val r2 = ins.read(buf); if (r2 < 0) break; md.update(buf, 0, r2) }
+                            md.digest().joinToString("") { "%02x".format(it) }
                         }
                     } finally { runCatching { sftp.close() } }
                 }
                 // ⚠️ 大小对不上就别装 —— 半个 APK 比不更新糟得多
                 if (got != update.sizeBytes) throw RuntimeException(t("下载不完整（%d/%d），没装").format(got, update.sizeBytes))
+                // ⚠️ **大小校验挡不住换包**：那个长度来自同一个响应，能换包的人当然也能改长度。
+                //    清单里的 sha256 才算数（2026-09-04 安全审计）。
+                if (update.sha256.isNotBlank() && !update.sha256.equals(sum, true)) {
+                    runCatching { f.delete() }
+                    throw RuntimeException(t("包对不上（校验失败），没装 —— 换个网络再试一次"))
+                }
+                // ⚠️ 再挡一层：**下来的包必须和本机是同一把签名**。这样即便清单和包被一起换掉，
+                //    攻击者也没法让我们去装一个「换了包名并排安装」的冒牌货。
+                signatureMismatch(app, f)?.let { runCatching { f.delete() }; throw RuntimeException(it) }
                 ready = f
                 // ⚠️ **这一下不一定拉得起来，而且失败是静默的。**
                 // 下载跑在 app scope 上（切页面不断，这是对的），28 MB 在手机网络下要几分钟 ——
@@ -139,7 +155,8 @@ fun UpdateBanner(ssh: SshSession?, update: Update?, onDone: () -> Unit) {
 }
 
 /** 从公网下载页取包（流式，带进度）。@return 实际字节数 */
-private suspend fun downloadHttp(url: String, into: File, onBytes: (Long) -> Unit): Long =
+/** @return 下了多少字节 to 这包的 sha256（十六进制小写） */
+private suspend fun downloadHttp(url: String, into: File, onBytes: (Long) -> Unit): Pair<Long, String> =
     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         into.parentFile?.mkdirs()
         val c = (java.net.URL(url).openConnection() as java.net.HttpURLConnection).apply {
@@ -148,18 +165,20 @@ private suspend fun downloadHttp(url: String, into: File, onBytes: (Long) -> Uni
         try {
             if (c.responseCode !in 200..299) throw RuntimeException("HTTP ${c.responseCode}")
             var n = 0L
+            // ⚠️ **边下边算**（照抄 AsrModel 那十行）：下完再读一遍要多花几秒，而这个包 50MB
+            val md = java.security.MessageDigest.getInstance("SHA-256")
             c.inputStream.use { input ->
                 into.outputStream().use { out ->
                     val buf = ByteArray(64 * 1024)
                     while (true) {
                         val r = input.read(buf)
                         if (r < 0) break
-                        out.write(buf, 0, r); n += r
+                        out.write(buf, 0, r); md.update(buf, 0, r); n += r
                         onBytes(n)
                     }
                 }
             }
-            n
+            n to md.digest().joinToString("") { "%02x".format(it) }
         } finally { c.disconnect() }
     }
 
@@ -192,3 +211,20 @@ internal fun install(ctx: Context, apk: File): String? {
         null
     }.getOrElse { t("拉不起安装器：%s").format(it.message) }
 }
+
+/**
+ * 下来的 APK 跟本机是不是同一把签名。@return 出错原因；null = 一致（或读不出来，那时不拦）
+ *
+ * ⚠️ 只在**明确读到两边的证书**时才判不一致。读不出来就放行 —— 这里的目的是挡「换包名的冒牌货」，
+ * 不是给系统的签名校验加锁；因为读不出来而把正常更新拦下来，代价比放行大。
+ */
+private fun signatureMismatch(ctx: Context, apk: File): String? = runCatching {
+    val pm = ctx.packageManager
+    val flag = android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES
+    val theirs = pm.getPackageArchiveInfo(apk.absolutePath, flag)?.signingInfo?.apkContentsSigners
+    val ours = pm.getPackageInfo(ctx.packageName, flag).signingInfo?.apkContentsSigners
+    if (theirs.isNullOrEmpty() || ours.isNullOrEmpty()) return@runCatching null
+    val a = theirs.map { it.toCharsString() }.toSet()
+    val b = ours.map { it.toCharsString() }.toSet()
+    if (a != b) t("这个包的签名跟本机不一致，没装") else null
+}.getOrNull()

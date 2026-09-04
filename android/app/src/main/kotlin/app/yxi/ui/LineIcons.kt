@@ -28,7 +28,7 @@ import androidx.compose.ui.unit.dp
  *
  * ⚠️ 没引图标库：离线构建加不了依赖，而且这几个形状用路径写就是几行。
  */
-enum class Ico { Chat, Server, Sliders, Gear, Crown, Moon, Person }
+enum class Ico { Chat, Server, Sliders, Gear, Crown, Moon, Person, Bolt }
 
 @Composable
 fun YxiIcon(ico: Ico, size: Dp = 22.dp, tint: Color = LocalContentColor.current, modifier: Modifier = Modifier) {
@@ -85,6 +85,17 @@ fun YxiIcon(ico: Ico, size: Dp = 22.dp, tint: Color = LocalContentColor.current,
                 val bite = Path().apply { addOval(Rect(9.5f * k, 0f * k, 27f * k, 17.5f * k)) }
                 drawPath(Path().apply { op(full, bite, PathOperation.Difference) }, tint, style = st)
             }
+            Ico.Bolt -> drawPath(                                   // 闪电：会话状态那条的开关 / 「模式」标记
+                // ⚠️ 这里原来直接写 emoji「⚡」（用户 2026-09-04：「看起来很违和」）。
+                //    emoji 是彩色位图字形，粗细、基线、配色全归系统字体管 —— 它旁边就是 ︿ 那种细线，
+                //    一胖一瘦贴在一起怎么调都不对。改成跟别的图标同一套：24 格、2 格粗、圆角描边。
+                Path().apply {
+                    moveTo(13.2f * k, 2.6f * k); lineTo(5.6f * k, 13.4f * k); lineTo(11.2f * k, 13.4f * k)
+                    lineTo(10.8f * k, 21.4f * k); lineTo(18.4f * k, 10.6f * k); lineTo(12.8f * k, 10.6f * k)
+                    close()
+                },
+                tint, style = st,
+            )
             Ico.Person -> {                                         // 头像占位
                 drawCircle(tint, 3.6f * k, Offset(12f * k, 8.6f * k), style = st)
                 drawPath(

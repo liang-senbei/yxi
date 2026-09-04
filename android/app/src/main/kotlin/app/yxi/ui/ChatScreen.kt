@@ -11,6 +11,8 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.clickable
+import androidx.compose.material3.Surface
+import app.yxi.ui.theme.Muted
 import app.yxi.ui.theme.Amber
 import app.yxi.ui.theme.Copper
 import androidx.compose.foundation.combinedClickable
@@ -77,6 +79,7 @@ private val Pill = RoundedCornerShape(100.dp)
  * 发消息走 `tmux send-keys` 打进那个活着的会话，
  * 所以 Claude Code 的配置、权限、MCP、skills 原样生效 —— 我们不重新实现 agent 协议。
  */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun ChatScreen(
     /** ⚠️ 连接由 [Workspace] 持有并传进来 —— 切模式时这个 composable 会销毁，连接不能跟着断 */
@@ -596,6 +599,11 @@ fun ChatScreen(
     //    （用户：「上导航栏收起的地方却是有空白，X 的就不会」）。页眉的高度要进**列表的 contentPadding**——
     //    那是内容的一部分，手一划就滚上去了，栏退场时底下露出来的正好是字。
     val headerDp = with(LocalDensity.current) { headerPx.toDp() }
+    // ⚠️ **列表外面这几行要自己让开页眉。** 页眉是**悬浮**在正文上的（高度只进了列表的
+    //    `contentPadding`），而状态提示 / 状态带 / 「正在做」这三行不在列表里 —— 谁排第一，
+    //    谁就得自己加这段 `top`，否则整行钻到页眉底下（实测跑到状态栏里去了，等于没显示）。
+    //    ⚠️ 不能给 Column 整个加：那样三行都没有的时候会**空出永久的一条**（#228 那个白条）。
+    val statsShown = showStats && (ctxUse != null || todayUse != null)
     Column(Modifier.fillMaxSize()) {
         // 标题和路径由 Workspace 的头部管，这里只在出问题时说一句
         status?.let {
@@ -617,29 +625,28 @@ fun ChatScreen(
         // ⚠️ **拿不到就整行不画**，不显示 0、不显示「未知」——
         // 额度和花费显示一个假的比不显示危险得多，你会照着它决定今天开不开大活。
         if (showStats && (ctxUse != null || todayUse != null)) {
-            Row(
-                // ⚠️ **必须能横滑。** 这一行现在有五格（⚡模式 / 模型 / 思考强度·模式 / 上下文 / 今日），
-                // 窄屏放不下就会把左边的挤没 —— 加了「模式」这格之后风险是实打实的。
-                // 横滑之后放不下也只是滑一下的事，不会有信息凭空消失。
-                Modifier.fillMaxWidth().padding(18.dp, 0.dp, 18.dp, 2.dp)
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically,
+            androidx.compose.foundation.layout.FlowRow(
+                // ⚠️ **放不下要换行，不能裁。** 这行有五格（模式 / 模型 / 思考强度 / 上下文 / 今日），
+                // 窄屏一定放不下。原来是横滑，结果默认停在最左边、右边那两格数字**看着就是被切掉的**
+                // —— 而右边那两格恰恰是要看的（上下文、今日花了多少）。换行了就一个都不少。
+                Modifier.fillMaxWidth()
+                    .padding(top = if (status == null) headerDp else 0.dp)
+                    .padding(14.dp, 2.dp, 14.dp, 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 // 模式快切：模型 / 思考强度 / ultracode，点开面板一点就切、可叠加
-                Text(
-                    t("⚡模式"),
-                    Modifier.clickable(enabled = ssh != null) { showModes = true }.padding(end = 12.dp),
-                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                    color = MaterialTheme.colorScheme.primary, maxLines = 1,
+                StatChip(
+                    t("模式"), MaterialTheme.colorScheme.primary, icon = Ico.Bolt,
+                    onClick = if (ssh != null) ({ showModes = true }) else null,
                 )
                 // 模型名单独一格，**可点** —— 点开就是 `/model` 那个选单
                 ctxUse?.model?.takeIf { it.isNotBlank() }?.let { m ->
-                    Text(
+                    StatChip(
                         if (modelBusy) t("开选单…") else m.removePrefix("claude-"),
-                        Modifier
-                            .clickable(enabled = ssh != null && !modelBusy) {
-                                val s0 = ssh ?: return@clickable
+                        MaterialTheme.colorScheme.primary, mono = true,
+                        onClick = if (ssh != null && !modelBusy) ({
+                                val s0 = ssh
                                 scope.launch {
                                     modelBusy = true
                                     models = app.yxi.ssh.catching {
@@ -653,11 +660,7 @@ fun ChatScreen(
                                     }
                                     modelBusy = false
                                 }
-                            }
-                            .padding(end = 10.dp),
-                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                        color = MaterialTheme.colorScheme.primary,
-                        maxLines = 1,
+                        }) else null,
                     )
                 }
                 // 这个会话在什么**模式**：思考强度（max/high/mid）+ 计划模式。跟模型一样是**按会话**的。
@@ -672,40 +675,27 @@ fun ChatScreen(
                         // ponytail 强度（lite/full/ultra）——读得到才显示
                         if (cu.ponytail.isNotBlank()) add("ponytail " + cu.ponytail)
                     }
-                    if (bits.isNotEmpty()) Text(
-                        bits.joinToString(" · "),
-                        Modifier.padding(end = 10.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Copper, maxLines = 1,
-                    )
+                    // ⚠️ 这格**不能点**，所以是 Muted 不是主色 —— 这条上「蓝 = 能点」是唯一的颜色规则
+                    if (bits.isNotEmpty()) StatChip(bits.joinToString(" · "), Muted)
                 }
                 // 上下文单独一格、可点：快满了染琥珀，点一下发 /compact（手机上懒得敲那几个字母）
                 ctxUse?.let { cu ->
                     // ponytail: 固定阈值 15 万 —— 逼近常见的 20 万自动压缩线；模型窗口不同就改这个数
-                    val tight = cu.tokens >= 150_000
-                    Text(
+                    // ⚠️ 模型名里**明写**了 `[1m]` 才敢按 100 万算 —— 那是显式的窗口标记，不是从模型系列猜的
+                    //    （猜窗口会显示出假百分比，见 [Transcript.Ctx] 的注释）。其余按 20 万那条常见的自动压缩线。
+                    val tight = cu.tokens >= if (cu.model.contains("[1m]")) 750_000 else 150_000
+                    StatChip(
                         t("上下文 %s").format(tokenText(cu.tokens)),
-                        Modifier
-                            .clickable(enabled = ssh != null) {
-                                val s0 = ssh ?: return@clickable
-                                scope.launch { runCatching { SessionProbe.send(s0, sessionName, "/compact") } }
-                                android.widget.Toast.makeText(ctx, t("已发 /compact —— 压一下上下文"),
-                                    android.widget.Toast.LENGTH_SHORT).show()
-                            }
-                            .padding(end = 10.dp),
-                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                        color = if (tight) Amber else MaterialTheme.colorScheme.outline,
-                        maxLines = 1,
+                        if (tight) Amber else Copper, mono = true,   // 能点（发 /compact）→ 主色；吃紧了才转琥珀
+                        onClick = if (ssh != null) ({
+                            val s0 = ssh
+                            scope.launch { runCatching { SessionProbe.send(s0, sessionName, "/compact") } }
+                            android.widget.Toast.makeText(ctx, t("已发 /compact —— 压一下上下文"),
+                                android.widget.Toast.LENGTH_SHORT).show()
+                        }) else null,
                     )
                 }
-                todayUse?.let {
-                    Text(
-                        t("今日 %s · %s").format(it.tokenText, it.costText),
-                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                        color = MaterialTheme.colorScheme.outline,
-                        maxLines = 1,
-                    )
-                }
+                todayUse?.let { StatChip(t("今日 %s · %s").format(it.tokenText, it.costText), Muted, mono = true) }
             }
         }
 
@@ -721,7 +711,9 @@ fun ChatScreen(
         doingNow?.let {
             Text(
                 t("▶ 正在做 · %s").format(it),
-                Modifier.fillMaxWidth().padding(18.dp, 0.dp, 18.dp, 2.dp),
+                Modifier.fillMaxWidth()
+                    .padding(top = if (status == null && !statsShown) headerDp else 0.dp)
+                    .padding(18.dp, 0.dp, 18.dp, 2.dp),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary,
                 maxLines = 1,
@@ -1428,7 +1420,14 @@ private fun tokenText(n: Long): String = when {
 
 private fun copy(ctx: android.content.Context, text: String) {
     val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-    cm.setPrimaryClip(android.content.ClipData.newPlainText("yxi", text))
+    // ⚠️ 标成敏感：安卓 13+ 复制后会弹一个**带内容预览**的浮层，对话正文会给旁边的人看见
+    val clip = android.content.ClipData.newPlainText("yxi", text)
+    if (android.os.Build.VERSION.SDK_INT >= 33) {
+        clip.description.extras = android.os.PersistableBundle().apply {
+            putBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE, true)
+        }
+    }
+    cm.setPrimaryClip(clip)
     // Android 13+ 系统自己会弹「已复制」的浮层，再 Toast 一次就是两层，所以只在旧系统上吱
     if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) {
         android.widget.Toast.makeText(ctx, t("已复制"), android.widget.Toast.LENGTH_SHORT).show()
@@ -1929,3 +1928,46 @@ internal class Upload(val uri: android.net.Uri, val name: String, val isImage: B
     var job: kotlinx.coroutines.Job? = null
 }
 
+
+/**
+ * 会话状态那条上的一格。
+ *
+ * ⚠️ **为什么改成药丸**（用户 2026-09-04：「⚡ 标志和下面的记录看起来很违和」）：
+ * 原来这行是**五段裸文字**直接飘在正文上——蓝的「⚡模式 opus-5」、铜色的「最大思考」、
+ * 琥珀的「上下文 163K」，字号字体各不同，底下没有承托。而这个 App 从看板到输入框
+ * **一切都是药丸**（见 design/STYLE.md「药丸是基本形状语言」），只有这一条不是，
+ * 于是它看着像别的软件掉进来的一行调试信息。
+ *
+ * 现在：每格一颗药丸，底色统一 `surfaceContainerHigh`（跟上面那排 终端/对话/文件/实验室 同一层），
+ * **颜色只留给有含义的地方**——能点的用主色、思考强度用铜色、上下文吃紧了才染琥珀，其余一律 Muted。
+ */
+@Composable
+private fun StatChip(
+    text: String,
+    color: androidx.compose.ui.graphics.Color,
+    mono: Boolean = false,
+    icon: Ico? = null,
+    onClick: (() -> Unit)? = null,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = Pill,
+        modifier = if (onClick != null) Modifier.clip(Pill).clickable(onClick = onClick) else Modifier,
+    ) {
+        Row(
+            Modifier.padding(10.dp, 5.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            icon?.let { YxiIcon(it, 12.dp, color) }
+            Text(
+                text,
+                style = MaterialTheme.typography.labelSmall.let {
+                    if (mono) it.copy(fontFamily = FontFamily.Monospace) else it
+                },
+                color = color,
+                maxLines = 1,
+            )
+        }
+    }
+}

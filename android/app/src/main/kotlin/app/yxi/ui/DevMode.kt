@@ -256,7 +256,13 @@ object DevMode {
             // 而且诊断**不写回** hostKey（KnownHosts.add 只在真连接时才存），
             // 所以不会把一台没核对过的机器悄悄变成「已信任」
             val known = app.yxi.ssh.KnownHosts(store, host.id, object : app.yxi.ssh.TrustPrompt {
-                override fun confirmNewHost(host: String, keyType: String, fingerprint: String) = true
+                // ⚠️ **以前这里 `return true`** —— 等于对这台主机开了一次 StrictHostKeyChecking=no，
+            //    而且 jsch 在 promptYesNo 返回 true 之后会把这把密钥**写进信任库**
+            //    （旧注释说「诊断不写回 hostKey」是错的，审计反编译 jsch 核对过）。
+            //    后果：用户被引导去跑诊断时链路上有中间人 → 假指纹被永久钉死，
+            //    密码认证的主机还会把明文密码交给对面。诊断一律**拒绝新主机**：
+            //    没连过的主机先在主机页正常连一次（那里有真的指纹确认框），再来诊断。
+            override fun confirmNewHost(host: String, keyType: String, fingerprint: String) = false
             })
             val s = app.yxi.ssh.SshSession(cfg, known)
             s.connect()

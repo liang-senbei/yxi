@@ -220,11 +220,15 @@ fun MeDialog(onClose: () -> Unit) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { MeAvatar(72.dp) }
                 OutlinedTextField(
-                    name, { if (it.length <= 24) name = it }, label = { Text(t("昵称")) }, singleLine = true,
+                    // ⚠️ 只挡控制字符和长度。HTML 转义**不在这儿做** —— 后台已经改成事件委托 + 转义，
+                    //    修在 sink 端才是正解；客户端过滤只是噪音，改包的人绕得过去。
+                    name, { v -> v.filterNot(Char::isISOControl).take(24).let { name = it } },
+                    label = { Text(t("昵称")) }, singleLine = true,
                     supportingText = { Text(t("1–24 个字")) },
                 )
                 OutlinedTextField(
-                    sign, { if (it.length <= 60) sign = it }, label = { Text(t("个性签名")) }, maxLines = 3,
+                    sign, { v -> v.filterNot(Char::isISOControl).take(60).let { sign = it } },
+                    label = { Text(t("个性签名")) }, maxLines = 3,
                     supportingText = { Text(t("最多 60 个字")) },
                 )
                 if (signed && q != null) Text(
@@ -254,7 +258,8 @@ fun MeDialog(onClose: () -> Unit) {
                         // ⚠️ 一次提交算一次配额 —— 所以昵称和签名一起发，没改的字段不发
                         val e = Account.saveProfile(
                             ctx,
-                            nickname = name.trim().takeIf { it != q?.nickname },
+                            // ⚠️ 空昵称别发：服务端会拒，而这一次提交照样扣一格配额
+                            nickname = name.trim().takeIf { it.isNotEmpty() && it != q?.nickname },
                             signature = sign.trim().takeIf { it != q?.signature },
                         )
                         busy = false

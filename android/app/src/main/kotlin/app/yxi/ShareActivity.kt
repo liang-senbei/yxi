@@ -106,6 +106,10 @@ private fun SharePicker(store: HostStore, keys: KeyManager, text: String?, uris:
                         val staged = ArrayList<Attachments.Staged>()
                         try {
                             for (uri in uris) {
+                                // ⚠️ 只收 content:。别的 App 能显式 Intent 打过来塞 `file:///data/data/app.yxi/…`，
+                                //    而 openInputStream 用的是**我们自己的 UID** —— 等于替它读我们的私有文件
+                                //    （confused deputy，2026-09-04 安全审计）。
+                                if (uri.scheme != "content") continue
                                 val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: continue
                                 val mime = ctx.contentResolver.getType(uri).orEmpty()
                                 val isImage = mime.startsWith("image/")

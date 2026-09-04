@@ -4391,3 +4391,90 @@ PATH 只有 `/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`，而
 **修法**：所有远端命令前面加 `export PATH="$HOME/.local/bin:$HOME/bin:/usr/local/bin:$PATH";`。
 ⚠️ 通用：**别用 `ssh host "command -v X"` 判断远端有没有 X** —— 交互 shell 找得到不代表 exec 找得到。
 自己验一下：`ssh host 'echo $PATH'` 跟你登上去 `echo $PATH` 是两个东西。
+
+## #234 开了 R8 之后「一点终端就整个 App 没了」—— native 按**字段名**取值，被混淆改掉
+
+**症状**：1.0.5 开混淆后编译全绿、SSH 正常、看板 21 个会话都在，**唯独点「终端」整个进程瞬间消失**。
+logcat 里是 native 崩溃，栈顶在 `libndk_translation.so`（模拟器的 ARM 翻译层）——**极容易误判成模拟器的锅**。
+往下翻才是真话：
+
+```
+Abort message: 'Throwing new exception 'no "I" field "fgGreen" in class
+"Lorg/connectbot/terminal/CellRun;"' … java.lang.NoSuchFieldError: no "I" field "fgRed"
+    at org.connectbot.terminal.TerminalNative.nativeInit(...)
+```
+
+**根因**：终端控件 `org.connectbot:termlib` 的 `libjni_cb_term.so` 用 `GetFieldID("fgRed")` 这类
+**按名字**取 Java 字段。R8 把 `CellRun.fgRed` 改名 → JNI 找不到 → 直接 abort（不是抛异常，是杀进程）。
+proguard 规则里当时只 keep 了 jsch / BouncyCastle / sherpa-onnx，**漏了它**。
+
+**修法**：`-keep class org.connectbot.terminal.** { *; }` + `-keepclassmembers … { <fields>; <methods>; }`。
+
+⚠️ **通用**：判断「哪些库开混淆会崩」不要靠印象，**按包里的 `.so` 反查**：
+`unzip -Z1 app.apk 'lib/*'` 列出所有 native 库，每一个都要问一句「它回头找 Java 时按名字还是按符号」。
+本项目当时包里有 6 个 `.so`，规则只覆盖了 4 个。
+⚠️ **验证也别偷懒**：确认规则生效可以直接查 dex 字符串表 ——
+`unzip -p app.apk classes.dex | strings | grep -c '^fgRed$'` 应该是 1（被改名就是 0）。
+
+## #235 安全白名单静默吃掉了用户 8 个中文会话（30 个只显示 22）
+
+**症状**：红队 E2E 时顺手对了一下数：服务器上 30 个 `cc-*` 会话，App 看板只有 22。
+少的正好是 `cc-今天` `cc-文件` `cc-日常对话` `cc-智商题` `cc-环境` `cc-诗歌` `cc-项目` `cc-文件传`。
+**没有任何报错**——会话就是不见了。
+
+**根因**：修命令注入时给会话名加了白名单 `^[A-Za-z0-9._@%+=,:-]{1,64}$`。
+写的时候脑子里想的是「我见过的会话名长这样」，而会话名是**用户自己起的**，中文天经地义。
+
+**修法**：判据从「允许我认识的字符」改成「**这个名字当 shell 参数会不会跑出命令来**」——
+黑名单 `' " ` $ ; & | < > \ /` + 控制字符（`/` 也挡是因为同一个函数还被拿去拼远端路径）。
+中日韩、空格、括号配上单引号转义完全无害。见 `ssh/Shell.kt`。
+
+⚠️ **通用**：**白名单只能用在「格式由我们规定」的字段上**（版本号、id、枚举值）。
+凡是**用户或外部系统起的名字**，白名单一定会误杀，而且是静默误杀 —— 那时候要的是危险字符黑名单。
+⚠️ 这个洞光看代码看不出来（规则本身很"安全"），是**拿真机器上的真数据对数**才露的：
+凡是加了过滤，就去数一遍「过滤前 N 条、过滤后 N 条」。
+
+## #236 实验室页面能开 WebSocket 出网 —— `blockNetworkLoads` 和 `shouldInterceptRequest` 都管不着
+
+**症状**：往实验室推了一张出网自检页，结果：外链 `<img>` 挡住了、`fetch`/XHR/`sendBeacon`/`<script src>`
+也挡住了（服务器侧监听一条请求都没收到），但 **`new WebSocket('wss://echo.websocket.org')` 的 `onopen` 触发了**
+—— 对方回了 HTTP 101，那是一条**真的通向公网的连接**。
+
+**根因**：`settings.blockNetworkLoads` 管的是**资源加载**；`WebViewClient.shouldInterceptRequest`
+**不会为 WebSocket 回调**。两道防线在 WS 上都是空的。而实验室页面是**服务器上的 agent 写的**，
+「agent 被提示词注入」是我们明写的威胁模型 —— 等于留了一条无声的外传通道。
+
+**修法**：加载前往 HTML 里插一条 CSP `<meta>`，`connect-src 'none'`（fetch / XHR / WebSocket /
+EventSource / sendBeacon 全归它管）。见 `ui/WebFence.kt`。插入位置取「`<head>` 之后」和
+「第一个 `<script` 之前」**靠前的那个** —— 恶意页面会故意把脚本写在 `<head>` 前面。
+
+⚠️ **通用**：**「我挡住了 fetch」不等于「它出不去网」。** 判据不能看页面里的回调
+（`fetch` 被拦截器喂了空应答一样会 resolve，看着像"出去了"其实没出去；反过来 WS 的 onopen 是真的），
+**只能看服务器有没有收到请求**。测出网就起一个监听自己数。
+
+## #237 悬浮页眉下面的那几行：`status` 一为空就整条钻进状态栏
+
+**症状**：对话页顶上那条状态（模式 / 模型 / 上下文 / 今日）有时看得见、有时"没显示"。
+uiautomator 抓出来才发现它**在**，只是被画到了 `y=18..60` —— 系统状态栏底下，页眉之上。
+
+**根因**：页眉是**悬浮**的，它的高度只进了列表的 `contentPadding`（#228 那条：不能在 Column 里留位置，
+否则页眉收起时会露出永久白条）。而列表**外面**还有三行（状态提示 / 状态带 / 「正在做」），
+当时只有第一行 `status` 加了 `padding(top = headerDp)`。`status` 一为 null，后面那两行就顶到了 y=0。
+
+**修法**：谁是**第一个真正渲染出来的**，谁加这段 top —— 用 `if (status == null) headerDp else 0.dp`
+这样一路串下去。不能给 Column 整个加（那就退回 #228 的白条）。
+
+⚠️ **通用**：悬浮栏 + 「列表外面还有几行」是个组合陷阱：只要这几行是**条件渲染**的，
+就必须按「谁排第一谁让位」写，不能挂在其中某一行上。
+
+## #238 模拟器上跑 release 包会 ANR —— 因为 release 是 arm64-only，在 x86_64 模拟器上全程翻译执行
+
+**症状**：同一份代码，debug 包在模拟器上顺滑，release 包点一下就 "Yxi isn't responding"，
+而且 logcat 里的 native 崩溃栈顶都在 `libndk_translation.so`，看着像"混淆搞崩了"。
+
+**根因**：`defaultConfig` 里 `abiFilters += "arm64-v8a"`，debug 额外并上 `x86_64`（两者是**并集**）。
+所以 release 包在 x86_64 模拟器上是靠 NDK translation 跑的 —— 慢一个量级，主线程稍微一忙就超 5 秒。
+
+**修法 / 怎么避开**：要在模拟器上验 release 的**混淆规则**（那是 dex 层面的，跟 ABI 无关），
+就临时给 release 也并上 `x86_64` 编一个包来跑，验完撤掉。别拿翻译层下的 ANR 当 App 的性能问题。
+⚠️ 顺带：宿主机 load 高的时候（本机实测 load 20+、steal 22%）模拟器同样会 ANR —— 先 `uptime` 再下结论。

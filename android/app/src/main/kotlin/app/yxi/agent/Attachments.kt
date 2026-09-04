@@ -20,7 +20,12 @@ object Attachments {
     const val ROOT = "/root/src/tmp"
 
     /** 项目目录名 = tmux 会话名去掉 `cc-` 前缀。跟看板上显示的名字一致，找起来不用猜。 */
-    fun dirFor(session: String): String = ROOT + "/" + session.removePrefix("cc-").ifBlank { "misc" }
+    fun dirFor(session: String): String {
+        // ⚠️ 会话名可能来自通知事件（服务器上的 agent 能写），带 `../` 就能让 mkdirs/write
+        //    落到暂存区外面（2026-09-04 安全审计）。不合白名单一律扔进 misc。
+        val name = session.removePrefix("cc-").ifBlank { "misc" }
+        return ROOT + "/" + (if (app.yxi.ssh.Shell.safeName(name)) name else "misc")
+    }
 
     /**
      * @param localUri 手机上那份的 content Uri（字符串形式）。**只为预览用。**

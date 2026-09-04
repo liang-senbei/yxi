@@ -149,8 +149,12 @@ if [ "${1:-}" = "--publish" ]; then
   #    见 TROUBLESHOOTING #148。App 读的是清单里的 `file` 字段，所以老版本也能跟上。
   VER_APK="Yxi-${CODE}.apk"
   cp -f "$EVENTS_DIR/Yxi.apk" "$EVENTS_DIR/$VER_APK"
-  python3 -c 'import json,sys,pathlib; pathlib.Path(sys.argv[1]).write_text(json.dumps({"versionCode":int(sys.argv[2]),"versionName":sys.argv[3],"file":sys.argv[5],"notes":sys.argv[4]},ensure_ascii=False,indent=1))' \
-    "$EVENTS_DIR/latest.json" "$CODE" "$NAME" "$NOTES" "$VER_APK"
+  # ⚠️ **清单里必须带 sha256**（2026-09-04 安全审计）：手机下完包只比过字节数，
+  #    而那个字节数来自同一个响应 —— 能换包的人当然也能改长度，等于没校验。
+  #    模型下载（AsrModel）一直是钉死 sha256 的，最该校验的 APK 反而没有。
+  APK_SHA=$(sha256sum "$EVENTS_DIR/$VER_APK" | cut -d" " -f1)
+  python3 -c 'import json,sys,pathlib; pathlib.Path(sys.argv[1]).write_text(json.dumps({"versionCode":int(sys.argv[2]),"versionName":sys.argv[3],"file":sys.argv[5],"notes":sys.argv[4],"sha256":sys.argv[6]},ensure_ascii=False,indent=1))' \
+    "$EVENTS_DIR/latest.json" "$CODE" "$NAME" "$NOTES" "$VER_APK" "$APK_SHA"
   echo "· 发布好了：$EVENTS_DIR/Yxi.apk（$(du -h "$EVENTS_DIR/Yxi.apk" | cut -f1)）"
   echo "  清单 → versionCode $CODE / $NAME"
   echo "  ⚠️ versionCode 必须比上一版大 —— 手机只比这个数，versionName 只给人看。"

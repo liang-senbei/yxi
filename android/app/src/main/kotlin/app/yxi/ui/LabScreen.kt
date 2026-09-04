@@ -473,6 +473,33 @@ private fun LabItemPreview(item: LabRemote.Item, ssh: SshSession?, full: Boolean
                             layoutParams = android.view.ViewGroup.LayoutParams(
                                 android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
                             settings.javaScriptEnabled = true
+                            // ⚠️ **实验室页面不可信**：它是从服务器读的 HTML，
+                            //    「服务器被攻破 / agent 被提示词注入」是我们明写的威胁模型。
+                            //    `baseUrl=null` 给的是不透明源 —— 它挡的是**读**（同源），**不挡发**：
+                            //    `fetch` / `<img src=https://>` 照走。全屏的实验室没有地址栏，
+                            //    一个假的「连接已过期，请重新输入 SSH 密码」就能把这个 App 的核心资产钓走。
+                            //    契约本来就要求页面单文件离线，那就在客户端强制离线（2026-09-04 安全审计）。
+                            settings.blockNetworkLoads = true
+                            settings.setGeolocationEnabled(false)
+                            // ⚠️ **上面这两条挡不住 WebSocket**（红队 E2E 实测：`wss://` 的 onopen 真的触发了）。
+                            //    真正的围栏是加载时套的那层 CSP —— 见 [WebFence]，别把它去掉。
+                            webViewClient = object : android.webkit.WebViewClient() {
+                                // 页面加载完就该定死：不许导航去别处（否则它就是个没有地址栏的浏览器）
+                                override fun shouldOverrideUrlLoading(
+                                    v: android.webkit.WebView,
+                                    r: android.webkit.WebResourceRequest,
+                                ) = true
+
+                                // 兜底：非 data: 的请求一律给空应答
+                                override fun shouldInterceptRequest(
+                                    v: android.webkit.WebView,
+                                    r: android.webkit.WebResourceRequest,
+                                ): android.webkit.WebResourceResponse? =
+                                    if (r.url.scheme == "data") null
+                                    else android.webkit.WebResourceResponse(
+                                        "text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)),
+                                    )
+                            }
                             settings.allowFileAccess = false; settings.allowContentAccess = false
                             // ⚠️ **必须 true。** false 的时候 WebView 走「老式布局」：布局视口没有高度，
                             // 页面里的 100vh 算成 0 —— 画布后备 935×935 画得好好的，CSS 高度却是 0，
@@ -496,7 +523,7 @@ private fun LabItemPreview(item: LabRemote.Item, ssh: SshSession?, full: Boolean
                             // 布局视口一直撑在 1424，之后有了尺寸也回不来。`post {}` 不够（那时还没布局），
                             // 要挂在 onLayoutChange 上，宽高都 > 0 才 load，且只 load 一次。
                             var loaded = false
-                            fun loadOnce() { if (!loaded && width > 0 && height > 0) { loaded = true; loadDataWithBaseURL(null, h, "text/html", "utf-8", null) } }
+                            fun loadOnce() { if (!loaded && width > 0 && height > 0) { loaded = true; loadDataWithBaseURL(null, WebFence.wrap(h), "text/html", "utf-8", null) } }
                             addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> loadOnce() }
                             post { loadOnce() }
                         } },

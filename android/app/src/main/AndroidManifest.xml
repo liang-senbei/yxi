@@ -31,7 +31,11 @@
          录音只是上传的原料，App 不往任何云服务发音频。 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
+    <!-- ⚠️ `allowBackup="false"`（2026-09-04 安全审计）：这个 App 的数据本来换机就带不走 ——
+         Keystore 密钥不进备份，SSH 私钥和主机密码到了新机解不开；
+         而备份能带走的恰恰是 hosts.json（主机清单：地址/端口/用户名）和登录令牌。 -->
     <application
+        android:allowBackup="false"
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"

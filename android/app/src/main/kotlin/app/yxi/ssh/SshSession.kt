@@ -87,7 +87,10 @@ class SshSession(
         Crypto.ensureProviders()
         // 把 jsch 自己的日志接到 logcat —— 认证失败时光看异常消息什么也看不出来
         JSch.setLogger(object : com.jcraft.jsch.Logger {
-            override fun isEnabled(level: Int) = true
+                // ⚠️ release 里不打：jsch 会把主机名、端口、服务器 OpenSSH 版本、认证方式协商
+                //    全写进 logcat，而用户发 bugreport 会把整个 logcat 一起带出去 ——
+                //    那是一份现成的攻击面清单（密码和私钥 jsch 本来就不打）。
+                override fun isEnabled(level: Int) = app.yxi.BuildConfig.DEBUG
             override fun log(level: Int, message: String) { Log.i("YxiSSH", "[$level] $message") }
         })
     }

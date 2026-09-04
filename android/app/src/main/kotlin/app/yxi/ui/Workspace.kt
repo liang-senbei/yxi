@@ -282,15 +282,17 @@ fun Workspace(
         runCatching {
             // 重连时会话早就建好、选项也设过了，省掉这一次往返
             if (sessionName != null && generation == 0) runCatching {
+                // ⚠️ 委托属性不能智能转换，先落成本地量再拼（同 #210 那个坑）
+                val q = app.yxi.ssh.Shell.q(sessionName.orEmpty())
                 s.exec(
-                    "tmux has-session -t $sessionName 2>/dev/null || tmux new-session -d -s $sessionName; " +
+                    "tmux has-session -t $q 2>/dev/null || tmux new-session -d -s $q; " +
                         // ⚠️ **关掉这个会话的状态栏。** 手机上它白占一行，而会话名我们顶栏已有
                         // （那条 `[cc-mail] 0:claude*` 是重复）。用 `-t 会话` 只关 Yxi 开的，别动桌面别的会话。
                         //
                         // ⚠️ 这里用**shell 的 `; `** 收尾，起一个**独立的 tmux 调用** ——
                         // 不能用 tmux 的 `\;` 串进后面那串，否则后面那个 `tmux` 会变成
                         // set-option 的参数，整条命令失效（状态栏关不掉，实测踩过）。
-                        "tmux set -t $sessionName status off; " +
+                        "tmux set -t $q status off; " +
                         "tmux set -g set-titles on \\; set -g mouse on \\; set -g status-right ''"
                 )
             }
@@ -331,7 +333,7 @@ fun Workspace(
                 // ⚠️ **`-d` 不能省。** 用户在桌面也 attach 着同一会话时，tmux 把窗口撑到那个
                 // 宽客户端的尺寸，手机 46 列塞不下 → 整屏折行、状态栏堆成一条条绿条（用户截图）。
                 // `-d` 踢掉别的客户端，手机成唯一客户端 → 窗口缩到手机尺寸 → 不花屏。这正合遥控器定位。
-                sh.write("tmux attach -d -t $sessionName\n")
+                sh.write("tmux attach -d -t ${app.yxi.ssh.Shell.q(sessionName.orEmpty())}\n")
                 attached = sessionName
             }
         }.onFailure {
@@ -360,8 +362,8 @@ fun Workspace(
         val s = ssh ?: return@LaunchedEffect
         if (shell == null || attached == null || attached == target) return@LaunchedEffect
         runCatching {
-            s.exec("tmux has-session -t '$target' 2>/dev/null || tmux new-session -d -s '$target'")
-            s.exec("tmux switch-client -t '$target' 2>/dev/null")
+            s.exec("tmux has-session -t ${app.yxi.ssh.Shell.q(target)} 2>/dev/null || tmux new-session -d -s ${app.yxi.ssh.Shell.q(target)}")
+            s.exec("tmux switch-client -t ${app.yxi.ssh.Shell.q(target)} 2>/dev/null")
             attached = target
         }.onFailure {
             if (it is kotlinx.coroutines.CancellationException) throw it
@@ -573,9 +575,9 @@ fun Workspace(
                     color = if (stats) SurfaceContainerHigh else SurfaceContainer, shape = Pill,
                     modifier = Modifier.clip(Pill).clickable { stats = !stats; Prefs.setStats(ctx, stats) },
                 ) {
-                    Text(
-                        "⚡", Modifier.padding(12.dp, 8.dp),
-                        style = MaterialTheme.typography.labelLarge, color = if (stats) Copper else Muted,
+                    YxiIcon(
+                        Ico.Bolt, 17.dp, if (stats) Copper else Muted,
+                        Modifier.padding(12.dp, 9.dp),
                     )
                 }
                 // 收 / 展页眉
