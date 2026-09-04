@@ -168,9 +168,34 @@ class MainActivity : ComponentActivity() {
                 }
                 if (editMe) app.yxi.ui.MeDialog { editMe = false }
 
+                // ── 侧边栏（学 Threads：左上角 ☰ 或从左边缘划，抽屉从左滑入，主页面被推向右）──
+                val drawer = rememberDrawerState(DrawerValue.Closed)
+                val drawerScope = rememberCoroutineScope()
+                val drawerWidth = 300.dp
+                val drawerWidthPx = with(LocalDensity.current) { drawerWidth.toPx() }
+                val openDrawer = { drawerScope.launch { drawer.open() }; Unit }
+
                 // ⚠️ 工作区**整屏**，没有底部栏：终端最缺竖向空间，
                 // 而软键盘弹起时底部栏会和键盘工具条、系统手势条挤成四层（D22）
+                // ⚠️ **但它要待在抽屉里面**：会话里也要能拉侧边栏（用户 2026-09-04）。
+                //    边缘手势在会话里关掉 —— 那个动作归系统的「右滑返回」，抢了就两个都不好使。
                 work?.let { w ->
+                    ModalNavigationDrawer(
+                        drawerState = drawer,
+                        gesturesEnabled = false,
+                        scrimColor = Color.Black.copy(alpha = 0.12f),
+                        drawerContent = {
+                            ModalDrawerSheet(Modifier.width(drawerWidth), drawerShape = RoundedCornerShape(0.dp, 28.dp, 28.dp, 0.dp)) {
+                                YxiDrawer(
+                                    hosts = hosts, current = host,
+                                    onPickHost = { hostId = it.id; work = null; tab = Tab.Sessions; drawerScope.launch { drawer.close() } },
+                                    onTab = { tab = it; work = null; drawerScope.launch { drawer.close() } },
+                                    onMember = { member = true; work = null; drawerScope.launch { drawer.close() } },
+                                    onEditMe = { editMe = true; drawerScope.launch { drawer.close() } },
+                                )
+                            }
+                        },
+                    ) {
                     Scaffold { p ->
                         // ⚠️ **必须按目标 key 一下。** [Workspace] 里的 `sessionName` / `mode`
                         // 都是 `remember(host.id)` —— 同一台主机上换个会话，key 没变，
@@ -183,19 +208,15 @@ class MainActivity : ComponentActivity() {
                                 preconnected = warm.session,
                                 // ⚠️ 只吃底部的 inset，不吃状态栏那段（学 Gemini：状态栏跟 App 融为一体，光晕铺到最顶上，
                                 //    内容滑到状态栏下面时用一层淡渐变压一下）。页眉自己 statusBarsPadding。
+                                onMenu = openDrawer,
                                 modifier = Modifier.padding(bottom = p.calculateBottomPadding()),
                             )
                         }
                     }
+                    }   // ModalNavigationDrawer（工作区那层）
                     return@YxiTheme
                 }
 
-                // ── 侧边栏（学 Threads：左上角 ☰ 或从左边缘划，抽屉从左滑入，主页面被推向右）──
-                // ⚠️ 抽屉里放什么用户还没定（2026-09-04），先把壳做出来：主机切换 + 版本。
-                val drawer = rememberDrawerState(DrawerValue.Closed)
-                val drawerScope = rememberCoroutineScope()
-                val drawerWidth = 300.dp
-                val drawerWidthPx = with(LocalDensity.current) { drawerWidth.toPx() }
                 ModalNavigationDrawer(
                     drawerState = drawer,
                     scrimColor = Color.Black.copy(alpha = 0.12f),

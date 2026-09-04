@@ -17,6 +17,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
@@ -97,6 +98,8 @@ fun Workspace(
      * 它归 MainActivity 所有，**这里不许 disconnect** —— 断了下次又要重连。
      */
     preconnected: SshSession? = null,
+    /** 点 ☰ 拉侧边栏（抽屉在 MainActivity 那层） */
+    onMenu: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -449,10 +452,19 @@ fun Workspace(
                     .statusBarsPadding(),
             ) {
             Row(
-                Modifier.fillMaxWidth().padding(14.dp, if (folded) 6.dp else 10.dp, 14.dp, if (folded) 4.dp else 8.dp),
+                Modifier.fillMaxWidth().padding(6.dp, if (folded) 6.dp else 10.dp, 14.dp, if (folded) 4.dp else 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
+                // ☰：会话里也能拉侧边栏（用户 2026-09-04：「跟主页侧边栏一样的图标」）。
+                // ⚠️ 会话里**只能点这个开**，边缘划手势关掉了 —— 那个手势归系统的「右滑返回」，
+                //    两个抢一个动作只会两个都不好使。
+                Box(
+                    Modifier.size(38.dp).clip(CircleShape).clickable(onClick = onMenu),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("☰", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 // 点会话名 = 唤出悬浮排列。换会话是这个 app 最高频的动作，
                 // 不该让人退回看板再滚一遍列表
                 Box(Modifier.weight(1f)) {

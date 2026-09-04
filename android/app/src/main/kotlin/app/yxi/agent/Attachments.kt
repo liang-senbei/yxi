@@ -33,7 +33,20 @@ object Attachments {
         val remotePath: String,
         val isImage: Boolean,
         val localUri: String? = null,
-    )
+        /**
+         * 原始文件的扩展名（小写、不带点）。⚠️ 用户 2026-09-04：「上传的时候也显示文件后缀名，
+         * 不要就是附件1图片1」—— 「图片1」看不出是 png 还是 heic，「附件1」更看不出是 pdf 还是 zip。
+         * 编号会重排（[renumber]），所以扩展名得单独存着，重排时带上。
+         */
+        val ext: String = "",
+    ) {
+        /** 界面上和给 Claude 的映射里都用它：`图片1.png` / `附件2.pdf` */
+        val display: String get() = if (ext.isEmpty()) label else "$label.$ext"
+    }
+
+    /** 从原始文件名里取扩展名：小写、最长 6 位、只留字母数字（`.tar.gz` 只取 `gz`，够用了） */
+    fun extOf(name: String): String =
+        name.substringAfterLast('.', "").lowercase().filter { it.isLetterOrDigit() }.take(6)
 
     /**
      * 传一个文件上去。[name] 是原始文件名，只用来取扩展名和给人看。
@@ -49,7 +62,10 @@ object Attachments {
         sftp.mkdirs(dir)
         val path = remotePath(session, name, stamp)
         sftp.write(path, bytes, progress)
-        return Staged(if (isImage) t("图片%d").format(index) else t("附件%d").format(index), path, isImage)
+        return Staged(
+            if (isImage) t("图片%d").format(index) else t("附件%d").format(index),
+            path, isImage, ext = extOf(name),
+        )
     }
 
     /** 上传落在服务器上的路径。单独拿出来是为了**取消时能删掉传了一半的那个**。 */
@@ -73,6 +89,7 @@ object Attachments {
         var img = 0
         var file = 0
         return list.map {
+            // ⚠️ 只重排编号，扩展名原样带过去
             if (it.isImage) it.copy(label = t("图片%d").format(++img))
             else it.copy(label = t("附件%d").format(++file))
         }
@@ -123,7 +140,8 @@ object Attachments {
     /** 发送时贴在正文前面的路径映射。没有附件就返回空串。 */
     fun header(staged: List<Staged>): String =
         if (staged.isEmpty()) "" else
-            staged.joinToString("\n") { "[${it.label}] ${it.remotePath}" } + "\n"
+            // 给 Claude 的映射也用带后缀的名字 —— 它一眼知道该按图片读还是按文档读
+            staged.joinToString("\n") { "[${it.display}] ${it.remotePath}" } + "\n"
 
     /**
      * 清掉 3 天前的暂存文件。

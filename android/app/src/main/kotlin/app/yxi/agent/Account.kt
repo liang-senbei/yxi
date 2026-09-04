@@ -52,7 +52,16 @@ object Account {
         val quotaRemaining: Int?,
         val nextRefreshAt: String?,
         val quotaRule: String,
+        /**
+         * 这个账号身上的封禁。⚠️ **恒为数组，没封时是空的**（logto_yxi 给的契约）。
+         * 只有**按产品封**才会出现在这儿 —— 全局封会让 Logto 当场作废令牌，那时候连 `/api/me` 都进不去，
+         * App 只看得到 401，拿不到原因，走的是「登录失效了」那条路。
+         */
+        val bans: List<Ban> = emptyList(),
     )
+
+    /** 一条封禁。`reason` 可能为 null（管理员没填）；`until` 为 null = 永久。 */
+    data class Ban(val productName: String, val reason: String?, val until: String?, val createdAt: String)
 
     /** 登录了没。⚠️ 是 Compose 状态，界面直接读。 */
     var signedIn by mutableStateOf(false)
@@ -222,6 +231,39 @@ object Account {
         Result.success(msg)
     }
 
+    /** 一档卖多少钱 */
+    data class Plan(val tier: String, val name: String, val price: Int, val days: Int, val desc: String)
+
+    /** `GET /api/purchase` —— **公开接口，不要登录**（未登录也要看得到价格） */
+    data class Purchase(
+        val currency: String, val plans: List<Plan>, val shopUrl: String,
+        val wechatId: String, val wechatName: String, val qrUrl: String, val note: String,
+    )
+
+    var purchase by mutableStateOf<Purchase?>(null)
+        private set
+
+    suspend fun loadPurchase(): Unit = withContext(Dispatchers.IO) {
+        val (c, body) = req("$API/api/purchase", "GET", null, null)
+        if (c !in 200..299) return@withContext
+        runCatching {
+            val o = JSONObject(body)
+            val arr = o.optJSONArray("plans")
+            val w = o.optJSONObject("wechat")
+            purchase = Purchase(
+                currency = o.str("currency").ifEmpty { "CNY" },
+                plans = (0 until (arr?.length() ?: 0)).mapNotNull { i ->
+                    arr?.optJSONObject(i)?.let {
+                        Plan(it.str("tier"), it.str("name"), it.optInt("price"), it.optInt("days"), it.str("desc"))
+                    }
+                },
+                shopUrl = o.str("shopUrl"),
+                wechatId = w.str("id"), wechatName = w.str("name"), qrUrl = w.str("qrUrl"),
+                note = o.str("note"),
+            )
+        }
+    }
+
     // ── 杂活 ───────────────────────────────────────────────────────────────
 
     /**
@@ -267,6 +309,18 @@ object Account {
             },
             nextRefreshAt = q.str("nextRefreshAt").takeIf { it.isNotEmpty() },
             quotaRule = q.str("rule"),
+            bans = o.optJSONArray("bans")?.let { arr ->
+                (0 until arr.length()).mapNotNull { i ->
+                    arr.optJSONObject(i)?.let {
+                        Ban(
+                            productName = it.str("productName"),
+                            reason = it.str("reason").takeIf { r -> r.isNotEmpty() },
+                            until = it.str("until").takeIf { u -> u.isNotEmpty() },
+                            createdAt = it.str("createdAt"),
+                        )
+                    }
+                }
+            }.orEmpty(),
         )
     }
 
@@ -302,7 +356,7 @@ object Account {
         }
     }
 
-    private fun req(url: String, method: String, token: String, body: String?): Pair<Int, String> {
+    private fun req(url: String, method: String, token: String?, body: String?): Pair<Int, String> {
         val c = (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = 12_000; readTimeout = 15_000
             // ⚠️ **必须发真正的 PATCH。** 试过 `POST + X-HTTP-Method-Override: PATCH`，
@@ -316,7 +370,7 @@ object Account {
                     f.set(this, method)
                 }
             }
-            setRequestProperty("Authorization", "Bearer $token")
+            if (token != null) setRequestProperty("Authorization", "Bearer $token")
             setRequestProperty("Accept", "application/json")
             if (body != null) {
                 doOutput = true

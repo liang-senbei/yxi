@@ -888,7 +888,7 @@ fun ChatScreen(
                     Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = Pill) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                a.label,
+                                a.display,
                                 Modifier
                                     // 只有图片点得开；别的文件点名字不该有反应
                                     .clickable(enabled = a.isImage && a.localUri != null) { preview = a }

@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import app.yxi.agent.Account
@@ -55,6 +56,7 @@ fun MemberScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
     var loading by remember { mutableStateOf(false) }
     // 进来拉一次最新的（会员到期、配额都可能在别处变了）
     LaunchedEffect(Unit) {
+        Account.loadPurchase()          // 公开接口，没登录也拉 —— 价格是给还没买的人看的
         if (Account.signedIn) { loading = true; Account.refresh(ctx); loading = false }
     }
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp, 12.dp, 18.dp, 24.dp)) {
@@ -100,8 +102,35 @@ fun MemberScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
             )
         }
+        me?.bans?.firstOrNull()?.let { ban ->
+            Spacer(Modifier.height(12.dp))
+            Surface(
+                color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(14.dp, 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        t("这个账号被封禁了"), style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                    Text(
+                        t("原因：%s").format(ban.reason ?: t("未说明")) + " · " +
+                            (ban.until?.take(10)?.let { t("到 %s").format(it) } ?: t("永久")),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                    Text(
+                        t("封禁期间改不了资料、也兑不了码。"),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = .8f),
+                    )
+                }
+            }
+        }
         Spacer(Modifier.height(16.dp))
         RedeemBox()
+        Spacer(Modifier.height(12.dp))
+        BuyBox()
         Spacer(Modifier.height(18.dp))
         Plan(
             name = t("免费版"), tagline = t("一台机器，够用"),
@@ -111,18 +140,20 @@ fun MemberScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
         Spacer(Modifier.height(12.dp))
         Plan(
             name = "Pro", tagline = t("多机器盯梢，随手就批"),
+            price = Account.purchase?.plans?.firstOrNull { it.tier == "pro" },
             accent = Color(0xFF4C8DF6), own = tier == Account.Tier.Pro,
             lines = listOf(t("主机不限台"), t("后台盯梢 + 通知里直接批"), t("实验室：让 agent 画图"), t("资料每月能改 2 次")),
         )
         Spacer(Modifier.height(12.dp))
         Plan(
             name = "Ultra", tagline = t("整队 agent 一起带"),
+            price = Account.purchase?.plans?.firstOrNull { it.tier == "ultra" },
             accent = Color(0xFFB07CFF), own = tier == Account.Tier.Ultra,
             lines = listOf(t("Pro 的全部"), t("多设备同步"), t("实验室额度更高"), t("资料改多少次都行")),
         )
         Spacer(Modifier.height(16.dp))
         Text(
-            t("还不能直接买 —— 先用兑换码。价格定了会在这儿开。"),
+            Account.purchase?.note ?: t("买到兑换码之后，回来在上面输入就能开通。"),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
         )
         if (Account.signedIn) {
@@ -226,7 +257,10 @@ private fun tidyCode(raw: String): String {
 }
 
 @Composable
-private fun Plan(name: String, tagline: String, accent: Color, own: Boolean, lines: List<String>) {
+private fun Plan(
+    name: String, tagline: String, accent: Color, own: Boolean, lines: List<String>,
+    price: Account.Plan? = null,
+) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         shape = RoundedCornerShape(20.dp),
@@ -246,13 +280,17 @@ private fun Plan(name: String, tagline: String, accent: Color, own: Boolean, lin
                         style = MaterialTheme.typography.labelSmall,
                     )
                     Spacer(Modifier.weight(1f))
-                    if (!own) Text(
+                    // ⚠️ 价格来自 `/api/purchase`，**不写进 APK** —— 老板改价不用等发版
+                    if (price != null) Text(
+                        "¥${price.price}", style = MaterialTheme.typography.titleMedium, color = accent,
+                    ) else if (!own) Text(
                         t("即将开放"), style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.outline,
                     )
                 }
                 Text(
-                    tagline, Modifier.padding(top = 2.dp),
+                    tagline + (price?.let { " · " + t("%d 天").format(it.days) } ?: ""),
+                    Modifier.padding(top = 2.dp),
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
                 )
                 Spacer(Modifier.height(10.dp))
@@ -261,6 +299,86 @@ private fun Plan(name: String, tagline: String, accent: Color, own: Boolean, lin
                         Box(Modifier.padding(top = 7.dp).size(5.dp).clip(RoundedCornerShape(3.dp)).background(accent))
                         Text(it, style = MaterialTheme.typography.bodyMedium)
                     }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 怎么买。⚠️ **不接支付**：去发卡站或加微信买兑换码，回来在上面那个框里输入。
+ * 价格、店铺地址、微信号和二维码**全部来自 `/api/purchase`**，一个字都不写进 APK ——
+ * 老板改价换码不用等发版（logto_yxi 2026-09-04）。
+ */
+@Composable
+private fun BuyBox() {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val p = Account.purchase ?: return
+    var qr by remember(p.qrUrl) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    var showQr by remember { mutableStateOf(false) }
+    LaunchedEffect(p.qrUrl, showQr) {
+        if (showQr && qr == null) qr = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                java.net.URL(p.qrUrl).openStream().use { it.readBytes() }.let { bytes ->
+                    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                        ?.asImageBitmap()
+                }
+            }.getOrNull()
+        }
+    }
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(16.dp, 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(t("怎么买"), style = MaterialTheme.typography.titleMedium)
+            p.plans.forEach {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(it.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "¥${it.price} · ${it.desc}",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
+                    )
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = {
+                        runCatching {
+                            ctx.startActivity(
+                                android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(p.shopUrl))
+                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                        }
+                    },
+                    shape = RoundedCornerShape(50), modifier = Modifier.weight(1f),
+                ) { Text(t("去商店买")) }
+                TextButton({ showQr = !showQr }, modifier = Modifier.weight(1f)) {
+                    Text(if (showQr) t("收起微信") else t("加微信买"))
+                }
+            }
+            if (showQr) {
+                Column(
+                    Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    qr?.let {
+                        androidx.compose.foundation.Image(
+                            it, contentDescription = null,
+                            modifier = Modifier.fillMaxWidth(0.7f).clip(RoundedCornerShape(12.dp)),
+                        )
+                    } ?: Text(t("二维码加载中…"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
+                    Text(
+                        t("微信号 %s（%s）· 长按复制").format(p.wechatId, p.wechatName),
+                        Modifier.clickable {
+                            val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                as android.content.ClipboardManager
+                            cm.setPrimaryClip(android.content.ClipData.newPlainText("wechat", p.wechatId))
+                            android.widget.Toast.makeText(ctx, t("微信号复制好了"), android.widget.Toast.LENGTH_SHORT).show()
+                        },
+                        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline,
+                    )
                 }
             }
         }

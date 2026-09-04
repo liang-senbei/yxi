@@ -48,6 +48,8 @@ fun HostsScreen(
     var batteryHint by remember { mutableStateOf(false) }
     val hosts by store.hosts.collectAsState()
     var adding by remember { mutableStateOf(false) }
+    /** 免费档想加第 3 台时的提示 */
+    var overLimit by remember { mutableStateOf(false) }
     var showKey by remember { mutableStateOf(false) }
     var installTarget by remember { mutableStateOf<Host?>(null) }
     var editing by remember { mutableStateOf<Host?>(null) }
@@ -60,7 +62,17 @@ fun HostsScreen(
             Text(t("主机"), style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
             IconTextButton(t("公钥")) { showKey = true }
             Spacer(Modifier.width(8.dp))
-            IconTextButton("＋", primary = true) { adding = true }
+            IconTextButton("＋", primary = true) {
+                // ⚠️ **免费档最多绑 2 台**（老板定的会员权益）。这是**客户端软限制** ——
+                //    主机和密钥按设计只存在这台手机上，服务端不知道也不该知道你绑了几台
+                //    （隐私政策白纸黑字写着配置只存本地）。所以改 APK 能绕过，这是已知且接受的。
+                //    绝不为了堵它把主机列表传服务端。
+                val tier = if (app.yxi.agent.Account.signedIn) app.yxi.agent.Account.me?.tier else null
+                if (tier == null || tier == app.yxi.agent.Account.Tier.Free) {
+                    if (hosts.size >= 2) { overLimit = true; return@IconTextButton }
+                }
+                adding = true
+            }
         }
 
         if (hosts.isEmpty()) {
@@ -99,6 +111,17 @@ fun HostsScreen(
         }
     }
 
+    if (overLimit) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { overLimit = false },
+        title = { Text(t("免费档最多绑 2 台")) },
+        text = {
+            Text(
+                t("再加就要 Pro 或 Ultra —— 它们不限台数。\n（主机和密钥一直只存在这台手机上，这条限制也只在手机上判。）"),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        },
+        confirmButton = { androidx.compose.material3.TextButton({ overLimit = false }) { Text(t("知道了")) } },
+    )
     if (adding) {
         AddHostSheet(store, keys, ctx, onDone = { adding = false })
     }

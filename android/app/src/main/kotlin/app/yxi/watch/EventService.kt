@@ -238,7 +238,11 @@ class EventService : Service() {
             .setAutoCancel(true)
             .setOnlyAlertOnce(!alert)                 // 升级重提醒 alert=true → 再响一次
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(Notification.CATEGORY_CALL)
+            // ⚠️ **屏幕亮着的时候不能当「来电」。** `CATEGORY_CALL` + 全屏意图 = 系统按「来电」处理：
+            //    悬浮条**钉在屏幕上不走**，非要你划掉（用户 2026-09-04：「不主动移就一直在」）。
+            //    亮屏时按普通消息发 —— 悬浮条自己 5 秒左右收起，通知**照样留在状态栏**。
+            //    ⚠️ 安卓没有「设置悬浮条停留几秒」的接口，能控的只有「别把它标成来电」。
+            .setCategory(if (asleep()) Notification.CATEGORY_CALL else Notification.CATEGORY_MESSAGE)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
         // **锁屏上把屏幕点亮。**
         //
@@ -250,7 +254,9 @@ class EventService : Service() {
         // 拿不到就当没有这行 —— 退回普通高优先级通知，跟以前一个样，不能因此崩或者不发。
         // ⚠️ 第二个参数传 true = 允许系统在用户正在用手机时改成「悬浮条」而不是全屏接管。
         // 传 false 会在你正打字时糊你一脸全屏，那比不提醒还讨厌。
-        if (canFullScreen()) b.setFullScreenIntent(pi, true)
+        // ⚠️ **只在黑屏/锁屏时才用全屏意图。** 它的用处是「把躺在桌上的手机点亮」；
+        //    人正在用手机时挂上它，只会让悬浮条变成赖着不走的来电条。
+        if (asleep() && canFullScreen()) b.setFullScreenIntent(pi, true)
         // ⚠️ **危险动作不给一键批。**
         //
         // 我们原来只防「提示变了」（#53 加指纹校验）—— 那是**机器侧的过期**。
@@ -567,6 +573,13 @@ class EventService : Service() {
      * 所以这里必须问一次再用 —— 问都不问直接调，在新系统上等于这行代码不存在，
      * 而你还以为自己做了锁屏唤醒。
      */
+    /** 手机是不是「没在用」：黑屏或者锁着。⚠️ 决定按「来电」还是按「消息」发。 */
+    private fun asleep(): Boolean = runCatching {
+        val pm = getSystemService(android.os.PowerManager::class.java)
+        val km = getSystemService(android.app.KeyguardManager::class.java)
+        !pm.isInteractive || km.isKeyguardLocked
+    }.getOrDefault(false)
+
     private fun canFullScreen(): Boolean =
         if (Build.VERSION.SDK_INT < 34) true
         else runCatching {
@@ -645,7 +658,7 @@ class EventService : Service() {
                 .setContentIntent(pi)
                 .setAutoCancel(true)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setCategory(Notification.CATEGORY_CALL)
+                .setCategory(Notification.CATEGORY_MESSAGE)   // 试一发：亮着屏点的，按消息来（悬浮条会自己收）
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             runCatching { androidx.core.app.NotificationManagerCompat.from(ctx).notify(7, b.build()) }
         }
