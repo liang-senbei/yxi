@@ -362,8 +362,13 @@ class MainActivity : ComponentActivity() {
                         Tab.Config -> if (host == null) {
                             EmptyHint(t("还没有主机"), t("去「主机」那一栏加一台"), m)
                         } else {
-                            app.yxi.ui.ConfigScreen(shared.session, host, hosts,
-                                onPickHost = { picked -> hostId = picked.id }, modifier = m)
+                            app.yxi.ui.ConfigScreen(
+                                shared.session, host, hosts,
+                                // 「线路」那一栏要知道谁在干活才好排队切 —— 复用看板已经拉回来的这份，
+                                // 不为它再起一次 SSH 往返（状态源见 SessionProbe，~/.claude/sessions/*.json）
+                                sessions = sessionList,
+                                onPickHost = { picked -> hostId = picked.id }, modifier = m,
+                            )
                         }
                         Tab.Settings -> SettingsScreen(
                             store, keys, host, shared.session, shared.error,

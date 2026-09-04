@@ -20,12 +20,13 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * 《神之冠冕》—— 八顶王冠，祈愿的角色池就是它们（老板 2026-09-04 给的设定）。
+ * 《神之冠冕》—— 九顶王冠，祈愿的角色池就是它们（老板 2026-09-04 给的设定）。
  * 首期 UP：**浮云之冠 · 云曦**。
  *
- * **老板给了 9 张立绘**（2026-09-04），卡面用立绘（`res/drawable-nodpi/card_<id>.webp`，
- * 已按人物位置切成竖版、总共 1.2MB）。只有幻蝶没有图 —— 那一张退回下面这套**几何冠纹章**，
- * 卡面不会因此开天窗。
+ * **每一位都有立绘**（`res/drawable-nodpi/card_<id>.webp`，已按人物位置切成竖版、总共 1.2MB）。
+ * ⚠️ 原本还有第十位「幻蝶」，因为**只有它没有立绘**，老板 2026-09-05 拍板不留 ——
+ * 名单从 10 位变 9 位。**没图的角色不进名单**：一张几何纹章摆在八张立绘中间，
+ * 看着就像没做完，而不像一种风格。
  *
  * 每顶冠在 **100×100** 的格子里画，跟 [LineIcons] 同一套手法：圆头圆角、描边为主。
  * 它现在有两个用处：没立绘的顶位，以及需要小尺寸单色标记的地方。
@@ -46,13 +47,14 @@ data class Crown(
     val ink: Color,
     /**
      * 立绘资源（`R.drawable.card_<id>`）。0 = 没有立绘，退回几何冠纹章。
-     * ⚠️ 老板 2026-09-04 给了 9 张，只有幻蝶没有 —— 卡面不能因此开天窗。
+     * ⚠️ 现在**九位全都有图**，这条退路只留给「新角色立绘还没到」的过渡期 ——
+     * 别拿它当「可以先上没图的角色」的许可（幻蝶就是这么被砍的）。
      */
     val art: Int = 0,
 )
 
 /**
- * 八顶。**顺序就是展示顺序**，云曦排第一（首期 UP）。
+ * 九顶。**顺序就是展示顺序**，云曦排第一（首期 UP）。
  * ⚠️ 文案是老板给的原文，只做了标点整理 —— **别自己改写**，这是设定不是文案草稿。
  */
 val CROWNS = listOf(
@@ -79,12 +81,6 @@ val CROWNS = listOf(
         "替众生寻找万物起源的答案，将全宇宙的苦难化为头顶的荆棘与自身的修为。",
         "我头顶的每一根荆棘，都是这宇宙向真理献祭的代价。",
         listOf(Color(0xFFE6D6BC), Color(0xFFC9A87C)), Color(0xFF7A5A32), app.yxi.R.drawable.card_suyuan,
-    ),
-    Crown(
-        "huandie", "幽冥之冠", "幻蝶", "神秘 · 温柔",
-        "用灵蝶读取死者的遗憾，将躁动不安的灵魂引渡至没有痛苦的彼岸。",
-        "嘘，闭上眼。死亡不是终点。",
-        listOf(Color(0xFF3C4A6B), Color(0xFF5B7A6B)), Color(0xFF8FE0C0),
     ),
     Crown(
         "xuanji", "永恒之冠", "璇玑", "冷酷 · 绝对理性",
@@ -189,24 +185,6 @@ internal fun DrawScope.drawCrown(id: String, ink: Color, alpha: Float) {
                 val a = PIf * 2f * i / 10f - PIf / 2f
                 line(50f + cos(a) * 21f, 46f + sin(a) * 21f, 50f + cos(a) * 30f, 46f + sin(a) * 30f)
             }
-            band()
-        }
-        // 幽冥：蝶翼
-        "huandie" -> {
-            path {
-                moveTo(50f * k, 66f * k)
-                cubicTo(30f * k, 66f * k, 18f * k, 46f * k, 30f * k, 34f * k)
-                cubicTo(42f * k, 26f * k, 50f * k, 44f * k, 50f * k, 66f * k)
-                close()
-            }
-            path {
-                moveTo(50f * k, 66f * k)
-                cubicTo(70f * k, 66f * k, 82f * k, 46f * k, 70f * k, 34f * k)
-                cubicTo(58f * k, 26f * k, 50f * k, 44f * k, 50f * k, 66f * k)
-                close()
-            }
-            line(50f, 30f, 50f, 66f)
-            dot(44f, 28f, 1.6f); dot(56f, 28f, 1.6f)
             band()
         }
         // 永恒：同心 + 准星

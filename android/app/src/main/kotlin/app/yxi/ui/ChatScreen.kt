@@ -7,6 +7,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -362,13 +363,19 @@ fun ChatScreen(
     var lines by remember(sessionName) { mutableIntStateOf(1) }
     var multi by remember(sessionName) { mutableStateOf(false) }
     val barsMax = (if (headerPx > 0) headerPx.toFloat() else with(LocalDensity.current) { 96.dp.toPx() })
-    val barsConn = remember(barsMax) {
+    val barsConn = remember(barsMax, listState) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: androidx.compose.ui.geometry.Offset, source: NestedScrollSource): androidx.compose.ui.geometry.Offset {
                 val dy = available.y
                 // ⚠️ **只认手指。** 程序滚动（点 ↓ 跳底部、新消息跟随）也会走这条 —— 那一下会把栏收起来，
                 //    紧接着「到底了就展开」又把它展开，一收一展就是用户看到的「↓ 一直闪」（#226）。
                 if (dy == 0f || source != NestedScrollSource.UserInput) return androidx.compose.ui.geometry.Offset.Zero
+                // ⚠️⚠️ **只认列表自己在滚。** 输入框（[BasicTextFieldRow]，maxLines=7）也在这个
+                //    Box 里，草稿一长它内部就能滚 —— 而它滚的时候会把 delta 往上派发到这里，
+                //    于是「在输入框里翻自己写的字」被当成「翻聊天记录」：栏收了，字一行没动。
+                //    用户 2026-09-05 报的就是这个：只能把键盘调出来靠光标挪，才看得到草稿后半截。
+                //    listState.isScrollInProgress 在拖拽开始时就为真，能干净地把两者分开。
+                if (!listState.isScrollInProgress) return androidx.compose.ui.geometry.Offset.Zero
                 // 方向按用户实测定：往下滑（回看历史）收起，往上滑（回到最新）展开。
                 barsOff = (barsOff + dy).coerceIn(0f, barsMax)
                 return androidx.compose.ui.geometry.Offset.Zero
@@ -1441,21 +1448,50 @@ private fun BasicTextFieldRow(
     onLines: (Int) -> Unit = {},
     onValue: (String) -> Unit,
 ) {
+    // 草稿超过 7 行 = 框里滚得动、但看不出「下面还有」。⚠️ maxLines 只限**视口高度**，
+    // onTextLayout 给的 lineCount 是**全文行数**（不是截断后的），所以这个判断是准的。
+    var over by remember { mutableStateOf(false) }
     androidx.compose.foundation.text.BasicTextField(
         value, onValue,
         modifier = Modifier.padding(20.dp, 15.dp).fillMaxWidth()
             .focusRequester(focus)
             .onFocusChanged { onFocus(it.isFocused) },
-        onTextLayout = { onLines(if (value.isEmpty()) 1 else it.lineCount) },
+        onTextLayout = {
+            val n = if (value.isEmpty()) 1 else it.lineCount
+            over = n > 7
+            onLines(n)
+        },
         // 最多 7 行，多了在框里滚 —— 别把对话顶没了
         maxLines = 7,
         textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
         cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
         decorationBox = { inner ->
-            if (value.isEmpty()) {
-                Text(t("说一句…"), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.outline)
+            // ⚠️ 超过 7 行时**把文字自己的底边淡出**，而不是在上面压一条实色渐变 ——
+            //    输入框是 [GlassPill]（半透明玻璃 + 流动底色），压实色会变成一根灰条。
+            //    DstIn 只改 alpha、不碰颜色，所以底下是什么都不影响。
+            //    这一层只画不挡手：拖它就是拖输入框自己（收栏那条 nestedScroll 已经不抢，见 barsConn）。
+            Box(
+                Modifier
+                    .graphicsLayer {
+                        if (over) compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen
+                    }
+                    .drawWithContent {
+                        drawContent()
+                        if (!over) return@drawWithContent
+                        val fade = (18.dp.toPx() / size.height).coerceIn(0.05f, 0.4f)
+                        drawRect(
+                            Brush.verticalGradient(
+                                0f to Color.Black, 1f - fade to Color.Black, 1f to Color.Transparent,
+                            ),
+                            blendMode = androidx.compose.ui.graphics.BlendMode.DstIn,
+                        )
+                    },
+            ) {
+                if (value.isEmpty()) {
+                    Text(t("说一句…"), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.outline)
+                }
+                inner()
             }
-            inner()
         },
     )
 }

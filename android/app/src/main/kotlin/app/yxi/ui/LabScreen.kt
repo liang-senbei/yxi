@@ -617,7 +617,13 @@ private fun LabAskDialog(
     onClose: () -> Unit, onSend: (String, String) -> Unit,
 ) {
     var extra by remember { mutableStateOf("") }
-    var target by remember { mutableStateOf(sessionName ?: sessions.firstOrNull()) }
+    // ⚠️ **更新默认派回给生成它的那个会话**（老板 2026-09-05）：卡片本来就记着「由谁生成」，
+    //    那份上下文（画的是什么、用什么技法、上一版为什么这么改）只在它那儿。
+    //    派给别人 = 让一个没看过这张图的会话从头猜。改还是能改，只是不用每次手动挑。
+    val author = ask.item?.by?.takeIf { it.isNotBlank() }?.let { by ->
+        sessions.firstOrNull { it == by || app.yxi.agent.Session.shortOf(it) == by }
+    }
+    var target by remember { mutableStateOf(author ?: sessionName ?: sessions.firstOrNull()) }
     val title = when (ask.kind) {
         "verify" -> t("查明并画出来"); "draw" -> t("把结构画成图")
         else -> t("更新《%s》").format(ask.item?.title ?: "")
@@ -627,7 +633,7 @@ private fun LabAskDialog(
         "draw" -> t("不填就默认：把这个项目的模块关系画成依赖图。填了就按你说的画（流程 / 时序 / ER / C4 / Gantt…）")
         else -> t("不填就默认：按项目现状重画这一张、原位替换。填了就加上你的要求")
     }
-    val candidates = (listOfNotNull(sessionName) + sessions).distinct().take(8)
+    val candidates = (listOfNotNull(author, sessionName) + sessions).distinct().take(8)
     AlertDialog(
         onDismissRequest = onClose,
         title = { Text(title) },
@@ -637,7 +643,13 @@ private fun LabAskDialog(
                     extra, { extra = it }, Modifier.fillMaxWidth(), minLines = 2, maxLines = 5,
                     label = { Text(t("提示词（可不填）")) }, placeholder = { Text(hint, style = MaterialTheme.typography.bodySmall) },
                 )
-                Text(t("派给哪个会话"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
+                Text(
+                    // 说清楚默认为什么是它 —— 不解释的话「怎么自己就选好了」比选错还让人犯嘀咕
+                    if (author != null) t("派给哪个会话 · 默认发回给生成它的 %s")
+                        .format(app.yxi.agent.Session.shortOf(author))
+                    else t("派给哪个会话"),
+                    style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline,
+                )
                 if (candidates.isEmpty()) Text(t("这台机器上还没有会话 —— 先去看板 ＋ 开一个"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     candidates.forEach { n ->
@@ -646,8 +658,11 @@ private fun LabAskDialog(
                             color = if (on) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
                             shape = Pill, modifier = Modifier.clip(Pill).clickable { target = n },
                         ) {
-                            Text(app.yxi.agent.Session.shortOf(n), Modifier.padding(12.dp, 7.dp), style = MaterialTheme.typography.labelMedium,
-                                color = if (on) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface)
+                            Text(
+                                app.yxi.agent.Session.shortOf(n) + if (n == author) " ·作者" else "",
+                                Modifier.padding(12.dp, 7.dp), style = MaterialTheme.typography.labelMedium,
+                                color = if (on) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface,
+                            )
                         }
                     }
                 }

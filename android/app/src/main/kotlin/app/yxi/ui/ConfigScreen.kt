@@ -43,6 +43,8 @@ fun ConfigScreen(
     ssh: SshSession?,
     host: Host,
     hosts: List<Host> = listOf(host),
+    /** 看板拉回来的会话（[LinesPanel] 拿它判断「谁在干活」，忙的时候排队再换线路） */
+    sessions: List<app.yxi.agent.Session> = emptyList(),
     onPickHost: (Host) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -86,9 +88,14 @@ fun ConfigScreen(
             }
         }
 
-        // 两块：「连接」（把第三方服务接给 agent）和「Agent 配置」（原来那棵配置树）
-        Row(Modifier.padding(14.dp, 0.dp, 14.dp, 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("connect" to t("连接"), "agent" to t("Agent 配置")).forEach { (k, label) ->
+        // 三块：「线路」（agent 走哪条线：订阅 / 官方 API / 第三方中转）、
+        //       「连接」（把第三方服务接给 agent）、「Agent 配置」（原来那棵配置树）
+        // ⚠️ 排在最前是因为它最粗：线路决定请求打到哪儿，另外两块都在它下游。
+        Row(
+            Modifier.horizontalScroll(rememberScrollState()).padding(14.dp, 0.dp, 14.dp, 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            listOf("lines" to t("线路"), "connect" to t("连接"), "agent" to t("Agent 配置")).forEach { (k, label) ->
                 val on = panel == k
                 Text(
                     label,
@@ -101,6 +108,7 @@ fun ConfigScreen(
                 )
             }
         }
+        if (panel == "lines") { LinesPanel(ssh, host, sessions); return@Column }
         if (panel == "connect") { ConnectPanel(ssh, host); return@Column }
 
         val ts = tools

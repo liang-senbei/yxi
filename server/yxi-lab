@@ -27,6 +27,12 @@ while [ $# -gt 0 ]; do
   esac
 done
 set -- "${pos[@]:-}"
+
+# 没写 --by 就用**当前 tmux 会话名**（cc-xxx / cx-xxx）。理由：手机上点「更新」时
+# 默认要发回给生成它的那个会话，而那全靠这一条 by。谁都记不住每次加 --by，所以在这儿自动填。
+# 不在 tmux 里跑（cron / 裸 ssh）就留空 —— 空比编一个假的强。
+[ -n "$BY" ] || BY="$(tmux display-message -p '#S' 2>/dev/null || true)"
+
 cmd="${1:-help}"
 
 type_of() {   # 扩展名 → 类型
@@ -49,13 +55,23 @@ typ = {"gif":"gif","png":"image","jpg":"image","jpeg":"image","webp":"image","bm
        "html":"html","htm":"html","mp4":"video","webm":"video","mov":"video","md":"note","markdown":"note","txt":"note"}.get(ext)
 if typ is None: bad.append(f"不认识的扩展名 .{ext}（认：png jpg webp gif svg html mp4 webm md txt）")
 if size > 3 * 1024 * 1024: warn.append(f"{size/1048576:.1f}MB 偏大，手机上加载会慢（图/GIF 走 base64 经 SSH，>3MB 会很慢）")
-if typ == "html":
+# ⚠️ SVG 和 HTML 一样要查：App 把 svg 拼进**同一个开着 JS 的 WebView**，
+# 而这里原来只查 html，svg 一个字节都不看（2026-09-04 cc-Yxi 的安全审计指出）。
+if typ in ("html", "svg"):
     t = open(f, encoding="utf-8", errors="replace").read()
-    if size > 1024 * 1024: bad.append("网页超过 1MB —— 它是经 SSH 整段拉回来的，压一压（图用 data URI 但别放大图）")
-    if 'name="viewport"' not in t: bad.append('缺 <meta name="viewport" content="width=device-width, initial-scale=1">，手机上会按 980px 桌面版排')
-    ext_refs = re.findall(r'(?:src|href)\s*=\s*["\']?(https?://[^"\'\s>]+)', t) + re.findall(r'url\((https?://[^)]+)\)', t)
+    if size > 1024 * 1024: bad.append("文件超过 1MB —— 它是经 SSH 整段拉回来的，压一压（图用 data URI 但别放大图）")
+    ext_refs = re.findall(r'(?:src|href|xlink:href)\s*=\s*["\']?(https?://[^"\'\s>]+)', t) + re.findall(r'url\((https?://[^)]+)\)', t)
     if ext_refs and not allow_net: bad.append("引用了外部资源（" + ", ".join(ext_refs[:3]) + "…）：预览是离线沙箱，全部内联成 data URI；确实要联网加 --allow-net")
     if re.search(r'<script[^>]+src=', t): bad.append("<script src=…> 外部脚本：内联进来")
+if typ == "svg":
+    # SVG 是拿来看的图，不该跑代码。能跑代码就能在无地址栏的全屏里画一个假的密码框。
+    if re.search(r'<script[\s>]', t): bad.append("SVG 里有 <script>：图不该跑代码。要动效就做成 .html，那边才有完整的契约约束")
+    ev = re.findall(r'\son[a-z]+\s*=', t, re.I)
+    if ev: bad.append(f"SVG 里有事件处理器（{', '.join(sorted(set(x.strip() for x in ev))[:3])}…）：同上，去掉")
+    if "<foreignObject" in t: warn.append("用了 <foreignObject>：它能把任意 HTML 塞进 SVG，确认里面没有脚本和外链")
+    if "javascript:" in t.lower(): bad.append("SVG 里有 javascript: 链接：去掉")
+if typ == "html":
+    if 'name="viewport"' not in t: bad.append('缺 <meta name="viewport" content="width=device-width, initial-scale=1">，手机上会按 980px 桌面版排')
     if "yxi-aspect" not in t and not sys.argv[0]: pass
     if "requestAnimationFrame" in t and "resize" not in t: warn.append("用了 requestAnimationFrame 但没监听 resize：WebView 首帧尺寸可能是 0，画布会空着（模板里有 fit()）")
     if "getUserMedia" in t or "localStorage" in t: warn.append("用了 getUserMedia/localStorage：沙箱里没有")
