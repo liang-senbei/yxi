@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -53,6 +54,24 @@ fun SettingsScreen(
     connectError: String? = null,
     /** 点「会员中心」跳过去（那一页在 MainActivity 那层管） */
     onMember: () -> Unit = {},
+    /**
+     * 这一页是「我的」还是「设置」。
+     *
+     * ⚠️ **两者不是一个东西**（用户 2026-09-04：「设置和我的不是一个东西」）：
+     * · `true`  = **我的**：只有「我」（头像 / 昵称 / 签名）和会员中心 —— 关于**你这个人**的。
+     * · `false` = **设置**：版本、手机功能、界面、关于与帮助、开发者 —— 关于**这个 App** 的。
+     * 走同一个 composable 是因为两页共用一堆私有小部件（[Card] / [SectionLabel] / [Hint2]…），
+     * 拆成两个文件反而要把它们全提出去。
+     */
+    mine: Boolean = true,
+    /** 「我的」最底下那一行「设置」—— 跳到设置页（同一个 composable 的 `mine = false`） */
+    onPrefs: () -> Unit = {},
+    /** 「我的」宫格里的「工单中心」 */
+    onTickets: () -> Unit = {},
+    /** 「我的」里的「趋势」——每天烧了多少 token / 多少钱 */
+    onTrend: () -> Unit = {},
+    /** 「我的」宫格里的「邮件」——我们发给你的站内信 */
+    onMail: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val ctx = LocalContext.current
@@ -76,7 +95,12 @@ fun SettingsScreen(
         modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text(t("我的"), style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(18.dp, 14.dp, 18.dp, 4.dp))
+        Text(
+            if (mine) t("我的") else t("设置"),
+            style = MaterialTheme.typography.headlineMedium,
+            modifier = Modifier.padding(18.dp, 14.dp, 18.dp, 4.dp),
+        )
+        if (mine) {
 
         // ── 「我」：头像 / 昵称 / 签名（学 QQ 和 Gemini 的个人页：账号那块单独一张卡，摆最上面）
         var editMe by remember { mutableStateOf(false) }
@@ -153,12 +177,134 @@ fun SettingsScreen(
             }
         }
 
-        SectionLabel(t("反馈与版本"))
+        // ── 钱包 ────────────────────────────────────────────────────
+        // ⚠️ **余额不写 ¥0.00**。服务端现在根本没有这个字段，写个 0 就是在说
+        //    「你的余额是零」——那是假的（design/STYLE.md「不骗人」）。没开通就说没开通。
+        //    字段形状已经发给 cc-logto_yxi 对齐：balance 用**分**（整数）+ currency，别用浮点。
+        var soon by remember { mutableStateOf<String?>(null) }
+        soon?.let { what ->
+            AlertDialog(
+                onDismissRequest = { soon = null },
+                title = { Text(what) },
+                text = { Text(t("这块还没开通。界面先摆在这儿，后台那边定好了就能用 —— 不做点了没反应的假按钮。")) },
+                confirmButton = { TextButton({ soon = null }) { Text(t("知道了")) } },
+            )
+        }
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = RoundedCornerShape(22.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)
+                .clip(RoundedCornerShape(22.dp)).clickable { soon = t("钱包") },
+        ) {
+            Row(
+                Modifier.padding(16.dp, 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                YxiIcon(Ico.Wallet, size = 22.dp, tint = androidx.compose.ui.graphics.Color(0xFF35B6A0))
+                Column(Modifier.weight(1f)) {
+                    Text(t("钱包"), style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        t("充值还没开 · 以后可以用余额自动续会员"),
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline,
+                    )
+                }
+                // ⚠️ 服务端给的是 **balanceCents（分）**，只在**显示的这一刻**除 100 变成元。
+                //    别在别处提前转成 Double —— 字段名里带单位就是为了防这个（logto_yxi 2026-09-04）。
+                // ⚠️ 三态，别把后两个混成一个（#240 那个坑我在这儿又踩了一次）：
+                //    没登录 → 「未登录」；登录了但资料还没回来 → 「读取中」；拿到了才显示金额。
+                val acc = app.yxi.agent.Account.me
+                when {
+                    !app.yxi.agent.Account.signedIn -> Text(
+                        t("未登录"),
+                        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline,
+                    )
+                    acc == null -> Text(
+                        t("读取中"),
+                        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline,
+                    )
+                    else -> Text(
+                        "¥" + "%.2f".format(acc.balanceCents / 100.0),
+                        style = MaterialTheme.typography.titleSmall.copy(
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                Text("›", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.outline)
+            }
+        }
 
-        // ── 工单中心 ───────────────────────────────────────────────
-        // 哪里不好用随手记一条，落在**连着的那台服务器** `~/.yxi/tickets.jsonl`，
-        // 开发那边 `cat` 一下就能看全（存手机本地等于没提，见 [app.yxi.agent.Tickets]）
-        TicketsCard(ssh)
+        // ── 趋势：卡上直接画一条最近半个月的小柱状图，点开是整页
+        //    ⚠️ 拿不到（那台机器没装 ccusage）就**只显示标题不画图**，不画一条假曲线
+        var spark by remember(ssh) { mutableStateOf<List<app.yxi.agent.Day>?>(null) }
+        LaunchedEffect(ssh) {
+            spark = ssh?.let { app.yxi.ssh.catching { app.yxi.agent.Usage.daily(it, 14) }.getOrNull() }
+        }
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = RoundedCornerShape(22.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)
+                .clip(RoundedCornerShape(22.dp)).clickable { onTrend() },
+        ) {
+            Row(
+                Modifier.padding(16.dp, 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                YxiIcon(Ico.Bolt, size = 22.dp, tint = app.yxi.ui.theme.Copper)
+                Column(Modifier.weight(1f)) {
+                    Text(t("趋势"), style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        spark?.lastOrNull()?.let { t("今天 %s · $%.2f").format(it.tokenText, it.costUSD) }
+                            ?: t("每天烧了多少 token、多少钱"),
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline,
+                    )
+                }
+                spark?.takeIf { it.size >= 2 }?.let {
+                    TrendSpark(it, Modifier.width(90.dp).height(34.dp))
+                }
+                Text("›", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.outline)
+            }
+        }
+
+        // ── 四宫格（学 QQ / 米哈游那种个人页）：邮件 · 祈愿 · 活动 · 工单 ──
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            GridEntry(
+                Ico.Mail, t("邮件"), Color(0xFF4C8DF6), Modifier.weight(1f),
+                // 未读数直接打在图标上 —— 不然要点进去才知道有信，等于没通知
+                badge = app.yxi.agent.Account.me?.unreadMail ?: 0,
+            ) { onMail() }
+            GridEntry(Ico.Wish, t("祈愿"), Color(0xFFB07AE8), Modifier.weight(1f)) { soon = t("祈愿") }
+            GridEntry(Ico.Gift, t("活动中心"), Color(0xFFE8912D), Modifier.weight(1f)) { soon = t("活动中心") }
+            GridEntry(Ico.Chat, t("工单"), Color(0xFF7A69E8), Modifier.weight(1f)) { onTickets() }
+        }
+
+        Spacer(Modifier.height(4.dp))
+        // ── 设置：「我的」最底下那一行（用户 2026-09-04）
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = RoundedCornerShape(22.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)
+                .clip(RoundedCornerShape(22.dp)).clickable { onPrefs() },
+        ) {
+            Row(
+                Modifier.padding(16.dp, 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                YxiIcon(Ico.Gear, size = 22.dp, tint = MaterialTheme.colorScheme.outline)
+                Text(t("设置"), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                Text("›", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.outline)
+            }
+        }
+
+        } else {
+
+        SectionLabel(t("版本"))
 
         // ── 版本 ───────────────────────────────────────────────────
         Card(t("版本"), Glyph.Info, subtitle = t("%s（versionCode %d）").format(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE)) {
@@ -442,6 +588,7 @@ fun SettingsScreen(
                     t("服务器上唯一需要装的是 yxi-hook（就为了让手机能主动响）。")
             )
         }
+        }   // if (mine) … else …
     }
 
     if (showKey) PublicKeySheetPublic(keys) { showKey = false }
@@ -656,6 +803,27 @@ private fun notificationsOn(ctx: Context): Boolean = runCatching {
         android.content.pm.PackageManager.PERMISSION_GRANTED
 }.getOrDefault(true)
 
+/**
+ * 工单中心**单独一页** —— 侧边栏里那一项（用户 2026-09-04：侧边栏里少了这个）。
+ *
+ * 它是这个 App 里**唯一一条你和开发之间的通道**：写下来落在**连着的那台服务器**
+ * `~/.yxi/tickets.jsonl`，开发那边 `cat` 一下就看全了（存手机本地等于没提）。
+ * 所以它不该埋在设置的第三层里，而应该和主机、配置、会员中心并排。
+ */
+@Composable
+fun TicketsScreen(ssh: SshSession?, modifier: Modifier = Modifier) {
+    Column(
+        modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            t("工单中心"), style = MaterialTheme.typography.headlineMedium,
+            modifier = Modifier.padding(18.dp, 14.dp, 18.dp, 4.dp),
+        )
+        TicketsCard(ssh)
+    }
+}
+
 /** 工单中心：写一条 + 看已提的。存在连着的服务器上（[app.yxi.agent.Tickets]）。 */
 @Composable
 private fun TicketsCard(ssh: app.yxi.ssh.SshSession?) {
@@ -737,6 +905,47 @@ private fun beijingTime(at: Long): String = if (at <= 0) "" else runCatching {
 }.getOrDefault("")
 
 /** QQ 那种分组小标题：卡片上面一行小灰字，把一堆设置分出层次 */
+/** 「我的」上那一格：圆角方块里一枚描边图标，底下一行字。四格一排。 */
+@Composable
+private fun GridEntry(
+    ico: Ico,
+    label: String,
+    tint: androidx.compose.ui.graphics.Color,
+    modifier: Modifier = Modifier,
+    /** > 0 就在图标右上角打一个红点数字 */
+    badge: Int = 0,
+    onClick: () -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = RoundedCornerShape(18.dp),
+        modifier = modifier.clip(RoundedCornerShape(18.dp)).clickable(onClick = onClick),
+    ) {
+        Column(
+            Modifier.padding(vertical = 14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Box {
+                YxiIcon(ico, size = 24.dp, tint = tint)
+                if (badge > 0) Surface(
+                    color = MaterialTheme.colorScheme.error,
+                    shape = RoundedCornerShape(100.dp),
+                    modifier = Modifier.align(Alignment.TopEnd).offset(x = 9.dp, y = (-6).dp),
+                ) {
+                    Text(
+                        if (badge > 99) "99+" else badge.toString(),
+                        Modifier.padding(5.dp, 1.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onError,
+                    )
+                }
+            }
+            Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+        }
+    }
+}
+
 @Composable
 private fun SectionLabel(text: String) {
     Text(

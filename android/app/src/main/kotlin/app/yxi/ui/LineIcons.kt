@@ -28,7 +28,7 @@ import androidx.compose.ui.unit.dp
  *
  * ⚠️ 没引图标库：离线构建加不了依赖，而且这几个形状用路径写就是几行。
  */
-enum class Ico { Chat, Server, Sliders, Gear, Crown, Moon, Person, Bolt }
+enum class Ico { Chat, Server, Sliders, Gear, Crown, Moon, Person, Bolt, Wallet, Mail, Wish, Gift }
 
 @Composable
 fun YxiIcon(ico: Ico, size: Dp = 22.dp, tint: Color = LocalContentColor.current, modifier: Modifier = Modifier) {
@@ -84,6 +84,38 @@ fun YxiIcon(ico: Ico, size: Dp = 22.dp, tint: Color = LocalContentColor.current,
                 val full = Path().apply { addOval(Rect(3.5f * k, 3.5f * k, 20.5f * k, 20.5f * k)) }
                 val bite = Path().apply { addOval(Rect(9.5f * k, 0f * k, 27f * k, 17.5f * k)) }
                 drawPath(Path().apply { op(full, bite, PathOperation.Difference) }, tint, style = st)
+            }
+            Ico.Wallet -> {                                         // 钱包：卡包 + 扣子
+                drawRoundRect(tint, Offset(3f * k, 6f * k), Size(18f * k, 13f * k), CornerRadius(3.4f * k), style = st)
+                line(3f, 10.2f, 21f, 10.2f)
+                drawCircle(tint, 1.15f * k, Offset(16.6f * k, 14.6f * k))
+            }
+            Ico.Mail -> {                                           // 信封：口盖是两笔，别画成一个三角
+                drawRoundRect(tint, Offset(3f * k, 5.5f * k), Size(18f * k, 13f * k), CornerRadius(2.8f * k), style = st)
+                line(3.8f, 7f, 12f, 12.8f); line(20.2f, 7f, 12f, 12.8f)
+            }
+            Ico.Wish -> {                                           // 祈愿：一颗四角星 + 两颗小的
+                drawPath(
+                    Path().apply {
+                        moveTo(11f * k, 3.2f * k)
+                        cubicTo(11.9f * k, 8.2f * k, 13.3f * k, 9.6f * k, 18.3f * k, 10.5f * k)
+                        cubicTo(13.3f * k, 11.4f * k, 11.9f * k, 12.8f * k, 11f * k, 17.8f * k)
+                        cubicTo(10.1f * k, 12.8f * k, 8.7f * k, 11.4f * k, 3.7f * k, 10.5f * k)
+                        cubicTo(8.7f * k, 9.6f * k, 10.1f * k, 8.2f * k, 11f * k, 3.2f * k)
+                        close()
+                    },
+                    tint, style = st,
+                )
+                drawCircle(tint, 1.0f * k, Offset(18.4f * k, 17.4f * k))
+                drawCircle(tint, 0.7f * k, Offset(14.8f * k, 20.4f * k))
+            }
+            Ico.Gift -> {                                           // 活动：礼盒
+                drawRoundRect(tint, Offset(3.5f * k, 9.5f * k), Size(17f * k, 10.5f * k), CornerRadius(2.2f * k), style = st)
+                line(3.5f, 13.4f, 20.5f, 13.4f)
+                line(12f, 9.5f, 12f, 20f)
+                // 蝴蝶结：两个小圈
+                drawCircle(tint, 2.1f * k, Offset(9.4f * k, 7.2f * k), style = Stroke(width = w))
+                drawCircle(tint, 2.1f * k, Offset(14.6f * k, 7.2f * k), style = Stroke(width = w))
             }
             Ico.Bolt -> drawPath(                                   // 闪电：会话状态那条的开关 / 「模式」标记
                 // ⚠️ 这里原来直接写 emoji「⚡」（用户 2026-09-04：「看起来很违和」）。

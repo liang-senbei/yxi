@@ -11,6 +11,28 @@ import org.json.JSONObject
  * 整块藏起来 —— 额度这种东西，**显示一个假的比不显示危险得多**：
  * 你会照着那个数字安排今天要不要开大活。
  */
+/** 「趋势」里的一天。[costUSD] 是**美元**，ccusage 自己按当天的价目表算好的。 */
+data class Day(
+    /** `YYYY-MM-DD`，服务器自己的日期 */
+    val date: String,
+    val tokens: Long,
+    val costUSD: Double,
+    /** 那天各个模型分别烧了多少 —— 按钱从多到少排给界面用 */
+    val models: List<ModelCost>,
+) {
+    val tokenText: String get() = when {
+        tokens >= 1_000_000_000 -> "%.1fB".format(tokens / 1e9)
+        tokens >= 1_000_000 -> "%.0fM".format(tokens / 1e6)
+        tokens >= 1_000 -> "%.0fK".format(tokens / 1e3)
+        else -> tokens.toString()
+    }
+    /** `09-04` —— 图上的横坐标标签 */
+    val short: String get() = date.removePrefix(date.take(5))
+}
+
+/** 一天里某个模型烧掉的量。 */
+data class ModelCost(val name: String, val tokens: Long, val costUSD: Double)
+
 data class Usage(
     /** 5 小时窗口还剩多少分钟 */
     val remainingMinutes: Int,
@@ -65,6 +87,51 @@ data class Usage(
                     costUSD = b.optDouble("costUSD", 0.0),
                     tokensPerMinute = br?.optDouble("tokensPerMinute", 0.0) ?: 0.0,
                 )
+            }.getOrNull()
+        }
+
+        /**
+         * 按天的用量曲线 —— 「趋势」那一页的数据（用户 2026-09-04 要的：
+         * 「按天为横坐标记录每天的 token 用量变化，最好还能记录用的模型和花费的美元」）。
+         *
+         * 走 `ccusage daily --json`。schema **不是猜的**，是在本机真跑一遍对着看的：
+         * 每天一条，`period` = `YYYY-MM-DD`、`totalTokens`、`totalCost`（美元）、
+         * `modelsUsed`（那天用过哪些模型）、`modelBreakdowns`（每个模型各自的 token 和钱）。
+         *
+         * ⚠️ 跟这个文件里别的函数同一条规矩：**探不到 ccusage 就返回 null，调用方整块藏掉**。
+         * ⚠️ 钱不自己算 —— 价目表随时在变，抄进 App 就会过期（见 [today] 的注释）。
+         */
+        suspend fun daily(ssh: SshSession, days: Int = 30): List<Day>? {
+            val out = runCatching {
+                ssh.exec(
+                    "export PATH=\$HOME/.local/bin:\$HOME/.npm-global/bin:/usr/local/bin:\$PATH; " +
+                        "for d in /opt/node*/bin /usr/lib/node_modules/.bin; do [ -d \"\$d\" ] && PATH=\$PATH:\$d; done; " +
+                        "command -v ccusage >/dev/null 2>&1 || exit 0; " +
+                        "ccusage daily --json 2>/dev/null"
+                )
+            }.getOrNull().orEmpty().trim()
+            if (out.isEmpty() || !out.startsWith("{")) return null
+            return runCatching {
+                val arr = JSONObject(out).optJSONArray("daily") ?: return null
+                val list = ArrayList<Day>(arr.length())
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    val date = o.optString("period").takeIf { it.isNotBlank() } ?: continue
+                    val models = ArrayList<ModelCost>()
+                    o.optJSONArray("modelBreakdowns")?.let { mb ->
+                        for (j in 0 until mb.length()) {
+                            val m = mb.optJSONObject(j) ?: continue
+                            models += ModelCost(
+                                name = m.optString("modelName").removePrefix("claude-"),
+                                tokens = m.optLong("inputTokens") + m.optLong("outputTokens") +
+                                    m.optLong("cacheCreationTokens") + m.optLong("cacheReadTokens"),
+                                costUSD = m.optDouble("cost", 0.0),
+                            )
+                        }
+                    }
+                    list += Day(date, o.optLong("totalTokens"), o.optDouble("totalCost"), models)
+                }
+                list.takeLast(days)
             }.getOrNull()
         }
 

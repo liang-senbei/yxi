@@ -168,11 +168,21 @@ class MainActivity : ComponentActivity() {
                 }
 
                 var member by remember { mutableStateOf(false) }
+                // ⚠️ **「设置」和「我的」是两页**（用户 2026-09-04）：底部导航那一栏是「我的」（人），
+                //    侧边栏最底下那颗齿轮打开的才是「设置」（App）。工单中心也从设置里搬出来单独一页。
+                var prefs by remember { mutableStateOf(false) }
+                var tickets by remember { mutableStateOf(false) }
+                var trend by remember { mutableStateOf(false) }
+                var mail by remember { mutableStateOf(false) }
                 var editMe by remember { mutableStateOf(false) }
-                BackHandler(enabled = work != null || member || tab != Tab.Sessions) {
+                BackHandler(enabled = work != null || member || prefs || tickets || trend || mail || tab != Tab.Sessions) {
                     when {
                         work != null -> work = null      // 工作区 → 回标签页
                         member -> member = false         // 会员中心 → 回去
+                        prefs -> prefs = false           // 设置 → 回去
+                        tickets -> tickets = false       // 工单中心 → 回去
+                        trend -> trend = false           // 趋势 → 回去
+                        mail -> mail = false             // 邮件 → 回去
                         else -> tab = Tab.Sessions       // 非默认标签 → 回会话
                     }
                 }
@@ -202,6 +212,8 @@ class MainActivity : ComponentActivity() {
                                     onTab = { tab = it; work = null; drawerScope.launch { drawer.close() } },
                                     onMember = { member = true; work = null; drawerScope.launch { drawer.close() } },
                                     onEditMe = { editMe = true; drawerScope.launch { drawer.close() } },
+                                    onPrefs = { prefs = true; work = null; drawerScope.launch { drawer.close() } },
+                                    onTickets = { tickets = true; work = null; drawerScope.launch { drawer.close() } },
                                 )
                             }
                         },
@@ -238,6 +250,8 @@ class MainActivity : ComponentActivity() {
                                 onTab = { tab = it; drawerScope.launch { drawer.close() } },
                                 onMember = { member = true; drawerScope.launch { drawer.close() } },
                                 onEditMe = { editMe = true; drawerScope.launch { drawer.close() } },
+                                onPrefs = { prefs = true; drawerScope.launch { drawer.close() } },
+                                onTickets = { tickets = true; drawerScope.launch { drawer.close() } },
                             )
                         }
                     },
@@ -264,6 +278,25 @@ class MainActivity : ComponentActivity() {
                     val m = Modifier.padding(p)
                     if (member) {
                         app.yxi.ui.MemberScreen(onBack = { member = false }, modifier = m)
+                        return@Scaffold
+                    }
+                    if (prefs) {
+                        SettingsScreen(
+                            store, keys, host, shared.session, shared.error,
+                            onMember = { member = true; prefs = false }, mine = false, modifier = m,
+                        )
+                        return@Scaffold
+                    }
+                    if (tickets) {
+                        app.yxi.ui.TicketsScreen(shared.session, modifier = m)
+                        return@Scaffold
+                    }
+                    if (trend) {
+                        app.yxi.ui.TrendScreen(shared.session, modifier = m)
+                        return@Scaffold
+                    }
+                    if (mail) {
+                        app.yxi.ui.MailScreen(modifier = m)
                         return@Scaffold
                     }
                     when (tab) {
@@ -300,7 +333,9 @@ class MainActivity : ComponentActivity() {
                         }
                         Tab.Settings -> SettingsScreen(
                             store, keys, host, shared.session, shared.error,
-                            onMember = { member = true }, modifier = m,
+                            onMember = { member = true }, mine = true,
+                            onPrefs = { prefs = true }, onTickets = { tickets = true },
+                            onTrend = { trend = true }, onMail = { mail = true }, modifier = m,
                         )
                     }
                 }
@@ -342,6 +377,7 @@ private fun EmptyHint(title: String, sub: String, modifier: Modifier) {
 private fun YxiDrawer(
     hosts: List<Host>, current: Host?,
     onPickHost: (Host) -> Unit, onTab: (Tab) -> Unit, onMember: () -> Unit, onEditMe: () -> Unit,
+    onPrefs: () -> Unit, onTickets: () -> Unit,
 ) {
     val ctx = LocalContext.current
     val rev = app.yxi.ui.Me.rev.intValue                     // 改了昵称/头像要重画
@@ -403,6 +439,8 @@ private fun YxiDrawer(
             },
             onClick = onMember,
         )
+        // 工单中心 —— 你和开发之间唯一那条通道，别埋在设置第三层里
+        DrawerRow(app.yxi.ui.Ico.Chat, t("工单中心"), Color(0xFF7A69E8)) { onTickets() }
         Spacer(Modifier.weight(1f))
         // ── 最底下那一行：设置 / 夜间（学 QQ）
         androidx.compose.material3.HorizontalDivider(Modifier.padding(horizontal = 18.dp))
@@ -410,7 +448,7 @@ private fun YxiDrawer(
             Modifier.fillMaxWidth().padding(8.dp, 8.dp, 8.dp, 0.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            BottomAction(app.yxi.ui.Ico.Gear, t("设置"), Modifier.weight(1f)) { onTab(Tab.Settings) }
+            BottomAction(app.yxi.ui.Ico.Gear, t("设置"), Modifier.weight(1f)) { onPrefs() }
             val dark = app.yxi.ui.Skin.style == app.yxi.ui.Skin.Style.Dark
             BottomAction(app.yxi.ui.Ico.Moon, if (dark) t("浅色") else t("夜间"), Modifier.weight(1f)) {
                 app.yxi.ui.Skin.set(ctx, if (dark) app.yxi.ui.Skin.Style.Light else app.yxi.ui.Skin.Style.Dark)

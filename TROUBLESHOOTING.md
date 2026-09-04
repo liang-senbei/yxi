@@ -4568,3 +4568,38 @@ scheme（我们的 `io.yxi.app://callback`）当 Intent 发出去 —— 这正�
 3. **机器本身在忙**：那天 load 20+、CPU steal 6~22%（其中一个是用户 VS Code 把 `/root` 当工作区、
    索引带 `--follow` 爬进了 `/sys`，一个 `rg` 吃 583% 跑了近两小时）。这种时候谁都快不了 ——
    下结论前先 `uptime` 和 `vmstat` 看一眼，别把机器的问题当成构建配置的问题。
+
+## #245 连过 SSH 之后，整个进程的 HTTPS 全废（潜伏很久，被强制登录放大成致命）
+
+**症状**：App 刚起来一切正常；**连上一台主机之后**，账号接口、检查更新、会员中心
+**全部悄悄失败**。日志里只有一句「没拿到 token」，界面上什么都不说 ——
+「我的」和会员中心只是显示兜底值（免费版、未登录），看不出发生了什么。
+
+真正的异常藏在一层 runCatching 里：
+
+```
+java.security.NoSuchAlgorithmException: Error constructing implementation
+(algorithm: Default, provider: AndroidOpenSSL,
+ class: com.android.org.conscrypt.DefaultSSLContextImpl$TLSv13)
+```
+
+**根因**（两条叠在一起）：
+1. 我们为了 **Ed25519**（安卓 JCA 不提供）要动 provider：`removeProvider("BC")` +
+   插完整版 BouncyCastle。原来是 `insertProviderAt(…, 1)` —— **排在 Conscrypt 前面**，
+   于是 `TrustManagerFactory.getDefaultAlgorithm()`（PKIX）解析到 BC 的实现，
+   而它读不了安卓的系统信任库。
+2. 安卓的 `DefaultSSLContextImpl` 是**懒初始化**的：第一次有人要 HTTPS 时才构造，
+   **而且构造失败会被永久缓存**。所以出不出事完全取决于「第一次 HTTPS」和
+   「第一次连 SSH」谁先谁后 —— 这就是为什么它能潜伏这么久：
+   以前先登录（HTTPS）再连主机，顺序恰好是好的。
+
+**修法**（`ssh/Crypto.kt`，两条都要）：
+- 动 provider **之前**先 `SSLContext.getInstance("Default")` 把好的那份构造出来缓存住；
+- BouncyCastle 用 `addProvider`（排最后），**不要** `insertProviderAt(…, 1)`。
+  Ed25519 只有它提供，排最后照样找得到；TLS 继续归 Conscrypt —— 那本来就是安卓的正常状态。
+
+⚠️ **通用一**：**动全局 JCA provider 是有副作用的**，而副作用落在别人身上（HTTPS），
+且只在特定调用顺序下发作。改 provider 之前先想清楚「谁会因为顺序变了而拿到不同的实现」。
+⚠️ **通用二**：这个 bug 能活这么久，是因为**失败被吞了**——`refresh()` 返回的错误字符串
+从来没人显示。加登录门禁之后它变致命（令牌续不上 = 用户被卡在门外）才暴露。
+**所有返回错误的函数，界面上必须有一处会把它说出来。**

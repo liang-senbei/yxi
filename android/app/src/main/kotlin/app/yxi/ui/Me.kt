@@ -78,12 +78,33 @@ object Me {
 
     fun avatarFile(ctx: Context): File = File(ctx.filesDir, "avatar.png")
 
+    /**
+     * 换头像：从相册选一张，裁成正方形、缩到 512、存到 [avatarFile]。
+     *
+     * ⚠️ **只存在这台手机上。** Logto 那边只存头像 URL，要真正跨设备得先有对象存储；
+     * 在那之前，与其摆一个「点了没反应」的假按钮，不如先给一个**本机生效**的真功能，
+     * 界面上如实写清楚（design/STYLE.md「不骗人」）。
+     */
+    fun saveAvatar(ctx: Context, uri: android.net.Uri): Boolean = runCatching {
+        val src = ctx.contentResolver.openInputStream(uri).use { BitmapFactory.decodeStream(it) } ?: return false
+        val n = minOf(src.width, src.height)
+        val sq = android.graphics.Bitmap.createBitmap(src, (src.width - n) / 2, (src.height - n) / 2, n, n)
+        val out = android.graphics.Bitmap.createScaledBitmap(sq, 512, 512, true)
+        avatarFile(ctx).outputStream().use { out.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        rev.intValue++
+        true
+    }.getOrDefault(false)
+
     /** 服务端头像下下来存本地，按 URL 分文件名 —— 每次进 App 重下一遍没必要 */
     fun cachedRemote(ctx: Context, url: String): File =
         File(ctx.cacheDir, "avatar-" + url.hashCode().toString(16) + ".img")
 }
 
-/** 圆头像：服务端的 > 本机存的 > 占位小人 */
+/**
+ * 圆头像：**本机自己选的 > 服务端的 > 占位小人**。
+ * ⚠️ 本机的排在前面：那是用户在这台手机上**明确选过**的一张，
+ * 被服务端那张（多半是社交注册顺带来的）盖掉就等于「我改了但没变」。
+ */
 @Composable
 fun MeAvatar(size: Dp = 56.dp, modifier: Modifier = Modifier) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -93,14 +114,17 @@ fun MeAvatar(size: Dp = 56.dp, modifier: Modifier = Modifier) {
     LaunchedEffect(rev, url) {
         bmp = withContext(Dispatchers.IO) {
             runCatching {
-                if (url != null) {
+                val local = Me.avatarFile(ctx).takeIf { it.exists() && it.length() > 0 }
+                if (local != null) {
+                    BitmapFactory.decodeFile(local.path)?.asImageBitmap()
+                } else if (url != null) {
                     val f = Me.cachedRemote(ctx, url)
                     if (!f.exists() || f.length() == 0L) {
                         java.net.URL(url).openStream().use { input -> f.outputStream().use { input.copyTo(it) } }
                     }
                     BitmapFactory.decodeFile(f.path)?.asImageBitmap()
                 } else {
-                    Me.avatarFile(ctx).takeIf { it.exists() }?.let { BitmapFactory.decodeFile(it.path)?.asImageBitmap() }
+                    null
                 }
             }.getOrNull()
         }
@@ -218,7 +242,30 @@ fun MeDialog(onClose: () -> Unit) {
         title = { Text(t("我")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { MeAvatar(72.dp) }
+                // 换头像：系统相册选一张。用 PickVisualMedia —— **不用申请读相册权限**
+                val pick = androidx.activity.compose.rememberLauncherForActivityResult(
+                    androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
+                ) { uri ->
+                    if (uri != null && !Me.saveAvatar(ctx, uri)) err = t("这张图读不了，换一张")
+                }
+                Column(
+                    Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Box(
+                        Modifier.clip(androidx.compose.foundation.shape.CircleShape).clickable {
+                            pick.launch(
+                                androidx.activity.result.PickVisualMediaRequest(
+                                    androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly,
+                                ),
+                            )
+                        },
+                    ) { MeAvatar(72.dp) }
+                    Text(
+                        t("点头像换一张 · 只存在这台手机上"),
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline,
+                    )
+                }
                 OutlinedTextField(
                     // ⚠️ 只挡控制字符和长度。HTML 转义**不在这儿做** —— 后台已经改成事件委托 + 转义，
                     //    修在 sink 端才是正解；客户端过滤只是噪音，改包的人绕得过去。

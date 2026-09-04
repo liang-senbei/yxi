@@ -58,7 +58,31 @@ object Account {
          * App 只看得到 401，拿不到原因，走的是「登录失效了」那条路。
          */
         val bans: List<Ban> = emptyList(),
+        /**
+         * 钱包（cc-logto_yxi 2026-09-04 上线）。
+         * ⚠️ **`balanceCents` 是「分」**，字段名里带单位就是为了防「有人当成元」的 100 倍事故。
+         *    整数，永远不出现浮点。要显示成元只在**显示的那一刻**除 100。
+         * ⚠️ `autoRenew` 这一版**只读不写**：充值还没通，余额永远是 0，
+         *    放个开关就是「点了没反应的假按钮」。等对方开了写入口再做。
+         */
+        val balanceCents: Long = 0,
+        val currency: String = "CNY",
+        val autoRenew: Boolean = false,
+        /** 未读站内信条数 —— 图标上那个红点靠它，不然要进去才知道有信 */
+        val unreadMail: Int = 0,
     )
+
+    /** 一封站内信。[kind] 契约里固定四个：`redeem` / `expiry` / `notice` / `system`。 */
+    data class Mail(
+        val id: String,
+        val kind: String,
+        val title: String,
+        val body: String,
+        val createdAt: String,
+        val readAt: String?,
+    ) {
+        val unread: Boolean get() = readAt.isNullOrEmpty()
+    }
 
     /** 一条封禁。`reason` 可能为 null（管理员没填）；`until` 为 null = 永久。 */
     data class Ban(val productName: String, val reason: String?, val until: String?, val createdAt: String)
@@ -86,7 +110,13 @@ object Account {
 
     /** 进程起来时调一次：把上次的登录状态和资料摆出来，界面不用等网络 */
     fun load(ctx: Context) {
-        signedIn = p(ctx).getString("auth.refresh", null) != null
+        // ⚠️ **判据是「解得开」，不是「有这个键」。**
+        //    令牌是用 Keystore 加密存的（[app.yxi.ssh.Vault]）。密钥没了而密文还在，是真会发生的
+        //    （模拟器冷启、系统重置密钥、上一版存的明文）—— 这时候如果还当「登录着」：
+        //    登录门禁不弹、每个接口都拿不到 token、界面全是兜底值，**用户没有任何办法自救**。
+        //    2026-09-04 在模拟器上就是这个表现，查了半天：日志里只有一行「没拿到 token」。
+        signedIn = p(ctx).getString("auth.refresh", null)
+            ?.let { runCatching { app.yxi.ssh.Vault.open(it) }.getOrNull() } != null
         me = p(ctx).getString("auth.me", null)?.let { runCatching { parseMe(JSONObject(it)) }.getOrNull() }
     }
 
@@ -205,13 +235,22 @@ object Account {
         // 拿到锁之后**再看一眼**：可能别的线程刚续过。少转一次就少一次踩宽限期的机会。
         cached()?.let { if (stillGood()) return it }
         val acc = cached()
-        val rt = sp.getString("auth.refresh", null)
-            ?.let { runCatching { app.yxi.ssh.Vault.open(it) }.getOrNull() } ?: return acc
+        val sealed = sp.getString("auth.refresh", null)
+        val rt = sealed?.let { runCatching { app.yxi.ssh.Vault.open(it) }.getOrNull() }
+        if (rt == null) {
+            // 有密文却解不开 → 这份登录**永远用不了了**，当场登出，让门禁把人接住去重登
+            if (sealed != null) {
+                signOut(ctx)
+                signedOutWhy = "登录信息读不出来了，重新登一次"
+            }
+            return acc
+        }
         val (c, body) = form(
             "$AUTH/oidc/token",
             mapOf("grant_type" to "refresh_token", "refresh_token" to rt, "client_id" to APP_ID, "scope" to SCOPES),
         )
         if (c !in 200..299) {
+            android.util.Log.w("YxiAccount", "续令牌失败 HTTP $c: " + body.take(200))
             // ⚠️ refresh 被拒（撤销 / 过期 / 账号被全局封 / 旧令牌被重用过）就是真的掉登录了，
             //    别装作还登着，**更不能拿同一个令牌重试** —— 重试就是又一次重用。
             //    ⚠️ 但**网络不通（code 0）不算**：那种时候把人登出是最坏的处理。
@@ -231,15 +270,26 @@ object Account {
 
     /** 拉一次 `GET /api/me`，顺手缓存。@return 出错原因，成功 null */
     suspend fun refresh(ctx: Context): String? = withContext(Dispatchers.IO) {
-        val tk = token(ctx) ?: return@withContext "没登录"
+        val tk = token(ctx) ?: run {
+            android.util.Log.w("YxiAccount", "/api/me 没拿到 token（令牌解不开 / 续不上）")
+            return@withContext "没登录"
+        }
         val (c, body) = req("$API/api/me", "GET", tk, null)
-        if (c !in 200..299) return@withContext httpErr(c, body)
+        if (c !in 200..299) {
+            android.util.Log.w("YxiAccount", "/api/me HTTP $c: " + body.take(200))
+            return@withContext httpErr(c, body)
+        }
         runCatching {
             val o = JSONObject(body)
             me = parseMe(o)
             p(ctx).edit().putString("auth.me", body).apply()
             signedIn = true
-        }.exceptionOrNull()?.let { return@withContext "读不懂服务器的回复" }
+        }.exceptionOrNull()?.let {
+            // ⚠️ **别把解析失败咽下去。** 咽下去的表现是：登录着、也不报错，
+            //    但「我的」「会员中心」全是空的 —— 界面只能显示兜底值，谁也看不出发生了什么。
+            android.util.Log.w("YxiAccount", "/api/me 解析失败", it)
+            return@withContext "读不懂服务器的回复：" + (it.message ?: it.javaClass.simpleName)
+        }
         null
     }
 
@@ -272,12 +322,28 @@ object Account {
         if (c !in 200..299) return@withContext Result.failure(Exception(httpErr(c, resp)))
         val o = runCatching { JSONObject(resp) }.getOrNull() ?: return@withContext Result.failure(Exception("读不懂服务器的回复"))
         refresh(ctx)
-        val tier = o.optString("tier").uppercase()
-        val days = o.optInt("days")
-        // ⚠️ replay = 同一张码你自己重兑（断网重试就会这样）——**没有重复加天数**，得说清楚
-        val msg = if (o.optBoolean("replay"))
-            "这张码你已经兑过了，没有重复加天数（到期 ${o.optString("expiresAt").take(10)}）"
-        else "兑换成功：$tier $days 天，到期 ${o.optString("expiresAt").take(10)}"
+        // 兑换后的余额两种码都给，直接用它刷钱包，不用再打一次 /api/me（logto_yxi 2026-09-04）
+        if (o.has("balanceCents")) me?.let { m -> me = m.copy(balanceCents = o.optLong("balanceCents")) }
+        val replay = o.optBoolean("replay")
+        // ⚠️ **必须按 kind 分支**：余额券的 `tier` 给的是**当前档位**、`days` 给 0
+        //    （对方为了不让老版本崩才保留这两个字段）。照老写法会说出
+        //    「兑换成功：FREE 0 天」这种鬼话 —— 用户兑的明明是钱。
+        val msg = when (o.optString("kind")) {
+            "balance" -> {
+                val got = yuan(o.optLong("amountCents"))
+                val now = yuan(o.optLong("balanceCents"))
+                if (replay) "这张码你已经兑过了，没有重复到账（当前余额 $now）"
+                else "余额到账 $got —— 当前余额 $now"
+            }
+            else -> {
+                val tier = o.optString("tier").uppercase()
+                val days = o.optInt("days")
+                val until = o.optString("expiresAt").take(10)
+                // ⚠️ replay = 同一张码你自己重兑（断网重试就会这样）——**没有重复加天数**，得说清楚
+                if (replay) "这张码你已经兑过了，没有重复加天数（到期 $until）"
+                else "兑换成功：$tier $days 天，到期 $until"
+            }
+        }
         Result.success(msg)
     }
 
@@ -314,6 +380,55 @@ object Account {
         }
     }
 
+    /**
+     * 站内信一页。
+     *
+     * ⚠️ **游标是 `before`（取比它更旧的），不是 `after`** —— cc-logto_yxi 特意改过来的：
+     * 收件箱是从顶上插新信的，用 page/pageSize 会重复或漏，`after` 的含义又容易理解反。
+     * 往下翻就把**上一页最后一条的 id** 传进来。
+     *
+     * @return null = 拿不到（没登录 / 网络不通）。**别把「拿不到」画成「没有信」。**
+     */
+    suspend fun mail(ctx: Context, before: String? = null): Pair<List<Mail>, String?>? =
+        withContext(Dispatchers.IO) {
+            val tk = token(ctx) ?: return@withContext null
+            val url = "$API/api/mail?limit=30" + (before?.let { "&before=$it" } ?: "")
+            val (c, body) = req(url, "GET", tk, null)
+            if (c !in 200..299) return@withContext null
+            runCatching {
+                val o = JSONObject(body)
+                val arr = o.optJSONArray("items")
+                val list = (0 until (arr?.length() ?: 0)).mapNotNull { i ->
+                    arr?.optJSONObject(i)?.let {
+                        Mail(
+                            id = it.str("id"), kind = it.str("kind"), title = it.str("title"),
+                            body = it.str("body"), createdAt = it.str("createdAt"),
+                            readAt = it.str("readAt").takeIf { r -> r.isNotEmpty() },
+                        )
+                    }
+                }
+                // 顺手把未读数刷新到 me 上 —— 红点跟着它走
+                me?.let { m -> me = m.copy(unreadMail = o.optInt("unread", m.unreadMail)) }
+                list to o.str("nextCursor").takeIf { it.isNotEmpty() }
+            }.getOrNull()
+        }
+
+    /**
+     * 标一封已读。
+     * ⚠️ 契约说它**幂等**，而且标别人的信也照样回 200（探不出 id 存不存在）——
+     * 所以别拿返回值当「这封信存在」的证据。
+     */
+    suspend fun markMailRead(ctx: Context, id: String): Boolean = withContext(Dispatchers.IO) {
+        val tk = token(ctx) ?: return@withContext false
+        val (c, body) = req("$API/api/mail/$id/read", "POST", tk, "")
+        if (c !in 200..299) return@withContext false
+        runCatching {
+            val left = JSONObject(body).optInt("unread", -1)
+            if (left >= 0) me?.let { me = it.copy(unreadMail = left) }
+        }
+        true
+    }
+
     // ── 杂活 ───────────────────────────────────────────────────────────────
 
     /**
@@ -346,6 +461,10 @@ object Account {
             avatar = pr.str("avatar").takeIf { it.isNotEmpty() },
             signature = pr.str("signature"),
             email = pr.str("email"),
+            balanceCents = o.optJSONObject("wallet")?.optLong("balanceCents") ?: 0L,
+            currency = o.optJSONObject("wallet").str("currency").ifEmpty { "CNY" },
+            autoRenew = o.optJSONObject("wallet")?.optBoolean("autoRenew") == true,
+            unreadMail = o.optInt("unreadMail", 0),
             quotaLimit = q?.optInt("limit") ?: 0,
             quotaUsed = q?.optInt("used") ?: 0,
             // ⚠️ **先读 `unlimited` 这个显式布尔**（服务端 2026-09-04 加的）。
@@ -455,6 +574,9 @@ object Account {
             0 to """{"msg":"连不上登录服务：${e.message}"}"""
         } finally { c.disconnect() }
     }
+
+    /** 分 → 「¥12.34」。⚠️ 只在**显示的这一刻**除 100，别在别处提前转成小数。 */
+    private fun yuan(cents: Long): String = "¥" + "%.2f".format(cents / 100.0)
 
     private fun randomUrlSafe(n: Int): String {
         val b = ByteArray(n); SecureRandom().nextBytes(b); return b64url(b)

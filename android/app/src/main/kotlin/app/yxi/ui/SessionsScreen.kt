@@ -38,6 +38,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -1100,17 +1101,24 @@ private fun SessionCard(
             enabled = openEnabled, onClick = onOpen, onLongClick = onLongPress,
         ),
     ) {
-        // 这张卡的「身份」= **整张卡的底色**，不是一条线：收藏一种、置顶一种、两者都有就是两色渐变。
-        // ⚠️ 染得很淡（往底色里掺 0.5）：一屏十几张卡，颜色一重就成了花被子，字也读不清了。
+        // 这张卡的「身份」= **整张卡的底色**。四种组合四种颜色，**要一眼分得出**
+        // （用户 2026-09-04：「颜色太淡了不是很能看出区别，比如一个淡蓝一个透亮一个亮橙，
+        //   什么都没有的就是白色」）。第一版往底色里只掺 0.5，在浅色皮肤上几乎全是白的。
+        //
+        //   什么都没有 → 底色（浅色皮肤下就是白）
+        //   收藏       → 淡蓝
+        //   置顶       → 亮橙
+        //   两者都有   → 薄荷绿（「透亮」那一个）—— 不用蓝橙渐变了，渐变在小卡片上反而看不出是第四种
         val base = MaterialTheme.colorScheme.surfaceContainerLow
-        val fav = androidx.compose.ui.graphics.lerp(base, MaterialTheme.colorScheme.secondaryContainer, 0.5f)
-        val pin = androidx.compose.ui.graphics.lerp(base, MaterialTheme.colorScheme.tertiaryContainer, 0.5f)
-        val skin = when {
-            faved && pinned -> Brush.horizontalGradient(listOf(pin, fav))
-            faved -> androidx.compose.ui.graphics.SolidColor(fav)
-            pinned -> androidx.compose.ui.graphics.SolidColor(pin)
-            else -> androidx.compose.ui.graphics.SolidColor(base)
-        }
+        val dark = base.luminance() < 0.5f
+        val skin = androidx.compose.ui.graphics.SolidColor(
+            when {
+                faved && pinned -> if (dark) Color(0xFF17453C) else Color(0xFFCFF3E6)   // 薄荷
+                faved -> if (dark) Color(0xFF17324F) else Color(0xFFD6E8FF)             // 淡蓝
+                pinned -> if (dark) Color(0xFF4A3113) else Color(0xFFFFE2BF)            // 亮橙
+                else -> base
+            },
+        )
         Column(
             Modifier
                 .background(skin)
@@ -1539,10 +1547,11 @@ internal fun GroupPicker(
 }
 
 /**
- * 会话卡片 + **左滑露出一排按钮**（收藏 / 置顶 / 终止），**右滑快捷收藏**。
+ * 会话卡片 + **左滑露出一排按钮**（收藏 / 置顶 / 终止）。
  *
- * ⚠️ 用户 2026-09-04 定的：「左滑改为打开侧边栏，右滑直接显示终止或者收藏；
- * 收藏那个五角星标记去掉，置顶的图标也去掉，都放在左滑里面」。
+ * ⚠️ **右滑不做任何事** —— 那一下要留给侧边栏（用户 2026-09-04：「我不要右滑收藏的功能，
+ * 我只需要右滑直接进入那个侧边栏」）。所以这里只认左滑，右滑一律不消费手势，交给上面的抽屉。
+ * 收藏 / 置顶仍然在左滑那排按钮里，一个都没少。
  * 以前是「左滑到底 = 弹终止确认框」，误触就把确认框糊你脸上；现在左滑只是**把面板拉出来**，
  * 按哪个是另一下。终止仍然走确认框 —— 杀掉 = 里面跑着的 Claude 一起没。
  *
@@ -1562,7 +1571,6 @@ private fun SwipeCard(
 ) {
     val density = androidx.compose.ui.platform.LocalDensity.current
     val panelPx = with(density) { 222.dp.toPx() }
-    val favPx = with(density) { 92.dp.toPx() }        // 右滑超过这么多 = 收藏
     val x = remember { androidx.compose.animation.core.Animatable(0f) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(open) { if (!open && x.value != 0f) x.animateTo(0f, androidx.compose.animation.core.tween(220)) }
@@ -1586,30 +1594,20 @@ private fun SwipeCard(
                 MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer,
             ) { onOpen(false); onAskKill() }
         }
-        // 右滑时左边露出的提示 —— 这种手势没人猜得到，滑到一半看见字才知道
-        if (x.value > 2f) Row(
-            Modifier.matchParentSize().padding(start = 22.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                if (faved) t("取消收藏") else t("收藏"),
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = (x.value / favPx).coerceIn(0f, 1f)),
-            )
-        }
         Box(
             Modifier
                 .offset { androidx.compose.ui.unit.IntOffset(x.value.roundToInt(), 0) }
                 .draggable(
                     orientation = androidx.compose.foundation.gestures.Orientation.Horizontal,
+                    // ⚠️ 上限钉死在 0：卡片**永远不往右动**，右滑那一下留给侧边栏
                     state = androidx.compose.foundation.gestures.rememberDraggableState { d ->
-                        scope.launch { x.snapTo((x.value + d).coerceIn(-panelPx, favPx * 1.25f)) }
+                        scope.launch { x.snapTo((x.value + d).coerceIn(-panelPx, 0f)) }
                     },
                     onDragStopped = {
-                        when {
-                            x.value <= -panelPx * 0.4f -> { onOpen(true); x.animateTo(-panelPx, androidx.compose.animation.core.tween(200)) }
-                            x.value >= favPx -> { onToggleFav(); onOpen(false); x.animateTo(0f, androidx.compose.animation.core.tween(220)) }
-                            else -> { onOpen(false); x.animateTo(0f, androidx.compose.animation.core.tween(200)) }
+                        if (x.value <= -panelPx * 0.4f) {
+                            onOpen(true); x.animateTo(-panelPx, androidx.compose.animation.core.tween(200))
+                        } else {
+                            onOpen(false); x.animateTo(0f, androidx.compose.animation.core.tween(200))
                         }
                     },
                 ),

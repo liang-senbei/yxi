@@ -643,7 +643,7 @@ internal object En {
         "下载" to "Download",
         "下载中…" to "Downloading…",
         "模式" to "Mode",
-        "已登录" to "Signed in",
+        "登录信息读不出来了，重新登一次" to "Your saved sign-in could not be read. Please sign in again.",
         "你的 agent 在服务器上跑，你在这儿把关" to
             "Your agents run on the server. You call the shots from here.",
         "登录 / 注册" to "Sign in / Sign up",

@@ -54,10 +54,12 @@ fun MemberScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
     val me = Account.me
     val tier = me?.tier ?: Account.Tier.Free
     var loading by remember { mutableStateOf(false) }
+    // ⚠️ 拉资料失败要**说出来**：以前这个返回值直接丢了，于是「登录着但整页是空的」查不出原因
+    var loadErr by remember { mutableStateOf<String?>(null) }
     // 进来拉一次最新的（会员到期、配额都可能在别处变了）
     LaunchedEffect(Unit) {
         Account.loadPurchase()          // 公开接口，没登录也拉 —— 价格是给还没买的人看的
-        if (Account.signedIn) { loading = true; Account.refresh(ctx); loading = false }
+        if (Account.signedIn) { loading = true; loadErr = Account.refresh(ctx); loading = false }
     }
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp, 12.dp, 18.dp, 24.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -85,6 +87,10 @@ fun MemberScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
                 Text(line, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
             }
             if (!Account.signedIn) Button({ Account.startLogin(ctx) }, shape = RoundedCornerShape(50)) { Text(t("登录")) }
+        }
+        loadErr?.takeIf { Account.signedIn && me == null }?.let {
+            Spacer(Modifier.height(8.dp))
+            Text(t("会员资料没拉到：") + it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
         }
         // 掉登录了要说一句 —— 页面突然变回「未登录」而不给理由，最让人发毛
         Account.signedOutWhy?.takeIf { !Account.signedIn }?.let {
