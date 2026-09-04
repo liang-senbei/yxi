@@ -12,6 +12,18 @@ package app.yxi.ui
 internal object En {
     val map: Map<String, String> = mapOf(
         "语言" to "Language",
+        "你选了「手机上算」，但模型还没下 —— 去「我的 · 语音识别」下一个" to "You picked on-device, but the model isn't downloaded — get it under Profile · Voice input",
+        "你选了「服务器上算」，但这台机器上没有 yxi-asr" to "You picked server-side, but this machine has no yxi-asr",
+        "自动" to "Auto",
+        "手机上算" to "On this phone",
+        "服务器上算" to "On your server",
+        "系统识别" to "System",
+        "自动：手机上下了模型就用手机（离线、最快），没下就用服务器上的 `yxi-asr`，都没有才退回系统识别。" to "Auto: use the phone if the model is downloaded (offline, fastest), else `yxi-asr` on your server, else the system recogniser.",
+        "手机上算：不联网、不经过任何服务器。要先下模型（约 %d MB）。" to "On this phone: offline, never leaves the device. Needs the model (~%d MB).",
+        "服务器上算：同一个模型跑在你自己的机器上，最准。要那台机器装过 `yxi-asr`（装机脚本里有）。" to "On your server: same model on a real machine — most accurate. Needs `yxi-asr` installed there.",
+        "系统识别：不占空间，但依赖 Google 服务 —— 关了 GMS 的手机上它是不存在的。" to "System: no download, but needs Google services — absent on phones with GMS disabled.",
+        "模型是开源的 SenseVoice，中英粤日都认、自带标点。" to "The model is the open-source SenseVoice: Chinese, English, Cantonese and Japanese, with punctuation.",
+        "在用" to "In use",
         "UID 复制好了" to "UID copied",
         "语音识别就绪：点一下麦克风开始说，再点一下结束" to "Voice input ready: tap the mic to start, tap again to stop",
         "反馈与版本" to "Feedback & version",

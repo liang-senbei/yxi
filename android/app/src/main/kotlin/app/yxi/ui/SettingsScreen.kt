@@ -314,18 +314,48 @@ fun SettingsScreen(
             val asr = app.yxi.agent.AsrModel
             LaunchedEffect(Unit) { asr.refresh(ctx) }
             val supported = app.yxi.agent.OnDeviceAsr.supported
+            LaunchedEffect(Unit) { asr.loadEngine(ctx) }
             Card(
                 t("语音识别"), Glyph.Mic,
-                subtitle = when {
+                subtitle = asr.engine.label + " · " + when {
                     !supported -> t("这台设备不支持（只打包了 arm64）")
                     asr.installed -> t("已就绪 · 在手机上识别，离线也能用")
                     asr.progress >= 0f -> t("下载中 %d%%").format((asr.progress * 100).toInt())
                     else -> t("没下模型 · 现在用的是系统识别")
                 },
             ) {
+                // 用哪套 —— 自动挡挑不出「用户想要哪套」，给个明确的开关（用户要的）
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    app.yxi.agent.AsrModel.Engine.entries.forEach { e ->
+                        val on = asr.engine == e
+                        Surface(
+                            color = if (on) CopperContainer else SurfaceContainerHigh,
+                            shape = Pill,
+                            modifier = Modifier.clip(Pill).clickable { asr.setEngine(ctx, e) },
+                        ) {
+                            Text(
+                                e.label,
+                                Modifier.padding(13.dp, 9.dp),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = if (on) MaterialTheme.colorScheme.onPrimaryContainer else Muted,
+                            )
+                        }
+                    }
+                }
                 Hint2(
-                    t("识别**在这台手机上**做：不联网、不经过服务器、也不依赖 Google 服务。" +
-                        "模型是开源的 SenseVoice，中英粤日都认、自带标点。")
+                    when (asr.engine) {
+                        app.yxi.agent.AsrModel.Engine.Auto ->
+                            t("自动：手机上下了模型就用手机（离线、最快），没下就用服务器上的 `yxi-asr`，都没有才退回系统识别。")
+                        app.yxi.agent.AsrModel.Engine.Device ->
+                            t("手机上算：不联网、不经过任何服务器。要先下模型（约 %d MB）。").format(app.yxi.agent.AsrModel.SIZE_MB)
+                        app.yxi.agent.AsrModel.Engine.Server ->
+                            t("服务器上算：同一个模型跑在你自己的机器上，最准。要那台机器装过 `yxi-asr`（装机脚本里有）。")
+                        app.yxi.agent.AsrModel.Engine.System ->
+                            t("系统识别：不占空间，但依赖 Google 服务 —— 关了 GMS 的手机上它是不存在的。")
+                    }
+                )
+                Hint2(
+                    t("模型是开源的 SenseVoice，中英粤日都认、自带标点。")
                 )
                 if (!supported) {
                     Hint2(t("⚠️ 只打包了 arm64 的原生库（模拟器和很老的机器用不了），这台机器会继续用系统识别。"))

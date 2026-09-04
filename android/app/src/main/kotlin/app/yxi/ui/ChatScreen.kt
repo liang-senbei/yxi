@@ -857,6 +857,25 @@ fun ChatScreen(
                 .onSizeChanged { composerH = it.height }
                 .background(Brush.verticalGradient(0f to Color.Transparent, 0.4f to fadeTo, 1f to fadeTo)),
         ) {
+        // ⚠️ **终端里那行状态词也要在对话里看得见**（用户 2026-09-04：「Mustering…（32s · token）这些要在对话里显示」）。
+        //    以前只有会话切换卡上有（[Switcher]），对话页里没有 —— 而对话页恰恰是盯着它干活的地方。
+        //    这行字只有屏幕上有（转录里没有），所以来源是 `tmux capture-pane` 解析出来的 [app.yxi.agent.Live.status]。
+        //    跑完之后 `doneFor` 会顶上来显示「刚跑完 · 13s」，几秒后自然消失。
+        val statusLine = when {
+            live.busy && !live.status.isNullOrBlank() -> "✽ " + live.status to app.yxi.ui.theme.Teal
+            !live.doneFor.isNullOrBlank() -> t("刚跑完 · %s").format(live.doneFor) to app.yxi.ui.theme.Copper
+            else -> null
+        }
+        statusLine?.let { (text, color) ->
+            Text(
+                text,
+                Modifier.fillMaxWidth().padding(22.dp, 0.dp, 22.dp, 4.dp),
+                style = MaterialTheme.typography.labelSmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+                color = color,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+        }
         if (staged.isNotEmpty() || queue.isNotEmpty()) {
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(16.dp, 0.dp, 16.dp, 6.dp),
@@ -942,10 +961,17 @@ fun ChatScreen(
                     Spacer(Modifier.width(10.dp))
                 }
             }
+            // 用户在设置里选的那套（默认自动）。⚠️ 选了「手机上算」但没下模型 / 选了「服务器上算」但那台没装，
+            //    就不该假装能用 —— 点的时候直说，别默默换一套（用户根本不知道自己在用哪个）。
+            val eng = app.yxi.agent.AsrModel.engine
+            val useDevice = onDevice && eng != app.yxi.agent.AsrModel.Engine.Server &&
+                eng != app.yxi.agent.AsrModel.Engine.System
+            val useServer = serverAsr && !useDevice && eng != app.yxi.agent.AsrModel.Engine.Device &&
+                eng != app.yxi.agent.AsrModel.Engine.System
             val micBtn: @Composable () -> Unit = {
                 // 语音：**服务器上有 `yxi-asr` 就按住说话**（识别在你自己的机器上跑，
                 // 准得多、也不经过任何云 API）；没装就退回系统那个识别界面。
-                if (onDevice || serverAsr) MicTap(
+                if (useDevice || useServer) MicTap(
                     recording = recording,
                     busy = asrBusy,
                     onStart = {
@@ -973,7 +999,7 @@ fun ChatScreen(
                         }
                         if (pcm != null) scope.launch {
                             asrBusy = true
-                            val said = if (onDevice) {
+                            val said = if (useDevice) {
                                 // ① 手机上算 —— 不联网、不依赖服务器，最快也最省事
                                 app.yxi.agent.OnDeviceAsr.transcribe(ctx, pcm) { why ->
                                     android.widget.Toast.makeText(ctx, why, android.widget.Toast.LENGTH_LONG).show()
@@ -1000,6 +1026,17 @@ fun ChatScreen(
                         }
                     },
                 ) else FlatIcon(Glyph.Mic, t("语音输入")) {
+                    when (eng) {
+                        app.yxi.agent.AsrModel.Engine.Device -> if (!onDevice) {
+                            android.widget.Toast.makeText(ctx, t("你选了「手机上算」，但模型还没下 —— 去「我的 · 语音识别」下一个"), android.widget.Toast.LENGTH_LONG).show()
+                            return@FlatIcon
+                        }
+                        app.yxi.agent.AsrModel.Engine.Server -> if (!serverAsr) {
+                            android.widget.Toast.makeText(ctx, t("你选了「服务器上算」，但这台机器上没有 yxi-asr"), android.widget.Toast.LENGTH_LONG).show()
+                            return@FlatIcon
+                        }
+                        else -> Unit
+                    }
                     // ⚠️ **没有语音识别时要说一声。** 原来只是 `runCatching { launch }` ——
                     // 兜住了不崩，但**失败完全静默**：点了麦克风什么都不发生，一个字的解释都没有。
                     // 这不是边角情况：用户的荣耀 **GMS 是关的**，实测把识别服务禁掉之后
@@ -1068,7 +1105,7 @@ fun ChatScreen(
                 val pcm = recorder.stop()
                 if (pcm != null) scope.launch {
                     asrBusy = true
-                    val said = if (onDevice) {
+                    val said = if (useDevice) {
                         app.yxi.agent.OnDeviceAsr.transcribe(ctx, pcm) { why ->
                             android.widget.Toast.makeText(ctx, why, android.widget.Toast.LENGTH_LONG).show()
                         }

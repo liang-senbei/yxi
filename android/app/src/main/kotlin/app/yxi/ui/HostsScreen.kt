@@ -17,6 +17,7 @@ import androidx.compose.runtime.*
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -38,6 +39,8 @@ private val Pill = RoundedCornerShape(100.dp)
 fun HostsScreen(
     store: HostStore,
     keys: KeyManager,
+    /** 此刻在用的那台（看板/对话连的就是它）—— 多台时要一眼看出来 */
+    current: String? = null,
     onOpen: (Host) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -77,6 +80,7 @@ fun HostsScreen(
                 items(hosts, key = { it.id }) { h ->
                     HostRow(
                         h,
+                        current = h.id == current,
                         ctx = ctx,
                         store = store,
                         keys = keys,
@@ -120,6 +124,8 @@ fun HostsScreen(
 @Composable
 private fun HostRow(
     h: Host,
+    /** 是不是此刻在用的那台 */
+    current: Boolean,
     ctx: android.content.Context,
     store: HostStore,
     keys: KeyManager,
@@ -132,7 +138,11 @@ private fun HostRow(
     /// 长按一次 +1 —— [HostQuota] 靠它知道「该重查了」
     var expandAt by remember(h.id) { mutableStateOf(0) }
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        // ⚠️ **在用的那台要一眼认出来**（用户 2026-09-04：多台主机时当前在用的用不同颜色显示）。
+        //    底色换成强调色的容器 + 左边一条这台机器自己的色条（[hostColor] 从 id 派生，
+        //    跟看板、配置页那颗小圆点是同一个颜色，多机时「这是哪台」不用读字）。
+        color = if (current) MaterialTheme.colorScheme.secondaryContainer
+        else MaterialTheme.colorScheme.surfaceContainerLow,
         shape = MaterialTheme.shapes.large,
         modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.large).combinedClickable(
             onClick = onClick,
@@ -142,10 +152,30 @@ private fun HostRow(
             onLongClick = { expanded = !expanded; if (expanded) expandAt++ },
         ),
     ) {
-        Column(Modifier.padding(16.dp, 14.dp)) {
+        Column(
+            Modifier
+                .drawBehind {
+                    val w = 4.dp.toPx()
+                    drawRoundRect(
+                        androidx.compose.ui.graphics.SolidColor(hostColor(h.id)),
+                        topLeft = androidx.compose.ui.geometry.Offset(4.dp.toPx(), 3.dp.toPx()),
+                        size = androidx.compose.ui.geometry.Size(w, size.height - 6.dp.toPx()),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(w / 2),
+                    )
+                }
+                .padding(18.dp, 14.dp, 16.dp, 14.dp),
+        ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(h.alias, style = MaterialTheme.typography.titleMedium)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(h.alias, style = MaterialTheme.typography.titleMedium)
+                    if (current) Text(
+                        t("在用"),
+                        Modifier.clip(Pill).background(MaterialTheme.colorScheme.tertiaryContainer).padding(8.dp, 2.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    )
+                }
                 Spacer(Modifier.height(3.dp))
                 // ⚠️ 地址栏里混进中文/全角字符是**最贵的一种错**：连不上，
                 // 而错误信息在别处，用户看着列表觉得一切正常。所以在列表里就标出来 ——

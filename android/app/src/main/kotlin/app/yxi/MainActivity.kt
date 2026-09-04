@@ -257,6 +257,7 @@ class MainActivity : ComponentActivity() {
                         }
                         Tab.Hosts -> HostsScreen(
                             store, keys,
+                            current = host?.id,
                             onOpen = { hostId = it.id; tab = Tab.Sessions },
                             modifier = m,
                         )

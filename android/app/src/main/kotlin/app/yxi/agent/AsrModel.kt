@@ -43,6 +43,38 @@ object AsrModel {
 
     fun refresh(ctx: Context) { installed = OnDeviceAsr.ready(ctx) }
 
+    /**
+     * 用哪套识别。⚠️ 用户 2026-09-04：「语音模型可以自己选择去切换」。
+     *
+     * 三套各有各的道理，自动挡选不出「用户想要哪套」：
+     *  · [Device] 手机上算 —— 离线、不经过任何机器，但要下 153MB 模型
+     *  · [Server] 服务器上算 —— 最准（同一个模型跑在有算力的机器上），但要那台机器装过 `yxi-asr`
+     *  · [System] 系统识别 —— 不占空间，但依赖 Google 服务（**用户的荣耀默认关着 GMS，等于没有**）
+     */
+    enum class Engine(val key: String, private val zh: String) {
+        Auto("auto", "自动"),
+        Device("device", "手机上算"),
+        Server("server", "服务器上算"),
+        System("system", "系统识别");
+
+        // ⚠️ `get()` 不是构造参数：换语言要跟着变（跟 Skin.Style / Tab.label 同一个坑）
+        val label: String get() = app.yxi.ui.t(zh)
+    }
+
+    /** 自动 = 手机上装了就用手机，没装就问服务器，都没有才用系统 */
+    var engine by mutableStateOf(Engine.Auto)
+        private set
+
+    fun loadEngine(ctx: Context) {
+        val k = ctx.getSharedPreferences("yxi", Context.MODE_PRIVATE).getString("asr.engine", null) ?: return
+        engine = Engine.entries.firstOrNull { it.key == k } ?: return
+    }
+
+    fun setEngine(ctx: Context, e: Engine) {
+        engine = e
+        ctx.getSharedPreferences("yxi", Context.MODE_PRIVATE).edit().putString("asr.engine", e.key).apply()
+    }
+
     fun start(ctx: Context) {
         if (progress >= 0f) return                     // 已经在下了
         val app = ctx.applicationContext
