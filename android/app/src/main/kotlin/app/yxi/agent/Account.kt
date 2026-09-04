@@ -70,6 +70,10 @@ object Account {
         val autoRenew: Boolean = false,
         /** 未读站内信条数 —— 图标上那个红点靠它，不然要进去才知道有信 */
         val unreadMail: Int = 0,
+        /** 手上几张曦光（祈愿用） */
+        val tickets: Int = 0,
+        /** 离保底还差几抽。⚠️ 是「**还差**」不是「已累计」—— 歧义写进字段名里解决（对方定的）。 */
+        val pityRemaining: Int = 0,
     )
 
     /** 一封站内信。[kind] 契约里固定四个：`redeem` / `expiry` / `notice` / `system`。 */
@@ -455,6 +459,26 @@ object Account {
         true
     }
 
+    /**
+     * 带登录态打一个 GET，成功返回 JSON。
+     * ⚠️ 拿不到一律 null（没登录 / 网络不通 / 接口还没上线），**调用方要把整块藏掉**，
+     * 不是显示 0 或空列表 —— 「拿不到」和「没有」是两件事。
+     */
+    suspend fun apiGet(ctx: Context, path: String): JSONObject? = withContext(Dispatchers.IO) {
+        val tk = token(ctx) ?: return@withContext null
+        val (c, body) = req("$API$path", "GET", tk, null)
+        if (c !in 200..299) return@withContext null
+        runCatching { JSONObject(body) }.getOrNull()
+    }
+
+    /** 同 [apiGet]，POST。 */
+    suspend fun apiPost(ctx: Context, path: String, body: String): JSONObject? = withContext(Dispatchers.IO) {
+        val tk = token(ctx) ?: return@withContext null
+        val (c, resp) = req("$API$path", "POST", tk, body)
+        if (c !in 200..299) return@withContext null
+        runCatching { JSONObject(resp) }.getOrNull()
+    }
+
     // ── 杂活 ───────────────────────────────────────────────────────────────
 
     /**
@@ -491,6 +515,8 @@ object Account {
             currency = o.optJSONObject("wallet").str("currency").ifEmpty { "CNY" },
             autoRenew = o.optJSONObject("wallet")?.optBoolean("autoRenew") == true,
             unreadMail = o.optInt("unreadMail", 0),
+            tickets = o.optJSONObject("wish")?.optInt("tickets") ?: 0,
+            pityRemaining = o.optJSONObject("wish")?.optInt("pityRemaining") ?: 0,
             quotaLimit = q?.optInt("limit") ?: 0,
             quotaUsed = q?.optInt("used") ?: 0,
             // ⚠️ **先读 `unlimited` 这个显式布尔**（服务端 2026-09-04 加的）。

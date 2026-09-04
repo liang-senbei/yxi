@@ -72,6 +72,10 @@ fun SettingsScreen(
     onTrend: () -> Unit = {},
     /** 「我的」宫格里的「邮件」——我们发给你的站内信 */
     onMail: () -> Unit = {},
+    /** 祈愿（抽奖） */
+    onWish: () -> Unit = {},
+    /** 活动中心（签到等） */
+    onActivity: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val ctx = LocalContext.current
@@ -278,8 +282,8 @@ fun SettingsScreen(
                 // 未读数直接打在图标上 —— 不然要点进去才知道有信，等于没通知
                 badge = app.yxi.agent.Account.me?.unreadMail ?: 0,
             ) { onMail() }
-            GridEntry(Ico.Wish, t("祈愿"), Color(0xFFB07AE8), Modifier.weight(1f)) { soon = t("祈愿") }
-            GridEntry(Ico.Gift, t("活动中心"), Color(0xFFE8912D), Modifier.weight(1f)) { soon = t("活动中心") }
+            GridEntry(Ico.Wish, t("祈愿"), Color(0xFFB07AE8), Modifier.weight(1f)) { onWish() }
+            GridEntry(Ico.Gift, t("活动中心"), Color(0xFFE8912D), Modifier.weight(1f)) { onActivity() }
             GridEntry(Ico.Chat, t("工单"), Color(0xFF7A69E8), Modifier.weight(1f)) { onTickets() }
         }
 

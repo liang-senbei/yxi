@@ -174,8 +174,10 @@ class MainActivity : ComponentActivity() {
                 var tickets by remember { mutableStateOf(false) }
                 var trend by remember { mutableStateOf(false) }
                 var mail by remember { mutableStateOf(false) }
+                var wish by remember { mutableStateOf(false) }
+                var activity by remember { mutableStateOf(false) }
                 var editMe by remember { mutableStateOf(false) }
-                BackHandler(enabled = work != null || member || prefs || tickets || trend || mail || tab != Tab.Sessions) {
+                BackHandler(enabled = work != null || member || prefs || tickets || trend || mail || wish || activity || tab != Tab.Sessions) {
                     when {
                         work != null -> work = null      // 工作区 → 回标签页
                         member -> member = false         // 会员中心 → 回去
@@ -183,6 +185,8 @@ class MainActivity : ComponentActivity() {
                         tickets -> tickets = false       // 工单中心 → 回去
                         trend -> trend = false           // 趋势 → 回去
                         mail -> mail = false             // 邮件 → 回去
+                        wish -> wish = false             // 祈愿 → 回去
+                        activity -> activity = false     // 活动中心 → 回去
                         else -> tab = Tab.Sessions       // 非默认标签 → 回会话
                     }
                 }
@@ -299,6 +303,14 @@ class MainActivity : ComponentActivity() {
                         app.yxi.ui.MailScreen(modifier = m)
                         return@Scaffold
                     }
+                    if (wish) {
+                        app.yxi.ui.WishScreen(modifier = m)
+                        return@Scaffold
+                    }
+                    if (activity) {
+                        app.yxi.ui.ActivityScreen(modifier = m)
+                        return@Scaffold
+                    }
                     when (tab) {
                         Tab.Sessions -> if (host == null) {
                             EmptyHint(t("还没有主机"), t("去「主机」那一栏加一台"), m)
@@ -335,7 +347,8 @@ class MainActivity : ComponentActivity() {
                             store, keys, host, shared.session, shared.error,
                             onMember = { member = true }, mine = true,
                             onPrefs = { prefs = true }, onTickets = { tickets = true },
-                            onTrend = { trend = true }, onMail = { mail = true }, modifier = m,
+                            onTrend = { trend = true }, onMail = { mail = true },
+                            onWish = { wish = true }, onActivity = { activity = true }, modifier = m,
                         )
                     }
                 }
