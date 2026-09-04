@@ -188,7 +188,14 @@ class EventService : Service() {
         if (kind == "needs") {
             // 选项一律从屏幕读，绝不预设（把「拒绝」写死成 2 = 点一下就永久放行）；读不出就只留「点开去看」
             val pending = if (full.isNotBlank()) runCatching { SessionProbe.pending(ssh, full) }.getOrNull() else null
-            postNeeds(host, full, session, e.optString("cwd"), pending, mins = 0, alert = true,
+            // ⚠️ **同一件事别响第二次**（用户：「一条通知会重复提醒 n 次」）。钩子会为同一个待批
+            //    重复发事件（重试、重连补历史、同一个权限框又问一遍），内容一模一样。
+            //    一样的内容 5 分钟内再来：**只更新通知，不再响**。内容变了才是真的新事。
+            val sig = "$full|$detail|$preview|$tool|$arg"
+            val now = System.currentTimeMillis()
+            val again = lastSig[session]?.let { it.first == sig && now - it.second < 5 * 60_000L } == true
+            lastSig[session] = sig to now
+            postNeeds(host, full, session, e.optString("cwd"), pending, mins = 0, alert = !again,
                       detail = detail, preview = preview, tool = tool, arg = arg)
         } else {
             postDone(host, full, session, e.optString("cwd"), preview)
@@ -201,6 +208,8 @@ class EventService : Service() {
         @Volatile var detail: String = "", @Volatile var preview: String = "",
     ) { @Volatile var alerted: Int = 0 }
     private val waits = java.util.concurrent.ConcurrentHashMap<String, WaitCtx>()
+    /** 每个会话上一条通知的内容指纹 + 时间，用来把「同一件事又发一遍」压成静默更新 */
+    private val lastSig = java.util.concurrent.ConcurrentHashMap<String, Pair<String, Long>>()
 
     /**
      * 「需要你」的通知 —— 纯构建，不碰 SSH（pending 由调用方抓好传进来）。
@@ -375,7 +384,9 @@ class EventService : Service() {
     }
 
     private suspend fun escalate() {
-        val thresh = intArrayOf(2, 5, 10, 20, 40)
+        // ⚠️ **只补一次**（10 分钟）。原来是 2/5/10/20/40 分钟各响一次 —— 一个等着的会话就要吵你五回，
+        //    几个会话一起等就是一串。用户：「一条通知会重复提醒 n 次」。等太久的事，一次提醒够了。
+        val thresh = intArrayOf(10)
         while (currentCoroutineContext().isActive) {
             delay(60_000)
             for ((short, wc) in waits.entries.toList()) {

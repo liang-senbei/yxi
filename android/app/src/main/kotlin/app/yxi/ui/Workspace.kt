@@ -17,6 +17,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.animation.core.tween
@@ -412,17 +413,19 @@ fun Workspace(
     var glow by remember(host.id) { mutableStateOf(Triple(false, false, false)) }
     var stats by remember(host.id) { mutableStateOf(Prefs.stats(ctx)) }
     /** 对话页上划收起页眉（学 X），下滑展开；换模式就复位 */
-    var barsHidden by remember(host.id) { mutableStateOf(false) }
-    LaunchedEffect(mode) { barsHidden = false }
+    // 上下栏退场了多少（0 = 全在，1 = 退完），由 ChatScreen 跟着手指连续报上来
+    var barsFrac by remember(host.id) { mutableFloatStateOf(0f) }
+    LaunchedEffect(mode) { barsFrac = 0f }
     var headerH by remember(host.id) { mutableIntStateOf(0) }
-    val topInset by animateDpAsState(
-        if (barsHidden) 0.dp else with(LocalDensity.current) { headerH.toDp() }, tween(220), label = "topInset",
-    )
     val header = remember {
         movableContentOf {
-        AnimatedVisibility(
-                visible = !barsHidden,
-                enter = slideInVertically { -it } + fadeIn(), exit = slideOutVertically { -it } + fadeOut(),
+        Box(
+                // 学 X：栏是**盖在**正文上的，退场只是把它挪出去 —— 正文一动不动，
+                // 所以没有「栏一收，底下突然多出一块字」那种突兀感（用户看 X 慢动作看出来的）。
+                Modifier.graphicsLayer {
+                    translationY = -barsFrac * size.height
+                    alpha = 1f - barsFrac * 0.85f
+                },
             ) {
             Column(Modifier.statusBarsPadding()) {
             Row(
@@ -604,8 +607,8 @@ fun Workspace(
                     onOpenPath = { p -> jumpTo = p; mode = Mode.Files },
                     onGlow = { b, w, st -> glow = Triple(b, w, st) },
                     showStats = stats,
-                    topInset = if (mode == Mode.Chat) topInset else 0.dp,
-                    onBars = { barsHidden = it },
+                    headerPx = if (mode == Mode.Chat) headerH else 0,
+                    onBars = { barsFrac = it },
                     modifier = Modifier.fillMaxSize(),
                 )
                 Mode.Files -> FilesScreen(

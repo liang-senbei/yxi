@@ -91,9 +91,11 @@ fun ChatScreen(
     /** 顶上那条「⚡模式 / 模型 / 思考 / 上下文 / 今日」显不显示 —— 由页眉上的 ⚡ 按钮开关（用户：常驻太难看） */
     showStats: Boolean = true,
     /** 上划收起 / 下滑展开（学 X）：true = 收起。页眉在 Workspace 那边，靠这个回调同步 */
-    onBars: (Boolean) -> Unit = {},
-    /** 页眉悬浮在上面时它的高度（收起时 0）：整页内容按它下移，收起时内容自然滑到状态栏底下（不留白） */
-    topInset: androidx.compose.ui.unit.Dp = 0.dp,
+    /** 报「上下栏退场了多少」（0 = 全在，1 = 全退完），跟着手指连续走 */
+    onBars: (Float) -> Unit = {},
+    /** 悬浮页眉的高度（px）。⚠️ **内容永远按它留白，不跟着收起变** —— 学 X：栏是盖在正文上的，
+     *  退场时只是把栏挪走，底下的字本来就在那儿，不重排、不跳。 */
+    headerPx: Int = 0,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -285,6 +287,13 @@ fun ChatScreen(
      * null = 还没拿到第一批。
      */
     var seenKeys by remember(sessionName) { mutableStateOf<Set<String>?>(null) }
+    /**
+     * 已经放过进入动画的 key。⚠️ **一条只放一次，永远。**
+     * 原来只看「在不在第一批里」，于是**只要那条被重新组合**（列表跳位置、条目滚出去又滚回来、
+     * 转录重灌），它就再滑入淡入一次 —— 一屏的条目同时来这么一下，就是用户录到的
+     * 「整屏白一下再淡回来，一秒两次」。见 #227。
+     */
+    val animated = remember(sessionName) { mutableSetOf<String>() }
     val openGroups = remember { mutableStateListOf<String>() }
     val motionOn = remember {
         runCatching {
@@ -324,32 +333,46 @@ fun ChatScreen(
     // ── 学 X：上划（往下读）把页眉和输入栏收起来，下滑再展开；到底了、或键盘开着，一律展开 ──
     // ⚠️ 用 nestedScroll 的 onPreScroll 看手势方向，不看列表位置：方向一换就重新累计，过 28dp 才动，
     //    免得手指抖一下两条栏就上下乱跳。
-    var barsHidden by remember(sessionName) { mutableStateOf(false) }
+    /** 上下栏退了多少像素（0 = 全在，barsMax = 收完）。⚠️ 跟着手指连续走 —— X 的自然感全在这：
+     *  不是「过了阈值啪一下收掉」，而是你划多少它退多少，松手才归位。 */
+    var barsOff by remember(sessionName) { mutableFloatStateOf(0f) }
     /** 输入区（含快捷语、附件条）的实际高度：列表底部留这么多，不然最后一条被悬浮的输入框盖住 */
     var composerH by remember { mutableIntStateOf(0) }
     /** 输入框现在几行 —— 多行时换成 Gemini 那种两段式（文字在上、按钮在下） */
     var lines by remember(sessionName) { mutableIntStateOf(1) }
     var multi by remember(sessionName) { mutableStateOf(false) }
-    var barsAcc by remember { mutableFloatStateOf(0f) }
-    val barsThreshold = with(LocalDensity.current) { 28.dp.toPx() }
-    val barsConn = remember(barsThreshold) {
+    val barsMax = (if (headerPx > 0) headerPx.toFloat() else with(LocalDensity.current) { 96.dp.toPx() })
+    val barsConn = remember(barsMax) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: androidx.compose.ui.geometry.Offset, source: NestedScrollSource): androidx.compose.ui.geometry.Offset {
                 val dy = available.y
                 // ⚠️ **只认手指。** 程序滚动（点 ↓ 跳底部、新消息跟随）也会走这条 —— 那一下会把栏收起来，
                 //    紧接着「到底了就展开」又把它展开，一收一展就是用户看到的「↓ 一直闪」（#226）。
                 if (dy == 0f || source != NestedScrollSource.UserInput) return androidx.compose.ui.geometry.Offset.Zero
-                barsAcc = if ((dy < 0f) == (barsAcc < 0f)) barsAcc + dy else dy
-                // ⚠️ 方向按用户实测定：往下滑（回看历史）收起，往上滑（回到最新）展开；到底了一律展开。
-                //    0.9.89 写反了（用户：「上滑下滑搞反了」）。
-                if (barsAcc > barsThreshold && !barsHidden) barsHidden = true       // 下滑：收
-                if (barsAcc < -barsThreshold && barsHidden) barsHidden = false      // 上滑：展开
+                // 方向按用户实测定：往下滑（回看历史）收起，往上滑（回到最新）展开。
+                barsOff = (barsOff + dy).coerceIn(0f, barsMax)
                 return androidx.compose.ui.geometry.Offset.Zero
             }
         }
     }
-    LaunchedEffect(Unit) { snapshotFlow { listState.atBottom }.collect { if (it) barsHidden = false } }
-    LaunchedEffect(barsHidden) { onBars(barsHidden) }
+    // 松手归位：过半就收干净，没过半就弹回来 —— 中间那个半吊子状态不留（学 X）
+    LaunchedEffect(listState, barsMax) {
+        snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
+            if (scrolling) return@collect
+            val to = if (barsOff > barsMax / 2f) barsMax else 0f
+            if (barsOff != to) androidx.compose.animation.core.animate(
+                barsOff, to, animationSpec = tween(260, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+            ) { v, _ -> barsOff = v }
+        }
+    }
+    // 到底了一律展开（新消息来了得看得见输入框）
+    LaunchedEffect(Unit) {
+        snapshotFlow { listState.atBottom }.collect {
+            if (it && barsOff != 0f) androidx.compose.animation.core.animate(barsOff, 0f, animationSpec = tween(220)) { v, _ -> barsOff = v }
+        }
+    }
+    val barsFrac = (barsOff / barsMax).coerceIn(0f, 1f)
+    LaunchedEffect(barsFrac) { onBars(barsFrac) }
     val imeOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     // ⚠️ **恒定，不跟着 barsHidden 变。** 变的话：点 ↓ 到底 → 栏展开 → 底部留白变大 → 又能往下滚 →
     //    「不在底部」→ ↓ 按钮重新冒出来还往上跳一截 —— 就是用户录到的「点了一直闪」（#226）。
@@ -559,7 +582,7 @@ fun ChatScreen(
     LaunchedEffect(glowBusy, glowWait, glowStream) { onGlow(glowBusy, glowWait, glowStream) }
     DisposableEffect(Unit) { onDispose { onGlow(false, false, false) } }
     Box(modifier.fillMaxSize()) {
-    Column(Modifier.fillMaxSize().padding(top = topInset)) {
+    Column(Modifier.fillMaxSize().padding(top = with(LocalDensity.current) { headerPx.toDp() })) {
         // 标题和路径由 Workspace 的头部管，这里只在出问题时说一句
         status?.let {
             Text(
@@ -727,7 +750,10 @@ fun ChatScreen(
                     }
                     val item = (row as ChatRow.One).item
                     // 只给「加载完之后才出现」的条目做进入动画 —— 初始那几百条一起滑入是灾难
-                    val fresh = seenKeys != null && item.key !in seenKeys!!
+                    // 只有「加载完之后新来的」+「这条从没动画过」+「就在末尾附近」才动画：
+                    // 老内容重新组合一律不动（#227），中间插进来的也不动（会把整屏顶得乱跳）。
+                    val fresh = seenKeys != null && item.key !in seenKeys!! && i >= rows.size - 3 &&
+                        animated.add(item.key)
                     EnterUp(animate = fresh && motionOn) {
                     Item(
                         item,
@@ -763,8 +789,12 @@ fun ChatScreen(
             // ⚠️ **只在没在底部时才出现。** 一直挂着的话它就是块永久的遮挡 ——
             // 而绝大多数时候你本来就在底部（新消息会自动跟着走），那时它毫无用处。
             // derivedStateOf：不加的话每滚一帧都要重组整个 ChatScreen。
+            // ⚠️ **粘着（stick）时一律不出现** —— 这才是「点了 ↓ 一直闪」的根（#226）：
+            //    点 ↓ 之后 stick=true，会话又在出字，每 300ms 来一批 → 列表长高一点 → 有那么一两帧「不在底部」
+            //    → 按钮淡入 → 跟随滚到底 → 淡出 …… 一秒闪两下。而粘着时它本来就没用（马上自己就到底了）。
+            //    想要它回来：手指往上一拖，stick 就关了。
             val away by remember {
-                derivedStateOf { items.isNotEmpty() && !listState.atBottom }
+                derivedStateOf { items.isNotEmpty() && !stick && !listState.atBottom }
             }
             androidx.compose.animation.AnimatedVisibility(
                 visible = away,
@@ -800,7 +830,8 @@ fun ChatScreen(
                 // 上划收起、下滑展开（学 X）。键盘开着时永远在 —— 正打字呢不能把输入框收走
         // ⚠️ 不用 AnimatedVisibility：Box 里套着外层 Column 的作用域，Kotlin 会挑中 ColumnScope 那个重载然后报
         //    「不能用隐式接收者调用」；而且它收起时会把输入框卸掉、焦点和光标全丢。改成整块平移 + 淡出，组合树不动。
-        val hideFrac by animateFloatAsState(if (!barsHidden || imeOpen) 0f else 1f, tween(220), label = "composerHide")
+        // ⚠️ ×1.7：X 的下栏比上栏退得快一点，用户专门指出来了。键盘开着时永远在（正打字呢）。
+        val hideFrac = if (imeOpen) 0f else (barsFrac * 1.7f).coerceIn(0f, 1f)
         Box(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                 .graphicsLayer { translationY = size.height * hideFrac; alpha = 1f - hideFrac },
@@ -1019,14 +1050,7 @@ fun ChatScreen(
             } else Column(Modifier.padding(6.dp, 6.dp, 6.dp, 4.dp)) {
                 Box(Modifier.fillMaxWidth()) { field(draft) }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    plusBtn()
-                    // 长文写歪了一键清空（也是输入框卡住时的逃生口）
-                    Text(
-                        t("清空"),
-                        Modifier.clip(Pill).clickable { draft = ""; Drafts.set(ctx, hostId, sessionName, "") }.padding(12.dp, 8.dp),
-                        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline,
-                    )
-                    Spacer(Modifier.weight(1f)); micBtn(); sendBtn()
+                    plusBtn(); Spacer(Modifier.weight(1f)); micBtn(); sendBtn()
                 }
             }
 
@@ -1369,15 +1393,20 @@ private suspend fun androidx.compose.foundation.lazy.LazyListState.scrollToEnd()
     // 加载时 items 还在长，点的一刻 items.size 已经不是最新；懒加载下面几项还没组合，
     // `canScrollForward` 又会**提前**报 false，于是 scrollToItem 只跳到半路、循环第一下就 return，
     // 表现就是用户说的「点好几次才到底，每次只挪一点」。
+    // ⚠️ **先等一帧再读 `totalItemsCount`。** 新内容刚进来时列表还没重量过，这个数是**上一帧的** ——
+    //    照着它 `scrollToItem` 就是跳到「旧的最后一条」，也就是**往回退一条**，下一帧发现变多了又往前跳。
+    //    每来一批就退一条、进一条 …… 就是用户录到的「点了 ↓ 之后一直闪」：内容 -116px / +116px 来回弹（#227）。
+    androidx.compose.runtime.withFrameNanos { }
     var last = layoutInfo.totalItemsCount - 1
     if (last < 0) return
-    scrollToItem(last)
+    // ⚠️ **只往前，绝不往回。** 跟随的语义就是「去最新」，任何一次往回跳都是 bug（也让两个协程同时在滚也不会互相抽）。
+    if (last > firstVisibleItemIndex) scrollToItem(last)
     var stable = 0
     repeat(60) {
         // 每次判前等一帧：canScrollForward 从 layoutInfo 算，scrollToItem 完布局还没重量
         androidx.compose.runtime.withFrameNanos { }
         val n = layoutInfo.totalItemsCount - 1
-        if (n > last) { last = n; scrollToItem(last); stable = 0 }   // 又来新内容，再跳到最后
+        if (n > last) { last = n; if (last > firstVisibleItemIndex) scrollToItem(last); stable = 0 }   // 又来新内容，再跳到最后
         if (!canScrollForward) {
             // 连续两帧都到底才算真到底（一帧可能是布局没跟上的假象）
             if (++stable >= 2) return
