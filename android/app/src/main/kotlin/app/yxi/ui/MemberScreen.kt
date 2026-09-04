@@ -178,6 +178,9 @@ fun RedeemBox(modifier: Modifier = Modifier) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     var code by remember { mutableStateOf("") }
+    // 兑成功了放一遍动效（[RedeemSuccess]）。⚠️ **重兑不放** —— 那一次什么都没加，庆祝它是骗人。
+    var celebrate by remember { mutableStateOf<Account.Redeemed?>(null) }
+    celebrate?.let { RedeemSuccess(it) { celebrate = null } }
     var busy by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf<String?>(null) }
     var ok by remember { mutableStateOf(false) }
@@ -199,7 +202,9 @@ fun RedeemBox(modifier: Modifier = Modifier) {
             //    客户端不认识这个格式，就不该假装认识：**原样收、原样发，让服务端去判**。
             //    只保留三件无争议的事：转大写、去掉空白、限个长度。
             OutlinedTextField(
-                code, { v -> code = v.uppercase().filter { it.isLetterOrDigit() || it == '-' }.take(48) },
+                // 契约（cc-logto_yxi 2026-09-04，design/wallet-mail.md）：^[A-Z0-9][A-Z0-9-]{3,39}$
+                // —— 4~40 位，段长**没有任何规律**。客户端只做三件事：转大写、去首尾空白、限长 40。
+                code, { v -> code = v.uppercase().filter { it.isLetterOrDigit() || it == '-' }.take(40) },
                 placeholder = { Text(t("粘贴或输入兑换码")) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
@@ -222,8 +227,11 @@ fun RedeemBox(modifier: Modifier = Modifier) {
                         val r = Account.redeem(ctx, code.trim())
                         busy = false
                         ok = r.isSuccess
-                        msg = r.getOrNull() ?: r.exceptionOrNull()?.message
-                        if (r.isSuccess) code = ""
+                        msg = r.getOrNull()?.msg ?: r.exceptionOrNull()?.message
+                        if (r.isSuccess) {
+                            code = ""
+                            r.getOrNull()?.takeIf { !it.replay }?.let { celebrate = it }
+                        }
                     }
                 },
                 shape = RoundedCornerShape(50), modifier = Modifier.fillMaxWidth(),

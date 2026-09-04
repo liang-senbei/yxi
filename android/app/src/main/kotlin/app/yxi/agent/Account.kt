@@ -316,7 +316,23 @@ object Account {
         }
 
     /** 兑换码。成功回一段可以直接显示的话；失败回错误原因。 */
-    suspend fun redeem(ctx: Context, code: String): Result<String> = withContext(Dispatchers.IO) {
+    /**
+     * 兑换的结构化结果 —— 成功动效（[app.yxi.ui.RedeemSuccess]）要按 [kind] 和 [tier] 分两套文案和配色，
+     * 光有一句话不够。[msg] 是给输入框下面那行小字用的。
+     */
+    data class Redeemed(
+        val msg: String,
+        /** `membership` / `balance` */
+        val kind: String,
+        val tier: Tier,
+        val expiresAt: String,
+        val amountCents: Long,
+        val balanceCents: Long,
+        /** 同一张码重兑 —— **不放动效**，那不是一件值得庆祝的事 */
+        val replay: Boolean,
+    )
+
+    suspend fun redeem(ctx: Context, code: String): Result<Redeemed> = withContext(Dispatchers.IO) {
         val tk = token(ctx) ?: return@withContext Result.failure(Exception("没登录"))
         val (c, resp) = req("$API/api/me/redeem", "POST", tk, JSONObject().put("code", code).toString())
         if (c !in 200..299) return@withContext Result.failure(Exception(httpErr(c, resp)))
@@ -344,7 +360,17 @@ object Account {
                 else "兑换成功：$tier $days 天，到期 $until"
             }
         }
-        Result.success(msg)
+        Result.success(
+            Redeemed(
+                msg = msg,
+                kind = o.optString("kind").ifEmpty { "membership" },
+                tier = when (o.optString("tier")) { "ultra" -> Tier.Ultra; "pro" -> Tier.Pro; else -> Tier.Free },
+                expiresAt = o.optString("expiresAt").take(10),
+                amountCents = o.optLong("amountCents"),
+                balanceCents = o.optLong("balanceCents"),
+                replay = replay,
+            ),
+        )
     }
 
     /** 一档卖多少钱 */

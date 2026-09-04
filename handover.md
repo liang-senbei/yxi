@@ -31,6 +31,25 @@
 往 `sshd_config` 写 `Port` 无效且会跟 socket 抢端口把 22 一起搞挂。见 TROUBLESHOOTING #67。
 
 ## 进度
+- ✅ **1.0.10（versionCode 154）已发布**（2026-09-04）：**兑换成功动效「玻璃药丸展开」**
+  （老板选定，规格与参考实现由 cc-logto_yxi 给：`logto_yxi/design/redeem-success.md`）。
+  转圈 → 打勾 → 药丸横向展开，欢迎语从里面长出来；那颗药丸**就是输入框那颗 GlassPill**，
+  三个循环（呼吸 2.6s / 光带 3.8s / 色相 6s）展开后继续跑。见 `ui/RedeemSuccess.kt`。
+  - **两套文案各自实测过**（用后台真发的码，不是预览）：会员码 →「Welcome to / Yunxi Pro」+
+    「会员有效期至 2026-09-05」；余额券 →「余额到账 / ¥1.00」+「当前余额 ¥1.00」，配色跟当前档位走。
+  - ⚠️ 流动层不透明度 **0.20**，不是 STYLE.md §2.2 的 0.38 —— 那个值是盖在整页光晕上的，
+    药丸近白底再叠 0.38 会变成一颗实心橙药丸。
+  - ⚠️ 展开宽度用 `TextMeasurer` **实测文字宽**算，不写死倍数（「Yunxi Ultra」比「Yunxi Pro」长）。
+  - 音效是**合成**的（AudioTrack，白噪声起音 + C6 + G6），和「勾开始描出」的 1020ms 对齐，**跟随系统静音**。
+  - **重兑不放动效** —— 那一次什么都没加，庆祝它是骗人。
+
+### 测试账号自助复位（做 E2E 时用）
+cc-logto_yxi 提供，**不用再找他**：
+```
+ssh hk13 "cd /root/src/workplace/logto_yxi && python3 scripts/test-reset.py yxi-app-test@mail.yxi.keuury.com"
+```
+不传码面 = 清全部兑换记录；也可只清指定码。护栏：只认测试号前缀、拒绝 admin 账号。
+测试账号密码在本机 `/root/.secrets/yxi-app-test.txt`（600）。
 - ✅ **1.0.9（versionCode 153）已发布**（2026-09-04）：修**兑换框把码「整理」坏了**——
   它按「3-4-4-4」重排后再发给服务端，于是**只有恰好长成那样的码能兑**。
   现在原样收发，格式让服务端判（TROUBLESHOOTING #246）。
