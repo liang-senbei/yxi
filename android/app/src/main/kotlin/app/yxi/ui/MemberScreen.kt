@@ -149,11 +149,16 @@ fun RedeemBox(modifier: Modifier = Modifier) {
                 YxiIcon(Ico.Crown, size = 20.dp, tint = Color(0xFFE8912D))
                 Text(t("兑换码"), style = MaterialTheme.typography.titleMedium)
             }
+            // ⚠️ **存的是「纯码」，连字符只是画出来的**（VisualTransformation）。
+            //    第一版是每敲一个字就把整串重排一遍再写回去 —— 输入快一点（或粘贴）就会**串位**：
+            //    实测用 adb 灌进去 18 个字符，9 个位置对不上。重写输入框的内容是要付代价的，
+            //    能用「只改显示」解决就别改值。
             OutlinedTextField(
-                code, { code = tidyCode(it) },
+                code, { code = it.uppercase().filter(Char::isLetterOrDigit).take(15) },
                 placeholder = { Text("YXI-XXXX-XXXX-XXXX") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
+                visualTransformation = DashedCode,
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                     capitalization = KeyboardCapitalization.Characters,
                 ),
@@ -170,7 +175,7 @@ fun RedeemBox(modifier: Modifier = Modifier) {
                     if (!Account.signedIn) { msg = t("先登录再兑换"); ok = false; return@Button }
                     busy = true; msg = null
                     scope.launch {
-                        val r = Account.redeem(ctx, code.trim())
+                        val r = Account.redeem(ctx, tidyCode(code))
                         busy = false
                         ok = r.isSuccess
                         msg = r.getOrNull() ?: r.exceptionOrNull()?.message
@@ -181,6 +186,30 @@ fun RedeemBox(modifier: Modifier = Modifier) {
             ) { Text(if (busy) t("兑换中…") else t("兑换")) }
         }
     }
+}
+
+/** 把纯码画成 `YXI-XXXX-XXXX-XXXX`：只动显示，不动输入框里存的值 */
+private val DashedCode = androidx.compose.ui.text.input.VisualTransformation { text ->
+    val body = text.text
+    val shown = tidyCode(body)
+    androidx.compose.ui.text.input.TransformedText(
+        androidx.compose.ui.text.AnnotatedString(shown),
+        object : androidx.compose.ui.text.input.OffsetMapping {
+            // 前 3 位之后每 4 位多一个连字符
+            override fun originalToTransformed(offset: Int) = offset + when {
+                offset <= 3 -> 0
+                offset <= 7 -> 1
+                offset <= 11 -> 2
+                else -> 3
+            }
+            override fun transformedToOriginal(offset: Int) = offset - when {
+                offset <= 3 -> 0
+                offset <= 8 -> 1
+                offset <= 13 -> 2
+                else -> 3
+            }
+        },
+    )
 }
 
 /** 大写、去掉乱七八糟的字符、每 4 位补一个连字符（YXI-XXXX-XXXX-XXXX） */

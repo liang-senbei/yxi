@@ -215,25 +215,41 @@ object Account {
         val pr = o.optJSONObject("profile")
         val q = o.optJSONObject("quota")
         return Me(
-            userId = o.optString("userId"),
+            userId = o.str("userId"),
             tier = when (o.optString("tier")) {
                 "ultra" -> Tier.Ultra
                 "pro" -> Tier.Pro
                 else -> Tier.Free
             },
-            expiresAt = ms?.optString("expiresAt")?.takeIf { it.isNotEmpty() && it != "null" },
+            expiresAt = ms.str("expiresAt").takeIf { it.isNotEmpty() },
             neverExpires = ms?.optBoolean("neverExpires") == true,
-            nickname = pr?.optString("nickname").orEmpty(),
-            avatar = pr?.optString("avatar")?.takeIf { it.isNotEmpty() && it != "null" },
-            signature = pr?.optString("signature").orEmpty(),
-            email = pr?.optString("email").orEmpty(),
+            // ⚠️ **`optString` 读 JSON null 会得到字符串 "null"**（不是空串）——
+            //    实测签名没设的账号，编辑框里赫然写着 `null`。所有可空字符串都得过这一手。
+            nickname = pr.str("nickname"),
+            avatar = pr.str("avatar").takeIf { it.isNotEmpty() },
+            signature = pr.str("signature"),
+            email = pr.str("email"),
             quotaLimit = q?.optInt("limit") ?: 0,
             quotaUsed = q?.optInt("used") ?: 0,
-            // ⚠️ `remaining: null` = ultra 不限。`optInt` 读 null 会给 0 —— 那是「用完了」，正好反了
-            quotaRemaining = if (q == null || q.isNull("remaining")) null else q.optInt("remaining"),
-            nextRefreshAt = q?.optString("nextRefreshAt")?.takeIf { it.isNotEmpty() && it != "null" },
-            quotaRule = q?.optString("rule").orEmpty(),
+            // ⚠️ **先读 `unlimited` 这个显式布尔**（服务端 2026-09-04 加的）。
+            //    以前只能靠 `remaining: null` 判「不限」—— 而 `optInt` 读 null 会给 0，
+            //    那是「用完了」，意思正好反过来：付费的 ultra 会被拦在门外（#229）。
+            quotaRemaining = when {
+                q == null -> null
+                q.optBoolean("unlimited") -> null
+                q.isNull("remaining") -> null
+                else -> q.optInt("remaining")
+            },
+            nextRefreshAt = q.str("nextRefreshAt").takeIf { it.isNotEmpty() },
+            quotaRule = q.str("rule"),
         )
+    }
+
+    /** JSON 里的可空字符串：null / "null" / 没这个键 一律当空串 */
+    private fun JSONObject?.str(key: String): String {
+        if (this == null || isNull(key)) return ""
+        val v = optString(key)
+        return if (v == "null") "" else v
     }
 
     /** 服务端的错都带中文 msg / 有约定的 error 码，翻译成一句人话 */

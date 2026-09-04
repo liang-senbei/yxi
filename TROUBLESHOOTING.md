@@ -4357,3 +4357,19 @@ LazyColumn 里条目滚出屏幕会被**销毁**，滚回来重新组合，`fres
 3. **OAuth 回调一定要校 `state`**：不校的话任何 App 都能拿 `io.yxi.app://callback?code=…` 塞给你。
    实测用 `adb shell am start -a VIEW -d "io.yxi.app://callback?code=fake&state=wrong"` 打了一发，
    校验生效（不存任何 token）—— 这条验证很便宜，值得每次都做。
+
+## #230 `optString` 读 JSON null 给的是字符串 "null"
+
+**症状**：个性签名没设过的账号，编辑框里明晃晃写着 `null`。
+**根因**：Android 的 `JSONObject.optString(key)` 在值是 JSON null 时返回**字符串 `"null"`**，不是空串
+（fallback 只在「没这个键」时生效）。
+**修法**：所有可空字符串统一走一个小工具：`isNull(key)` 先判，再把 `"null"` 也当空串。
+⚠️ 通用：**接口里能给 null 的字段，一律不要直接 `optString`**。
+
+## #231 「每敲一个字就重排整串」的输入框会串位
+
+**症状**：兑换码框里灌进 18 个字符，跟源码**长度一样但 9 个位置对不上**（`adb shell input text` 复现）。
+**根因**：`onValueChange` 里把整串重新格式化（补连字符）再写回去 —— 输入快的时候（连续注入 / 粘贴 / 有些输入法的批量提交）
+新值和状态回写互相追，字符顺序就乱了。
+**修法**：**存纯值，连字符只在显示层画**（`VisualTransformation` + `OffsetMapping`），输入框里的值一个字都不动。
+⚠️ 通用：**格式化不要写回输入框的值**（手机号、卡号、兑换码都一样）。

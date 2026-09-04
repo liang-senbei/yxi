@@ -637,6 +637,15 @@
 - ✅ **yxi-hub 多组成员（2026-09-02）**：一个会话在多个组里时，`who`/`context` 按组分开列、`say` 的消息带共同组名
   `[同组 组名 · 谁]`、`all` 必须指明组（#211）。服务器侧改动，已装到本机 `~/.local/bin/yxi-hub`。
 - ✅ **下载站隐私政策 / 服务条款页（2026-09-04）**：Google 登录同意屏幕要的 `https://yxi.keuury.com/privacy` `/terms`（cc-logto_yxi 代老板提的）。源在仓库 `site/privacy.html` `site/terms.html`，线上在 hk13 `/var/www/yxi/`，nginx 显式 location 在 `snippets/yxi-dl.conf`。中英双语、短；改内容改那两个文件再 scp 上去。
+- ✅ **1.0.1（2026-09-04）—— 账号这条路真机跑通了**（cc-logto_yxi 给了测试账号，在模拟器上端到端过了一遍）：
+  登录（邮箱+密码 → 回调 → 存 token）→ `GET /api/me` → 兑换码（pro / ultra 各一张）→ 改签名 → 再改一次撞配额上限，全过。
+  结论回给 logto_yxi：**兑换后 tier 立刻变**（pro 到期 10-05；再兑 ultra 从 10-05 往后叠到 11-05）、
+  **额度按新档位的周期回满**（pro 的下次刷新是 09-15，ultra 显示「资料改多少次都行」）。
+  路上修掉三个：
+  ① **签名框里赫然写着 `null`** —— `optString` 读 JSON null 得到的是字符串 `"null"` 不是空串；所有可空字段统一走 `str()`。
+  ② **兑换码输入会串位**：原来每敲一个字就把整串重排再写回输入框，输入快一点（adb 灌 / 粘贴）就乱 —— 实测 18 个字符 9 个位置对不上。
+     改成**只存纯码、连字符用 `VisualTransformation` 画**（不再改值）。
+  ③ 服务端新加了 `quota.unlimited` 布尔，改成先读它（原来的 `isNull` 写法也对，但这个更明确）。
 - ✅ **1.0.0（2026-09-04）—— 账号登录 + 会员中心接上后端**（cc-logto_yxi 的会员服务已上线）：
   **登录**：Logto OIDC + PKCE，**手写的，没引 SDK**（离线构建加不了依赖）——
   `agent/Account.kt`：`/oidc/auth` 拉浏览器 → `io.yxi.app://callback`（manifest 里的 intent-filter，MainActivity 是 singleTask 走 onNewIntent）
