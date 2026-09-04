@@ -82,6 +82,20 @@ fun WishScreen(modifier: Modifier = Modifier) {
     got?.let { d -> WishResult(d) { got = null } }
     // 卡牌库：《神之冠冕》八顶。**没抽到的只给剪影**，别让人以为已经有了。
     var library by remember { mutableStateOf(false) }
+    var history by remember { mutableStateOf(false) }
+    if (history) Dialog(
+        onDismissRequest = { history = false },
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+            WishHistory()
+            Text(
+                "✕", Modifier.align(Alignment.TopEnd).padding(18.dp)
+                    .clip(RoundedCornerShape(100.dp)).clickable { history = false }.padding(10.dp),
+                style = MaterialTheme.typography.titleMedium, color = Muted,
+            )
+        }
+    }
     // 拥有哪些 —— **服务端说了算**（见 Wish.collection 的注释）。拿不到就当空，界面会说明还没开通。
     var ownedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     LaunchedEffect(Unit) { Wish.collection(ctx)?.let { ownedIds = it } }
@@ -134,6 +148,21 @@ fun WishScreen(modifier: Modifier = Modifier) {
                         style = MaterialTheme.typography.labelSmall, color = Muted,
                     )
                 }
+                Text("›", style = MaterialTheme.typography.titleMedium, color = Muted)
+            }
+        }
+
+        // 抽过什么都记在这儿 —— 能自证没被坑（记录在服务端，换手机也在）
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = RoundedCornerShape(22.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)
+                .clip(RoundedCornerShape(22.dp)).clickable { history = true },
+        ) {
+            Row(Modifier.padding(18.dp, 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                YxiIcon(Ico.Chat, size = 22.dp, tint = Muted)
+                Spacer(Modifier.width(10.dp))
+                Text(t("祈愿记录"), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
                 Text("›", style = MaterialTheme.typography.titleMedium, color = Muted)
             }
         }
@@ -446,7 +475,7 @@ private const val PI2 = 6.2831855f
 private val TRAIL = CubicBezierEasing(0.3f, 0f, 0.2f, 1f)
 
 /** 稀有度排序：蓝 1 < 紫 2 < 金 3 < 红 4。星轨的颜色取这一批里最高的那个。 */
-private fun rank(r: String): Int = when (r) {
+internal fun rank(r: String): Int = when (r) {
     "红", "character", "legendary" -> 4
     "金", "gold", "tickets" -> 3
     "紫", "rare", "epic" -> 2
@@ -456,14 +485,14 @@ private fun rank(r: String): Int = when (r) {
 private val FLIP = CubicBezierEasing(0.16f, 0.84f, 0.28f, 1.02f)
 
 /** 四档颜色，跟老板定的对齐：红=角色、金=曦光、紫=稀有装扮、蓝=普通装扮。 */
-private fun rarityColor(r: String): Color = when (rank(r)) {
+internal fun rarityColor(r: String): Color = when (rank(r)) {
     4 -> Color(0xFFFF5C6E)      // 红
     3 -> Color(0xFFFFC24D)      // 金
     2 -> Color(0xFFB07AE8)      // 紫
     else -> Color(0xFF5FA8F5)   // 蓝
 }
 
-private fun rarityLabel(r: String): String = when (rank(r)) {
+internal fun rarityLabel(r: String): String = when (rank(r)) {
     4 -> t("角色")
     3 -> t("曦光")
     2 -> t("稀有")

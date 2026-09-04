@@ -851,6 +851,16 @@ internal object En {
         "会退出这台机器上 %s 的登录，会话里再用得重新登。" to "This signs %s out on this machine; sessions will need a fresh login.",
         "没装" to "Not installed",
         "已登录" to "Signed in",
+        "祈愿记录" to "Wish history",
+        "十连" to "10-pull",
+        "单抽" to "Single",
+        "NEW" to "NEW",
+        "重复 · 折曦光 ×%d" to "Duplicate · converted to %d Radiance",
+        "会员 %d 天" to "%d days of membership",
+        "取不到 —— 网络不通，或者登录过期了。记录在服务端，没丢。" to
+            "Couldn't load — no network, or your sign-in expired. The history lives on the server; nothing is lost.",
+        "还没有记录。去祈愿页抽一次，抽到什么都会记在这里。" to
+            "No history yet. Make a wish and everything you get will be listed here.",
         "安装" to "Install",
         "退出" to "Sign out",
         "在服务器上起 Claude Code 登录…" to "Starting Claude Code login on the server…",

@@ -31,6 +31,11 @@
 往 `sshd_config` 写 `Port` 无效且会跟 socket 抢端口把 22 一起搞挂。见 TROUBLESHOOTING #67。
 
 ## 进度
+- ✅ **1.1.1（versionCode 157）已发布**（2026-09-04）：**祈愿记录页**（`ui/WishHistory.kt`，
+  由 cc-Yxi_pilot 写，我接的入口和译文）。一次祈愿一张卡，四档颜色跟抽卡当场一致 ——
+  ⚠️ 为此把 `WishScreen` 的 `rank/rarityColor/rarityLabel` 从 private 开成 internal：
+  **同一个金色不能有两份**，抽卡当场一个金、翻记录另一个金，人只会以为自己记错了。
+  实测：真十连的 10 条全在（7 个曦光 · 蓝色开屏 NEW · 紫色 Pro 体验 1 天 · 红色云曦 NEW）。
 - ✅ **1.1.0（versionCode 156）已发布**（2026-09-04）：**祈愿开张 + 一批 bug**。
   - **《神之冠冕》卡牌库**：老板给的 **9 张立绘**已切成竖版卡面打进包
     （`res/drawable-nodpi/card_<id>.webp`，共 1.2MB）。名单 10 位，首期 UP 云曦；

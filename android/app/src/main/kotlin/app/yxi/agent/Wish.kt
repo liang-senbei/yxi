@@ -191,6 +191,59 @@ object Wish {
         }
     }.getOrNull()
 
+    /**
+     * 历史里的**一次**祈愿（单抽或十连）。[results] 是那一次的全部结果，
+     * 服务端把发奖时那份原样存下来了 —— 所以形状和 [Draw.results] 完全一致。
+     *
+     * ⚠️ **一条 = 一次祈愿，不是一个道具。** 十连是一次决策、一次扣费；
+     * 铺平成十条就再也答不出「我那次十连出了什么」。
+     */
+    data class Record(
+        val drawId: Long,
+        val count: Int,
+        val at: String,
+        val results: List<Got>,
+    )
+
+    /**
+     * 祈愿记录，**新的在前**。契约 `wish-checkin.md` §4。
+     *
+     * ⚠️ 游标是 **before**（取比它更旧的），不是 after —— 记录从顶上插新的，
+     * 按页码翻会重复或漏（同站内信）。往下翻传**上一页最后一条的 drawId**。
+     *
+     * @return null = **拿不到**（没登录 / 接口没上线 / 网络不通）；
+     *   `Pair(这一页, 下一页游标)`，游标为 null = 没有更早的了。
+     *   ⚠️ 界面别把 null 和「空列表」混成一句话说。
+     */
+    suspend fun history(ctx: Context, before: String? = null): Pair<List<Record>, String?>? =
+        withContext(Dispatchers.IO) {
+            val url = "/api/wish/history?limit=30" + (before?.let { "&before=$it" } ?: "")
+            val o = Account.apiGet(ctx, url) ?: return@withContext null
+            runCatching {
+                val list = o.optJSONArray("items").list { r ->
+                    Record(
+                        drawId = r.optLong("drawId"),
+                        count = r.optInt("count"),
+                        at = r.optString("at"),
+                        results = r.optJSONArray("results").list(::got),
+                    )
+                }
+                // ⚠️ 没有下一页时服务端给的是 **JSON null**，而 optString 读 null 会返回
+                //    字符串 "null"（TROUBLESHOOTING #230 咬过一次）——「看更早的」会永远点不完。
+                //    所以先 isNull 判一道。
+                val next = if (o.isNull("nextCursor")) null
+                else o.optString("nextCursor").takeIf { it.isNotEmpty() }
+                list to next
+            }.getOrNull()
+        }
+
+    /** 把一条结果读成 [Got]。history 与 draw 共用一个形状，解析也只该有一处。 */
+    private fun got(it: JSONObject): Got = Got(
+        it.optString("id"), it.optString("name"), it.optString("rarity"),
+        it.optString("kind"), it.optLong("amount"), it.optBoolean("new"),
+        it.optJSONObject("dupConvertedTo")?.let { d -> d.optString("kind") to d.optLong("amount") },
+    )
+
     private inline fun <T> JSONArray?.list(f: (JSONObject) -> T): List<T> =
         (0 until (this?.length() ?: 0)).mapNotNull { i -> this?.optJSONObject(i)?.let(f) }
 }
