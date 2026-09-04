@@ -17,6 +17,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onSizeChanged
@@ -419,6 +420,7 @@ fun Workspace(
     var headerH by remember(host.id) { mutableIntStateOf(0) }
     val header = remember {
         movableContentOf {
+        val bg = MaterialTheme.colorScheme.background
         Box(
                 // 学 X：栏是**盖在**正文上的，退场只是把它挪出去 —— 正文一动不动，
                 // 所以没有「栏一收，底下突然多出一块字」那种突兀感（用户看 X 慢动作看出来的）。
@@ -427,7 +429,25 @@ fun Workspace(
                     alpha = 1f - barsFrac * 0.85f
                 },
             ) {
-            Column(Modifier.statusBarsPadding()) {
+            // ⚠️ **必须给个不透明的底。** 页眉现在是**悬浮**在正文上的（正文从它底下滚过去），
+            //    不给底就是正文的字直接透到标题和模式条上，糊成一团。底下再补一小段渐变，
+            //    让正文滑进去的时候是「淡出」不是「切断」。
+            Column(
+                Modifier.background(bg)
+                    .drawWithContent {
+                        drawContent()
+                        val h = 14.dp.toPx()
+                        drawRect(
+                            Brush.verticalGradient(
+                                0f to bg,
+                                1f to androidx.compose.ui.graphics.Color.Transparent,
+                            ),
+                            topLeft = androidx.compose.ui.geometry.Offset(0f, size.height),
+                            size = androidx.compose.ui.geometry.Size(size.width, h),
+                        )
+                    }
+                    .statusBarsPadding(),
+            ) {
             Row(
                 Modifier.fillMaxWidth().padding(14.dp, if (folded) 6.dp else 10.dp, 14.dp, if (folded) 4.dp else 8.dp),
                 verticalAlignment = Alignment.CenterVertically,

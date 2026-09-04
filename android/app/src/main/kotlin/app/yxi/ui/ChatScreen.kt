@@ -41,6 +41,9 @@ import androidx.compose.foundation.background
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import kotlinx.coroutines.flow.collectLatest
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.graphics.Brush
@@ -413,7 +416,12 @@ fun ChatScreen(
         if (cached.isEmpty() || items.isNotEmpty()) return@LaunchedEffect
         val inc = Transcript.Incremental()
         val shown = withContext(Dispatchers.Default) { inc.add(cached.asSequence()); inc.snapshot() }
-        if (items.isEmpty()) { items = shown; inc.ctx?.let { ctxUse = it } }
+        if (items.isEmpty()) {
+            items = shown; inc.ctx?.let { ctxUse = it }
+            // ⚠️ 这批是**磁盘上存的旧内容**，可能是几天前的。不吭声的话用户会当成当前对话
+            //    （用户 2026-09-04 截图：「怎么会加载了很久很久之前的对话」）。
+            status = t("这是上次的内容，正在取最新…")
+        }
     }
 
     LaunchedEffect(sessionName, ssh) {
@@ -429,7 +437,8 @@ fun ChatScreen(
         val memKey = app.yxi.agent.ChatMemory.key(hostId, sessionName)
         val remembered = app.yxi.agent.ChatMemory.get(memKey)?.takeIf { it.items.isNotEmpty() }
         if (remembered != null) {
-            items = remembered.items; remembered.ctx?.let { ctxUse = it }; status = null; settled = true
+            items = remembered.items; remembered.ctx?.let { ctxUse = it }; settled = true
+            status = t("这是上次的内容，正在取最新…")
         }
         // ⚠️ 会话名必须传 —— 转录按 sessionId 找，不按目录找。
         // 只给 cwd 的话，会话里 cd 过一次就再也找不到（用户报的 hexingyang 就是）。
@@ -442,6 +451,9 @@ fun ChatScreen(
         if (remembered != null && remembered.file == file) {
             entry = remembered
         } else {
+            // ⚠️ **转录换文件了，之前摆出来的那批就是别的对话，立刻扔掉。**
+            //    留着的话屏幕上顶着一段几天前的对话，而且没有任何提示（用户截图报的就是这个）。
+            if (remembered != null) { items = emptyList(); settled = false }
             // 第一次进（或转录文件换了：/clear、换了 uuid）：老路 —— 先画最新一屏，再灌历史
             // ⚠️ **有东西看之前别把提示清掉。** 原来这里先 `status = null` 再去拉 0.58 MB，
             // 那几秒钟正好是「上面没提示、下面没内容」的纯白屏。
@@ -510,7 +522,7 @@ fun ChatScreen(
                 entry.offset += bytes
                 if (!caughtUp && headLastKey != null && snap.any { it.key == headLastKey }) caughtUp = true
                 if (caughtUp) {
-                    items = snap; inc.ctx?.let { ctxUse = it }
+                    items = snap; inc.ctx?.let { ctxUse = it }; status = null
                     entry.items = snap; entry.ctx = inc.ctx
                 }
             }
@@ -556,18 +568,16 @@ fun ChatScreen(
     // 「历史还在灌、布局还在变」的时候，滚到一半列表又长高了 ——
     // 结果永远差最后一屏（最后一条被切掉，↓ 按钮赖着不走）。
     // 加上 settled：灌完那一刻**再定位一次**，这次布局是稳的。
-    LaunchedEffect(items.size, settled) {
-        if (items.isEmpty()) return@LaunchedEffect
-        runCatching {
-            // 灌历史时一律瞬移到底（停在最新）；灌完之后只有「粘着」才跟随 ——
-            // 用户往上翻看旧消息时 stick=false，不会被新消息拽回底部（#61 那类错误）。
-            if (!settled || stick) {
-                listState.scrollToEnd()
-                // ⚠️ 补一次。一批多条一次涌入时，最后一条的高度常在首次滚动**之后**才定下来，
-                // 首次滚到的「底」其实差最后一条 —— 等布局稳一下再滚一次，才真正贴底。
-                delay(120)
-                if (!settled || stick) listState.scrollToEnd()
-            }
+    LaunchedEffect(listState) {
+        // ⚠️ **攒一下再追（debounce）。** 转录是每 300ms 刷一批，一批里常常还分几次到，
+        //    而队列里的消息（排队中的、别的 agent 注入的）会在末尾一冒一消 —— 每次变动都追一下，
+        //    就是用户说的「一闪一闪一跳一跳」。等它安静 110ms 再追，中间那些过渡态就不用管了（#228）。
+        snapshotFlow { items.size to settled }.collectLatest { (n, st) ->
+            if (n == 0) return@collectLatest
+            if (!st) { runCatching { listState.scrollToEnd() }; return@collectLatest }   // 灌历史：立刻贴底
+            if (!stick) return@collectLatest
+            delay(110)
+            runCatching { listState.scrollToEnd(smooth = true) }
         }
     }
 
@@ -582,12 +592,16 @@ fun ChatScreen(
     LaunchedEffect(glowBusy, glowWait, glowStream) { onGlow(glowBusy, glowWait, glowStream) }
     DisposableEffect(Unit) { onDispose { onGlow(false, false, false) } }
     Box(modifier.fillMaxSize()) {
-    Column(Modifier.fillMaxSize().padding(top = with(LocalDensity.current) { headerPx.toDp() })) {
+    // ⚠️ **别在这儿留页眉的位置。** 留了就是永久空一条：页眉收起时那块露的是底色，不是正文
+    //    （用户：「上导航栏收起的地方却是有空白，X 的就不会」）。页眉的高度要进**列表的 contentPadding**——
+    //    那是内容的一部分，手一划就滚上去了，栏退场时底下露出来的正好是字。
+    val headerDp = with(LocalDensity.current) { headerPx.toDp() }
+    Column(Modifier.fillMaxSize()) {
         // 标题和路径由 Workspace 的头部管，这里只在出问题时说一句
         status?.let {
             Text(
                 it,
-                Modifier.fillMaxWidth().padding(18.dp, 8.dp),
+                Modifier.fillMaxWidth().padding(18.dp, 8.dp).padding(top = headerDp),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.outline,
             )
@@ -737,7 +751,7 @@ fun ChatScreen(
             LazyColumn(
                 Modifier.fillMaxSize(),
                 state = listState,
-                contentPadding = PaddingValues(16.dp, 6.dp, 16.dp, composerPad + 8.dp),
+                contentPadding = PaddingValues(16.dp, headerDp + 6.dp, 16.dp, composerPad + 8.dp),
                 verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
                 items(rows.size, key = { rows[it].key }) { i ->
@@ -1388,32 +1402,32 @@ private fun Item(
  * 传个巨大的 `scrollOffset` 也不可靠。老老实实滚到滚不动为止。
  * 次数封顶，免得内容还在增长时转不出来。
  */
-private suspend fun androidx.compose.foundation.lazy.LazyListState.scrollToEnd() {
-    // ⚠️ **自己读真正的最后一项，别信外面传进来的下标** —— 边界情况全栽在「下标过时」上：
-    // 加载时 items 还在长，点的一刻 items.size 已经不是最新；懒加载下面几项还没组合，
-    // `canScrollForward` 又会**提前**报 false，于是 scrollToItem 只跳到半路、循环第一下就 return，
-    // 表现就是用户说的「点好几次才到底，每次只挪一点」。
-    // ⚠️ **先等一帧再读 `totalItemsCount`。** 新内容刚进来时列表还没重量过，这个数是**上一帧的** ——
-    //    照着它 `scrollToItem` 就是跳到「旧的最后一条」，也就是**往回退一条**，下一帧发现变多了又往前跳。
-    //    每来一批就退一条、进一条 …… 就是用户录到的「点了 ↓ 之后一直闪」：内容 -116px / +116px 来回弹（#227）。
-    androidx.compose.runtime.withFrameNanos { }
-    var last = layoutInfo.totalItemsCount - 1
-    if (last < 0) return
-    // ⚠️ **只往前，绝不往回。** 跟随的语义就是「去最新」，任何一次往回跳都是 bug（也让两个协程同时在滚也不会互相抽）。
-    if (last > firstVisibleItemIndex) scrollToItem(last)
-    var stable = 0
-    repeat(60) {
-        // 每次判前等一帧：canScrollForward 从 layoutInfo 算，scrollToItem 完布局还没重量
-        androidx.compose.runtime.withFrameNanos { }
-        val n = layoutInfo.totalItemsCount - 1
-        if (n > last) { last = n; if (last > firstVisibleItemIndex) scrollToItem(last); stable = 0 }   // 又来新内容，再跳到最后
-        if (!canScrollForward) {
-            // 连续两帧都到底才算真到底（一帧可能是布局没跟上的假象）
-            if (++stable >= 2) return
-        } else {
-            stable = 0
-            scroll { scrollBy(6000f) }
+private suspend fun androidx.compose.foundation.lazy.LazyListState.scrollToEnd(smooth: Boolean = false) {
+    repeat(30) {
+        val last = layoutInfo.totalItemsCount - 1
+        if (last < 0) return
+        val lastVis = layoutInfo.visibleItemsInfo.lastOrNull()
+        val end = layoutInfo.viewportEndOffset - layoutInfo.afterContentPadding
+        when {
+            lastVis != null && lastVis.index >= last -> {
+                // ⚠️ **看得见最后一条时只补差的那点像素，绝不整块跳。**
+                //    `scrollToItem(last)` 是把最后一条的**顶部**顶到屏幕上沿 —— 最后一条要是长回复或大工具卡，
+                //    中间那一帧画面就甩到别处去了（#228）。
+                val delta = (lastVis.offset + lastVis.size - end).toFloat()
+                if (delta <= 0.5f) return
+                if (smooth) animateScrollBy(delta, tween(170, easing = LinearOutSlowInEasing))
+                else scroll { scrollBy(delta) }
+            }
+            // ⚠️ **跟随时要「滑过去」，不是「跳过去」。** 会话在出字时每 300ms 来一批，
+            //    每批瞬移一两百像素 —— 眼睛看到的就是「一闪一闪一跳一跳」（用户第三次报同一个现象）。
+            //    滑 170ms 就成了「往下滚了一段」，是运动不是闪。远了才瞬移（点 ↓ 从半山腰跳底部那种）。
+            smooth && lastVis != null && last - lastVis.index <= 4 -> {
+            }
+            // 大 offset 会被夹到列表真正的末尾，一次到位
+            else -> {
+            }
         }
+        androidx.compose.runtime.withFrameNanos { }   // 等这次布局落定再看还差多少
     }
 }
 
@@ -1814,3 +1828,4 @@ internal class Upload(val uri: android.net.Uri, val name: String, val isImage: B
     @Volatile var cancelled = false
     var job: kotlinx.coroutines.Job? = null
 }
+
