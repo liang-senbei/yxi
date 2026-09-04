@@ -48,6 +48,9 @@ fun CardLibrary(owned: Set<String> = emptySet(), live: Boolean = false, modifier
     var open by remember { mutableStateOf<Crown?>(null) }
     open?.let { c -> CrownDetail(c, owned.contains(c.id)) { open = null } }
 
+    // 两栏：角色（这一页）和装扮（[SkinPicker]）。
+    // ⚠️ 「我有什么」和「我用哪个」摆在同一处最省解释 —— 装扮不像角色只是收藏，它是**正在用的东西**。
+    var tab by remember { mutableStateOf(0) }
     Column(modifier.fillMaxSize()) {
         Column(Modifier.padding(18.dp, 14.dp, 18.dp, 6.dp)) {
             Text(t("卡牌库"), style = MaterialTheme.typography.headlineMedium)
@@ -62,6 +65,29 @@ fun CardLibrary(owned: Set<String> = emptySet(), live: Boolean = false, modifier
                     style = MaterialTheme.typography.labelSmall, color = Muted,
                 )
             }
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(14.dp, 4.dp, 14.dp, 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            listOf(t("角色"), t("装扮")).forEachIndexed { i, label ->
+                Surface(
+                    color = if (tab == i) MaterialTheme.colorScheme.secondaryContainer
+                    else MaterialTheme.colorScheme.surfaceContainerLow,
+                    shape = RoundedCornerShape(100.dp),
+                    modifier = Modifier.clip(RoundedCornerShape(100.dp)).clickable { tab = i },
+                ) {
+                    Text(
+                        label, Modifier.padding(18.dp, 8.dp),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (tab == i) MaterialTheme.colorScheme.onSecondaryContainer else Muted,
+                    )
+                }
+            }
+        }
+        if (tab == 1) {
+            SkinPicker(live = live, header = false)
+            return@Column
         }
         // ⚠️ **一列横版，不是两列竖版**（老板 2026-09-04：「我给你上传的图片，你不要截图、
         //    不要截一部分出来，要保证它是完整的」）。原图实测全是 **16:9 横构图**（2752×1536 一类，

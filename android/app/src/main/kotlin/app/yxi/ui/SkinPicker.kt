@@ -23,7 +23,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -45,7 +44,7 @@ import app.yxi.ui.theme.Muted
  * 没对上而列表是空的，写「你还没有任何装扮」就是骗人 —— 那时要说的是「没对上，按上次的显示」。
  */
 @Composable
-fun SkinPicker(live: Boolean = false, modifier: Modifier = Modifier) {
+fun SkinPicker(live: Boolean = false, header: Boolean = true, modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
     val owned = Cosmetics.owned(ctx)
 
@@ -56,7 +55,8 @@ fun SkinPicker(live: Boolean = false, modifier: Modifier = Modifier) {
         .count { it.isNotEmpty() && it in owned }
 
     Column(modifier.fillMaxSize()) {
-        Column(Modifier.padding(18.dp, 14.dp, 18.dp, 6.dp)) {
+        // 嵌在卡牌库里时不画大标题 —— 上面「角色 / 装扮」那个分栏已经说过一遍了
+        if (header) Column(Modifier.padding(18.dp, 14.dp, 18.dp, 6.dp)) {
             Text(t("装扮"), style = MaterialTheme.typography.headlineMedium)
             Text(
                 t("已拥有 %d / %d").format(has, all),
@@ -76,6 +76,20 @@ fun SkinPicker(live: Boolean = false, modifier: Modifier = Modifier) {
             contentPadding = PaddingValues(14.dp, 4.dp, 14.dp, 24.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            if (!header) item {
+                Text(
+                    t("已拥有 %d / %d").format(has, all),
+                    Modifier.padding(4.dp, 2.dp, 0.dp, 0.dp),
+                    style = MaterialTheme.typography.labelMedium, color = Muted,
+                )
+            }
+            if (!header && !live) item {
+                Text(
+                    t("没跟服务端对上 —— 下面按上次同步的结果显示，可能不是最新的。"),
+                    Modifier.padding(4.dp, 6.dp, 0.dp, 0.dp),
+                    style = MaterialTheme.typography.labelSmall, color = Muted,
+                )
+            }
             item { SectionTitle(t("终端配色")) }
             items(Skins.TERMS.size) { i ->
                 val s = Skins.TERMS[i]
@@ -151,8 +165,11 @@ private fun SkinRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // ⚠️ 未拥有的**压暗但保留轮廓** —— 收集类界面要让人看见「还差什么」（同卡牌库）
-            Box(Modifier.alpha(if (owned) 1f else 0.32f)) { swatch() }
+            // ⚠️⚠️ 小样**不压暗、不去饱和**（跟卡牌库相反，这是有意的）。
+            //    卡牌库压暗的是**画**，轮廓还在，认得出是哪张；配色小样压暗的是**颜色本身** ——
+            //    实测「终端·琥珀」和「终端·青」压到 0.32 之后是同一坨灰，预览就白做了，
+            //    而人想要的正是那个颜色。「有没有」右边那行字（未拥有）说得清清楚楚，不靠灰。
+            swatch()
             Text(
                 label, Modifier.weight(1f),
                 style = MaterialTheme.typography.titleSmall,

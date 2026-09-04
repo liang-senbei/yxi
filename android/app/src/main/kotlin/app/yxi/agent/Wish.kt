@@ -35,6 +35,13 @@ object Wish {
          */
         val tenPullCost: Int = 10,
         val singlePullCost: Int = 1,
+        /**
+         * **还没就绪、暂时抽不到**的项（服务端 `upcoming`）。当「即将推出」展示 ——
+         * 池子不会看着空，也让人知道以后会有什么。
+         * ⚠️ `items` 里的 `rate` **已经是真实可抽概率**（未就绪的那份概率并到别处了），
+         * 公示页直接用，别自己去扣。
+         */
+        val upcoming: List<Item> = emptyList(),
     )
 
     /** 奖池里的一项。[rate] 是服务端给的中奖率（0~1），只用来公示。 */
@@ -93,6 +100,12 @@ object Wish {
                 pityAt = o.optInt("pityAt"),
                 tenPullCost = o.optInt("tenPullCost", 10),
                 singlePullCost = o.optInt("singlePullCost", 1),
+                upcoming = o.optJSONArray("upcoming").list {
+                    Item(
+                        it.optString("id"), it.optString("name"), it.optString("rarity"),
+                        0.0, it.optString("kind"), it.optLong("amount"),
+                    )
+                },
                 items = o.optJSONArray("items").list {
                     Item(
                         it.optString("id"), it.optString("name"), it.optString("rarity"),

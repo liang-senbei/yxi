@@ -278,13 +278,40 @@ fun WishScreen(modifier: Modifier = Modifier) {
                         AnimatedVisibility(rates) {
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 p.items.sortedByDescending { it.rate }.forEach { it2 ->
-                                    Row {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            Modifier.size(7.dp).clip(RoundedCornerShape(100.dp))
+                                                .background(rarityColor(it2.rarity)),
+                                        )
+                                        Spacer(Modifier.width(8.dp))
                                         Text(it2.name, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
                                         Text(
                                             "%.2f%%".format(it2.rate * 100),
                                             style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
                                             color = Muted,
                                         )
+                                    }
+                                }
+                                // ⚠️ 未就绪的单独一段，**不给概率** —— 它现在抽不到，
+                                //    给个数字就是骗人；上面那些 rate 已经是真实可抽概率了。
+                                if (p.upcoming.isNotEmpty()) {
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        t("即将推出（现在抽不到）"),
+                                        style = MaterialTheme.typography.labelSmall, color = Muted,
+                                    )
+                                    p.upcoming.forEach { u ->
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Box(
+                                                Modifier.size(7.dp).clip(RoundedCornerShape(100.dp))
+                                                    .background(rarityColor(u.rarity).copy(alpha = 0.35f)),
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(
+                                                u.name, Modifier.weight(1f),
+                                                style = MaterialTheme.typography.bodySmall, color = Muted,
+                                            )
+                                        }
                                     }
                                 }
                             }
