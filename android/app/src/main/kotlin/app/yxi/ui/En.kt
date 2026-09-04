@@ -12,6 +12,7 @@ package app.yxi.ui
 internal object En {
     val map: Map<String, String> = mapOf(
         "语言" to "Language",
+        "登录失效了，重新登一次" to "Signed out — please sign in again",
         "你选了「手机上算」，但模型还没下 —— 去「我的 · 语音识别」下一个" to "You picked on-device, but the model isn't downloaded — get it under Profile · Voice input",
         "你选了「服务器上算」，但这台机器上没有 yxi-asr" to "You picked server-side, but this machine has no yxi-asr",
         "自动" to "Auto",

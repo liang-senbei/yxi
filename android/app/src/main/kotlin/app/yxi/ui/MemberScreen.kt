@@ -84,6 +84,11 @@ fun MemberScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
             }
             if (!Account.signedIn) Button({ Account.startLogin(ctx) }, shape = RoundedCornerShape(50)) { Text(t("登录")) }
         }
+        // 掉登录了要说一句 —— 页面突然变回「未登录」而不给理由，最让人发毛
+        Account.signedOutWhy?.takeIf { !Account.signedIn }?.let {
+            Spacer(Modifier.height(8.dp))
+            Text(t(it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        }
         if (Account.signedIn && me != null) {
             Spacer(Modifier.height(10.dp))
             Text(

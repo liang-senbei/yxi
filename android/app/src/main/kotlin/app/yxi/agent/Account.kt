@@ -64,6 +64,15 @@ object Account {
     /** 浏览器登录完跳回来的那个 URI —— MainActivity 塞进来，界面层取走处理 */
     var pendingCallback by mutableStateOf<Uri?>(null)
 
+    /**
+     * 上一次「掉登录」的原因，界面拿去说一声。
+     *
+     * ⚠️ **不能默默把人登出。** refresh 被服务器明确拒绝（撤销 / 过期 / 账号被全局封）时，
+     * 令牌当场作废，App 这边只看得到 401 —— 拿不到原因（logto_yxi 2026-09-04：全局封禁就是这个表现）。
+     * 那也要说一句「登录失效了，重新登一次」，而不是让人看着一个突然变回「未登录」的页面猜。
+     */
+    var signedOutWhy by mutableStateOf<String?>(null)
+
     private fun p(ctx: Context) = ctx.getSharedPreferences("yxi", Context.MODE_PRIVATE)
 
     /** 进程起来时调一次：把上次的登录状态和资料摆出来，界面不用等网络 */
@@ -123,6 +132,7 @@ object Account {
     }
 
     fun signOut(ctx: Context) {
+        signedOutWhy = null
         p(ctx).edit().remove("auth.access").remove("auth.refresh").remove("auth.exp").remove("auth.me").apply()
         signedIn = false; me = null
     }
@@ -146,8 +156,12 @@ object Account {
             mapOf("grant_type" to "refresh_token", "refresh_token" to rt, "client_id" to APP_ID, "scope" to SCOPES),
         )
         if (c !in 200..299) {
-            // ⚠️ refresh 被拒（撤销 / 过期）就是真的掉登录了，别装作还登着
-            if (c == 400 || c == 401) { signOut(ctx) }
+            // ⚠️ refresh 被拒（撤销 / 过期 / 账号被全局封）就是真的掉登录了，别装作还登着。
+            //    ⚠️ 但**网络不通（code 0）不算**：那种时候把人登出是最坏的处理。
+            if (c == 400 || c == 401) {
+                signOut(ctx)
+                signedOutWhy = "登录失效了，重新登一次"
+            }
             return null
         }
         saveTokens(ctx, JSONObject(body))
