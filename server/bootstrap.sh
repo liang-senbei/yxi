@@ -28,6 +28,7 @@ if [ "$(id -u)" != 0 ]; then
   if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then SUDO="sudo -n"; else SUDO="none"; fi
 fi
 need=""
+# 可跳过的部分：YXI_NO_CLAUDE=1 / YXI_NO_CODEX=1 / YXI_NO_OPENCODE=1 / YXI_NO_HERMES=1
 for c in tmux curl git python3; do command -v "$c" >/dev/null 2>&1 || need="$need $c"; done
 if [ -n "$need" ]; then
   say "装系统包：$need"
@@ -90,10 +91,43 @@ if [ "${YXI_NO_CODEX:-}" != 1 ]; then
   fi
 fi
 
+# ── 3b. OpenCode：官方安装脚本（装到 ~/.opencode/bin 并自己加 PATH）。**不是 Yxi 的必需项**：
+#        装不成只 warn，不把整个装机判失败。YXI_NO_OPENCODE=1 跳过。
+if [ "${YXI_NO_OPENCODE:-}" != 1 ]; then
+  if command -v opencode >/dev/null 2>&1; then
+    ok "OpenCode 已装：$(opencode --version 2>/dev/null | head -1)"
+  else
+    say "装 OpenCode（约 100MB）"
+    if curl -fsSL https://opencode.ai/install | bash >/dev/null 2>&1 \
+       && { command -v opencode >/dev/null 2>&1 || [ -x "$HOME/.opencode/bin/opencode" ]; }; then
+      [ -x "$HOME/.opencode/bin/opencode" ] && [ ! -e "$BIN/opencode" ] && ln -s "$HOME/.opencode/bin/opencode" "$BIN/opencode" 2>/dev/null
+      ok "OpenCode $(opencode --version 2>/dev/null | head -1)"
+    else
+      warn "OpenCode 没装成（这台机器到 opencode.ai 通吗？）—— 不影响 Yxi，跳过"
+    fi
+  fi
+fi
+
+# ── 3c. Hermes Agent：官方安装脚本（只要 git/curl/xz；Python 3.11 和 Node 它自己装，**几百 MB、要几分钟**）。
+#        落 ~/.local/bin/hermes。同样不是必需项：装不成只 warn。YXI_NO_HERMES=1 跳过。
+if [ "${YXI_NO_HERMES:-}" != 1 ]; then
+  if command -v hermes >/dev/null 2>&1; then
+    ok "Hermes Agent 已装"
+  else
+    say "装 Hermes Agent（它会顺带装 Python 3.11 / Node，几百 MB，可能要几分钟）"
+    if curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-browser --skip-computer-use >/dev/null 2>&1 \
+       && { command -v hermes >/dev/null 2>&1 || [ -x "$BIN/hermes" ]; }; then
+      ok "Hermes Agent 已装"
+    else
+      warn "Hermes Agent 没装成（到 hermes-agent.nousresearch.com / github 通吗？）—— 不影响 Yxi，跳过"
+    fi
+  fi
+fi
+
 # ── 4. PATH：以后开的 shell（tmux 里的登录 shell）要找得到 ~/.local/bin
 for f in "$HOME/.profile" "$HOME/.bashrc" "$HOME/.zshrc"; do
   [ "$f" = "$HOME/.zshrc" ] && [ ! -f "$f" ] && continue
-  grep -qs '\.local/bin' "$f" 2>/dev/null || printf '\n# yxi: claude / codex 装在这儿\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$f"
+  grep -qs '\.local/bin' "$f" 2>/dev/null || printf '\n# yxi: claude / codex / hermes 装在这儿\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$f"
 done
 
 # ── 5. Yxi 服务器侧工具：钩子（手机响）· yxi-hub（组内通讯）· yxi-lab（实验室）
@@ -114,6 +148,8 @@ say "结果"
 command -v tmux   >/dev/null 2>&1 && ok "tmux $(tmux -V 2>/dev/null | cut -d' ' -f2)" || warn "tmux 没有 —— 没有它手机上看不到会话"
 command -v claude >/dev/null 2>&1 && ok "claude $(claude --version 2>/dev/null | head -1)" || warn "claude 没有"
 command -v codex  >/dev/null 2>&1 && ok "codex $(codex --version 2>/dev/null)" || warn "codex 没有"
+command -v opencode >/dev/null 2>&1 && ok "opencode $(opencode --version 2>/dev/null | head -1)" || warn "opencode 没有（可选）"
+command -v hermes   >/dev/null 2>&1 && ok "hermes 在" || warn "hermes 没有（可选）"
 echo
 if [ $FAIL = 0 ]; then
   echo "装好了。下一步：手机上「配置 → 连接」里登录 Claude Code / Codex，然后回看板 ＋ 开会话。"

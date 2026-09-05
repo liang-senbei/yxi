@@ -41,15 +41,89 @@ object Lines {
         val apiKey: String = "",
         /** 这条线是给谁的：`claude` 或 `codex`。**两家的机制完全不同**，见 [applyCodex]。 */
         val agent: String = CLAUDE,
+        /**
+         * **CC Switch 那一整段 settings 片段里，除三个核心 env 之外的部分**（v2，2026-09-05）：
+         * `env` 里的模型映射（ANTHROPIC_MODEL / ANTHROPIC_DEFAULT_*_MODEL / ENABLE_TOOL_SEARCH …）
+         * 和顶层键（model / effortLevel / includeCoAuthoredBy / autoCompactWindow …）。
+         * 三个核心键**不放这里**（放了就有两个真相源）。Codex 线路放 model / model_reasoning_effort 等。
+         */
+        val extra: JSONObject = JSONObject(),
+        val note: String = "",
     ) {
         val isCodex get() = agent == CODEX
+        /** extra 里 env 部分（不含核心三键） */
+        fun extraEnv(): JSONObject = extra.optJSONObject("env") ?: JSONObject()
+        /** extra 里顶层键（不含 env） */
+        fun extraTop(): Map<String, Any> = extra.keys().asSequence().filter { it != "env" }.associateWith { extra.get(it) }
+        /** 整段 settings 片段（核心三键 + extra），给「高级 JSON」编辑和导出用 */
+        fun settingsJson(): JSONObject {
+            val env = JSONObject(extraEnv().toString())
+            env.put("ANTHROPIC_BASE_URL", baseUrl).put("ANTHROPIC_AUTH_TOKEN", token).put("ANTHROPIC_API_KEY", apiKey)
+            val o = JSONObject(); extraTop().forEach { (k, v) -> o.put(k, v) }; o.put("env", env); return o
+        }
+        companion object {
+            /** 从一整段 settings 片段拆回 Line（编辑「高级 JSON」保存时用）。核心三键抽出来，其余进 extra。 */
+            fun fromSettings(base: Line, settings: JSONObject): Line {
+                val env = settings.optJSONObject("env") ?: JSONObject()
+                val ex = JSONObject(); val exEnv = JSONObject()
+                // ⚠️ 进模型这一道门就过白名单：不许的键连 lines.json 都进不去（见 TOP_ALLOW / envAllowed）
+                env.keys().forEach { k -> if (k !in CORE && envAllowed(k)) exEnv.put(k, env.get(k)) }
+                settings.keys().forEach { k -> if (k != "env" && topAllowed(k)) ex.put(k, settings.get(k)) }
+                if (exEnv.length() > 0) ex.put("env", exEnv)
+                return base.copy(
+                    baseUrl = env.optString("ANTHROPIC_BASE_URL"), token = env.optString("ANTHROPIC_AUTH_TOKEN"),
+                    apiKey = env.optString("ANTHROPIC_API_KEY"), extra = ex,
+                )
+            }
+        }
     }
 
     const val CLAUDE = "claude"
     const val CODEX = "codex"
 
+    /** 三个核心 env 键。**永远全写、不设写空串**（#254）。 */
+    val CORE = listOf("ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY")
+    /** 官方文档明写「启动时读一次」的顶层键 —— 碰了这些切换后要提示重开（或 /model、/effort）。 */
+    val RESTART_ONLY_TOP = setOf("model", "effortLevel", "modelSettings", "outputStyle")
+
+    /**
+     * ⚠️⚠️ **线路能写进 settings.json 的顶层键 —— 白名单，默认拒绝。**
+     * 安全审查（2026-09-05）：`~/.yxi/lines.json` 服务器上的 agent 能写；若允许任意顶层键，
+     * 被注入的 agent 往某条线路塞 `hooks` / `apiKeyHelper` / `permissions` / `enabledPlugins`，
+     * 用户在手机上点一下「换线」，settings.json 里就多了一条**会执行命令的钩子**（Claude Code 热重载 hooks）——
+     * 「人在手机上把关」被整个绕开。所以只放 CC Switch 那一排**纯偏好**的键；不在名单里的**不写、不删**，界面上明说。
+     */
+    val TOP_ALLOW = setOf(
+        "model", "effortLevel", "modelSettings", "outputStyle", "includeCoAuthoredBy",
+        "autoCompactWindow", "autoUpdatesChannel", "skipDangerousModePermissionPrompt", "skipWebFetchPreflight",
+    )
+
+    /**
+     * ⚠️⚠️ **env 同理，白名单按前缀。** `NODE_OPTIONS=--require=/x.js` / `LD_PRELOAD` / `PATH` / `HOME`
+     * 会进 Claude Code 的进程环境，等于任意代码执行（审查员核过：它是动态链接的 Node SEA）。
+     * 放行：`ANTHROPIC_*`（端点/钥匙/模型映射）、`ENABLE_*` / `DISABLE_*`（功能开关），
+     * 外加几个点名的 Claude Code 开关。其余一律不进数据模型、不写文件。
+     */
+    private val ENV_ALLOW_PREFIX = listOf("ANTHROPIC_", "ENABLE_", "DISABLE_")
+    private val ENV_ALLOW_EXACT = setOf(
+        "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "CLAUDE_CODE_MAX_OUTPUT_TOKENS", "MAX_THINKING_TOKENS", "API_TIMEOUT_MS",
+    )
+    fun envAllowed(k: String) = k in ENV_ALLOW_EXACT || ENV_ALLOW_PREFIX.any { k.startsWith(it) }
+    fun topAllowed(k: String) = k in TOP_ALLOW
+
+    /**
+     * 把一段 settings 片段里**不许写**的键挑出来（顶层 + env），返回它们的名字。
+     * 数据进模型时（[Line.fromSettings]）和落盘时（[apply]）**都**过一遍 —— 两道门。
+     */
+    fun rejectedKeys(extra: JSONObject): List<String> {
+        val out = ArrayList<String>()
+        extra.keys().forEach { k -> if (k != "env" && !topAllowed(k)) out += k }
+        extra.optJSONObject("env")?.keys()?.forEach { k -> if (k !in CORE && !envAllowed(k)) out += "env.$k" }
+        return out
+    }
+
     /** `settings.json` 里此刻真正写着的那三个值。 */
-    data class Env(val baseUrl: String, val token: String, val apiKey: String) {
+    data class Env(val baseUrl: String, val token: String, val apiKey: String, val all: Map<String, String> = emptyMap()) {
         /** 三个都空 = 没被任何线路接管，走 Claude Code 自己的登录（订阅） */
         val isDefault get() = baseUrl.isBlank() && token.isBlank() && apiKey.isBlank()
     }
@@ -70,6 +144,31 @@ object Lines {
 
     private fun settingsPath(home: String) = "$home/.claude/settings.json"
     private fun listPath(home: String) = "$home/.yxi/lines.json"
+    /**
+     * 我们**曾经**写过的 env 键 / 顶层键，**只增不减**。
+     * 为什么要单独存：`apply()` 靠「线路 extra 的并集」决定把哪些键写成空串 —— 线路一删，它独有的键就从并集里消失，
+     * settings.json 里那个值再没人清，**永久残留**（正确性审查复现）。
+     * 为什么不放进 lines.json：那是个数组，1.1.8 的 App 用 `JSONArray(raw)` 读，改成对象它们就「取不到」。
+     */
+    private fun ownedPath(home: String) = "$home/.yxi/lines-owned.json"
+    private class Owned(val env: MutableSet<String>, val top: MutableSet<String>)
+    private suspend fun readOwned(ssh: SshSession, home: String): Owned {
+        val o = runCatching { JSONObject(ConfigRemote.readFile(ssh, ownedPath(home)) ?: "{}") }.getOrElse { JSONObject() }
+        fun set(k: String) = (o.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()).toMutableSet()
+        return Owned(set("env").filter(::envAllowed).toMutableSet(), set("top").filter(::topAllowed).toMutableSet())
+    }
+    /** 把这批线路的键并进历史集合并落盘（只增）。写不成不算错 —— 最坏是残留一次，下次再清。 */
+    private suspend fun growOwned(ssh: SshSession, home: String, lines: List<Line>): Owned {
+        val o = readOwned(ssh, home)
+        lines.filter { !it.isCodex }.forEach { l ->
+            l.extraEnv().keys().forEach { if (envAllowed(it)) o.env += it }
+            l.extraTop().keys.forEach { if (topAllowed(it)) o.top += it }
+        }
+        val j = JSONObject().put("env", JSONArray(o.env.sorted())).put("top", JSONArray(o.top.sorted())).toString(1)
+        runCatching { val f = ssh.openSftp(); try { f.write(ownedPath(home), j.toByteArray()) } finally { runCatching { f.close() } } }
+        ssh.exec("chmod 600 " + Shell.q(ownedPath(home)) + " 2>/dev/null")
+        return o
+    }
 
     /**
      * 改哪个文件。[cwd] = null 是**整机**（`~/.claude/settings.json`，那台机器上所有 agent 一起换）；
@@ -108,21 +207,27 @@ object Lines {
         val raw = ConfigRemote.readFile(ssh, listPath(h)) ?: return@withContext emptyList()
         // ⚠️ 文件在但解析不了 = 「拿不到」，不是「一条都没有」。当成空表的话人会去重建、
         //    原来那份（可能是手改坏的）就被覆盖了。返回 null 让界面说「取不到」。
-        runCatching {
+        parseLines(raw)
+    }
+
+    private fun parseLines(raw: String): List<Line>? =
+        if (raw.isBlank()) emptyList() else runCatching {
             val a = JSONArray(raw)
             (0 until a.length()).mapNotNull { i ->
                 a.optJSONObject(i)?.let {
-                    Line(
+                    val base = Line(
                         id = it.optString("id"), name = it.optString("name"),
                         baseUrl = it.optString("baseUrl"), token = it.optString("token"),
                         apiKey = it.optString("apiKey"),
                         // 老清单没有这个字段，默认当 Claude —— 加字段不能让已有的线路变身
                         agent = it.optString("agent").ifBlank { CLAUDE },
+                        note = it.optString("note"),
                     )
+                    // v2：带 settings 片段就从片段拆；v1 条目没有 settings，原样（1.1.8 用户无感升级）
+                    it.optJSONObject("settings")?.let { st -> if (base.isCodex) base.copy(extra = st) else Line.fromSettings(base, st) } ?: base
                 }
             }
         }.getOrNull()
-    }
 
     /** @return 出错原因；null = 成功。 */
     suspend fun saveList(ssh: SshSession?, lines: List<Line>): String? = withContext(Dispatchers.IO) {
@@ -133,7 +238,9 @@ object Lines {
             a.put(
                 JSONObject().put("id", it.id).put("name", it.name)
                     .put("baseUrl", it.baseUrl).put("token", it.token).put("apiKey", it.apiKey)
-                    .put("agent", it.agent),
+                    .put("agent", it.agent).put("note", it.note)
+                    // v2：整段片段也存一份 —— 读的时候以它为准；核心三键仍单独存是给 1.1.8 之前的 App 读的
+                    .put("settings", if (it.isCodex) it.extra else it.settingsJson()),
             )
         }
         // ⚠️ 里面装的是钥匙：目录 700、文件 600。**先建目录再写**，SFTP 不会替你建。
@@ -143,6 +250,7 @@ object Lines {
             try { sftp.write(listPath(h), a.toString(2).toByteArray()) } finally { runCatching { sftp.close() } }
         }.onFailure { return@withContext "写失败：${it.message?.take(60)}" }
         s.exec("chmod 600 \"\$HOME/.yxi/lines.json\"")
+        growOwned(s, h, lines)          // 删线路之前它的键已经在历史集合里了，删了照样能清
         null
     }
 
@@ -157,7 +265,8 @@ object Lines {
         return runCatching {
             val e = JSONObject(raw).optJSONObject("env") ?: return null
             if (!e.has(BASE) && !e.has(TOKEN) && !e.has(KEY)) return null
-            Env(e.optString(BASE), e.optString(TOKEN), e.optString(KEY))
+            Env(e.optString(BASE), e.optString(TOKEN), e.optString(KEY),
+                e.keys().asSequence().associateWith { k -> e.optString(k) })
         }.getOrNull()
     }
 
@@ -186,8 +295,12 @@ object Lines {
      * 这条线路是不是当前在用的那条。
      * ⚠️ **三个值全比**，不是只比 baseUrl —— 同一个中转常常挂好几家，端点一样钥匙不一样。
      */
-    fun matches(line: Line, env: Env): Boolean =
-        line.baseUrl == env.baseUrl && line.token == env.token && line.apiKey == env.apiKey
+    fun matches(line: Line, env: Env): Boolean {
+        if (line.baseUrl != env.baseUrl || line.token != env.token || line.apiKey != env.apiKey) return false
+        // v2：这条线路带的模型映射等 env 键也要对上（两条线端点钥匙一样、模型不一样是常见的）
+        val ex = line.extraEnv()
+        return ex.keys().asSequence().all { k -> env.all[k] == ex.optString(k) }
+    }
 
     // ── 换线 ────────────────────────────────────────────────────────────────
 
@@ -197,24 +310,45 @@ object Lines {
      * ⚠️ 写法上只碰 `env` 里那三个 key，`settings.json` 的其余部分原样保留；
      * 落盘走 [ConfigRemote.save]，它**先备份、json 先校验**，坏了绝不写。
      *
-     * @return 出错原因；null = 成功。
+     * @return [Applied]：`err` 出错原因（null = 成功）；`restart` 这次**真改了值**的启动时读一次的顶层键
+     *   （model/effortLevel/modelSettings/outputStyle），界面要照实说「这几个要重开会话」。
+     *   ⚠️ 只算真变了的：以前按「所有线路碰过的键」算，effortLevel 没变也喊要重开，E2E 抓到是错的。
      */
-    suspend fun apply(ssh: SshSession?, line: Line?, cwd: String? = null): String? = withContext(Dispatchers.IO) {
-        val s = ssh ?: return@withContext "没连上"
-        val path = targetPath(s, cwd) ?: return@withContext "取不到要改的文件路径"
+    class Applied(val err: String?, val restart: List<String> = emptyList())
+
+    suspend fun apply(ssh: SshSession?, line: Line?, cwd: String? = null, all: List<Line> = emptyList()): Applied = withContext(Dispatchers.IO) {
+        val s = ssh ?: return@withContext Applied("没连上")
+        val path = targetPath(s, cwd) ?: return@withContext Applied("取不到要改的文件路径")
         // 项目级那个 .claude 目录可能还不存在，SFTP 不会替你建
         if (cwd != null) s.exec("mkdir -p " + Shell.q(cwd.trimEnd('/') + "/.claude"))
         val raw = ConfigRemote.readFile(s, path) ?: "{}"
         val root = runCatching { JSONObject(raw) }.getOrElse {
-            return@withContext "settings.json 现在就是坏的（${it.message?.take(40)}），没敢动"
+            return@withContext Applied("settings.json 现在就是坏的（${it.message?.take(40)}），没敢动")
         }
         val env = root.optJSONObject("env") ?: JSONObject()
         // ⚠️⚠️ 三个全写，不设的写空串。**别用 remove()** —— 删掉不生效，旧值还在进程里。
         env.put(BASE, line?.baseUrl.orEmpty())
         env.put(TOKEN, line?.token.orEmpty())
         env.put(KEY, line?.apiKey.orEmpty())
+        // v2：我们「拥有」的 env 键 = 所有线路里出现过的 env 键的并集。**同样全写、不设写空串** ——
+        //    上一条线路设过 ANTHROPIC_MODEL、这一条没设，不写空串它就一直是上一条的模型（#254 的同款）。
+        // ⚠️ 落盘前**再**过一遍白名单：lines.json 是服务器上读回来的，agent 能改，进模型那道门挡不住它。
+        // 并集 = **历史上写过的**（含已删线路的）∪ 当前列表 ∪ 这条。历史只增不减，所以删线路不会留残留。
+        val hist = growOwned(s, home(s) ?: return@withContext Applied("取不到家目录"), all + listOfNotNull(line))
+        val owned = hist.env
+        owned.forEach { k -> env.put(k, line?.extraEnv()?.optString(k).orEmpty()) }
         root.put("env", env)
-        if (cwd == null) ConfigRemote.save(s, path, root.toString(2)) else writeNoBackup(s, path, root.toString(2))
+        // 顶层键：并集里这条没给的**删掉**（顶层键没有 env 那种「删不生效」的事，删了就是回默认）；
+        // 给了的照值写。model / effortLevel 这些是启动时读一次的，**真变了**才让界面提示要重开。
+        // 顶层键只碰白名单里的：不在名单里的**既不写也不删**（用户自己的 hooks / permissions 一根手指都不碰）
+        val restart = mutableListOf<String>()
+        hist.top.forEach { k ->
+            val v = line?.extraTop()?.get(k)
+            if (k in RESTART_ONLY_TOP && root.opt(k)?.toString() != v?.toString()) restart += k
+            if (v == null) root.remove(k) else root.put(k, v)
+        }
+        val err = if (cwd == null) ConfigRemote.save(s, path, root.toString(2)) else writeNoBackup(s, path, root.toString(2))
+        Applied(err, restart.sorted())
     }
 
     /**
@@ -250,10 +384,14 @@ object Lines {
         val root = runCatching { JSONObject(raw) }.getOrElse {
             return@withContext "这个项目的 settings.local.json 是坏的，没敢动"
         }
+        val hist = readOwned(s, home(s) ?: return@withContext "取不到家目录")
         root.optJSONObject("env")?.let { e ->
             e.remove(BASE); e.remove(TOKEN); e.remove(KEY)
+            // 「跟随整机」= 项目级不再有我们写过的**任何**键：只删三键的话模型/强度会留在项目级继续覆盖整机（正确性审查复现）
+            hist.env.forEach { k -> e.remove(k) }
             if (e.length() == 0) root.remove("env") else root.put("env", e)
         }
+        hist.top.forEach { k -> root.remove(k) }
         writeNoBackup(s, path, root.toString(2))
     }
 
@@ -389,6 +527,9 @@ object Lines {
         val s = ssh ?: return@withContext "没连上"
         val h = home(s) ?: return@withContext "取不到家目录"
         val path = "$h/.codex/config.toml"
+        // Codex 的 auth.command 不按 shell 解析，路径里有空白/引号就没法表达 —— 与其写一条必失败的命令，不如拒绝并说清
+        if (line != null && keyPath(h).any { it.isWhitespace() || it == '"' || it == '\'' })
+            return@withContext "家目录路径含空格或引号（$h），Codex 的 auth.command 不支持这种路径，这条线路写不了"
         val body = stripBlocks(ConfigRemote.readFile(s, path).orEmpty())
             ?: return@withContext "config.toml 里 Yxi 的标记不成对（被手改过？），没敢动 —— 手动把 `# >>> yxi` / `# <<< yxi` 那几行清掉再试"
         // ⚠️ 用户自己手写过一个同名的表（没带我们的标记）→ 再写一份就是重复表头，TOML 非法、codex 直接拒启。
@@ -414,7 +555,10 @@ object Lines {
             // ⚠️ 用 auth.command 而不是 env_key：env_key 要求进程环境里真有那个变量，
             //    而我们没法往用户已经开着的 tmux 里注环境变量。command 实测可行。
             append("\n[model_providers.").append(PROVIDER_ID).append(".auth]\n")
-            append("command = \"cat ").append(keyPath(h)).append("\"\n")
+            // ⚠️ Codex 的 auth.command **不走 shell**，自己按空格切：加引号会被当成文件名的一部分
+            //    （实测 `cat '/x/with space/key'` → No such file or directory）。所以路径**不能**加引号；
+            //    含空格/引号的家目录在上面已经拒绝了，这里拿到的路径一定是干净的。
+            append("command = \"").append(tomlEscape("cat " + keyPath(h))).append("\"\n")
             append(BODY_OFF).append('\n')
         }
         s.exec("mkdir -p \"\$HOME/.codex\" \"\$HOME/.yxi\" && chmod 700 \"\$HOME/.yxi\"")
@@ -450,6 +594,84 @@ object Lines {
                 else -> "\\"
             }
         }
+
+    // ── 看板：每个会话走的是什么 ────────────────────────────────────────────
+
+    /** 给看板显示的一行小字。[custom] = 设了但不在清单里（电脑上用 CC Switch 切的、或手改的）。 */
+    data class Label(val text: String, val lineName: String?, val project: Boolean, val custom: Boolean)
+
+    /**
+     * 所有会话各走哪条线路，**一次 SSH 往返**：一个脚本把整机 settings、每个 cwd 的项目级 settings、
+     * codex 那段一起打回来，匹配在手机上做。读不到的会话**不给标签**（不猜）。
+     *
+     * ⚠️ cwd 过 [safeCwd]，不合格的不进脚本 —— 它来自 tmux，服务器上的 agent 能改。
+     */
+    suspend fun labels(ssh: SshSession?, sessions: List<Session>): Map<String, Label> = withContext(Dispatchers.IO) {
+        val s = ssh ?: return@withContext emptyMap()
+        val h = home(s) ?: return@withContext emptyMap()
+        val cwds = sessions.asSequence().filter { !it.isCodex }.mapNotNull { safeCwd(it.cwd) }.toSet()
+        val script = buildString {
+            // 线路清单也并进同一次往返 —— 看板每 5 秒调一次，别为它多开一条 exec
+            append("cat ").append(Shell.q(listPath(h))).append(" 2>/dev/null | tr -d '\\n'; printf '\\n@@LINES\\n'; ")
+            append("cat ").append(Shell.q(settingsPath(h))).append(" 2>/dev/null | tr -d '\\n'; printf '\\n@@MACHINE\\n'; ")
+            cwds.forEach { c ->
+                // ⚠️ cwd 作为 printf 的**参数**传（%s），不嵌进格式串：嵌进去的话 Shell.q 的 '\'' 会跟外层单引号打架，
+                //    路径里一个 ' 就让整段脚本解析失败、所有会话丢标签（安全审查用 bash -c 复现）
+                append("cat ").append(Shell.q("$c/.claude/settings.local.json")).append(" 2>/dev/null | tr -d '\\n'; printf '\\n@@P %s\\n' ").append(Shell.q(c)).append("; ")
+            }
+            append("sed -n '/").append(BODY_ON).append("/,/").append(BODY_OFF).append("/p' ").append(Shell.q("$h/.codex/config.toml")).append(" 2>/dev/null; printf '\\n@@CODEX\\n'")
+        }
+        val out = runCatching { s.exec(script) }.getOrNull() ?: return@withContext emptyMap()
+        fun envOf(raw: String): Env? = runCatching {
+            val e = JSONObject(raw).optJSONObject("env") ?: return@runCatching null
+            if (!e.has(BASE) && !e.has(TOKEN) && !e.has(KEY)) null
+            else Env(e.optString(BASE), e.optString(TOKEN), e.optString(KEY), e.keys().asSequence().associateWith { k -> e.optString(k) })
+        }.getOrNull()
+        // 按标记切段：每段 = 内容 + 一行 @@… 标签
+        val machineEnv: Env?; val project = HashMap<String, Env?>(); var codexUrl: String? = null
+        var buf = StringBuilder(); var me: Env? = null; var machineSeen = false
+        var lines: List<Line> = emptyList()
+        out.lineSequence().forEach { ln ->
+            when {
+                ln == "@@LINES" -> { lines = parseLines(buf.toString()) ?: return@withContext emptyMap(); buf = StringBuilder() }   // 清单坏了宁可不标
+                ln == "@@MACHINE" -> { me = envOf(buf.toString()); machineSeen = true; buf = StringBuilder() }
+                // printf %s 已把 Shell.q 的引号吃掉，拿到的就是原路径 —— **别 trim 引号**，路径尾真有 ' 会被切掉
+                ln.startsWith("@@P ") -> { project[ln.removePrefix("@@P ")] = envOf(buf.toString()); buf = StringBuilder() }
+                ln == "@@CODEX" -> {
+                    codexUrl = buf.lineSequence().firstOrNull { it.trim().startsWith("base_url") }
+                        ?.let { Regex("""base_url\s*=\s*"(.*)"\s*$""").find(it.trim())?.groupValues?.get(1) }?.let { tomlUnescape(it) }
+                    buf = StringBuilder()
+                }
+                else -> buf.append(ln).append('\n')
+            }
+        }
+        if (!machineSeen) return@withContext emptyMap()      // 脚本没跑完整，宁可不标
+        machineEnv = me
+        val claudeLines = lines.filter { !it.isCodex }
+        fun labelFor(env: Env?, fromProject: Boolean): Label {
+            if (env == null || env.isDefault) return Label("claude · 官方登录", null, fromProject, false)
+            val hit = claudeLines.firstOrNull { matches(it, env) }
+            return if (hit != null) Label("Yxi_switch · ${hit.name}", hit.name, fromProject, false)
+            else Label("自定义 · " + hostOf(env.baseUrl), null, fromProject, true)
+        }
+        val res = HashMap<String, Label>()
+        sessions.forEach { sess ->
+            if (sess.isCodex) {
+                val url = codexUrl
+                res[sess.name] = if (url == null) Label("codex · 官方登录", null, false, false)
+                else lines.firstOrNull { it.isCodex && it.baseUrl == url }?.let { Label("Yxi_switch · ${it.name}", it.name, false, false) }
+                    ?: Label("自定义 · " + hostOf(url), null, false, true)
+            } else {
+                val c = safeCwd(sess.cwd)
+                val p = c?.let { project[it] }
+                res[sess.name] = if (p != null) labelFor(p, true) else labelFor(machineEnv, false)
+            }
+        }
+        res
+    }
+
+    private fun hostOf(url: String): String =
+        url.removePrefix("https://").removePrefix("http://").substringBefore('/').ifBlank { url.ifBlank { "?" } }
 
     // ── 杂 ──────────────────────────────────────────────────────────────────
 

@@ -36,7 +36,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import app.yxi.agent.LinePresets
 import app.yxi.agent.Lines
+import org.json.JSONObject
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import app.yxi.agent.Session
 import app.yxi.agent.SessionProbe
 import app.yxi.agent.SessionState
@@ -133,14 +137,17 @@ fun LinesPanel(ssh: SshSession?, host: Host?, sessions: List<Session>) {
     /** [forAgent] / [cwd] **显式传进来**，不读当前状态 —— 排队落地时当前状态可能已经不是排队时那个了。 */
     suspend fun doApply(line: Lines.Line?, forAgent: String, cwd: String?, where: String) {
         if (forAgent == Lines.CODEX) return doApplyCodex(line)
-        val err = Lines.apply(ssh, line, cwd)
-        if (err != null) { note = t("没换成：%s").format(err); return }
+        val r = Lines.apply(ssh, line, cwd, lines.orEmpty())
+        if (r.err != null) { note = t("没换成：%s").format(r.err); return }
         reload()
         val probe = Lines.probe(ssh, line?.baseUrl.orEmpty())
+        // v2：model / effortLevel 这类顶层键是**启动时读一次**的（官方文档 + cc-Yxi #265 实测），
+        //    切换后那部分不会热生效 —— 照实多说一句，别让人以为切了。**只说这次真变了的**（E2E 抓到过误报）。
+        val tail = if (r.restart.isEmpty()) "" else "\n" + t("⚠️ 其中 %s 要重开会话（或用 /model、/effort）才变。").format(r.restart.joinToString(" / "))
         // ⚠️ 换端点之后第一次请求会**全量重读上下文**（缓存是按端点分的），又慢又贵。
         //    不说的话人会以为切换卡住了 —— 这是 cc-remote-dev-station 提醒的一条。
         note = t("%s已换到「%s」· %s\n下一次请求就走新线路；那一次会重读整段对话，慢一点、贵一点，是正常的。")
-            .format(where, line?.name ?: t("默认"), probe)
+            .format(where, line?.name ?: t("默认"), probe) + tail
     }
 
     // 排队中的那一下：一旦没有会话在干活，自动落地。
@@ -252,8 +259,10 @@ fun LinesPanel(ssh: SshSession?, host: Host?, sessions: List<Session>) {
                             name = l.name.ifBlank { l.id },
                             sub = listOfNotNull(
                                 l.baseUrl.ifBlank { null },
+                                (l.extraEnv().optString("ANTHROPIC_MODEL").ifBlank { l.extra.optString("model") }).ifBlank { null },
                                 Lines.mask(l.token).ifBlank { null }?.let { t("令牌 ") + it },
                                 Lines.mask(l.apiKey).ifBlank { null }?.let { t("密钥 ") + it },
+                                l.note.ifBlank { null },
                             ).joinToString(" · ").ifBlank { t("什么都没填") },
                             current = if (agent == Lines.CODEX) codexNow?.let { Lines.matchesCodex(l, it) } == true
                             else cur != null && Lines.matches(l, cur),
@@ -363,12 +372,53 @@ private fun LineEditor(
     var url by remember(line.id) { mutableStateOf(line.baseUrl) }
     var token by remember(line.id) { mutableStateOf(line.token) }
     var key by remember(line.id) { mutableStateOf(line.apiKey) }
+    var note by remember(line.id) { mutableStateOf(line.note) }
+    /** 除核心三键外的整段片段（env 模型映射 + 顶层键）。预设 / 开关 / 高级 JSON 都改它。 */
+    var extra by remember(line.id) { mutableStateOf(JSONObject(line.extra.toString())) }
+    var advanced by remember(line.id) { mutableStateOf(false) }
+    var advText by remember(line.id) { mutableStateOf("") }
+    var advErr by remember(line.id) { mutableStateOf<String?>(null) }
+    var presetMenu by remember(line.id) { mutableStateOf(false) }
     var confirmDel by remember(line.id) { mutableStateOf(false) }
+    fun env(): JSONObject = extra.optJSONObject("env") ?: JSONObject().also { extra.put("env", it) }
+    fun setEnv(k: String, v: String?) { val e = env(); if (v == null) e.remove(k) else e.put(k, v); extra = JSONObject(extra.toString()) }
+    fun setTop(k: String, v: Any?) { if (v == null) extra.remove(k) else extra.put(k, v); extra = JSONObject(extra.toString()) }
+    // 五个快捷开关 —— 对齐 CC Switch 编辑页那一排。都是同一段 JSON 的快捷写法，不是另一套配置。
+    val toggles: List<Triple<String, () -> Boolean, (Boolean) -> Unit>> = if (line.isCodex) emptyList() else listOf(
+        Triple(t("隐藏 AI 署名"), { extra.has("includeCoAuthoredBy") && !extra.optBoolean("includeCoAuthoredBy", true) }, { on -> setTop("includeCoAuthoredBy", if (on) false else null) }),
+        Triple(t("Teammates 模式"), { env().optString("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS") == "1" }, { on -> setEnv("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", if (on) "1" else null) }),
+        Triple(t("启用 Tool Search"), { env().optString("ENABLE_TOOL_SEARCH") == "true" }, { on -> setEnv("ENABLE_TOOL_SEARCH", if (on) "true" else null) }),
+        Triple(t("最大强度思考"), { extra.optString("effortLevel") == "max" }, { on -> setTop("effortLevel", if (on) "max" else null) }),
+        Triple(t("禁用自动升级"), { env().optString("DISABLE_AUTOUPDATER") == "1" }, { on -> setEnv("DISABLE_AUTOUPDATER", if (on) "1" else null) }),
+    )
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (line.name.isBlank()) t("加一条线路") else t("改线路")) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // 预设：CC Switch 那份表解析来的（名字 + 端点 + 模型键）。选了只填端点和模型键，钥匙自己填。
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(t("预设"), style = MaterialTheme.typography.labelMedium, color = Muted)
+                    Text(
+                        t("选一个中转 / 官方预设 ▾"),
+                        Modifier.clip(RoundedCornerShape(8.dp)).clickable { presetMenu = true }.padding(8.dp, 4.dp),
+                        style = MaterialTheme.typography.labelMedium, color = Copper,
+                    )
+                    androidx.compose.material3.DropdownMenu(presetMenu, { presetMenu = false }) {
+                        LinePresets.forAgent(line.agent).forEach { p ->
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text(p.name + "  ·  " + p.baseUrl.removePrefix("https://").removePrefix("http://"), style = MaterialTheme.typography.bodySmall) },
+                                onClick = {
+                                    presetMenu = false
+                                    if (name.isBlank()) name = p.name
+                                    url = p.baseUrl
+                                    if (line.isCodex) { if (p.model.isNotBlank()) setTop("model", p.model) }
+                                    else { p.env.forEach { (k, v) -> setEnv(k, v) } }
+                                },
+                            )
+                        }
+                    }
+                }
                 OutlinedTextField(name, { name = it }, label = { Text(t("名字（自己认得就行）")) }, singleLine = true)
                 if (line.isCodex) {
                     OutlinedTextField(url, { url = it }, label = { Text(t("端点 base_url")) }, singleLine = true)
@@ -385,12 +435,53 @@ private fun LineEditor(
                         t("留空的那项会写成空串 —— 那才是「不设」。留空不等于沿用上一条。"),
                         style = MaterialTheme.typography.labelSmall, color = Muted,
                     )
+                    // 五个快捷开关（对齐 CC Switch）
+                    toggles.forEach { (label, get, set) ->
+                        Row(Modifier.fillMaxWidth().clickable { set(!get()) }, verticalAlignment = Alignment.CenterVertically) {
+                            androidx.compose.material3.Checkbox(checked = get(), onCheckedChange = { set(it) })
+                            Text(label, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+                OutlinedTextField(note, { note = it }, label = { Text(t("备注（可空）")) }, singleLine = true)
+                // 高级：整段 settings 片段。CC Switch 那份 JSON 直接贴这里就能用。
+                Text(
+                    if (advanced) t("▾ 高级 JSON（整段 settings 片段）") else t("▸ 高级 JSON（整段 settings 片段）"),
+                    Modifier.clickable {
+                        advanced = !advanced
+                        if (advanced) advText = (if (line.isCodex) extra else Lines.Line(line.id, name, url.trim(), token.trim(), key.trim(), line.agent, extra).settingsJson()).toString(2)
+                    },
+                    style = MaterialTheme.typography.labelMedium, color = Copper,
+                )
+                if (advanced) {
+                    OutlinedTextField(
+                        advText, { advText = it; advErr = null }, minLines = 6, maxLines = 14,
+                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+                        isError = advErr != null, supportingText = advErr?.let { { Text(it) } },
+                    )
+                    Text(
+                        t("保存时以这段为准：env 里的三个核心键会回填到上面三个框；其余键（模型映射、model、effortLevel…）跟着线路一起切。"),
+                        style = MaterialTheme.typography.labelSmall, color = Muted,
+                    )
                 }
             }
         },
         confirmButton = {
             TextButton(onClick = {
-                onSave(line.copy(name = name.trim(), baseUrl = url.trim(), token = token.trim(), apiKey = key.trim()))
+                var out = line.copy(name = name.trim(), baseUrl = url.trim(), token = token.trim(), apiKey = key.trim(), note = note.trim(), extra = extra)
+                if (advanced) {
+                    // 高级 JSON 打开着就以它为准 —— 但坏 JSON 绝不存（一个语法错能让 Claude Code 起不来）
+                    val parsed = runCatching { JSONObject(advText) }.getOrElse { advErr = t("JSON 格式不对：%s").format(it.message?.take(50)); return@TextButton }
+                    if (!line.isCodex && parsed.has("env") && parsed.optJSONObject("env") == null) { advErr = t("env 必须是对象"); return@TextButton }
+                    if (!line.isCodex) {
+                        // 不许写的键（hooks / permissions / NODE_OPTIONS…）在这里就拒掉并**说出来**，
+                        // 不能悄悄丢：人贴了一段 CC Switch 的 JSON，得知道哪几行没生效、为什么
+                        val bad = Lines.rejectedKeys(parsed)
+                        if (bad.isNotEmpty()) { advErr = t("这些键不允许由线路写入（安全）：%s").format(bad.joinToString(", ")); return@TextButton }
+                    }
+                    out = if (line.isCodex) out.copy(extra = parsed) else Lines.Line.fromSettings(out, parsed)
+                }
+                onSave(out)
             }) { Text(t("存")) }
         },
         dismissButton = {

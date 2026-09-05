@@ -123,11 +123,16 @@ fun SessionsScreen(
     // ⚠️ 单独一条 5 秒轮询，不挂进 snapshotFull 那条链 —— 线路读失败不该拖累会话列表。
     var lineLabels by remember(host.id) { mutableStateOf<Map<String, String>>(emptyMap()) }
     val latestSessions = androidx.compose.runtime.rememberUpdatedState(sessions)
-    // ⚠️ 轮询先关着：Lines.labels 在 cc-Yxi_pilot 的线路 v2 里，那批还在审查门禁；
-    //    发版是整棵树一起编的，这里不能引用还没过审的代码。v2 过审合进来时把下面这段放开：
-    //    LaunchedEffect(ssh, host.id) { val s = ssh ?: return@LaunchedEffect
-    //        while (true) { lineLabels = runCatching { app.yxi.agent.Lines.labels(s, latestSessions.value).mapValues { it.value.text } }.getOrDefault(lineLabels); delay(5000) } }
-    @Suppress("UNUSED_VARIABLE") val keepForV2 = latestSessions
+    // 线路 v2（cc-Yxi_pilot）过审后放开：一次 SSH 往返拿全部会话的线路标签，跟看板同一个 5 秒节奏
+    LaunchedEffect(ssh, host.id) {
+        val s = ssh ?: return@LaunchedEffect
+        while (true) {
+            lineLabels = runCatching {
+                app.yxi.agent.Lines.labels(s, latestSessions.value).mapValues { it.value.text }
+            }.getOrDefault(lineLabels)
+            delay(5000)
+        }
+    }
     /// 正在给哪个会话选组
     /** 正在编辑哪个组的组规 */
     var ruleFor by remember { mutableStateOf<String?>(null) }
@@ -556,6 +561,7 @@ fun SessionsScreen(
                     ReorderablePinned(
                         tops = tops,
                         favedNames = faved,
+                        lines = lineLabels,
                         onOpen = { onOpenChat(it.name, it.cwd) },
                         onReply = { replyTo = it },
                         onUnpin = { pinned = pinned - it.name; Pinned.set(ctx, host.id, pinned) },
@@ -990,6 +996,8 @@ private fun GroupHeader(st: SessionState, n: Int) {
 private fun ReorderablePinned(
     tops: List<Session>,
     favedNames: Set<String>,
+    /** 会话名 → 走的线路那行小字（见 SessionsScreen 的 lineLabels）。没有就不画 */
+    lines: Map<String, String> = emptyMap(),
     onOpen: (Session) -> Unit,
     onReply: (Session) -> Unit,
     onUnpin: (Session) -> Unit,
@@ -1029,6 +1037,7 @@ private fun ReorderablePinned(
             ) {
             SessionCard(
                     sess,
+                    line = lines[sess.name],
                     pinned = true,
                     dragging = isDragged,
                     // 只要有一张被拎起来（dragIndex>=0），就把点击关掉 —— 免得松手误开对话
