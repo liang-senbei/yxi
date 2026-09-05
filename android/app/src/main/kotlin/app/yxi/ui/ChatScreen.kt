@@ -540,16 +540,21 @@ fun ChatScreen(
                     if (items.isEmpty()) status = t("载入失败：%s").format(it.message ?: "")
                 }
             // 历史从最后 400 行的字节起点开始跟随（不是 `tail -n`）：这样读到哪个字节是算得出来的，下次接着读
-            val ts = TranscriptStream.tailStart(s, file, 400)
+            // ⚠️ 拿不到就**在这儿等着重试**，别 return：effect 的 key 是 (sessionName, ssh)，连接只是抖一下、
+            //    ssh 对象没换的话它不会重跑，用户就永远停在「正在重试…」上（Opus 审查 2026-09-05 指出的）。
+            var ts: Pair<Long, Long>? = null
+            while (ts == null) {
+                ts = TranscriptStream.tailStart(s, file, 400)
+                if (ts == null) {
+                    if (items.isEmpty()) status = t("连接还没稳，正在重试…")
+                    delay(2_000)
+                }
+            }
             // ⚠️⚠️ **tailStart 拿不到就停，绝不退回 0。** 原来是 `?: 0L`：连接正在重建（切后台回来那一刻）时
             //    exec 回空串 → tailStart 为 null → 从**第 1 个字节**开始 `tail -c +1 -f` —— 把 373MB 的整个转录
             //    从几周前的第一句话开始重放，手机边解析边滚，最后停在项目第一天的对话上
             //    （用户 2026-09-05 第五次报，截图是最早那次装公钥的对话）。而且这个 0 会写进 ChatMemory，
             //    之后每次进来都重放一遍。连接一稳（ssh 换新对象）这个 effect 会自己重跑。
-            if (ts == null) {
-                if (items.isEmpty()) status = t("连接还没稳，正在重试…")
-                return@LaunchedEffect
-            }
             val start = ts.second
             // ⚠️ 这一趟要灌多少字节 —— 下面拿它当「灌完了没」的**确定判据**（见 caughtUp）
             expectBytes = (ts.first - ts.second).coerceAtLeast(0L)
