@@ -72,11 +72,13 @@ object Attachments {
         index: Int, isImage: Boolean, stamp: String,
         /** 进度 `(已传, 总数)`，返回 false 中止（见 [Sftp.write]） */
         progress: ((Long, Long) -> Boolean)? = null,
+        /** 重试时传 true：从服务器上已有的那半个接着传（见 [Sftp.write]） */
+        resume: Boolean = false,
     ): Staged {
         val dir = dirFor(session)
         sftp.mkdirs(dir)
         val path = remotePath(session, name, stamp)
-        sftp.write(path, input, total, progress)
+        sftp.write(path, input, total, progress, resume)
         return Staged(
             if (isImage) t("图片%d").format(index) else t("附件%d").format(index),
             path, isImage, ext = extOf(name),

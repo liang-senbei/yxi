@@ -119,6 +119,17 @@ fun SessionsScreen(
     var collapsed by remember(host.id) { mutableStateOf(Board.collapsed(ctx, host.id)) }
     // ⚠️ 从缓存起步，不从空表起步 —— 否则每次进看板都先是一屏「没编组」，等一趟 SSH 才分组（见 Recent.groups）
     var groups by remember(host.id) { mutableStateOf(app.yxi.agent.Recent.groups(ctx, host.id)) }
+    // 每个会话走哪条线路（cc-Yxi_pilot 的 Lines.labels，一次 SSH 往返）。读不到的不在 Map 里，卡片就不画。
+    // ⚠️ 单独一条 5 秒轮询，不挂进 snapshotFull 那条链 —— 线路读失败不该拖累会话列表。
+    var lineLabels by remember(host.id) { mutableStateOf<Map<String, app.yxi.agent.Lines.Label>>(emptyMap()) }
+    val latestSessions = androidx.compose.runtime.rememberUpdatedState(sessions)
+    LaunchedEffect(ssh, host.id) {
+        val s = ssh ?: return@LaunchedEffect
+        while (true) {
+            lineLabels = runCatching { app.yxi.agent.Lines.labels(s, latestSessions.value) }.getOrDefault(lineLabels)
+            delay(5000)
+        }
+    }
     /// 正在给哪个会话选组
     /** 正在编辑哪个组的组规 */
     var ruleFor by remember { mutableStateOf<String?>(null) }
@@ -620,6 +631,7 @@ fun SessionsScreen(
                         ) {
                         SessionCard(
                             members[i],
+                            line = lineLabels[members[i].name]?.text,
                             faved = members[i].name in faved,
                             pinned = members[i].name in pinned,
                             onOpen = { onOpenChat(members[i].name, members[i].cwd) },
@@ -660,6 +672,7 @@ fun SessionsScreen(
                         ) {
                         SessionCard(
                             group[i],
+                            line = lineLabels[group[i].name]?.text,
                             faved = group[i].name in faved,
                             pinned = group[i].name in pinned,
                             // 点卡片 = 进对话；气泡按钮 = 不进对话直接回一句
@@ -1075,6 +1088,8 @@ private fun SessionCard(
     s: Session,
     /** 点一下 = 进对话（在里面回它）。 */
     onOpen: () -> Unit,
+    /** 这个会话走的线路（「Yxi_switch · 名」/「claude · 官方登录」/「自定义 · 域名」）。null = 读不到，不画。 */
+    line: String? = null,
     /** 图钉下面那个气泡按钮 = **不进对话直接回一句**（0.8.8 加回来，用户要求）。 */
     onReply: () -> Unit = {},
     // ⚠️ **卡片上不放 ☆ 和图钉了**（用户 2026-09-04：「收藏那个五角星标记去掉，置顶的图标也去掉，
@@ -1168,6 +1183,14 @@ private fun SessionCard(
             if (detail.isNotEmpty()) {
                 Text(
                     detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 13.dp),
+                )
+            }
+            // 线路：走的哪条配置（线路 v2，cc-Yxi_pilot）。读不到就不画，不猜。
+            line?.let {
+                Text(
+                    it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline,
                     maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     modifier = Modifier.padding(start = 13.dp),
                 )

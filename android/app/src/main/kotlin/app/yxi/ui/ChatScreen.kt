@@ -183,26 +183,36 @@ fun ChatScreen(
                 // 还是试两次：新通道也可能撞上网络抖动。
                 var ok: app.yxi.agent.Attachments.Staged? = null
                 var lastErr: Throwable? = null
-                repeat(2) {
-                    if (ok != null || up.cancelled) return@repeat
+                // ⚠️ **最多 4 次、失败了不删、下一次从断点续传。** 原来只试 2 次、每次失败都把半个文件
+                //    删掉从头来 —— 手机网络一抖大文件就永远传不完，用户只能一遍遍点重试（2026-09-05）。
+                //    现在链路抖一下只是多等一会儿，传过的字节不白传。间隔 1s / 2s / 4s，别把抖动的链路越抖越坏。
+                for (attempt in 0 until 4) {
+                    if (ok != null || up.cancelled) break
+                    if (attempt > 0) delay(1000L shl (attempt - 1))
                     val fresh = app.yxi.ssh.catching { s0.openSftp() }.getOrNull()
-                    if (fresh == null) { lastErr = IllegalStateException(t("开不了 SFTP 通道")); return@repeat }
+                    if (fresh == null) { lastErr = IllegalStateException(t("开不了 SFTP 通道")); continue }
                     try {
-                        // 每次尝试重新开流：上一次失败时流可能已经读到一半
+                        // 每次尝试重新开流：续传时 jsch 自己会 skip 掉远端已有的那段
                         val input = ctx.contentResolver.openInputStream(up.uri) ?: error(t("这个文件读不出来"))
-                        ok = app.yxi.agent.Attachments.upload(fresh, sessionName, up.name, input, size, idx, up.isImage, stamp) { done, total ->
-                            up.progress = if (total > 0) done.toFloat() / total else 0f
-                            !up.cancelled          // ✕ 按下去这里返回 false，jsch 就停
-                        }.copy(localUri = up.uri.toString())
+                        ok = app.yxi.agent.Attachments.upload(
+                            fresh, sessionName, up.name, input, size, idx, up.isImage, stamp,
+                            progress = { done, total ->
+                                up.progress = if (total > 0) done.toFloat() / total else 0f
+                                !up.cancelled          // ✕ 按下去这里返回 false，jsch 就停
+                            },
+                            resume = attempt > 0,
+                        ).copy(localUri = up.uri.toString())
                     } catch (e: Throwable) {
                         if (e is kotlinx.coroutines.CancellationException) throw e
                         lastErr = e
-                        // 取消 / 失败：传了一半的那个别留在服务器上
-                        runCatching { fresh.rm(path) }
+                        // 取消才删；失败留着，下一次续传接着用
+                        if (up.cancelled) runCatching { fresh.rm(path) }
                     } finally {
                         runCatching { fresh.close() }
                     }
                 }
+                // 四次都没成：半个文件别留在服务器上
+                if (ok == null && !up.cancelled) runCatching { s0.openSftp().let { f -> try { f.rm(path) } finally { f.close() } } }
                 when {
                     up.cancelled -> {}
                     ok != null -> { staged = app.yxi.agent.Attachments.renumber(staged + ok!!); queue.remove(up) }

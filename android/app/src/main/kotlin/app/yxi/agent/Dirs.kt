@@ -98,7 +98,11 @@ object Dirs {
         // ⚠️ 只认这两个，别的一律退回 claude —— 这行最终是 send-keys 进 shell 的
         val a0 = if (agent == "codex" || (agent == null && session.startsWith("cx-"))) "codex" else "claude"
         val extra = launchArgs.filter { it.isLetterOrDigit() || it in "-[]._ " }.trim()
-        val a = if (extra.isNotEmpty() && a0 == "claude") "claude $extra" else a0
+        // ⚠️⚠️ 带参数时必须 `command claude`：交互 shell 里 `claude` 是 bashrc 的**函数**（→ cloud-enter，
+        //    自动 tmux + 登记 + resume），它会**吞掉参数**并把会话登记给 watchdog —— 模拟器实测：
+        //    发了 `claude --model sonnet --effort medium`，起来的却是「Fable 5.1 with max effort」。
+        //    绕开函数直接跑二进制；root 跑 --dangerously-skip-permissions 要 IS_SANDBOX=1（跟 cloud-enter 一样）。
+        val a = if (extra.isNotEmpty() && a0 == "claude") "IS_SANDBOX=1 command claude $extra --dangerously-skip-permissions" else a0
         val launch = if (resume && a == "claude") """
             enc=${'$'}(printf %s "${'$'}want" | sed 's/[^A-Za-z0-9]/-/g')
             u=${'$'}(ls -t "${'$'}HOME/.claude/projects/${'$'}enc"/????????-????-????-????-????????????.jsonl 2>/dev/null | head -1)

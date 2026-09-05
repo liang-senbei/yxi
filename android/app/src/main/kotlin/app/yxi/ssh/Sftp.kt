@@ -141,18 +141,27 @@ class Sftp internal constructor(private val ch: ChannelSftp, private val lock: M
     suspend fun write(
         path: String, input: java.io.InputStream, total: Long,
         progress: ((Long, Long) -> Boolean)? = null,
+        /**
+         * **续传**：服务器上已经有半个文件时，从它的大小接着传。jsch 的 RESUME 模式会自己
+         * 读远端大小、在 [input] 上 `skip` 掉那么多字节 —— 所以调用方只管**重新开一个流**传进来。
+         * ⚠️ 视频「要点击重试多次」的根就在这：原来每次失败都 `rm` 掉半个文件从头来，
+         * 手机网络一抖就白传 —— 大文件在抖动的链路上永远传不完（用户 2026-09-05）。
+         */
+        resume: Boolean = false,
     ) = withContext(Dispatchers.IO) {
         lock.withLock {
+            val mode = if (resume) ChannelSftp.RESUME else ChannelSftp.OVERWRITE
             input.use { inp ->
-                if (progress == null) ch.put(inp, path, ChannelSftp.OVERWRITE)
+                if (progress == null) ch.put(inp, path, mode)
                 else {
-                    var done = 0L
+                    // RESUME 时 jsch 会从「已传到的字节」起报 count；这里的 done 也从远端大小起算，进度条才不倒退
+                    var done = if (resume) runCatching { ch.stat(path).size }.getOrDefault(0L) else 0L
                     val mon = object : com.jcraft.jsch.SftpProgressMonitor {
-                        override fun init(op: Int, src: String?, dest: String?, max: Long) { done = 0 }
+                        override fun init(op: Int, src: String?, dest: String?, max: Long) {}
                         override fun count(n: Long): Boolean { done += n; return progress(done, total) }
                         override fun end() {}
                     }
-                    ch.put(inp, path, mon, ChannelSftp.OVERWRITE)
+                    ch.put(inp, path, mon, mode)
                 }
             }
         }
