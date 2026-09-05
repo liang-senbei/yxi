@@ -62,10 +62,22 @@ object Tz {
     private val D = DateTimeFormatter.ofPattern("yyyy-MM-dd")
     private val SHORT = DateTimeFormatter.ofPattern("MM-dd HH:mm")
 
+    /** 只有日期没有时刻的值（`2026-10-06`）。⚠️ 这种是**日历日**不是时刻，换时区不该动它 ——
+     *  按北京 0 点换到纽约会变成前一天，「10-06 到期」显示成「10-05 到期」是错的。 */
+    private fun dateOnly(s: String) = s.length == 10 && s[4] == '-' && s[7] == '-'
+
     /** ISO → 「2026-09-05 16:08」（按设置的时区）。解不出来原样退回（截 16 位）—— 别把一段乱码显示成空。 */
-    fun dateTime(iso: String?): String = parse(iso)?.atZone(zone.zoneId)?.format(DT) ?: iso.orEmpty().take(16).replace('T', ' ')
-    /** ISO → 「2026-09-05」 */
-    fun date(iso: String?): String = parse(iso)?.atZone(zone.zoneId)?.format(D) ?: iso.orEmpty().take(10)
+    fun dateTime(iso: String?): String {
+        val s = iso?.trim().orEmpty()
+        if (dateOnly(s)) return s
+        return parse(s)?.atZone(zone.zoneId)?.format(DT) ?: s.take(16).replace('T', ' ')
+    }
+    /** ISO → 「2026-09-05」。纯日期原样返回（见 [dateOnly]）。 */
+    fun date(iso: String?): String {
+        val s = iso?.trim().orEmpty()
+        if (dateOnly(s)) return s
+        return parse(s)?.atZone(zone.zoneId)?.format(D) ?: s.take(10)
+    }
     /** unix 秒 → 「09-05 16:08」（实验室 / 工单那种短格式） */
     fun stamp(epochSec: Long): String = Instant.ofEpochSecond(epochSec).atZone(zone.zoneId).format(SHORT)
 }
