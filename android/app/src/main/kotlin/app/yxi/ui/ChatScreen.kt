@@ -481,8 +481,15 @@ fun ChatScreen(
         // 再只拉增量。原来每次都从头找文件、拉 0.5MB 首屏、再灌 4MB 历史 —— 用户：「退出去再进要等好久」。
         val memKey = app.yxi.agent.ChatMemory.key(hostId, sessionName)
         val remembered = app.yxi.agent.ChatMemory.get(memKey)?.takeIf { it.items.isNotEmpty() }
+        // ⚠️⚠️ **数据一落地就把列表钉到底**，不靠下面那个追底 effect。
+        //    `rememberLazyListState()` 从第 0 条（= 窗口里**最老**的那条）开始画；追底 effect 是 collectLatest，
+        //    活跃会话每 300ms 换一批 items 就把它取消一次 —— 动画永远跑不完，视图就停在很久以前的内容上
+        //    （用户 2026-09-05 第四次报：截图停在两天前的对话）。requestScrollToItem 在**下一次布局**生效、
+        //    不是动画、取消不了，索引给大了会被夹到最后一条。
+        fun pinToEnd() = listState.requestScrollToItem(Int.MAX_VALUE / 2, END_OFFSET)
         if (remembered != null) {
             items = remembered.items; remembered.ctx?.let { ctxUse = it }; settled = true
+            pinToEnd()
             status = t("这是上次的内容，正在取最新…")
         }
         // ⚠️ 会话名必须传 —— 转录按 sessionId 找，不按目录找。
@@ -520,6 +527,7 @@ fun ChatScreen(
                         items = withContext(Dispatchers.Default) {
                             inc0.add(head.asSequence()); inc0.snapshot()
                         }
+                        pinToEnd()
                         inc0.ctx?.let { ctxUse = it }
                         // 存下来，下次冷启动能立刻画出这几条
                         app.yxi.agent.TranscriptCache.save(ctx, sessionName, cwd, head)
@@ -555,6 +563,8 @@ fun ChatScreen(
         // 这一趟已经吃进去多少字节 —— 跟 expectBytes 比，就知道历史灌完没有
         var eaten = 0L
         var idleTicks = 0
+        // 完整列表已经上过屏（钉过一次底）
+        var promoted = !fresh
         val inc = entry.inc
         val pending = ArrayList<String>()
         var pendingBytes = 0L
@@ -584,7 +594,7 @@ fun ChatScreen(
                     //    空转兜底，而且要连着 10 拍（3 秒）。
                     if (!caughtUp && expectBytes == 0L && idleTicks >= 10) {
                         val snap = withContext(Dispatchers.Default) { inc.snapshot() }
-                        if (snap.isNotEmpty()) { items = snap; caughtUp = true; inc.ctx?.let { ctxUse = it } }
+                        if (snap.isNotEmpty()) { items = snap; caughtUp = true; inc.ctx?.let { ctxUse = it }; promoted = true; pinToEnd() }
                     }
                     if (items.isNotEmpty() && caughtUp) settled = true
                     continue
@@ -601,8 +611,11 @@ fun ChatScreen(
                 if (!caughtUp && headLastKey != null && snap.any { it.key == headLastKey }) caughtUp = true
                 if (!caughtUp && expectBytes > 0 && eaten >= expectBytes) caughtUp = true
                 if (caughtUp) {
+                    val firstFull = !promoted
                     items = snap; inc.ctx?.let { ctxUse = it }; status = null
                     entry.items = snap; entry.ctx = inc.ctx
+                    // 60 行首屏 → 400 行完整列表那一下：换完立刻钉到底（锚点保住了也要钉，首屏最后一条可能不在屏底）
+                    if (firstFull) { promoted = true; pinToEnd() }
                 }
             }
         }
@@ -655,11 +668,15 @@ fun ChatScreen(
         //    行数不变而**内容变了**的情况真实存在：三条工具卡合成一组（size 不变、
         //    屏幕上少两行、高度掉几百像素）、排队消息出队变成真消息（out +1 / queued -1，
         //    size 完全不变）。只盯 size 的话这些时候**一次都不追**，位置就留在错的地方。
-        snapshotFlow { items to settled }.collectLatest { (list, st) ->
+        // ⚠️ **collect 不是 collectLatest**：活跃会话每 300ms 换一批 items，collectLatest 会把上一次
+        //    还没滚完的动画取消掉再等 110ms 重来 —— 在出字的会话里它**永远滚不到底**，
+        //    这就是「停在很久以前的内容」的另一半根因（进场那一半靠 pinToEnd）。
+        //    顺序执行的话每次最多 30 帧就完，攒几批也就多滚几下，不会跑丢。
+        snapshotFlow { items to settled }.collect { (list, st) ->
             val n = list.size
-            if (n == 0) return@collectLatest
-            if (!st) { runCatching { listState.scrollToEnd() }; return@collectLatest }   // 灌历史：立刻贴底
-            if (!stick) return@collectLatest
+            if (n == 0) return@collect
+            if (!st) { runCatching { listState.scrollToEnd() }; return@collect }   // 灌历史：立刻贴底
+            if (!stick) return@collect
             delay(110)
             runCatching { listState.scrollToEnd(smooth = true) }
         }
