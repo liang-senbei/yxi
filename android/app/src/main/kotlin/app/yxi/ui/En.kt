@@ -1187,5 +1187,6 @@ internal object En {
         "再补一句…" to "Add a follow-up…",
         "发送中…" to "Sending…",
         "没发出去 —— 网络不通，或者登录过期了" to "Didn't go through — no network, or your sign-in expired",
+        "没关闭的工单太多了 —— 先把解决了的关掉几条再提" to "Too many open tickets — close a few that are solved before opening another",
     )
 }

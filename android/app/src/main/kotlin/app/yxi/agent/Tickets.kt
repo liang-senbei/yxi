@@ -56,7 +56,11 @@ object Tickets {
         val unread: Boolean,
     )
 
-    /** 提一条。@return null = 成功，否则是给人看的失败原因。 */
+    /**
+     * 提一条。@return null = 成功，否则是给人看的失败原因。
+     * ⚠️ 用 [Account.apiRaw] 不用 apiPost：服务端对**未关闭工单超过 10 张**回 429 `too_many_open`，
+     * 那不是网络问题，得告诉人「先关几条」—— 说成「网络不通」就是骗人（STYLE.md §0）。
+     */
     suspend fun add(ctx: Context, category: Category, text: String, version: String, device: String): String? =
         withContext(Dispatchers.IO) {
             val body = JSONObject()
@@ -65,7 +69,12 @@ object Tickets {
                 .put("version", version)
                 .put("device", device)
                 .toString()
-            if (Account.apiPost(ctx, BASE, body) == null) t("没发出去 —— 网络不通，或者登录过期了") else null
+            val (code, _) = Account.apiRaw(ctx, BASE, "POST", body) ?: return@withContext t("没登录")
+            when (code) {
+                in 200..299 -> null
+                429 -> t("没关闭的工单太多了 —— 先把解决了的关掉几条再提")
+                else -> t("没发出去 —— 网络不通，或者登录过期了")
+            }
         }
 
     /**

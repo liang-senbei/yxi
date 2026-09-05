@@ -899,20 +899,24 @@ fun TicketsScreen(modifier: Modifier = Modifier) {
             else -> {
                 SectionLabel(t("我的工单"))
                 items.forEach { tk ->
-                    TicketRow(
-                        tk, expanded = open == tk.id,
-                        onToggle = {
-                            open = if (open == tk.id) null else tk.id
-                            // 点开就算看过回复了：本地先翻掉红点，服务端幂等标记
-                            if (open == tk.id && tk.unread) scope.launch {
-                                if (app.yxi.agent.Tickets.markRead(ctx, tk.id)) {
-                                    val i = items.indexOfFirst { it.id == tk.id }
-                                    if (i >= 0) items[i] = tk.copy(unread = false)
+                    key(tk.id) {
+                        TicketRow(
+                            tk, expanded = open == tk.id,
+                            onToggle = {
+                                open = if (open == tk.id) null else tk.id
+                                // 点开就算看过回复了：本地先翻掉红点，服务端幂等标记
+                                if (open == tk.id && tk.unread) scope.launch {
+                                    if (app.yxi.agent.Tickets.markRead(ctx, tk.id)) {
+                                        // ⚠️ 改列表里**此刻**那一条，别拿闭包里捕获的 tk 写回去 ——
+                                        //    markRead 在飞的时候列表可能已经 reload 过，旧 tk 会把新回复盖掉
+                                        val i = items.indexOfFirst { it.id == tk.id }
+                                        if (i >= 0) items[i] = items[i].copy(unread = false)
+                                    }
                                 }
-                            }
-                        },
-                        onChanged = { reload++ },
-                    )
+                            },
+                            onChanged = { reload++ },
+                        )
+                    }
                 }
                 // 还有更旧的：传上一页最后一条的 id
                 cursor?.let { cur ->
