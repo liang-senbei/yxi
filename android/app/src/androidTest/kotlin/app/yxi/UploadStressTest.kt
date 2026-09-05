@@ -75,7 +75,7 @@ class UploadStressTest {
         try {
             val stamp = "stress-" + System.nanoTime()
             val t0 = System.currentTimeMillis()
-            val st = Attachments.upload(sftp, "cc-upload-stress", "$tag.bin", f.inputStream().buffered(), f.length(), 1, false, stamp) { _, _ -> true }
+            val st = Attachments.upload(sftp, "cc-upload-stress", "$tag.bin", f.inputStream().buffered(), f.length(), 1, false, stamp, progress = { _, _ -> true })
             val remote = sftp.size(st.remotePath)
             assertEquals("$tag：服务器上的大小和本地对不上", f.length(), remote)
             runCatching { sftp.rm(st.remotePath) }
