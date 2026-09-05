@@ -10,9 +10,9 @@
 # ⚠️ 只有「系统包」那一步要 root（或免密 sudo）；不是 root 就跳过并说明，其余照装（都在 $HOME 下）。
 # ⚠️ 装完**不登录**：登录在手机上「配置 → 连接」里做（Claude Code 是网页给码粘回来，Codex 是设备码）。
 #
-# 环境变量：YXI_NO_CODEX=1 不装 Codex · YXI_NO_CLAUDE=1 不装 Claude Code · YXI_NO_OPENCODE=1 / YXI_NO_HERMES=1 跳过选装 · YXI_SITE 换下载源
-# ⚠️ 走 `curl … | bash` 时变量要 **export** 或写在 bash 那一侧：`YXI_NO_HERMES=1 curl … | bash` 只喂给了 curl，
-#    bash 收不到（2026-09-05 干净容器实测：这么写 Hermes 照装）。正确：`export YXI_NO_HERMES=1; curl … | bash`。
+# 环境变量：YXI_NO_CODEX=1 不装 Codex · YXI_NO_CLAUDE=1 不装 Claude Code · YXI_WITH_OPENCODE=1 / YXI_WITH_HERMES=1 才装 OpenCode / Hermes（默认不装）· YXI_SITE 换下载源
+# ⚠️ 走 `curl … | bash` 时变量要 **export** 或写在 bash 那一侧：`YXI_WITH_HERMES=1 curl … | bash` 只喂给了 curl，
+#    bash 收不到（2026-09-05 干净容器实测）。正确：`export YXI_WITH_HERMES=1; curl … | bash`。
 set -uo pipefail
 
 SITE="${YXI_SITE:-https://yxi.keuury.com}"
@@ -30,7 +30,7 @@ if [ "$(id -u)" != 0 ]; then
   if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then SUDO="sudo -n"; else SUDO="none"; fi
 fi
 need=""
-# 可跳过的部分：YXI_NO_CLAUDE=1 / YXI_NO_CODEX=1 / YXI_NO_OPENCODE=1 / YXI_NO_HERMES=1
+# 可跳过的部分：YXI_NO_CLAUDE=1 / YXI_NO_CODEX=1；选装（默认不装）：YXI_WITH_OPENCODE=1 / YXI_WITH_HERMES=1
 for c in tmux curl git python3; do command -v "$c" >/dev/null 2>&1 || need="$need $c"; done
 if [ -n "$need" ]; then
   say "装系统包：$need"
@@ -94,8 +94,9 @@ if [ "${YXI_NO_CODEX:-}" != 1 ]; then
 fi
 
 # ── 3b. OpenCode：官方安装脚本（装到 ~/.opencode/bin 并自己加 PATH）。**不是 Yxi 的必需项**：
-#        装不成只 warn，不把整个装机判失败。YXI_NO_OPENCODE=1 跳过。
-if [ "${YXI_NO_OPENCODE:-}" != 1 ]; then
+#        装不成只 warn，不把整个装机判失败。**默认不装**，YXI_WITH_OPENCODE=1 才装 ——
+#        老板 2026-09-05 在手机上只勾了 Claude Code，结果 OpenCode / Hermes 照装（几百 MB）：选装的东西必须是 opt-in。
+if [ "${YXI_WITH_OPENCODE:-}" = 1 ]; then
   if command -v opencode >/dev/null 2>&1; then
     ok "OpenCode 已装：$(opencode --version 2>/dev/null | head -1)"
   else
@@ -111,8 +112,8 @@ if [ "${YXI_NO_OPENCODE:-}" != 1 ]; then
 fi
 
 # ── 3c. Hermes Agent：官方安装脚本（只要 git/curl/xz；Python 3.11 和 Node 它自己装，**几百 MB、要几分钟**）。
-#        落 ~/.local/bin/hermes。同样不是必需项：装不成只 warn。YXI_NO_HERMES=1 跳过。
-if [ "${YXI_NO_HERMES:-}" != 1 ]; then
+#        落 ~/.local/bin/hermes。同样不是必需项：装不成只 warn。**默认不装**，YXI_WITH_HERMES=1 才装。
+if [ "${YXI_WITH_HERMES:-}" = 1 ]; then
   if command -v hermes >/dev/null 2>&1; then
     ok "Hermes Agent 已装"
   else
@@ -150,8 +151,8 @@ say "结果"
 command -v tmux   >/dev/null 2>&1 && ok "tmux $(tmux -V 2>/dev/null | cut -d' ' -f2)" || warn "tmux 没有 —— 没有它手机上看不到会话"
 command -v claude >/dev/null 2>&1 && ok "claude $(claude --version 2>/dev/null | head -1)" || warn "claude 没有"
 command -v codex  >/dev/null 2>&1 && ok "codex $(codex --version 2>/dev/null)" || warn "codex 没有"
-command -v opencode >/dev/null 2>&1 && ok "opencode $(opencode --version 2>/dev/null | head -1)" || warn "opencode 没有（可选）"
-command -v hermes   >/dev/null 2>&1 && ok "hermes 在" || warn "hermes 没有（可选）"
+command -v opencode >/dev/null 2>&1 && ok "opencode $(opencode --version 2>/dev/null | head -1)"
+command -v hermes   >/dev/null 2>&1 && ok "hermes 在"
 echo
 if [ $FAIL = 0 ]; then
   echo "装好了。下一步：手机上「配置 → 连接」里登录 Claude Code / Codex，然后回看板 ＋ 开会话。"
