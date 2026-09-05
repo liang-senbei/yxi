@@ -31,7 +31,8 @@
 往 `sshd_config` 写 `Port` 无效且会跟 socket 抢端口把 22 一起搞挂。见 TROUBLESHOOTING #67。
 
 ## 待发版（攒着）
-- **cc-Yxi · 对话页停在两天前 / 几周前（#271 #272）**：进场钉底 + 追底 effect 改 collect；tailStart 拿不到不再退回 0（整文件重放）。老板说「这个问题很严重」——建议这条到齐就发。
+- **cc-Yxi · 对话页停在两天前 / 几周前（#271 #272 #273）**：进场钉底 + 追底 effect 改 collect；tailStart 拿不到不再退回 0；**真根因 #273**：心跳空行被记进字节位置 → offset 超过文件大小 → GNU tail 判 file truncated 从 0 重放整份转录。空行不计字节 + `streamFrom` 起点夹到文件大小内。Mac E2E 第三轮复现过、修后针对性 E2E（闲置会话 cc-e2e，客观判据：tail 起点 ≤ 文件大小 / logcat 无 truncated / 屏上是最新 token）。
+- **cc-Yxi · 一键装机不再顺带装 OpenCode / Hermes**（老板 2026-09-05 截图：只勾 Claude Code 却装了几百 MB）：bootstrap.sh 改 opt-in（`YXI_WITH_OPENCODE=1` / `YXI_WITH_HERMES=1`），**已发到公网**（服务器脚本不随 APK，手机点装机时现拉）。待办：看板头部主机名太长会折成两行挤按钮（截图 Thor-h/e）。
 - **cc-Yxi · 时区设置**：设置 → 界面 → 时区（跟随手机 / UTC / 北京 / 纽约 / 洛杉矶 / 东京），全 App 绝对时间统一走 `agent/Tz.kt` 换算（额度恢复、会员到期、邮件、订单、祈愿记录、实验室、工单）；相对时间不变。编译过、i18n 归零。
 
 > 组规（老板 2026-09-05）：**所有组员都改好了才构建新版本，别频繁发**。修完一处先记在这儿，一行一条、写清是谁的；
