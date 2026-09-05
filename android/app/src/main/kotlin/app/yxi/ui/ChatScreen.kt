@@ -480,7 +480,8 @@ fun ChatScreen(
         // ⚠️ **进过的对话留在内存里**（[app.yxi.agent.ChatMemory]）：重进先把上次的条目原样摆出来、
         // 再只拉增量。原来每次都从头找文件、拉 0.5MB 首屏、再灌 4MB 历史 —— 用户：「退出去再进要等好久」。
         val memKey = app.yxi.agent.ChatMemory.key(hostId, sessionName)
-        val remembered = app.yxi.agent.ChatMemory.get(memKey)?.takeIf { it.items.isNotEmpty() }
+        // ⚠️ offset 为 0 的缓存条目是**中毒**的（见下面 tailStart 那条注释）：拿它续流等于把整个转录从第一个字节重放。
+        val remembered = app.yxi.agent.ChatMemory.get(memKey)?.takeIf { it.items.isNotEmpty() && it.offset > 0L }
         // ⚠️⚠️ **数据一落地就把列表钉到底**，不靠下面那个追底 effect。
         //    `rememberLazyListState()` 从第 0 条（= 窗口里**最老**的那条）开始画；追底 effect 是 collectLatest，
         //    活跃会话每 300ms 换一批 items 就把它取消一次 —— 动画永远跑不完，视图就停在很久以前的内容上
@@ -540,9 +541,18 @@ fun ChatScreen(
                 }
             // 历史从最后 400 行的字节起点开始跟随（不是 `tail -n`）：这样读到哪个字节是算得出来的，下次接着读
             val ts = TranscriptStream.tailStart(s, file, 400)
-            val start = ts?.second ?: 0L
+            // ⚠️⚠️ **tailStart 拿不到就停，绝不退回 0。** 原来是 `?: 0L`：连接正在重建（切后台回来那一刻）时
+            //    exec 回空串 → tailStart 为 null → 从**第 1 个字节**开始 `tail -c +1 -f` —— 把 373MB 的整个转录
+            //    从几周前的第一句话开始重放，手机边解析边滚，最后停在项目第一天的对话上
+            //    （用户 2026-09-05 第五次报，截图是最早那次装公钥的对话）。而且这个 0 会写进 ChatMemory，
+            //    之后每次进来都重放一遍。连接一稳（ssh 换新对象）这个 effect 会自己重跑。
+            if (ts == null) {
+                if (items.isEmpty()) status = t("连接还没稳，正在重试…")
+                return@LaunchedEffect
+            }
+            val start = ts.second
             // ⚠️ 这一趟要灌多少字节 —— 下面拿它当「灌完了没」的**确定判据**（见 caughtUp）
-            expectBytes = ts?.let { (size, st) -> size - st }?.coerceAtLeast(0L) ?: 0L
+            expectBytes = (ts.first - ts.second).coerceAtLeast(0L)
             entry = app.yxi.agent.ChatMemory.Entry(file, Transcript.Incremental()).also {
                 it.offset = start
                 app.yxi.agent.ChatMemory.put(memKey, it)
