@@ -5086,3 +5086,35 @@ SSH 写根本没发出去。新 effect 里 `pending == null`，什么都不做�
 **一般规律**：`a ?: b` 这种「首选源没有就退回次选源」的写法，要问清楚**「没有」和「明确说没事」是不是同一回事**。
 这里首选源明确说了「闲着」，却因为被编码成「没条目」而被当成「不知道」，把话语权让给了过期的次选源。
 
+## #267 「上传视频经常失败」—— 整个文件先读进内存再传
+
+**症状**（用户 2026-09-05）：图片偶尔、视频经常传不上去，没有明白的报错。
+
+**根因**：对话页附件和「分享到 Yxi」两条路都是 `openInputStream(uri).readBytes()` 把**整个文件读成一个
+ByteArray** 再交给 jsch。一段视频就是一次几百 MB 的分配（App 堆一共 256~512MB，读的过程还会再复制一遍），
+要么 OOM、要么被系统杀，表现就是「传不上去」。图片小看不出来，视频一上就炸。
+jsch 的 `put` 本来就吃 `InputStream`，中间那份 ByteArray 纯属多余。
+
+**修法**：`Sftp.write` / `Attachments.upload` 加流式重载，边读边传；大小用 `openAssetFileDescriptor(uri).length`
+只为算进度。重试时**重新开流**（上一次失败时流可能读到一半）。
+
+**压力测试**（`app/src/androidTest/.../UploadStressTest.kt`，走真 SSH 到宿主机，`sftp.size` 核对一字不差）：
+64KB / 2MB / 16MB / 64MB / **160MB** 逐档 + 6 个文件并发各开一条通道 × 3 轮，全过。
+模拟器 NAT 上约 3 MB/s，160MB 用 53 秒。
+⚠️ 跑法上的两个坑：`connectedAndroidTest` 每次**重装 App**，KeyManager 的密钥跟着换 → 测试用一把固定密钥；
+/sdcard 在分区存储下 App **读不到** → 私钥走 instrumentation 参数（base64url）进来：
+`-Pandroid.testInstrumentationRunnerArguments.stressKey=$(base64 -w0 ~/.ssh/yxi-stress | tr '+/' '-_')`。
+
+**一般规律**：凡是「文件 → 网络」的路径，**中间不许出现整文件的 ByteArray**。它在小文件上永远不会暴露，
+在用户第一次传视频那天准时炸。
+
+## #268 页眉收起了，状态芯片那条还杵在顶上
+
+**症状**：对话页往上滑，页眉（标题 / 四个标签）收起来了，「模式 / 模型 / 最大思考 / 上下文」那排芯片不动。
+
+**根因**：页眉在 Workspace 里按 `barsFrac` 平移；芯片那排在 ChatScreen 的 Column 里，不在页眉里，
+只是 `padding(top = headerDp)` 给页眉让了位 —— 它从来没接过 `barsFrac`。
+
+**修法**：`Modifier.collapseBy(frac)`：**布局高度**按 frac 缩到 0 + 淡出。
+⚠️ 不能只用 `graphicsLayer` 平移：那不改布局，列表不会跟着上来，顶上会留一条空带。
+

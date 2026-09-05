@@ -128,14 +128,15 @@ private fun SharePicker(store: HostStore, keys: KeyManager, text: String?, uris:
                         if (uri.scheme != "content") { failed++; continue }
                         // ⚠️ **一张失败不能拖垮其余的**：每张各自 try，失败只记一笔继续下一张。
                         val one = runCatching {
-                            val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                                ?: error(t("这个文件读不出来"))
+                            // ⚠️ 流式，不 readBytes —— 分享一段视频过来原来就是在这儿 OOM 的（Sftp.write 那条注释）
+                            val size = ctx.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
+                            val input = ctx.contentResolver.openInputStream(uri) ?: error(t("这个文件读不出来"))
                             val mime = ctx.contentResolver.getType(uri).orEmpty()
                             val isImage = mime.startsWith("image/")
                             val name = uri.lastPathSegment?.substringAfterLast('/') ?: if (isImage) "image" else "file"
                             val stamp = java.text.SimpleDateFormat("MMdd-HHmmss-SSS", java.util.Locale.US).format(java.util.Date())
                             Attachments.upload(
-                                sftp, target.name, name, bytes,
+                                sftp, target.name, name, input, size,
                                 staged.count { it.isImage == isImage } + 1, isImage, stamp,
                             )
                         }

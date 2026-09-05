@@ -124,18 +124,36 @@ class Sftp internal constructor(private val ch: ChannelSftp, private val lock: M
      * `SftpProgressMonitor.count` 语义）—— 附件条上那个 ✕ 靠它把正在传的那一个停下来。
      * ⚠️ 中止是抛 SftpException 出来的（jsch 没有干净的取消），调用方按 cancelled 标记区分。
      */
-    suspend fun write(path: String, bytes: ByteArray, progress: ((Long, Long) -> Boolean)? = null) = withContext(Dispatchers.IO) {
+    suspend fun write(path: String, bytes: ByteArray, progress: ((Long, Long) -> Boolean)? = null) =
+        write(path, java.io.ByteArrayInputStream(bytes), bytes.size.toLong(), progress)
+
+    /**
+     * **流式**写：从 [input] 边读边传，**不把整个文件读进内存**。
+     *
+     * ⚠️⚠️ 这是「上传视频经常失败」的根（用户 2026-09-05）：原来所有上传都先 `readBytes()`
+     * 把整个文件读成一个 ByteArray —— 一段 200MB 的视频在手机上就是一次 200MB 的分配
+     * （App 堆一共才 256~512MB，读的过程还会再复制一遍），要么直接 OOM，要么被系统杀掉，
+     * 表现就是「传不上去」而且没有明白的原因。jsch 的 `put` 本来就吃 InputStream，
+     * 中间那份 ByteArray 纯属多余。图片小、看不出来；视频一上就炸。
+     *
+     * @param total 文件总字节数，只用来算进度；不知道就给 -1（进度回调里 total 为 -1）。
+     */
+    suspend fun write(
+        path: String, input: java.io.InputStream, total: Long,
+        progress: ((Long, Long) -> Boolean)? = null,
+    ) = withContext(Dispatchers.IO) {
         lock.withLock {
-            if (progress == null) ch.put(java.io.ByteArrayInputStream(bytes), path, ChannelSftp.OVERWRITE)
-            else {
-                val total = bytes.size.toLong()
-                var done = 0L
-                val mon = object : com.jcraft.jsch.SftpProgressMonitor {
-                    override fun init(op: Int, src: String?, dest: String?, max: Long) { done = 0 }
-                    override fun count(n: Long): Boolean { done += n; return progress(done, total) }
-                    override fun end() {}
+            input.use { inp ->
+                if (progress == null) ch.put(inp, path, ChannelSftp.OVERWRITE)
+                else {
+                    var done = 0L
+                    val mon = object : com.jcraft.jsch.SftpProgressMonitor {
+                        override fun init(op: Int, src: String?, dest: String?, max: Long) { done = 0 }
+                        override fun count(n: Long): Boolean { done += n; return progress(done, total) }
+                        override fun end() {}
+                    }
+                    ch.put(inp, path, mon, ChannelSftp.OVERWRITE)
                 }
-                ch.put(java.io.ByteArrayInputStream(bytes), path, mon, ChannelSftp.OVERWRITE)
             }
         }
     }

@@ -60,13 +60,23 @@ object Attachments {
     suspend fun upload(
         sftp: Sftp, session: String, name: String, bytes: ByteArray,
         index: Int, isImage: Boolean, stamp: String,
+        progress: ((Long, Long) -> Boolean)? = null,
+    ): Staged = upload(sftp, session, name, java.io.ByteArrayInputStream(bytes), bytes.size.toLong(), index, isImage, stamp, progress)
+
+    /**
+     * **流式**上传：边读 [input] 边传，不把文件读进内存（视频就是这么传失败的，见 [Sftp.write]）。
+     * [total] 是文件字节数（不知道给 -1，进度就没法算）。
+     */
+    suspend fun upload(
+        sftp: Sftp, session: String, name: String, input: java.io.InputStream, total: Long,
+        index: Int, isImage: Boolean, stamp: String,
         /** 进度 `(已传, 总数)`，返回 false 中止（见 [Sftp.write]） */
         progress: ((Long, Long) -> Boolean)? = null,
     ): Staged {
         val dir = dirFor(session)
         sftp.mkdirs(dir)
         val path = remotePath(session, name, stamp)
-        sftp.write(path, bytes, progress)
+        sftp.write(path, input, total, progress)
         return Staged(
             if (isImage) t("图片%d").format(index) else t("附件%d").format(index),
             path, isImage, ext = extOf(name),

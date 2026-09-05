@@ -51,6 +51,7 @@ import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.layout
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.onSizeChanged
@@ -161,12 +162,16 @@ fun ChatScreen(
         up.error = null; up.progress = 0f; up.cancelled = false
         up.job = scope.launch {
             try {
-            // ⚠️ **先把字节读进内存，再谈传。** 读文件本身可能失败（授权过期、文件没了），
-            // 那跟「传失败」是两码事，要分开报。
-            val bytes = withContext(Dispatchers.IO) {
-                app.yxi.ssh.catching { ctx.contentResolver.openInputStream(up.uri)?.use { it.readBytes() } }.getOrNull()
+            // ⚠️⚠️ **不再把整个文件读进内存。** 原来这里 `readBytes()`，一段视频就是一次几百 MB 的分配，
+            //    直接 OOM / 被系统杀 —— 「上传视频经常失败」的根（Sftp.write 那条注释）。
+            //    现在只先探一下**读不读得出来 + 多大**（授权过期、文件没了这类错跟「传失败」是两码事，要分开报），
+            //    真正的字节在传的时候从流里边读边发。
+            val size = withContext(Dispatchers.IO) {
+                app.yxi.ssh.catching {
+                    ctx.contentResolver.openAssetFileDescriptor(up.uri, "r")?.use { it.length } ?: -1L
+                }.getOrNull()
             }
-            if (bytes == null || bytes.isEmpty()) { up.error = t("这个文件读不出来"); return@launch }
+            if (size == null || size == 0L) { up.error = t("这个文件读不出来"); return@launch }
             // 排队：一个一个传，序号才连得上（并发时每个协程读到同一份 staged，五张全叫「图片1」，#156）
             uploadLock.withLock {
                 if (up.cancelled) return@withLock
@@ -183,7 +188,9 @@ fun ChatScreen(
                     val fresh = app.yxi.ssh.catching { s0.openSftp() }.getOrNull()
                     if (fresh == null) { lastErr = IllegalStateException(t("开不了 SFTP 通道")); return@repeat }
                     try {
-                        ok = app.yxi.agent.Attachments.upload(fresh, sessionName, up.name, bytes, idx, up.isImage, stamp) { done, total ->
+                        // 每次尝试重新开流：上一次失败时流可能已经读到一半
+                        val input = ctx.contentResolver.openInputStream(up.uri) ?: error(t("这个文件读不出来"))
+                        ok = app.yxi.agent.Attachments.upload(fresh, sessionName, up.name, input, size, idx, up.isImage, stamp) { done, total ->
                             up.progress = if (total > 0) done.toFloat() / total else 0f
                             !up.cancelled          // ✕ 按下去这里返回 false，jsch 就停
                         }.copy(localUri = up.uri.toString())
@@ -662,10 +669,15 @@ fun ChatScreen(
     val statsShown = showStats && (ctxUse != null || todayUse != null)
     Column(Modifier.fillMaxSize()) {
         // 标题和路径由 Workspace 的头部管，这里只在出问题时说一句
+        // ⚠️ 这几行（状态提示 / 状态条）**要跟页眉一起收起来**。页眉在 Workspace 里按 barsFrac 上移，
+        //    而它们在这个 Column 里、不在页眉里 —— 原来纹丝不动，用户 2026-09-05 录到的就是：
+        //    「闪电标志（状态条）不关掉，往上滑页眉收了、这条还杵在顶上」。
+        //    ⚠️ 不能只做 graphicsLayer 平移/淡出：那不改布局，列表不会跟着上来，顶上会留一条空带。
+        //    所以用 [collapseBy]：**布局高度**按 barsFrac 缩到 0，内容往上推出去。
         status?.let {
             Text(
                 it,
-                Modifier.fillMaxWidth().padding(18.dp, 8.dp).padding(top = headerDp),
+                Modifier.fillMaxWidth().collapseBy(barsFrac).padding(18.dp, 8.dp).padding(top = headerDp),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.outline,
             )
@@ -685,7 +697,7 @@ fun ChatScreen(
                 // ⚠️ **放不下要换行，不能裁。** 这行有五格（模式 / 模型 / 思考强度 / 上下文 / 今日），
                 // 窄屏一定放不下。原来是横滑，结果默认停在最左边、右边那两格数字**看着就是被切掉的**
                 // —— 而右边那两格恰恰是要看的（上下文、今日花了多少）。换行了就一个都不少。
-                Modifier.fillMaxWidth()
+                Modifier.fillMaxWidth().collapseBy(barsFrac)
                     .padding(top = if (status == null) headerDp else 0.dp)
                     .padding(14.dp, 2.dp, 14.dp, 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
@@ -2251,3 +2263,18 @@ private fun StatChip(
         }
     }
 }
+
+/**
+ * 按 [frac]（0 = 全在，1 = 收完）把这一块**在布局上**收掉：高度缩到 0，内容往上推、同时淡出。
+ * ⚠️ 用 layout 而不是 graphicsLayer —— 后者只改画面不改布局，下面的列表不会跟着上来，会留一条空带。
+ * 每帧重新布局这一块（几个芯片）代价可以忽略。
+ */
+private fun Modifier.collapseBy(frac: Float): Modifier = this
+    .layout { measurable, constraints ->
+        val p = measurable.measure(constraints)
+        val f = frac.coerceIn(0f, 1f)
+        val h = (p.height * (1f - f)).toInt()
+        layout(p.width, h) { p.placeRelative(0, h - p.height) }
+    }
+    .graphicsLayer { alpha = 1f - frac.coerceIn(0f, 1f) }
+
