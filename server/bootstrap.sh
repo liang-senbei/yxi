@@ -10,7 +10,9 @@
 # ⚠️ 只有「系统包」那一步要 root（或免密 sudo）；不是 root 就跳过并说明，其余照装（都在 $HOME 下）。
 # ⚠️ 装完**不登录**：登录在手机上「配置 → 连接」里做（Claude Code 是网页给码粘回来，Codex 是设备码）。
 #
-# 环境变量：YXI_NO_CODEX=1 不装 Codex · YXI_NO_CLAUDE=1 不装 Claude Code · YXI_SITE 换服务器侧工具的下载源
+# 环境变量：YXI_NO_CODEX=1 不装 Codex · YXI_NO_CLAUDE=1 不装 Claude Code · YXI_NO_OPENCODE=1 / YXI_NO_HERMES=1 跳过选装 · YXI_SITE 换下载源
+# ⚠️ 走 `curl … | bash` 时变量要 **export** 或写在 bash 那一侧：`YXI_NO_HERMES=1 curl … | bash` 只喂给了 curl，
+#    bash 收不到（2026-09-05 干净容器实测：这么写 Hermes 照装）。正确：`export YXI_NO_HERMES=1; curl … | bash`。
 set -uo pipefail
 
 SITE="${YXI_SITE:-https://yxi.keuury.com}"
