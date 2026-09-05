@@ -31,19 +31,21 @@
 往 `sshd_config` 写 `Port` 无效且会跟 socket 抢端口把 22 一起搞挂。见 TROUBLESHOOTING #67。
 
 ## 待发版（攒着）
-- **cc-Yxi · 对话页停在两天前 / 几周前（#271 #272 #273）**：进场钉底 + 追底 effect 改 collect；tailStart 拿不到不再退回 0；**真根因 #273**：心跳空行被记进字节位置 → offset 超过文件大小 → GNU tail 判 file truncated 从 0 重放整份转录。空行不计字节 + `streamFrom` 起点夹到文件大小内。Mac E2E 第三轮复现过、修后针对性 E2E（闲置会话 cc-e2e，客观判据：tail 起点 ≤ 文件大小 / logcat 无 truncated / 屏上是最新 token）。
-- **cc-Yxi · 一键装机不再顺带装 OpenCode / Hermes**（老板 2026-09-05 截图：只勾 Claude Code 却装了几百 MB）：bootstrap.sh 改 opt-in（`YXI_WITH_OPENCODE=1` / `YXI_WITH_HERMES=1`），**已发到公网**（服务器脚本不随 APK，手机点装机时现拉）。待办：看板头部主机名太长会折成两行挤按钮（截图 Thor-h/e）。
-- **cc-Yxi · 时区设置**：设置 → 界面 → 时区（跟随手机 / UTC / 北京 / 纽约 / 洛杉矶 / 东京），全 App 绝对时间统一走 `agent/Tz.kt` 换算（额度恢复、会员到期、邮件、订单、祈愿记录、实验室、工单）；相对时间不变。编译过、i18n 归零。
 
 > 组规（老板 2026-09-05）：**所有组员都改好了才构建新版本，别频繁发**。修完一处先记在这儿，一行一条、写清是谁的；
 > 发版前 `yxi-hub all` 问一圈都齐了再 build + publish；发完清空。例外只有线上崩溃 / 数据风险，破例前先跟老板说。
 
-- **cc-Yxi_pilot · 线路 v2**（已合入 HEAD，未发版）：一条线路 = 整段 settings 片段（白名单键）、80 条 Claude / 57 条 Codex 预设、五个开关、高级 JSON；看板每个会话显示 `Yxi_switch · 名` / `claude · 官方登录` / codex 段；装机加 OpenCode/Hermes。门禁：两轮 Opus 5 审查全修 + 模拟器 E2E 8 项全过（`Yxi_pilot/design/lines-v2.md`）。
-  cc-Yxi 侧三件（放开轮询 / 置顶卡片传 line / En +15）**已做完**，i18n 归零、编译过。
-- **cc-Yxi_pilot · 主机加 Tailscale 内网连接**（老板 2026-09-05 要的）：加/改主机表单多一条「公网 | Tailscale 内网」切换，选内网填 100.x IP；只换连的地址，**认证不动**（密钥 / 密码照旧）。`Host` +`tailscaleIp`/`useTailscale`，`connectHost` 统一出口——SshConnect / KnownHosts 指纹框 / DevMode 诊断 / 设置页描述全走它；卡片走内网时「在用」旁多一枚「内网」药丸；改了内网 IP 同样作废指纹（同「改地址」的理由）。文件：`ssh/HostStore.kt` · `ui/HostsScreen.kt` · `ui/SshConnect.kt` · `ssh/KnownHosts.kt` · `ui/DevMode.kt` · `ui/SettingsScreen.kt` · `agent/TailscaleStatus.kt`（新增）。含 Tailscale 设备列表（老板追加）：长按主机展开后「内网设备」按钮，现连一次 `tailscale status --json`，列 Self + Peers（在线绿/离线灰点 + 主机名 + 100.x IP + OS + 离线补 `Tz.dateTime(LastSeen)`）；不轮询、有刷新。**编译过**；En +12 在 `Yxi_pilot/design/tailscale-en.txt` 等 cc-Yxi 贴；**审查 / Mac mini E2E 还没做**——老板说先记着一起验。
-- **cc-Yxi_Entertainment · 工单中心搬进会员服务 + 分类**（老板 2026-09-05 拍板）：工单从「SSH 落用户自己服务器的 JSONL」改走 `/api/support/tickets`（cc-logto_yxi 已上线，契约 `logto_yxi/design/support-tickets.md`）。提单必选分类（账号问题 / Bug 反馈 / 充值问题 / 其他问题）；「我的工单」列表：分类 / 状态 / 时间、未读回复红点、展开看回复串、追问（关闭的追问 = 重开）；「我的」工单格红点（同邮件的 Badges 水位）。文件：`agent/Tickets.kt`（重写）· `ui/SettingsScreen.kt`（工单页 + 工单格）· `agent/Account.kt`（`unreadTickets`）· `ui/Badges.kt`（按 key）· `MainActivity.kt`（一行）· `En.kt`（+20/−3）· `androidTest/TicketsTest.kt`（3 条过）。**编译过、i18n 归零、模拟器 + 真服务器 E2E 全过**（提单 → 后台回复 → 红点亮 → 点开消 → 追问翻回待处理 → 关闭后可重开）。**Opus 子代理审查已过、修复经同一审查员复核确认**（2 处该修 + 1 处建议全改了：429 超限单独提示 · 标已读改写列表当前项 · forEach 加 key），**修复后已在 Mac mini 模拟器复验**（工单格红点亮 → 列表红点 + 已回复 → 展开标已读、库里 last_read_reply_id 推进到最新 → 返回红点消）。**齐了。** 修复在工作树里（Tickets.kt / SettingsScreen.kt / En.kt），待 cc-Yxi 按路径提交。
+- **cc-Yxi_pilot · 主机加 Tailscale 内网连接**（老板 2026-09-05 要的）：加/改主机表单「公网 | Tailscale 内网」切换 + 设备列表。**编译过**；En +12 已贴 En.kt；**审查 / Mac mini E2E 还没做**——老板说先记着一起验。
+- 待办：看板头部主机名太长会折成两行挤按钮（截图 Thor-h/e）。
+- **待老板拍板 · 抽卡界面改 activetheory.net 风格**（老板 2026-09-05 问「能不能像素级复刻」）：提案已推实验室「抽卡动效」组（`祈愿 · 铬环（Active Theory 风）` + 对照图）。结论：他们是整站 WebGL 3D（PBR 铬材质 / bloom / GPU 粒子，软件 GPU 直接被拦到 unsupported 页），**像素级复刻做不到、他们的 logo·字体（NB Architekt 商业授权）·模型也不能拿**；能做的是同一套视觉语言（黑场+青紫雾、铬环、景深星尘、光条、玻璃卡、故障字、细边药丸）用 Canvas 2D 重做，可原样搬进 `DropEffect.kt`/`WishScreen.kt`。采纳后再动 App（drop-effect 规格归 cc-logto_yxi，动之前先对）。
 
 ## 进度
+- ✅ **1.1.12（versionCode 168）已发布**（2026-09-05）：
+  - **对话页跳到几周前对话修复（#273 真根因）**：心跳空行字节漂移 → offset 超文件大小 → GNU tail `file truncated` 从 0 重放。修：空行不计字节 + `streamFrom` 起点夹到文件大小。Mac E2E 三轮全过。
+  - **一键装机不再顺带装 OpenCode / Hermes**：bootstrap.sh 改 opt-in。
+  - **时区设置**：设置 → 界面 → 时区，全 App 绝对时间走 `agent/Tz.kt`。
+  - **工单中心搬进会员服务 + 分类**（cc-Yxi_Entertainment）：走 `/api/support/tickets`，分类 + 未读红点 + 回复串 + 追问重开。
+  - **线路 v2**（cc-Yxi_pilot）：整段 settings 片段 + 预设 + 五开关 + 高级 JSON。
 - ✅ **1.1.11（versionCode 167）已发布**（2026-09-04）：
   - **立绘改成整图不裁**（老板：「不要截图、不要截一部分出来，要保证它是完整的」）。
     ⚠️ 量过：九张原图**全是 16:9 横构图**（1.7917），**不是 9:16** —— 老板自己也不确定，别硬套。
