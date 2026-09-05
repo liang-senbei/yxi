@@ -847,6 +847,7 @@ internal object En {
         "会退出这台机器上 %s 的登录，会话里再用得重新登。" to "This signs %s out on this machine; sessions will need a fresh login.",
         "没装" to "Not installed",
         "已登录" to "Signed in",
+        "走 Codex 自己的登录" to "Codex’s own login",
         "Codex 已改到「%s」· %s\n⚠️ 要重开 Codex 会话才生效 —— 它的配置是启动时读的，不像 Claude Code 能热切。" to "Codex switched to “%s” · %s\n⚠️ Takes effect only after you restart the Codex session — it reads its config at startup, unlike Claude Code which switches live.",
         "排队中：%s这一轮跑完就换到「%s」（%s）" to "Queued: %sswitches to “%s” once this turn finishes (%s)",
         "取不到线路清单 —— 没连上那台机器，或者服务器上的 lines.json 被改坏了。" to "Can’t load the line list — not connected to that machine, or lines.json on the server is corrupted.",

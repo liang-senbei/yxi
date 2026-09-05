@@ -121,7 +121,9 @@ fun LinesPanel(ssh: SshSession?, host: Host?, sessions: List<Session>) {
         val err = Lines.applyCodex(ssh, line)
         if (err != null) { note = t("没换成：%s").format(err); return }
         reload()
-        val probe = Lines.probe(ssh, line?.baseUrl.orEmpty())
+        // ⚠️ 回默认时别调 probe("")：它那句「走 Claude Code 自己的登录」是 Claude 的措辞，
+        //    出现在 Codex 页上就是说错话（E2E 第二轮截图抓到的）
+        val probe = if (line == null) t("走 Codex 自己的登录") else Lines.probe(ssh, line.baseUrl)
         // ⚠️ Codex **一定要重开会话**：它的配置是进程启动时读的。这句不能省 ——
         //    省了人点完看不到变化，只会以为坏了。
         note = t("Codex 已改到「%s」· %s\n⚠️ 要重开 Codex 会话才生效 —— 它的配置是启动时读的，不像 Claude Code 能热切。")

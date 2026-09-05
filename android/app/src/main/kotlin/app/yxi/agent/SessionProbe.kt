@@ -167,7 +167,12 @@ object SessionProbe {
                     "busy" -> "work"
                     else -> ""            // idle：留空 → SessionState.of 给 Idle
                 }
-                if (state.isEmpty()) return@runCatching
+                // ⚠️⚠️ **idle 也要记一条，不能 return。** 原来 idle 直接跳过、不往 ccStates 里放，
+                //    下面那句 `ccStates[name] ?: states[name]` 就退回到 ~/.cloud-status 的**旧值**
+                //    （cc-state 要等下一个 hook 事件才翻）。cc-Yxi_pilot 2026-09-05 的 E2E 抓到两次：
+                //    sessions.json 07:04:16 变 idle，看板到 07:06:20 才跟着变 —— **晚两分钟**，
+                //    「忙时排队切线路」因此看起来像卡住了两分钟。
+                //    Claude Code 自己那份说「闲着」就是闲着，**显式的 idle 必须赢过回退**。
                 ccStates[name] = Triple(
                     state,
                     // `waitingFor` 是它自己的枚举（dialog open / input needed / …），
