@@ -121,12 +121,12 @@ fun SessionsScreen(
     var groups by remember(host.id) { mutableStateOf(app.yxi.agent.Recent.groups(ctx, host.id)) }
     // 每个会话走哪条线路（cc-Yxi_pilot 的 Lines.labels，一次 SSH 往返）。读不到的不在 Map 里，卡片就不画。
     // ⚠️ 单独一条 5 秒轮询，不挂进 snapshotFull 那条链 —— 线路读失败不该拖累会话列表。
-    var lineLabels by remember(host.id) { mutableStateOf<Map<String, app.yxi.agent.Lines.Label>>(emptyMap()) }
+    var lineLabels by remember(host.id) { mutableStateOf<Map<String, String>>(emptyMap()) }
     val latestSessions = androidx.compose.runtime.rememberUpdatedState(sessions)
     // ⚠️ 轮询先关着：Lines.labels 在 cc-Yxi_pilot 的线路 v2 里，那批还在审查门禁；
     //    发版是整棵树一起编的，这里不能引用还没过审的代码。v2 过审合进来时把下面这段放开：
     //    LaunchedEffect(ssh, host.id) { val s = ssh ?: return@LaunchedEffect
-    //        while (true) { lineLabels = runCatching { app.yxi.agent.Lines.labels(s, latestSessions.value) }.getOrDefault(lineLabels); delay(5000) } }
+    //        while (true) { lineLabels = runCatching { app.yxi.agent.Lines.labels(s, latestSessions.value).mapValues { it.value.text } }.getOrDefault(lineLabels); delay(5000) } }
     @Suppress("UNUSED_VARIABLE") val keepForV2 = latestSessions
     /// 正在给哪个会话选组
     /** 正在编辑哪个组的组规 */
@@ -629,7 +629,7 @@ fun SessionsScreen(
                         ) {
                         SessionCard(
                             members[i],
-                            line = lineLabels[members[i].name]?.text,
+                            line = lineLabels[members[i].name],
                             faved = members[i].name in faved,
                             pinned = members[i].name in pinned,
                             onOpen = { onOpenChat(members[i].name, members[i].cwd) },
@@ -670,7 +670,7 @@ fun SessionsScreen(
                         ) {
                         SessionCard(
                             group[i],
-                            line = lineLabels[group[i].name]?.text,
+                            line = lineLabels[group[i].name],
                             faved = group[i].name in faved,
                             pinned = group[i].name in pinned,
                             // 点卡片 = 进对话；气泡按钮 = 不进对话直接回一句
