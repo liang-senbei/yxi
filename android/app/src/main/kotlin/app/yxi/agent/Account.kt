@@ -68,6 +68,8 @@ object Account {
         val balanceCents: Long = 0,
         val currency: String = "CNY",
         val autoRenew: Boolean = false,
+        /** 当前档续一期要多少分（服务端算的，free 是 null）。开关文案「到期自动扣 ¥30」用它，**不自己乘** */
+        val autoRenewPriceCents: Long? = null,
         /** 未读站内信条数 —— 图标上那个红点靠它，不然要进去才知道有信 */
         val unreadMail: Int = 0,
         /**
@@ -130,6 +132,9 @@ object Account {
     /** 服务端那份资料（可能是上次缓存的）。 */
     var me by mutableStateOf<Me?>(null)
         private set
+
+    /** 让同包的 [Shop] 之类就地改一两个字段（买完刷余额、开关续费），别开放整个 setter。 */
+    internal fun patchMe(f: (Me) -> Me) { me?.let { me = f(it) } }
 
     /** 浏览器登录完跳回来的那个 URI —— MainActivity 塞进来，界面层取走处理 */
     var pendingCallback by mutableStateOf<Uri?>(null)
@@ -591,6 +596,17 @@ object Account {
         runCatching { JSONObject(body) }.getOrNull()
     }
 
+    /**
+     * 带登录态打一个请求，**把状态码和原文一起交出来** —— 给「失败也要看原因」的地方用
+     * （商城余额不足回 400 + needCents，得读出来告诉用户差多少；[apiPost] 只回 null 说不清）。
+     * null = 没登录。
+     */
+    suspend fun apiRaw(ctx: Context, path: String, method: String, body: String?): Pair<Int, String>? =
+        withContext(Dispatchers.IO) {
+            val tk = token(ctx) ?: return@withContext null
+            req("$API$path", method, tk, body)
+        }
+
     /** 同 [apiGet]，POST。 */
     suspend fun apiPost(ctx: Context, path: String, body: String): JSONObject? = withContext(Dispatchers.IO) {
         val tk = token(ctx) ?: return@withContext null
@@ -632,6 +648,7 @@ object Account {
             signature = pr.str("signature"),
             email = pr.str("email"),
             balanceCents = o.optJSONObject("wallet")?.optLong("balanceCents") ?: 0L,
+            autoRenewPriceCents = o.optJSONObject("wallet")?.let { w -> if (w.isNull("autoRenewPriceCents")) null else w.optLong("autoRenewPriceCents") },
             currency = o.optJSONObject("wallet").str("currency").ifEmpty { "CNY" },
             autoRenew = o.optJSONObject("wallet")?.optBoolean("autoRenew") == true,
             unreadMail = o.optInt("unreadMail", 0),

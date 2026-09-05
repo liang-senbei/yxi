@@ -52,6 +52,7 @@ import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.zIndex
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.onSizeChanged
@@ -547,7 +548,10 @@ fun ChatScreen(
         // ⚠️ 第一次进：历史悄悄在后台灌，界面停在 head（最新一屏），等 inc **追上 head 的最新那条**（key 对上）
         //    才交出完整列表，不给用户看「从旧滚到新」。重进：inc 里已经是完整的，来一批换一批。
         val headLastKey = if (fresh) items.lastOrNull()?.key else null
-        var caughtUp = !fresh || headLastKey == null
+        // ⚠️⚠️ **head 拉空了也不能提前放行**（原来 `|| headLastKey == null` 会让 caughtUp 一开始就为 true）：
+        //    那样每 300ms 一批就整体换一次 items + 追底一次 —— 用户看到的是历史像放电影一样从旧滚到新，
+        //    顶栏的上下文数字一路往上爬（1.1.10 实拍：294K → 915K 每帧一变）。宁可多等两秒空着，也不放电影。
+        var caughtUp = !fresh
         // 这一趟已经吃进去多少字节 —— 跟 expectBytes 比，就知道历史灌完没有
         var eaten = 0L
         var idleTicks = 0
@@ -574,11 +578,15 @@ fun ChatScreen(
                     //    现在只在**连着四拍都空**（≈1.2 秒，远超一次刷新的耗时）时才当兜底用。
                     //    真正的判据是下面的 eaten >= expectBytes：**数字节，不猜时序。**
                     idleTicks++
-                    if (!caughtUp && idleTicks >= 4) {
+                    // ⚠️ **知道要灌多少字节时，绝不按「没动静」放行。** 手机网络上 4MB 历史是一阵一阵来的，
+                    //    间隔随便就超过一秒多；按空转放行等于把半截当完整（#261 ①）—— 之后每批再换一次 items，
+                    //    就是「一闪一闪 + 上下文数字乱跳」。只有 tailStart 拿不到大小（expectBytes == 0）时才退回
+                    //    空转兜底，而且要连着 10 拍（3 秒）。
+                    if (!caughtUp && expectBytes == 0L && idleTicks >= 10) {
                         val snap = withContext(Dispatchers.Default) { inc.snapshot() }
                         if (snap.isNotEmpty()) { items = snap; caughtUp = true; inc.ctx?.let { ctxUse = it } }
                     }
-                    if (items.isNotEmpty() && (caughtUp || idleTicks >= 4)) settled = true
+                    if (items.isNotEmpty() && caughtUp) settled = true
                     continue
                 }
                 idleTicks = 0
@@ -677,6 +685,9 @@ fun ChatScreen(
     //    谁就得自己加这段 `top`，否则整行钻到页眉底下（实测跑到状态栏里去了，等于没显示）。
     //    ⚠️ 不能给 Column 整个加：那样三行都没有的时候会**空出永久的一条**（#228 那个白条）。
     val statsShown = showStats && (ctxUse != null || todayUse != null)
+    // 顶上那几行（状态提示 / 状态条 / 正在做）现在**悬浮**在列表上方、跟页眉一起平移（见 [floatTop]），
+    // 它们的高度要像页眉一样进列表的 contentPadding —— 这里量出来
+    var stripH by remember { mutableIntStateOf(0) }
     Column(Modifier.fillMaxSize()) {
         // 标题和路径由 Workspace 的头部管，这里只在出问题时说一句
         // ⚠️ 这几行（状态提示 / 状态条）**要跟页眉一起收起来**。页眉在 Workspace 里按 barsFrac 上移，
@@ -684,10 +695,19 @@ fun ChatScreen(
         //    「闪电标志（状态条）不关掉，往上滑页眉收了、这条还杵在顶上」。
         //    ⚠️ 不能只做 graphicsLayer 平移/淡出：那不改布局，列表不会跟着上来，顶上会留一条空带。
         //    所以用 [collapseBy]：**布局高度**按 barsFrac 缩到 0，内容往上推出去。
+        // ⚠️⚠️ 这个 Column **不占布局高度**（[floatTop]），只画在列表上面；收起 = 平移 + 淡出。
+        //    1.1.10 用的是「布局高度按 barsFrac 缩到 0」（collapseBy）—— 展开时列表被它往下推、
+        //    展开完又跳回来，就是用户慢动作录到的「展开的同时内容还在下移」。页眉本来就是悬浮的，
+        //    这几行跟页眉同一种做法才对：**收放只动画面，不动布局**。
+        val hasTop = status != null || statsShown || doingNowText(items) != null
+        Column(
+            Modifier.fillMaxWidth().floatTop(barsFrac, headerPx) { h -> if (h != stripH) stripH = h }
+                .padding(top = if (hasTop) headerDp else 0.dp),
+        ) {
         status?.let {
             Text(
                 it,
-                Modifier.fillMaxWidth().collapseBy(barsFrac).padding(18.dp, 8.dp).padding(top = headerDp),
+                Modifier.fillMaxWidth().padding(18.dp, 8.dp),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.outline,
             )
@@ -707,8 +727,7 @@ fun ChatScreen(
                 // ⚠️ **放不下要换行，不能裁。** 这行有五格（模式 / 模型 / 思考强度 / 上下文 / 今日），
                 // 窄屏一定放不下。原来是横滑，结果默认停在最左边、右边那两格数字**看着就是被切掉的**
                 // —— 而右边那两格恰恰是要看的（上下文、今日花了多少）。换行了就一个都不少。
-                Modifier.fillMaxWidth().collapseBy(barsFrac)
-                    .padding(top = if (status == null) headerDp else 0.dp)
+                Modifier.fillMaxWidth()
                     .padding(14.dp, 2.dp, 14.dp, 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -777,19 +796,11 @@ fun ChatScreen(
         }
 
         // Claude 此刻在做计划里的哪一步 —— 取最近一次 TodoWrite 里 in_progress 那条，顶栏回显一眼看清进度
-        val doingNow = remember(items) {
-            items.filterIsInstance<ChatItem.ToolCall>().lastOrNull { it.name == "TodoWrite" }
-                ?.input?.optJSONArray("todos")?.let { a ->
-                    (0 until a.length()).asSequence().mapNotNull { a.optJSONObject(it) }
-                        .firstOrNull { it.optString("status") == "in_progress" }
-                        ?.let { it.optString("activeForm").ifBlank { it.optString("content") } }
-                }?.takeIf { it.isNotBlank() }
-        }
+        val doingNow = remember(items) { doingNowText(items) }
         doingNow?.let {
             Text(
                 t("▶ 正在做 · %s").format(it),
                 Modifier.fillMaxWidth()
-                    .padding(top = if (status == null && !statsShown) headerDp else 0.dp)
                     .padding(18.dp, 0.dp, 18.dp, 2.dp),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary,
@@ -797,6 +808,7 @@ fun ChatScreen(
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
             )
         }
+        }   // floatTop 的那个 Column
 
         // ⚠️ 库把链接点击交给 `LocalUriHandler`，所以在这儿换一个自己的。
         // 认出 [Linkify.SCHEME] 就转成「跳去看这个文件」，其余的（http 之类）
@@ -820,7 +832,12 @@ fun ChatScreen(
             LazyColumn(
                 Modifier.fillMaxSize(),
                 state = listState,
-                contentPadding = PaddingValues(16.dp, headerDp + 6.dp, 16.dp, composerPad + 8.dp),
+                // 顶部留白 = 悬浮在上面那几行的高度（它们已经含了页眉的高度）；一行都没有就只留页眉
+                contentPadding = PaddingValues(
+                    16.dp,
+                    (if (hasTop) with(LocalDensity.current) { stripH.toDp() } else headerDp) + 6.dp,
+                    16.dp, composerPad + 8.dp,
+                ),
                 verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
                 items(rows.size, key = { rows[it].key }) { i ->
@@ -2275,16 +2292,30 @@ private fun StatChip(
 }
 
 /**
- * 按 [frac]（0 = 全在，1 = 收完）把这一块**在布局上**收掉：高度缩到 0，内容往上推、同时淡出。
- * ⚠️ 用 layout 而不是 graphicsLayer —— 后者只改画面不改布局，下面的列表不会跟着上来，会留一条空带。
- * 每帧重新布局这一块（几个芯片）代价可以忽略。
+ * 让这一块**悬浮**在后面的内容上方：布局上不占高度（后面的列表从它底下开始，靠 contentPadding 让位），
+ * 画面上按 [frac]（0 = 全在，1 = 收完）跟页眉一起往上平移 + 淡出。
+ * ⚠️ **收放只动画面不动布局** —— 改布局高度会把列表推来推去（1.1.10 的 collapseBy 就是这么错的）。
+ * [onHeight] 报出它的真实高度，给列表的 contentPadding 用。
  */
-private fun Modifier.collapseBy(frac: Float): Modifier = this
+private fun Modifier.floatTop(frac: Float, headerPx: Int, onHeight: (Int) -> Unit): Modifier = this
+    .zIndex(1f)
     .layout { measurable, constraints ->
         val p = measurable.measure(constraints)
-        val f = frac.coerceIn(0f, 1f)
-        val h = (p.height * (1f - f)).toInt()
-        layout(p.width, h) { p.placeRelative(0, h - p.height) }
+        onHeight(p.height)
+        layout(p.width, 0) { p.placeRelative(0, 0) }
     }
-    .graphicsLayer { alpha = 1f - frac.coerceIn(0f, 1f) }
+    .graphicsLayer {
+        val f = frac.coerceIn(0f, 1f)
+        translationY = -(headerPx + size.height) * f
+        alpha = 1f - f
+    }
+
+/** Claude 此刻在做计划里的哪一步 —— 最近一次 TodoWrite 里 in_progress 那条 */
+private fun doingNowText(items: List<ChatItem>): String? =
+    items.filterIsInstance<ChatItem.ToolCall>().lastOrNull { it.name == "TodoWrite" }
+        ?.input?.optJSONArray("todos")?.let { a ->
+            (0 until a.length()).asSequence().mapNotNull { a.optJSONObject(it) }
+                .firstOrNull { it.optString("status") == "in_progress" }
+                ?.let { it.optString("activeForm").ifBlank { it.optString("content") } }
+        }?.takeIf { it.isNotBlank() }
 

@@ -73,6 +73,8 @@ fun SettingsScreen(
     onTickets: () -> Unit = {},
     /** 「我的」里的「趋势」——每天烧了多少 token / 多少钱 */
     onTrend: () -> Unit = {},
+    /** 「我的」里的「钱包」——余额 / 自动续费 / 商城 / 订单 */
+    onWallet: () -> Unit = {},
     /** 「我的」宫格里的「邮件」——我们发给你的站内信 */
     onMail: () -> Unit = {},
     /** 祈愿（抽奖） */
@@ -205,7 +207,7 @@ fun SettingsScreen(
             color = MaterialTheme.colorScheme.surfaceContainerLow,
             shape = RoundedCornerShape(22.dp),
             modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)
-                .clip(RoundedCornerShape(22.dp)).clickable { soon = t("钱包") },
+                .clip(RoundedCornerShape(22.dp)).clickable { onWallet() },
         ) {
             Row(
                 Modifier.padding(16.dp, 14.dp),
@@ -221,7 +223,7 @@ fun SettingsScreen(
                         //    只允许 reason=refund 那条路扣成负数，用户主动消费仍然不许透支）。
                         //    欠着钱的人不该看到一句讲充值好处的话 —— 那会让他以为一切正常。
                         if ((acc?.balanceCents ?: 0L) < 0L) t("有一笔兑换被撤销了 · 下次充值先抵这笔")
-                        else t("充值还没开 · 以后可以用余额自动续会员"),
+                        else t("余额兑换码兑入 · 商城买会员码 · 到期自动续费"),
                         style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline,
                     )
                 }
