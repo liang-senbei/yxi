@@ -1233,5 +1233,10 @@ internal object En {
         "累计 %d 星 · %s 到账" to "%d stars total · %s granted",
         "该层最佳 ★ %d" to "Floor best ★ %d",
         "刷新失败 —— 显示的是上次的数据" to "Refresh failed — showing the last loaded data",
+        // 头像框（深渊满星「王棋彩框」+ 晨曦光环，cc-Yxi_Entertainment 2026-09-05）
+        "头像框" to "Avatar frame",
+        "不戴" to "None",
+        "晨曦光环" to "Dawn Halo",
+        "深渊 · 王棋彩框 · 第 %d 期" to "Abyss · King's Frame · Season %d",
     )
 }

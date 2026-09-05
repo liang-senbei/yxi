@@ -49,7 +49,7 @@ object Abyss {
     data class Season(val id: String, val seq: Int, val name: String, val startsAt: String, val endsAt: String, val turbulence: Turbulence?)
 
     /** 满星那档额外发的：`tickets` 带 [amount]；`cosmetic` 带 [id]（素材没到时服务端先放 tickets 占位） */
-    data class FullReward(val kind: String, val amount: Long, val id: String)
+    data class FullReward(val kind: String, val amount: Long, val id: String, val name: String = "")
 
     /**
      * 规则数值，服务端 `abyss.json` 原样下发；客户端预估**只能**用这里的数。
@@ -183,7 +183,7 @@ object Abyss {
                 weakMult = ru.optDouble("weakMult", 1.5), turbMult = ru.optDouble("turbMult", 1.5),
                 teamSize = ru.optInt("teamSize", 2), passRatio = ru.optDouble("passRatio", 1.0), bonusRatio = ru.optDouble("bonusRatio", 1.3),
                 rewardEvery = ru.optInt("rewardEvery", 3), rewardTickets = ru.optInt("rewardTickets", 2), maxStars = ru.optInt("maxStars", 36),
-                fullReward = FullReward(fr?.optString("kind").orEmpty(), fr?.optLong("amount") ?: 0L, fr?.optString("id").orEmpty()),
+                fullReward = FullReward(fr?.optString("kind").orEmpty(), fr?.optLong("amount") ?: 0L, fr?.optString("id").orEmpty(), fr?.optString("name").orEmpty()),
             ),
         )
     }

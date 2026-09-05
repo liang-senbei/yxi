@@ -56,6 +56,8 @@ data class Crown(
 /**
  * 九顶。**顺序就是展示顺序**，云曦排第一（首期 UP）。
  * ⚠️ 文案是老板给的原文，只做了标点整理 —— **别自己改写**，这是设定不是文案草稿。
+ * ⚠️ 独舞者 / 幽火 的性格词是 2026-09-05 老板授意「参照星穹铁道同类角色」由 cc-Yxi_Entertainment 定的
+ *    （花火 / 镜流 → 孤高 · 灵动；流萤 / 黄泉 → 寂静 · 不灭），服务端 abyss.json 角色表与此逐字一致，改一处要改两处。
  */
 val CROWNS = listOf(
     Crown(
@@ -103,12 +105,12 @@ val CROWNS = listOf(
     // ⚠️ 下面两位是老板 2026-09-04 连立绘一起追加的，**只给了名字，没给性格/故事/台词** ——
     //    我不替他编设定（那是 IP，不是文案草稿），空着显示「设定待补」。
     Crown(
-        "duwuzhe", "星月", "独舞者", "",
+        "duwuzhe", "星月", "独舞者", "孤高 · 灵动",
         "", "",
         listOf(Color(0xFF2E3A5C), Color(0xFF5A6B93)), Color(0xFFCFE0FF), app.yxi.R.drawable.card_duwuzhe,
     ),
     Crown(
-        "youhuo", "苍冥", "幽火", "",
+        "youhuo", "苍冥", "幽火", "寂静 · 不灭",
         "", "",
         listOf(Color(0xFF2B2A22), Color(0xFF4E4530)), Color(0xFFE8C87A), app.yxi.R.drawable.card_youhuo,
     ),

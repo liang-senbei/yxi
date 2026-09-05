@@ -132,6 +132,8 @@ fun MeAvatar(size: Dp = 56.dp, modifier: Modifier = Modifier) {
     // 档位光环（规格由 cc-logto_yxi 给：service/admin/halo-spec.html）。
     // ⚠️ 档位读服务端的 tier，**不自己算**；免费档没有光环。
     val tier = if (Account.signedIn) Account.me?.tier ?: Account.Tier.Free else Account.Tier.Free
+    // 头像框（装扮槽位 Skins.FRAME）：读它就订阅了 Cosmetics 的版本号，换框当场重画
+    val frame = Skins.frame(ctx)
     val motion = remember {
         runCatching {
             android.provider.Settings.Global.getFloat(
@@ -160,8 +162,12 @@ fun MeAvatar(size: Dp = 56.dp, modifier: Modifier = Modifier) {
     val stroke = if (tier == Account.Tier.Ultra) 3.5.dp else 2.5.dp
     Box(
         modifier.size(size + (gap + stroke) * 2).drawBehind {
-            if (ring.isEmpty()) return@drawBehind
             val c = androidx.compose.ui.geometry.Offset(size.toPx() / 2 + (gap + stroke).toPx(), size.toPx() / 2 + (gap + stroke).toPx())
+            // 头像框（装扮，画法在 AvatarFrames.kt）：不管有没有档位光环都戴，画在光环外一圈，跟光环同一个转速
+            if (frame.kind != Skins.FrameKind.NONE) {
+                drawAvatarFrame(frame, c, size.toPx() / 2 + (gap + stroke).toPx() + 3.dp.toPx(), 2.5.dp.toPx(), a)
+            }
+            if (ring.isEmpty()) return@drawBehind
             val rr = size.toPx() / 2 + gap.toPx() + stroke.toPx() / 2
             val ultra = tier == Account.Tier.Ultra
             // 外圈薄雾（只有 ultra）：1.34× 头像，呼吸

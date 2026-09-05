@@ -49,9 +49,11 @@ fun SkinPicker(live: Boolean = false, header: Boolean = true, modifier: Modifier
     val owned = Cosmetics.owned(ctx)
 
     // 默认那套不算「收集品」，不进分母 —— 它是退路，不是奖品
+    // 深渊框只有拿到的才出现在列表里（每期一款、期末停产，不列「未拥有」的过期款）
+    val frames = Skins.frames(ctx)
     val all = Skins.TERMS.count { it.id.isNotEmpty() } +
-        Skins.BUBBLES.count { it.id.isNotEmpty() } + Skins.PHRASE_PACKS.size
-    val has = (Skins.TERMS.map { it.id } + Skins.BUBBLES.map { it.id } + Skins.PHRASE_PACKS.map { it.id })
+        Skins.BUBBLES.count { it.id.isNotEmpty() } + Skins.PHRASE_PACKS.size + frames.count { it.id.isNotEmpty() }
+    val has = (Skins.TERMS.map { it.id } + Skins.BUBBLES.map { it.id } + Skins.PHRASE_PACKS.map { it.id } + frames.map { it.id })
         .count { it.isNotEmpty() && it in owned }
 
     Column(modifier.fillMaxSize()) {
@@ -90,6 +92,17 @@ fun SkinPicker(live: Boolean = false, header: Boolean = true, modifier: Modifier
                     style = MaterialTheme.typography.labelSmall, color = Muted,
                 )
             }
+            item { SectionTitle(t("头像框")) }
+            items(frames.size) { i ->
+                val f = frames[i]
+                SkinRow(
+                    label = f.label,
+                    owned = f.id.isEmpty() || f.id in owned,
+                    current = Cosmetics.picked(ctx, Skins.FRAME) == f.id,
+                    onPick = { Cosmetics.pick(ctx, Skins.FRAME, f.id) },
+                ) { FrameSwatch(f) }
+            }
+
             item { SectionTitle(t("终端配色")) }
             items(Skins.TERMS.size) { i ->
                 val s = Skins.TERMS[i]
@@ -233,5 +246,17 @@ private fun PackSwatch(pk: Skins.Pack) {
             style = MaterialTheme.typography.labelSmall, color = Muted, maxLines = 1,
             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
         )
+    }
+}
+
+/** 头像框小样：一枚灰底小头像 + 框本身，跟「我的」上那圈是同一段绘制代码，静止不转。 */
+@Composable
+private fun FrameSwatch(f: Skins.Frame) {
+    val disc = MaterialTheme.colorScheme.surfaceContainerHigh
+    androidx.compose.foundation.Canvas(Modifier.size(58.dp, 34.dp)) {
+        val c = androidx.compose.ui.geometry.Offset(size.width / 2, size.height / 2)
+        val r = size.height / 2 - 4.dp.toPx()
+        drawCircle(disc, radius = r - 2.dp.toPx(), center = c)
+        drawAvatarFrame(f, c, r, stroke = 2.dp.toPx(), spin = 0f)
     }
 }

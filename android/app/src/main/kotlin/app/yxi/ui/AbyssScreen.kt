@@ -152,7 +152,7 @@ private fun SeasonCard(s: Abyss.State) {
             }
             // 满星那档写实际配置的东西：素材没到时服务端放的是曦光占位，别把「限定装扮」写死（不骗人）
             val full = s.rules.fullReward
-            val fullText = if (full.kind == "cosmetic") t("本期限定装扮") else t("曦光 ×%d").format(full.amount)
+            val fullText = if (full.kind == "cosmetic") full.name.ifBlank { t("本期限定装扮") } else t("曦光 ×%d").format(full.amount)
             Text(
                 t("每 %d 星 → 曦光 ×%d · 满 %d 星再加 %s · 自动到账")
                     .format(s.rules.rewardEvery, s.rules.rewardTickets, s.rules.maxStars, fullText),

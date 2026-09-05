@@ -30,6 +30,7 @@ object Skins {
     /** 槽位。一个槽位同时只能用一套。 */
     const val TERMINAL = "terminal"
     const val BUBBLE = "bubble"
+    const val FRAME = "frame"
 
     // ── 终端配色 ────────────────────────────────────────────────────────────
 
@@ -110,7 +111,43 @@ object Skins {
         Pack("phrase_pack_debug", "快捷语包·排查", listOf("先复现再改", "根因是什么", "把报错原文贴出来", "加一行日志再跑")),
     )
 
+    // ── 头像框 ──────────────────────────────────────────────────────────────
+
+    enum class FrameKind { NONE, DAWN, ABYSS }
+
+    /**
+     * 戴在头像外圈的框，画法在 [drawAvatarFrame]。[season] 只对深渊那款有意义（转一下起始色相）。
+     * ⚠️ 深渊的「王棋彩框」**不在祈愿奖池里**，只有满 36 星那档发（服务端 abyss.json 的 fullReward），
+     *    每期一款、期末不再产出 —— 所以每期在这儿加一行，画法共用。
+     */
+    class Frame(val id: String, private val zh: String?, val kind: FrameKind, val season: Int = 0) {
+        val label: String get() = zh?.let { t(it) } ?: t("深渊 · 王棋彩框 · 第 %d 期").format(season)
+    }
+
+    /** 固定的两枚：不戴、晨曦光环。深渊框不在这儿写死，见 [frames]。 */
+    val FRAMES = listOf(
+        Frame("", "不戴", FrameKind.NONE),
+        Frame("halo_dawn", "晨曦光环", FrameKind.DAWN),
+    )
+
+    /**
+     * 固定的 + 拥有的深渊框。服务端每期发 `halo_abyss_<期数>`（abyss.json 的 idTemplate，
+     * cc-logto_yxi 2026-09-05），**按前缀识别、期数从 id 里读**，第 N 期的框不用客户端发版就能戴。
+     */
+    fun frames(ctx: Context): List<Frame> {
+        val abyss = Cosmetics.owned(ctx).mapNotNull { id ->
+            ABYSS_ID.matchEntire(id)?.groupValues?.get(1)?.toIntOrNull()?.let { n -> Frame(id, null, FrameKind.ABYSS, season = n) }
+        }.sortedBy { it.season }
+        return FRAMES + abyss
+    }
+
+    private val ABYSS_ID = Regex("""halo_abyss_(\d+)""")
+
     // ── 取当前该用哪套 ──────────────────────────────────────────────────────
+
+    /** 当前戴的框；`kind == NONE` = 不戴。 */
+    fun frame(ctx: Context): Frame = pick(ctx, FRAME, frames(ctx), FRAMES[0]) { it.id }
+
 
     fun terminal(ctx: Context): Term = pick(ctx, TERMINAL, TERMS, TERMS[0]) { it.id }
 
