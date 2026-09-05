@@ -6,52 +6,51 @@
 <meta name="yxi-aspect" content="9:16">
 <title>activetheory.net 首页 · WebGL 复刻</title>
 <style>
-  html,body{margin:0;height:100%;background:#000;overflow:hidden}
+  html,body{margin:0;height:100%;background:#000;overflow:hidden;touch-action:none}
   canvas{display:block}
-  #ui{position:fixed;inset:0;pointer-events:none;font-family:ui-monospace,Menlo,Consolas,"Roboto Mono",monospace}
-  /* 导航药丸：参考帧 x 156–365 / y 31–77（390×844 基准） */
+  #txt{position:fixed;inset:0;pointer-events:none}
+  #ui{position:fixed;inset:0;pointer-events:none}
+  /* 导航药丸：参考帧 x 156–365 / y 31–77（390×844 基准）。字画在 #txt 画布上，好做像素格故障 */
   #nav{position:absolute;left:40%;top:3.67%;width:53.6%;height:5.5%;border-radius:999px;
        border:1.5px solid rgba(140,205,195,.78);background:rgba(2,6,8,.66);
-       display:flex;align-items:center;justify-content:space-around;
        box-shadow:0 0 18px rgba(20,120,110,.25), inset 0 0 12px rgba(120,200,190,.08)}
-  #nav span{color:#fff;font-weight:700;font-size:min(2.85vw,13px);letter-spacing:.06em;
-       text-shadow:1px 0 rgba(120,200,255,.55),-1px 0 rgba(255,120,200,.45)}
-  #nav i{display:block;width:14%;height:1px;background:rgba(255,255,255,.85)}
-  /* 药丸底下那团绿光 + 雨丝 */
+  #nav i{position:absolute;left:43%;top:50%;width:14%;height:1px;background:rgba(255,255,255,.85)}
   #glow{position:absolute;left:50%;top:8.6%;width:44%;height:6%;
         background:radial-gradient(ellipse at 55% 0%,rgba(170,255,205,.9),rgba(60,190,140,.35) 35%,rgba(0,0,0,0) 70%)}
   #rain{position:absolute;left:54%;top:9%;width:42%;height:5%;opacity:.5;
         background:repeating-linear-gradient(90deg,rgba(180,255,220,.35) 0 1px,rgba(0,0,0,0) 1px 13px),repeating-linear-gradient(90deg,rgba(180,255,220,.3) 0 1px,rgba(0,0,0,0) 1px 31px);
         -webkit-mask-image:linear-gradient(rgba(0,0,0,.9),rgba(0,0,0,0));mask-image:linear-gradient(rgba(0,0,0,.9),rgba(0,0,0,0))}
-  #hint{position:fixed;left:0;right:0;bottom:10px;text-align:center;font:11px ui-monospace,Menlo,monospace;letter-spacing:.18em;color:#55626a;pointer-events:none}
 </style>
 </head>
 <body>
-<div id="ui"><div id="glow"></div><div id="rain"></div><div id="nav"><span>WORK</span><i></i><span>CONTACT</span></div></div>
-<div id="hint"></div>
+<div id="ui"><div id="glow"></div><div id="rain"></div><div id="nav"><i></i></div></div>
+<canvas id="txt"></canvas>
 <script>__THREE__</script>
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
-// activetheory.net 首页第一屏的 WebGL 复刻（three.js r147）。
-// 做法照他们自己的着色器（assets/shaders/compiled.vs 里读出来的）：
-//  · 环 / 管：不是 PBR 反射，是「深色玻璃折射背景 + 菲涅尔彩虹边 + 流动法线扰动」（HomeLogoShader / ChainShader）
-//  · 星尘：GPU 点精灵，大小 ∝ 1000/距离，暗心亮边的小气泡 + 少量白点（LogoParticle / FloatingParticles）
-//  · 雾：软光片加法叠加再进 bloom（LightVolume → VolumetricLight → composite）
+// activetheory.net 首页第一屏的 WebGL 复刻（three.js r147），照他们自己的着色器逐层重建：
+//  · 环 / 管 / Y：深色玻璃折射背景 + 菲涅尔彩虹边 + 流动法线扰动（HomeLogoShader / ChainShader）
+//  · 星尘：GPU 点精灵，大小 ∝ 1000/距离，暗心亮边的小气泡（LogoParticle / FloatingParticles）
+//  · 雾：软光片加法叠加再进 bloom（LightVolume → composite）
 //  · 后期：UnrealBloom、RGB 错位、对比度、角落渐变光、胶片噪点、右上角磨砂（GlobalComposite.fs）
+//  · 动：相机 wobble + 手指 moveXY 视差（他们参数表 wobbleStrength .1 / moveXY [.4,.2]）；
+//        往下滑 = 相机推进（他们 camera.z = 40 − 15·scroll）+ 星尘上涌 + 雾转紫 + 大字像素格故障显形（DefaultText.glsl）
 // 相机：fov 30，距离 15.75 → z=0 平面上 1 世界单位 = 100 css px（844 高的基准），几何直接从参考帧量出来填。
 // ─────────────────────────────────────────────────────────────────────────────
 var W = 0, H = 0, DPR = Math.min(window.devicePixelRatio || 1, 2);
 var renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
 renderer.setPixelRatio(DPR);
-renderer.outputEncoding = THREE.LinearEncoding;   // 他们整条链是线性的，不套 sRGB
+renderer.outputEncoding = THREE.LinearEncoding;
 document.body.insertBefore(renderer.domElement, document.getElementById('ui'));
 var camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
 camera.position.set(0, 0, 15.75);
+var CAM_Z = 15.75;
 
-// 参考帧 390×844 上的 css px → 世界坐标
 function px(x, y) { return new THREE.Vector3((x - 195) / 100, (422 - y) / 100, 0); }
+function clamp01(x) { return x < 0 ? 0 : x > 1 ? 1 : x; }
+function smooth(p) { return p * p * (3 - 2 * p); }
+function seg(t, a, b) { return clamp01((t - a) / (b - a)); }
 
-// ── 共用 GLSL：simplex 噪声（Ashima，公有领域）、HSV
 var GLSL_NOISE = `
 vec3 mod289(vec3 x){return x-floor(x*(1.0/289.0))*289.0;}
 vec4 mod289(vec4 x){return x-floor(x*(1.0/289.0))*289.0;}
@@ -82,48 +81,48 @@ vec3 rgb2hsv(vec3 c){vec4 K=vec4(0.0,-1.0/3.0,2.0/3.0,-1.0);vec4 p=mix(vec4(c.bg
 
 // ══ 背景层（渲到 RT，给环和管当折射源）════════════════════════════════════
 var bgScene = new THREE.Scene();
-bgScene.background = new THREE.Color(0x090d11);   // 参考帧的黑不是纯黑，约 (11,15,18)
+bgScene.background = new THREE.Color(0x090d11);
 var rtBG = new THREE.WebGLRenderTarget(2, 2, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBAFormat });
 
-// 软光片（他们的 LightVolume：光片 × 噪声遮罩，加法叠加）
 function softTex() {
   var c = document.createElement('canvas'); c.width = c.height = 256; var g = c.getContext('2d');
   var grd = g.createRadialGradient(128, 128, 0, 128, 128, 128);
   grd.addColorStop(0, 'rgba(255,255,255,1)'); grd.addColorStop(0.35, 'rgba(255,255,255,0.45)'); grd.addColorStop(1, 'rgba(255,255,255,0)');
   g.fillStyle = grd; g.fillRect(0, 0, 256, 256);
-  var t = new THREE.CanvasTexture(c); return t;
+  return new THREE.CanvasTexture(c);
 }
 var soft = softTex();
 function light(color, x, y, z, sx, sy, alpha) {
   var m = new THREE.SpriteMaterial({ map: soft, color: color, transparent: true, opacity: alpha, blending: THREE.AdditiveBlending, depthWrite: false });
-  var s = new THREE.Sprite(m); s.position.set(x, y, z); s.scale.set(sx, sy, 1); bgScene.add(s); return s;
+  var s = new THREE.Sprite(m); s.position.set(x, y, z); s.scale.set(sx, sy, 1); bgScene.add(s);
+  s.userData = { x: x, y: y, sx: sx, sy: sy, a: alpha, c0: new THREE.Color(color) };
+  return s;
 }
-// 取色自参考帧：左上 (36,57,68) 青雾、右下 (54,93,103) 青绿雾、顶部整体一层蓝灰
-var fogTL = light(0x24a0b8, -3.1, 5.1, -1.0, 5.2, 4.6, 1.0);
-var fogTL2 = light(0x1a6e84, -2.2, 4.0, -1.5, 7.0, 5.0, 0.55);
-var fogBR = light(0x26a8a0, 3.3, -5.2, -1.0, 5.0, 4.6, 1.0);
-var fogTop = light(0x1a3d4d, 0.5, 4.2, -3.0, 11.0, 3.6, 0.42);
-var fogCenter = light(0x0d2230, 0.0, -0.5, -3.0, 9.0, 9.0, 0.2);
+// 取色自参考帧：左上青雾、右下青绿雾、顶部蓝灰。往下滑时转成他们第二屏的紫 / 洋红（见 live-m-05）
+var fogTL = light(0x24a0b8, -3.1, 5.1, -1.0, 5.2, 4.6, 1.0);  fogTL.userData.c1 = new THREE.Color(0x6a3fb0);
+var fogTL2 = light(0x1a6e84, -2.2, 4.0, -1.5, 7.0, 5.0, 0.55); fogTL2.userData.c1 = new THREE.Color(0x4a2a80);
+var fogBR = light(0x26a8a0, 3.3, -5.2, -1.0, 5.0, 4.6, 1.0);   fogBR.userData.c1 = new THREE.Color(0xb04da0);
+var fogTop = light(0x1a3d4d, 0.5, 4.2, -3.0, 11.0, 3.6, 0.42); fogTop.userData.c1 = new THREE.Color(0x3a2a5a);
+var fogCenter = light(0x0d2230, 0.0, -0.5, -3.0, 9.0, 9.0, 0.2); fogCenter.userData.c1 = new THREE.Color(0x2a1a40);
+var fogs = [fogTL, fogTL2, fogBR, fogTop, fogCenter];
 
-// 星尘：小气泡（暗心亮边）+ 少量白点。位置分布照参考帧：下 40% 最密，上面零星
+// 星尘
 var N = 760;
 var pos = new Float32Array(N * 3), rnd = new Float32Array(N * 4), col = new Float32Array(N * 3);
 (function seed() {
   var s = 11; function r() { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; }
   for (var i = 0; i < N; i++) {
     var u = r();
-    // y：世界 -5.2 … 2.2，越往下越密（参考帧 y>500px 处最密）
-    // 88% 在环以下（世界 -5.4 … -0.6，越下越密），12% 零星飘在上面
     var y = u < 0.88 ? -0.6 - 4.8 * Math.pow(u / 0.88, 0.6) : -0.6 + 2.8 * r();
-    var e = r(); var x = (r() < 0.5 ? -1 : 1) * (e < 0.55 ? 1.0 + 2.4 * r() : 1.4 * r());   // 两侧密，中间稀
-    var z = -3.0 + r() * 5.0;                  // 深度决定大小
+    var e = r(); var x = (r() < 0.5 ? -1 : 1) * (e < 0.55 ? 1.0 + 2.4 * r() : 1.4 * r());
+    var z = -3.0 + r() * 5.0;
     pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z;
     rnd[i * 4] = r(); rnd[i * 4 + 1] = r(); rnd[i * 4 + 2] = r(); rnd[i * 4 + 3] = r();
     var k = r(), c;
-    if (k < 0.66) c = [0.72, 0.76, 0.42];        // 橄榄黄绿（参考帧气泡色）
-    else if (k < 0.84) c = [0.52, 0.62, 0.78];   // 蓝灰
-    else if (k < 0.93) c = [0.74, 0.74, 0.76];   // 白灰
-    else c = [0.05, 0.06, 0.07];                 // 近处的暗色遮挡泡（参考帧里的黑点）
+    if (k < 0.66) c = [0.72, 0.76, 0.42];
+    else if (k < 0.84) c = [0.52, 0.62, 0.78];
+    else if (k < 0.93) c = [0.74, 0.74, 0.76];
+    else c = [0.05, 0.06, 0.07];
     col[i * 3] = c[0]; col[i * 3 + 1] = c[1]; col[i * 3 + 2] = c[2];
   }
 })();
@@ -132,19 +131,26 @@ dustGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
 dustGeo.setAttribute('random', new THREE.BufferAttribute(rnd, 4));
 dustGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
 var dustMat = new THREE.ShaderMaterial({
-  uniforms: { time: { value: 0 }, DPR: { value: DPR }, uSizeBias: { value: 1.0 } },
+  uniforms: { time: { value: 0 }, DPR: { value: DPR }, uSizeBias: { value: 1.0 }, uScroll: { value: 0 }, uPointer: { value: new THREE.Vector2(99, 99) } },
   transparent: true, depthWrite: false,
   vertexShader: `
     attribute vec4 random; attribute vec3 color;
-    uniform float time, DPR, uSizeBias;
+    uniform float time, DPR, uSizeBias, uScroll; uniform vec2 uPointer;
     varying vec4 vRandom; varying vec3 vColor; varying float vScale;
     void main(){
       vec3 p = position;
+      // 待机：慢慢往上飘 + 轻微摆动（他们 pos.y += sin(time+rand*20)*…）
+      p.y += time * 0.06 * (0.3 + random.w);
       p.y += sin(time*0.35 + random.x*20.0) * 0.05 * (0.4 + random.w);
       p.x += cos(time*0.25 + random.y*20.0) * 0.03;
+      // 往下滑：星尘上涌，少数飞得很快（他们 scrollMove 用 pow(random.y, …) 挑出一小撮）
+      p.y += smoothstep(0.0, 0.9, uScroll) * mix(1.5, 9.0, pow(random.y, 6.0));
+      p.y = mod(p.y + 5.4, 8.0) - 5.4;
+      // 手指推开（他们是流体模拟，这里用一个软排斥）
+      vec2 d = p.xy - uPointer; float rr = length(d);
+      p.xy += (d / max(rr, 1e-3)) * smoothstep(1.3, 0.0, rr) * 0.45;
       vec4 mv = modelViewMatrix * vec4(p, 1.0);
       float dist = length(mv.xyz);
-      // 他们：vScale = smoothstep(3,15,dist) × 闪烁 × mix(0.1,2,rand) × 稀有的 3 倍大
       float sc = smoothstep(6.0, 22.0, dist);
       sc *= 1.0 + (0.5 + sin(time*5.0 + random.x*20.0)*0.5) * 0.35;
       sc *= mix(0.35, 1.6, random.z);
@@ -159,7 +165,6 @@ var dustMat = new THREE.ShaderMaterial({
     void main(){
       vec2 p = gl_PointCoord - 0.5; float r = length(p);
       if (r > 0.5 || vScale < 0.08) discard;
-      // matcap 味的小气泡：暗心、亮边，左上来光
       float rim = smoothstep(0.0, 0.42, r);
       float lit = clamp(dot(normalize(p + 1e-4), normalize(vec2(-0.6, 0.8))), 0.0, 1.0);
       vec3 c = vColor * (0.62 + 0.45 * rim * (0.5 + 0.6 * lit));
@@ -171,12 +176,12 @@ var dustMat = new THREE.ShaderMaterial({
 });
 bgScene.add(new THREE.Points(dustGeo, dustMat));
 
-// ══ 前景层：环 + 管，折射 rtBG ══════════════════════════════════════════════
+// ══ 前景层：环 + Y + 管，折射 rtBG ═══════════════════════════════════════════
 var fgScene = new THREE.Scene();
 fgScene.background = rtBG.texture;
 
 var glassMat = new THREE.ShaderMaterial({
-  uniforms: { tRefraction: { value: rtBG.texture }, resolution: { value: new THREE.Vector2(1, 1) }, time: { value: 0 } },
+  uniforms: { tRefraction: { value: rtBG.texture }, resolution: { value: new THREE.Vector2(1, 1) }, time: { value: 0 }, uScroll: { value: 0 } },
   vertexShader: `
     varying vec3 vNormal, vViewDir, vWorldPos;
     void main(){
@@ -187,65 +192,74 @@ var glassMat = new THREE.ShaderMaterial({
       gl_Position = projectionMatrix * mv;
     }`,
   fragmentShader: GLSL_NOISE + `
-    uniform sampler2D tRefraction; uniform vec2 resolution; uniform float time;
+    uniform sampler2D tRefraction; uniform vec2 resolution; uniform float time, uScroll;
     varying vec3 vNormal, vViewDir, vWorldPos;
-    // 他们的 rainbowColor(t)：t∈[0,.3] 从紫到红，之后再整体色相 +.5
     vec3 rainbow(float t){ t = clamp(t, 0.0, 0.3) / 0.3; return hsv2rgb(vec3(0.78 - t * 0.78, 1.0, 1.0)); }
     void main(){
       vec2 screenuv = gl_FragCoord.xy / resolution;
       vec3 N = normalize(vNormal); vec3 V = normalize(vViewDir);
-      // 流动的法线扰动（他们是一张滚动的法线贴图）
       float n1 = snoise(vWorldPos * 3.5 + vec3(0.0, -time * 0.18, 0.0));
       float n2 = snoise(vWorldPos * 3.5 + vec3(5.2, -time * 0.18, 1.3));
       vec2 pn = vec2(n1, n2);
       vec3 Np = normalize(N + vec3(pn, 0.0) * 0.25);
-      // 折射背景：深色玻璃
-      // 折射的背景只占三成，主体是一根有明暗的深灰金属带（他们还叠了一张灰色贴图）
       vec3 color = texture2D(tRefraction, screenuv - Np.xy * 0.06 - pn * 0.006).rgb * 0.3;
       float lam = max(dot(Np, normalize(vec3(-0.3, 0.9, 0.5))), 0.0);
       color += vec3(0.21, 0.215, 0.245) * (0.30 + 0.70 * lam);
-      // 参考帧里带子只有朝环心的内侧边亮，外侧边是暗的（他们按法线偏移取样折射造成的）
       vec2 toC = normalize(vec2(0.02, -0.02) - vWorldPos.xy);
       float inner = 0.3 + 0.7 * clamp(dot(normalize(Np.xy + 1e-4), toC), 0.0, 1.0);
       float spk = snoise(vWorldPos * 28.0 + vec3(0.0, time * 0.05, 0.0)) * 0.6 + snoise(vWorldPos * 90.0) * 0.4;
-      // 菲涅尔彩虹边
       float f = 1.0 - pow(abs(dot(Np, V)), 1.5 + sin(time * 0.1) * 0.3);
       vec3 r = rainbow(clamp(f + spk * 0.25, 0.0, 1.0) * 0.3);
       vec3 rh = rgb2hsv(r); rh.x = fract(rh.x + 0.5); r = hsv2rgb(rh);
       color += r * f * 0.30 * inner;
       color += pow(f, 2.0) * 0.36 * inner;
-      color += max(spk, 0.0) * 0.16 * (0.5 + 0.5 * inner);    // 带子上那些碎亮斑
-      // 一道白色高光（他们靠视频贴图和 highlight 扫过，这里用一盏假光）
+      color += max(spk, 0.0) * 0.16 * (0.5 + 0.5 * inner);
       vec3 L = normalize(vec3(-0.35, 0.85, 0.55)); vec3 Hh = normalize(L + V);
       color += pow(max(dot(Np, Hh), 0.0), 70.0) * 0.5 * inner;
       vec3 L2 = normalize(vec3(0.7, -0.5, 0.6)); vec3 H2 = normalize(L2 + V);
       color += pow(max(dot(Np, H2), 0.0), 90.0) * vec3(0.9, 0.7, 1.0) * 0.25;
-      // 饱和度 ×.9，再拉对比
+      // 往下滑：管和环染上他们第二屏那种粉紫铬（live-m-05）
+      color += uScroll * vec3(0.30, 0.10, 0.34) * (0.4 + 0.6 * inner) * (0.5 + 0.5 * f);
       vec3 hs = rgb2hsv(color); hs.y *= 0.9; color = hsv2rgb(hs);
       color = pow(color * 1.35, vec3(1.35));
       gl_FragColor = vec4(color, 1.0);
     }`,
 });
 
-// 环：参考帧外径横 69 / 竖 78 css px → 主半径 .78，绕 Y 转 28° 就成了竖长的椭圆；带宽约 8px → 管半径 .04
+// 环：参考帧外径横 69 / 竖 78 css px → 主半径 .78，绕 Y 转 28° 就是竖长的椭圆；带宽约 10px → 管半径 .06
 var ring = new THREE.Mesh(new THREE.TorusGeometry(0.78, 0.06, 48, 256), glassMat);
 ring.position.copy(px(197, 424));
-ring.rotation.y = 0.485;
-ring.rotation.z = -0.06;
+var RING_ROT_Y = 0.485;
+ring.rotation.y = RING_ROT_Y; ring.rotation.z = -0.06;
 fgScene.add(ring);
 
-// 管：从环底左右两点出发，环下交叉，向两侧鼓出再从画面底部收回 —— 一条开放曲线，端点藏在环里
+// Y：老板说 a 换成 Y。三段胶囊拼的，跟环同一种铬，挂在环上一起转。占环内径六成左右（他们的 a 也差不多）
+(function buildY() {
+  var rad = 0.085, arm = 0.56, stem = 0.40;
+  function bar(len, angle, cx, cy) {
+    var g = new THREE.CapsuleGeometry(rad, len, 6, 24);
+    var m = new THREE.Mesh(g, glassMat);
+    m.position.set(cx, cy, 0); m.rotation.z = angle; ring.add(m);
+  }
+  var a = 0.55, j = -0.04;  // 字形比例：两臂离竖直 31.5° 且比杆长，交点略低于环心 —— 臂短杆长就成箭头了
+  // rotation.z 为负 = 顶端往 +x 倒，所以往右倒的那根要放在右边，两臂才是从交点向外上方张开（之前反了，成了箭头）
+  bar(arm, -a, Math.sin(a) * arm / 2, j + Math.cos(a) * arm / 2);
+  bar(arm, a, -Math.sin(a) * arm / 2, j + Math.cos(a) * arm / 2);
+  bar(stem, 0, 0, j - stem / 2);
+})();
+
+// 管：从环底左右两点出发，环下交叉，向两侧鼓出再从画面底部收回
 var loopPts = [
   px(165, 492), px(205, 560), px(260, 645), px(300, 725), px(306, 780), px(280, 844), px(200, 905),
   px(115, 844), px(85, 780), px(92, 725), px(135, 645), px(205, 560), px(227, 492),
 ];
-loopPts[1].z = 0.06; loopPts[11].z = -0.06;          // 交叉处一前一后，别打架
-loopPts[5].z = 0.25; loopPts[7].z = 0.25; loopPts[6].z = 0.35; // 底部那段离相机近一点，管显得粗
+loopPts[1].z = 0.06; loopPts[11].z = -0.06;
+loopPts[5].z = 0.25; loopPts[7].z = 0.25; loopPts[6].z = 0.35;
 var curve = new THREE.CatmullRomCurve3(loopPts, false, 'centripetal', 0.5);
 var tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 320, 0.052, 20, false), glassMat);
 fgScene.add(tube);
 
-// ══ 后期：bloom → 合成（RGB 错位 / 对比 / 角落渐变光 / 噪点 / 右上角磨砂）═══════
+// ══ 后期 ═══════════════════════════════════════════════════════════════════
 var composer = new THREE.EffectComposer(renderer);
 composer.addPass(new THREE.RenderPass(fgScene, camera));
 var bloom = new THREE.UnrealBloomPass(new THREE.Vector2(390, 844), 0.7, 0.7, 0.55);
@@ -255,50 +269,118 @@ var finalPass = new THREE.ShaderPass({
   vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
   fragmentShader: GLSL_NOISE + `
     uniform sampler2D tDiffuse; uniform vec2 resolution; uniform float time; varying vec2 vUv;
-    // 他们的 getNoise（simplenoise.glsl）
     float getNoise(vec2 uv, float t){ float x = uv.x * uv.y * t * 1000.0; x = mod(x, 13.0) * mod(x, 123.0); float dx = mod(x, 0.01); return clamp(0.1 + dx * 100.0, 0.0, 1.0); }
     vec3 overlay(vec3 b, vec3 s, float o){ vec3 r = mix(2.0*b*s, 1.0-2.0*(1.0-b)*(1.0-s), step(0.5, b)); return mix(b, r, o); }
     void main(){
       vec2 uv = vUv;
       vec2 sq = (uv - 0.5) * vec2(1.0, resolution.y / resolution.x) + 0.5;
-      // 右上角磨砂：法线噪声把 uv 揉一下
       float frost = smoothstep(0.30, 0.0, length(uv - vec2(1.0, 1.0))) * 0.08;
       vec2 fn = vec2(snoise(vec3(uv * 55.0, 1.7)), snoise(vec3(uv * 55.0 + 9.1, 4.2)));
       uv += fn * frost * 0.5;
-      // RGB 错位（角度 120°，量极小）
       vec2 off = vec2(cos(2.0944), sin(2.0944)) * 0.0011;
       vec3 c = vec3(texture2D(tDiffuse, uv + off).r, texture2D(tDiffuse, uv).g, texture2D(tDiffuse, uv - off).b);
       c = (c - 0.5) * 1.06 + 0.5;
-      // 角落渐变光（蓝紫，随噪声呼吸）
       vec3 grad = hsv2rgb(vec3(fract(0.62 + snoise(vec3(sq * 0.65, time * 0.04)) * 0.065), 0.5, 1.0));
       float gN = 0.5 + snoise(vec3(sq * 0.7, time * 0.03 + 3.0)) * 0.5;
       float corner = 0.7 * 1.5 * smoothstep(0.55, 0.95, length(sq - 0.5));
       c += grad * (0.05 + pow(corner * gN, 2.0)) * 0.22;
-      // 胶片噪点 overlay .15
       c = overlay(c, vec3(getNoise(vUv, fract(time) + 1.0)), 0.15);
       gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
     }`,
 });
 composer.addPass(finalPass);
 
+// ══ 文字层（2D 画布）：导航字 + 第二屏大字，用他们 DefaultText.glsl 的「像素格」过渡 ═══════
+var txt = document.getElementById('txt'), tctx = txt.getContext('2d');
+var off = document.createElement('canvas'), octx = off.getContext('2d');
+var lowc = document.createElement('canvas'), lowctx = lowc.getContext('2d');
+var u = 1;
+// 把一段字先画到离屏，再按格子大小缩小放大回来 = 他们 floor(uv*grid)/grid 的效果
+function pixelText(str, font, color, x, y, align, cell, alpha, tint) {
+  octx.font = font; octx.textBaseline = 'middle'; octx.textAlign = 'left';
+  var w = Math.ceil(octx.measureText(str).width) + 8, h = Math.ceil(parseFloat(font.match(/(\d+(\.\d+)?)px/)[1]) * 1.35);
+  if (off.width < w || off.height < h) { off.width = Math.max(off.width, w); off.height = Math.max(off.height, h); octx.font = font; octx.textBaseline = 'middle'; }
+  octx.clearRect(0, 0, off.width, off.height);
+  octx.fillStyle = color; octx.fillText(str, 4, h / 2);
+  if (tint > 0) { octx.globalCompositeOperation = 'source-atop'; octx.fillStyle = 'rgba(128,128,255,' + tint + ')'; octx.fillRect(0, 0, w, h); octx.globalCompositeOperation = 'source-over'; }
+  var dx = align === 'center' ? x - w / 2 : align === 'right' ? x - w : x, dy = y - h / 2;
+  tctx.globalAlpha = alpha;
+  if (cell > 1.01) {
+    var sw = Math.max(1, Math.round(w / cell)), shh = Math.max(1, Math.round(h / (cell * 0.6)));
+    if (lowc.width < sw || lowc.height < shh) { lowc.width = Math.max(lowc.width, sw); lowc.height = Math.max(lowc.height, shh); }
+    lowctx.clearRect(0, 0, lowc.width, lowc.height);
+    lowctx.drawImage(off, 0, 0, w, h, 0, 0, sw, shh);          // 缩到格子数
+    tctx.imageSmoothingEnabled = false;
+    tctx.drawImage(lowc, 0, 0, sw, shh, dx + cell * 0.2, dy + cell * 0.3, w, h);   // 硬边放大 + 他们那点 (0.2,0.5) 偏移
+    tctx.imageSmoothingEnabled = true;
+  } else {
+    tctx.drawImage(off, 0, 0, w, h, dx, dy, w, h);
+  }
+  tctx.globalAlpha = 1;
+}
+// 他们的过渡：uAlpha 0→1 时 grid 50→500（越来越细），中段 sin(time*40) 抖一下
+function glitchCell(trans) { return Math.max(1, 6 * u * (1 - trans)); }
+function flicker(trans, t) { return 0.9 + Math.sin(t * 40) * 0.1 * smooth(seg(0.2 - Math.abs(trans - 0.5), 0.05, 0.2)); }
+
+var mono = 'ui-monospace, Menlo, Consolas, "Roboto Mono", monospace';
+function drawText(t, scroll) {
+  tctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  tctx.clearRect(0, 0, W, H);
+  // 导航字：每 7 秒重新「显形」一次（他们滑动时会重触发）
+  var navT = smooth(seg((t % 7), 0.0, 0.9));
+  var navCell = glitchCell(navT), navA = flicker(navT, t);
+  var navFont = '700 ' + Math.round(11.5 * u) + 'px ' + mono;
+  var navY = H * (0.0367 + 0.0275);
+  pixelText('WORK', navFont, '#ffffff', W * (0.40 + 0.536 * 0.20), navY, 'center', navCell, navA, 0.15 + 0.1 * Math.sin(t));
+  pixelText('CONTACT', navFont, '#ffffff', W * (0.40 + 0.536 * 0.75), navY, 'center', navCell, navA, 0.15 + 0.1 * Math.sin(t + 1));
+  // 他们首屏正中上方那行小字 SCROLL DOWN，滑了就淡掉
+  var sdT = smooth(seg((t % 9), 0.0, 1.0));
+  pixelText('SCROLL DOWN', '500 ' + Math.round(9 * u) + 'px ' + mono, 'rgba(200,225,240,0.85)', W / 2, H * 0.255, 'center', glitchCell(sdT), flicker(sdT, t) * (1 - seg(scroll, 0.02, 0.2)), 0.2);
+  // 第二屏大字（他们是 CREATIVE / DIGITAL / EXPERIENCES + 一段简介；文案换成我们的）
+  var tr = smooth(seg(scroll, 0.42, 0.8));
+  if (tr > 0) {
+    var cell = glitchCell(tr), a = flicker(tr, t) * seg(scroll, 0.42, 0.55);
+    var big = '900 ' + Math.round(46 * u) + 'px ' + mono;
+    var lx = W * 0.06;
+    pixelText('YXI', big, '#ffffff', lx, H * 0.24, 'left', cell, a, 0.1);
+    pixelText('曦光祈愿', '900 ' + Math.round(44 * u) + 'px system-ui, "PingFang SC", "Noto Sans CJK SC", sans-serif', '#ffffff', lx, H * 0.315, 'left', cell, a, 0.1);
+    var small = '500 ' + Math.round(11.5 * u) + 'px ' + mono;
+    var lines = ['神之冠冕 · 九位角色', '抽到角色会一并带上她的立绘头像、', '专属光环、专属开屏和主题配色。', '摇号在服务端，概率公示。'];
+    for (var i = 0; i < lines.length; i++) pixelText(lines[i], small, 'rgba(255,255,255,0.92)', lx, H * (0.60 + i * 0.033), 'left', cell, a, 0.1);
+    pixelText('->  概率公示', small, '#B38AFF', lx, H * 0.76, 'left', cell, a, 0);
+  }
+}
+
+// ══ 交互：手指视差 + 往下滑推进 ═══════════════════════════════════════════
+var ptr = { x: 0, y: 0, tx: 0, ty: 0, wx: 99, wy: 99, down: false, ly: 0 }, scroll = 0, scrollT = 0;
+window.addEventListener('pointerdown', function (e) { ptr.down = true; ptr.ly = e.clientY; });
+window.addEventListener('pointerup', function () { ptr.down = false; ptr.wx = 99; ptr.wy = 99; });
+window.addEventListener('pointercancel', function () { ptr.down = false; ptr.wx = 99; ptr.wy = 99; });
+window.addEventListener('pointermove', function (e) {
+  ptr.tx = (e.clientX / W - 0.5) * 2; ptr.ty = -(e.clientY / H - 0.5) * 2;
+  // 手指在 z=0 平面上的世界坐标（相机推进时按比例缩）
+  var hw = 8.44 * (camera.position.z / CAM_Z);
+  ptr.wx = ptr.tx * hw * (W / H) / 2; ptr.wy = ptr.ty * hw / 2;
+  if (ptr.down) { scrollT = clamp01(scrollT - (e.clientY - ptr.ly) / 600); ptr.ly = e.clientY; }
+});
+window.addEventListener('wheel', function (e) { scrollT = clamp01(scrollT + e.deltaY / 1600); }, { passive: true });
+
 function fit() {
   W = window.innerWidth; H = window.innerHeight;
   if (!W || !H) return;
-  renderer.setSize(W, H);
-  composer.setSize(W, H);
-  camera.aspect = W / H;
-  // 以 844 高为基准：不管屏多高，z=0 处 1 单位恒为 100 个「基准 px」，宽屏两侧多露
-  camera.position.z = 15.75;
-  camera.updateProjectionMatrix();
+  u = Math.min(W, H * 9 / 16) / 390;
+  renderer.setSize(W, H); composer.setSize(W, H);
+  camera.aspect = W / H; camera.updateProjectionMatrix();
   rtBG.setSize(Math.round(W * DPR), Math.round(H * DPR));
   glassMat.uniforms.resolution.value.set(W * DPR, H * DPR);
   finalPass.uniforms.resolution.value.set(W * DPR, H * DPR);
   bloom.setSize(W, H);
-  dustMat.uniforms.uSizeBias.value = H / 844;   // 点大小是绝对像素，跟着视口高缩放，预览小框里才不会显得又大又密
+  dustMat.uniforms.uSizeBias.value = H / 844;
+  txt.width = Math.round(W * DPR); txt.height = Math.round(H * DPR); txt.style.width = W + 'px'; txt.style.height = H + 'px';
 }
 window.addEventListener('resize', fit); fit();
 
-var t0 = 0, paused = false;
+var t0 = 0, paused = false, tmp = new THREE.Color();
 function frame(now) {
   if (!t0) t0 = now;
   if (!paused) draw((now - t0) / 1000);
@@ -306,14 +388,37 @@ function frame(now) {
 }
 function draw(t) {
   if (!W || !H) return;
-  dustMat.uniforms.time.value = t;
-  glassMat.uniforms.time.value = t;
+  ptr.x += (ptr.tx - ptr.x) * 0.08; ptr.y += (ptr.ty - ptr.y) * 0.08;
+  scroll += (scrollT - scroll) * 0.07;
+  var sc = smooth(scroll);
+  // 相机：wobble .1 + moveXY [.4,.2] + 推进
+  camera.position.x = Math.sin(t * 0.31) * 0.10 + ptr.x * 0.4;
+  camera.position.y = Math.cos(t * 0.23) * 0.06 + ptr.y * 0.2 + sc * 0.3;
+  camera.position.z = CAM_Z - 6.4 * sc;
+  camera.lookAt(0, sc * 0.3, 0);
+  // 环：慢转 + 轻浮；推进时转过来正对
+  ring.rotation.y = RING_ROT_Y * (1 - sc) + 0.14 * sc + Math.sin(t * 0.4) * 0.07;
+  ring.rotation.x = Math.sin(t * 0.27) * 0.05;
+  ring.position.y = -0.02 + Math.sin(t * 0.5) * 0.03 - sc * 0.1;
+  ring.position.x = 0.02 + ptr.x * 0.05;
+  // 管：轻轻晃（他们 ChainShader 顶点里的 cos/sin 摆动）
+  tube.rotation.z = Math.sin(t * 0.33) * 0.012; tube.position.x = Math.sin(t * 0.21) * 0.03;
+  // 雾：呼吸 + 转紫
+  for (var i = 0; i < fogs.length; i++) {
+    var f = fogs[i], d = f.userData, ph = i * 1.7;
+    f.position.x = d.x + Math.sin(t * 0.17 + ph) * 0.25; f.position.y = d.y + Math.cos(t * 0.13 + ph) * 0.2;
+    var b = 1 + Math.sin(t * 0.2 + ph) * 0.08; f.scale.set(d.sx * b, d.sy * b, 1);
+    f.material.opacity = d.a * (1 + 0.25 * sc);
+    tmp.copy(d.c0).lerp(d.c1, sc); f.material.color.copy(tmp);
+  }
+  dustMat.uniforms.time.value = t; dustMat.uniforms.uScroll.value = scroll; dustMat.uniforms.uPointer.value.set(ptr.wx, ptr.wy);
+  glassMat.uniforms.time.value = t; glassMat.uniforms.uScroll.value = sc;
   finalPass.uniforms.time.value = t;
-  ring.rotation.y = 0.485 + Math.sin(t * 0.3) * 0.04;
   renderer.setRenderTarget(rtBG); renderer.render(bgScene, camera); renderer.setRenderTarget(null);
   composer.render();
+  drawText(t, scroll);
 }
-window.seek = function (s) { paused = true; draw(s); };
+window.seek = function (s, sc) { paused = true; if (sc != null) { scroll = scrollT = sc; } t0 = 1; draw(s); };
 requestAnimationFrame(frame);
 </script>
 </body>
