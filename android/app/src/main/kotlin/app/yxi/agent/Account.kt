@@ -387,6 +387,11 @@ object Account {
         // 兑换后的余额两种码都给，直接用它刷钱包，不用再打一次 /api/me（logto_yxi 2026-09-04）
         if (o.has("balanceCents")) me?.let { m -> me = m.copy(balanceCents = o.optLong("balanceCents")) }
         val replay = o.optBoolean("replay")
+        // ⚠️ **「已撤销」和「已兑过」得分开说**（cc-logto_yxi 2026-09-05）：被撤的人再兑同一张码，
+        //    服务端回 replay:true + revoked:true + msg。东西已经收回了还说「没有重复到账」，
+        //    用户会以为钱还在。服务端给了话就用它的（那句是它按撤销原因拼的），没给再兜一句。
+        val revoked = o.optBoolean("revoked")
+        val serverMsg = o.optString("msg").takeIf { it.isNotBlank() }
         // ⚠️ **必须按 kind 分支**：余额券的 `tier` 给的是**当前档位**、`days` 给 0
         //    （对方为了不让老版本崩才保留这两个字段）。照老写法会说出
         //    「兑换成功：FREE 0 天」这种鬼话 —— 用户兑的明明是钱。
@@ -394,7 +399,8 @@ object Account {
             "balance" -> {
                 val got = yuan(o.optLong("amountCents"))
                 val now = yuan(o.optLong("balanceCents"))
-                if (replay) "这张码你已经兑过了，没有重复到账（当前余额 $now）"
+                if (replay && revoked) (serverMsg ?: "这张码你之前兑过，但那次兑换已被撤销，不能再兑") + "（当前余额 $now）"
+                else if (replay) "这张码你已经兑过了，没有重复到账（当前余额 $now）"
                 else "余额到账 $got —— 当前余额 $now"
             }
             else -> {
@@ -402,7 +408,8 @@ object Account {
                 val days = o.optInt("days")
                 val until = o.optString("expiresAt").take(10)
                 // ⚠️ replay = 同一张码你自己重兑（断网重试就会这样）——**没有重复加天数**，得说清楚
-                if (replay) "这张码你已经兑过了，没有重复加天数（到期 $until）"
+                if (replay && revoked) (serverMsg ?: "这张码你之前兑过，但那次兑换已被撤销，不能再兑")
+                else if (replay) "这张码你已经兑过了，没有重复加天数（到期 $until）"
                 else "兑换成功：$tier $days 天，到期 $until"
             }
         }

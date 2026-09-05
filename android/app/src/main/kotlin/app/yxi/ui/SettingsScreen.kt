@@ -947,7 +947,7 @@ private fun GridEntry(
         ) {
             Box {
                 YxiIcon(ico, size = 24.dp, tint = tint)
-                // 8dp 红点，外面一圈底色描边 —— 点压在描边图标的线上时靠这圈把它和线分开
+                // 9dp 红点，外面一圈底色描边 —— 点压在描边图标的线上时靠这圈把它和线分开
                 if (dot) Box(
                     Modifier.align(Alignment.TopEnd).offset(x = 5.dp, y = (-3).dp).size(9.dp)
                         .clip(CircleShape).background(MaterialTheme.colorScheme.error)

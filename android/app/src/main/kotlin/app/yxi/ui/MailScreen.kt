@@ -19,7 +19,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -58,6 +60,11 @@ import kotlinx.coroutines.launch
  * ⚠️⚠️ **未读和未领是两件事**（cc-logto_yxi 2026-09-05 明确提醒，服务端也分两个数）：
  * **读过了也可能没领。** 所以这一页顶上分开说：红点跟着未读走（那是「有新东西」的通用含义），
  * 未领单独一行提醒。合成一个数之后，「红点没了但东西还躺在信里没拿」这件事就再也说不出来了。
+ *
+ * 老板 2026-09-05：进来要**看得出哪些读过哪些没读**，并且**能自己删信**。
+ * 所以顶上一排筹片筛「全部 / 未读 / 已读」，未读的左边一颗红点（跟宫格上那颗同色），读过的标题压暗；
+ * 删除在展开的信里（可见入口 + 确认框，STYLE.md「危险动作永远多一步」），有东西没领的先领再删。
+ * 宫格红点的水位在 [Badges]：这一页每次拿到新的未读数就把水位抬上去 —— 「点进去就消」就是这一句。
  */
 @Composable
 fun MailScreen(modifier: Modifier = Modifier) {
@@ -68,6 +75,8 @@ fun MailScreen(modifier: Modifier = Modifier) {
     var loading by remember { mutableStateOf(true) }
     var failed by remember { mutableStateOf(false) }
     var open by remember { mutableStateOf<String?>(null) }
+    var filter by remember { mutableStateOf(Filter.All) }
+    var confirmDelete by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         loading = true
@@ -75,6 +84,9 @@ fun MailScreen(modifier: Modifier = Modifier) {
         if (r == null) failed = true else { items.addAll(r.first); cursor = r.second }
         loading = false
     }
+    // 「点进去就消」：进页、以及在这页里每读掉一封，都把红点水位抬到当前未读数（见 [Badges]）
+    val unreadNow = Account.me?.unreadMail
+    LaunchedEffect(unreadNow) { unreadNow?.let { Badges.mailSeen(ctx, it) } }
 
     Column(modifier.fillMaxSize()) {
         Text(
@@ -88,7 +100,22 @@ fun MailScreen(modifier: Modifier = Modifier) {
             Modifier.padding(18.dp, 0.dp, 18.dp, 8.dp),
             style = MaterialTheme.typography.labelMedium, color = Copper,
         )
-        Spacer(Modifier.height(4.dp))
+        // 全部 / 未读 N / 已读。N 用服务端的数（跨页也准），不数本地这几十条
+        Row(
+            Modifier.padding(18.dp, 2.dp, 18.dp, 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            MailChip(t("全部"), filter == Filter.All) { filter = Filter.All }
+            val n = unreadNow ?: 0
+            MailChip(if (n > 0) t("未读 %d").format(n) else t("未读"), filter == Filter.Unread) { filter = Filter.Unread }
+            MailChip(t("已读"), filter == Filter.Read) { filter = Filter.Read }
+        }
+        val shown = when (filter) {
+            Filter.All -> items
+            // 正展开着的那封别因为刚被标成已读就从「未读」里消失 —— 人还在读它
+            Filter.Unread -> items.filter { it.unread || it.id == open }
+            Filter.Read -> items.filter { !it.unread }
+        }
         when {
             loading && items.isEmpty() -> Hint(t("正在取…"))
             failed && items.isEmpty() -> Hint(t("取不到 —— 网络不通，或者登录过期了。下拉重试或重新登录。"))
@@ -98,7 +125,16 @@ fun MailScreen(modifier: Modifier = Modifier) {
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(14.dp, 0.dp, 14.dp, 24.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                items(items, key = { it.id }) { m ->
+                // 这一筛没有：说一句，但「看更早的」照样留着 —— 更早的页里可能有
+                if (shown.isEmpty()) item {
+                    Text(
+                        if (filter == Filter.Unread) t("没有未读的信") else t("没有已读的信"),
+                        Modifier.fillMaxWidth().padding(18.dp, 16.dp),
+                        style = MaterialTheme.typography.bodySmall, color = Muted,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                }
+                items(shown, key = { it.id }) { m ->
                     val expanded = open == m.id
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -118,10 +154,10 @@ fun MailScreen(modifier: Modifier = Modifier) {
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
-                                // 没读过的左边一颗点 —— 别只靠字重，深色下几乎看不出来
+                                // 没读过的左边一颗红点（跟「我的」宫格上那颗同色）—— 别只靠字重，深色下几乎看不出来
                                 Box(
                                     Modifier.size(7.dp).clip(CircleShape)
-                                        .background(if (m.unread) Copper else Color.Transparent),
+                                        .background(if (m.unread) MaterialTheme.colorScheme.error else Color.Transparent),
                                 )
                                 Text(kindLabel(m.kind), style = MaterialTheme.typography.labelSmall, color = kindColor(m.kind))
                                 Text(
@@ -134,6 +170,8 @@ fun MailScreen(modifier: Modifier = Modifier) {
                             Text(
                                 m.title,
                                 style = MaterialTheme.typography.titleSmall,
+                                // 读过的标题压暗：一眼分得出「哪些还没看」
+                                color = if (m.unread) MaterialTheme.colorScheme.onSurface else Muted,
                                 maxLines = if (expanded) 3 else 1,
                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                             )
@@ -153,6 +191,21 @@ fun MailScreen(modifier: Modifier = Modifier) {
                                         // 领取顺带标已读（领了还算未读很奇怪）—— 两个标记一起更新
                                         if (i >= 0) items[i] = m.copy(claimedAt = "claimed", readAt = m.readAt ?: "read")
                                         got?.let { }
+                                    }
+                                    // 删除：可见入口 + 确认框（STYLE.md「危险动作永远多一步」）。
+                                    // 有东西没领的不给删 —— 服务端也会拒（409），这里只是把话先说在前面
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                        if (m.claimable) Text(
+                                            t("先领取再删"), Modifier.padding(12.dp, 6.dp),
+                                            style = MaterialTheme.typography.labelSmall, color = Muted,
+                                        ) else Text(
+                                            t("删除"),
+                                            Modifier.clip(RoundedCornerShape(100.dp))
+                                                .clickable { confirmDelete = m.id }
+                                                .padding(12.dp, 6.dp),
+                                            style = MaterialTheme.typography.labelLarge,
+                                            color = MaterialTheme.colorScheme.error,
+                                        )
                                     }
                                 }
                             }
@@ -186,6 +239,29 @@ fun MailScreen(modifier: Modifier = Modifier) {
                 }
             }
         }
+    }
+
+    confirmDelete?.let { id ->
+        AlertDialog(
+            onDismissRequest = { confirmDelete = null },
+            title = { Text(t("删除这封信？")) },
+            text = { Text(t("删了就找不回来了。")) },
+            confirmButton = {
+                TextButton({
+                    confirmDelete = null
+                    scope.launch {
+                        // ⚠️ 失败不动本地列表（Account.deleteMail 的注释）：没删掉就说没删掉
+                        if (Account.deleteMail(ctx, id)) {
+                            items.removeAll { it.id == id }
+                            if (open == id) open = null
+                        } else android.widget.Toast.makeText(
+                            ctx, t("没删掉 —— 网络不通或登录过期了，信还在。"), android.widget.Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                }) { Text(t("删除"), color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton({ confirmDelete = null }) { Text(t("取消")) } },
+        )
     }
 }
 
@@ -330,3 +406,19 @@ private fun SenderAvatar(url: String, size: androidx.compose.ui.unit.Dp) {
     }
 }
 
+/** 收件箱筛选 */
+private enum class Filter { All, Unread, Read }
+
+/** 药丸筹片（同 LinesPanel 的 ScopeChip）：选中 primaryContainer，没选 surfaceContainerHigh */
+@Composable
+private fun MailChip(label: String, on: Boolean, onClick: () -> Unit) {
+    Text(
+        label,
+        Modifier.clip(RoundedCornerShape(100.dp))
+            .background(if (on) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh)
+            .clickable(onClick = onClick)
+            .padding(14.dp, 7.dp),
+        style = MaterialTheme.typography.labelLarge,
+        color = if (on) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
