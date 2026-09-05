@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -33,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import app.yxi.agent.Abyss
 import app.yxi.agent.Wish
 import app.yxi.ui.theme.Amber
 import app.yxi.ui.theme.Copper
@@ -47,7 +49,7 @@ import kotlinx.coroutines.launch
  * 画出来的连续天数是假的，用户会照着它以为自己签了。
  */
 @Composable
-fun ActivityScreen(modifier: Modifier = Modifier) {
+fun ActivityScreen(onAbyss: () -> Unit = {}, modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var st by remember { mutableStateOf<Wish.CheckIn?>(null) }
@@ -68,9 +70,10 @@ fun ActivityScreen(modifier: Modifier = Modifier) {
         val s = st
         when {
             loading -> Hint(t("正在取…"))
-            s == null -> Hint(
-                t("活动还没开通。开了之后签到、限时活动都在这儿 —— 签到攒的「曦光」拿去祈愿。"),
-            )
+            s == null -> {
+                Hint(t("活动还没开通。开了之后签到、限时活动都在这儿 —— 签到攒的「曦光」拿去祈愿。"))
+                AbyssEntry(onAbyss)
+            }
             else -> {
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -128,7 +131,7 @@ fun ActivityScreen(modifier: Modifier = Modifier) {
                         }
                     }
                 }
-                Hint(t("更多活动还没上。有了会摆在这儿。"))
+                AbyssEntry(onAbyss)
             }
         }
     }
@@ -142,5 +145,52 @@ private fun Hint(text: String) {
         modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp),
     ) {
         Text(text, Modifier.padding(18.dp, 16.dp), style = MaterialTheme.typography.bodySmall, color = Muted)
+    }
+}
+
+/**
+ * 活动中心里的**深渊**入口卡：本期塔名 · 我的星数 · 距重置。
+ * 本期还没打过（服务端 `played`）→ 图标右上角亮红点；打过一次就消，跨设备一致。
+ * ⚠️ 接口拿不到时照样摆卡（是入口不是数据），副标题如实写「取不到」。
+ */
+@Composable
+private fun AbyssEntry(onOpen: () -> Unit) {
+    val ctx = LocalContext.current
+    var st by remember { mutableStateOf<Abyss.State?>(null) }
+    var failed by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { val r = Abyss.state(ctx); if (r == null) failed = true else st = r }
+    val s = st
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = RoundedCornerShape(22.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp).clip(RoundedCornerShape(22.dp)).clickable { onOpen() },
+    ) {
+        Row(
+            Modifier.padding(18.dp, 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Box {
+                YxiIcon(Ico.Crown, size = 24.dp, tint = Color(0xFF7A69E8))
+                if (s != null && !s.played) Box(
+                    Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-3).dp).size(8.dp)
+                        .clip(CircleShape).background(MaterialTheme.colorScheme.error),
+                )
+            }
+            Column(Modifier.weight(1f)) {
+                Text(t("深渊"), style = MaterialTheme.typography.titleMedium)
+                Text(
+                    when {
+                        s != null -> t("%s · ★ %d / %d · %s").format(
+                            s.season.name.ifBlank { t("本期") }, s.totalStars, s.rules.maxStars, untilReset(s.season.endsAt),
+                        ).trimEnd(' ', '·')
+                        failed -> t("取不到 —— 网络不通，或者登录过期了。")
+                        else -> t("正在取…")
+                    },
+                    style = MaterialTheme.typography.labelMedium, color = Muted,
+                )
+            }
+            Text("›", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.outline)
+        }
     }
 }
