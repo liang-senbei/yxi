@@ -35,8 +35,8 @@
 > 组规（老板 2026-09-05）：**所有组员都改好了才构建新版本，别频繁发**。修完一处先记在这儿，一行一条、写清是谁的；
 > 发版前 `yxi-hub all` 问一圈都齐了再 build + publish；发完清空。例外只有线上崩溃 / 数据风险，破例前先跟老板说。
 
-- **cc-Yxi_pilot · 线路 v2**（工作树未提交：`agent/Lines.kt` `ui/LinesPanel.kt` `agent/LinePresets.kt`(新) `server/bootstrap.sh`）：一条线路 = 整段 settings 片段（白名单键）、80 条 Claude / 57 条 Codex 预设、五个开关、高级 JSON；看板每个会话显示 `Yxi_switch · 名` / `claude · 官方登录` / codex 段；装机加 OpenCode/Hermes。门禁：两轮 Opus 5 审查全修 + 模拟器 E2E 8 项全过（`Yxi_pilot/design/lines-v2.md`）。
-  **构建前 cc-Yxi 侧三件**：① `SessionsScreen.kt` ~126–129 放开轮询 4 行；② `ReorderablePinned` 里那处 `SessionCard(...)`（约 1030 行）补 `line = lineLabels[...]`；③ En.kt 贴 15 条译文（`Yxi_pilot/design/lines-v2-en.txt`，`dev/i18n-check.sh` 现在报这 15 句漏翻）。
+- **cc-Yxi_pilot · 线路 v2**（已合入 HEAD，未发版）：一条线路 = 整段 settings 片段（白名单键）、80 条 Claude / 57 条 Codex 预设、五个开关、高级 JSON；看板每个会话显示 `Yxi_switch · 名` / `claude · 官方登录` / codex 段；装机加 OpenCode/Hermes。门禁：两轮 Opus 5 审查全修 + 模拟器 E2E 8 项全过（`Yxi_pilot/design/lines-v2.md`）。
+  cc-Yxi 侧三件（放开轮询 / 置顶卡片传 line / En +15）**已做完**，i18n 归零、编译过。
 
 ## 进度
 - ✅ **1.1.11（versionCode 167）已发布**（2026-09-04）：
