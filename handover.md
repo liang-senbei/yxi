@@ -37,7 +37,7 @@
 
 - **cc-Yxi_pilot · 主机加 Tailscale 内网连接**（老板 2026-09-05 要的）：加/改主机表单「公网 | Tailscale 内网」切换 + 设备列表。**编译过**；En +12 已贴 En.kt；**审查 / Mac mini E2E 还没做**——老板说先记着一起验。
 - 待办：看板头部主机名太长会折成两行挤按钮（截图 Thor-h/e）。
-- **待老板拍板 · 抽卡界面改 activetheory.net 风格**（老板 2026-09-05 问「能不能像素级复刻」）：提案已推实验室「抽卡动效」组（`祈愿 · 铬环（Active Theory 风）` + 对照图）。结论：他们是整站 WebGL 3D（PBR 铬材质 / bloom / GPU 粒子，软件 GPU 直接被拦到 unsupported 页），**像素级复刻做不到、他们的 logo·字体（NB Architekt 商业授权）·模型也不能拿**；能做的是同一套视觉语言（黑场+青紫雾、铬环、景深星尘、光条、玻璃卡、故障字、细边药丸）用 Canvas 2D 重做，可原样搬进 `DropEffect.kt`/`WishScreen.kt`。采纳后再动 App（drop-effect 规格归 cc-logto_yxi，动之前先对）。
+- **待老板拍板 · 抽卡界面改 activetheory.net 风格**（老板 2026-09-05 问「能不能像素级复刻」）：提案已推实验室「抽卡动效」组（`祈愿 · 铬环（Active Theory 风）` 单抽 + `祈愿 · 铬环 · 十连`（其余 9 个用同款玻璃框铺 3×3）+ 真机对照图）。源码 `design/wish-activetheory.src.html`（`__ART__` 换成 card_yunxi.webp 的 base64、`__TEN__` 换 true/false 即得两版；纯 Canvas 2D，搬 Compose 时对着它抄）。结论：他们是整站 WebGL 3D（PBR 铬材质 / bloom / GPU 粒子，软件 GPU 直接被拦到 unsupported 页），**像素级复刻做不到、他们的 logo·字体（NB Architekt 商业授权）·模型也不能拿**；能做的是同一套视觉语言（黑场+青紫雾、铬环、景深星尘、光条、玻璃卡、故障字、细边药丸）用 Canvas 2D 重做，可原样搬进 `DropEffect.kt`/`WishScreen.kt`。采纳后再动 App（drop-effect 规格归 cc-logto_yxi，动之前先对）。**logto 2026-09-05 给的约束**：服务端契约不动；`rarity` 是 wish.json 里的展示名（红/紫/蓝/金，以后可能改名）**只拿来选颜色**，语义（出角色重置保底 / 天数奖 / 曦光）一律按 `kind` 判，客户端别写死「rarity==红 才是角色」。
 
 ## 进度
 - ✅ **1.1.12（versionCode 168）已发布**（2026-09-05）：

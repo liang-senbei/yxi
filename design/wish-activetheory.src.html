@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="yxi-aspect" content="9:16">
+<title>祈愿 · 铬环（Active Theory 风）__TITLE__</title>
+<style>
+  html,body{margin:0;height:100%;background:#000;overflow:hidden}
+  canvas{display:block;width:100vw;height:100vh}
+  #hint{position:fixed;left:0;right:0;bottom:10px;text-align:center;font:11px ui-monospace,Menlo,monospace;letter-spacing:.18em;color:#6e7a80;pointer-events:none}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hint">点一下重播</div>
+<img id="art" alt="" style="display:none" src="data:image/webp;base64,__ART__">
+<script>
+// 祈愿出货 · 照 activetheory.net 的视觉语言重做：黑场 + 青/紫雾、铬环与交叉铬管、景深星尘、
+// 变形镜头光条、磨砂玻璃卡、故障位移的等宽大字、细边药丸按钮。全部 Canvas 2D，可原样搬进 Compose。
+// 稀有度颜色仍用我们自己的四档（红 #ff5a4e …），这里演示红档（角色 · 云曦）。
+var cv = document.getElementById('c'), ctx = cv.getContext('2d'), art = document.getElementById('art');
+var W = 0, H = 0, Wc = 0, u = 1, dpr = 1;
+
+// ── 时间轴（ms）
+var TOTAL = 6400, HOLD = 2200, t0 = 0, paused = false;
+var RING0 = 200, RING1 = 1400;      // 铬环扫出
+var TUBE0 = 900, TUBE1 = 2000;      // 两根铬管垂下交叉
+var CHG0 = 1500, CHG1 = 2250;       // 蓄力：星尘被吸向环心，档位色在环里涨
+var FL0 = 2200, FL1 = 2550;         // 镜头光条 + 一闪
+var CARD0 = 2350, CARD1 = 3300;     // 玻璃卡从环里升起
+var TXT0 = 3200, TXT1 = 4400;       // 故障字落定
+var PILL0 = 4300, PILL1 = 5000;     // 药丸按钮
+var CALM = 5000;                    // 之后一切收静
+// 十连变体：环和主卡缩到上面，其余 9 个结果用同款玻璃框铺 3×3
+var TEN = __TEN__, GRID0 = 4100, GRID1 = 5400;
+if (TEN) { TOTAL = 7200; TXT1 = 4200; PILL0 = 5300; PILL1 = 5900; CALM = 5900; }
+// ⚠️ 颜色看 rarity（展示名，以后可能改），语义看 kind —— logto 2026-09-05 定的，客户端别写死「红==角色」
+var TIERS = { '红': '#ff5a4e', '金': '#ffd76a', '紫': '#a06bff', '蓝': '#5aa8ff' };
+var ITEMS = [
+  { n: '曦光 ×1', r: '金', k: 'tickets' }, { n: '终端配色', r: '蓝', k: 'cosmetic' }, { n: '启动器图标', r: '蓝', k: 'cosmetic', dup: true },
+  { n: '角色光环', r: '紫', k: 'cosmetic', nw: true }, { n: '曦光 ×1', r: '金', k: 'tickets' }, { n: '开屏', r: '蓝', k: 'cosmetic' },
+  { n: 'Pro 体验 1 天', r: '紫', k: 'membership_days' }, { n: '曦光 ×1', r: '金', k: 'tickets' }, { n: '终端配色', r: '蓝', k: 'cosmetic', dup: true },
+];
+function kindLabel(it) { return it.k === 'tickets' ? '曦光返还' : it.k === 'membership_days' ? '会员天数' : it.k === 'character' ? '角色' : it.dup ? '已有 · 折 1 曦光' : it.nw ? '装扮 · NEW' : '装扮'; }
+
+// ── 颜色（取自他们站点的参数表：雾 #1A90AD、紫 #C64DFF/#422EA3、薰衣草 #B38AFF、薄荷 #84C8C3、光条 #C2DCFF）
+var TIER = { hi: '#ff5a4e', mid: '#ff7a6a' };      // 红档 · 角色（我们自己的四档之一）
+var LAV = '#B38AFF', MINT = '#84C8C3', GREEN = '#0BED90';
+
+// ── 预渲染的贴图（一次生成，每帧只 drawImage，不分配）
+var spr = {};
+function softDot(color, size, hard) {
+  var c = document.createElement('canvas'); c.width = c.height = size;
+  var g = c.getContext('2d'), r = size / 2;
+  var grd = g.createRadialGradient(r, r, 0, r, r, r);
+  grd.addColorStop(0, color); grd.addColorStop(hard ? 0.55 : 0.0, color.replace(/[\d.]+\)$/, hard ? '1)' : '0.9)'));
+  grd.addColorStop(1, color.replace(/[\d.]+\)$/, '0)'));
+  g.fillStyle = grd; g.fillRect(0, 0, size, size); return c;
+}
+function streakSprite() {
+  var c = document.createElement('canvas'); c.width = 512; c.height = 48; var g = c.getContext('2d');
+  var grd = g.createLinearGradient(0, 0, 512, 0);
+  grd.addColorStop(0, 'rgba(194,220,255,0)'); grd.addColorStop(0.35, 'rgba(194,220,255,0.55)');
+  grd.addColorStop(0.5, 'rgba(255,255,255,1)'); grd.addColorStop(0.65, 'rgba(194,220,255,0.55)'); grd.addColorStop(1, 'rgba(194,220,255,0)');
+  g.fillStyle = grd; g.fillRect(0, 0, 512, 48);
+  var v = g.createLinearGradient(0, 0, 0, 48);
+  v.addColorStop(0, 'rgba(0,0,0,1)'); v.addColorStop(0.5, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,1)');
+  g.globalCompositeOperation = 'destination-out'; g.fillStyle = v; g.fillRect(0, 0, 512, 48);
+  return c;
+}
+function grainSprite() {
+  var c = document.createElement('canvas'); c.width = c.height = 160; var g = c.getContext('2d');
+  var id = g.createImageData(160, 160), d = id.data;
+  for (var i = 0; i < d.length; i += 4) { var v = 128 + (Math.random() - 0.5) * 255; d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255; }
+  g.putImageData(id, 0, 0); return c;
+}
+spr.gold = softDot('rgba(214,226,122,1)', 32, true);
+spr.blue = softDot('rgba(120,196,255,1)', 32, true);
+spr.white = softDot('rgba(255,255,255,1)', 32, true);
+spr.dark = softDot('rgba(0,0,0,1)', 64, false);
+spr.glowTeal = softDot('rgba(26,144,173,1)', 256, false);
+spr.glowPurple = softDot('rgba(66,46,163,1)', 256, false);
+spr.glowMag = softDot('rgba(198,77,255,1)', 256, false);
+spr.glowTier = softDot('rgba(255,90,78,1)', 256, false);
+spr.glowWhite = softDot('rgba(255,255,255,1)', 256, false);
+spr.glowMint = softDot('rgba(11,237,144,1)', 256, false);
+spr.glow金 = softDot('rgba(255,215,106,1)', 128, false); spr.glow紫 = softDot('rgba(160,107,255,1)', 128, false);
+spr.glow蓝 = softDot('rgba(90,168,255,1)', 128, false); spr.glow红 = spr.glowTier;
+spr.streak = streakSprite();
+spr.grain = grainSprite();
+
+// ── 星尘：700 颗，Float32Array，位置是时间的函数（不存速度，重播/跳时都确定）
+var N = 950, P = new Float32Array(N * 6); // x0 y0 depth kind phase speed
+(function seed() {
+  var s = 7;
+  function rnd() { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; }
+  for (var i = 0; i < N; i++) {
+    var o = i * 6, r = rnd();
+    P[o] = rnd();                             // x（比例）
+    P[o + 1] = 1 - Math.pow(rnd(), 1.7);      // y（比例）— 往下密，像他们首页
+    P[o + 2] = r < 0.06 ? 0.75 + rnd() * 0.25 : Math.pow(rnd(), 1.6) * 0.6; // 景深：6% 在近处、大而糊，其余多数很小
+    var k = rnd(); P[o + 3] = k < 0.62 ? 0 : k < 0.88 ? 1 : k < 0.965 ? 2 : 3; // 0 金绿 1 蓝 2 白 3 黑遮挡
+    P[o + 4] = rnd() * 6.283;
+    P[o + 5] = 0.5 + rnd();
+  }
+})();
+
+// ── 文字（离屏预渲染：白 / 红 / 青 三份，故障时错位叠）
+var texts = [], textsReady = false;
+function mkText(str, px, font, color, spacing) {
+  var m = document.createElement('canvas').getContext('2d');
+  m.font = font; try { m.letterSpacing = spacing || '0px'; } catch (e) {}
+  var w = Math.max(2, Math.ceil(m.measureText(str).width) + 8), h = Math.max(2, Math.ceil(px * 1.4));
+  function layer(col) {
+    var c = document.createElement('canvas'); c.width = w; c.height = h; var g = c.getContext('2d');
+    g.font = font; try { g.letterSpacing = spacing || '0px'; } catch (e) {}
+    g.textBaseline = 'middle'; g.fillStyle = col; g.fillText(str, 4, h / 2); return c;
+  }
+  return { w: w, h: h, white: layer(color), red: layer('rgba(255,70,90,0.9)'), cyan: layer('rgba(80,220,255,0.9)') };
+}
+function buildTexts() {
+  var mono = 'ui-monospace, Menlo, Consolas, "Roboto Mono", monospace';
+  texts = [
+    mkText('NEW CHARACTER  ·  角色', Math.round(11 * u), Math.round(11 * u) + 'px ' + mono, LAV, (2.2 * u) + 'px'),
+    mkText('云曦', Math.round((TEN ? 28 : 46) * u), 'bold ' + Math.round((TEN ? 28 : 46) * u) + 'px system-ui, "PingFang SC", "Noto Sans CJK SC", sans-serif', '#ffffff', ((TEN ? 4 : 6) * u) + 'px'),
+    mkText('浮云之冠  ·  空灵 · 纯真', Math.round(13 * u), Math.round(13 * u) + 'px system-ui, sans-serif', 'rgba(255,255,255,0.78)', (1.5 * u) + 'px'),
+    mkText('->  已收入卡牌库', Math.round(12.5 * u), Math.round(12.5 * u) + 'px ' + mono, LAV, (1.6 * u) + 'px'),
+  ];
+  textsReady = true;
+}
+
+var chrome = null, tubeGrad = null, dash = [0, 0];
+function fit() {
+  dpr = window.devicePixelRatio || 1;
+  W = window.innerWidth; H = window.innerHeight;
+  if (!W || !H) return;
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  Wc = Math.min(W, H * 9 / 16); u = Wc / 390;
+  // 铬的彩虹膜：锥形渐变定一次，画的时候转画布
+  if (ctx.createConicGradient) {
+    chrome = ctx.createConicGradient(0, 0, 0);
+    [[0, '#ffffff'], [0.10, '#f0b3ff'], [0.22, '#8fd9ff'], [0.34, '#e9f9ff'], [0.46, '#84c8c3'], [0.56, '#ffffff'],
+     [0.68, '#c8a6ff'], [0.80, '#b4e0e3'], [0.90, '#f6f6f6'], [1, '#ffffff']].forEach(function (s) { chrome.addColorStop(s[0], s[1]); });
+  } else {
+    chrome = ctx.createLinearGradient(-Wc / 2, 0, Wc / 2, 0);
+    chrome.addColorStop(0, '#f0b3ff'); chrome.addColorStop(0.5, '#ffffff'); chrome.addColorStop(1, '#8fd9ff');
+  }
+  tubeGrad = ctx.createLinearGradient(0, 0, 0, H);
+  [[0, '#14161c'], [0.18, '#e8f4ff'], [0.30, '#f2b8ff'], [0.42, '#1a1d26'], [0.55, '#ffffff'], [0.66, '#9fd8ff'],
+   [0.78, '#202430'], [0.90, '#f4c8ff'], [1, '#0d0e12']].forEach(function (s) { tubeGrad.addColorStop(s[0], s[1]); });
+  dash[0] = dash[1] = H * 2.2;
+  buildTexts();
+}
+window.addEventListener('resize', fit); fit();
+
+// ── 小工具（不分配）
+function clamp01(x) { return x < 0 ? 0 : x > 1 ? 1 : x; }
+function seg(t, a, b) { return clamp01((t - a) / (b - a)); }
+function smooth(p) { return p * p * (3 - 2 * p); }
+function outCubic(p) { p = 1 - p; return 1 - p * p * p; }
+function outBack(p) { var c = 1.4; p = p - 1; return 1 + p * p * ((c + 1) * p + c); }
+function glow(sp, x, y, r, a) { if (a <= 0) return; ctx.globalAlpha = a; ctx.drawImage(sp, x - r, y - r, r * 2, r * 2); ctx.globalAlpha = 1; }
+function rrect(x, y, w, h, r) {
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+
+// ── 场景几何
+function ringState(t) {
+  // 环：先在 0.40H 处，卡升起时放大并成为卡的背光框
+  var k = smooth(seg(t, CARD0, CARD1));
+  var cx = W / 2, cy = H * (0.40 - (TEN ? 0.13 : 0.02) * k), R = Wc * (0.40 + (TEN ? -0.03 : 0.13) * k);
+  return { cx: cx, cy: cy, R: R, w: Wc * (0.045 - 0.012 * k) };
+}
+
+function drawStage(t) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  ctx.globalCompositeOperation = 'lighter';
+  var calm = 1 - 0.45 * smooth(seg(t, CALM, CALM + 900));
+  glow(spr.glowTeal, W * 0.2, -H * 0.12, Wc * 0.95, 0.42 * calm);           // 顶部青雾（他们首页的那团）——黑要占大头，雾只在边上
+  glow(spr.glowPurple, W * 0.8, H * 1.15, Wc * 1.1, 0.40 * calm);          // 底部紫雾
+  glow(spr.glowMag, W * 0.05, H * 0.95, Wc * 0.6, 0.16 * calm);
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+function drawDust(t) {
+  var rs = ringState(t);
+  // 吸向环心的力：蓄力时升到 .85，闪光后反冲到 -.3，再回 0
+  var pull = 0;
+  if (t < CHG1) pull = 0.85 * smooth(seg(t, CHG0, CHG1));
+  else if (t < 2650) pull = 0.85 - 1.15 * outCubic(seg(t, CHG1, 2650));
+  else pull = -0.3 * (1 - smooth(seg(t, 2650, 3400)));
+  var calm = 1 - 0.55 * smooth(seg(t, CALM, CALM + 1200));
+  var drift = (t < CALM ? t : CALM + (t - CALM) * 0.25) * 0.001;
+  ctx.globalCompositeOperation = 'lighter';
+  for (var i = 0; i < N; i++) {
+    var o = i * 6, d = P[o + 2], kind = P[o + 3];
+    if (kind === 3) continue;
+    var sp = P[o + 5];
+    var x = (P[o] * 1.2 - 0.1) * W - drift * 14 * sp * (0.4 + d), y = P[o + 1] * H + Math.sin(drift * 0.9 + P[o + 4]) * 9 * u * (0.3 + d);
+    x = ((x % (W * 1.2)) + W * 1.2) % (W * 1.2) - W * 0.1;
+    var dx = rs.cx - x, dy = rs.cy - y;
+    x += dx * pull * (0.9 - d * 0.5); y += dy * pull * (0.9 - d * 0.5);
+    var big = d > 0.7, r = big ? (7 + 12 * (d - 0.7) / 0.3) * u : (0.9 + 2.2 * d) * u;
+    var a = (big ? 0.07 : 0.30 + 0.6 * d) * calm;
+    if (kind === 1) a *= 0.8;
+    ctx.globalAlpha = a;
+    ctx.drawImage(kind === 0 ? spr.gold : kind === 1 ? spr.blue : spr.white, x - r, y - r, r * 2, r * 2);
+  }
+  ctx.globalCompositeOperation = 'source-over';
+  // 近处的黑色遮挡颗粒（他们画面里那些暗点）
+  for (var j = 0; j < N; j++) {
+    var o2 = j * 6; if (P[o2 + 3] !== 3) continue;
+    var d2 = P[o2 + 2], x2 = (P[o2] * 1.2 - 0.1) * W - drift * 10 * P[o2 + 5], y2 = P[o2 + 1] * H + Math.sin(drift + P[o2 + 4]) * 6 * u;
+    x2 = ((x2 % (W * 1.2)) + W * 1.2) % (W * 1.2) - W * 0.1;
+    var r2 = (5 + 9 * d2) * u;
+    ctx.globalAlpha = 0.4 * calm; ctx.drawImage(spr.dark, x2 - r2, y2 - r2, r2 * 2, r2 * 2);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawTubes(t) {
+  var p = seg(t, TUBE0, TUBE1); if (p <= 0) return;
+  var rs = ringState(t), cx = rs.cx, cy = rs.cy, R = rs.R;
+  var dim = 1 - 0.35 * smooth(seg(t, CARD0, CARD1));
+  ctx.save();
+  ctx.setLineDash(dash); ctx.lineDashOffset = dash[0] * (1 - outCubic(p));
+  ctx.lineCap = 'round';
+  // 两根管从环的左下/右下垂下，交叉后各奔对侧出画（像他们的 logo 尾巴）
+  for (var side = -1; side <= 1; side += 2) {
+    var sx = cx + side * R * 0.55, sy = cy + R * 0.84;
+    ctx.beginPath(); ctx.moveTo(sx, sy);
+    ctx.bezierCurveTo(cx + side * R * 0.35, cy + R * 1.9, cx - side * R * 0.9, cy + R * 2.1, cx - side * R * 0.95, H * 1.15);
+    ctx.globalAlpha = dim;
+    ctx.lineWidth = rs.w * 0.74; ctx.strokeStyle = 'rgba(8,9,14,0.8)'; ctx.stroke();
+    ctx.lineWidth = rs.w * 0.6; ctx.strokeStyle = tubeGrad; ctx.stroke();
+    ctx.lineWidth = rs.w * 0.1; ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.stroke();
+  }
+  ctx.restore(); ctx.globalAlpha = 1;
+}
+
+function drawRing(t) {
+  var p = seg(t, RING0, RING1); if (p <= 0) return;
+  var rs = ringState(t), cx = rs.cx, cy = rs.cy, R = rs.R, w = rs.w;
+  var sweep = 6.2832 * outCubic(p), a0 = -1.5708;
+  var charge = smooth(seg(t, CHG0, CHG1)) * (1 - smooth(seg(t, FL1, CARD1)));
+  var calm = 1 - 0.5 * smooth(seg(t, CALM, CALM + 900));
+  // 环里的档位色：蓄力时涨起来
+  ctx.globalCompositeOperation = 'lighter';
+  glow(spr.glowTier, cx, cy, R * (0.6 + 0.9 * charge), 0.85 * charge);
+  glow(spr.glowWhite, cx, cy, R * 1.5, 0.10 * calm);                // 环的辉光（他们首页 bloom 很重）
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.save(); ctx.translate(cx, cy); ctx.rotate(-0.15); ctx.scale(1, 0.94);
+  function arc(rr) { ctx.beginPath(); ctx.arc(0, 0, rr, a0, a0 + sweep); }
+  ctx.lineCap = 'round';
+  arc(R); ctx.lineWidth = w * 1.0; ctx.strokeStyle = 'rgba(8,9,14,0.75)'; ctx.stroke();      // 暗金属底（不是描边，是金属背光面）
+  ctx.save(); ctx.rotate(t * 0.00025);                                                    // 转的是彩虹膜，不是环
+  var mid = Math.min(w * 0.78, R * 0.8);
+  arc(R); ctx.lineWidth = mid; ctx.strokeStyle = chrome; ctx.stroke();
+  ctx.restore();
+  arc(R - w * 0.30); ctx.lineWidth = w * 0.14; ctx.strokeStyle = 'rgba(0,0,0,0.45)'; ctx.stroke();  // 内侧阴影
+  arc(R + w * 0.22); ctx.lineWidth = w * 0.10; ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.stroke(); // 外侧高光
+  ctx.restore();
+  // 扫出时的亮头
+  if (p < 1) {
+    var hx = cx + Math.cos(a0 + sweep) * R, hy = cy + Math.sin(a0 + sweep) * R * 0.94;
+    ctx.globalCompositeOperation = 'lighter'; glow(spr.glowWhite, hx, hy, w * 2.2, 0.9); ctx.globalCompositeOperation = 'source-over';
+  }
+}
+
+function drawFlash(t) {
+  var p = seg(t, FL0, FL1); if (p <= 0 || p >= 1) return;
+  var rs = ringState(t);
+  var env = p < 0.3 ? p / 0.3 : 1 - (p - 0.3) / 0.7;
+  ctx.globalCompositeOperation = 'lighter';
+  var sw = W * 1.6 * (0.6 + 0.6 * p), sh = 22 * u * (1 - 0.4 * p);
+  ctx.globalAlpha = env; ctx.drawImage(spr.streak, rs.cx - sw / 2, rs.cy - sh / 2, sw, sh);
+  ctx.globalAlpha = env * 0.55; ctx.drawImage(spr.streak, rs.cx - sw * 0.35, rs.cy - sh * 2.2, sw * 0.7, sh * 4.4);
+  glow(spr.glowWhite, rs.cx, rs.cy, rs.R * 1.1, env * 0.9);
+  glow(spr.glowTier, rs.cx, rs.cy, Math.max(W, H), env * 0.45);
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+}
+
+function drawCard(t) {
+  var p = seg(t, CARD0, CARD1); if (p <= 0) return;
+  var rs = ringState(t), e = outBack(p);
+  var cw = Wc * (TEN ? 0.62 : 0.86) * (0.55 + 0.45 * e), ch = cw * 536 / 960;
+  var cx = rs.cx, cy = rs.cy + (1 - e) * rs.R * 0.9;
+  var x = cx - cw / 2, y = cy - ch / 2, r = 14 * u;
+  ctx.save(); ctx.globalAlpha = clamp01(p * 2);
+  // 玻璃壳：先一圈软影，再图，再顶部一层亮膜和一条细白边（照他们 work 页的玻璃卡）
+  ctx.globalCompositeOperation = 'lighter'; glow(spr.glowTier, cx, cy, cw * 0.75, 0.22 * (1 - 0.6 * smooth(seg(t, CALM, CALM + 900)))); ctx.globalCompositeOperation = 'source-over';
+  ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 24 * u; ctx.shadowOffsetY = 10 * u;
+  ctx.fillStyle = '#0b0d12'; rrect(x, y, cw, ch, r); ctx.fill();
+  ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+  ctx.save(); rrect(x, y, cw, ch, r); ctx.clip();
+  if (art.complete && art.naturalWidth) ctx.drawImage(art, x, y, cw, ch);
+  var sheen = ctx.createLinearGradient(0, y, 0, y + ch * 0.5);
+  sheen.addColorStop(0, 'rgba(255,255,255,0.16)'); sheen.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = sheen; ctx.fillRect(x, y, cw, ch * 0.5);
+  ctx.restore();
+  ctx.lineWidth = 1.2 * u; ctx.strokeStyle = 'rgba(255,255,255,0.42)'; rrect(x, y, cw, ch, r); ctx.stroke();
+  ctx.restore();
+}
+
+function drawGlitchText(item, cx, cy, p, settle, align) {
+  if (!item) return;
+  var w = item.w, h = item.h, x = align === 'left' ? cx : cx - w / 2, y = cy - h / 2;
+  var vis = Math.max(1, Math.floor(w * outCubic(p)));
+  var amp = (1 - settle) * 16 * u, slices = 9, sh = h / slices;
+  for (var i = 0; i < slices; i++) {
+    var sy = Math.floor(i * sh), sHt = Math.ceil(sh) + 1;
+    var dx = amp * (Math.random() - 0.5) * 2;
+    if (settle < 1 && Math.random() < 0.08) continue;           // 偶尔缺一片
+    if (settle < 1) {
+      ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = (1 - settle) * 0.9;
+      ctx.drawImage(item.red, 0, sy, vis, sHt, x + dx - 2.5 * u * (1 - settle), y + sy, vis, sHt);
+      ctx.drawImage(item.cyan, 0, sy, vis, sHt, x + dx + 2.5 * u * (1 - settle), y + sy, vis, sHt);
+      ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+    }
+    ctx.drawImage(item.white, 0, sy, vis, sHt, x + dx, y + sy, vis, sHt);
+  }
+}
+
+function drawText(t) {
+  var p = seg(t, TXT0, TXT1); if (p <= 0 || !textsReady) return;
+  var rs = ringState(t), top = rs.cy + rs.R * 0.94 + 10 * u;
+  var settle = smooth(seg(t, TXT0 + 500, TXT1 + 300));
+  // 字后面压一层暗底，铬管穿过去也不花
+  var sc = ctx.createLinearGradient(0, top - 30 * u, 0, top + 120 * u);
+  sc.addColorStop(0, 'rgba(0,0,0,0)'); sc.addColorStop(0.3, 'rgba(0,0,0,0.55)'); sc.addColorStop(1, 'rgba(0,0,0,0.55)');
+  ctx.fillStyle = sc; ctx.fillRect(0, top - 30 * u, W, (TEN ? 100 : 150) * u);
+  var lx = W / 2 - Wc * 0.43;
+  if (TEN) {
+    drawGlitchText(texts[0], lx, top + 4 * u, seg(p, 0, 0.35), settle, 'left');
+    drawGlitchText(texts[1], lx - 3 * u, top + 30 * u, seg(p, 0.15, 0.7), settle, 'left');
+    drawGlitchText(texts[2], lx, top + 56 * u, seg(p, 0.45, 1), settle, 'left');
+    return;
+  }
+  drawGlitchText(texts[0], lx, top + 6 * u, seg(p, 0, 0.35), settle, 'left');
+  drawGlitchText(texts[1], lx - 4 * u, top + 42 * u, seg(p, 0.15, 0.7), settle, 'left');
+  drawGlitchText(texts[2], lx, top + 78 * u, seg(p, 0.45, 0.85), settle, 'left');
+  drawGlitchText(texts[3], lx, top + 104 * u, seg(p, 0.6, 1), Math.min(1, settle + 0.5), 'left');
+}
+
+// 十连的其余 9 个：同款玻璃框铺 3×3，边色按 rarity、副标按 kind
+function drawGrid(t) {
+  if (!TEN) return;
+  var p = seg(t, GRID0, GRID1); if (p <= 0) return;
+  var gw = Wc * 0.84, gap = 8 * u, fw = (gw - 2 * gap) / 3, fh = fw * 9 / 16, x0 = W / 2 - gw / 2, y0 = H * 0.585;
+  var calm = 1 - 0.5 * smooth(seg(t, CALM, CALM + 900));
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (var i = 0; i < 9; i++) {
+    var it = ITEMS[i], hi = TIERS[it.r] || '#ffffff', col = i % 3, row = (i / 3) | 0;
+    var e = outCubic(seg(t, GRID0 + i * 95, GRID0 + i * 95 + 420)); if (e <= 0) continue;
+    var x = x0 + col * (fw + gap), y = y0 + row * (fh + gap) + (1 - e) * 16 * u;
+    ctx.globalAlpha = e;
+    ctx.globalCompositeOperation = 'lighter'; glow(spr['glow' + it.r] || spr.glowWhite, x + fw / 2, y + fh / 2, fw * 0.7, (0.30 * (1 - e) + 0.12) * calm * e);
+    ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = e;
+    ctx.fillStyle = 'rgba(8,10,16,0.80)'; rrect(x, y, fw, fh, 8 * u); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.05)'; ctx.fillRect(x + 1, y + 1, fw - 2, fh * 0.45);
+    ctx.lineWidth = (1.1 + (1 - e) * 1.5) * u; ctx.strokeStyle = hi; rrect(x, y, fw, fh, 8 * u); ctx.stroke();
+    ctx.fillStyle = '#ffffff'; ctx.font = Math.round(11 * u) + 'px system-ui, sans-serif';
+    ctx.fillText(it.n, x + fw / 2, y + fh * 0.40);
+    ctx.fillStyle = hi; ctx.font = Math.round(8.5 * u) + 'px ui-monospace, Menlo, monospace';
+    ctx.fillText(kindLabel(it), x + fw / 2, y + fh * 0.72);
+  }
+  ctx.textAlign = 'left'; ctx.globalAlpha = 1;
+}
+
+function pill(x, y, w, h, alpha) {
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = 'rgba(0,0,0,0.55)'; rrect(x, y, w, h, h / 2); ctx.fill();
+  ctx.lineWidth = 1.2 * u; ctx.strokeStyle = 'rgba(132,200,195,0.9)'; ctx.stroke();
+  // 药丸下面那道光管（他们导航条底下的绿光）
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.save(); ctx.translate(x + w / 2, y + h + 6 * u); ctx.scale(1, 0.22);
+  ctx.globalAlpha = alpha * 0.55; ctx.drawImage(spr.glowMint, -w * 0.55, -w * 0.55, w * 1.1, w * 1.1);
+  ctx.restore(); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+}
+function drawPills(t) {
+  var p = seg(t, PILL0, PILL1); if (p <= 0) return;
+  var e = outCubic(p), y = H * (TEN ? 0.885 : 0.845) - 8 * u * (1 - e), h = (TEN ? 40 : 44) * u, w = Wc * 0.78, x = W / 2 - w / 2;
+  pill(x, y, w, h, e);
+  ctx.globalAlpha = e;
+  ctx.font = Math.round(12.5 * u) + 'px ui-monospace, Menlo, monospace'; try { ctx.letterSpacing = (2 * u) + 'px'; } catch (er) {}
+  ctx.textBaseline = 'middle'; ctx.textAlign = 'center'; ctx.fillStyle = '#ffffff';
+  ctx.fillText('祈愿 ×1', x + w * 0.25, y + h / 2 + 0.5);
+  ctx.fillText('祈愿 ×10', x + w * 0.75, y + h / 2 + 0.5);
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1 * u;
+  ctx.beginPath(); ctx.moveTo(x + w * 0.42, y + h / 2); ctx.lineTo(x + w * 0.58, y + h / 2); ctx.stroke();
+  if (!TEN) {
+    ctx.font = Math.round(10.5 * u) + 'px ui-monospace, Menlo, monospace'; ctx.fillStyle = 'rgba(179,138,255,0.95)';
+    ctx.fillText('1 曦光', x + w * 0.25, y + h + 18 * u); ctx.fillText('9 曦光 · 会员九折', x + w * 0.75, y + h + 18 * u);
+  }
+  try { ctx.letterSpacing = '0px'; } catch (er2) {}
+  ctx.textAlign = 'left'; ctx.globalAlpha = 1;
+}
+
+function drawGrain() {
+  // 胶片颗粒 + 暗角：他们整站都有一层
+  ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = 0.09;
+  var ox = -Math.floor(Math.random() * 160), oy = -Math.floor(Math.random() * 160);
+  for (var y = oy; y < H; y += 160) for (var x = ox; x < W; x += 160) ctx.drawImage(spr.grain, x, y);
+  ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+  var v = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.45, W / 2, H / 2, Math.max(W, H) * 0.75);
+  v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,0.6)');
+  ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+}
+
+function draw(t) {
+  if (!W || !H) return;
+  drawStage(t);
+  drawDust(t);
+  drawTubes(t);
+  drawRing(t);
+  drawCard(t);
+  drawFlash(t);
+  drawText(t);
+  drawGrid(t);
+  drawPills(t);
+  drawGrain();
+}
+function loop(now) {
+  if (!t0) t0 = now;
+  var t = now - t0;
+  if (t >= TOTAL + HOLD) { t0 = now; t = 0; }
+  if (!paused) draw(Math.min(t, TOTAL));
+  requestAnimationFrame(loop);
+}
+document.addEventListener('pointerdown', function () { t0 = 0; paused = false; });
+window.seek = function (ms) { paused = true; draw(ms); };   // 截图用：定住在某一毫秒
+if (art.complete) requestAnimationFrame(loop); else art.onload = function () { requestAnimationFrame(loop); };
+</script>
+</body>
+</html>
