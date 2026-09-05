@@ -411,7 +411,7 @@ object Account {
             else -> {
                 val tier = o.optString("tier").uppercase()
                 val days = o.optInt("days")
-                val until = o.optString("expiresAt").take(10)
+                val until = Tz.date(o.optString("expiresAt"))
                 // ⚠️ replay = 同一张码你自己重兑（断网重试就会这样）——**没有重复加天数**，得说清楚
                 if (replay && revoked) (serverMsg ?: "这张码你之前兑过，但那次兑换已被撤销，不能再兑")
                 else if (replay) "这张码你已经兑过了，没有重复加天数（到期 $until）"
@@ -423,7 +423,7 @@ object Account {
                 msg = msg,
                 kind = o.optString("kind").ifEmpty { "membership" },
                 tier = when (o.optString("tier")) { "ultra" -> Tier.Ultra; "pro" -> Tier.Pro; else -> Tier.Free },
-                expiresAt = o.optString("expiresAt").take(10),
+                expiresAt = Tz.date(o.optString("expiresAt")),
                 amountCents = o.optLong("amountCents"),
                 balanceCents = o.optLong("balanceCents"),
                 replay = replay,
@@ -701,7 +701,7 @@ object Account {
             //    本地写死一句就会说错。下面那些只是**服务端没给 msg 时**的兜底。
             msg.isNotEmpty() -> msg
             err == "quota_exhausted" -> {
-                val next = o?.optString("nextRefreshAt")?.take(10).orEmpty()
+                val next = o?.optString("nextRefreshAt")?.let { Tz.date(it) }.orEmpty()
                 if (next.isEmpty()) "这个月的修改次数用完了" else "这个月的修改次数用完了，$next 恢复"
             }
             err == "code_not_found" -> "没有这张兑换码"

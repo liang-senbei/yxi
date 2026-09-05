@@ -100,6 +100,7 @@ class MainActivity : ComponentActivity() {
         val keys = KeyManager(applicationContext)
         val prefs = getSharedPreferences("yxi", MODE_PRIVATE)
         app.yxi.ui.I18n.load(this)
+        app.yxi.agent.Tz.load(this)
         app.yxi.ui.Skin.load(this)
         app.yxi.agent.Account.load(this)
         // ⚠️ 只挡**多任务卡片**的系统快照（它把对话内容存进 /data/system_ce/，我们清不掉）。

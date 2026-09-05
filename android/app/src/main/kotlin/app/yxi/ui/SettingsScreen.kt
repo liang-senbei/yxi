@@ -598,6 +598,31 @@ fun SettingsScreen(
             }
         }
 
+        // 时区：全 App 的绝对时间都从 Tz 走，这里一改处处跟着换（相对时间「几分钟前」不受影响）
+        Card(t("时区"), Glyph.Globe, subtitle = app.yxi.agent.Tz.zone.label) {
+            androidx.compose.foundation.layout.FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                app.yxi.agent.Tz.Zone.entries.forEach { z ->
+                    val on = app.yxi.agent.Tz.zone == z
+                    Surface(
+                        color = if (on) CopperContainer else SurfaceContainerHigh,
+                        shape = Pill,
+                        modifier = Modifier.clip(Pill).clickable { app.yxi.agent.Tz.set(ctx, z) },
+                    ) {
+                        Text(
+                            z.label,
+                            Modifier.padding(16.dp, 9.dp),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = if (on) MaterialTheme.colorScheme.onTertiaryContainer else Muted,
+                        )
+                    }
+                }
+            }
+            Hint2(t("额度恢复时间、邮件、订单、实验室、工单这些绝对时间都按这个时区显示；「几分钟前」那种不受影响。"))
+        }
+
         if (dev) DevCard(ctx, host, store, keys, connectError)
 
         SectionLabel(t("关于与帮助"))
@@ -920,8 +945,7 @@ private fun TicketsCard(ssh: app.yxi.ssh.SshSession?) {
 
 /** unix 秒 → 北京时间 `MM-dd HH:mm`。0 = 空串。 */
 private fun beijingTime(at: Long): String = if (at <= 0) "" else runCatching {
-    java.time.Instant.ofEpochSecond(at).atZone(java.time.ZoneId.of("Asia/Shanghai"))
-        .format(java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm"))
+    app.yxi.agent.Tz.stamp(at)
 }.getOrDefault("")
 
 /** QQ 那种分组小标题：卡片上面一行小灰字，把一堆设置分出层次 */

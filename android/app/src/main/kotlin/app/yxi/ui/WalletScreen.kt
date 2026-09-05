@@ -31,6 +31,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import app.yxi.agent.Account
 import app.yxi.agent.Shop
+import app.yxi.agent.Tz
 import app.yxi.ui.theme.Muted
 import kotlinx.coroutines.launch
 
@@ -124,7 +125,7 @@ fun WalletScreen(onShop: () -> Unit, onRedeem: () -> Unit, modifier: Modifier = 
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(od.itemId.uppercase() + " · " + Account.yuan(od.priceCents), style = MaterialTheme.typography.titleSmall)
-                            Text(od.at.take(16).replace('T', ' '), style = MaterialTheme.typography.labelSmall, color = Muted)
+                            Text(Tz.dateTime(od.at), style = MaterialTheme.typography.labelSmall, color = Muted)
                         }
                         // 码：点一下复制。⚠️ 这是不记名码，谁拿到谁能兑 —— 所以只在你自己的订单里露出来
                         Text(

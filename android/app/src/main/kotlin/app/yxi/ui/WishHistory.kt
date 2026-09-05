@@ -126,7 +126,7 @@ private fun DrawCard(r: Wish.Record) {
                 )
                 Text(
                     // 服务端给的是 ISO 串，截到分钟就够 —— 记录页看的是「哪天那会儿」，不是秒
-                    r.at.take(16).replace('T', ' '),
+                    app.yxi.agent.Tz.dateTime(r.at),
                     Modifier.weight(1f),
                     style = MaterialTheme.typography.labelSmall, color = Muted,
                     textAlign = TextAlign.End,

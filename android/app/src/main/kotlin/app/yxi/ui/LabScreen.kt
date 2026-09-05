@@ -69,8 +69,7 @@ private class LabCat(val key: String, val items: List<LabRemote.Item>) {
 private fun beijing(at: Long): String {
     if (at <= 0) return ""
     return runCatching {
-        java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm")
-            .format(java.time.Instant.ofEpochSecond(at).atZone(java.time.ZoneId.of("Asia/Shanghai")))
+        app.yxi.agent.Tz.stamp(at)
     }.getOrDefault("")
 }
 

@@ -282,7 +282,7 @@ fun MeDialog(onClose: () -> Unit) {
                     when {
                         q.quotaRemaining == null -> t("改多少次都行")
                         else -> t("这个月还能改 %d 次").format(q.quotaRemaining) +
-                            (q.nextRefreshAt?.take(10)?.let { " · " + t("%s 恢复").format(it) } ?: "")
+                            (q.nextRefreshAt?.let { " · " + t("%s 恢复").format(app.yxi.agent.Tz.date(it)) } ?: "")
                     },
                     style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline,
                 )

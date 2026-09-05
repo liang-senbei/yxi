@@ -161,7 +161,7 @@ fun MailScreen(modifier: Modifier = Modifier) {
                                 )
                                 Text(kindLabel(m.kind), style = MaterialTheme.typography.labelSmall, color = kindColor(m.kind))
                                 Text(
-                                    m.createdAt.take(16).replace('T', ' '),
+                                    app.yxi.agent.Tz.dateTime(m.createdAt),
                                     Modifier.weight(1f),
                                     style = MaterialTheme.typography.labelSmall, color = Muted,
                                     textAlign = androidx.compose.ui.text.style.TextAlign.End,

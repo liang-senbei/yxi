@@ -81,7 +81,7 @@ fun MemberScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
                     !Account.signedIn -> t("登录后才能看会员状态")
                     tier == Account.Tier.Free -> t("当前：免费版")
                     me?.neverExpires == true -> t("当前：%s · 永久").format(tier.name)
-                    me?.expiresAt != null -> t("当前：%s · %s 到期").format(tier.name, me.expiresAt.take(10))
+                    me?.expiresAt != null -> t("当前：%s · %s 到期").format(tier.name, app.yxi.agent.Tz.date(me.expiresAt))
                     else -> t("当前：%s").format(tier.name)
                 }
                 Text(line, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
@@ -103,7 +103,7 @@ fun MemberScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
                 when {
                     me.quotaRemaining == null -> t("资料改多少次都行")
                     else -> t("这个月还能改 %d 次资料").format(me.quotaRemaining) +
-                        (me.nextRefreshAt?.take(10)?.let { " · " + t("%s 恢复").format(it) } ?: "")
+                        (me.nextRefreshAt?.let { " · " + t("%s 恢复").format(app.yxi.agent.Tz.date(it)) } ?: "")
                 },
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
             )
@@ -121,7 +121,7 @@ fun MemberScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
                     )
                     Text(
                         t("原因：%s").format(ban.reason ?: t("未说明")) + " · " +
-                            (ban.until?.take(10)?.let { t("到 %s").format(it) } ?: t("永久")),
+                            (ban.until?.let { t("到 %s").format(app.yxi.agent.Tz.date(it)) } ?: t("永久")),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onErrorContainer,
                     )
