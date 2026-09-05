@@ -42,7 +42,16 @@ object TranscriptStream {
         val out = ssh.exec(
             "p=\"\$HOME/.claude/projects\"; n='$q'; " +
                 "if [ -n \"\$n\" ]; then " +
-                "m=\$(grep -l \"\\\"tmux\\\":\\\"\$n:\" \"\$HOME\"/.claude/sessions/*.json 2>/dev/null | head -1); " +
+                // ⚠️⚠️ **同一个 tmux 名字可能有多份 session json**（本机 37 个会话里 25 个是这样：
+                //    每次重开 / --resume 都会新写一份）。原来是 `grep -l … | head -1` ——
+                //    取的是**输出顺序的第一个，不是最新的那个**，而输出顺序根本不可靠：
+                //    这台机器上 /usr/bin/grep 是 **ugrep（多线程）**，实测同一条命令连跑三次，
+                //    第一次和后两次的顺序就不一样。哪天某个会话 /clear 过、两份 json 指向不同
+                //    sessionId，界面就会在两份转录之间来回跳（顶栏的模型和上下文也跟着变）。
+                //    → 先 grep 出全部，再 `ls -t` 取**最新**。
+                //    （文件名是 `<pid>.json` / uuid，没有空格，所以这里可以不加引号做词分割。）
+                "m=\$(grep -l \"\\\"tmux\\\":\\\"\$n:\" \"\$HOME\"/.claude/sessions/*.json 2>/dev/null); " +
+                "[ -n \"\$m\" ] && m=\$(ls -t \$m 2>/dev/null | head -1); " +
                 "if [ -n \"\$m\" ]; then " +
                 "s=\$(sed -n 's/.*\"sessionId\":\"\\([^\"]*\\)\".*/\\1/p' \"\$m\" 2>/dev/null | head -1); " +
                 "if [ -n \"\$s\" ]; then r=\$(ls -t \"\$p\"/*/\"\$s\".jsonl 2>/dev/null | head -1); " +

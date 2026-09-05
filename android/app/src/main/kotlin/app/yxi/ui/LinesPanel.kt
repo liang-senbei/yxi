@@ -68,6 +68,10 @@ fun LinesPanel(ssh: SshSession?, host: Host?, sessions: List<Session>) {
     var act by remember(key) { mutableStateOf<Lines.Active?>(null) }
     /** 改谁：null = 整机；某个会话 = 只改它所在那个目录。 */
     var scope by remember(key) { mutableStateOf<Session?>(null) }
+    /** 给哪个 agent 配线路。**两家机制完全不同**，混在一列里只会让人切错。 */
+    var agent by remember(key) { mutableStateOf(Lines.CLAUDE) }
+    /** Codex 现在被我们接管到哪个端点；null = 没接管（走它自己的登录）。 */
+    var codexNow by remember(key) { mutableStateOf<String?>(null) }
     var loading by remember(key) { mutableStateOf(true) }
     var note by remember(key) { mutableStateOf("") }
     /** 排队中的那条：忙完自动落地。null = 没有排队。 */
@@ -85,15 +89,28 @@ fun LinesPanel(ssh: SshSession?, host: Host?, sessions: List<Session>) {
     suspend fun reload() {
         lines = Lines.list(ssh)
         act = Lines.active(ssh, scope?.cwd)
+        codexNow = Lines.currentCodex(ssh)
     }
 
-    LaunchedEffect(ssh, key, scope?.name) {
+    LaunchedEffect(ssh, key, scope?.name, agent) {
         loading = true
         reload()
         loading = false
     }
 
+    suspend fun doApplyCodex(line: Lines.Line?) {
+        val err = Lines.applyCodex(ssh, line)
+        if (err != null) { note = t("没换成：%s").format(err); return }
+        reload()
+        val probe = Lines.probe(ssh, line?.baseUrl.orEmpty())
+        // ⚠️ Codex **一定要重开会话**：它的配置是进程启动时读的。这句不能省 ——
+        //    省了人点完看不到变化，只会以为坏了。
+        note = t("Codex 已改到「%s」· %s\n⚠️ 要重开 Codex 会话才生效 —— 它的配置是启动时读的，不像 Claude Code 能热切。")
+            .format(line?.name ?: t("默认"), probe)
+    }
+
     suspend fun doApply(line: Lines.Line?) {
+        if (agent == Lines.CODEX) return doApplyCodex(line)
         val err = Lines.apply(ssh, line, scope?.cwd)
         if (err != null) { note = t("没换成：%s").format(err); return }
         reload()
@@ -150,7 +167,11 @@ fun LinesPanel(ssh: SshSession?, host: Host?, sessions: List<Session>) {
     Column(Modifier.fillMaxSize()) {
         // 改谁。**先选范围再选线路** —— 不先说清改的是整机还是一个项目，
         // 点下去那一下的影响面差一个数量级。
-        if (scopables.isNotEmpty()) ScopeBar(scopables, scope) { scope = it }
+        // 先分 agent：两家的配置机制、生效方式、能不能热切**全都不一样**，
+        // 混成一列会让人以为切了 Codex 的线 Claude 也跟着变。
+        AgentBar(agent) { agent = it }
+        // 项目级只对 Claude 成立 —— Codex 的 config.toml 是整机一份，没有目录级
+        if (agent == Lines.CLAUDE && scopables.isNotEmpty()) ScopeBar(scopables, scope) { scope = it }
         LazyColumn(
             Modifier.fillMaxSize(),
             contentPadding = PaddingValues(14.dp, 4.dp, 14.dp, 24.dp),
@@ -181,18 +202,23 @@ fun LinesPanel(ssh: SshSession?, host: Host?, sessions: List<Session>) {
                             style = MaterialTheme.typography.labelLarge, color = Muted,
                         )
                     }
+                    if (agent == Lines.CODEX) item {
+                        Hint(t("Codex 换线要重开那个会话才生效 —— 它的配置是进程启动时读的，不像 Claude Code 能热切。"))
+                    }
                     // 「默认」永远在列、永远可选 —— 那是退路：任何一条线路出问题都能一键回来
                     item {
                         LineRow(
-                            name = t("默认（走 Claude Code 自己的登录）"),
+                            name = if (agent == Lines.CODEX) t("默认（走 Codex 自己的登录）")
+                            else t("默认（走 Claude Code 自己的登录）"),
                             sub = t("不设任何端点和钥匙"),
-                            current = cur?.isDefault == true,
+                            current = if (agent == Lines.CODEX) codexNow == null else cur?.isDefault == true,
                             onPick = { pick(null) },
                             onEdit = null,
                         )
                     }
-                    items(lines.orEmpty().size) { i ->
-                        val l = lines.orEmpty()[i]
+                    val shown = lines.orEmpty().filter { it.agent == agent }
+                    items(shown.size) { i ->
+                        val l = shown[i]
                         LineRow(
                             name = l.name.ifBlank { l.id },
                             sub = listOfNotNull(
@@ -200,13 +226,14 @@ fun LinesPanel(ssh: SshSession?, host: Host?, sessions: List<Session>) {
                                 Lines.mask(l.token).ifBlank { null }?.let { t("令牌 ") + it },
                                 Lines.mask(l.apiKey).ifBlank { null }?.let { t("密钥 ") + it },
                             ).joinToString(" · ").ifBlank { t("什么都没填") },
-                            current = cur != null && Lines.matches(l, cur),
+                            current = if (agent == Lines.CODEX) codexNow != null && codexNow == l.baseUrl
+                            else cur != null && Lines.matches(l, cur),
                             onPick = { pick(l) },
                             onEdit = { edit = l },
                         )
                     }
                     // 单独设过的项目才有得撤 —— 没设过的本来就在跟随整机，不给一个点了没反应的按钮
-                    if (act?.fromProject == true) scope?.let { sc ->
+                    if (agent == Lines.CLAUDE && act?.fromProject == true) scope?.let { sc ->
                         item {
                             FollowMachineRow {
                                 bg.launch {
@@ -219,13 +246,15 @@ fun LinesPanel(ssh: SshSession?, host: Host?, sessions: List<Session>) {
                             }
                         }
                     }
-                    if (cur != null && !cur.isDefault && lines.orEmpty().none { Lines.matches(it, cur) }) item {
+                    if (agent == Lines.CLAUDE && cur != null && !cur.isDefault &&
+                        lines.orEmpty().none { Lines.matches(it, cur) }
+                    ) item {
                         // 真相源是 settings.json，不是我们的清单 —— 对不上就照实说，别假装是列表里某条
                         Hint(t("现在走的不是列表里的任何一条（可能是在电脑上或手动改的）：%s")
                             .format(cur.baseUrl.ifBlank { t("只设了钥匙，没设端点") }))
                     }
                     item {
-                        AddRow { edit = Lines.Line(id = Lines.newId(), name = "") }
+                        AddRow { edit = Lines.Line(id = Lines.newId(), name = "", agent = agent) }
                     }
                 }
             }
@@ -312,13 +341,22 @@ private fun LineEditor(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(name, { name = it }, label = { Text(t("名字（自己认得就行）")) }, singleLine = true)
-                OutlinedTextField(url, { url = it }, label = { Text(t("端点 ANTHROPIC_BASE_URL")) }, singleLine = true)
-                OutlinedTextField(token, { token = it }, label = { Text(t("令牌 ANTHROPIC_AUTH_TOKEN")) }, singleLine = true)
-                OutlinedTextField(key, { key = it }, label = { Text(t("密钥 ANTHROPIC_API_KEY")) }, singleLine = true)
-                Text(
-                    t("留空的那项会写成空串 —— 那才是「不设」。留空不等于沿用上一条。"),
-                    style = MaterialTheme.typography.labelSmall, color = Muted,
-                )
+                if (line.isCodex) {
+                    OutlinedTextField(url, { url = it }, label = { Text(t("端点 base_url")) }, singleLine = true)
+                    OutlinedTextField(key, { key = it }, label = { Text(t("密钥（存服务器上 600 的文件里）")) }, singleLine = true)
+                    Text(
+                        t("Codex 走 config.toml 的 model_provider；钥匙不写进 config.toml，另存一个只有你能读的文件。"),
+                        style = MaterialTheme.typography.labelSmall, color = Muted,
+                    )
+                } else {
+                    OutlinedTextField(url, { url = it }, label = { Text(t("端点 ANTHROPIC_BASE_URL")) }, singleLine = true)
+                    OutlinedTextField(token, { token = it }, label = { Text(t("令牌 ANTHROPIC_AUTH_TOKEN")) }, singleLine = true)
+                    OutlinedTextField(key, { key = it }, label = { Text(t("密钥 ANTHROPIC_API_KEY")) }, singleLine = true)
+                    Text(
+                        t("留空的那项会写成空串 —— 那才是「不设」。留空不等于沿用上一条。"),
+                        style = MaterialTheme.typography.labelSmall, color = Muted,
+                    )
+                }
             }
         },
         confirmButton = {
@@ -423,5 +461,17 @@ private fun FollowMachineRow(onClick: () -> Unit) {
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary,
             )
         }
+    }
+}
+
+/** 给哪个 agent 配线路。两家机制完全不同，先分开再说。 */
+@Composable
+private fun AgentBar(agent: String, onPick: (String) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(14.dp, 10.dp, 14.dp, 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        ScopeChip(t("Claude Code"), agent == Lines.CLAUDE) { onPick(Lines.CLAUDE) }
+        ScopeChip("Codex", agent == Lines.CODEX) { onPick(Lines.CODEX) }
     }
 }

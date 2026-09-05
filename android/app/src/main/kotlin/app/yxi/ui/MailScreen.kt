@@ -2,7 +2,9 @@ package app.yxi.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import app.yxi.agent.Account
@@ -51,6 +54,10 @@ import kotlinx.coroutines.launch
  * ⚠️ 翻页游标是 **before**（取比它更旧的），不是 after —— 收件箱从顶上插新信，
  * 按页码取会重复或漏。往下翻传**上一页最后一条的 id**。
  * ⚠️ **「拿不到」和「没有信」要分开说**：网络不通时写「没有信」是在骗人。
+ *
+ * ⚠️⚠️ **未读和未领是两件事**（cc-logto_yxi 2026-09-05 明确提醒，服务端也分两个数）：
+ * **读过了也可能没领。** 所以这一页顶上分开说：红点跟着未读走（那是「有新东西」的通用含义），
+ * 未领单独一行提醒。合成一个数之后，「红点没了但东西还躺在信里没拿」这件事就再也说不出来了。
  */
 @Composable
 fun MailScreen(modifier: Modifier = Modifier) {
@@ -72,8 +79,16 @@ fun MailScreen(modifier: Modifier = Modifier) {
     Column(modifier.fillMaxSize()) {
         Text(
             t("邮件"), style = MaterialTheme.typography.headlineMedium,
-            modifier = Modifier.padding(18.dp, 14.dp, 18.dp, 8.dp),
+            modifier = Modifier.padding(18.dp, 14.dp, 18.dp, 4.dp),
         )
+        // ⚠️ 未领**单独说**，不并进未读的红点里
+        val unclaimed = Account.me?.unclaimedMail ?: 0
+        if (unclaimed > 0) Text(
+            t("有 %d 封信里的东西还没领").format(unclaimed),
+            Modifier.padding(18.dp, 0.dp, 18.dp, 8.dp),
+            style = MaterialTheme.typography.labelMedium, color = Copper,
+        )
+        Spacer(Modifier.height(4.dp))
         when {
             loading && items.isEmpty() -> Hint(t("正在取…"))
             failed && items.isEmpty() -> Hint(t("取不到 —— 网络不通，或者登录过期了。下拉重试或重新登录。"))
@@ -123,7 +138,23 @@ fun MailScreen(modifier: Modifier = Modifier) {
                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                             )
                             AnimatedVisibility(expanded) {
-                                Text(m.body, style = MaterialTheme.typography.bodyMedium)
+                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Text(m.body, style = MaterialTheme.typography.bodyMedium)
+                                    // 发件人：名字和头像都由服务端给 —— 换 logo 不用改历史信件
+                                    if (m.fromName.isNotBlank()) Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(7.dp),
+                                    ) {
+                                        SenderAvatar(m.fromAvatar, 20.dp)
+                                        Text(m.fromName, style = MaterialTheme.typography.labelSmall, color = Muted)
+                                    }
+                                    if (m.attachments.isNotEmpty()) Attachments(m) { got ->
+                                        val i = items.indexOfFirst { it.id == m.id }
+                                        // 领取顺带标已读（领了还算未读很奇怪）—— 两个标记一起更新
+                                        if (i >= 0) items[i] = m.copy(claimedAt = "claimed", readAt = m.readAt ?: "read")
+                                        got?.let { }
+                                    }
+                                }
                             }
                             if (!expanded) Text(
                                 m.body, style = MaterialTheme.typography.bodySmall, color = Muted,
@@ -184,3 +215,118 @@ private fun Hint(text: String) {
         Text(text, Modifier.padding(18.dp, 16.dp), style = MaterialTheme.typography.bodySmall, color = Muted)
     }
 }
+
+/**
+ * 信里的附件 + 「领取」。
+ *
+ * ⚠️ `code` 类附件**什么都不发**，只是印一串码面给用户自己去兑 —— 所以
+ * 一封只带 code 的信**没有「领取」这一步**，画一个点了什么都不发生的按钮比不画更糟。
+ * ⚠️ 领取失败**不改本地状态**：说成领到了而实际没有，用户会以为东西丢了。
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun Attachments(m: Account.Mail, onClaimed: (Account.Claim?) -> Unit) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var busy by remember(m.id) { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        m.attachments.forEach { a ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(Modifier.size(6.dp).clip(CircleShape).background(if (a.grantable) Copper else Muted))
+                Text(a.name, style = MaterialTheme.typography.bodySmall)
+                // 兑换码是给人抄走的，长按复制
+                if (a.kind == "code") Text(
+                    t("长按复制"), style = MaterialTheme.typography.labelSmall, color = Muted,
+                    modifier = Modifier.combinedClickable(
+                        onClick = {},
+                        onLongClick = {
+                            val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                as android.content.ClipboardManager
+                            cm.setPrimaryClip(android.content.ClipData.newPlainText("code", a.name))
+                            android.widget.Toast.makeText(ctx, t("复制好了"), android.widget.Toast.LENGTH_SHORT).show()
+                        },
+                    ),
+                )
+            }
+        }
+        when {
+            // 只有码面：没有「领」这一步，说清楚就行
+            m.attachments.none { it.grantable } -> Text(
+                t("这串码自己去「兑换」里输"), style = MaterialTheme.typography.labelSmall, color = Muted,
+            )
+            !m.claimedAt.isNullOrEmpty() -> Text(
+                t("已领取"), style = MaterialTheme.typography.labelMedium, color = Muted,
+            )
+            else -> Surface(
+                color = MaterialTheme.colorScheme.primary,
+                shape = RoundedCornerShape(100.dp),
+                modifier = Modifier.clip(RoundedCornerShape(100.dp)).clickable(enabled = !busy) {
+                    busy = true
+                    scope.launch {
+                        val r = Account.claimMail(ctx, m.id)
+                        busy = false
+                        if (r == null) {
+                            android.widget.Toast.makeText(
+                                ctx, t("没领到 —— 网络不通或登录过期了，东西还在信里。"),
+                                android.widget.Toast.LENGTH_LONG,
+                            ).show()
+                        } else {
+                            // ⚠️ replay = 之前已经领过，**这次没有重复发**。照实说，别说成「领取成功」
+                            android.widget.Toast.makeText(
+                                ctx,
+                                if (r.replay) t("这封信之前已经领过了，没有重复发") else t("领好了"),
+                                android.widget.Toast.LENGTH_SHORT,
+                            ).show()
+                            onClaimed(r)
+                        }
+                    }
+                },
+            ) {
+                Text(
+                    if (busy) t("领取中…") else t("领取"),
+                    Modifier.padding(18.dp, 8.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onPrimary,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 发件人头像。⚠️ 复用 [Me.cachedRemote] 那套缓存（下一次就走本地文件）——
+ * 全部信件都是同一个 official，实际只会下一次。拿不到就画一个圆底，**不留空洞**。
+ */
+@Composable
+private fun SenderAvatar(url: String, size: androidx.compose.ui.unit.Dp) {
+    val ctx = LocalContext.current
+    var bmp by remember(url) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    LaunchedEffect(url) {
+        if (url.isBlank()) return@LaunchedEffect
+        bmp = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                val f = Me.cachedRemote(ctx, url)
+                if (!f.exists() || f.length() == 0L) {
+                    java.net.URL(url).openStream().use { i -> f.outputStream().use { i.copyTo(it) } }
+                }
+                android.graphics.BitmapFactory.decodeFile(f.path)?.asImageBitmap()
+            }.getOrNull()
+        }
+    }
+    Box(
+        Modifier.size(size).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHigh),
+        contentAlignment = Alignment.Center,
+    ) {
+        bmp?.let {
+            androidx.compose.foundation.Image(
+                bitmap = it, contentDescription = null,
+                modifier = Modifier.size(size).clip(CircleShape),
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+            )
+        }
+    }
+}
+

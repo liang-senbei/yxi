@@ -51,6 +51,7 @@ android {
         getByName("debug") { ndk { abiFilters += "x86_64" } }
 
         release {
+            ndk { abiFilters += "x86_64" }   // E2E-TEMP
             // 有密钥就直接签好（省掉「忘了签 / 签到旧包上」那类事故，见 #223）
             signingConfig = signingConfigs.findByName("release")
             // ⚠️ **开混淆和资源压缩**（2026-09-04 安全审计，老板点名要「反反编译」）。

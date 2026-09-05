@@ -501,7 +501,29 @@ fun ToolGroupCard(calls: List<ChatItem.ToolCall>, open: Boolean, onToggle: () ->
 sealed interface ChatRow {
     val key: String
     data class One(val item: ChatItem) : ChatRow { override val key get() = item.key }
-    data class Group(val calls: List<ChatItem.ToolCall>) : ChatRow { override val key get() = "group-" + calls.first().key }
+    /**
+     * ⚠️⚠️ **key 取 `last()` 不是 `first()`，这是修 bug 修出来的，别改回去。**
+     *
+     * 分组是对**当前这份列表**算出来的，所以组的边界会随着列表变化而移动。
+     * 历史是**往前灌**的（先画最新 60 行，再补 400 行）——同名工具的连续段因此会**往前长**：
+     *   只有最新 60 行时：`[Bash₄,Bash₅,Bash₆]` → key `group-Bash₄`
+     *   400 行到了：      `[Bash₁…Bash₆]`      → key `group-Bash₁`
+     * 用 `first()` 的话 **`group-Bash₄` 直接从列表里消失**，而 LazyColumn 的滚动锚点
+     * 正是靠 key 找的 —— 锚点没了就退回按下标定位，于是**停在几天前的内容上**；
+     * 每来一批再错一次，就是用户 2026-09-05 录到的「一闪一闪 + 跳到很久以前」。
+     * 用 `last()`：往前长的时候最后一条不变，锚点保住。
+     *
+     * 反方向（agent 正在往后追加工具卡）`last()` 会变而 `first()` 不变 —— 但那一端
+     * **本来就粘在底部自动跟随**（`stick`），锚点重置看不见。两害相权，取 `last()`。
+     *
+     * ⚠️⚠️ **而且不能加 `"group-"` 前缀。** 还有第二条丢 key 的路：
+     * 60 行窗口里边界上的 `tool_use` 配不到 `tool_result`（`result == null`），
+     * 于是**不合组**、是三行独立的 [One]（key 就是各自的 uuid）；
+     * 400 行齐了之后合成一组。加了前缀的话这三个 key 一个都不剩；
+     * 不加前缀，至少**最后那条的 key 原样还在**，锚点接得住。
+     * （不会撞 key：一条 item 只可能出现在一行里，要么是 One 要么在某个 Group 里。）
+     */
+    data class Group(val calls: List<ChatItem.ToolCall>) : ChatRow { override val key get() = calls.last().key }
 }
 
 /**

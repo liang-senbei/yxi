@@ -472,8 +472,14 @@ fun ChatScreen(
             return@LaunchedEffect
         }
         val entry: app.yxi.agent.ChatMemory.Entry
+        /** 这一趟历史要灌多少字节（走缓存那条路是 0 = 没有历史要灌） */
+        var expectBytes = 0L
         if (remembered != null && remembered.file == file) {
             entry = remembered
+            // ⚠️ **这里要把「正在取最新…」清掉。** 原来只有 else 分支和「收到新行」时才清 ——
+            //    会话闲着没有新行的时候，这条提示就**永远挂着**；而它在列表外面、跟列表同一个
+            //    Column，挂着就一直占着一行高度。文件对上了就说明已经接上了，没什么可等的。
+            status = null
         } else {
             // ⚠️ **转录换文件了，之前摆出来的那批就是别的对话，立刻扔掉。**
             //    留着的话屏幕上顶着一段几天前的对话，而且没有任何提示（用户截图报的就是这个）。
@@ -504,7 +510,10 @@ fun ChatScreen(
                     if (items.isEmpty()) status = t("载入失败：%s").format(it.message ?: "")
                 }
             // 历史从最后 400 行的字节起点开始跟随（不是 `tail -n`）：这样读到哪个字节是算得出来的，下次接着读
-            val start = TranscriptStream.tailStart(s, file, 400)?.second ?: 0L
+            val ts = TranscriptStream.tailStart(s, file, 400)
+            val start = ts?.second ?: 0L
+            // ⚠️ 这一趟要灌多少字节 —— 下面拿它当「灌完了没」的**确定判据**（见 caughtUp）
+            expectBytes = ts?.let { (size, st) -> size - st }?.coerceAtLeast(0L) ?: 0L
             entry = app.yxi.agent.ChatMemory.Entry(file, Transcript.Incremental()).also {
                 it.offset = start
                 app.yxi.agent.ChatMemory.put(memKey, it)
@@ -519,6 +528,9 @@ fun ChatScreen(
         //    才交出完整列表，不给用户看「从旧滚到新」。重进：inc 里已经是完整的，来一批换一批。
         val headLastKey = if (fresh) items.lastOrNull()?.key else null
         var caughtUp = !fresh || headLastKey == null
+        // 这一趟已经吃进去多少字节 —— 跟 expectBytes 比，就知道历史灌完没有
+        var eaten = 0L
+        var idleTicks = 0
         val inc = entry.inc
         val pending = ArrayList<String>()
         var pendingBytes = 0L
@@ -532,19 +544,34 @@ fun ChatScreen(
                     else (pending.toList() to pendingBytes).also { pending.clear(); pendingBytes = 0L }
                 }
                 if (batch.isEmpty()) {
-                    // 一个空转周期 = 历史灌完。兜底：万一始终没匹配上 head 的 key，也把完整的放出来
-                    if (!caughtUp) {
+                    // ⚠️⚠️ **一个空转周期 ≠ 历史灌完。** 原来就是这么判的，是这个 bug 的主因：
+                    //    收行的 collect 和这个 300ms ticker **跑在同一个主线程上**，而每批刷新都要
+                    //    整体换 items（几百条重组重布局）+ 追底 —— 主线程一被占住，行就塞不进 pending，
+                    //    ticker 反倒先被派发 → pending 空 → 被当成「灌完了」。
+                    //    后果很重：一份**起点在 400 行前、结尾停在半路**的残缺快照被当成正式内容摆上屏，
+                    //    还写进 ChatMemory（下面那行）—— 于是退回看板再进，看到的还是它，
+                    //    顶栏的模型和上下文也跟着变成 400 行前那条消息的（用户 2026-09-05 录到的就是这个）。
+                    //    现在只在**连着四拍都空**（≈1.2 秒，远超一次刷新的耗时）时才当兜底用。
+                    //    真正的判据是下面的 eaten >= expectBytes：**数字节，不猜时序。**
+                    idleTicks++
+                    if (!caughtUp && idleTicks >= 4) {
                         val snap = withContext(Dispatchers.Default) { inc.snapshot() }
                         if (snap.isNotEmpty()) { items = snap; caughtUp = true; inc.ctx?.let { ctxUse = it } }
                     }
-                    if (items.isNotEmpty()) settled = true
+                    if (items.isNotEmpty() && (caughtUp || idleTicks >= 4)) settled = true
                     continue
                 }
+                idleTicks = 0
                 val snap = withContext(Dispatchers.Default) {
                     inc.add(batch.asSequence()); inc.snapshot()
                 }
                 entry.offset += bytes
+                eaten += bytes
+                // ⚠️ 两条都算「追上了」：① 解析结果里出现了 head 的最后一条（最准）
+                //    ② **字节数够了** —— tailStart 已经告诉我们这趟要灌多少，数够就是真灌完了，
+                //       不用去猜「多久没来行 = 完了」。①失效（比如 head 末尾是排队条目、key 不稳）时靠②兜。
                 if (!caughtUp && headLastKey != null && snap.any { it.key == headLastKey }) caughtUp = true
+                if (!caughtUp && expectBytes > 0 && eaten >= expectBytes) caughtUp = true
                 if (caughtUp) {
                     items = snap; inc.ctx?.let { ctxUse = it }; status = null
                     entry.items = snap; entry.ctx = inc.ctx
@@ -596,7 +623,12 @@ fun ChatScreen(
         // ⚠️ **攒一下再追（debounce）。** 转录是每 300ms 刷一批，一批里常常还分几次到，
         //    而队列里的消息（排队中的、别的 agent 注入的）会在末尾一冒一消 —— 每次变动都追一下，
         //    就是用户说的「一闪一闪一跳一跳」。等它安静 110ms 再追，中间那些过渡态就不用管了（#228）。
-        snapshotFlow { items.size to settled }.collectLatest { (n, st) ->
+        // ⚠️⚠️ **盯的是 items 这个列表本身，不是 items.size。**
+        //    行数不变而**内容变了**的情况真实存在：三条工具卡合成一组（size 不变、
+        //    屏幕上少两行、高度掉几百像素）、排队消息出队变成真消息（out +1 / queued -1，
+        //    size 完全不变）。只盯 size 的话这些时候**一次都不追**，位置就留在错的地方。
+        snapshotFlow { items to settled }.collectLatest { (list, st) ->
+            val n = list.size
             if (n == 0) return@collectLatest
             if (!st) { runCatching { listState.scrollToEnd() }; return@collectLatest }   // 灌历史：立刻贴底
             if (!stick) return@collectLatest
@@ -1727,7 +1759,13 @@ private fun UserBubble(
     val (refs, body) = remember(text) { app.yxi.agent.Attachments.parseRefs(text) }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         var menu by remember { mutableStateOf(false) }
-        Box(Modifier.fillMaxWidth(0.85f)) {
+        // ⚠️⚠️ **contentAlignment 必须给。** Box 的孩子默认落在**左上角**，而
+        //    里面那句 `Column(horizontalAlignment = Alignment.End)` 只在 Column
+        //    **自己那点宽度**里生效 —— Column 是 wrap-content，所以它等于什么都没做。
+        //    结果：长消息把 Column 撑到 85% 满宽，看着像右对齐；**短消息（「继续」两个字）
+        //    就停在屏幕 15% 处**，用户 2026-09-05 截图报的就是这个。
+        //    「看起来对」和「对」不是一回事：这类对齐 bug 只有短内容才露馅。
+        Box(Modifier.fillMaxWidth(0.85f), contentAlignment = Alignment.TopEnd) {
           Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
             // 缩略图在气泡**外面上方** —— 跟参考款一样。放进气泡里的话，
             // 图和文字共用那个圆角背景，一张竖图会把气泡撑成一条，很难看。
@@ -1786,7 +1824,13 @@ private fun QueuedBubble(
     val (refs, body) = remember(text) { app.yxi.agent.Attachments.parseRefs(text) }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         var menu by remember { mutableStateOf(false) }
-        Box(Modifier.fillMaxWidth(0.85f)) {
+        // ⚠️⚠️ **contentAlignment 必须给。** Box 的孩子默认落在**左上角**，而
+        //    里面那句 `Column(horizontalAlignment = Alignment.End)` 只在 Column
+        //    **自己那点宽度**里生效 —— Column 是 wrap-content，所以它等于什么都没做。
+        //    结果：长消息把 Column 撑到 85% 满宽，看着像右对齐；**短消息（「继续」两个字）
+        //    就停在屏幕 15% 处**，用户 2026-09-05 截图报的就是这个。
+        //    「看起来对」和「对」不是一回事：这类对齐 bug 只有短内容才露馅。
+        Box(Modifier.fillMaxWidth(0.85f), contentAlignment = Alignment.TopEnd) {
         Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (refs.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             refs.forEach { AttachThumb(it, ssh, onOpenRef) }

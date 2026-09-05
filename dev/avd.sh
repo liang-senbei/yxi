@@ -26,7 +26,15 @@ create)
 start)
   # ⚠️ pkill 的模式必须加方括号，否则 -f 会匹配到执行它的这条命令自身 → 自杀
   pkill -f 'qemu-sys[t]em' 2>/dev/null; sleep 2; adb kill-server >/dev/null 2>&1
-  nohup emulator -avd "$AVD" -no-window -no-audio -no-boot-anim -no-metrics \
+  # ⚠️⚠️ **必须放进自己的 systemd scope，不能直接 nohup。**
+  # 这台机器上整棵 tmux / claude 进程树都活在 `cloud-watchdog.service` 的 cgroup 里，
+  # 而 `cloud-watchdog.timer` **每 15 秒触发一次**；每次那个 unit 停下来，systemd 就把
+  # cgroup 里的「残留进程」清掉 —— 从会话里 nohup 起的模拟器正好算残留。
+  # 表现是**模拟器每 15 秒左右必死**，而且日志干干净净（emulator.log 停在「Boot completed」、
+  # logcat 里没有任何崩溃），查起来完全没有方向：像是「App 一进对话页就把模拟器带走」。
+  # 见 TROUBLESHOOTING #263。`systemd-run --scope` 把它挪进独立 scope，watchdog 就管不着了。
+  RUN=""; command -v systemd-run >/dev/null 2>&1 && RUN="systemd-run --scope --collect --quiet --unit=yxi-avd-$$"
+  nohup $RUN emulator -avd "$AVD" -no-window -no-audio -no-boot-anim -no-metrics \
       -gpu swiftshader_indirect -no-snapshot -skin 720x1280 \
       ${PROXY:+-http-proxy "$PROXY"} -memory 2048 -cores 4 > /tmp/emulator.log 2>&1 &
   adb wait-for-device

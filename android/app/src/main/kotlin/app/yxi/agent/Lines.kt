@@ -237,9 +237,13 @@ object Lines {
         if (baseUrl.isBlank()) return@withContext "默认线路（走 Claude Code 自己的登录）"
         val s = ssh ?: return@withContext "没连上，没法探"
         val u = "'" + baseUrl.trimEnd('/').replace("'", "'\\''") + "'"
-        val code = s.exec("curl -sS -o /dev/null -m 8 -w '%{http_code}' $u 2>/dev/null || echo 000").trim()
+        // ⚠️ **别写 `|| echo 000`。** curl 连不上时**自己就会**把 `%{http_code}` 输出成 `000`
+        //    并且退出码非零，`||` 再补一个就拼成 `000000`，于是「== 000」判不出来，
+        //    界面把一个死端点报成「通」。E2E 实测抓到的（2026-09-05），见 TROUBLESHOOTING #255。
+        val code = s.exec("curl -sS -o /dev/null -m 8 -w '%{http_code}' $u 2>/dev/null").trim()
         when {
-            code == "000" || code.isBlank() -> "连不上这个地址"
+            // 000 是 curl 表示「压根没连上」的约定值；用 startsWith 兜住重复输出的情况
+            code.isBlank() || code.startsWith("000") -> "连不上这个地址"
             else -> "通（HTTP $code）"
         }
     }

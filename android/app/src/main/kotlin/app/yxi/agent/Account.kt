@@ -70,6 +70,11 @@ object Account {
         val autoRenew: Boolean = false,
         /** 未读站内信条数 —— 图标上那个红点靠它，不然要进去才知道有信 */
         val unreadMail: Int = 0,
+        /**
+         * 有附件但**还没领**的信有几封。
+         * ⚠️ 跟 [unreadMail] **是两回事**：读过了也可能没领。界面上分开说，别合并成一个数。
+         */
+        val unclaimedMail: Int = 0,
         /** 手上几张曦光（祈愿用） */
         val tickets: Int = 0,
         /** 离保底还差几抽。⚠️ 是「**还差**」不是「已累计」—— 歧义写进字段名里解决（对方定的）。 */
@@ -84,9 +89,37 @@ object Account {
         val body: String,
         val createdAt: String,
         val readAt: String?,
+        /** 发件人显示名（服务端解析的，历史信件跟着一起改） */
+        val fromName: String = "",
+        val fromAvatar: String = "",
+        /** 附件；没有就是空表 */
+        val attachments: List<Attach> = emptyList(),
+        /** 领过没。⚠️ 跟 [readAt] 是两回事：**读过了也可能没领**。 */
+        val claimedAt: String? = null,
     ) {
         val unread: Boolean get() = readAt.isNullOrEmpty()
+
+        /** 有东西可领、且还没领 */
+        val claimable: Boolean
+            get() = claimedAt.isNullOrEmpty() && attachments.any { it.grantable }
     }
+
+    /**
+     * 信里的一件附件。
+     * ⚠️ [kind] == `code` 的**什么都不发**，只是印一串码面给用户自己去兑 ——
+     * 所以它不算 [grantable]，一封只带 code 的信没有「领取」这一步。
+     */
+    data class Attach(val kind: String, val amount: Long, val name: String) {
+        val grantable: Boolean get() = kind == "tickets" || kind == "balance_cents" || kind == "membership_days"
+    }
+
+    /** 领取的结果。[replay] = 之前已经领过，**这次没有重复发**。 */
+    data class Claim(
+        val replay: Boolean,
+        val tickets: Int,
+        val balanceCents: Long,
+        val unclaimed: Int,
+    )
 
     /** 一条封禁。`reason` 可能为 null（管理员没填）；`until` 为 null = 永久。 */
     data class Ban(val productName: String, val reason: String?, val until: String?, val createdAt: String)
@@ -428,6 +461,41 @@ object Account {
      *
      * @return null = 拿不到（没登录 / 网络不通）。**别把「拿不到」画成「没有信」。**
      */
+    /**
+     * 领这封信里的附件。
+     *
+     * ⚠️ 服务端**幂等**：重复领回 `replay: true`，**不重复发**。所以网络超时后可以放心重试。
+     * ⚠️ 领取会**顺带标记已读** —— 领了还算未读很奇怪。返回之后界面要把两个标记一起更新。
+     * ⚠️ `code` 类附件不在这里发（它本来就什么都不发，只是一串码面）。
+     *
+     * @return null = 没领成（没登录 / 网络不通 / 服务端拒了）。**别当成领到了**。
+     */
+    suspend fun claimMail(ctx: Context, id: String): Claim? = withContext(Dispatchers.IO) {
+        val tk = token(ctx) ?: return@withContext null
+        val (c, body) = req("$API/api/mail/$id/claim", "POST", tk, "{}")
+        if (c !in 200..299) return@withContext null
+        runCatching {
+            val o = JSONObject(body)
+            val r = Claim(
+                replay = o.optBoolean("replay"),
+                tickets = o.optInt("tickets", -1),
+                balanceCents = o.optLong("balanceCents", Long.MIN_VALUE),
+                unclaimed = o.optInt("unclaimed", -1),
+            )
+            // ⚠️ **就地把服务端刚给的数字用上**，别等下一次 /api/me ——
+            //    签到那次踩过：领了曦光，切到祈愿页还是「曦光 ×0」，按钮点不动（见 Wish.parse）。
+            me?.let { m ->
+                me = m.copy(
+                    tickets = if (r.tickets >= 0) r.tickets else m.tickets,
+                    balanceCents = if (r.balanceCents != Long.MIN_VALUE) r.balanceCents else m.balanceCents,
+                    unclaimedMail = if (r.unclaimed >= 0) r.unclaimed else m.unclaimedMail,
+                    unreadMail = m.unreadMail,
+                )
+            }
+            r
+        }.getOrNull()
+    }
+
     suspend fun mail(ctx: Context, before: String? = null): Pair<List<Mail>, String?>? =
         withContext(Dispatchers.IO) {
             val tk = token(ctx) ?: return@withContext null
@@ -443,11 +511,29 @@ object Account {
                             id = it.str("id"), kind = it.str("kind"), title = it.str("title"),
                             body = it.str("body"), createdAt = it.str("createdAt"),
                             readAt = it.str("readAt").takeIf { r -> r.isNotEmpty() },
+                            fromName = it.optJSONObject("from")?.str("name").orEmpty(),
+                            fromAvatar = it.optJSONObject("from")?.str("avatar").orEmpty(),
+                            attachments = it.optJSONArray("attachments").let { a ->
+                                (0 until (a?.length() ?: 0)).mapNotNull { j ->
+                                    a?.optJSONObject(j)?.let { x ->
+                                        Attach(x.str("kind"), x.optLong("amount"), x.str("name"))
+                                    }
+                                }
+                            },
+                            claimedAt = it.str("claimedAt").takeIf { c -> c.isNotEmpty() },
                         )
                     }
                 }
-                // 顺手把未读数刷新到 me 上 —— 红点跟着它走
-                me?.let { m -> me = m.copy(unreadMail = o.optInt("unread", m.unreadMail)) }
+                // 顺手把两个数刷新到 me 上。
+                // ⚠️⚠️ **未读和未领是两件事**（cc-logto_yxi 2026-09-05 明确提醒）：
+                //    读过了也可能没领。**别合成一个数** —— 合了之后「红点消了但东西还在信里没拿」
+                //    这件事就再也说不出来了。
+                me?.let { m ->
+                    me = m.copy(
+                        unreadMail = o.optInt("unread", m.unreadMail),
+                        unclaimedMail = o.optInt("unclaimed", m.unclaimedMail),
+                    )
+                }
                 list to o.str("nextCursor").takeIf { it.isNotEmpty() }
             }.getOrNull()
         }
@@ -524,6 +610,7 @@ object Account {
             currency = o.optJSONObject("wallet").str("currency").ifEmpty { "CNY" },
             autoRenew = o.optJSONObject("wallet")?.optBoolean("autoRenew") == true,
             unreadMail = o.optInt("unreadMail", 0),
+            unclaimedMail = o.optInt("unclaimedMail", 0),
             tickets = o.optJSONObject("wish")?.optInt("tickets") ?: 0,
             pityRemaining = o.optJSONObject("wish")?.optInt("pityRemaining") ?: 0,
             quotaLimit = q?.optInt("limit") ?: 0,

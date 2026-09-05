@@ -161,18 +161,36 @@ object Transcript {
             parseInto(lines, out, calls, queued, said) { ctx = it }
 
         /** 当前快照。排队的挂在最后 —— 它们还没进对话，位置就在「此刻」。 */
-        fun snapshot(): List<ChatItem> = out + queued.asSequence()
-            .filter { it.isNotBlank() }              // 老格式的空占位不显示
-            .filterNot { it.trim() in said }
-            .mapIndexed { i, t ->
-                // ⚠️ **排着队的也可能不是用户说的话。** 队友/子 agent 的消息是通过
-                // 队列注入的，落在 `queue-operation` 里 —— 只在 parseUser 里认注入
-                // 会漏掉它们，屏幕上就是一坨 `<agent-message from="…">` 顶着
-                // 「排队中·你说的话」的样子。这条是真机上看出来的。
-                val inj = injectedOf(t)
-                if (inj == null) ChatItem.Queued("queued-$i-" + t.hashCode(), t)
-                else ChatItem.Injected("queued-$i-" + t.hashCode(), inj.first + t(" · 排队中"), inj.second, t)
-            }
+        fun snapshot(): List<ChatItem> {
+            // ⚠️⚠️ **key 里不能有队列下标。** 原来是 `"queued-$i-…"`，`i` 是在整个队列里的位置 ——
+            //    队头一出队，**后面每一条的 key 全变**，LazyColumn 只能把它们销毁重建
+            //    （屏幕上是「一现即隐」），而且 head 的最后一条要是排队条目，
+            //    `headLastKey` 就永远匹配不上、历史判不出「灌完了」（见 ChatScreen 的 caughtUp）。
+            //    现在按**内容**编号：同样的话出现第几次。出队只会影响它后面同内容的那几条，
+            //    不同内容的一律不受牵连 —— 而重复排同一句话本来就少见。
+            val seen = HashMap<Int, Int>()
+            return out + queued.asSequence()
+                .filter { it.isNotBlank() }              // 老格式的空占位不显示
+                .filterNot { it.trim() in said }
+                .map { t ->
+                    val h = t.hashCode()
+                    val nth = seen.merge(h, 1, Int::plus)!! - 1
+                    val k = "queued-$h-$nth"
+                    // ⚠️ **排着队的也可能不是用户说的话。** 队友/子 agent 的消息是通过
+                    // 队列注入的，落在 `queue-operation` 里 —— 只在 parseUser 里认注入
+                    // 会漏掉它们，屏幕上就是一坨 `<agent-message from="…">` 顶着
+                    // 「排队中·你说的话」的样子。这条是真机上看出来的。
+                    val inj = injectedOf(t)
+                    if (inj == null) ChatItem.Queued(k, t)
+                    else ChatItem.Injected(k, inj.first + t(" · 排队中"), inj.second, t)
+                }
+                .toList()
+                // ⚠️ **兜住重复 key。** 重连时 `LaunchedEffect(sessionName, ssh)` 会换键重启，
+                //    Compose 只 cancel 不 join —— 旧那轮的刷新协程可能再喂一批进**同一个**
+                //    解析器（entry 是 ChatMemory 里的全局对象），同一行就解了两遍。
+                //    LazyColumn 遇到重复 key 是**直接抛**，不是画错 —— 宁可多这一趟去重。
+                .distinctBy { it.key }
+        }
 
         /** 已经吃进去多少行 —— 上层拿它决定从哪儿接着喂。 */
         var consumed: Int = 0
