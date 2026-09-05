@@ -100,7 +100,15 @@ object TranscriptStream {
      * 文件要是被重写得比 offset 还短，`tail -c` 什么都不吐、等它长回来；那种情况上层按「转录文件换了」处理。
      */
     fun streamFrom(ssh: SshSession, file: String, offset: Long): Flow<String> =
-        follow(ssh, "tail -c +${offset + 1} -f '$file'")
+        // ⚠️⚠️ **起点先夹到文件大小以内。** `tail -c +N -f` 的 N 一旦超过文件大小，GNU tail 在文件下次变长时
+        //    判成「file truncated」，从第 0 字节把整个文件重放（#273，几百 MB 的转录 = 几周前的对话涌上屏）。
+        //    上层的 offset 是自己数出来的，任何一处多数了一个字节（心跳空行、编码差异）都会踩进去；
+        //    这里在服务器上花一次 stat 兜住，比指望所有调用方数得分毫不差可靠。
+        follow(
+            ssh,
+            "f='$file'; o=$offset; s=\$(stat -c %s \"\$f\" 2>/dev/null || echo 0); " +
+                "[ \"\$o\" -gt \"\$s\" ] && o=\$s; tail -c +\$((o+1)) -f \"\$f\"",
+        )
 
     fun stream(ssh: SshSession, file: String, backlog: Int = 800): Flow<String> =
         follow(ssh, "tail -n $backlog -f '$file'")

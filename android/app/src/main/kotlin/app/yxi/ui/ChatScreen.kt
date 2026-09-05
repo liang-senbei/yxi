@@ -638,6 +638,14 @@ fun ChatScreen(
         // 里逸出就是**闪退**（#125）。catching 兜住（取消照抛，切页面照常），断了让看门狗重连。
         app.yxi.ssh.catching {
             TranscriptStream.streamFrom(s, file, entry.offset).collect { line ->
+                // ⚠️⚠️ **心跳空行不算字节。** `SshSession.follow` 每 20 秒往流里 `printf '\n'` 一次防通道被掐，
+                //    那一行**不在文件里**。原来照样 +1，在对话页停几分钟 offset 就比文件大小多出十几个字节；
+                //    退回看板再进，`tail -c +N -f` 的 N 落在文件末尾之外 —— GNU tail 把它当成「文件被截断」，
+                //    **从第 0 字节把整份转录重放一遍**（logcat：`tail: …jsonl: file truncated`；
+                //    服务器上 30 字节的文件实测：起点多 3 字节、文件一长就整文件重吐）。
+                //    这就是「退回看板再进 / 从后台切回，看到几周前的对话」的真根因（#273）——
+                //    会话越闲越容易中（文件不长，多出的字节盖不掉）。转录是 JSONL，真正的空行不存在。
+                if (line.isEmpty()) return@collect
                 // ⚠️ 字节数按 UTF-8 算再加一个换行 —— 这是下次 `tail -c +N` 的起点，算错就会漏行或重行
                 synchronized(lock) { pending += line; pendingBytes += line.toByteArray().size + 1 }
             }
