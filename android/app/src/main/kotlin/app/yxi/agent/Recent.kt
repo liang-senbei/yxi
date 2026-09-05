@@ -25,6 +25,28 @@ object Recent {
         ctx?.let { save(it, hostId, sessions, now) }
     }
 
+    // ── 分组表也要缓存，理由跟会话列表一模一样 ──
+    // ⚠️ 用户 2026-09-05 截图报的：进看板先是「没编组 32」，过一会儿分组才冒出来。
+    //    根因：会话列表挂在 MainActivity 那层 + 落盘，所以一进来就有；
+    //    分组表却是 SessionsScreen 里 `remember(host.id) { Groups.Table() }` —— **每次进看板都从空表开始**，
+    //    等 5 秒一次的探测跑完一趟 SSH 才填上。那一趟在 5G 上要 1~3 秒，期间所有卡片都归到「没编组」。
+    //    分组是**结构**，比会话状态更稳定，缓存一份几乎没有代价；带时间戳的旧分组也比空的强。
+    private val groupsByHost = HashMap<String, Groups.Table>()
+
+    /** 上一次看到的分组表（内存 → 磁盘 → 空表）。空表不代表「没有分组」，只代表「还没拿到过」。 */
+    fun groups(ctx: android.content.Context?, hostId: String): Groups.Table {
+        groupsByHost[hostId]?.let { return it }
+        val raw = ctx?.getSharedPreferences("yxi", android.content.Context.MODE_PRIVATE)
+            ?.getString("groups:$hostId", null) ?: return Groups.Table()
+        return runCatching { Groups.parse(raw) }.getOrDefault(Groups.Table()).also { groupsByHost[hostId] = it }
+    }
+
+    fun putGroups(ctx: android.content.Context?, hostId: String, t: Groups.Table) {
+        groupsByHost[hostId] = t
+        ctx?.getSharedPreferences("yxi", android.content.Context.MODE_PRIVATE)?.edit()
+            ?.putString("groups:$hostId", Groups.encode(t))?.apply()
+    }
+
     /** 没抓到过就返回空 —— 调用方该显示「读取中」，不是显示「没有会话」。 */
     fun get(hostId: String): List<Session> = byHost[hostId].orEmpty()
 

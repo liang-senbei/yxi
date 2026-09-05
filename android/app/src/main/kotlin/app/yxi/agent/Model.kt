@@ -185,6 +185,70 @@ object Model {
         ssh.exec("tmux send-keys -t ${app.yxi.ssh.Shell.q(target)} 's'")
     }
 
+    // ── 快路：不开 TUI 选单，直接发 `/model <名字>` ──
+    //
+    // ⚠️⚠️ **两条路语义不同，2026-09-05 用一次性会话实测的（/tmp/modelprobe.log）：**
+    //   · 上面那条「开选单 → 挪光标 → 送 s」= **只换这个会话**，但要抓屏 4 次、等 1~4 秒，
+    //     用户嫌慢（「切换模型选单延迟很高」）。
+    //   · `/model <名字>` = 弹一个「Switch model? This conversation is cached for the current
+    //     model…」的确认框，**Enter 确认后既换这个会话、也写进 ~/.claude/settings.json 当账号默认**
+    //     （settings.json 的 model 实测变了）。`/effort <级别>` 同理，回显直接写着
+    //     「saved as your default for new sessions」。
+    //   · 直接改 settings.json / 项目级 settings.local.json 的 model、effortLevel：
+    //     **对跑着的会话不生效**（实测改完再问，模型和强度都没变）—— 只有 env 那一段会热加载。
+    // 所以快路 = 快 + 改默认；界面上要**把「会改默认」写在按钮旁边**，不能藏。
+    //
+    // ⚠️ **发完 `/model X` 必须补一个 Enter 把确认框按掉。** 不按的话那个框一直开着，
+    //    用户下一条消息会被它吃掉（探针里「ok」那条就是这么丢的）—— ModeSheet 原来的
+    //    「Opus 5 · 1M」芯片就有这个毛病，现在统一走这儿。
+
+    /** `~/.claude/settings.json` 里的 `availableModels` + 当前默认 `model`。按主机缓存，一次 cat 就够。 */
+    data class Available(val models: List<String>, val default: String)
+    private val availCache = HashMap<String, Available>()
+
+    /**
+     * 这台机器上能选哪些模型。**读的是 settings.json 的白名单**，不抓 TUI；拿不到就退回一份通用别名表。
+     * ⚠️ 名字就是 `/model` 能吃的那种（`sonnet[1m]` / `opus-4-6[1m]` / `haiku` / `default`）。
+     */
+    suspend fun available(ssh: SshSession, hostId: String, force: Boolean = false): Available {
+        if (!force) availCache[hostId]?.let { return it }
+        val raw = runCatching { ssh.exec("cat \"\$HOME/.claude/settings.json\" 2>/dev/null") }.getOrDefault("")
+        val got = runCatching {
+            val o = org.json.JSONObject(raw)
+            val arr = o.optJSONArray("availableModels")
+            val list = (0 until (arr?.length() ?: 0)).mapNotNull { arr?.optString(it)?.takeIf { s -> s.isNotBlank() } }
+            Available(list, o.optString("model"))
+        }.getOrNull()
+        val fallback = listOf("default", "opus", "sonnet", "haiku")
+        val a = if (got == null || got.models.isEmpty()) Available(fallback, got?.default.orEmpty()) else got
+        availCache[hostId] = a
+        return a
+    }
+
+    /**
+     * 快路换模型：`/model <名字>` + 1.5 秒后 Enter 按掉确认框。**两个来回，不抓屏。**
+     * @return 出错原因；null = 发出去了。⚠️ 只在 [borrowable] 时发 —— 输入框里有半截草稿会被接上。
+     */
+    suspend fun switchFast(ssh: SshSession, target: String, alias: String): String? {
+        if (!Regex("""^[A-Za-z0-9\-\[\]._]+$""").matches(alias)) return "模型名有怪字符：$alias"
+        if (!borrowable(ssh.exec("tmux capture-pane -p -t ${app.yxi.ssh.Shell.q(target)}"))) return "它正忙着，或者输入框里有没发完的字 —— 等一下再点"
+        val t = app.yxi.ssh.Shell.q(target)
+        ssh.exec("tmux send-keys -t $t -l '/model $alias'; sleep 0.3; tmux send-keys -t $t Enter")
+        kotlinx.coroutines.delay(1500)
+        // 同一个模型再发一次不弹框；弹了就按掉，没弹这个 Enter 落在空输入框上是无害的
+        ssh.exec("tmux send-keys -t $t Enter")
+        return null
+    }
+
+    /** 思考强度：`/effort <级别>`。一个来回。⚠️ 同样会写成账号默认（回显明说的）。 */
+    suspend fun setEffort(ssh: SshSession, target: String, level: String): String? {
+        if (level !in listOf("max", "xhigh", "high", "mid", "medium", "low")) return "强度值不对：$level"
+        if (!borrowable(ssh.exec("tmux capture-pane -p -t ${app.yxi.ssh.Shell.q(target)}"))) return "它正忙着，或者输入框里有没发完的字 —— 等一下再点"
+        val t = app.yxi.ssh.Shell.q(target)
+        ssh.exec("tmux send-keys -t $t -l '/effort $level'; sleep 0.3; tmux send-keys -t $t Enter")
+        return null
+    }
+
     /** 关掉选单不做任何改动。⚠️ **取消也必须发** —— 面板不关，抓屏会一直看到它。 */
     suspend fun cancel(ssh: SshSession, target: String) {
         ssh.exec("tmux send-keys -t ${app.yxi.ssh.Shell.q(target)} Escape")

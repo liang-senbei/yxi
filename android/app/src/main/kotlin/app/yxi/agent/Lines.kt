@@ -106,6 +106,8 @@ object Lines {
     suspend fun list(ssh: SshSession?): List<Line>? = withContext(Dispatchers.IO) {
         val h = home(ssh) ?: return@withContext null
         val raw = ConfigRemote.readFile(ssh, listPath(h)) ?: return@withContext emptyList()
+        // ⚠️ 文件在但解析不了 = 「拿不到」，不是「一条都没有」。当成空表的话人会去重建、
+        //    原来那份（可能是手改坏的）就被覆盖了。返回 null 让界面说「取不到」。
         runCatching {
             val a = JSONArray(raw)
             (0 until a.length()).mapNotNull { i ->
@@ -119,7 +121,7 @@ object Lines {
                     )
                 }
             }
-        }.getOrElse { emptyList() }
+        }.getOrNull()
     }
 
     /** @return 出错原因；null = 成功。 */
@@ -359,16 +361,24 @@ object Lines {
         }
     }
 
-    /** Codex 现在走的是不是我们设的线；返回那条线的 base_url，null = 没被我们接管。 */
-    suspend fun currentCodex(ssh: SshSession?): String? = withContext(Dispatchers.IO) {
+    /** Codex 此刻被我们接管到的端点 + 钥匙。**两个都要比**：同一个中转常挂几家，端点一样钥匙不一样。 */
+    data class CodexNow(val baseUrl: String, val apiKey: String)
+
+    fun matchesCodex(line: Line, now: CodexNow): Boolean = line.baseUrl == now.baseUrl && line.apiKey == now.apiKey
+
+    /** Codex 现在走的是不是我们设的线；null = 没被我们接管（走它自己的登录）。 */
+    suspend fun currentCodex(ssh: SshSession?): CodexNow? = withContext(Dispatchers.IO) {
         val h = home(ssh) ?: return@withContext null
         val raw = ConfigRemote.readFile(ssh, "$h/.codex/config.toml") ?: return@withContext null
         val ls = raw.split('\n').map { it.trim() }
         val i = ls.indexOf(BODY_ON); if (i < 0) return@withContext null
         val j = ls.indexOf(BODY_OFF); if (j < i) return@withContext null
-        ls.subList(i, j).firstOrNull { it.startsWith("base_url") }
+        val url = ls.subList(i, j).firstOrNull { it.startsWith("base_url") }
             ?.let { Regex("""base_url\s*=\s*"(.*)"\s*$""").find(it)?.groupValues?.get(1) }
-            ?.let { tomlUnescape(it) }
+            ?.let { tomlUnescape(it) } ?: return@withContext null
+        // 钥匙只读进内存做比对，不显示、不落日志
+        val key = ConfigRemote.readFile(ssh, keyPath(h))?.trimEnd('\n').orEmpty()
+        CodexNow(url, key)
     }
 
     /**
@@ -381,6 +391,15 @@ object Lines {
         val path = "$h/.codex/config.toml"
         val body = stripBlocks(ConfigRemote.readFile(s, path).orEmpty())
             ?: return@withContext "config.toml 里 Yxi 的标记不成对（被手改过？），没敢动 —— 手动把 `# >>> yxi` / `# <<< yxi` 那几行清掉再试"
+        // ⚠️ 用户自己手写过一个同名的表（没带我们的标记）→ 再写一份就是重复表头，TOML 非法、codex 直接拒启。
+        //    宁可拒绝并说清楚，不能猜（第二轮复核指出）。
+        // ponytail: 只认 `[model_providers.yxi]` 这种朴素写法；TOML 还允许 `[ model_providers.yxi ]`
+        //    和 `[model_providers."yxi"]`，这里漏检（第三轮复核指出）。漏检的后果是 codex 拒启、当场可见，
+        //    不是静默；真有人这么写再上 TOML 解析。
+        if (line != null && body.lineSequence().any {
+                val t = it.trim(); t == "[model_providers.$PROVIDER_ID]" || t.startsWith("[model_providers.$PROVIDER_ID.")
+            }
+        ) return@withContext "config.toml 里已经有一个你自己写的 [model_providers.$PROVIDER_ID]，跟 Yxi 要写的撞名了 —— 先把它改个名再试"
         val next = if (line == null) body else buildString {
             append(HEAD_ON).append('\n')
             append("# 这两段是 Yxi「线路」自动写的，手改会被覆盖。\n")
@@ -414,11 +433,23 @@ object Lines {
 
     private fun keyPath(home: String) = "$home/.yxi/codex-key"
 
-    /** [tomlEscape] 的逆，只用来把 config.toml 里我们自己写的 base_url 读回来比对。 */
-    private fun tomlUnescape(v: String): String = v
-        .replace(Regex("""\\u([0-9A-Fa-f]{4})""")) { it.groupValues[1].toInt(16).toChar().toString() }
-        .replace("\\n", "\n").replace("\\r", "\r").replace("\\t", "\t")
-        .replace("\\\"", "\"").replace("\\\\", "\\")
+    /**
+     * [tomlEscape] 的逆，只用来把 config.toml 里我们自己写的 base_url 读回来比对。
+     * ⚠️ **单遍扫描，不能用连串 replace**：先换 `\n` 再换 `\\` 的话，`\\n`（转义的反斜杠 + 字母 n）
+     * 会被先当成换行吃掉（第二轮复核用 Python 转写复现）。
+     */
+    private fun tomlUnescape(v: String): String =
+        Regex("""\\(u([0-9A-Fa-f]{4})|[nrt"\\])""").replace(v) { m ->
+            val g = m.groupValues[1]
+            when {
+                g.startsWith("u") -> m.groupValues[2].toInt(16).toChar().toString()
+                g == "n" -> "\n"
+                g == "r" -> "\r"
+                g == "t" -> "\t"
+                g == "\"" -> "\""
+                else -> "\\"
+            }
+        }
 
     // ── 杂 ──────────────────────────────────────────────────────────────────
 

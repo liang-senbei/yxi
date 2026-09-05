@@ -142,6 +142,9 @@ fun ChatScreen(
     var ctxUse by remember(sessionName) { mutableStateOf<app.yxi.agent.Transcript.Ctx?>(null) }
     /** 这台机器**今天**烧了多少。⚠️ 拿不到就是 null，整块藏掉（[app.yxi.agent.Usage] 的规矩） */
     var todayUse by remember(sessionName) { mutableStateOf<app.yxi.agent.Today?>(null) }
+    /** 快路的模型名单（本地选单开着）。null = 没开 */
+    var fastModels by remember { mutableStateOf<app.yxi.agent.Model.Available?>(null) }
+    var showEffort by remember { mutableStateOf(false) }
     /** `/model` 选单开着的时候放这儿。null = 没开 */
     var models by remember(sessionName) { mutableStateOf<List<app.yxi.agent.Model.Choice>?>(null) }
     var modelBusy by remember(sessionName) { mutableStateOf(false) }
@@ -694,25 +697,20 @@ fun ChatScreen(
                     onClick = if (ssh != null) ({ showModes = true }) else null,
                 )
                 // 模型名单独一格，**可点** —— 点开就是 `/model` 那个选单
+                // ⚠️ 点开的是**本地选单**（名单来自 settings.json 的 availableModels，按主机缓存一次）——
+                //    零往返、立刻弹。原来是点一下就去 TUI 里开 /model 选单再抓屏 4 次，等 1~4 秒
+                //    （用户 2026-09-05：「切换模型选单延迟很高」）。慢的那条留作「仅本会话」的备选。
                 ctxUse?.model?.takeIf { it.isNotBlank() }?.let { m ->
                     StatChip(
-                        if (modelBusy) t("开选单…") else m.removePrefix("claude-"),
+                        if (modelBusy) t("切换中…") else m.removePrefix("claude-"),
                         MaterialTheme.colorScheme.primary, mono = true,
                         onClick = if (ssh != null && !modelBusy) ({
-                                val s0 = ssh
-                                scope.launch {
-                                    modelBusy = true
-                                    models = app.yxi.ssh.catching {
-                                        app.yxi.agent.Model.open(s0, sessionName)
-                                    }.getOrNull()
-                                    if (models == null) {
-                                        android.widget.Toast.makeText(
-                                            ctx, t("它正忙着，或者输入框里有没发完的字 —— 等一下再点"),
-                                            android.widget.Toast.LENGTH_LONG,
-                                        ).show()
-                                    }
-                                    modelBusy = false
-                                }
+                            val s0 = ssh
+                            scope.launch {
+                                fastModels = app.yxi.ssh.catching {
+                                    app.yxi.agent.Model.available(s0, hostId)
+                                }.getOrNull() ?: app.yxi.agent.Model.Available(listOf("default", "opus", "sonnet", "haiku"), "")
+                            }
                         }) else null,
                     )
                 }
@@ -728,8 +726,12 @@ fun ChatScreen(
                         // ponytail 强度（lite/full/ultra）——读得到才显示
                         if (cu.ponytail.isNotBlank()) add("ponytail " + cu.ponytail)
                     }
-                    // ⚠️ 这格**不能点**，所以是 Muted 不是主色 —— 这条上「蓝 = 能点」是唯一的颜色规则
-                    if (bits.isNotEmpty()) StatChip(bits.joinToString(" · "), Muted)
+                    // 能点了：点开选思考强度（`/effort`）。按「蓝 = 能点」的规则改成主色。
+                    if (bits.isNotEmpty()) StatChip(
+                        bits.joinToString(" · "),
+                        if (ssh != null) MaterialTheme.colorScheme.primary else Muted,
+                        onClick = if (ssh != null) ({ showEffort = true }) else null,
+                    )
                 }
                 // 上下文单独一格、可点：快满了染琥珀，点一下发 /compact（手机上懒得敲那几个字母）
                 ctxUse?.let { cu ->
@@ -1233,11 +1235,108 @@ fun ChatScreen(
         onPick = { cmd ->
             val s0 = ssh
             if (s0 != null) {
-                scope.launch { runCatching { SessionProbe.send(s0, sessionName, cmd) } }
-                android.widget.Toast.makeText(ctx, t("已发 %s").format(cmd), android.widget.Toast.LENGTH_SHORT).show()
+                scope.launch {
+                    // ⚠️ `/model X` 在有对话的会话里会弹「Switch model?」确认框，不按掉的话
+                    //    用户下一条消息会被它吃掉（探针实测）。所以走 switchFast，它会补那个 Enter。
+                    val alias = cmd.trim().removePrefix("/model").trim().takeIf { cmd.trim().startsWith("/model ") }
+                    val err = app.yxi.ssh.catching {
+                        if (alias != null) app.yxi.agent.Model.switchFast(s0, sessionName, alias)
+                        else { SessionProbe.send(s0, sessionName, cmd); null }
+                    }.getOrElse { it.message }
+                    android.widget.Toast.makeText(ctx, err ?: t("已发 %s").format(cmd), android.widget.Toast.LENGTH_SHORT).show()
+                }
             }
         },
         onDismiss = { showModes = false },
+    )
+
+    // 快路模型选单：本地名单，点一下 = `/model <名字>`（两个来回）。
+    // ⚠️ **说清楚它会改账号默认** —— 这是实测出来的语义，不是猜的（Model.kt 顶部）。
+    //    想只换这个会话的走底下那行「仅本会话」，那条慢（要开 TUI 选单）。
+    fastModels?.let { av ->
+        val curModel = ctxUse?.model.orEmpty().removePrefix("claude-")
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { fastModels = null },
+            title = { Text(t("换模型")) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    av.models.forEach { name ->
+                        val isCur = name.isNotBlank() && (curModel.startsWith(name.substringBefore('[')) || name == av.default && curModel.isEmpty())
+                        Row(
+                            Modifier.fillMaxWidth().clickable {
+                                val s0 = ssh ?: return@clickable
+                                fastModels = null
+                                scope.launch {
+                                    modelBusy = true
+                                    val err = app.yxi.ssh.catching { app.yxi.agent.Model.switchFast(s0, sessionName, name) }.getOrElse { it.message }
+                                    modelBusy = false
+                                    android.widget.Toast.makeText(ctx, err ?: t("已切到 %s · 也成了账号默认").format(name), android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                            }.padding(4.dp, 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                name, Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                                color = if (isCur) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            )
+                            if (name == av.default) Text(t("默认"), style = MaterialTheme.typography.labelSmall, color = Muted)
+                        }
+                    }
+                    Text(
+                        t("点一下就切，顺便写成账号默认（以后新会话也用它）。"),
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    // 慢路：只换这个会话，不碰默认 —— 要开 TUI 选单再抓屏，1~4 秒
+                    Text(
+                        t("只换这个会话，不改默认（慢，要开选单）→"),
+                        Modifier.fillMaxWidth().clickable {
+                            val s0 = ssh ?: return@clickable
+                            fastModels = null
+                            scope.launch {
+                                modelBusy = true
+                                models = app.yxi.ssh.catching { app.yxi.agent.Model.open(s0, sessionName) }.getOrNull()
+                                if (models == null) android.widget.Toast.makeText(ctx, t("它正忙着，或者输入框里有没发完的字 —— 等一下再点"), android.widget.Toast.LENGTH_LONG).show()
+                                modelBusy = false
+                            }
+                        }.padding(4.dp, 8.dp),
+                        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            },
+            confirmButton = {},
+            dismissButton = { androidx.compose.material3.TextButton({ fastModels = null }) { Text(t("算了")) } },
+        )
+    }
+
+    // 思考强度选单：`/effort <级别>`，一个来回。同样会写成默认（回显明说的）。
+    if (showEffort) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { showEffort = false },
+        title = { Text(t("思考强度")) },
+        text = {
+            Column {
+                listOf("max" to t("最大思考"), "high" to t("高强度"), "mid" to t("中等"), "low" to t("低")).forEach { (lv, label) ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable {
+                            val s0 = ssh ?: return@clickable
+                            showEffort = false
+                            scope.launch {
+                                val err = app.yxi.ssh.catching { app.yxi.agent.Model.setEffort(s0, sessionName, lv) }.getOrElse { it.message }
+                                android.widget.Toast.makeText(ctx, err ?: t("已发 %s").format("/effort $lv"), android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }.padding(4.dp, 10.dp),
+                    ) {
+                        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium,
+                            color = if (ctxUse?.effort == lv) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                        Text(lv, style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace), color = Muted)
+                    }
+                }
+                Text(t("会一并写成账号默认。"), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+            }
+        },
+        confirmButton = {},
+        dismissButton = { androidx.compose.material3.TextButton({ showEffort = false }) { Text(t("算了")) } },
     )
 
     models?.let { list ->

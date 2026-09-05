@@ -117,7 +117,8 @@ fun SessionsScreen(
     var pinned by remember(host.id) { mutableStateOf(Pinned.get(ctx, host.id)) }
     var view by remember(host.id) { mutableStateOf(Board.view(ctx, host.id)) }
     var collapsed by remember(host.id) { mutableStateOf(Board.collapsed(ctx, host.id)) }
-    var groups by remember(host.id) { mutableStateOf(app.yxi.agent.Groups.Table()) }
+    // ⚠️ 从缓存起步，不从空表起步 —— 否则每次进看板都先是一屏「没编组」，等一趟 SSH 才分组（见 Recent.groups）
+    var groups by remember(host.id) { mutableStateOf(app.yxi.agent.Recent.groups(ctx, host.id)) }
     /// 正在给哪个会话选组
     /** 正在编辑哪个组的组规 */
     var ruleFor by remember { mutableStateOf<String?>(null) }
@@ -174,6 +175,7 @@ fun SessionsScreen(
                     // 它原来是「点了才去抓」，打开菜单要干等一趟 SSH 往返
                     .onSuccess {
                         app.yxi.agent.Recent.put(ctx, host.id, it.sessions)
+                        app.yxi.agent.Recent.putGroups(ctx, host.id, it.groups)
                         onSessions(it.sessions); groups = it.groups; tools = it.tools; status = ""
                         fresh = true
                     }
@@ -461,7 +463,10 @@ fun SessionsScreen(
                 if (ssh == null) onRetry() else scope.launch {
                     val s = ssh
                     if (s != null) runCatching { SessionProbe.snapshotFull(s) }
-                        .onSuccess { onSessions(it.sessions); groups = it.groups; tools = it.tools; status = "" }
+                        .onSuccess {
+                            app.yxi.agent.Recent.putGroups(ctx, host.id, it.groups)
+                            onSessions(it.sessions); groups = it.groups; tools = it.tools; status = ""
+                        }
                     // 转一下让人看见它确实动了 —— 一闪而过的刷新等于没反馈
                     delay(400)
                 }
@@ -809,6 +814,7 @@ fun SessionsScreen(
                 ruleFor = null
                 val table = groups.withRule(g, text)
                 groups = table
+                app.yxi.agent.Recent.putGroups(ctx, host.id, table)
                 val s = ssh ?: return@GroupRuleDialog
                 scope.launch {
                     runCatching {
@@ -833,6 +839,7 @@ fun SessionsScreen(
             onSave = { table, joined ->
                 grouping = null
                 groups = table                     // 先画出来，别让人等一趟 SSH
+                app.yxi.agent.Recent.putGroups(ctx, host.id, table)
                 val s = ssh ?: return@GroupPicker
                 scope.launch {
                     runCatching {

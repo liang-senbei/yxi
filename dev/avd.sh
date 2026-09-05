@@ -11,6 +11,8 @@ IMG="system-images;android-34;google_apis_playstore;x86_64"
 # `SocketException: Connection reset`，极难定位（见 TROUBLESHOOTING #15）。
 # 只有需要登 Google 账号时才 PROXY=http://10.0.2.2:1080 临时开。
 PROXY=${PROXY:-}
+# ⚠️ 渲染后端可换：GPU=guest ./dev/avd.sh start。默认的 swiftshader_indirect（宿主侧 gfxstream）
+#    在对话页上会整个 qemu SIGSEGV（strace 抓到的，见 TROUBLESHOOTING #264）；guest 是客户机侧软渲染，走另一条路。
 SHOT=${SHOT:-/tmp/avd-shot.png}
 
 case "${1:-}" in
@@ -35,7 +37,7 @@ start)
   # 见 TROUBLESHOOTING #263。`systemd-run --scope` 把它挪进独立 scope，watchdog 就管不着了。
   RUN=""; command -v systemd-run >/dev/null 2>&1 && RUN="systemd-run --scope --collect --quiet --unit=yxi-avd-$$"
   nohup $RUN emulator -avd "$AVD" -no-window -no-audio -no-boot-anim -no-metrics \
-      -gpu swiftshader_indirect -no-snapshot -skin 720x1280 \
+      -gpu "${GPU:-swiftshader_indirect}" -no-snapshot -skin 720x1280 \
       ${PROXY:+-http-proxy "$PROXY"} -memory 2048 -cores 4 > /tmp/emulator.log 2>&1 &
   adb wait-for-device
   n=0; until [ "$(adb shell getprop sys.boot_completed 2>/dev/null|tr -d '\r')" = "1" ] || [ $n -gt 90 ]; do sleep 4; n=$((n+1)); done

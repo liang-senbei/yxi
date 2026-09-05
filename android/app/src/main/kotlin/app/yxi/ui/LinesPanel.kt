@@ -38,6 +38,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.yxi.agent.Lines
 import app.yxi.agent.Session
+import app.yxi.agent.SessionProbe
 import app.yxi.agent.SessionState
 import app.yxi.ssh.Host
 import app.yxi.ssh.SshSession
@@ -55,7 +56,10 @@ import kotlinx.coroutines.launch
  * ⚠️ **忙的时候不立刻切**：那会让一轮对话前半段走 A、后半段走 B。
  * 缓存是按端点分的，中途换端点要把整段对话重读一遍（慢且贵）；新线路还不一定有同一个模型，
  * 半途报错的话人会以为是任务本身失败了。所以**干活中就排队，空闲了自动落地**。
- * 状态直接用父级传进来的 [sessions]（[SessionProbe] 已经探过一次），**不另起一次 SSH 往返**。
+ * ⚠️ 父级传进来的 [sessions] **只在看板页可见时才刷新**（那边每 5 秒探一次）——人一进配置页它就冻住了。
+ * 而排队这条路完全靠「忙 → 空闲」这个跃迁：列表冻住 = 排队永远不落地（E2E 2026-09-05 实测：
+ * 探针空闲 80 秒后界面仍挂着「排队中」，服务器一字未写）。所以这里**自己每 5 秒探一次**，
+ * 只在本面板可见时跑（LaunchedEffect 随组合销毁），代价跟看板页一样。父级那份只当初值。
  *
  * ⚠️ **Codex 不吃这一套**（它读 `~/.codex/auth.json`，不是 env），这一页只管 Claude Code。
  * 机器上有 Codex 会话时明说一句，别让人以为一起换了。
@@ -71,7 +75,7 @@ fun LinesPanel(ssh: SshSession?, host: Host?, sessions: List<Session>) {
     /** 给哪个 agent 配线路。**两家机制完全不同**，混在一列里只会让人切错。 */
     var agent by remember(key) { mutableStateOf(Lines.CLAUDE) }
     /** Codex 现在被我们接管到哪个端点；null = 没接管（走它自己的登录）。 */
-    var codexNow by remember(key) { mutableStateOf<String?>(null) }
+    var codexNow by remember(key) { mutableStateOf<Lines.CodexNow?>(null) }
     var loading by remember(key) { mutableStateOf(true) }
     var note by remember(key) { mutableStateOf("") }
     /**
@@ -83,12 +87,23 @@ fun LinesPanel(ssh: SshSession?, host: Host?, sessions: List<Session>) {
     var pending by remember(key) { mutableStateOf<Queued?>(null) }
     var edit by remember(key) { mutableStateOf<Lines.Line?>(null) }
 
+    // 会话状态**自己保鲜**，见文件头。live 为 null（还没探到 / 没连上）就用父级传的那份
+    var live by remember(key) { mutableStateOf<List<Session>?>(null) }
+    LaunchedEffect(ssh, key) {
+        val s = ssh ?: return@LaunchedEffect
+        while (true) {
+            runCatching { SessionProbe.snapshot(s) }.onSuccess { live = it }
+                .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+            kotlinx.coroutines.delay(5_000)
+        }
+    }
+    val sess = live ?: sessions
     // 换整机要等所有 Claude 会话都闲下来；只换一个项目，就只等那一个。
-    val waitOn = scope?.let { s -> sessions.filter { it.name == s.name } } ?: sessions
+    val waitOn = scope?.let { s -> sess.filter { it.name == s.name } } ?: sess
     val busy = waitOn.count { it.state == SessionState.Working && !it.isCodex }
-    val hasCodex = sessions.any { it.isCodex }
+    val hasCodex = sess.any { it.isCodex }
     // 能单独设线路的会话：跑 Claude 的、而且知道它在哪个目录
-    val scopables = sessions.filter { !it.isCodex && it.cwd.isNotBlank() }
+    val scopables = sess.filter { !it.isCodex && it.cwd.isNotBlank() }
 
     suspend fun reload() {
         lines = Lines.list(ssh)
@@ -131,7 +146,7 @@ fun LinesPanel(ssh: SshSession?, host: Host?, sessions: List<Session>) {
     //    effect 自己的 key → Compose 取消并重启这个 effect → doApply 在第一个挂起点（SSH）就被取消。
     //    表现是横幅消失、没有任何提示、服务器上什么都没写 —— 「界面说做了、实际没做」（正确性审查指出）。
     //    bg 是 rememberCoroutineScope，不跟 effect 一起死。
-    val queuedBusy = pending?.let { q -> (q.cwd?.let { c -> sessions.filter { it.cwd == c } } ?: sessions)
+    val queuedBusy = pending?.let { q -> (q.cwd?.let { c -> sess.filter { it.cwd == c } } ?: sess)
         .count { it.state == SessionState.Working && !it.isCodex } } ?: 0
     LaunchedEffect(pending, queuedBusy) {
         val q = pending ?: return@LaunchedEffect
@@ -142,7 +157,9 @@ fun LinesPanel(ssh: SshSession?, host: Host?, sessions: List<Session>) {
 
     fun pick(line: Lines.Line?) {
         val where = scope?.let { t("只给「%s」").format(it.short) } ?: t("整台机器")
-        if (busy > 0) {
+        // Codex 换线**不排队**：它的配置要重开会话才生效，运行中的会话根本不受影响，
+        // 等 Claude 那些会话空闲毫无意义，只是让人白等（正确性审查指出）。
+        if (busy > 0 && agent != Lines.CODEX) {
             pending = Queued(line, agent, scope?.cwd, where)
             note = t("这台机器上有 %d 个会话在干活 —— 已排队，跑完这一轮自动换。").format(busy)
         } else bg.launch { doApply(line, agent, scope?.cwd, where) }
@@ -204,7 +221,7 @@ fun LinesPanel(ssh: SshSession?, host: Host?, sessions: List<Session>) {
             when {
                 loading && lines == null -> item { Hint(t("正在取…")) }
                 // 拿不到 ≠ 一条都没建过
-                lines == null -> item { Hint(t("取不到 —— 没连上那台机器。")) }
+                lines == null -> item { Hint(t("取不到线路清单 —— 没连上那台机器，或者服务器上的 lines.json 被改坏了。")) }
                 else -> {
                     item {
                         Text(
@@ -236,7 +253,7 @@ fun LinesPanel(ssh: SshSession?, host: Host?, sessions: List<Session>) {
                                 Lines.mask(l.token).ifBlank { null }?.let { t("令牌 ") + it },
                                 Lines.mask(l.apiKey).ifBlank { null }?.let { t("密钥 ") + it },
                             ).joinToString(" · ").ifBlank { t("什么都没填") },
-                            current = if (agent == Lines.CODEX) codexNow != null && codexNow == l.baseUrl
+                            current = if (agent == Lines.CODEX) codexNow?.let { Lines.matchesCodex(l, it) } == true
                             else cur != null && Lines.matches(l, cur),
                             onPick = { pick(l) },
                             onEdit = { edit = l },

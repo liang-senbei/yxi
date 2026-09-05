@@ -15,8 +15,8 @@ android {
         targetSdk = 37
         // ⚠️ versionCode 是**更新检查唯一比较的东西**，每次发包必须 +1。
         // versionName 只给人看。
-        versionCode = 162
-        versionName = "1.1.6"
+        versionCode = 163
+        versionName = "1.1.7"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // ⚠️ **只留 arm64-v8a。** sherpa-onnx 的 AAR 带四套原生库，加起来 120MB；
@@ -51,7 +51,6 @@ android {
         getByName("debug") { ndk { abiFilters += "x86_64" } }
 
         release {
-            ndk { abiFilters += "x86_64" }   // E2E-TEMP
             // 有密钥就直接签好（省掉「忘了签 / 签到旧包上」那类事故，见 #223）
             signingConfig = signingConfigs.findByName("release")
             // ⚠️ **开混淆和资源压缩**（2026-09-04 安全审计，老板点名要「反反编译」）。
