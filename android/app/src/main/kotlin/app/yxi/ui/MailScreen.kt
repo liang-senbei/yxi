@@ -86,7 +86,7 @@ fun MailScreen(modifier: Modifier = Modifier) {
     }
     // 「点进去就消」：进页、以及在这页里每读掉一封，都把红点水位抬到当前未读数（见 [Badges]）
     val unreadNow = Account.me?.unreadMail
-    LaunchedEffect(unreadNow) { unreadNow?.let { Badges.mailSeen(ctx, it) } }
+    LaunchedEffect(unreadNow) { unreadNow?.let { Badges.mark(ctx, Badges.MAIL, it) } }
 
     Column(modifier.fillMaxSize()) {
         Text(

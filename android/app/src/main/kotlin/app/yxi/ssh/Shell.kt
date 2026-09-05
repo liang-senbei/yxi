@@ -4,7 +4,7 @@ package app.yxi.ssh
  * 拼远端 shell 命令时**唯一**的转义与白名单。
  *
  * ⚠️ **为什么要有这么一个文件**：2026-09-04 的安全审计发现同一个转义函数在四个地方各抄了一份
- * （`ConfigRemote.shq` / `Dirs.q` / `Connect.shq` / `Tickets.shellSingleQuote`）——
+ * （`ConfigRemote.shq` / `Dirs.q` / `Connect.shq`）——
  * 抄了四份的结果是**谁想起来谁用**，26 个插值点漏网。其中最要命的一条：
  * 会话名从服务器的 `~/.yxi/events.jsonl` 一路流进 `tmux capture-pane -t '…'`，
  * 而那个文件**服务器上的 agent 自己就能写**。被提示词注入打中的 agent 因此可以反过来

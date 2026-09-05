@@ -1,40 +1,44 @@
 package app.yxi.agent
 
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 工单会被塞进一条 shell 命令追加进文件 —— 用户在工单里写什么字符都可能。
- * ⚠️ 转义错了不是显示难看，是**写坏文件**甚至**被当命令执行**。
+ * 工单 2026-09-05 搬进会员服务（`/api/support/tickets`），客户端只剩「读服务端的 JSON」这一段逻辑。
+ * 守两件：回复的 by 分得清官方 / 用户；服务端加了新分类老客户端不崩。
  */
 class TicketsTest {
 
-    @Test fun 单引号要转义() {
-        assertEquals("'abc'", Tickets.shellSingleQuote("abc"))
-        // 单引号是单引号字符串里唯一的危险字符：闭合 → 插一个转义的 ' → 再开
-        assertEquals("""'it'\''s'""", Tickets.shellSingleQuote("it's"))
+    @Test fun 解析一条带回复的工单() {
+        val o = JSONObject(
+            """{"id":7,"category":"payment","text":"充了没到账","status":"replied",
+                "createdAt":"2026-09-05T10:00:00+08:00","updatedAt":"2026-09-05T11:00:00+08:00",
+                "replies":[{"by":"official","text":"已补发","at":"2026-09-05T10:30:00+08:00"},
+                           {"by":"user","text":"收到","at":"2026-09-05T11:00:00+08:00"}],
+                "unread":true}""",
+        )
+        val tk = Tickets.parse(o)
+        assertEquals("7", tk.id)
+        assertEquals(Tickets.Category.Payment, tk.category)
+        assertEquals("replied", tk.status)
+        assertTrue(tk.unread)
+        assertEquals(2, tk.replies.size)
+        assertTrue(tk.replies[0].official)
+        assertFalse(tk.replies[1].official)
     }
 
-    @Test fun 别的危险字符靠单引号本身挡住() {
-        // $ ` \ ; | & 换行 在单引号里都是字面量，不该被改写
-        val nasty = "\$HOME `rm -rf /` ; echo x | tee \\ && ok\n换行"
-        val q = Tickets.shellSingleQuote(nasty)
-        assertTrue(q.startsWith("'") && q.endsWith("'"))
-        assertEquals(nasty, q.substring(1, q.length - 1))   // 原样保留
+    @Test fun 字段缺了不抛且默认待处理() {
+        val tk = Tickets.parse(JSONObject("""{"id":1,"text":"x"}"""))
+        assertEquals("open", tk.status)
+        assertEquals(0, tk.replies.size)
+        assertFalse(tk.unread)
     }
 
-    @Test fun 解析jsonl跳过坏行() {
-        val raw = """
-            {"at":100,"text":"第一条","version":"0.9.20(64)"}
-            这不是 json
-            {"at":200,"text":"第二条"}
-            {"at":300,"text":""}
-        """.trimIndent()
-        val ts = Tickets.parse(raw)
-        assertEquals(2, ts.size)                    // 坏行和空文本都不要
-        assertEquals("第一条", ts[0].text)
-        assertEquals("0.9.20(64)", ts[0].version)
-        assertEquals(200L, ts[1].at)
+    @Test fun 未知分类归到其他() {
+        assertEquals(Tickets.Category.Other, Tickets.Category.of("weird"))
+        assertEquals(Tickets.Category.Bug, Tickets.Category.of("bug"))
     }
 }

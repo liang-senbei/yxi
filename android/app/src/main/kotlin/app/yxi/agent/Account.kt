@@ -77,6 +77,8 @@ object Account {
          * ⚠️ 跟 [unreadMail] **是两回事**：读过了也可能没领。界面上分开说，别合并成一个数。
          */
         val unclaimedMail: Int = 0,
+        /** 有我没看过的官方回复的工单数 —— 工单格红点靠它。同 [unreadMail]：服务端给的，客户端不自己数。 */
+        val unreadTickets: Int = 0,
         /** 手上几张曦光（祈愿用） */
         val tickets: Int = 0,
         /** 离保底还差几抽。⚠️ 是「**还差**」不是「已累计」—— 歧义写进字段名里解决（对方定的）。 */
@@ -135,6 +137,9 @@ object Account {
 
     /** 让同包的 [Shop] 之类就地改一两个字段（买完刷余额、开关续费），别开放整个 setter。 */
     internal fun patchMe(f: (Me) -> Me) { me?.let { me = f(it) } }
+
+    /** 工单接口顺带给的未读数就地回灌（同签到回灌曦光）。负数 = 服务端没给，不动。 */
+    fun setUnreadTickets(n: Int) { if (n >= 0) patchMe { it.copy(unreadTickets = n) } }
 
     /** 浏览器登录完跳回来的那个 URI —— MainActivity 塞进来，界面层取走处理 */
     var pendingCallback by mutableStateOf<Uri?>(null)
@@ -653,6 +658,7 @@ object Account {
             autoRenew = o.optJSONObject("wallet")?.optBoolean("autoRenew") == true,
             unreadMail = o.optInt("unreadMail", 0),
             unclaimedMail = o.optInt("unclaimedMail", 0),
+            unreadTickets = o.optInt("unreadTickets", 0),
             tickets = o.optJSONObject("wish")?.optInt("tickets") ?: 0,
             pityRemaining = o.optJSONObject("wish")?.optInt("pityRemaining") ?: 0,
             quotaLimit = q?.optInt("limit") ?: 0,

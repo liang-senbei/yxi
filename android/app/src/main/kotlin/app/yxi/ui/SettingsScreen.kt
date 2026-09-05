@@ -8,6 +8,7 @@ import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -296,11 +297,14 @@ fun SettingsScreen(
             // 老板 2026-09-05：**只要红点、不要数字**，点进去就消。
             // 未读数是服务端的（/api/me），「看过没」的水位在本机（[Badges]）——两者一比就是亮不亮。
             val unread = app.yxi.agent.Account.me?.unreadMail ?: 0
-            LaunchedEffect(unread) { Badges.mailClamp(ctx, unread) }
-            GridEntry(Ico.Mail, t("邮件"), Color(0xFF4C8DF6), Modifier.weight(1f), dot = Badges.mailDot(ctx, unread)) { onMail() }
+            LaunchedEffect(unread) { Badges.clamp(ctx, Badges.MAIL, unread) }
+            GridEntry(Ico.Mail, t("邮件"), Color(0xFF4C8DF6), Modifier.weight(1f), dot = Badges.dot(ctx, Badges.MAIL, unread)) { onMail() }
             GridEntry(Ico.Wish, t("祈愿"), Color(0xFFB07AE8), Modifier.weight(1f)) { onWish() }
             GridEntry(Ico.Gift, t("活动中心"), Color(0xFFE8912D), Modifier.weight(1f)) { onActivity() }
-            GridEntry(Ico.Chat, t("工单"), Color(0xFF7A69E8), Modifier.weight(1f)) { onTickets() }
+            // 工单格同一套：有没看过的官方回复就亮（unreadTickets 由 /api/me 给）
+            val unreadT = app.yxi.agent.Account.me?.unreadTickets ?: 0
+            LaunchedEffect(unreadT) { Badges.clamp(ctx, Badges.TICKETS, unreadT) }
+            GridEntry(Ico.Chat, t("工单"), Color(0xFF7A69E8), Modifier.weight(1f), dot = Badges.dot(ctx, Badges.TICKETS, unreadT)) { onTickets() }
         }
 
         Spacer(Modifier.height(4.dp))
@@ -851,12 +855,33 @@ private fun notificationsOn(ctx: Context): Boolean = runCatching {
 /**
  * 工单中心**单独一页** —— 侧边栏里那一项（用户 2026-09-04：侧边栏里少了这个）。
  *
- * 它是这个 App 里**唯一一条你和开发之间的通道**：写下来落在**连着的那台服务器**
- * `~/.yxi/tickets.jsonl`，开发那边 `cat` 一下就看全了（存手机本地等于没提）。
- * 所以它不该埋在设置的第三层里，而应该和主机、配置、会员中心并排。
+ * 它是这个 App 里**唯一一条你和开发之间的通道**。2026-09-05 老板拍板从「SSH 落到用户自己服务器的
+ * `~/.yxi/tickets.jsonl`」搬进会员服务（hk13）：以前只有用户本人看得见，我们收不到、也回不了，等于没提。
+ * 现在：提单选分类 → 我们在后台回复 → 有回复没看时「我的」里工单格亮红点（水位见 [Badges]）→ 用户还能追问。
+ * ⚠️ 这一步在语义上是**把用户写的内容送出他的机器** —— 所以界面上明写只带文字 + 版本号 + 机型，
+ *    主机 / 密钥 / 会话内容一律不上传（[app.yxi.agent.Tickets] 的隐私红线）。
  */
 @Composable
-fun TicketsScreen(ssh: SshSession?, modifier: Modifier = Modifier) {
+fun TicketsScreen(modifier: Modifier = Modifier) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val items = remember { mutableStateListOf<app.yxi.agent.Tickets.Ticket>() }
+    var cursor by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(true) }
+    var failed by remember { mutableStateOf(false) }
+    var reload by remember { mutableIntStateOf(0) }
+    var open by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(reload) {
+        loading = true; failed = false
+        val r = app.yxi.agent.Tickets.load(ctx)
+        if (r == null) failed = true else { items.clear(); items.addAll(r.first); cursor = r.second }
+        loading = false
+    }
+    // 「点进去就消」：进页、以及在这页里每看掉一条回复，都把红点水位抬到当前未读数（同邮件页，见 [Badges]）
+    val unreadNow = app.yxi.agent.Account.me?.unreadTickets
+    LaunchedEffect(unreadNow) { unreadNow?.let { Badges.mark(ctx, Badges.TICKETS, it) } }
+
     Column(
         modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -865,27 +890,72 @@ fun TicketsScreen(ssh: SshSession?, modifier: Modifier = Modifier) {
             t("工单中心"), style = MaterialTheme.typography.headlineMedium,
             modifier = Modifier.padding(18.dp, 14.dp, 18.dp, 4.dp),
         )
-        TicketsCard(ssh)
+        NewTicketCard { reload++ }
+        when {
+            loading && items.isEmpty() -> TicketHint(t("正在取…"))
+            // ⚠️「拿不到」和「没有」分开说（STYLE.md：不骗人）
+            failed && items.isEmpty() -> TicketHint(t("取不到 —— 网络不通，或者登录过期了。"))
+            items.isEmpty() -> TicketHint(t("还没提过工单。哪里不好用，上面写一条。"))
+            else -> {
+                SectionLabel(t("我的工单"))
+                items.forEach { tk ->
+                    TicketRow(
+                        tk, expanded = open == tk.id,
+                        onToggle = {
+                            open = if (open == tk.id) null else tk.id
+                            // 点开就算看过回复了：本地先翻掉红点，服务端幂等标记
+                            if (open == tk.id && tk.unread) scope.launch {
+                                if (app.yxi.agent.Tickets.markRead(ctx, tk.id)) {
+                                    val i = items.indexOfFirst { it.id == tk.id }
+                                    if (i >= 0) items[i] = tk.copy(unread = false)
+                                }
+                            }
+                        },
+                        onChanged = { reload++ },
+                    )
+                }
+                // 还有更旧的：传上一页最后一条的 id
+                cursor?.let { cur ->
+                    Text(
+                        t("看更早的"),
+                        Modifier.fillMaxWidth().clickable {
+                            scope.launch {
+                                app.yxi.agent.Tickets.load(ctx, before = cur)?.let { items.addAll(it.first); cursor = it.second }
+                            }
+                        }.padding(16.dp),
+                        style = MaterialTheme.typography.labelLarge, color = Muted,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                }
+            }
+        }
     }
 }
 
-/** 工单中心：写一条 + 看已提的。存在连着的服务器上（[app.yxi.agent.Tickets]）。 */
 @Composable
-private fun TicketsCard(ssh: app.yxi.ssh.SshSession?) {
-    val ctx = androidx.compose.ui.platform.LocalContext.current
-    val scope = rememberCoroutineScope()
+private fun TicketHint(text: String) {
+    Surface(
+        color = SurfaceContainerLow, shape = RoundedCornerShape(22.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp),
+    ) {
+        Text(text, Modifier.padding(18.dp, 16.dp), style = MaterialTheme.typography.bodySmall, color = Muted)
+    }
+}
+
+/** 提一条：分类（必选）+ 正文。提交成功清空、通知上层刷列表。 */
+@Composable
+private fun NewTicketCard(onSubmitted: () -> Unit) {
+    val ctx = LocalContext.current
+    var cat by remember { mutableStateOf<app.yxi.agent.Tickets.Category?>(null) }
     var text by remember { mutableStateOf("") }
-    var list by remember { mutableStateOf<List<app.yxi.agent.Tickets.Ticket>?>(null) }
-    var sending by remember { mutableStateOf(false) }
-    var reload by remember { mutableIntStateOf(0) }
-
-    LaunchedEffect(ssh, reload) { if (ssh != null) list = app.yxi.agent.Tickets.load(ssh) }
-
-    Card(t("工单中心"), Glyph.Wrench, subtitle = t("哪里不好用，随手记一条")) {
-        Text(
-            t("写下来存在这台服务器上（~/.yxi/tickets.jsonl），开发那边直接查阅。会自动带上版本号和机型。"),
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
-        )
+    Card(t("提一条"), Glyph.Wrench, subtitle = t("哪里不好用，选个分类写下来"), startExpanded = true) {
+        // 分类是老板定的四个，必须选一个 —— 后台按它分派，不选就全成了「其他」大杂烩
+        Row(
+            Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            app.yxi.agent.Tickets.Category.entries.forEach { c -> ChoiceChip(c.label, cat == c) { cat = c } }
+        }
         Spacer(Modifier.height(10.dp))
         OutlinedTextField(
             text, { text = it },
@@ -893,60 +963,150 @@ private fun TicketsCard(ssh: app.yxi.ssh.SshSession?) {
             shape = MaterialTheme.shapes.medium,
             modifier = Modifier.fillMaxWidth().heightIn(min = 96.dp),
         )
+        Spacer(Modifier.height(8.dp))
+        // ⚠️ 这句是承诺不是说明：工单只带这三样，别的什么都不传（agent/Tickets.kt 的隐私红线）
+        Hint2(t("只会带上你写的文字、App 版本号和机型。主机、密钥、会话内容都不会上传。"))
         Spacer(Modifier.height(10.dp))
         SubmitButton(
-            label = t("提一条"),
+            label = t("提交"),
             modifier = Modifier.fillMaxWidth(), height = 46.dp,
-            successLabel = t("记下了"),
+            successLabel = t("已提交"),
         ) {
             val body = text.trim()
-            if (body.isBlank()) Result.failure(RuntimeException(t("先写点什么")))
-            else {
-                val err = app.yxi.agent.Tickets.add(
-                    ssh,
-                    app.yxi.agent.Tickets.Ticket(
-                        at = System.currentTimeMillis() / 1000,
-                        text = body,
+            val c = cat
+            when {
+                c == null -> Result.failure(RuntimeException(t("先选一个分类")))
+                body.isBlank() -> Result.failure(RuntimeException(t("先写点什么")))
+                else -> {
+                    val err = app.yxi.agent.Tickets.add(
+                        ctx, c, body,
                         version = "%s(%d)".format(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE),
-                        device = android.os.Build.MODEL + " / Android " + android.os.Build.VERSION.RELEASE,
-                    ),
-                )
-                if (err == null) { text = ""; reload++; Result.success(t("记下了")) }
-                else Result.failure(RuntimeException(err))
-            }
-        }
-
-        val ls = list
-        if (!ls.isNullOrEmpty()) {
-            Spacer(Modifier.height(14.dp))
-            Text(t("已提 %d 条").format(ls.size), style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.outline)
-            Spacer(Modifier.height(6.dp))
-            ls.take(8).forEach { tk ->
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                    shape = MaterialTheme.shapes.medium,
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
-                ) {
-                    Column(Modifier.padding(12.dp, 9.dp)) {
-                        Text(tk.text, style = MaterialTheme.typography.bodySmall, maxLines = 4)
-                        val meta = listOf(beijingTime(tk.at), tk.version).filter { it.isNotBlank() }.joinToString(" · ")
-                        if (meta.isNotBlank()) Text(
-                            meta,
-                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                            color = MaterialTheme.colorScheme.outline,
-                        )
-                    }
+                        device = Build.MODEL + " / Android " + Build.VERSION.RELEASE,
+                    )
+                    if (err == null) { text = ""; cat = null; onSubmitted(); Result.success(t("已提交")) }
+                    else Result.failure(RuntimeException(err))
                 }
             }
         }
     }
 }
 
-/** unix 秒 → 北京时间 `MM-dd HH:mm`。0 = 空串。 */
-private fun beijingTime(at: Long): String = if (at <= 0) "" else runCatching {
-    app.yxi.agent.Tz.stamp(at)
-}.getOrDefault("")
+/** 单选筹片（同 MailScreen 的 MailChip）：选中 primaryContainer，没选 surfaceContainerHigh */
+@Composable
+private fun ChoiceChip(label: String, on: Boolean, onClick: () -> Unit) {
+    Text(
+        label,
+        Modifier.clip(Pill)
+            .background(if (on) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh)
+            .clickable(onClick = onClick)
+            .padding(14.dp, 7.dp),
+        style = MaterialTheme.typography.labelLarge,
+        color = if (on) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/** 一条工单：分类 · 状态 · 时间 / 正文 / 展开后是回复串 + 追问框 */
+@Composable
+private fun TicketRow(
+    tk: app.yxi.agent.Tickets.Ticket,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    /** 追问发出去了 —— 上层重新拉列表 */
+    onChanged: () -> Unit,
+) {
+    Surface(
+        color = SurfaceContainerLow, shape = RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)
+            .clip(RoundedCornerShape(20.dp)).clickable(onClick = onToggle),
+    ) {
+        Column(Modifier.padding(16.dp, 14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // 有没看的官方回复：左边一颗红点（跟「我的」宫格上那颗同色）
+                Box(
+                    Modifier.size(7.dp).clip(CircleShape)
+                        .background(if (tk.unread) MaterialTheme.colorScheme.error else Color.Transparent),
+                )
+                Text(tk.category.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
+                val (st, stColor) = when (tk.status) {
+                    "closed" -> t("已关闭") to Muted
+                    "replied" -> t("已回复") to Copper
+                    else -> t("待处理") to Amber
+                }
+                Text(st, style = MaterialTheme.typography.labelSmall, color = stColor)
+                // ⚠️ 时间一律走 Tz（用户切了时区这里要跟着变），别自己格式化
+                Text(
+                    app.yxi.agent.Tz.dateTime(tk.createdAt), Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelSmall, color = Muted,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                )
+            }
+            Text(
+                tk.text, style = MaterialTheme.typography.bodyMedium,
+                maxLines = if (expanded) Int.MAX_VALUE else 2,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+            if (expanded) {
+                tk.replies.forEach { r -> ReplyBubble(r) }
+                // 关闭的也能追问 —— 服务端把它当重开（契约 support-tickets.md），所以框照留，只提前说一句
+                if (tk.status == "closed") Hint2(t("这条已关闭 —— 再补一句会重新打开。"))
+                FollowUp(tk.id, onChanged)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReplyBubble(r: app.yxi.agent.Tickets.Reply) {
+    Surface(
+        color = if (r.official) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceContainerLowest,
+        shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(12.dp, 9.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    if (r.official) t("Yxi 官方") else t("我"), Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelSmall, color = if (r.official) Copper else Muted,
+                )
+                Text(app.yxi.agent.Tz.dateTime(r.at), style = MaterialTheme.typography.labelSmall, color = Dim)
+            }
+            Text(r.text, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+/** 追问：一行输入 + 发送。发出去了上层刷列表；失败不清空、把原因说出来。 */
+@Composable
+private fun FollowUp(id: String, onSent: () -> Unit) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var text by remember(id) { mutableStateOf("") }
+    var busy by remember(id) { mutableStateOf(false) }
+    var err by remember(id) { mutableStateOf<String?>(null) }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(
+            text, { text = it }, Modifier.weight(1f),
+            placeholder = { Text(t("再补一句…")) }, maxLines = 4, shape = MaterialTheme.shapes.medium,
+        )
+        val can = !busy && text.isNotBlank()
+        Text(
+            if (busy) t("发送中…") else t("发送"),
+            Modifier.clip(Pill)
+                .background(if (can) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh)
+                .clickable(enabled = can) {
+                    busy = true; err = null
+                    scope.launch {
+                        val e = app.yxi.agent.Tickets.reply(ctx, id, text.trim())
+                        busy = false
+                        if (e == null) { text = ""; onSent() } else err = e
+                    }
+                }
+                .padding(16.dp, 10.dp),
+            style = MaterialTheme.typography.labelLarge,
+            color = if (can) MaterialTheme.colorScheme.onPrimary else Muted,
+        )
+    }
+    err?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+}
 
 /** QQ 那种分组小标题：卡片上面一行小灰字，把一堆设置分出层次 */
 /** 「我的」上那一格：圆角方块里一枚描边图标，底下一行字。四格一排。 */

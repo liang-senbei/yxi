@@ -325,7 +325,7 @@ class MainActivity : ComponentActivity() {
                             )
                             return@Scaffold
                         }
-                        Page.Tickets -> { app.yxi.ui.TicketsScreen(shared.session, modifier = m); return@Scaffold }
+                        Page.Tickets -> { app.yxi.ui.TicketsScreen(modifier = m); return@Scaffold }
                         Page.Trend -> { app.yxi.ui.TrendScreen(shared.session, modifier = m); return@Scaffold }
                         Page.Mail -> { app.yxi.ui.MailScreen(modifier = m); return@Scaffold }
                         Page.Wallet -> { app.yxi.ui.WalletScreen(onShop = { page = Page.Shop }, onRedeem = { page = Page.Member }, modifier = m); return@Scaffold }

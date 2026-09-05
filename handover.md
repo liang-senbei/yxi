@@ -38,6 +38,7 @@
 
 - **cc-Yxi_pilot · 线路 v2**（已合入 HEAD，未发版）：一条线路 = 整段 settings 片段（白名单键）、80 条 Claude / 57 条 Codex 预设、五个开关、高级 JSON；看板每个会话显示 `Yxi_switch · 名` / `claude · 官方登录` / codex 段；装机加 OpenCode/Hermes。门禁：两轮 Opus 5 审查全修 + 模拟器 E2E 8 项全过（`Yxi_pilot/design/lines-v2.md`）。
   cc-Yxi 侧三件（放开轮询 / 置顶卡片传 line / En +15）**已做完**，i18n 归零、编译过。
+- **cc-Yxi_Entertainment · 工单中心搬进会员服务 + 分类**（老板 2026-09-05 拍板）：工单从「SSH 落用户自己服务器的 JSONL」改走 `/api/support/tickets`（cc-logto_yxi 已上线，契约 `logto_yxi/design/support-tickets.md`）。提单必选分类（账号问题 / Bug 反馈 / 充值问题 / 其他问题）；「我的工单」列表：分类 / 状态 / 时间、未读回复红点、展开看回复串、追问（关闭的追问 = 重开）；「我的」工单格红点（同邮件的 Badges 水位）。文件：`agent/Tickets.kt`（重写）· `ui/SettingsScreen.kt`（工单页 + 工单格）· `agent/Account.kt`（`unreadTickets`）· `ui/Badges.kt`（按 key）· `MainActivity.kt`（一行）· `En.kt`（+20/−3）· `androidTest/TicketsTest.kt`（3 条过）。**编译过、i18n 归零、模拟器 + 真服务器 E2E 全过**（提单 → 后台回复 → 红点亮 → 点开消 → 追问翻回待处理 → 关闭后可重开）。
 
 ## 进度
 - ✅ **1.1.11（versionCode 167）已发布**（2026-09-04）：
