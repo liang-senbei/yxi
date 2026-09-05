@@ -844,6 +844,7 @@ internal object En {
         "会退出这台机器上 %s 的登录，会话里再用得重新登。" to "This signs %s out on this machine; sessions will need a fresh login.",
         "没装" to "Not installed",
         "已登录" to "Signed in",
+        "连接还没稳，正在重试…" to "Connection not steady yet — retrying…",
         "时区" to "Time zone",
         "跟随手机" to "Follow the phone",
         "UTC 世界标准时间" to "UTC",
