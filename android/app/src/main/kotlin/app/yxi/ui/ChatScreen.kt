@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.background
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -72,6 +73,8 @@ import app.yxi.ssh.SshSession
 import com.mikepenz.markdown.m3.Markdown
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -403,25 +406,39 @@ fun ChatScreen(
             }
         }
     }
+    // ⚠️ 三处会给栏做动画（松手归位 / 到底展开 / 点一下互切），**同一时刻只许一段在跑**：两段同时写 barsOff 会抖，
+    //    而且 260ms 的归位会把 220ms 的互切盖回去 —— 表现是「甩一下列表、点一下想把栏叫回来，栏又自己缩回去了」
+    //    （审查查出的）。所以动画统一从 animateBars 起，起新的先掐掉旧的。
+    val barsJob = remember { object { var job: Job? = null } }
+    fun CoroutineScope.animateBars(to: Float, ms: Int) {
+        barsJob.job?.cancel()
+        barsJob.job = launch {
+            androidx.compose.animation.core.animate(
+                barsOff, to, animationSpec = tween(ms, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+            ) { v, _ -> barsOff = v }
+        }
+    }
     // 松手归位：过半就收干净，没过半就弹回来 —— 中间那个半吊子状态不留（学 X）
     LaunchedEffect(listState, barsMax) {
         snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
             if (scrolling) return@collect
             val to = if (barsOff > barsMax / 2f) barsMax else 0f
-            if (barsOff != to) androidx.compose.animation.core.animate(
-                barsOff, to, animationSpec = tween(260, easing = androidx.compose.animation.core.FastOutSlowInEasing),
-            ) { v, _ -> barsOff = v }
+            if (barsOff != to) animateBars(to, 260)
         }
     }
     // 到底了一律展开（新消息来了得看得见输入框）
     LaunchedEffect(Unit) {
-        snapshotFlow { listState.atBottom }.collect {
-            if (it && barsOff != 0f) androidx.compose.animation.core.animate(barsOff, 0f, animationSpec = tween(220)) { v, _ -> barsOff = v }
-        }
+        snapshotFlow { listState.atBottom }.collect { if (it && barsOff != 0f) animateBars(0f, 220) }
     }
     val barsFrac = (barsOff / barsMax).coerceIn(0f, 1f)
     LaunchedEffect(barsFrac) { onBars(barsFrac) }
     val imeOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    // 点一下空白处 = 上下栏收/展互切（学阅读器）。每次点 +1，effect 按 key 重启
+    var barsTap by remember(sessionName) { mutableIntStateOf(0) }
+    LaunchedEffect(barsTap) {
+        if (barsTap == 0) return@LaunchedEffect
+        animateBars(if (barsOff > barsMax / 2f) 0f else barsMax, 220)
+    }
     // ⚠️ **恒定，不跟着 barsHidden 变。** 变的话：点 ↓ 到底 → 栏展开 → 底部留白变大 → 又能往下滚 →
     //    「不在底部」→ ↓ 按钮重新冒出来还往上跳一截 —— 就是用户录到的「点了一直闪」（#226）。
     //    收起时那段留白也看不见：一到底就自动展开了，收起状态下你本来就不在底部。
@@ -866,7 +883,11 @@ fun ChatScreen(
         androidx.compose.runtime.CompositionLocalProvider(
             androidx.compose.ui.platform.LocalUriHandler provides uri,
         ) {
-        Box(Modifier.weight(1f).nestedScroll(barsConn)) {
+        // ⚠️ detectTapGestures 只认**没被孩子消费**的点：链接 / 按钮 / 卡片各有自己的点击，点它们不切栏；
+        //    拖动也不算（滚动消费了位移）。键盘开着时不切 —— 正打字呢，栏本来就固定在。
+        Box(Modifier.weight(1f).nestedScroll(barsConn).pointerInput(imeOpen) {
+            detectTapGestures { if (!imeOpen) barsTap++ }
+        }) {
             // 连着的同名工具卡合成一张（用户：「满屏都是 bash」），点开才铺开
             val rows = remember(items) { groupToolRuns(items) }
             LazyColumn(

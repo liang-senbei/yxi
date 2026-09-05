@@ -82,6 +82,8 @@ fun SettingsScreen(
     onWish: () -> Unit = {},
     /** 活动中心（签到等） */
     onActivity: () -> Unit = {},
+    /** 云曦小管家（备忘 / 提醒 / 天气 + 会动的她） */
+    onYunxi: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val ctx = LocalContext.current
@@ -289,11 +291,12 @@ fun SettingsScreen(
             }
         }
 
-        // ── 四宫格（学 QQ / 米哈游那种个人页）：邮件 · 祈愿 · 活动 · 工单 ──
+        // ── 宫格（学 QQ / 米哈游那种个人页）：云曦 · 邮件 · 祈愿 · 活动 · 工单 ──
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            GridEntry(Ico.Crown, t("云曦"), Color(0xFF4C7FE0), Modifier.weight(1f)) { onYunxi() }
             // 老板 2026-09-05：**只要红点、不要数字**，点进去就消。
             // 未读数是服务端的（/api/me），「看过没」的水位在本机（[Badges]）——两者一比就是亮不亮。
             val unread = app.yxi.agent.Account.me?.unreadMail ?: 0

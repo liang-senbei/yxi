@@ -526,8 +526,13 @@ private fun HostQuota(
                     if (err is kotlinx.coroutines.CancellationException) throw err
                     tsNote = c.explain(err); tsBusy = false; return@launch
                 }
-                val result = app.yxi.ssh.catching { app.yxi.agent.TailscaleStatus.fetch(c.session) }
-                runCatching { c.session.disconnect() }
+                // ⚠️ disconnect 放 finally：`catching` 会把 CancellationException 原样抛出，用户在拉取途中把卡片收起
+                //    协程一取消就跳过了下面那行 disconnect，jsch 的 Session 连着 TCP 就漏了（审查查出）
+                val result = try {
+                    app.yxi.ssh.catching { app.yxi.agent.TailscaleStatus.fetch(c.session) }
+                } finally {
+                    runCatching { c.session.disconnect() }
+                }
                 result
                     .onSuccess { list ->
                         if (list == null) tsNote = t("这台机器没装 Tailscale 或没登录")
@@ -854,6 +859,14 @@ private fun AddHostSheet(
                     tailscaleIp, { tailscaleIp = app.yxi.ssh.HostInput.normalize(it) },
                     t("Tailscale 内网 IP，如 100.111.242.66"), mono = true,
                 )
+                // 跟上面公网地址同一套检查：中文输入法打出的全角句号在这儿就提醒，别等到列表页才发现连不上
+                app.yxi.ssh.HostInput.suspiciousChar(tailscaleIp)?.let {
+                    Text(
+                        t("地址里有个连不上的字符：%s —— 多半是中文输入法打出来的，删掉重打").format(it),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
                 Hint(t("手机也要装 Tailscale 并登进同一个 tailnet（目标机上 tailscale status 能看到）。认证不变，还是上面选的密钥 / 密码。"))
             }
 

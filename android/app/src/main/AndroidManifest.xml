@@ -19,6 +19,10 @@
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <!-- 开机自起：手机重启后不用手动打开 App 才恢复盯梢 -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- 云曦提醒：精确闹钟。13+ 用 USE_EXACT_ALARM（闹钟类免申请；我们走侧载不过 Play 审核），
+         12 用 SCHEDULE_EXACT_ALARM（默认已授）。见 yunxi/Reminders.kt -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
     <!-- 直接对本应用弹「后台不受限制」的授权框。
          ⚠️ 没有这条权限，那个 intent 会被拒，只能退回到「已放行应用列表」——
          而我们还没被放行，用户在那个列表里根本找不到这个 App。见 TROUBLESHOOTING #74 -->
@@ -112,6 +116,16 @@
             android:enabled="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- 云曦提醒：到点响；开机 / 升级后把闹钟排回去（系统会清掉所有闹钟）。见 yunxi/Reminders.kt -->
+        <receiver
+            android:name=".yunxi.ReminderReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
 

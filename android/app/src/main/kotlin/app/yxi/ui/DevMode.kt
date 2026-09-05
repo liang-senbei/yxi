@@ -164,7 +164,8 @@ object DevMode {
                 return@withContext b.toString()
             }
 
-            line("目标   ${host.username}@${host.connectHost}:${host.port}" + if (host.viaTailscale) "  （Tailscale 内网，公网 ${host.connectHost}）" else "")
+            // ⚠️ 括号里写的是**公网地址**，所以要用 hostname —— 第一版写成 connectHost，走内网时把 100.x 标成了「公网」（审查查出）
+            line("目标   ${host.username}@${host.connectHost}:${host.port}" + if (host.viaTailscale) t("  （Tailscale 内网，公网 %s）").format(host.hostname) else "")
             line("认证   " + if (host.useKey) "密钥" else "密码（${if (host.sealedPassword != null) "已保存" else "没保存"}）")
             line("指纹   " + (host.hostKey?.let { "已记住" } ?: "未记住（首次连接会问）"))
             line()

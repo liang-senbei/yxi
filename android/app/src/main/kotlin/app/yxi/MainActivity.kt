@@ -69,7 +69,7 @@ private enum class Tab(private val zh: String, val ico: app.yxi.ui.Ico) {
  * 盖在标签页之上的**整页**。加一页就往这儿加一个值，再去 MainActivity 那个 `when` 里加一支 ——
  * ⚠️ **没有第三处要同步**（这正是「点底部导航纹丝不动」那个 bug 复发三次的根）。
  */
-private enum class Page { Member, Prefs, Tickets, Trend, Mail, Wish, Activity, Wallet, Shop, Abyss }
+private enum class Page { Member, Prefs, Tickets, Trend, Mail, Wish, Activity, Wallet, Shop, Abyss, Yunxi }
 
 /** 工作区。它是**盖在标签页之上的整屏**，不是第四个标签 —— 见 D22。 */
 private data class Work(val host: Host, val session: String?, val cwd: String, val mode: Mode?)
@@ -77,6 +77,8 @@ private data class Work(val host: Host, val session: String?, val cwd: String, v
 class MainActivity : ComponentActivity() {
 
     private val jump = mutableStateOf<Triple<String, String, String>?>(null)
+    /** 通知点进来要直达的整页（云曦提醒的通知带 `page=yunxi`，见 app.yxi.yunxi.Reminders） */
+    private val openPage = mutableStateOf<String?>(null)
 
     private val askNotify =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* 拒了就静悄悄 */ }
@@ -91,6 +93,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun readJump(i: AndroidIntent?) {
+        i?.getStringExtra("page")?.let { openPage.value = it }
         val host = i?.getStringExtra("hostId") ?: return
         jump.value = Triple(host, i.getStringExtra("session").orEmpty(), i.getStringExtra("cwd").orEmpty())
     }
@@ -193,6 +196,9 @@ class MainActivity : ComponentActivity() {
                  * 「盖着东西没有」是 `page != null`，「收掉」是 `page = null`，编译器帮着数。
                  */
                 var page by remember { mutableStateOf<Page?>(null) }
+                // 提醒通知点进来：直达云曦页（只认得 yunxi；别的值忽略）
+                val wantPage by openPage
+                LaunchedEffect(wantPage) { if (wantPage == "yunxi") { page = Page.Yunxi; openPage.value = null } }
                 // ⚠️ **「设置」和「我的」是两页**（用户 2026-09-04）：底部导航那一栏是「我的」（人），
                 //    侧边栏最底下那颗齿轮打开的才是「设置」（App）。工单中心也从设置里搬出来单独一页。
                 var editMe by remember { mutableStateOf(false) }
@@ -291,6 +297,7 @@ class MainActivity : ComponentActivity() {
                                     onEditMe = { editMe = true; drawerScope.launch { drawer.close() } },
                                     onPrefs = { page = Page.Prefs; work = null; drawerScope.launch { drawer.close() } },
                                     onTickets = { page = Page.Tickets; work = null; drawerScope.launch { drawer.close() } },
+                                    onYunxi = { page = Page.Yunxi; work = null; drawerScope.launch { drawer.close() } },
                                     onTemp = { tempDlg = true; drawerScope.launch { drawer.close() } },
                                 )
                             }
@@ -330,6 +337,7 @@ class MainActivity : ComponentActivity() {
                                 onEditMe = { editMe = true; drawerScope.launch { drawer.close() } },
                                 onPrefs = { page = Page.Prefs; drawerScope.launch { drawer.close() } },
                                 onTickets = { page = Page.Tickets; drawerScope.launch { drawer.close() } },
+                                onYunxi = { page = Page.Yunxi; drawerScope.launch { drawer.close() } },
                                 onTemp = { tempDlg = true; drawerScope.launch { drawer.close() } },
                             )
                         }
@@ -374,6 +382,12 @@ class MainActivity : ComponentActivity() {
                         Page.Wish -> { app.yxi.ui.WishScreen(modifier = m); return@Scaffold }
                         Page.Activity -> { app.yxi.ui.ActivityScreen(onAbyss = { page = Page.Abyss }, modifier = m); return@Scaffold }
                         Page.Abyss -> { app.yxi.ui.AbyssScreen(modifier = m); return@Scaffold }
+                        Page.Yunxi -> {
+                            app.yxi.ui.YunxiScreen(
+                                onActivity = { page = Page.Activity }, onAbyss = { page = Page.Abyss }, onMail = { page = Page.Mail }, modifier = m,
+                            )
+                            return@Scaffold
+                        }
                         null -> Unit
                     }
                     when (tab) {
@@ -418,7 +432,7 @@ class MainActivity : ComponentActivity() {
                             onMember = { page = Page.Member }, mine = true,
                             onPrefs = { page = Page.Prefs }, onTickets = { page = Page.Tickets },
                             onTrend = { page = Page.Trend }, onMail = { page = Page.Mail }, onWallet = { page = Page.Wallet },
-                            onWish = { page = Page.Wish }, onActivity = { page = Page.Activity }, modifier = m,
+                            onWish = { page = Page.Wish }, onActivity = { page = Page.Activity }, onYunxi = { page = Page.Yunxi }, modifier = m,
                         )
                     }
                 }
@@ -461,6 +475,7 @@ private fun YxiDrawer(
     hosts: List<Host>, current: Host?,
     onPickHost: (Host) -> Unit, onTab: (Tab) -> Unit, onMember: () -> Unit, onEditMe: () -> Unit,
     onPrefs: () -> Unit, onTickets: () -> Unit,
+    onYunxi: () -> Unit = {},
     /** 「临时会话」：在服务器 /tmp 里开一个不保存的对话（见 TempSessions） */
     onTemp: () -> Unit = {},
 ) {
@@ -526,6 +541,8 @@ private fun YxiDrawer(
             onClick = onMember,
         )
         // 工单中心 —— 你和开发之间唯一那条通道，别埋在设置第三层里
+        // 云曦小管家 —— 备忘 / 提醒 / 天气 + 会动的她（老板 2026-09-06）
+        DrawerRow(app.yxi.ui.Ico.Crown, t("云曦"), Color(0xFF4C7FE0)) { onYunxi() }
         DrawerRow(app.yxi.ui.Ico.Chat, t("工单中心"), Color(0xFF7A69E8)) { onTickets() }
         Spacer(Modifier.weight(1f))
         // ── 最底下那一行：设置 / 夜间（学 QQ）

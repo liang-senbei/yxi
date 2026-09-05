@@ -5227,3 +5227,23 @@ Yxi 是手机替你写**另一台机器**的文件，而那台机器上还有一
 - **判据怎么定的**（照组规「E2E 判据要客观」）：容器里放一个假的 `claude` 桩，把收到的每一行写进 `/tmp/claude-in.log`，并画一个跟 Claude Code 一样的提示框（两条 `─` 中间一个 `❯`，`Model.borrowable` 就认这个）。再把 root 的 shell 换成一个 wrapper 把每条 SSH 命令记进 `/tmp/cmds.log`。于是「/clear 到底送没送」「App 到底跑了哪条命令」都是文件里的事实，不靠截屏猜。
 - **⚠️ 重建容器会把 `podman exec` 改过的东西还原**：我 recreate 之后桩退回镜像里那版（不画提示框），`borrowable` 于是**正确地**拒发 `/clear` —— 差点被当成代码 bug。改过运行中容器的东西，重建后要重新装一遍。
 - **教训**：E2E 跑不通时，先分清是**被测代码**还是**测试台**。这次三层链路全有问题，靠「手动跑同样的命令看能不能复现」逐层剥掉的；rig 的锅占了大半天。
+
+## #275 Mac mini 模拟器 E2E 的四个小坑（cc-Yxi_pilot，2026-09-06）
+
+**① 嵌套隧道连小命令都活不过 6 秒。** 想让模拟器连本机，第一版走「模拟器 → `adb reverse` → Mac:2201 → `ssh -R 2201` → 本机 sshd」。
+连接能认证成功，然后 6 秒后 `exec 挂了：session is down` —— 连 `claude mcp list` 这种几 KB 的状态命令都跑不完（#274 记的是传 3MB 断，其实小流量也断）。
+**修法**：不套隧道。Mac 本来就能直达本机公网 IP（它的反向隧道就是这么建的），模拟器走 Mac 的网**直连 `216.36.108.147:22`**，
+hosts.json 写公网 IP + 本机 ed25519 hostKey，App 公钥进本机 `authorized_keys`（标签 `yxi@mac-emu`，别用 `yxi@android`，见 #65）。稳，而且就是用户的真实路径（#64）。
+
+**② `adb shell` 会把 heredoc 脚本的后半段吃掉。** `ssh mac bash -s <<EOF … EOF` 里连着几条 `adb shell / adb push`，只有前两条执行了，后面静默消失 ——
+adb 读 stdin，把还没执行的脚本正文当输入吞了。**修法**：脚本先落盘再 `bash /tmp/e.sh`，且每个 adb 调用 `</dev/null`。
+
+**③ `pkill -f "2201:localhost:22"` 把自己杀了。** 模式串出现在当前 bash 的命令行里，`-f` 自匹配，整条命令退出码 144、后面的命令全没跑。
+**修法**：`pgrep -f "^ssh .* -R 2201"` 锚定进程名再 kill。
+
+**④ 重新 scp 了测试包却忘了重装，`ClassNotFoundException: app.yxi.YunxiTest`。** 报错栈里 `codePath=/data/app/~~5bg0…` 没变就是没装上。
+装前先 `unzip -p x.apk classes*.dex | strings | grep -c YunxiTest` 核一遍 dex 里有没有那个类，装后 `dumpsys package app.yxi.test | grep lastUpdateTime`。
+另：`am instrument` 会重启被测 App 进程，**别和界面 E2E 同时跑**，放最后。
+
+顺带记一笔没查透的：一次 `assembleDebug` 里 Kotlin 守护进程报 `Backend Internal error: Exception during IR lowering` → `Daemon compilation failed`，
+Gradle 回退进程内编译后 BUILD SUCCESSFUL、包是新的；`touch` 一个文件重编不复现（内容没变 UP-TO-DATE）。再遇到先 `./gradlew --stop` 清守护进程重编。

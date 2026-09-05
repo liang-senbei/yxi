@@ -24,7 +24,7 @@ import app.yxi.ssh.SshSession
  */
 object Connect {
 
-    enum class Kind { AGENT, GH, MCP, INFO }
+    enum class Kind { AGENT, GH, MCP, INFO, LOCAL }
 
     data class Service(
         val key: String,
@@ -36,36 +36,44 @@ object Connect {
         val kind: Kind = Kind.MCP,
         /** 不用登录就能用（加上即可） */
         val noAuth: Boolean = false,
+        /** 分类标签，用于 UI 分组。空 = 不归类（agent 登录那几个放最上面）。 */
+        val cat: String = "",
     )
 
     /** ⚠️ 地址都在服务器上探过活（2026-09-02，401 = 在线要认证，200 = 免认证）。 */
     val CATALOG = listOf(
-        // 两个 agent 自己的登录放最上面：没登录，下面接什么都白搭
+        // ── Agent 登录（无分类，放最上面）──
         Service("claude", "Claude Code", "Anthropic 的 agent —— 用 Claude 订阅或 Console 账号登录", kind = Kind.AGENT),
         Service("codex", "Codex", "OpenAI 的 agent —— 用 ChatGPT 账号登录（设备码）", kind = Kind.AGENT),
-        Service("github", "GitHub", "git 推拉、仓库 / PR / Issue", kind = Kind.GH),
-        Service("notion", "Notion", "读写页面和数据库", "https://mcp.notion.com/mcp"),
-        Service("linear", "Linear", "工单", "https://mcp.linear.app/mcp"),
-        Service("sentry", "Sentry", "错误监控", "https://mcp.sentry.dev/mcp"),
-        Service("atlassian", "Jira / Confluence", "Atlassian", "https://mcp.atlassian.com/v1/sse", "sse"),
-        Service("asana", "Asana", "任务", "https://mcp.asana.com/sse", "sse"),
-        Service("stripe", "Stripe", "支付", "https://mcp.stripe.com"),
-        Service("paypal", "PayPal", "支付", "https://mcp.paypal.com/mcp"),
-        Service("zapier", "Zapier", "几千个应用的自动化", "https://mcp.zapier.com/api/mcp/mcp"),
-        Service("vercel", "Vercel", "部署", "https://mcp.vercel.com"),
-        Service("netlify", "Netlify", "部署", "https://netlify-mcp.netlify.app/mcp"),
-        Service("cloudflare", "Cloudflare", "域名 / Workers", "https://mcp.cloudflare.com/mcp"),
-        Service("supabase", "Supabase", "数据库", "https://mcp.supabase.com/mcp"),
-        Service("figma", "Figma", "设计稿", "https://mcp.figma.com/mcp"),
-        Service("canva", "Canva", "设计", "https://mcp.canva.com/mcp"),
-        Service("intercom", "Intercom", "客服", "https://mcp.intercom.com/mcp"),
-        Service("monday", "monday.com", "项目", "https://mcp.monday.com/sse", "sse"),
-        Service("box", "Box", "文件", "https://mcp.box.com"),
-        Service("huggingface", "Hugging Face", "模型 / 数据集", "https://huggingface.co/mcp", noAuth = true),
-        Service("context7", "Context7", "各种库的最新文档", "https://mcp.context7.com/mcp", noAuth = true),
-        Service("deepwiki", "DeepWiki", "读任何 GitHub 仓库的文档", "https://mcp.deepwiki.com/mcp", noAuth = true),
-        Service("claudeai", "Gmail / 日历 / Slack …", "只有 claude.ai 订阅登录才有（claude.ai 连接器），用 API key 的没有", kind = Kind.INFO),
-        Service("chrome", "Claude in Chrome", "浏览器插件只配同一台电脑上的 Claude Code，远程服务器用不了", kind = Kind.INFO),
+        // ── 开发 ──
+        Service("github", "GitHub", "git 推拉、仓库 / PR / Issue", kind = Kind.GH, cat = "开发"),
+        Service("sentry", "Sentry", "错误监控", "https://mcp.sentry.dev/mcp", cat = "开发"),
+        Service("vercel", "Vercel", "部署", "https://mcp.vercel.com", cat = "开发"),
+        Service("netlify", "Netlify", "部署", "https://netlify-mcp.netlify.app/mcp", cat = "开发"),
+        Service("cloudflare", "Cloudflare", "域名 / Workers", "https://mcp.cloudflare.com/mcp", cat = "开发"),
+        Service("supabase", "Supabase", "数据库", "https://mcp.supabase.com/mcp", cat = "开发"),
+        // ── 协作 ──
+        Service("notion", "Notion", "读写页面和数据库", "https://mcp.notion.com/mcp", cat = "协作"),
+        Service("linear", "Linear", "工单", "https://mcp.linear.app/mcp", cat = "协作"),
+        Service("atlassian", "Jira / Confluence", "Atlassian", "https://mcp.atlassian.com/v1/sse", "sse", cat = "协作"),
+        Service("asana", "Asana", "任务", "https://mcp.asana.com/sse", "sse", cat = "协作"),
+        Service("monday", "monday.com", "项目", "https://mcp.monday.com/sse", "sse", cat = "协作"),
+        Service("figma", "Figma", "设计稿", "https://mcp.figma.com/mcp", cat = "协作"),
+        Service("canva", "Canva", "设计", "https://mcp.canva.com/mcp", cat = "协作"),
+        Service("intercom", "Intercom", "客服", "https://mcp.intercom.com/mcp", cat = "协作"),
+        Service("box", "Box", "文件", "https://mcp.box.com", cat = "协作"),
+        // ── 工具 ──
+        Service("stripe", "Stripe", "支付", "https://mcp.stripe.com", cat = "工具"),
+        Service("paypal", "PayPal", "支付", "https://mcp.paypal.com/mcp", cat = "工具"),
+        Service("zapier", "Zapier", "几千个应用的自动化", "https://mcp.zapier.com/api/mcp/mcp", cat = "工具"),
+        Service("huggingface", "Hugging Face", "模型 / 数据集", "https://huggingface.co/mcp", noAuth = true, cat = "工具"),
+        Service("context7", "Context7", "各种库的最新文档", "https://mcp.context7.com/mcp", noAuth = true, cat = "工具"),
+        Service("deepwiki", "DeepWiki", "读任何 GitHub 仓库的文档", "https://mcp.deepwiki.com/mcp", noAuth = true, cat = "工具"),
+        // ── 本地 ──
+        Service("wechat", "微信", "读取本机微信聊天记录", kind = Kind.LOCAL, cat = "本地"),
+        // ── 仅限订阅 ──
+        Service("claudeai", "Gmail / 日历 / Slack …", "只有 claude.ai 订阅登录才有（claude.ai 连接器），用 API key 的没有", kind = Kind.INFO, cat = "仅限订阅"),
+        Service("chrome", "Claude in Chrome", "浏览器插件只配同一台电脑上的 Claude Code，远程服务器用不了", kind = Kind.INFO, cat = "仅限订阅"),
     )
 
     enum class State { CONNECTED, NEEDS_AUTH, FAILED, ABSENT }
@@ -82,11 +90,14 @@ object Connect {
         val tmuxInstalled: Boolean = true,
         /** MCP 名 → 状态 */
         val mcp: Map<String, State> = emptyMap(),
+        /** 微信：电脑可达 + 密钥已提取 = CONNECTED；可达没密钥 = NEEDS_AUTH；不可达 = FAILED */
+        val wechat: State = State.ABSENT,
     ) {
         fun of(s: Service): State = when (s.kind) {
             Kind.AGENT -> if (if (s.key == "claude") claudeUser != null else codexLogged) State.CONNECTED else State.ABSENT
             Kind.GH -> if (ghUser != null) State.CONNECTED else State.ABSENT
             Kind.MCP -> mcp[s.key] ?: State.ABSENT
+            Kind.LOCAL -> wechat
             Kind.INFO -> State.ABSENT
         }
 
@@ -106,14 +117,19 @@ object Connect {
             // ⚠️ 登没登录的命令**退出码非零**（没登录时），不能像上面那样 `||` —— 会把「没登录」错报成「没装」
             "echo __CLAUDE__; if command -v claude >/dev/null 2>&1; then claude auth status --json 2>/dev/null; else echo NO_CLAUDE; fi; " +
             "echo __CODEX__; if command -v codex >/dev/null 2>&1; then codex login status 2>/dev/null; else echo NO_CODEX; fi; " +
-            "echo __TMUX__; command -v tmux >/dev/null 2>&1 || echo NO_TMUX; echo __END__"
+            "echo __TMUX__; command -v tmux >/dev/null 2>&1 || echo NO_TMUX; " +
+            // 微信：电脑可达 + 密钥文件在不在。ConnectTimeout=1 避免拖太久
+            "echo __WECHAT__; ssh -o ConnectTimeout=1 -o BatchMode=yes laptop " +
+            "\"if exist C:\\\\temp\\\\decrypted_key.txt echo KEY_OK\" 2>/dev/null || echo NO_LAPTOP; " +
+            "echo __END__"
 
     fun parseStatus(out: String): Status {
         val gh = out.substringAfter("__GH__", "").substringBefore("__MCP__")
         val mcpText = out.substringAfter("__MCP__", "").substringBefore("__CLAUDE__")
         val claudeText = out.substringAfter("__CLAUDE__", "").substringBefore("__CODEX__")
         val codexText = out.substringAfter("__CODEX__", "").substringBefore("__TMUX__")
-        val tmuxText = out.substringAfter("__TMUX__", "").substringBefore("__END__")
+        val tmuxText = out.substringAfter("__TMUX__", "").substringBefore("__WECHAT__")
+        val wechatText = out.substringAfter("__WECHAT__", "").substringBefore("__END__")
         // `claude auth status --json`：{"loggedIn":true,"authMethod":"claude.ai","email":"…","subscriptionType":"max",…}
         val claudeUser = runCatching {
             val j = org.json.JSONObject(claudeText.trim())
@@ -131,6 +147,14 @@ object Connect {
                 else -> State.FAILED
             }
         }
+        // ⚠️ 「没有 __WECHAT__ 段」和「有段但是空」要分开：空 = 电脑可达但密钥文件不在（Windows 的 `if exist`
+        //    不成立时什么都不打）；没段 = 老版本输出 / 命令被截断，那时什么都不知道，只能是 ABSENT。
+        val wechatState = when {
+            !out.contains("__WECHAT__") -> State.ABSENT
+            wechatText.contains("KEY_OK") -> State.CONNECTED
+            wechatText.contains("NO_LAPTOP") -> State.FAILED
+            else -> State.NEEDS_AUTH
+        }
         return Status(
             ghUser = user,
             ghInstalled = !gh.contains("NO_GH"),
@@ -141,6 +165,7 @@ object Connect {
             codexLogged = codexText.contains("Logged in", ignoreCase = true) && !codexText.contains("Not logged in", ignoreCase = true),
             tmuxInstalled = !tmuxText.contains("NO_TMUX"),
             mcp = mcp,
+            wechat = wechatState,
         )
     }
 
@@ -185,6 +210,10 @@ object Connect {
             "--header \"Authorization: Bearer \$T\" >/dev/null 2>&1; fi; echo ok"
 
     fun ghLogout() = "gh auth logout -h github.com >/dev/null 2>&1; claude mcp remove -s user github >/dev/null 2>&1; echo ok"
+
+    fun localDisconnect(key: String): String =
+        if (key == "wechat") "ssh -o ConnectTimeout=3 laptop \"del C:\\\\temp\\\\decrypted_key.txt\" 2>/dev/null; echo ok"
+        else "echo ok"
 
     // ── 两个 agent 自己的登录 ──
     //

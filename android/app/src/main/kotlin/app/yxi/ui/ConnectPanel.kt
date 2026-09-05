@@ -86,7 +86,7 @@ fun ConnectPanel(ssh: SshSession?, host: app.yxi.ssh.Host) {
         ) {
             item {
                 Text(
-                    t("认证一次，这台机器上的 Claude Code 就能直接调用它。全程在手机上完成。"),
+                    t("认证一次，agent 即可调用。"),
                     Modifier.padding(4.dp, 2.dp, 4.dp, 6.dp),
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
                 )
@@ -96,22 +96,33 @@ fun ConnectPanel(ssh: SshSession?, host: app.yxi.ssh.Host) {
             } else if (!st.claudeInstalled) item {
                 Note(t("这台机器上没有 claude 命令，MCP 那几项接不了；GitHub 仍然可以。"))
             }
-            items(Connect.CATALOG, key = { it.key }) { s ->
-                ServiceRow(
-                    s, st.of(s),
-                    // 登录流程全跑在 tmux 里：没 tmux 一律点不了（「安装」除外，它不靠 tmux）
-                    enabled = st.tmuxInstalled && when (s.kind) {
-                        Connect.Kind.AGENT -> true
-                        Connect.Kind.GH -> st.ghInstalled
-                        Connect.Kind.MCP -> st.claudeInstalled
-                        Connect.Kind.INFO -> false
-                    },
-                    installed = st.installed(s),
-                    extra = if (s.kind == Connect.Kind.AGENT && s.key == "claude") st.claudeUser else null,
-                    onConnect = { flow = Flow(ssh, s, scope) { tick++ } },
-                    onDrop = { confirmDrop = s },
-                    onInstall = { setupOnly = s.key; setup = true },
-                )
+            var lastCat = ""
+            Connect.CATALOG.forEach { s ->
+                if (s.cat != lastCat && s.cat.isNotBlank()) {
+                    lastCat = s.cat
+                    val c = s.cat
+                    item(key = "cat-$c") {
+                        Text(t(c), Modifier.padding(4.dp, 14.dp, 4.dp, 2.dp),
+                            style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+                item(key = s.key) {
+                    ServiceRow(
+                        s, st.of(s),
+                        enabled = when (s.kind) {
+                            Connect.Kind.LOCAL -> true
+                            Connect.Kind.INFO -> false
+                            Connect.Kind.AGENT -> st.tmuxInstalled
+                            Connect.Kind.GH -> st.tmuxInstalled && st.ghInstalled
+                            Connect.Kind.MCP -> st.tmuxInstalled && st.claudeInstalled
+                        },
+                        installed = st.installed(s),
+                        extra = if (s.kind == Connect.Kind.AGENT && s.key == "claude") st.claudeUser else null,
+                        onConnect = { flow = Flow(ssh, s, scope) { tick++ } },
+                        onDrop = { confirmDrop = s },
+                        onInstall = { setupOnly = s.key; setup = true },
+                    )
+                }
             }
             item {
                 Text(
@@ -151,6 +162,7 @@ fun ConnectPanel(ssh: SshSession?, host: app.yxi.ssh.Host) {
                     when (s.kind) {
                         Connect.Kind.AGENT -> t("会退出这台机器上 %s 的登录，会话里再用得重新登。").format(s.name)
                         Connect.Kind.GH -> t("会退出 gh 的登录，git 推拉和 GitHub MCP 一起失效。")
+                        Connect.Kind.LOCAL -> t("会清除密钥缓存，下次使用需要重新提取。")
                         else -> t("会从 Claude Code 的配置里删掉这个 MCP。")
                     },
                 )
@@ -163,6 +175,7 @@ fun ConnectPanel(ssh: SshSession?, host: app.yxi.ssh.Host) {
                             when (s.kind) {
                                 Connect.Kind.AGENT -> Connect.agentLogout(s.key)
                                 Connect.Kind.GH -> Connect.ghLogout()
+                                Connect.Kind.LOCAL -> Connect.localDisconnect(s.key)
                                 else -> Connect.mcpRemove(s.key)
                             },
                         )
@@ -305,6 +318,7 @@ class Flow(
             Connect.Kind.AGENT -> if (service.key == "claude") claude() else codex()
             Connect.Kind.GH -> gh()
             Connect.Kind.MCP -> mcp()
+            Connect.Kind.LOCAL -> local()
             Connect.Kind.INFO -> step = Step.Done(false, "")
         }
     }
@@ -388,6 +402,26 @@ class Flow(
         if (forwarded) port = p
         step = Step.Authorize(u, forwarded)
         waitDone { t("%s 接上了").format(service.name) }
+    }
+
+    /** 本地应用（微信）：SSH 到电脑 → 提取密钥。不走 tmux，直接 exec。 */
+    private suspend fun local() {
+        step = Step.Working(t("连接电脑…"))
+        val ping = ssh.exec("""ssh -o ConnectTimeout=3 -o BatchMode=yes laptop "echo OK" 2>/dev/null""")
+        if (!ping.contains("OK")) {
+            step = Step.Done(false, t("连不上电脑 —— 检查反向隧道是否正常")); return
+        }
+        step = Step.Working(t("提取微信密钥…"))
+        ssh.exec("""ssh -o ConnectTimeout=15 laptop "set ELECTRON_RUN_AS_NODE=1 && E:\weflow\WeFlow.exe C:\temp\getkey.js" 2>&1""")
+        // getkey.js 退出时文件已经写完（同步写），这 300ms 只是给 Windows 的文件系统缓存一点余量；
+        // 万一没赶上，用户再点一次「连接」就好，不会坏事
+        delay(300)
+        val check = ssh.exec("""ssh -o ConnectTimeout=3 laptop "if exist C:\temp\decrypted_key.txt echo KEY_OK" 2>/dev/null""")
+        if (check.contains("KEY_OK")) {
+            step = Step.Done(true, t("微信已连接")); onChanged()
+        } else {
+            step = Step.Done(false, t("密钥提取失败 —— WeFlow 在运行吗？"))
+        }
     }
 
     /** 等服务器那头出结果，最多 10 分钟。 */
