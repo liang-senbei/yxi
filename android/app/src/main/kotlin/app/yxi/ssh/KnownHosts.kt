@@ -92,7 +92,7 @@ class KnownHosts(
             val latch = CountDownLatch(1)
             Thread {
                 answer = runCatching {
-                    p.confirmNewHost(store.get(hostId)?.hostname.orEmpty(), "ssh-ed25519", fp)
+                    p.confirmNewHost(store.get(hostId)?.connectHost.orEmpty(), "ssh-ed25519", fp)
                 }.getOrDefault(false)
                 latch.countDown()
             }.start()

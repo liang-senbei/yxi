@@ -164,7 +164,7 @@ object DevMode {
                 return@withContext b.toString()
             }
 
-            line("目标   ${host.username}@${host.hostname}:${host.port}")
+            line("目标   ${host.username}@${host.connectHost}:${host.port}" + if (host.viaTailscale) "  （Tailscale 内网，公网 ${host.connectHost}）" else "")
             line("认证   " + if (host.useKey) "密钥" else "密码（${if (host.sealedPassword != null) "已保存" else "没保存"}）")
             line("指纹   " + (host.hostKey?.let { "已记住" } ?: "未记住（首次连接会问）"))
             line()
@@ -173,25 +173,25 @@ object DevMode {
             val ips: List<String>
             val t0 = System.currentTimeMillis()
             try {
-                ips = InetAddress.getAllByName(host.hostname).map { it.hostAddress ?: "?" }
+                ips = InetAddress.getAllByName(host.connectHost).map { it.hostAddress ?: "?" }
                 line("① 解析地址   OK  ${System.currentTimeMillis() - t0}ms  → ${ips.joinToString(", ")}")
             } catch (e: Throwable) {
                 line("① 解析地址   ✗ ${e::class.java.simpleName}: ${e.message}")
                 line()
                 line("地址解析不了 —— 这一栏必须是 IP 或真实域名。")
-                app.yxi.ssh.HostInput.suspiciousChar(host.hostname)?.let {
+                app.yxi.ssh.HostInput.suspiciousChar(host.connectHost)?.let {
                     line("⚠️ 地址里有个字符 $it —— 多半是中文输入法打的。")
                 }
                 return@withContext b.toString()
             }
 
             // ② TCP —— 分开报「超时」和「拒绝」，这两个是完全不同的方向
-            val tcp = probe(host.hostname, host.port, 12_000)
+            val tcp = probe(host.connectHost, host.port, 12_000)
             line("② 连 TCP     ${tcp.text}")
 
             if (tcp.ok) {
                 // ③ SSH banner —— 能读到就说明确实是 sshd 在对面
-                line("③ SSH 招呼   ${banner(host.hostname, host.port)}")
+                line("③ SSH 招呼   ${banner(host.connectHost, host.port)}")
                 // ④ 认证
                 line("④ 认证       ${auth(host, store, keys)}")
             } else {
@@ -204,10 +204,10 @@ object DevMode {
             line("⑤ 同一个 IP 上各端口（各 6 秒）")
             val ports = linkedSetOf(host.port, 22, 8443, 8899, 443, 80)
             for (p in ports) {
-                line("   :${p.toString().padEnd(5)} ${probe(host.hostname, p, 6_000).text}")
+                line("   :${p.toString().padEnd(5)} ${probe(host.connectHost, p, 6_000).text}")
             }
             line()
-            line(verdict(host, tcp, ports.map { it to probe(host.hostname, it, 4_000) }))
+            line(verdict(host, tcp, ports.map { it to probe(host.connectHost, it, 4_000) }))
             line()
             line("── 最近日志 ──")
             line(dump())

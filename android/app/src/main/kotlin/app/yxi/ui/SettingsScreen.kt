@@ -686,7 +686,7 @@ private fun DevCard(ctx: Context, host: Host?, store: HostStore, keys: KeyManage
         Hint2(
             t("诊断会把整条连接路径一步步走一遍：解析地址 → 连 TCP → SSH 招呼 → 认证，") +
                 t("再挨个试同一个 IP 上的几个端口。里面不含密码和私钥，可以直接贴出来。\n") +
-                t("测的是 ") + (host?.let { "${it.username}@${it.hostname}:${it.port}" } ?: t("（还没有主机）")) +
+                t("测的是 ") + (host?.let { "${it.username}@${it.connectHost}:${it.port}" } ?: t("（还没有主机）")) +
                 t(" —— 要换一台就去「会话」页顶部切换。")
         )
         Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {

@@ -194,12 +194,19 @@ private fun HostRow(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onTertiaryContainer,
                     )
+                    // 走 Tailscale 内网时标出来 —— 地址栏显示的是 100.x，不标用户会以为公网 IP 被改了
+                    if (h.viaTailscale) Text(
+                        t("内网"),
+                        Modifier.clip(Pill).background(MaterialTheme.colorScheme.secondaryContainer).padding(8.dp, 2.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
                 }
                 Spacer(Modifier.height(3.dp))
                 // ⚠️ 地址栏里混进中文/全角字符是**最贵的一种错**：连不上，
                 // 而错误信息在别处，用户看着列表觉得一切正常。所以在列表里就标出来 ——
                 // 这台主机的地址是「天亮」（一个 SSH 别名），在列表里躺了好几天没人发现。
-                val bad = app.yxi.ssh.HostInput.suspiciousChar(h.hostname)
+                val bad = app.yxi.ssh.HostInput.suspiciousChar(h.connectHost)
                 Text(
                     h.display,
                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
@@ -677,6 +684,8 @@ private fun AddHostSheet(
     var username by remember { mutableStateOf(editing?.username ?: "root") }
     var usePassword by remember { mutableStateOf(editing?.useKey == false) }
     var password by remember { mutableStateOf("") }
+    var tailscaleIp by remember { mutableStateOf(editing?.tailscaleIp ?: "") }
+    var useTailscale by remember { mutableStateOf(editing?.useTailscale ?: false) }
     var confirmDelete by remember { mutableStateOf(false) }
 
     ModalBottomSheet(onDismissRequest = onDone, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
@@ -749,6 +758,21 @@ private fun AddHostSheet(
                 Hint(t("用 App 自己的 ed25519 密钥。先去右上角「公钥」把它贴进目标机的 authorized_keys。"))
             }
 
+            // 公网 / Tailscale 内网。只换连的 IP，认证还是上面选的那种
+            Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = Pill) {
+                Row(Modifier.padding(4.dp)) {
+                    SegItem(t("公网"), !useTailscale, Modifier.weight(1f)) { useTailscale = false }
+                    SegItem(t("Tailscale 内网"), useTailscale, Modifier.weight(1f)) { useTailscale = true }
+                }
+            }
+            if (useTailscale) {
+                Field(
+                    tailscaleIp, { tailscaleIp = app.yxi.ssh.HostInput.normalize(it) },
+                    t("Tailscale 内网 IP，如 100.111.242.66"), mono = true,
+                )
+                Hint(t("手机也要装 Tailscale 并登进同一个 tailnet（目标机上 tailscale status 能看到）。认证不变，还是上面选的密钥 / 密码。"))
+            }
+
             Button(
                 onClick = {
                     // 保存时再拆一次 —— 手打的 `ip:2222` / `root@ip` 到这一刻才是完整的
@@ -776,14 +800,18 @@ private fun AddHostSheet(
                             // 那把指纹属于旧机器；留着的话下次连新机器会报「指纹变了」——
                             // 那是中间人警告的措辞，会把一次正常的改配置说成攻击。
                             hostKey = editing?.hostKey?.takeIf {
-                                editing.hostname == hn && editing.port == pt
+                                editing.hostname == hn && editing.port == pt &&
+                                    editing.tailscaleIp.orEmpty() == tailscaleIp.trim()
                             },
                             watch = editing?.watch ?: false,
+                            // 关掉开关也留着 IP —— 下次再开不用重填
+                            tailscaleIp = tailscaleIp.trim().ifEmpty { null },
+                            useTailscale = useTailscale,
                         )
                     )
                     onDone()
                 },
-                enabled = hostname.isNotBlank(),
+                enabled = hostname.isNotBlank() && (!useTailscale || tailscaleIp.isNotBlank()),
                 shape = Pill,
                 modifier = Modifier.fillMaxWidth().height(52.dp),
             ) { Text(t("保存")) }

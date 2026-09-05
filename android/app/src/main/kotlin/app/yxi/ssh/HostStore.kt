@@ -30,8 +30,19 @@ data class Host(
      * ⚠️ 需要这台机器上装了 `yxi-hook`；没装就一直静悄悄，不会报错。
      */
     val watch: Boolean = false,
+    /**
+     * Tailscale 内网地址（100.x.x.x）。填了就能在公网 / 内网之间切。
+     * 认证不变（还是密钥 / 密码），只是连的 IP 换成内网的 —— 手机和目标机在同一个 tailnet 时走这条，
+     * 不经公网、不受目标机防火墙对公网的限制。
+     */
+    val tailscaleIp: String? = null,
+    /** 当前用内网连。true 但 [tailscaleIp] 为空时回落到公网。 */
+    val useTailscale: Boolean = false,
 ) {
-    val display get() = "$username@$hostname" + if (port != 22) ":$port" else ""
+    /** 实际要连的地址 —— 内网开关 + 有内网 IP 才走内网。 */
+    val connectHost get() = if (useTailscale && !tailscaleIp.isNullOrBlank()) tailscaleIp else hostname
+    val viaTailscale get() = connectHost != hostname
+    val display get() = "$username@$connectHost" + if (port != 22) ":$port" else ""
 }
 
 /**
@@ -76,7 +87,7 @@ class HostStore(ctx: Context) {
     }
 
     fun configFor(h: Host, keys: KeyManager): HostConfig? =
-        authFor(h, keys)?.let { HostConfig(h.alias, h.hostname, h.port, h.username, it) }
+        authFor(h, keys)?.let { HostConfig(h.alias, h.connectHost, h.port, h.username, it) }
 
     private fun read(): List<Host> = runCatching {
         if (!file.exists()) return emptyList()
@@ -93,6 +104,8 @@ class HostStore(ctx: Context) {
                 sealedPassword = o.optString("sealedPassword").ifEmpty { null },
                 hostKey = o.optString("hostKey").ifEmpty { null },
                 watch = o.optBoolean("watch", false),
+                tailscaleIp = o.optString("tailscaleIp").ifEmpty { null },
+                useTailscale = o.optBoolean("useTailscale", false),
             )
         }
     }.getOrDefault(emptyList())
@@ -104,7 +117,8 @@ class HostStore(ctx: Context) {
                 JSONObject().apply {
                     put("id", h.id); put("alias", h.alias); put("hostname", h.hostname)
                     put("port", h.port); put("username", h.username); put("useKey", h.useKey)
-                    put("watch", h.watch)
+                    put("watch", h.watch); put("useTailscale", h.useTailscale)
+                    h.tailscaleIp?.let { put("tailscaleIp", it) }
                     h.sealedPassword?.let { put("sealedPassword", it) }
                     h.hostKey?.let { put("hostKey", it) }
                 }

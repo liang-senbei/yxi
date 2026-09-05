@@ -81,7 +81,7 @@ fun rememberSshConnector(
         object : Connect {
             override fun invoke(auth: HostConfig.Auth?): Connector? {
                 val cfg = if (auth != null)
-                    HostConfig(host.alias, host.hostname, host.port, host.username, auth)
+                    HostConfig(host.alias, host.connectHost, host.port, host.username, auth)
                 else store.configFor(host, keys) ?: return null
 
                 val known = KnownHosts(store, host.id, object : TrustPrompt {
