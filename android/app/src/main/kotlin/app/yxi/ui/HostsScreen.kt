@@ -508,6 +508,90 @@ private fun HostQuota(
                 Text(t("改主机"), Modifier.padding(14.dp, 7.dp), style = MaterialTheme.typography.labelMedium, color = Muted)
             }
         }
+
+        // Tailscale 内网设备列表：点按钮才拉，不轮询
+        var tsOpen by remember(h.id) { mutableStateOf(false) }
+        var tsDevices by remember(h.id) { mutableStateOf<List<app.yxi.agent.TailscaleStatus.Device>?>(null) }
+        var tsBusy by remember(h.id) { mutableStateOf(false) }
+        var tsNote by remember(h.id) { mutableStateOf<String?>(null) }
+
+        fun loadTailscale() {
+            if (tsBusy) return
+            scope.launch {
+                tsBusy = true; tsNote = null; tsDevices = null
+                val c = connect()
+                if (c == null) { tsNote = t("没有可用的认证方式"); tsBusy = false; return@launch }
+                val err = runCatching { c.session.connect() }.exceptionOrNull()
+                if (err != null) {
+                    if (err is kotlinx.coroutines.CancellationException) throw err
+                    tsNote = c.explain(err); tsBusy = false; return@launch
+                }
+                val result = app.yxi.ssh.catching { app.yxi.agent.TailscaleStatus.fetch(c.session) }
+                runCatching { c.session.disconnect() }
+                result
+                    .onSuccess { list ->
+                        if (list == null) tsNote = t("这台机器没装 Tailscale 或没登录")
+                        else tsDevices = list
+                    }
+                    .onFailure { tsNote = t("查询失败：%s").format(it.message ?: "") }
+                tsBusy = false
+            }
+        }
+
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = Pill,
+            modifier = Modifier.clip(Pill).clickable { if (!tsOpen) { tsOpen = true; loadTailscale() } else tsOpen = false },
+        ) {
+            Text(
+                if (tsOpen) t("收起内网设备") else t("内网设备"),
+                Modifier.padding(14.dp, 7.dp),
+                style = MaterialTheme.typography.labelMedium, color = Muted,
+            )
+        }
+
+        if (tsOpen) {
+            if (tsBusy) MorphButton(MorphPhase.Run, "", Modifier.fillMaxWidth(), height = 36.dp)
+            tsNote?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
+            tsDevices?.let { devices ->
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    devices.forEach { d ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            // 状态点
+                            Box(
+                                Modifier.size(8.dp).background(
+                                    if (d.online) Color(0xFF5FB570) else Color(0xFF999999),
+                                    RoundedCornerShape(4.dp),
+                                )
+                            )
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    d.hostName + if (d.isSelf) t("（本机）") else "",
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                                Text(
+                                    d.ip + " · " + d.os +
+                                        if (!d.online && d.lastSeen != null) t(" · 最后在线 %s").format(app.yxi.agent.Tz.dateTime(d.lastSeen))
+                                        else "",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                    color = Dim,
+                                )
+                            }
+                        }
+                    }
+                    // 刷新按钮
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = Pill,
+                        modifier = Modifier.clip(Pill).clickable(enabled = !tsBusy) { loadTailscale() },
+                    ) {
+                        Text(t("刷新"), Modifier.padding(14.dp, 5.dp), style = MaterialTheme.typography.labelSmall, color = Muted)
+                    }
+                }
+            }
+        }
     }
 
     // 探测 / 装机：主机页平时不保连接，这一下现连，关框就断（跟额度一个路子）
