@@ -7,6 +7,7 @@ import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OfflineSenseVoiceModelConfig
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -65,18 +66,44 @@ object OnDeviceAsr {
                 why(app.yxi.ui.t("语音模型装载失败：%s").format(it.message ?: it::class.simpleName.orEmpty()))
                 return@withContext null
             }
-            runCatching {
-                val s = r.createStream()
-                s.acceptWaveform(pcm, 16_000)
-                r.decode(s)
-                val txt = r.getResult(s).text
-                s.release()
-                clean(txt)
-            }.getOrElse {
+            runCatching { lock.withLock { decode(r, pcm) } }.getOrElse {
                 why(app.yxi.ui.t("识别失败：%s").format(it.message ?: it::class.simpleName.orEmpty()))
                 null
             }
         }
+
+    /**
+     * **边说边识别**用的一次试解：把「到目前为止」的音频解一遍，出个临时结果。
+     *
+     * ⚠️⚠️ **SenseVoice 是离线模型，不是流式模型** —— 它没有「接着上次往下解」这回事，
+     * 每次都得从头解整段。真流式要换 online zipformer，那是**再下一个几百 MB 的模型**，
+     * 为了看一眼自己说错没有不值得。所以这里用**滚动重解**：录着的时候反复解整段。
+     * 调用方必须**自限速**（见 `RecordingBar`）：解一次花多久就至少歇多久，
+     * 音频越长解码越慢 → 自动降频，不会越积越多。
+     *
+     * ⚠️ **拿不到就安静地返回 null**：这是临时结果，不是用户要的那次识别。
+     * 中途弹一个「识别失败」只会打断他说话 —— 真正的那次（[transcribe]）会照常报错。
+     * ⚠️ 用 `tryLock`：正解着就跳过这一拍，**不排队**。排队会让停止录音之后
+     * 还要等前面积压的几拍解完才出最终结果。
+     */
+    suspend fun partial(ctx: Context, pcm: FloatArray): String? = withContext(Dispatchers.Default) {
+        if (!supported || !ready(ctx)) return@withContext null
+        val r = runCatching { recognizer(ctx) }.getOrNull() ?: return@withContext null
+        if (!lock.tryLock()) return@withContext null
+        try { runCatching { decode(r, pcm) }.getOrNull() } finally { lock.unlock() }
+    }
+
+    /** ⚠️ 识别器不保证线程安全，试解和正式识别都得从 [lock] 走。 */
+    private val lock = kotlinx.coroutines.sync.Mutex()
+
+    private fun decode(r: OfflineRecognizer, pcm: FloatArray): String {
+        val s = r.createStream()
+        s.acceptWaveform(pcm, 16_000)
+        r.decode(s)
+        val txt = r.getResult(s).text
+        s.release()
+        return clean(txt)
+    }
 
     private fun recognizer(ctx: Context): OfflineRecognizer = rec ?: synchronized(this) {
         rec ?: OfflineRecognizer(

@@ -38,7 +38,14 @@ object Lines {
         val baseUrl: String = "",
         val token: String = "",
         val apiKey: String = "",
-    )
+        /** 这条线是给谁的：`claude` 或 `codex`。**两家的机制完全不同**，见 [applyCodex]。 */
+        val agent: String = CLAUDE,
+    ) {
+        val isCodex get() = agent == CODEX
+    }
+
+    const val CLAUDE = "claude"
+    const val CODEX = "codex"
 
     /** `settings.json` 里此刻真正写着的那三个值。 */
     data class Env(val baseUrl: String, val token: String, val apiKey: String) {
@@ -93,6 +100,8 @@ object Lines {
                         id = it.optString("id"), name = it.optString("name"),
                         baseUrl = it.optString("baseUrl"), token = it.optString("token"),
                         apiKey = it.optString("apiKey"),
+                        // 老清单没有这个字段，默认当 Claude —— 加字段不能让已有的线路变身
+                        agent = it.optString("agent").ifBlank { CLAUDE },
                     )
                 }
             }
@@ -107,7 +116,8 @@ object Lines {
         lines.forEach {
             a.put(
                 JSONObject().put("id", it.id).put("name", it.name)
-                    .put("baseUrl", it.baseUrl).put("token", it.token).put("apiKey", it.apiKey),
+                    .put("baseUrl", it.baseUrl).put("token", it.token).put("apiKey", it.apiKey)
+                    .put("agent", it.agent),
             )
         }
         // ⚠️ 里面装的是钥匙：目录 700、文件 600。**先建目录再写**，SFTP 不会替你建。
@@ -233,6 +243,111 @@ object Lines {
             else -> "通（HTTP $code）"
         }
     }
+
+
+    // ── Codex ───────────────────────────────────────────────────────────────
+
+    /**
+     * Codex 的线路。**跟 Claude Code 完全不是一套东西**，下面每一条都是实测出来的
+     * （2026-09-05，本机 codex-cli 0.153.0，隔离 `CODEX_HOME` 探针）：
+     *
+     * 1. **认 `~/.codex/config.toml` 的 `model_provider` + `[model_providers.<id>].base_url`** ——
+     *    实测把 base_url 指到 `127.0.0.1:1`，codex 报 `Reconnecting... waiting for network`，
+     *    说明确实按它去连。
+     * 2. ⚠️ **写 `~/.codex/auth.json` 的 `OPENAI_API_KEY` 喂不了自定义供应商** ——
+     *    实测报 `Missing environment variable: OPENAI_API_KEY`。
+     *    `env_key` 要的是**进程环境里真有那个变量**。
+     *    （CC Switch 的文档只写了「写 auth.json」，那条**只对内置的 openai 供应商成立**。）
+     * 3. ✅ **`[model_providers.<id>.auth]` 的 `command` 可以绕开环境变量** ——
+     *    实测不导出任何环境变量也能过认证、直接去连 base_url。
+     *    所以钥匙放一个 600 的文件、让它 `cat` 出来，**不用往 tmux 里注环境变量**。
+     *    ⚠️ `command` 是**字符串**不是数组（写成数组报 `invalid type: sequence, expected a string`）。
+     *
+     * ⚠️ **Codex 换线一定要重开会话。** 配置是进程启动时读的，这一条我**没有**实测
+     * （手上没有可用的 Codex 钥匙，没法验「换了之后运行中的会话变没变」），
+     * 依据是 CC Switch 的文档明写「Codex requires a terminal restart」。**界面上要照实说。**
+     */
+    private const val PROVIDER_ID = "yxi"
+    private const val HEAD_ON = "# >>> yxi line >>>"
+    private const val HEAD_OFF = "# <<< yxi line <<<"
+    private const val BODY_ON = "# >>> yxi provider >>>"
+    private const val BODY_OFF = "# <<< yxi provider <<<"
+
+    /**
+     * 把我们那两段从 config.toml 里挖掉，其余**一字不动**。
+     *
+     * ⚠️ **为什么是两段而不是一段**：TOML 里 `model_provider = "..."` 是**顶层键**，
+     * 必须出现在**任何 `[表]` 之前**；而 `[model_providers.yxi]` 是个表，必须放在**最后**
+     * （否则它后面用户自己的顶层键会被吃进这张表里）。一段做不到，两段才安全。
+     *
+     * ⚠️ **不做 TOML 解析**。config.toml 里还装着用户的 MCP 配置，
+     * 用字符串硬拼一个「合并」出来的文件迟早把人家的东西写坏。只认自己那两段标记，
+     * 认不出来就当没有 —— 宁可少改，不能改坏。
+     */
+    private fun stripBlocks(toml: String): String {
+        var t = toml
+        for ((a, b) in listOf(HEAD_ON to HEAD_OFF, BODY_ON to BODY_OFF)) {
+            while (true) {
+                val i = t.indexOf(a)
+                if (i < 0) break
+                val j = t.indexOf(b, i)
+                if (j < 0) { t = t.substring(0, i); break }
+                t = t.substring(0, i) + t.substring(j + b.length)
+            }
+        }
+        return t.trim('\n', ' ', '\t')
+    }
+
+    /** Codex 现在走的是不是我们设的线；返回那条线的 base_url，null = 没被我们接管。 */
+    suspend fun currentCodex(ssh: SshSession?): String? = withContext(Dispatchers.IO) {
+        val h = home(ssh) ?: return@withContext null
+        val raw = ConfigRemote.readFile(ssh, "$h/.codex/config.toml") ?: return@withContext null
+        val i = raw.indexOf(BODY_ON); if (i < 0) return@withContext null
+        val j = raw.indexOf(BODY_OFF, i); if (j < 0) return@withContext null
+        Regex("""base_url\s*=\s*"([^"]*)"""").find(raw.substring(i, j))?.groupValues?.get(1)
+    }
+
+    /**
+     * 给 Codex 换线。[line] 传 null = 撤掉我们那两段，回它自己原来的登录。
+     * @return 出错原因；null = 文件已写好（**但要重开那个会话才生效**，调用方必须说这句）。
+     */
+    suspend fun applyCodex(ssh: SshSession?, line: Line?): String? = withContext(Dispatchers.IO) {
+        val s = ssh ?: return@withContext "没连上"
+        val h = home(s) ?: return@withContext "取不到家目录"
+        val path = "$h/.codex/config.toml"
+        val body = stripBlocks(ConfigRemote.readFile(s, path).orEmpty())
+        val next = if (line == null) body else buildString {
+            append(HEAD_ON).append('\n')
+            append("# 这两段是 Yxi「线路」自动写的，手改会被覆盖。\n")
+            append("model_provider = \"").append(PROVIDER_ID).append("\"\n")
+            append(HEAD_OFF).append("\n\n")
+            if (body.isNotBlank()) append(body).append("\n\n")
+            append(BODY_ON).append('\n')
+            append("[model_providers.").append(PROVIDER_ID).append("]\n")
+            append("name = \"").append(line.name.replace("\"", "'")).append("\"\n")
+            append("base_url = \"").append(line.baseUrl).append("\"\n")
+            append("wire_api = \"responses\"\n")
+            // ⚠️ 用 auth.command 而不是 env_key：env_key 要求进程环境里真有那个变量，
+            //    而我们没法往用户已经开着的 tmux 里注环境变量。command 实测可行。
+            append("\n[model_providers.").append(PROVIDER_ID).append(".auth]\n")
+            append("command = \"cat ").append(keyPath(h)).append("\"\n")
+            append(BODY_OFF).append('\n')
+        }
+        s.exec("mkdir -p \"\$HOME/.codex\" \"\$HOME/.yxi\" && chmod 700 \"\$HOME/.yxi\"")
+        if (line != null) {
+            // 钥匙单独一个 600 的文件，不进 config.toml —— config.toml 用户自己也会看、也会贴给人看
+            runCatching {
+                val sftp = s.openSftp()
+                try { sftp.write(keyPath(h), (line.apiKey + "\n").toByteArray()) } finally { runCatching { sftp.close() } }
+            }.onFailure { return@withContext "写钥匙失败：${it.message?.take(60)}" }
+            s.exec("chmod 600 " + shq(keyPath(h)))
+        }
+        // ⚠️ ConfigRemote.save 只校验 .json，**toml 它不校验**。所以这里绝不做「合并」，
+        //    只做「挖掉自己那两段再拼回去」——用户的部分是原样搬运的，语法坏不了。
+        ConfigRemote.save(s, path, next.trimEnd() + "\n")
+    }
+
+    private fun keyPath(home: String) = "$home/.yxi/codex-key"
 
     // ── 杂 ──────────────────────────────────────────────────────────────────
 

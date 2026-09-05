@@ -1147,7 +1147,9 @@ fun ChatScreen(
                 runCatching { focus.requestFocus() }
             }
             // 在录音：整条输入框换成波形 —— 这时候不需要键盘也不需要按钮
-            if (recording) RecordingBar(recorder) {
+            // ⚠️ 只有**手机上算**这条路能边说边出字：服务端那条是「录完拼 wav 传上去」，
+            //    流式要重做传输协议。走服务端时不显示临时结果 —— 不假装它在识别。
+            if (recording) RecordingBar(recorder, live = useDevice) {
                 val pcm = recorder.stop()
                 if (pcm != null) scope.launch {
                     asrBusy = true
@@ -1380,7 +1382,7 @@ private fun MicTap(
  * 一眼就知道不对。
  */
 @Composable
-private fun RecordingBar(recorder: Recorder, onStop: () -> Unit) {
+private fun RecordingBar(recorder: Recorder, live: Boolean, onStop: () -> Unit) {
     val bars = remember { mutableStateListOf<Float>() }
     var ms by remember { mutableStateOf(0L) }
     LaunchedEffect(Unit) {
@@ -1392,7 +1394,37 @@ private fun RecordingBar(recorder: Recorder, onStop: () -> Unit) {
             ms = System.currentTimeMillis() - t0
         }
     }
+    // ── 边说边出字（用户 2026-09-05：「我说多少它识别以后就跳出来，这样我能看到有没有讲错话」）
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var partial by remember { mutableStateOf("") }
+    if (live) LaunchedEffect(Unit) {
+        while (true) {
+            val t0 = System.currentTimeMillis()
+            val pcm = recorder.snapshot()
+            // 半秒以下解出来基本是空的，白费一次
+            if (pcm != null && pcm.size >= Recorder.RATE / 2) {
+                app.yxi.agent.OnDeviceAsr.partial(ctx, pcm)?.takeIf { it.isNotBlank() }?.let { partial = it }
+            }
+            // ⚠️⚠️ **自限速**：这一拍解了多久，就至少歇多久。
+            //    SenseVoice 是离线模型，每次都从头解整段（见 OnDeviceAsr.partial）——
+            //    音频越长解码越慢，固定间隔的话会越积越多，到后面手机发烫、字还越来越滞后。
+            //    「花多久歇多久」让它自己降频：短句一秒好几拍，长录音自动稀疏下来。
+            kotlinx.coroutines.delay(maxOf(700L, System.currentTimeMillis() - t0))
+        }
+    }
     val red = MaterialTheme.colorScheme.error
+    Column {
+    // ⚠️ 这是**临时结果**，会随着你继续说而整句变化（不是往后追加）——
+    //    所以颜色比正文淡，让人一眼知道「还没定」。最终那次识别出来才进输入框。
+    if (partial.isNotBlank()) Text(
+        partial,
+        Modifier.fillMaxWidth().padding(20.dp, 12.dp, 20.dp, 0.dp),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 4,
+        // 溢出时留住**后面**的字：正在说的那半句比开头要紧
+        overflow = androidx.compose.ui.text.style.TextOverflow.StartEllipsis,
+    )
     Row(
         Modifier.fillMaxWidth().padding(20.dp, 14.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1427,6 +1459,7 @@ private fun RecordingBar(recorder: Recorder, onStop: () -> Unit) {
         ) {
             Box(Modifier.size(14.dp).clip(RoundedCornerShape(4.dp)).background(red))
         }
+    }
     }
 }
 

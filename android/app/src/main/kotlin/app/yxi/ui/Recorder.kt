@@ -105,6 +105,25 @@ class Recorder {
         return out
     }
 
+    /**
+     * **不停止**，把「到目前为止」录到的采样点复制一份出来 —— 边说边识别（流式）要用。
+     *
+     * ⚠️ 复制而不是交出内部数组：录音线程还在往 [chunks] 里写，把它直接给出去
+     * 就是在别的线程读一个正在改的列表。30 秒的音频拷一次约 2MB，每秒一次可以接受。
+     * ⚠️ 跟 [stop] 不同，**这里不丢短片段**：刚开口那 200ms 也该拿去试，
+     * 早一点出字正是这个功能的意义。
+     */
+    fun snapshot(): FloatArray? {
+        if (rec == null) return null
+        synchronized(chunks) {
+            if (total == 0) return null
+            val out = FloatArray(total)
+            var i = 0
+            for (c in chunks) for (v in c) { out[i++] = v / 32768f }
+            return out
+        }
+    }
+
     val recording: Boolean get() = rec != null
 
     companion object {
