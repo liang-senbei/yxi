@@ -5003,3 +5003,34 @@ logcat 里没有任何崩溃、内存和负载都很宽裕。表现极像「App 
 —— 应用日志里找不到原因时，去 `journalctl` 里按进程名搜，systemd 会明说是它干的。
 （cc-Yxi_pilot 上一轮 E2E 也撞过一次，当时归因成 OOM，是错的。）
 
+
+## #256 `LaunchedEffect` 在自己体内改自己的 key，异步工作被静默取消
+
+**症状**：线路页「忙时排队切」这条路：会话空闲后横幅消失、没有任何成功/失败提示，
+**服务器上什么都没写**。第一轮独立审查（Opus 5）从代码推出来的，逻辑上必然发生。
+
+**根因**：
+
+```kotlin
+LaunchedEffect(busy, pending, pendingDefault) {
+    if (busy == 0 && pending != null) {
+        val target = pending
+        pending = null            // ← 改了自己的 key
+        doApply(target)           // ← suspend，里面是 SSH 写，要几百毫秒
+    }
+}
+```
+
+`pending` 是这个 effect 的 key。体内把它置空 → 下一帧重组 → Compose 看到 key 变了 →
+**取消旧 effect 的协程、启动新的**。`doApply` 在第一个挂起点（`withContext(IO)`）就被取消，
+SSH 写根本没发出去。新 effect 里 `pending == null`，什么都不做。
+**所有日志都干净**，因为没有任何一步「失败」—— 它只是被取消了。
+
+**修法**：effect 体内只做「取快照、置空」，真正的工作丢给 `rememberCoroutineScope().launch { … }` ——
+那个 scope 跟 effect 的生命周期无关，key 变了它照跑。同一文件里非排队那条路本来就是这么写的。
+
+⚠️ **通用**：**`LaunchedEffect` 体内要改状态的话，先看那个状态是不是自己的 key。**
+是的话，这行之后的所有 suspend 调用都可能被取消，而且**不报错、不打日志**。
+要么把工作丢进独立 scope，要么不要把「会在体内改的状态」当 key。
+这条跟 #245（`DefaultSSLContextImpl` 失败被永久缓存）是同一类：**框架替你做了一个决定，
+而这个决定在任何日志里都不留痕**。

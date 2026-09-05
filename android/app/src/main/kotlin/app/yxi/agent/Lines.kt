@@ -1,5 +1,6 @@
 package app.yxi.agent
 
+import app.yxi.ssh.Shell
 import app.yxi.ssh.SshSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -84,7 +85,20 @@ object Lines {
      */
     private suspend fun targetPath(ssh: SshSession?, cwd: String?): String? =
         if (cwd == null) home(ssh)?.let { settingsPath(it) }
-        else cwd.trimEnd('/').ifBlank { null }?.let { "$it/.claude/settings.local.json" }
+        else safeCwd(cwd)?.let { "$it/.claude/settings.local.json" }
+
+    /**
+     * cwd 来自 `tmux` 的 `pane_current_path` —— **服务器上的 agent 自己就能 `cd`**，是信任边界。
+     * 只收绝对路径、不含 `..` 段、不含控制字符；不合格返回 null，调用方**拒绝写**（fail-closed，
+     * 同 SECURITY.md 对会话名的处理）。
+     */
+    private fun safeCwd(cwd: String): String? {
+        val c = cwd.trimEnd('/')
+        if (!c.startsWith("/") || c.isBlank()) return null
+        if (c.split('/').any { it == ".." }) return null
+        if (c.any { it < ' ' || it == '\u007f' }) return null
+        return c
+    }
 
     // ── 线路清单 ────────────────────────────────────────────────────────────
 
@@ -187,7 +201,7 @@ object Lines {
         val s = ssh ?: return@withContext "没连上"
         val path = targetPath(s, cwd) ?: return@withContext "取不到要改的文件路径"
         // 项目级那个 .claude 目录可能还不存在，SFTP 不会替你建
-        if (cwd != null) s.exec("mkdir -p " + shq(cwd.trimEnd('/') + "/.claude"))
+        if (cwd != null) s.exec("mkdir -p " + Shell.q(cwd.trimEnd('/') + "/.claude"))
         val raw = ConfigRemote.readFile(s, path) ?: "{}"
         val root = runCatching { JSONObject(raw) }.getOrElse {
             return@withContext "settings.json 现在就是坏的（${it.message?.take(40)}），没敢动"
@@ -198,7 +212,23 @@ object Lines {
         env.put(TOKEN, line?.token.orEmpty())
         env.put(KEY, line?.apiKey.orEmpty())
         root.put("env", env)
-        ConfigRemote.save(s, path, root.toString(2))
+        if (cwd == null) ConfigRemote.save(s, path, root.toString(2)) else writeNoBackup(s, path, root.toString(2))
+    }
+
+    /**
+     * 项目级文件**不能**走 [ConfigRemote.save]：它会在**项目目录**里留一份
+     * `settings.local.json.yxi-bak-<时间戳>`，里面有钥匙，而 `.gitignore` 里匹配的是
+     * `settings.local.json`，**备份文件名对不上** —— 用户一句 `git add -A` 就把钥匙提交进历史
+     * （安全审查 2026-09-05 用 `git check-ignore` 实测）。
+     * 这里 JSON 已经在内存里校验过（就是我们自己 `toString` 出来的），直接 SFTP 写，不留备份。
+     */
+    private suspend fun writeNoBackup(s: SshSession, path: String, text: String): String? {
+        runCatching { JSONObject(text) }.onFailure { return "内部错误：要写的不是合法 JSON" }
+        return runCatching {
+            val sftp = s.openSftp()
+            try { sftp.write(path, text.toByteArray()) } finally { runCatching { sftp.close() } }
+            null
+        }.getOrElse { "写失败：${it.message?.take(60)}" }
     }
 
     /**
@@ -222,7 +252,7 @@ object Lines {
             e.remove(BASE); e.remove(TOKEN); e.remove(KEY)
             if (e.length() == 0) root.remove("env") else root.put("env", e)
         }
-        ConfigRemote.save(s, path, root.toString(2))
+        writeNoBackup(s, path, root.toString(2))
     }
 
     /**
@@ -236,7 +266,7 @@ object Lines {
     suspend fun probe(ssh: SshSession?, baseUrl: String): String = withContext(Dispatchers.IO) {
         if (baseUrl.isBlank()) return@withContext "默认线路（走 Claude Code 自己的登录）"
         val s = ssh ?: return@withContext "没连上，没法探"
-        val u = "'" + baseUrl.trimEnd('/').replace("'", "'\\''") + "'"
+        val u = Shell.q(baseUrl.trimEnd('/'))
         // ⚠️ **别写 `|| echo 000`。** curl 连不上时**自己就会**把 `%{http_code}` 输出成 `000`
         //    并且退出码非零，`||` 再补一个就拼成 `000000`，于是「== 000」判不出来，
         //    界面把一个死端点报成「通」。E2E 实测抓到的（2026-09-05），见 TROUBLESHOOTING #255。
@@ -288,27 +318,57 @@ object Lines {
      * 用字符串硬拼一个「合并」出来的文件迟早把人家的东西写坏。只认自己那两段标记，
      * 认不出来就当没有 —— 宁可少改，不能改坏。
      */
-    private fun stripBlocks(toml: String): String {
-        var t = toml
-        for ((a, b) in listOf(HEAD_ON to HEAD_OFF, BODY_ON to BODY_OFF)) {
-            while (true) {
-                val i = t.indexOf(a)
-                if (i < 0) break
-                val j = t.indexOf(b, i)
-                if (j < 0) { t = t.substring(0, i); break }
-                t = t.substring(0, i) + t.substring(j + b.length)
+    private fun stripBlocks(toml: String): String? {
+        // ⚠️ **按整行认标记**，不是 indexOf：值里若出现同样的字（name 写成 `x # <<< yxi provider <<<`），
+        //    indexOf 会在值中间截断，把 auth 段泄进「用户内容」区（安全审查实测）。
+        //    配合 [tomlEscape]（值里不可能有换行），只有真正独占一行的才算标记。
+        val lines = toml.split('\n')
+        val out = ArrayList<String>(lines.size)
+        var inside: String? = null            // 当前在哪一段里，null = 用户内容
+        for (ln in lines) {
+            val t = ln.trim()
+            when {
+                inside == null && (t == HEAD_ON || t == BODY_ON) -> inside = if (t == HEAD_ON) HEAD_OFF else BODY_OFF
+                inside != null && t == inside -> inside = null
+                inside != null && (t == HEAD_ON || t == BODY_ON || t == HEAD_OFF || t == BODY_OFF) -> return null
+                inside == null && (t == HEAD_OFF || t == BODY_OFF) -> return null
+                inside == null -> out.add(ln)
             }
         }
-        return t.trim('\n', ' ', '\t')
+        // ⚠️ 开了没关 = 标记不成对。**宁可拒绝，不能猜**：原来遇到这种情况是把后面整段截掉，
+        //    用户的 MCP 配置会跟着一起消失（正确性审查指出）。
+        if (inside != null) return null
+        return out.joinToString("\n").trim('\n', ' ', '\t')
+    }
+
+    /**
+     * TOML 基本字符串转义。**跟 [Shell.q] 是两套规则**，不能混用：
+     * `"` `\` 要转义，换行/控制字符要写成 `\n` / `\uXXXX`。
+     * 不转义的话 baseUrl 里一个 `"` 就能关掉字符串、往 `[model_providers.yxi]` 表里注入任意键
+     * （安全审查用 tomllib 和 codex --strict-config 双双复现）。
+     */
+    private fun tomlEscape(v: String): String = buildString(v.length + 8) {
+        for (ch in v) when {
+            ch == '"' -> append("\\\"")
+            ch == '\\' -> append("\\\\")
+            ch == '\n' -> append("\\n")
+            ch == '\r' -> append("\\r")
+            ch == '\t' -> append("\\t")
+            ch < ' ' || ch == '\u007f' -> append("\\u%04X".format(ch.code))
+            else -> append(ch)
+        }
     }
 
     /** Codex 现在走的是不是我们设的线；返回那条线的 base_url，null = 没被我们接管。 */
     suspend fun currentCodex(ssh: SshSession?): String? = withContext(Dispatchers.IO) {
         val h = home(ssh) ?: return@withContext null
         val raw = ConfigRemote.readFile(ssh, "$h/.codex/config.toml") ?: return@withContext null
-        val i = raw.indexOf(BODY_ON); if (i < 0) return@withContext null
-        val j = raw.indexOf(BODY_OFF, i); if (j < 0) return@withContext null
-        Regex("""base_url\s*=\s*"([^"]*)"""").find(raw.substring(i, j))?.groupValues?.get(1)
+        val ls = raw.split('\n').map { it.trim() }
+        val i = ls.indexOf(BODY_ON); if (i < 0) return@withContext null
+        val j = ls.indexOf(BODY_OFF); if (j < i) return@withContext null
+        ls.subList(i, j).firstOrNull { it.startsWith("base_url") }
+            ?.let { Regex("""base_url\s*=\s*"(.*)"\s*$""").find(it)?.groupValues?.get(1) }
+            ?.let { tomlUnescape(it) }
     }
 
     /**
@@ -320,6 +380,7 @@ object Lines {
         val h = home(s) ?: return@withContext "取不到家目录"
         val path = "$h/.codex/config.toml"
         val body = stripBlocks(ConfigRemote.readFile(s, path).orEmpty())
+            ?: return@withContext "config.toml 里 Yxi 的标记不成对（被手改过？），没敢动 —— 手动把 `# >>> yxi` / `# <<< yxi` 那几行清掉再试"
         val next = if (line == null) body else buildString {
             append(HEAD_ON).append('\n')
             append("# 这两段是 Yxi「线路」自动写的，手改会被覆盖。\n")
@@ -328,8 +389,8 @@ object Lines {
             if (body.isNotBlank()) append(body).append("\n\n")
             append(BODY_ON).append('\n')
             append("[model_providers.").append(PROVIDER_ID).append("]\n")
-            append("name = \"").append(line.name.replace("\"", "'")).append("\"\n")
-            append("base_url = \"").append(line.baseUrl).append("\"\n")
+            append("name = \"").append(tomlEscape(line.name)).append("\"\n")
+            append("base_url = \"").append(tomlEscape(line.baseUrl)).append("\"\n")
             append("wire_api = \"responses\"\n")
             // ⚠️ 用 auth.command 而不是 env_key：env_key 要求进程环境里真有那个变量，
             //    而我们没法往用户已经开着的 tmux 里注环境变量。command 实测可行。
@@ -344,7 +405,7 @@ object Lines {
                 val sftp = s.openSftp()
                 try { sftp.write(keyPath(h), (line.apiKey + "\n").toByteArray()) } finally { runCatching { sftp.close() } }
             }.onFailure { return@withContext "写钥匙失败：${it.message?.take(60)}" }
-            s.exec("chmod 600 " + shq(keyPath(h)))
+            s.exec("chmod 600 " + Shell.q(keyPath(h)))
         }
         // ⚠️ ConfigRemote.save 只校验 .json，**toml 它不校验**。所以这里绝不做「合并」，
         //    只做「挖掉自己那两段再拼回去」——用户的部分是原样搬运的，语法坏不了。
@@ -352,6 +413,12 @@ object Lines {
     }
 
     private fun keyPath(home: String) = "$home/.yxi/codex-key"
+
+    /** [tomlEscape] 的逆，只用来把 config.toml 里我们自己写的 base_url 读回来比对。 */
+    private fun tomlUnescape(v: String): String = v
+        .replace(Regex("""\\u([0-9A-Fa-f]{4})""")) { it.groupValues[1].toInt(16).toChar().toString() }
+        .replace("\\n", "\n").replace("\\r", "\r").replace("\\t", "\t")
+        .replace("\\\"", "\"").replace("\\\\", "\\")
 
     // ── 杂 ──────────────────────────────────────────────────────────────────
 
@@ -364,5 +431,4 @@ object Lines {
 
     fun newId(): String = "line-" + java.util.UUID.randomUUID().toString().take(8)
 
-    private fun shq(p: String) = "'" + p.replace("'", "'\\''") + "'"
 }

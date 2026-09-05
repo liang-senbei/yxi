@@ -44,8 +44,19 @@ object ConfigRemote {
     }
 
     /**
-     * 存一个配置文件回服务器。**先备份**（`<file>.yxi-bak-<时间戳>`），json/toml **先校验**再写。
+     * 存一个配置文件回服务器。**先备份再写**，json **先校验**再写。
      * @return 出错原因；null = 成功。
+     *
+     * ⚠️⚠️ **备份放 `~/.yxi/backups/`，不放在原文件旁边。**
+     * 原来是 `<file>.yxi-bak-<时间戳>`，而配置文件可能就在**用户项目目录里**
+     * （`<项目>/.claude/settings.local.json` —— 线路的项目级设置写这儿，里面有
+     * `ANTHROPIC_AUTH_TOKEN`）。`.gitignore` 匹配的是 `settings.local.json`，
+     * **备份的名字对不上**，实测：
+     *     git check-ignore settings.local.json               → IGNORED
+     *     git check-ignore settings.local.json.yxi-bak-123   → NOT IGNORED
+     * 用户一句 `git add -A` 就把钥匙提交进历史，还可能推上 GitHub。
+     * （cc-Yxi_pilot 2026-09-05 的审查查出来的。）
+     * 挪到 `~/.yxi/backups/`：不在任何仓库里，目录 700、文件 600。
      */
     suspend fun save(ssh: SshSession?, path: String, text: String): String? {
         val s = ssh ?: return "没连上"
@@ -56,15 +67,25 @@ object ConfigRemote {
         val p = shq(path)
         // 备份 + 写。备份用 exec cp，写用 SFTP（二进制安全）
         val ts = System.currentTimeMillis() / 1000
+        // 备份名 = 原路径把 `/` 换成 `_` 再加时间戳 —— 扁平放一个目录里，一眼看得出备份的是谁
+        val bak = shq(path.trimStart('/').replace('/', '_') + ".$ts")
         runCatching {
-            s.exec("cp $p $p.yxi-bak-$ts 2>/dev/null || true")
+            s.exec(
+                "d=\"\$HOME/.yxi/backups\"; mkdir -p \"\$d\" && chmod 700 \"\$d\" && " +
+                    "cp $p \"\$d\"/$bak 2>/dev/null && chmod 600 \"\$d\"/$bak 2>/dev/null || true",
+            )
             val sftp = s.openSftp()
             try { sftp.write(path, text.toByteArray()) } finally { runCatching { sftp.close() } }
         }.onFailure { return "写回失败：${it.message?.take(60)}" }
         return null
     }
 
-    private fun shq(p: String) = "'" + p.replace("'", "'\\''") + "'"
+    /**
+     * ⚠️ **只是转调 [app.yxi.ssh.Shell.q]，不要在这儿再实现一遍。**
+     * SECURITY.md 定死：往远端命令里塞变量只准用那一处转义。
+     * 自带一份的代价我们付过 —— 命令注入审计里那 26 个漏网点，就是「抄了四份、谁想起来谁用」来的。
+     */
+    private fun shq(p: String) = app.yxi.ssh.Shell.q(p)
 
     private fun parse(o: JSONObject): List<Tool> {
         val tools = ArrayList<Tool>()

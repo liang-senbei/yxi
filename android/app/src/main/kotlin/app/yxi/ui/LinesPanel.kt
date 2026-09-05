@@ -74,9 +74,13 @@ fun LinesPanel(ssh: SshSession?, host: Host?, sessions: List<Session>) {
     var codexNow by remember(key) { mutableStateOf<String?>(null) }
     var loading by remember(key) { mutableStateOf(true) }
     var note by remember(key) { mutableStateOf("") }
-    /** 排队中的那条：忙完自动落地。null = 没有排队。 */
-    var pending by remember(key) { mutableStateOf<Lines.Line?>(null) }
-    var pendingDefault by remember(key) { mutableStateOf(false) }
+    /**
+     * 排队中的那一下。**把 agent 和范围一起冻结**，不是只记线路 ——
+     * 排队后人会切标签/切范围，落地时若读「当前」的 agent/scope，
+     * 就会把 Claude 的线路写进 Codex 的 config.toml，或把项目级的写成整机（正确性审查指出）。
+     */
+    class Queued(val line: Lines.Line?, val agent: String, val cwd: String?, val where: String)
+    var pending by remember(key) { mutableStateOf<Queued?>(null) }
     var edit by remember(key) { mutableStateOf<Lines.Line?>(null) }
 
     // 换整机要等所有 Claude 会话都闲下来；只换一个项目，就只等那一个。
@@ -109,33 +113,39 @@ fun LinesPanel(ssh: SshSession?, host: Host?, sessions: List<Session>) {
             .format(line?.name ?: t("默认"), probe)
     }
 
-    suspend fun doApply(line: Lines.Line?) {
-        if (agent == Lines.CODEX) return doApplyCodex(line)
-        val err = Lines.apply(ssh, line, scope?.cwd)
+    /** [forAgent] / [cwd] **显式传进来**，不读当前状态 —— 排队落地时当前状态可能已经不是排队时那个了。 */
+    suspend fun doApply(line: Lines.Line?, forAgent: String, cwd: String?, where: String) {
+        if (forAgent == Lines.CODEX) return doApplyCodex(line)
+        val err = Lines.apply(ssh, line, cwd)
         if (err != null) { note = t("没换成：%s").format(err); return }
         reload()
         val probe = Lines.probe(ssh, line?.baseUrl.orEmpty())
-        val where = scope?.let { t("只给「%s」").format(it.short) } ?: t("整台机器")
         // ⚠️ 换端点之后第一次请求会**全量重读上下文**（缓存是按端点分的），又慢又贵。
         //    不说的话人会以为切换卡住了 —— 这是 cc-remote-dev-station 提醒的一条。
         note = t("%s已换到「%s」· %s\n下一次请求就走新线路；那一次会重读整段对话，慢一点、贵一点，是正常的。")
             .format(where, line?.name ?: t("默认"), probe)
     }
 
-    // 排队中的那条：一旦没有会话在干活，自动落地
-    LaunchedEffect(busy, pending, pendingDefault) {
-        if (busy == 0 && (pending != null || pendingDefault)) {
-            val target = pending
-            pending = null; pendingDefault = false
-            doApply(target)
-        }
+    // 排队中的那一下：一旦没有会话在干活，自动落地。
+    // ⚠️⚠️ **必须用 bg.launch，不能在 effect 里直接 suspend 调用**：下面把 pending 置空会改掉
+    //    effect 自己的 key → Compose 取消并重启这个 effect → doApply 在第一个挂起点（SSH）就被取消。
+    //    表现是横幅消失、没有任何提示、服务器上什么都没写 —— 「界面说做了、实际没做」（正确性审查指出）。
+    //    bg 是 rememberCoroutineScope，不跟 effect 一起死。
+    val queuedBusy = pending?.let { q -> (q.cwd?.let { c -> sessions.filter { it.cwd == c } } ?: sessions)
+        .count { it.state == SessionState.Working && !it.isCodex } } ?: 0
+    LaunchedEffect(pending, queuedBusy) {
+        val q = pending ?: return@LaunchedEffect
+        if (queuedBusy > 0) return@LaunchedEffect
+        pending = null
+        bg.launch { doApply(q.line, q.agent, q.cwd, q.where) }
     }
 
     fun pick(line: Lines.Line?) {
+        val where = scope?.let { t("只给「%s」").format(it.short) } ?: t("整台机器")
         if (busy > 0) {
-            pending = line; pendingDefault = line == null
+            pending = Queued(line, agent, scope?.cwd, where)
             note = t("这台机器上有 %d 个会话在干活 —— 已排队，跑完这一轮自动换。").format(busy)
-        } else bg.launch { doApply(line) }
+        } else bg.launch { doApply(line, agent, scope?.cwd, where) }
     }
 
     edit?.let { e ->
@@ -178,14 +188,14 @@ fun LinesPanel(ssh: SshSession?, host: Host?, sessions: List<Session>) {
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (note.isNotBlank()) item { Banner(note, Copper) { note = "" } }
-            if (pending != null || pendingDefault) item {
+            pending?.let { q -> item {
                 // ⚠️ 这里**不能用 Amber** —— STYLE.md §1.2 把它定死给「需要你动手」，
                 //    排队中是状态通知，不需要你做任何事。挪用会稀释那个色的含义。
-                Banner(t("排队中：这一轮跑完就换到「%s」").format(pending?.name ?: t("默认")),
-                    MaterialTheme.colorScheme.tertiary) {
-                    pending = null; pendingDefault = false
-                }
-            }
+                // 把「给谁、改哪儿」一起显示 —— 排队后切了标签/范围的人得看见落地的是哪一个
+                Banner(t("排队中：%s这一轮跑完就换到「%s」（%s）").format(q.where, q.line?.name ?: t("默认"),
+                    if (q.agent == Lines.CODEX) "Codex" else "Claude Code"),
+                    MaterialTheme.colorScheme.tertiary) { pending = null }
+            } }
             if (hasCodex) item {
                 // 「拿不到」和「不适用」是两件事，这里是后者：Codex 根本不看这些 env
                 Hint(t("这台机器上有 Codex 会话 —— 它读的是自己那份配置，不跟着线路走，换了要重开。"))
