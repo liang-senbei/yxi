@@ -555,6 +555,24 @@ object Account {
     }
 
     /**
+     * 删一封（用户自己删 —— 老板 2026-09-05）。服务端**软删**，形状与 cc-logto_yxi 2026-09-05 约定：
+     * `POST /api/mail/<id>/delete` → `{ok, unread, unclaimed}`。
+     * ⚠️ 有东西**没领**的信服务端会拒（409 `unclaimed`）—— 界面上那种信的删除按钮本来就不给点，双保险。
+     * ⚠️ 失败**不改本地列表**：说成删了而服务端还在，下次进来它又冒出来，人只会以为「删不掉」。
+     */
+    suspend fun deleteMail(ctx: Context, id: String): Boolean = withContext(Dispatchers.IO) {
+        val o = apiPost(ctx, "/api/mail/$id/delete", "") ?: return@withContext false
+        // 服务端顺带给的两个数就地用上（同 markMailRead），不等下一次 /api/me
+        me?.let { m ->
+            me = m.copy(
+                unreadMail = o.optInt("unread", m.unreadMail),
+                unclaimedMail = o.optInt("unclaimed", m.unclaimedMail),
+            )
+        }
+        true
+    }
+
+    /**
      * 带登录态打一个 GET，成功返回 JSON。
      * ⚠️ 拿不到一律 null（没登录 / 网络不通 / 接口还没上线），**调用方要把整块藏掉**，
      * 不是显示 0 或空列表 —— 「拿不到」和「没有」是两件事。

@@ -5,7 +5,10 @@ import android.content.Intent
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -105,6 +108,10 @@ fun SettingsScreen(
             modifier = Modifier.padding(18.dp, 14.dp, 18.dp, 4.dp),
         )
         if (mine) {
+
+        // 每次进「我的」拉一次 /api/me —— 红点、余额、曦光都靠它。不拉的话只有冷启动那一次是准的，
+        // 新来的信要重启 App 才亮点，等于没通知。失败就用缓存的那份，别打断人。
+        LaunchedEffect(Unit) { if (app.yxi.agent.Account.signedIn) app.yxi.agent.Account.refresh(ctx) }
 
         // ── 「我」：头像 / 昵称 / 签名（学 QQ 和 Gemini 的个人页：账号那块单独一张卡，摆最上面）
         var editMe by remember { mutableStateOf(false) }
@@ -284,11 +291,11 @@ fun SettingsScreen(
             Modifier.fillMaxWidth().padding(horizontal = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            GridEntry(
-                Ico.Mail, t("邮件"), Color(0xFF4C8DF6), Modifier.weight(1f),
-                // 未读数直接打在图标上 —— 不然要点进去才知道有信，等于没通知
-                badge = app.yxi.agent.Account.me?.unreadMail ?: 0,
-            ) { onMail() }
+            // 老板 2026-09-05：**只要红点、不要数字**，点进去就消。
+            // 未读数是服务端的（/api/me），「看过没」的水位在本机（[Badges]）——两者一比就是亮不亮。
+            val unread = app.yxi.agent.Account.me?.unreadMail ?: 0
+            LaunchedEffect(unread) { Badges.mailClamp(ctx, unread) }
+            GridEntry(Ico.Mail, t("邮件"), Color(0xFF4C8DF6), Modifier.weight(1f), dot = Badges.mailDot(ctx, unread)) { onMail() }
             GridEntry(Ico.Wish, t("祈愿"), Color(0xFFB07AE8), Modifier.weight(1f)) { onWish() }
             GridEntry(Ico.Gift, t("活动中心"), Color(0xFFE8912D), Modifier.weight(1f)) { onActivity() }
             GridEntry(Ico.Chat, t("工单"), Color(0xFF7A69E8), Modifier.weight(1f)) { onTickets() }
@@ -923,12 +930,13 @@ private fun GridEntry(
     label: String,
     tint: androidx.compose.ui.graphics.Color,
     modifier: Modifier = Modifier,
-    /** > 0 就在图标右上角打一个红点数字 */
-    badge: Int = 0,
+    /** 图标右上角那颗小红点（老板 2026-09-05：只要点，不要数字） */
+    dot: Boolean = false,
     onClick: () -> Unit,
 ) {
+    val bg = MaterialTheme.colorScheme.surfaceContainerLow
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        color = bg,
         shape = RoundedCornerShape(18.dp),
         modifier = modifier.clip(RoundedCornerShape(18.dp)).clickable(onClick = onClick),
     ) {
@@ -939,18 +947,12 @@ private fun GridEntry(
         ) {
             Box {
                 YxiIcon(ico, size = 24.dp, tint = tint)
-                if (badge > 0) Surface(
-                    color = MaterialTheme.colorScheme.error,
-                    shape = RoundedCornerShape(100.dp),
-                    modifier = Modifier.align(Alignment.TopEnd).offset(x = 9.dp, y = (-6).dp),
-                ) {
-                    Text(
-                        if (badge > 99) "99+" else badge.toString(),
-                        Modifier.padding(5.dp, 1.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onError,
-                    )
-                }
+                // 8dp 红点，外面一圈底色描边 —— 点压在描边图标的线上时靠这圈把它和线分开
+                if (dot) Box(
+                    Modifier.align(Alignment.TopEnd).offset(x = 5.dp, y = (-3).dp).size(9.dp)
+                        .clip(CircleShape).background(MaterialTheme.colorScheme.error)
+                        .border(1.5.dp, bg, CircleShape),
+                )
             }
             Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1)
         }

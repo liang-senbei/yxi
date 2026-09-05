@@ -86,11 +86,19 @@ object Dirs {
          * Codex 没有这条（`codex resume --last` 在没历史时会报错），照旧裸起。
          */
         resume: Boolean = false,
+        /**
+         * 跟在 `claude` 后面的启动参数（如 `--model sonnet --effort medium`）。临时会话用。
+         * ⚠️ 这行最终 send-keys 进 shell —— **只放白名单里的字符**（字母数字 `-[]._` 和空格），
+         * 别的一律丢掉，宁可参数没生效也不给注入留口子。
+         */
+        launchArgs: String = "",
     ): String {
         val d = q(dir.trimEnd('/').ifBlank { "/" })
         val n = q(session)
         // ⚠️ 只认这两个，别的一律退回 claude —— 这行最终是 send-keys 进 shell 的
-        val a = if (agent == "codex" || (agent == null && session.startsWith("cx-"))) "codex" else "claude"
+        val a0 = if (agent == "codex" || (agent == null && session.startsWith("cx-"))) "codex" else "claude"
+        val extra = launchArgs.filter { it.isLetterOrDigit() || it in "-[]._ " }.trim()
+        val a = if (extra.isNotEmpty() && a0 == "claude") "claude $extra" else a0
         val launch = if (resume && a == "claude") """
             enc=${'$'}(printf %s "${'$'}want" | sed 's/[^A-Za-z0-9]/-/g')
             u=${'$'}(ls -t "${'$'}HOME/.claude/projects/${'$'}enc"/????????-????-????-????-????????????.jsonl 2>/dev/null | head -1)

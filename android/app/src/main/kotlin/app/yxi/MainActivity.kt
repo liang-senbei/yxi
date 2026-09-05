@@ -202,6 +202,20 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 if (editMe) app.yxi.ui.MeDialog { editMe = false }
+                // 临时会话：开成了直接跳进对话页；冷启动后第一次连上就把上次留下的收掉
+                var tempDlg by remember { mutableStateOf(false) }
+                if (tempDlg) host?.let { h ->
+                    app.yxi.ui.TempSessionDialog(
+                        shared.session, h.id,
+                        onOpen = { name, cwd -> tempDlg = false; work = Work(h, name, cwd, Mode.Chat) },
+                        onDismiss = { tempDlg = false },
+                    )
+                }
+                LaunchedEffect(shared.session, host?.id) {
+                    val s = shared.session ?: return@LaunchedEffect
+                    val h = host ?: return@LaunchedEffect
+                    app.yxi.agent.TempSessions.sweep(this@MainActivity, s, h.id)
+                }
 
                 // ── 侧边栏（学 Threads：左上角 ☰ 或从左边缘划，抽屉从左滑入，主页面被推向右）──
                 val drawer = rememberDrawerState(DrawerValue.Closed)
@@ -235,6 +249,7 @@ class MainActivity : ComponentActivity() {
                                     onEditMe = { editMe = true; drawerScope.launch { drawer.close() } },
                                     onPrefs = { page = Page.Prefs; work = null; drawerScope.launch { drawer.close() } },
                                     onTickets = { page = Page.Tickets; work = null; drawerScope.launch { drawer.close() } },
+                                    onTemp = { tempDlg = true; drawerScope.launch { drawer.close() } },
                                 )
                             }
                         },
@@ -273,6 +288,7 @@ class MainActivity : ComponentActivity() {
                                 onEditMe = { editMe = true; drawerScope.launch { drawer.close() } },
                                 onPrefs = { page = Page.Prefs; drawerScope.launch { drawer.close() } },
                                 onTickets = { page = Page.Tickets; drawerScope.launch { drawer.close() } },
+                                onTemp = { tempDlg = true; drawerScope.launch { drawer.close() } },
                             )
                         }
                     },
@@ -400,6 +416,8 @@ private fun YxiDrawer(
     hosts: List<Host>, current: Host?,
     onPickHost: (Host) -> Unit, onTab: (Tab) -> Unit, onMember: () -> Unit, onEditMe: () -> Unit,
     onPrefs: () -> Unit, onTickets: () -> Unit,
+    /** 「临时会话」：在服务器 /tmp 里开一个不保存的对话（见 TempSessions） */
+    onTemp: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val rev = app.yxi.ui.Me.rev.intValue                     // 改了昵称/头像要重画
@@ -448,6 +466,7 @@ private fun YxiDrawer(
         androidx.compose.material3.HorizontalDivider(Modifier.padding(horizontal = 18.dp))
         Spacer(Modifier.height(6.dp))
         // ── 功能入口（QQ 那种：彩色细线图标 + 标题 + 右边一个 ›）
+        DrawerRow(app.yxi.ui.Ico.Bolt, t("临时会话"), Color(0xFFE8912D), tail = t("不保存")) { onTemp() }
         DrawerRow(app.yxi.ui.Ico.Server, t("主机"), Color(0xFF4C8DF6)) { onTab(Tab.Hosts) }
         DrawerRow(app.yxi.ui.Ico.Sliders, t("配置"), Color(0xFF35B6A0)) { onTab(Tab.Config) }
         DrawerRow(
