@@ -203,7 +203,7 @@ object Model {
     //    「Opus 5 · 1M」芯片就有这个毛病，现在统一走这儿。
 
     /** `~/.claude/settings.json` 里的 `availableModels` + 当前默认 `model`。按主机缓存，一次 cat 就够。 */
-    data class Available(val models: List<String>, val default: String)
+    data class Available(val models: List<String>, val default: String, val effort: String = "")
     private val availCache = HashMap<String, Available>()
 
     /**
@@ -217,10 +217,10 @@ object Model {
             val o = org.json.JSONObject(raw)
             val arr = o.optJSONArray("availableModels")
             val list = (0 until (arr?.length() ?: 0)).mapNotNull { arr?.optString(it)?.takeIf { s -> s.isNotBlank() } }
-            Available(list, o.optString("model"))
+            Available(list, o.optString("model"), o.optString("effortLevel"))
         }.getOrNull()
         val fallback = listOf("default", "opus", "sonnet", "haiku")
-        val a = if (got == null || got.models.isEmpty()) Available(fallback, got?.default.orEmpty()) else got
+        val a = if (got == null || got.models.isEmpty()) Available(fallback, got?.default.orEmpty(), got?.effort.orEmpty()) else got
         availCache[hostId] = a
         return a
     }

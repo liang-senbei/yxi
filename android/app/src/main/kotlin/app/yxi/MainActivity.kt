@@ -1,6 +1,8 @@
 package app.yxi
 
 import kotlin.math.roundToInt
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Alignment
@@ -216,6 +218,45 @@ class MainActivity : ComponentActivity() {
                     val s = shared.session ?: return@LaunchedEffect
                     val h = host ?: return@LaunchedEffect
                     app.yxi.agent.TempSessions.sweep(this@MainActivity, s, h.id)
+                }
+
+                // 每次进临时会话先 /clear：上次的上下文不带过来，进去就能直接说话
+                // （用户 2026-09-05：「每次我进入 app 就默认对他执行 /clear，方便我立马能用」）。
+                // ⚠️ 刚开出来的那个跳过 —— 它本来就是空的，而且 claude 还在启动。
+                // ⚠️⚠️ **key 里绝不能放 shared.session**：断线重连会换一个新的 SshSession 对象，
+                //    effect 跟着重跑，就把用户正聊着的上下文清了（手机切网/息屏 30 秒就会触发）。
+                //    只按「进了哪个会话」重跑，连接在里面等 —— 跟上面 sweep 的 swept 集是一个路子。
+                // ⚠️ `shared` 是每次重组新建的 data class，`shared.session` 是普通字段：
+                //    直接在 effect 里读会**钉死在启动那一刻那个对象**上，断线换了新连接也看不见 ——
+                //    E2E 抓到的就是这个（logcat：`exec 挂了：session is down`，/clear 没送出去）。
+                //    rememberUpdatedState 让它始终指向最新的 shared，snapshotFlow 才能重新发。
+                val liveShared by rememberUpdatedState(shared)
+                val tmpName = work?.session?.takeIf { it.startsWith("cc-tmp-") }
+                LaunchedEffect(tmpName) {
+                    val n = tmpName ?: return@LaunchedEffect
+                    if (!app.yxi.agent.TempSessions.needsClear(n)) return@LaunchedEffect
+                    // ⚠️ 手机上「刚进来那一下」经常正撞上重连：连接可能还没好、或者拿到就死。
+                    //    轮询等一条活着的，别用 snapshotFlow —— `shared` 是 data class，
+                    //    结构相等时 rememberUpdatedState 不会触发新值，`.first{}` 会**一直挂着**，
+                    //    重试一次都轮不到（E2E 抓到的就是这个：进去了但一条命令都没发）。
+                    repeat(8) { attempt ->
+                        if (attempt > 0) kotlinx.coroutines.delay(1000)
+                        val s = liveShared.session?.takeIf { it.isAlive } ?: return@repeat
+                        val settled = runCatching {
+                            // ⚠️ 跟 Model.switchFast 一个规矩：输入框里有半截草稿时别送 ——
+                            //    /clear 会接在草稿后面，回车把人家没写完的话一起发出去。
+                            val screen = s.exec("tmux capture-pane -p -t ${app.yxi.ssh.Shell.q(n)}")
+                            // ⚠️ 抓回来是空的 = **没抓着**（exec 超时/断了），不是「输入框里有草稿」。
+                            //    当成后者就会一声不响地跳过 —— 链路慢的时候用户永远等不到 /clear。
+                            if (screen.isBlank()) return@runCatching false
+                            if (app.yxi.agent.Model.borrowable(screen)) {
+                                app.yxi.agent.SessionProbe.send(s, n, "/clear")
+                            }
+                            // 借不到（有草稿 / 正忙）是**不该送**，不是没送成 —— 别重试
+                            true
+                        }.getOrDefault(false)
+                        if (settled) return@LaunchedEffect
+                    }
                 }
 
                 // ── 侧边栏（学 Threads：左上角 ☰ 或从左边缘划，抽屉从左滑入，主页面被推向右）──

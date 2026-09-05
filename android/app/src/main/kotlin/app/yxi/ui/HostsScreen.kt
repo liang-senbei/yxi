@@ -628,7 +628,7 @@ private fun HostQuota(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        t("缓存和跑飞的进程收掉不丢东西。会话那一类会真的关掉 —— 但对话存档留着，之后还能接回来。"),
+                        t("清理缓存和失控进程不会丢数据。会话会被关闭，对话存档保留，可随时接回。"),
                         style = MaterialTheme.typography.labelSmall, color = Dim,
                     )
                     Column(
@@ -1091,7 +1091,7 @@ private fun InstallKeySheet(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(t("给 %s 装公钥").format(host.alias), style = MaterialTheme.typography.titleLarge)
-            Hint(t("用密码连一次，把这台手机的公钥追加进 ~/.ssh/authorized_keys，之后就免密了。相当于 ssh-copy-id。"))
+            Hint(t("用密码连一次，把这台手机的公钥写入目标机 ~/.ssh/authorized_keys，之后免密登录。"))
             Field(password, { password = it }, t("密码"), password = true)
             if (password.isNotEmpty()) {
                 SubmitButton(

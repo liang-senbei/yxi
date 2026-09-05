@@ -74,8 +74,7 @@ fun TrendScreen(ssh: SshSession?, modifier: Modifier = Modifier) {
         when {
             loading -> Hint(t("正在读这台机器的用量…"))
             list.isNullOrEmpty() -> Hint(
-                t("这台机器上没有 ccusage —— 装上它才有按天的用量。\n") +
-                    t("（我们不自己数：token 好数，钱要一张随时在变的价目表，抄进 App 就会过期。）"),
+                t("这台机器上没有 ccusage —— 装上它才有按天的用量。"),
             )
             else -> {
                 // 选中哪一天：默认最后一天（今天）

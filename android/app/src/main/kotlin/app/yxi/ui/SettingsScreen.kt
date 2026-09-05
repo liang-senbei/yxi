@@ -200,7 +200,7 @@ fun SettingsScreen(
             AlertDialog(
                 onDismissRequest = { soon = null },
                 title = { Text(what) },
-                text = { Text(t("这块还没开通。界面先摆在这儿，后台那边定好了就能用 —— 不做点了没反应的假按钮。")) },
+                text = { Text(t("功能开发中，敬请期待。")) },
                 confirmButton = { TextButton({ soon = null }) { Text(t("知道了")) } },
             )
         }

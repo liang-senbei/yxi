@@ -28,7 +28,17 @@ object TempSessions {
     fun dirOf(id: String) = "/tmp/yxi-tmp/$id"
     fun nameOf(id: String) = "cc-tmp-$id"
 
+    /**
+     * 刚开出来的那一个。新会话本来就是空的，进去不必再 `/clear`
+     * （而且那会儿 claude 还在启动，送早了会打在 shell 上）。只跳过一次。
+     */
+    @Volatile private var fresh: String? = null
+
+    /** 进入这个临时会话时该不该先 `/clear`：刚开的不用，之前留着的要。 */
+    fun needsClear(name: String): Boolean = if (fresh == name) { fresh = null; false } else true
+
     fun remember(ctx: Context, hostId: String, name: String) {
+        fresh = name
         val cur = p(ctx).getStringSet(KEY + hostId, emptySet()).orEmpty().toMutableSet()
         cur += name
         p(ctx).edit().putStringSet(KEY + hostId, cur).apply()

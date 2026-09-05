@@ -71,7 +71,7 @@ fun ActivityScreen(onAbyss: () -> Unit = {}, modifier: Modifier = Modifier) {
         when {
             loading -> Hint(t("正在取…"))
             s == null -> {
-                Hint(t("活动还没开通。开了之后签到、限时活动都在这儿 —— 签到攒的「曦光」拿去祈愿。"))
+                Hint(t("活动暂未开放，敬请期待。"))
                 AbyssEntry(onAbyss)
             }
             else -> {
@@ -125,7 +125,7 @@ fun ActivityScreen(onAbyss: () -> Unit = {}, modifier: Modifier = Modifier) {
                         }
                         s.nextReward.takeIf { it.isNotBlank() }?.let {
                             Text(
-                                t("明天签到给：%s").format(it),
+                                t("明日签到奖励：%s").format(it),
                                 style = MaterialTheme.typography.labelMedium, color = Amber,
                             )
                         }

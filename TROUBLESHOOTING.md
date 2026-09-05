@@ -5215,3 +5215,15 @@ Yxi 是手机替你写**另一台机器**的文件，而那台机器上还有一
 - **修法**：① 收流时空行不计字节（JSONL 没有真空行）；② `TranscriptStream.streamFrom` 在服务器上先 `stat`，起点夹到文件大小以内 —— 任何一处数错都兜住。
 - **还没兜的**：文件**真的**变短（Claude Code 重写转录）时 tail 同样会从 0 重放；没观察到过，观察到再加「stderr 出现 truncated 就断流重来」。
 - **教训**：第 #261/#269/#271/#272 四轮都在猜时序、改滚动，全是症状层；**这次是先看 logcat 再查 `ps` 里 tail 的真实参数**，十分钟定位。有 stderr 就先看 stderr。
+
+## #274 想给「临时会话」做 E2E，搭了半天测试机：三层链路都在骗你
+
+- **症状**：模拟器里的 App 连测试机，连上了但每 ~18 秒断一次；sshd 报 `ssh_dispatch_run_fatal: incomplete message`，App 侧 logcat 是 `exec 挂了：session is down` / `channel request: timeout`。手动 `ssh` 进去跑命令却好好的。
+- **根因（三个叠在一起，逐个排掉的）**：
+  1. **嵌套隧道**。测试机是本机的 podman 容器，我用 `ssh -R 2200` 从本机打到 Mac —— 而 `ssh mac` 本身就走 Mac 那条反向隧道。等于 SSH 套 SSH，App 的多条并发通道全挤在最外层那一条连接上。判据：从 Mac 手动 `ssh -p 2200 … "head -c 3000000 /dev/urandom | md5"`，**3MB 传不完就断**。换成让 Mac 直接拨服务器公网（`ssh -L 2200:127.0.0.1:2299 root@<server>`，Mac 本来就这么连），同样 5MB 一次过。
+  2. **模拟器 NAT**。一开始 App 填 `10.0.2.2:2200` 走 qemu 用户态转发，不稳；换 `adb reverse tcp:2200 tcp:2200`、App 填 `127.0.0.1:2200` 才稳。
+  3. **CPU steal**。本机一度 **18–27% st**（宿主机在抢，不是自己的进程 —— 我停掉 gradle 守护后 us 从 18% 掉到 5.9%，st 反而涨到 26.9%）。容器里的 sshd 被饿着 → channel request 超时。诊断卡顿**先看 `top` 的 st**，别只看 load 和内存。
+- **另一个坑**：`podman build` 报 `netavark: No such file or directory` → 加 `--network=host`。以及 **`podman exec … pkill sshd` 会把容器干掉**（sshd 是 PID 1），要重启 sshd 就用 `sleep infinity` 当 CMD、sshd 另起。
+- **判据怎么定的**（照组规「E2E 判据要客观」）：容器里放一个假的 `claude` 桩，把收到的每一行写进 `/tmp/claude-in.log`，并画一个跟 Claude Code 一样的提示框（两条 `─` 中间一个 `❯`，`Model.borrowable` 就认这个）。再把 root 的 shell 换成一个 wrapper 把每条 SSH 命令记进 `/tmp/cmds.log`。于是「/clear 到底送没送」「App 到底跑了哪条命令」都是文件里的事实，不靠截屏猜。
+- **⚠️ 重建容器会把 `podman exec` 改过的东西还原**：我 recreate 之后桩退回镜像里那版（不画提示框），`borrowable` 于是**正确地**拒发 `/clear` —— 差点被当成代码 bug。改过运行中容器的东西，重建后要重新装一遍。
+- **教训**：E2E 跑不通时，先分清是**被测代码**还是**测试台**。这次三层链路全有问题，靠「手动跑同样的命令看能不能复现」逐层剥掉的；rig 的锅占了大半天。
