@@ -30,10 +30,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.imageResource
@@ -108,13 +105,7 @@ fun WipeReveal(
     val idle = ImageBitmap.imageResource(app.yxi.R.drawable.yx_wish_idle)
     val done = ImageBitmap.imageResource(WishReveal.artOf(rarity))
     val tint = WishReveal.colorOf(rarity)
-    val motion = remember {
-        runCatching {
-            android.provider.Settings.Global.getFloat(
-                ctx.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f,
-            ) != 0f
-        }.getOrDefault(true)
-    }
+    val motion = !reducedMotion()   // ⚠️ 只有一处读这个系统开关（[reducedMotion]）
 
     // 擦到哪儿了：把画面切成 12×12 的格子，手指扫过就点亮一格。
     // 用格子不用路径：省内存、好算覆盖率，而且天然有"擦开的形状"。
@@ -241,45 +232,6 @@ private const val BURST = 1.9f      // 四段短片里最长的那段
 private fun starCenter(size: Size) = Offset(size.width * 0.42f, size.height * 0.52f)
 
 /**
- * 爆开的光：一圈扩散的环 + 一层薄光晕 + 八颗四散的星点。
- * ⚠️ **1.2 秒内全部收完**，落定那一帧不留任何飞着的东西（STYLE.md「落定那一帧必须干净」）。
- */
-private fun DrawScope.burstFx(age: Float, c: Color, at: Offset) {
-    val k = (age / BURST).coerceIn(0f, 1f)
-    val ease = 1f - (1f - k) * (1f - k)
-    val fade = 1f - k * k
-    val unit = size.minDimension
-
-    drawCircle(                                                                          // 扩散的环
-        c.copy(alpha = .8f * fade), unit * (0.12f + 0.62f * ease), at,
-        style = Stroke(width = unit * 0.012f * (1f - k) + 1f),
-    )
-    for (i in 0 until 8) {                                                               // 四散的星点
-        val a = (i * 45f + 12f) * (Math.PI / 180f).toFloat()
-        val d = unit * 0.62f * ease * (0.75f + 0.06f * i)
-        val r = unit * 0.018f * (1f - k * 0.5f)
-        val p = at + Offset(kotlin.math.cos(a) * d, kotlin.math.sin(a) * d)
-        rotate(45f, p) { drawRect(c.copy(alpha = .85f * fade), Offset(p.x - r, p.y - r), Size(r * 2, r * 2)) }
-    }
-}
-
-
-/** 爆开的光晕：画在人物**背后**的一团柔光，往外淡出（不是给她刷一层颜色） */
-private fun DrawScope.burstGlow(age: Float, c: Color, at: Offset) {
-    val k = (age / BURST).coerceIn(0f, 1f)
-    val r = size.minDimension * (0.16f + 0.62f * (1f - (1f - k) * (1f - k)))
-    drawCircle(
-        androidx.compose.ui.graphics.Brush.radialGradient(
-            0f to c.copy(alpha = .55f * (1f - k)),
-            0.55f to c.copy(alpha = .22f * (1f - k)),
-            1f to Color.Transparent,
-            center = at, radius = r,
-        ),
-        r, at,
-    )
-}
-
-/**
  * 放一段出货短片（`res/raw` 里的 mp4，带声音）。
  *
  * 用 **TextureView + MediaPlayer**，不引第三方播放器：这是一段 1.5 秒的小视频，
@@ -299,19 +251,35 @@ private fun RarityClip(resId: Int, modifier: Modifier = Modifier, onEnd: () -> U
             android.view.TextureView(c).apply {
                 surfaceTextureListener = object : android.view.TextureView.SurfaceTextureListener {
                     private var mp: android.media.MediaPlayer? = null
+
+                    // ⚠️ Surface 得自己 release：`MediaPlayer.release()` 不管它，
+                    //    `onSurfaceTextureDestroyed` 里 return true 释放的是 SurfaceTexture、不是这层包装。
+                    private var sf: android.view.Surface? = null
+
                     override fun onSurfaceTextureAvailable(st: android.graphics.SurfaceTexture, w: Int, h: Int) {
-                        mp = runCatching {
-                            android.media.MediaPlayer.create(c, resId).apply {
-                                setSurface(android.view.Surface(st))
-                                setOnCompletionListener { onEnd() }
-                                start()
-                            }
-                        }.getOrNull()
-                        if (mp == null) onEnd()          // 放不了就当放完，别把出货卡住
+                        // ⚠️ 先把播放器接在手上再 try：create 成功但 setSurface/start 抛了的话，
+                        //    整段 runCatching 会返回 null，那个已经创建出来的播放器就再也没人 release 了。
+                        val player = runCatching { android.media.MediaPlayer.create(c, resId) }.getOrNull()
+                        mp = player
+                        if (player == null) { onEnd(); return }
+                        val surface = android.view.Surface(st)
+                        sf = surface
+                        runCatching {
+                            player.setSurface(surface)
+                            player.setOnCompletionListener { onEnd() }
+                            player.start()
+                        }.onFailure {
+                            // 放不了就当放完，别把出货卡住
+                            runCatching { player.release() }
+                            runCatching { surface.release() }
+                            mp = null; sf = null; onEnd()
+                        }
                     }
                     override fun onSurfaceTextureSizeChanged(st: android.graphics.SurfaceTexture, w: Int, h: Int) = Unit
                     override fun onSurfaceTextureDestroyed(st: android.graphics.SurfaceTexture): Boolean {
-                        runCatching { mp?.release() }; mp = null; return true
+                        runCatching { mp?.release() }; mp = null
+                        runCatching { sf?.release() }; sf = null
+                        return true
                     }
                     override fun onSurfaceTextureUpdated(st: android.graphics.SurfaceTexture) = Unit
                 }

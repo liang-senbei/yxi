@@ -1267,6 +1267,7 @@ internal object En {
         "%d 抽内必出稀有" to "Guaranteed rare within %d pulls",
         "曦光 ×%d" to "Rays ×%d",
         "离保底还差 %d 抽" to "%d pulls to pity",
+        "保底" to "Pity",
         "祈愿 ×%d" to "Wish ×%d",
         "%d 曦光 · 会员九折" to "%d Rays · discounted for members",
         "%d 曦光" to "%d Rays",
@@ -1443,6 +1444,8 @@ internal object En {
         "深渊 · 王棋彩框 · 第 %d 期" to "Abyss · King's Frame · Season %d",
         // 活动 · 云曦节拍（音游，cc-Yxi_Entertainment 2026-09-06）
         "云曦节拍" to "Yunxi Beat",
+        "曦光不够，还差 %d 张。签到和活动中心能拿。" to "Not enough Rays — %d short. Check in daily or visit Events to get more.",
+        "再攒 %d 张就能十连。" to "%d more Rays for a ten-pull.",
         "擦一擦" to "Rub it",
         "%d BPM · %d 秒" to "%d BPM · %d s",
         "连击 ×%.1f" to "Combo ×%.1f",

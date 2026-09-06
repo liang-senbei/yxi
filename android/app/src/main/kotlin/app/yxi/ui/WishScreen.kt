@@ -12,10 +12,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
+
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -34,6 +36,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -83,7 +90,9 @@ fun WishScreen(modifier: Modifier = Modifier) {
     // ⚠️ 动画只是表现层 —— 东西在 draw 接口返回那一刻就已经是他的了，
     //    擦到一半退出、杀进程、断网，收藏页里都在。所以这里不重发请求、也不把擦完当领取条件。
     got?.let { d ->
-        var wiped by remember(d) { mutableStateOf(false) }
+        // 系统关了动画就别擦、也别放视频，直接给结果（跟 [WishResult] 同一个开关）
+        val reduced = reducedMotion()
+        var wiped by remember(d) { mutableStateOf(reduced) }
         if (!wiped) {
             val best = d.results.maxByOrNull { rank(it.rarity) }
             // ⚠️ 必须走 Dialog：直接摆一个 fillMaxSize 的 Box 会被后面的页面内容盖住
@@ -244,6 +253,18 @@ fun WishScreen(modifier: Modifier = Modifier) {
                         }
                     }
                 }
+                // 曦光不够就直说，并且说清差多少、去哪儿拿 ——
+                // ⚠️ 只把按钮变灰是**静默失败**：用户不知道为什么点不动，也不知道下一步该干嘛
+                //    （STYLE.md「一切失败都要说出来」「看得见、点得着」）。
+                if (tickets < p.singlePullCost) Text(
+                    t("曦光不够，还差 %d 张。签到和活动中心能拿。").format(p.singlePullCost - tickets),
+                    Modifier.padding(18.dp, 0.dp, 18.dp, 8.dp),
+                    style = MaterialTheme.typography.labelMedium, color = Amber,
+                ) else if (tickets < p.tenPullCost) Text(
+                    t("再攒 %d 张就能十连。").format(p.tenPullCost - tickets),
+                    Modifier.padding(18.dp, 0.dp, 18.dp, 8.dp),
+                    style = MaterialTheme.typography.labelMedium, color = Muted,
+                )
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 14.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -375,14 +396,7 @@ fun WishScreen(modifier: Modifier = Modifier) {
  */
 @Composable
 private fun WishResult(d: Wish.Draw, skipEffect: Boolean = false, onClose: () -> Unit) {
-    val ctx = LocalContext.current
-    val motion = remember {
-        runCatching {
-            android.provider.Settings.Global.getFloat(
-                ctx.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f,
-            ) != 0f
-        }.getOrDefault(true)
-    }
+    val motion = !reducedMotion()
     // ⚠️ 特效到 [DONE] 就收干净；小卡在那之后才落定，所以总长按小卡算
     val total = DONE + 50f + d.results.size * 110f + 520f
     val clock = remember { Animatable(if (motion) 0f else 1f) }
@@ -403,6 +417,9 @@ private fun WishResult(d: Wish.Draw, skipEffect: Boolean = false, onClose: () ->
         onDismissRequest = onClose,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
+        // 底部那行「点一下关闭」浮在滚动内容之上，得知道它多高才能给列表留出位置 ——
+        // 写死 dp 在大字体下会被它盖住最后一张卡（字号一大就折成两行）。
+        var footerH by remember { mutableStateOf(0) }
         Box(
             Modifier.fillMaxSize().background(Color(0xF20B0D12))
                 .clickable { if (ms >= total * 0.95f) onClose() else skipped = true },
@@ -412,7 +429,13 @@ private fun WishResult(d: Wish.Draw, skipEffect: Boolean = false, onClose: () ->
 
             // ── 立绘 / 小卡
             Column(
-                Modifier.fillMaxSize().padding(22.dp),
+                // ⚠️ 内容比屏幕矮时**居中**（单抽一张卡要在正中），比屏幕高时**能滚**
+                //    （十连 = 立绘 + 九张小卡，大字体下必然超一屏）。
+                //    verticalScroll 会把 minHeight 原样传给孩子，所以 Arrangement.Center
+                //    在没超屏时照样居中 —— 不用再套一层 BoxWithConstraints + heightIn。
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+                    .padding(22.dp, 22.dp, 22.dp, 0.dp)
+                    .padding(bottom = with(LocalDensity.current) { footerH.toDp() }),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
@@ -445,7 +468,10 @@ private fun WishResult(d: Wish.Draw, skipEffect: Boolean = false, onClose: () ->
                             Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
-                            Text(hero.crown, style = MaterialTheme.typography.labelSmall, color = Color(0xCCFFFFFF))
+                            Text(
+                                hero.crown + (if (best.byPity) " · " + t("保底") else ""),
+                                style = MaterialTheme.typography.labelSmall, color = Color(0xCCFFFFFF),
+                            )
                             Text(hero.name, style = MaterialTheme.typography.headlineSmall, color = Color.White)
                         }
                     }
@@ -477,7 +503,8 @@ private fun WishResult(d: Wish.Draw, skipEffect: Boolean = false, onClose: () ->
                             Column(Modifier.weight(1f)) {
                                 Text(g.name, style = MaterialTheme.typography.titleSmall)
                                 Text(
-                                    rarityLabel(g.rarity) + (if (g.isNew) " · NEW" else ""),
+                                    rarityLabel(g.rarity) + (if (g.isNew) " · NEW" else "") +
+                                        (if (g.byPity) " · " + t("保底") else ""),
                                     style = MaterialTheme.typography.labelSmall, color = glow,
                                 )
                             }
@@ -499,13 +526,36 @@ private fun WishResult(d: Wish.Draw, skipEffect: Boolean = false, onClose: () ->
             }
             Text(
                 if (ms >= total * 0.95f) t("点一下关闭 · 还剩 %d 张曦光").format(d.tickets) else t("点一下跳过"),
-                Modifier.align(Alignment.BottomCenter).padding(bottom = 34.dp),
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                    .onSizeChanged { footerH = it.height }
+                    // 渐变底衬：滚动时卡片会从这行字下面经过，没底衬两样都看不清
+                    .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xF20B0D12))))
+                    .windowInsetsPadding(WindowInsets.navigationBars)
+                    .padding(top = 26.dp, bottom = 22.dp),
                 style = MaterialTheme.typography.labelMedium, color = Color(0xB3FFFFFF),
+                textAlign = TextAlign.Center,
             )
         }
     }
 }
 
+
+/**
+ * 系统设置里「动画时长」调到 0（无障碍 / 省电）时返回 true。
+ * ⚠️ 抽卡的**每一段**表现都要听它：擦拭、开片视频、星轨光爆。
+ *    只关其中一段等于没关 —— 用户还是得坐着等完。
+ */
+@Composable
+internal fun reducedMotion(): Boolean {
+    val ctx = LocalContext.current
+    return remember {
+        runCatching {
+            android.provider.Settings.Global.getFloat(
+                ctx.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f,
+            ) == 0f
+        }.getOrDefault(false)
+    }
+}
 
 /** 稀有度排序：蓝 1 < 紫 2 < 金 3 < 红 4。星轨的颜色取这一批里最高的那个。 */
 internal fun rank(r: String): Int = when (r) {

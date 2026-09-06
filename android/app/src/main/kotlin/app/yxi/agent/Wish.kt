@@ -74,6 +74,8 @@ object Wish {
         val amount: Long,
         val isNew: Boolean,
         val dupConvertedTo: Pair<String, Long>?,
+        /** 这一发是**保底挑出来**的。角色已收齐时保底会空转、退回正常摇，那一发是 false。 */
+        val byPity: Boolean,
     )
 
     /** 一次祈愿的结果。[replay] = 这次是重试命中了幂等，**没有再扣曦光**。 */
@@ -136,13 +138,7 @@ object Wish {
         val o = Account.apiPost(ctx, "/api/wish/draw", body) ?: return@withContext null
         runCatching {
             Draw(
-                results = o.optJSONArray("results").list {
-                    Got(
-                        it.optString("id"), it.optString("name"), it.optString("rarity"),
-                        it.optString("kind"), it.optLong("amount"), it.optBoolean("new"),
-                        it.optJSONObject("dupConvertedTo")?.let { d -> d.optString("kind") to d.optLong("amount") },
-                    )
-                },
+                results = o.optJSONArray("results").list(::got),
                 tickets = o.optInt("tickets"),
                 pityRemaining = o.optInt("pityRemaining"),
                 drawId = o.optLong("drawId"),
@@ -262,6 +258,7 @@ object Wish {
         it.optString("id"), it.optString("name"), it.optString("rarity"),
         it.optString("kind"), it.optLong("amount"), it.optBoolean("new"),
         it.optJSONObject("dupConvertedTo")?.let { d -> d.optString("kind") to d.optLong("amount") },
+        it.optBoolean("byPity"),
     )
 
     private inline fun <T> JSONArray?.list(f: (JSONObject) -> T): List<T> =

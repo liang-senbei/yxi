@@ -55,7 +55,9 @@ fun CardLibrary(owned: Set<String> = emptySet(), live: Boolean = false, modifier
         Column(Modifier.padding(18.dp, 14.dp, 18.dp, 6.dp)) {
             Text(t("卡牌库"), style = MaterialTheme.typography.headlineMedium)
             Text(
-                t("《神之冠冕》· 已收集 %d / %d").format(owned.size, CROWNS.size),
+                // ⚠️ `owned` 是**服务端给的全部藏品 id**（角色 + 装扮 + 快捷语包…），
+                //    分母却只有角色数 —— 直接用 owned.size 会印出「已收集 27 / 9」。实测踩过。
+                t("《神之冠冕》· 已收集 %d / %d").format(CROWNS.count { owned.contains(it.id) }, CROWNS.size),
                 style = MaterialTheme.typography.labelMedium, color = Muted,
             )
             if (!live) {
