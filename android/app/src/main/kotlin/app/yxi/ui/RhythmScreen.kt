@@ -783,7 +783,9 @@ private fun judgeMisses(live: Live, now: Float, offset: Float, changed: () -> Un
 
 /** 边打边显示的分数。没配档位时 [Live.live] 跟老公式等价，配了就带上倍率 —— 两种情况都跟服务端一致 */
 private fun Live.currentScore() =
-    (live + maxCombo.toFloat() / chart.units.coerceAtLeast(1) * Rhythm.rules.comboBonus).toInt()
+    // ⚠️ 四舍五入，**不是截断**：服务端是 round，客户端要是 toInt() 截断，
+    //    同一局能差 1 分 —— 游戏里显示 132050、结算页 132051，玩家看得见。
+    (live + maxCombo.toFloat() / chart.units.coerceAtLeast(1) * Rhythm.rules.comboBonus).roundToInt()
 
 // ── 结算 ────────────────────────────────────────────────────────────────────
 @Composable
