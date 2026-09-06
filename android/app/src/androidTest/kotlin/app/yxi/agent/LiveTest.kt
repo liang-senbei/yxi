@@ -27,6 +27,47 @@ class LiveTest {
         assertNull(live.status)
     }
 
+    /**
+     * **状态词里带撇号也要认。**
+     *
+     * ⚠️ Claude Code 的状态词有一批是掉 g 的口语形式（`Beboppin'` `Jivin'` `Moseyin'`），
+     * 原来的 `[A-Za-z]+` 撞上撇号整行就不匹配 —— 表现是状态行**时有时无**
+     * （抽到普通词就显示、抽到带撇号的就消失），老板报「很不稳定」。
+     * ⚠️ 撇号有 ASCII 和排版两种；顺带行首可能有空格。
+     */
+    @Test fun 带撇号和连字符的状态词也认() {
+        fun 屏(状态行: String) = """
+            |一些正文
+            |$状态行
+            |──────────────
+            |❯
+            |──────────────
+            |  esc to interrupt
+        """.trimMargin()
+
+        // ⚠️ status 是**整条**（含后面的耗时），跟 `忙的时候认出状态词` 一样用 startsWith
+        fun 状态(行: String) = Live.parse(屏(行)).status.orEmpty()
+        assertTrue(状态("✻ Beboppin'… (2m44s)"), 状态("✻ Beboppin'… (2m44s)").startsWith("Beboppin'…"))
+        assertTrue(状态("✢ Jivin'… (12s)"), 状态("✢ Jivin'… (12s)").startsWith("Jivin'…"))
+        assertTrue(状态("✻ Beboppin’… (3s)"), 状态("✻ Beboppin’… (3s)").startsWith("Beboppin’…"))
+        assertTrue(状态("✻ Fast-thinking… (5s)"), 状态("✻ Fast-thinking… (5s)").startsWith("Fast-thinking…"))
+        // ⚠️ 行首有空格的**不认**：那是转录里引用的状态行，顶格的才是真的
+        //    （见 `屏幕上只是提到状态词不算数`）。我一开始放宽了行首，被那条用例当场打回。
+        assertNull(Live.parse(屏(" ✽ Working… (2m44s)")).status)
+    }
+
+    /** ⚠️ 放宽之后**不能**把正文当状态：词里不许有空格，否则 `- Waited for 3s` 会被当成「跑完了」。 */
+    @Test fun 放宽之后正文仍然不算状态() {
+        val 屏 = """
+            |- I waited for a while
+            |· 这是正文… 不是状态
+            |──────────────
+            |❯
+            |──────────────
+        """.trimMargin()
+        assertNull(Live.parse(屏).status)
+    }
+
     @Test fun 屏幕上只是提到状态词不算数() {
         // ⚠️ 这条测试**必须把真状态行去掉才有意义**。
         // 真状态行永远渲染在输出区最底下，而解析是倒着找第一条 ——
