@@ -66,6 +66,8 @@ fun ConnectPanel(ssh: SshSession?, host: app.yxi.ssh.Host) {
     var setupOnly by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
+    // 授权流程要等十分钟，中途连接大概率被换掉 —— 统一走这一份（TROUBLESHOOTING #282）
+    val alive = rememberAliveSsh(ssh)
 
     LaunchedEffect(ssh, host.id, tick) {
         if (tick == 0) status = null
@@ -118,7 +120,7 @@ fun ConnectPanel(ssh: SshSession?, host: app.yxi.ssh.Host) {
                         },
                         installed = st.installed(s),
                         extra = if (s.kind == Connect.Kind.AGENT && s.key == "claude") st.claudeUser else null,
-                        onConnect = { flow = Flow(ssh, s, scope) { tick++ } },
+                        onConnect = { flow = Flow(alive, s, scope) { tick++ } },
                         onDrop = { confirmDrop = s },
                         onInstall = { setupOnly = s.key; setup = true },
                     )
@@ -162,7 +164,7 @@ fun ConnectPanel(ssh: SshSession?, host: app.yxi.ssh.Host) {
     if (custom) CustomMcpDialog(onCancel = { custom = false }) { name, url ->
         custom = false
         val s = Connect.Service(name, name, url, url, if (url.endsWith("/sse")) "sse" else "http")
-        ssh?.let { live -> flow = Flow(live, s, scope) { tick++ } }
+        if (ssh != null) flow = Flow(alive, s, scope) { tick++ }
     }
 
     confirmDrop?.let { s ->
@@ -296,7 +298,14 @@ private fun Chip(text: String, color: androidx.compose.ui.graphics.Color) {
  * 免认证的 MCP：`add` 完就算完。
  */
 class Flow(
-    private val ssh: SshSession,
+    /**
+     * ⚠️⚠️ **这里刻意不接 `SshSession`，接的是「给我一条活的」那个函数**（[rememberAliveSsh]，TROUBLESHOOTING #282）。
+     * 这条流程最长等 **10 分钟**，中间用户会切去浏览器授权、锁屏、换网 —— 手机上重连是常态，
+     * 抓在手里的那个 `SshSession` 到时候几乎必然已经死了。原来的写法后果是**误报失败**：
+     * 连接一死 `exec` 抛异常 → 弹「没成功」，可服务器上的 tmux 流程其实好好地跑完了。
+     * 用户以为坏了、反复重来，而每重来一次 `mcpLoginStart` 会把服务器上那个正常的会话杀掉重开。
+     */
+    private val alive: suspend (Long) -> SshSession?,
     val service: Connect.Service,
     private val scope: kotlinx.coroutines.CoroutineScope,
     private val onChanged: () -> Unit,
@@ -326,8 +335,18 @@ class Flow(
      */
     var note by mutableStateOf("")
     private var job: Job? = null
-    private var port: Int? = null
+    /** 端口转发绑在**具体某条连接**上：连接换了，转发跟着没了，所以要记住是哪条 */
+    private var forwarded: Pair<SshSession, Int>? = null
     private val tmux = Connect.tmuxFor(service.key)
+
+    /** 一次性动作用：等一条活的（最多 20 秒），拿不到就 null —— 由调用处如实报错。 */
+    private suspend fun once(cmd: String): String? = alive(20_000)?.exec(cmd)
+
+    /**
+     * 轮询用：**拿不到连接就返回 null，让这一轮跳过**，不是失败。
+     * 服务器那头的 tmux 流程照跑，我们只是这一下看不见 —— 这正是原来误报失败的地方。
+     */
+    private suspend fun peek(cmd: String): String? = alive(0)?.let { runCatching { it.exec(cmd) }.getOrNull() }
 
     init {
         // ⚠️ 开新流程时把上一次遗留的回调丢掉：浏览器可能在没开框的时候把 localhost 地址
@@ -350,11 +369,11 @@ class Flow(
     /** Claude Code：起 `claude auth login` → 等授权 URL → 用户登录、页面给码 → 粘回去 → 等 `__DONE__` */
     private suspend fun claude() {
         step = Step.Working(t("在服务器上起 Claude Code 登录…"))
-        ssh.exec(Connect.claudeLoginStart())
+        once(Connect.claudeLoginStart()) ?: run { step = Step.Done(false, t("连接断了，等不到重连")); return }
         var url: String? = null
         for (i in 0 until 40) {
             delay(500)
-            val pane = ssh.exec(Connect.peekCommand(tmux))
+            val pane = peek(Connect.peekCommand(tmux)) ?: continue
             url = Connect.claudeUrl(pane)
             if (url != null) break
             Connect.parseDone(pane)?.let { if (!it) { step = Step.Done(false, Connect.failReason(pane)); return } }
@@ -367,11 +386,11 @@ class Flow(
     /** Codex：起 `codex login --device-auth` → 屏幕上等一次性码 → 用户去 auth.openai.com/codex/device 输码 → 等 `__DONE__` */
     private suspend fun codex() {
         step = Step.Working(t("在服务器上起 Codex 登录…"))
-        ssh.exec(Connect.codexLoginStart())
+        once(Connect.codexLoginStart()) ?: run { step = Step.Done(false, t("连接断了，等不到重连")); return }
         var code: String? = null
         for (i in 0 until 60) {
             delay(500)
-            val pane = ssh.exec(Connect.peekCommand(tmux))
+            val pane = peek(Connect.peekCommand(tmux)) ?: continue
             code = Connect.codexCode(pane)
             if (code != null) break
             Connect.parseDone(pane)?.let { if (!it) { step = Step.Done(false, Connect.failReason(pane)); return } }
@@ -383,38 +402,40 @@ class Flow(
 
     private suspend fun gh() {
         step = Step.Working(t("在服务器上起 gh 登录…"))
-        ssh.exec(Connect.ghLoginStart())
+        once(Connect.ghLoginStart()) ?: run { step = Step.Done(false, t("连接断了，等不到重连")); return }
         var enterSent = false
         var code: String? = null
         for (i in 0 until 60) {
             delay(500)
-            val pane = ssh.exec(Connect.peekCommand(tmux))
-            if (Connect.ghAsksGit(pane)) { ssh.exec(Connect.enterCommand(tmux)); continue }
+            val pane = peek(Connect.peekCommand(tmux)) ?: continue
+            if (Connect.ghAsksGit(pane)) { peek(Connect.enterCommand(tmux)); continue }
             code = Connect.ghCode(pane)
             if (code != null) {
-                if (Connect.ghAsksOpen(pane) && !enterSent) { ssh.exec(Connect.enterCommand(tmux)); enterSent = true }
+                if (Connect.ghAsksOpen(pane) && !enterSent) { peek(Connect.enterCommand(tmux)); enterSent = true }
                 break
             }
             Connect.parseDone(pane)?.let { if (!it) { step = Step.Done(false, Connect.failReason(pane)); return } }
         }
         val c = code ?: run { step = Step.Done(false, t("gh 没给出一次性码（这台机器装了 gh 吗？）")); return }
         step = Step.Code(c, Connect.GH_DEVICE_URL)
-        waitDone { ssh.exec(Connect.GH_AFTER_COMMAND); t("GitHub 接上了：git 推拉和 GitHub MCP 都能用了") }
+        // ⚠️ 这条要**真的执行到**（把 gh 的 token 配给 git + 加 GitHub MCP），所以用 once 等一条活的；
+        //    但只等 5 秒，别把「显示成功」拖太久 —— 等不到就算了，用户回头刷新状态还能看到 gh 已登录。
+        waitDone { alive(5_000)?.exec(Connect.GH_AFTER_COMMAND); t("GitHub 接上了：git 推拉和 GitHub MCP 都能用了") }
     }
 
     private suspend fun mcp() {
         step = Step.Working(t("加进 Claude Code…"))
-        val out = ssh.exec(Connect.mcpAdd(service))
+        val out = once(Connect.mcpAdd(service)) ?: run { step = Step.Done(false, t("连接断了，等不到重连")); return }
         if (out.contains("error", ignoreCase = true) && !out.contains("already", ignoreCase = true)) {
             step = Step.Done(false, out.trim().take(160)); return
         }
         if (service.noAuth) { step = Step.Done(true, t("加上了，不用登录，直接就能用")); onChanged(); return }
         step = Step.Working(t("等授权地址…"))
-        ssh.exec(Connect.mcpLoginStart(service.key))
+        once(Connect.mcpLoginStart(service.key)) ?: run { step = Step.Done(false, t("连接断了，等不到重连")); return }
         var url: String? = null
         for (i in 0 until 40) {
             delay(500)
-            val pane = ssh.exec(Connect.peekCommand(tmux))
+            val pane = peek(Connect.peekCommand(tmux)) ?: continue
             url = Connect.loginUrl(pane)
             if (url != null) break
             Connect.parseDone(pane)?.let { if (!it) { step = Step.Done(false, Connect.failReason(pane)); return } }
@@ -422,25 +443,29 @@ class Flow(
         val u = url ?: run { step = Step.Done(false, t("没拿到授权地址")); return }
         // 回调端口转发到手机上：浏览器授权完跳 localhost:<端口>，直接落到服务器
         val p = Connect.callbackPort(u)
-        val forwarded = p != null && ssh.forwardLocal(p)
-        if (forwarded) port = p
-        step = Step.Authorize(u, forwarded)
+        val ok = p != null && (alive(20_000)?.let { live ->
+            runCatching { live.forwardLocal(p) }.getOrDefault(false).also { if (it) forwarded = live to p }
+        } ?: false)
+        step = Step.Authorize(u, ok)
         waitDone { t("%s 接上了").format(service.name) }
     }
 
     /** 本地应用（微信）：SSH 到电脑 → 提取密钥。不走 tmux，直接 exec。 */
     private suspend fun local() {
         step = Step.Working(t("连接电脑…"))
-        val ping = ssh.exec("""ssh -o ConnectTimeout=3 -o BatchMode=yes laptop "echo OK" 2>/dev/null""")
+        val ping = once("""ssh -o ConnectTimeout=3 -o BatchMode=yes laptop "echo OK" 2>/dev/null""")
+        if (ping == null) { step = Step.Done(false, t("连接断了，等不到重连")); return }
         if (!ping.contains("OK")) {
             step = Step.Done(false, t("连不上电脑 —— 检查反向隧道是否正常")); return
         }
         step = Step.Working(t("提取微信密钥…"))
-        ssh.exec("""ssh -o ConnectTimeout=15 laptop "set ELECTRON_RUN_AS_NODE=1 && E:\weflow\WeFlow.exe C:\temp\getkey.js" 2>&1""")
+        // 提密钥要十几秒，中间连接可能被换掉 —— 同样走 once（TROUBLESHOOTING #282）
+        once("""ssh -o ConnectTimeout=15 laptop "set ELECTRON_RUN_AS_NODE=1 && E:\weflow\WeFlow.exe C:\temp\getkey.js" 2>&1""")
         // getkey.js 退出时文件已经写完（同步写），这 300ms 只是给 Windows 的文件系统缓存一点余量；
         // 万一没赶上，用户再点一次「连接」就好，不会坏事
         delay(300)
-        val check = ssh.exec("""ssh -o ConnectTimeout=3 laptop "if exist C:\temp\decrypted_key.txt echo KEY_OK" 2>/dev/null""")
+        val check = once("""ssh -o ConnectTimeout=3 laptop "if exist C:\temp\decrypted_key.txt echo KEY_OK" 2>/dev/null""")
+        if (check == null) { step = Step.Done(false, t("连接断了，等不到重连")); return }
         if (check.contains("KEY_OK")) {
             step = Step.Done(true, t("微信已连接")); onChanged()
         } else {
@@ -452,9 +477,12 @@ class Flow(
     private suspend fun waitDone(after: suspend () -> String) {
         for (i in 0 until 400) {
             delay(1500)
-            val pane = ssh.exec(Connect.peekCommand(tmux))
+            // ⚠️ **连接断了不算失败**：跳过这一轮就行，服务器那头的 tmux 照跑。
+            //    原来这里直接 `ssh.exec`，连接一死就抛异常 → 弹「没成功」，而授权其实成功了。
+            val pane = peek(Connect.peekCommand(tmux)) ?: continue
+            reforwardIfNeeded()
             // 登录成功后有的工具会停在「Press Enter to continue」—— 替用户按了，不然要等到超时
-            if (pane.contains("Press Enter to continue")) ssh.exec(Connect.enterCommand(tmux))
+            if (pane.contains("Press Enter to continue")) peek(Connect.enterCommand(tmux))
             if (pane.contains("Invalid code")) { note = ""; hint = t("码不对 —— 回页面把整串码重新复制一遍") }
             when (Connect.parseDone(pane)) {
                 true -> { val msg = after(); finish(); step = Step.Done(true, msg); onChanged(); return }
@@ -474,24 +502,40 @@ class Flow(
             //    用户会盯着「等着」一直等到 10 分钟超时，什么都不知道。
             // ⚠️⚠️ 但**「空」不等于「没了」**：exec 连接断了也返回空串。只有明确读到
             //    __GONE__ 才敢说流程结束；读到空就当不知道，照发，让 waitDone 去判。
-            val alive = ssh.exec(Connect.aliveCommand(service.key))
-            if (alive.contains("__GONE__")) {
+            val gone = once(Connect.aliveCommand(service.key))
+            if (gone == null) { note = ""; hint = t("连接断了，等不到重连"); return@launch }
+            if (gone.contains("__GONE__")) {
                 note = ""; hint = t("服务器那头的流程已经结束了 —— 关掉重来一次")
                 return@launch
             }
-            ssh.exec(Connect.pasteCommand(service.key, redirectUrl))
+            once(Connect.pasteCommand(service.key, redirectUrl))
         }
     }
 
+    /** 连接换过了就把回调端口在新连接上重转一次 —— 不然浏览器授权完跳 localhost 会落空 */
+    private suspend fun reforwardIfNeeded() {
+        val (old, p) = forwarded ?: return
+        if (old.isAlive) return
+        val live = alive(0) ?: return
+        if (runCatching { live.forwardLocal(p) }.getOrDefault(false)) forwarded = live to p
+    }
+
+    /**
+     * 收尾：撤端口转发 + 杀掉服务器上那个 tmux。
+     * ⚠️ **用 `peek` 不用 `once`**：这是尽力而为的清理，不该让人等。手机正好离线时 `once` 会为它干等 20 秒，
+     *   而它就卡在「判定成功」和「显示成功」之间 —— 用户盯着「等着」多等 20 秒（gh 那条还要再加一次，共 40 秒）。
+     *   杀不掉也无所谓：那个 tmux 自带 `sleep 900` 会自己退，下次开同名流程也会先 kill 一次（审查查出）。
+     */
     private suspend fun finish() {
-        port?.let { ssh.unforwardLocal(it) }; port = null
-        ssh.exec(Connect.killCommand(tmux))
+        forwarded?.let { (s, p) -> runCatching { s.unforwardLocal(p) } }; forwarded = null
+        peek(Connect.killCommand(tmux))
     }
 
     /** 关框：停止轮询、收回端口，**不杀服务器那头**（用户可能只是切去浏览器了） */
     fun cancelPolling() {
         job?.cancel()
-        port?.let { p -> scope.launch { ssh.unforwardLocal(p) } }
+        forwarded?.let { (s, p) -> scope.launch { runCatching { s.unforwardLocal(p) } } }
+        forwarded = null
     }
 }
 
