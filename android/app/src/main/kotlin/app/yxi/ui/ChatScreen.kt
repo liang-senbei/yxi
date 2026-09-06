@@ -1231,7 +1231,7 @@ fun ChatScreen(
                         // 下次进来发过的话又冒出来一遍
                         Drafts.set(ctx, hostId, sessionName, "")
                         // ⚠️ **不能用界面的 scope** —— 点完立刻切走会把它取消，那句话就没了（见 [Sender]）
-                        Sender.send(ctx, ssh, hostId, sessionName, t) { msg ->
+                        Sender.send(ctx, ::aliveSsh, hostId, sessionName, t) { msg ->
                             draft = Drafts.get(ctx, hostId, sessionName)   // 话还回来了，回填输入框
                             android.widget.Toast.makeText(ctx, msg, android.widget.Toast.LENGTH_LONG).show()
                         }

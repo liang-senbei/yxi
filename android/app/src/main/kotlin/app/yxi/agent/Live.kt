@@ -45,6 +45,24 @@ data class Live(
         }
 
         /**
+         * 输入框里还有没有字。**`null` = 判断不了**（读不到屏、找不到那两条边框）。
+         *
+         * ⚠️ 跟 [Model.borrowable] 的区别：那个还要求「不忙」（借会话送键的前提）；
+         * 这个**只问输入框空不空**。发完消息之后 Claude 正在跑是常态，
+         * 拿 borrowable 判会一直是 false，就会误以为没发出去、反复补回车。
+         * ⚠️ **`null` 和 `false` 不能混**：读不到屏就别下结论，更别补回车（#276 的老规矩）。
+         */
+        fun inputEmpty(screen: String): Boolean? {
+            if (screen.isBlank()) return null
+            val lines = screen.split('\n').map { it.trimEnd() }
+            val dividers = lines.indices.filter { isDivider(lines[it]) }
+            if (dividers.size < 2) return null
+            val body = lines.subList(dividers[dividers.size - 2] + 1, dividers.last())
+            if (body.size != 1) return false          // 多行 = 输入框里堆着东西
+            return body[0].trimStart().removePrefix("❯").isBlank()
+        }
+
+        /**
          * 状态行：**行首一个符号 + 一个以 `…` 结尾的词**，如 `✽ Scampering…`。
          * 收尾的形态是 `✻ Baked for 13s`（过去式 + for），那表示已经不忙了。
          *

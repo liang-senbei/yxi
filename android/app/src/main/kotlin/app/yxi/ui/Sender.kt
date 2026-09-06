@@ -25,7 +25,17 @@ object Sender {
     /** @param onFail 发不出去时回调（界面可以提示一下）。草稿已经替你还回去了。 */
     fun send(
         ctx: Context,
-        ssh: SshSession?,
+        /**
+         * **等一条活着的连接**（[app.yxi.ui.ChatScreen] 里的 `aliveSsh`）。
+         *
+         * ⚠️⚠️ **不能传一个抓好的 SshSession 进来。** 原来就是那样：调用点把 Composable 里
+         * 那个 `ssh` 传进来，这边 `if (!s.isConnected) return false` 立刻判失败、把话还回输入框。
+         * 而**上传附件正是最容易把连接换掉的操作**（几张图 / 一段视频，中途断线重连很常见，
+         * 上传那条路已经为此做了等待重连 —— 见 Uploader），发送这条路却没有。
+         * 于是：传完附件点发送 → 拿到的是刚死的那条 → 当场判失败 →
+         * **话又回到输入框里**。老板报的「上传有附件的时候还在对话框里面没发出去」就是这个。
+         */
+        aliveSsh: suspend (Long) -> SshSession?,
         hostId: String,
         session: String,
         text: String,
@@ -35,11 +45,13 @@ object Sender {
         val app = ctx.applicationContext
         scope.launch {
             // ⚠️ exec 是「失败静默返回空」的，所以不能只看有没有抛异常，还要看连接是否真活着
+            // ⚠️ 两件事都不能靠猜：
+            //  ① **连接**：等一条活着的（最多 20 秒），别拿一个抓好的对象判死刑 —— 见上面 aliveSsh。
+            //  ② **提交**：送完回头查输入框空没空（[SessionProbe.send] 自己做），
+            //     别「没抛异常就算发出去了」。
             val ok = runCatching {
-                val s = ssh ?: return@runCatching false
-                if (!s.isConnected) return@runCatching false
+                val s = aliveSsh(20_000) ?: return@runCatching false
                 SessionProbe.send(s, session, text)
-                s.isConnected
             }.getOrDefault(false)
             if (!ok) {
                 // 把话还给草稿 —— 宁可让它重新出现在输入框，也不能让用户以为发了、其实没发

@@ -117,14 +117,12 @@ object Model {
      */
     fun borrowable(screen: String): Boolean {
         if (Live.parse(screen).busy) return false
-        val lines = screen.split('\n').map { it.trimEnd() }
         // ⚠️ 用 [Live.isDivider]，别在这儿重写一份 —— 原来这里要求「整行纯横线」，
         //    而 Claude Code 把会话名画进了上边框，于是找不到上边框、这里永远 return false，
         //    表现是「点切模型永远说它正忙着」（老板 2026-09-06 报的，根因见 Live.isDivider）。
-        val dividers = lines.indices.filter { Live.isDivider(lines[it]) }
-        if (dividers.size < 2) return false
-        val body = lines.subList(dividers[dividers.size - 2] + 1, dividers.last())
-        return body.size == 1 && body[0].trimStart().removePrefix("❯").isBlank()
+        // 「输入框空不空」这一半交给 [Live.inputEmpty]（同一份判据，别再抄）；
+        // 判断不了（null）时保守当成「不能借」。
+        return Live.inputEmpty(screen) == true
     }
 
     /**

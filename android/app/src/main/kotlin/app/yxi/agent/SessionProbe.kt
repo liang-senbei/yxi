@@ -297,7 +297,7 @@ object SessionProbe {
      * 那句话就卡在对方输入框里没提交，用户以为发了、其实没发。
      * 用户原话：「点了向上的箭头然后切出去，容易没发送给 agent，要在对话里等几秒再返回才算发出去」。
      */
-    suspend fun send(session: SshSession, target: String, text: String) = withContext(NonCancellable) {
+    suspend fun send(session: SshSession, target: String, text: String): Boolean = withContext(NonCancellable) {
         val q = text.replace("'", "'\\''")
         // ⚠️⚠️ **文本和回车之间必须隔一下，否则多行的发不出去。**
         // Claude Code 的输入框认「括号粘贴」：一大块文本连着来，它按**粘贴**处理，
@@ -310,7 +310,32 @@ object SessionProbe {
         // ⚠️ 仍然是两条 `send-keys`：合成一条的话，文本里出现 "Enter" 这种字
         // 会被 send-keys 当按键名解析。
         // ⚠️ 带附件的消息一定是多行（头部一行路径 + 正文），所以这条路上多行是常态不是特例。
-        session.exec("tmux send-keys -t ${app.yxi.ssh.Shell.q(target)} -l '$q'; sleep 0.4; tmux send-keys -t ${app.yxi.ssh.Shell.q(target)} Enter")
+        val t = app.yxi.ssh.Shell.q(target)
+        session.exec("tmux send-keys -t $t -l '$q'; sleep 0.4; tmux send-keys -t $t Enter")
+
+        // ⚠️⚠️ **发完必须回头看一眼输入框空没空** —— 上面那 0.4 秒是个**赌**：
+        // 链路慢、机器忙、消息长（带附件的一定长）都可能让回车落进粘贴块里被当成换行，
+        // 结果**整段话原样躺在输入框里**，而这边一路 return 成功、草稿也清了、气泡也画了。
+        // 老板报的就是这个：「上传附件的时候还在对话框里面没发出去」。
+        // 不看的话我们永远不知道 —— 「发出去了」从来都是猜的，不是查的。
+        //
+        // ⚠️ 判据用 [Live.inputEmpty] 不是 [Model.borrowable]：发完 Claude 正在跑是常态，
+        //    borrowable 会因为「忙」一直是 false，那就会没完没了地补回车。
+        // ⚠️ **读不到屏（null）就什么都不做**：不补回车、也不报失败（#276 的老规矩，
+        //    「空」不等于「没发出去」；乱补回车可能在别的界面上误触发东西）。
+        repeat(3) { i ->
+            kotlinx.coroutines.delay(if (i == 0) 700L else 1200L)
+            val pane = runCatching { session.exec("tmux capture-pane -p -t $t") }.getOrNull().orEmpty()
+            when (app.yxi.agent.Live.inputEmpty(pane)) {
+                true -> return@withContext true          // 空了 = 真的提交了
+                null -> return@withContext true          // 判断不了，别乱补，也别谎报失败
+                false -> session.exec("tmux send-keys -t $t Enter")   // 还卡着 → 再按一次回车
+            }
+        }
+        // 补了三次还在框里 —— 如实返回失败，让上面把话还给用户
+        app.yxi.agent.Live.inputEmpty(
+            runCatching { session.exec("tmux capture-pane -p -t $t") }.getOrNull().orEmpty()
+        ) != false
     }
 
     /**

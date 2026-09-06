@@ -179,7 +179,9 @@ private fun SharePicker(store: HostStore, keys: KeyManager, text: String?, uris:
             if (body.isNotBlank()) {
                 withContext(Dispatchers.IO) {
                     // 先用借来的那条；挂了就**自己开一条新的**再试一次（借来的可能早被服务器收掉了）
-                    sent = runCatching { SessionProbe.send(s, target.name, body); true }.getOrElse {
+                    // ⚠️ 用 send 的返回值，别再「没抛异常就算成功」—— 回车被粘贴块吞掉时不抛异常，
+                    //    话却躺在对方输入框里（见 SessionProbe.send 里那段）。
+                    sent = runCatching { SessionProbe.send(s, target.name, body) }.getOrElse {
                         sendErr = it.message
                         val h = host
                         // 自己开一条新的（跟这个页面最初连主机是同一套写法）
@@ -190,7 +192,9 @@ private fun SharePicker(store: HostStore, keys: KeyManager, text: String?, uris:
                         }.getOrNull()
                         if (fresh == null) false
                         else try {
-                            SessionProbe.send(fresh, target.name, body); sendErr = null; true
+                            val ok2 = SessionProbe.send(fresh, target.name, body)
+                            if (ok2) sendErr = null
+                            ok2
                         } catch (e: Throwable) {
                             sendErr = e.message; false
                         } finally { runCatching { fresh.disconnect() } }
