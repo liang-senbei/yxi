@@ -1,0 +1,657 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>云曦节拍 · 试验台</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:#0b0d12;color:#E8EDF5;
+    font:14px/1.5 system-ui,-apple-system,"PingFang SC","Noto Sans CJK SC",sans-serif;
+    -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
+  #cv{display:block;width:100%;height:100%;touch-action:none}
+  #rotate{position:fixed;inset:0;display:none;place-items:center;text-align:center;background:#0b0d12;z-index:30;padding:24px}
+  @media (orientation:portrait){#rotate{display:grid}}
+  #rotate p{color:#8A93A3;max-width:22em;font-weight:300}
+
+  #gear{position:fixed;top:calc(12px + env(safe-area-inset-top));left:calc(14px + env(safe-area-inset-left));
+    z-index:20;width:36px;height:36px;border-radius:100px;border:1px solid #ffffff1f;background:#ffffff0a;
+    color:#E8EDF5;font-size:15px;line-height:34px;text-align:center;backdrop-filter:blur(10px);opacity:.7}
+  #panel{position:fixed;top:0;right:0;bottom:0;width:min(330px,86vw);z-index:25;background:#0f131be8;
+    backdrop-filter:blur(16px);border-left:1px solid #ffffff14;padding:calc(14px + env(safe-area-inset-top)) 18px 24px;
+    overflow-y:auto;transform:translateX(101%);transition:transform .22s ease}
+  #panel.open{transform:none}
+  #panel h2{margin:0 0 2px;font-size:15px;font-weight:500;letter-spacing:.02em}
+  #panel h3{margin:1.2em 0 .35em;font-size:11px;font-weight:500;letter-spacing:.12em;color:#7E8798;text-transform:uppercase}
+  .row{display:flex;align-items:center;gap:10px;margin:6px 0}
+  .row label{flex:0 0 7.6em;color:#AEB7C6;font-size:12.5px;font-weight:300}
+  .row input[type=range]{flex:1;min-width:0;accent-color:#E8EDF5;height:2px}
+  .row output{flex:0 0 3.4em;text-align:right;font-variant-numeric:tabular-nums;font-size:11.5px;color:#7E8798}
+  .seg{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 2px}
+  .seg button{flex:1 1 auto;padding:6px 10px;border-radius:100px;border:1px solid #ffffff1c;background:#ffffff08;
+    color:#AEB7C6;font-size:12px;font-weight:300}
+  .seg button.on{background:#E8EDF5;color:#0b0d12;border-color:#E8EDF5;font-weight:500}
+  .note{color:#6F7889;font-size:11.5px;line-height:1.55;margin:.4em 0 0;font-weight:300}
+  #copy{width:100%;margin-top:16px;padding:11px;border-radius:12px;border:0;background:#E8EDF5;color:#0b0d12;font-weight:500;font-size:13px}
+  #done{color:#7E8798;font-size:11.5px;text-align:center;min-height:1.4em;margin-top:6px;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<button id="gear" aria-label="设置">⚙</button>
+<div id="rotate"><p>把手机横过来——跟 App 里一样是横版的。</p></div>
+
+<div id="panel">
+  <h2>试验台</h2>
+  <p class="note">上面直接玩，看着调。定下来点最下面「复制这组设置」发我，我照着搬进 App。<br>
+  手感（判定宽窄、打击音延迟、震动）在这儿定不准——浏览器和原生差最多的就是这三样，那几项还是在 App 的手感面板里试。</p>
+
+  <h3>皮肤</h3>
+  <div class="seg" id="skin"></div>
+  <p class="note">「Phigros 原味」是对着你录的视频一比一抄的，当对照组。「云曦」是同一套骨架换成我们的四色、品牌色糊底、你那张评价词图的字。</p>
+
+  <h3>演示</h3>
+  <div class="seg" id="auto"></div>
+  <p class="note">自动打：让它自己全连，光看效果。</p>
+
+  <h3>爆点</h3>
+  <div class="row"><label>大小</label><input type="range" id="fxScale" min="0.5" max="1.8" step="0.05"><output></output></div>
+  <div class="row"><label>粒子数</label><input type="range" id="particles" min="0" max="14" step="1"><output></output></div>
+  <div class="row"><label>时长 秒</label><input type="range" id="fxLife" min="0.3" max="1.0" step="0.05"><output></output></div>
+
+  <h3>背景热度（连击越高越烫）</h3>
+  <div class="row"><label>强度</label><input type="range" id="heat" min="0" max="1.5" step="0.05"><output></output></div>
+  <div class="row"><label>满热连击</label><input type="range" id="heatMax" min="5" max="60" step="1"><output></output></div>
+  <div class="row"><label>底光亮度</label><input type="range" id="bgGain" min="0.5" max="3" step="0.05"><output></output></div>
+  <p class="note">云曦皮的底 = 对话页「模型在思考」那套光（ThinkingGlow）一比一移植：四团光各自独立相位，色相 6 秒一圈蓝→青→绿→黄→橙→粉。连击越高，亮度从「待机」升到「思考」；跳档那一瞬闪一下「等你拍板」的琥珀。</p>
+
+  <h3>校准线</h3>
+  <div class="row"><label>摆动幅度</label><input type="range" id="tilt" min="0" max="2" step="0.05"><output></output></div>
+  <div class="row"><label>回正快慢</label><input type="range" id="tiltBack" min="0.1" max="3" step="0.05"><output></output></div>
+  <div class="row"><label>谱面自带摆动</label><input type="range" id="sway" min="0" max="2" step="0.05"><output></output></div>
+
+  <h3>音符</h3>
+  <div class="row"><label>宽度</label><input type="range" id="noteW" min="0.6" max="1.6" step="0.05"><output></output></div>
+  <div class="row"><label>高度</label><input type="range" id="noteHscale" min="1" max="4" step="0.1"><output></output></div>
+  <p class="note">高度拉到 3~4 就是「钢琴块」的比例 —— 碎裂特效是按块设计的，薄片上和块上你都看一眼。</p>
+  <div class="row"><label>下落时长 秒</label><input type="range" id="approach" min="0.5" max="2.5" step="0.05"><output></output></div>
+  <div class="row"><label>密度</label><input type="range" id="density" min="0.4" max="2.5" step="0.05"><output></output></div>
+
+  <button id="copy">复制这组设置</button>
+  <div id="done"></div>
+</div>
+
+<!-- FX_MODULES -->
+
+<script>
+"use strict";
+// ─────────────────────────────────────────────────────────────────────────
+// 云曦节拍 · 试验台（第二版）
+//
+// 第一版被老板打回：「很难看，一点不精致」。这版先对着他录的 Phigros 逐帧抄骨架：
+//   · 判定线 = 纯白发丝线，不发彩光
+//   · 音符 = 薄薄一片胶囊，两头 ‹ › 尖角，白芯 + 色边
+//   · 爆点 = 正方框 + 45° 菱形框套着 → 里面两段细圆弧 → 中心实心圆 → 小方块粒子飞出
+//     （0.5 秒：圆先亮、框撑开、弧转开、粒子减速漂走，全程淡出）
+//   · 背景 = 糊掉的画（大色块 + 模糊），不是平铺渐变
+//   · HUD = 细体、小、留白多；连击居中、分数右上、曲名左下
+// 然后「云曦」皮只换四样：四色、品牌色糊底、评价词的字（老板的参考图）、热度。
+// 骨架不动 —— 精致来自克制，不来自加东西。
+// ─────────────────────────────────────────────────────────────────────────
+const KINDS = ['tick','slide','trace','swipe'];
+const PERFECT_MS = 120, GOOD_MS = 240;
+const TIERS = [{at:8,mult:1.2,label:'Great'},{at:15,mult:1.5,label:'Excellent'},{at:30,mult:2.0,label:'Amazing'}];
+
+const SKINS = {
+  phigros: {
+    name:'Phigros 原味',
+    line:'#FFFFFF',
+    note:{tick:'#5AC8FA', slide:'#5AC8FA', trace:'#F2E27A', swipe:'#F07A98'},
+    hit:{perfect:'#E8D9A0', good:'#7FB8E8'},
+    blobs:[['#2A3F8F',.9],['#B8912E',.8],['#3B6BB0',.6],['#7A6A2A',.5]],   // 视频里那张糊掉的画：蓝 + 金
+    hotBlobs:[['#2A3F8F',.9],['#B8912E',.8],['#3B6BB0',.6],['#7A6A2A',.5]], // 原味不变热
+    words:'plain',
+  },
+  yunxi: {
+    name:'云曦',
+    line:'#FFFFFF',
+    note:{tick:'#FFC08A', slide:'#8AD4F5', trace:'#F5A8C8', swipe:'#9EE6A8'},   // 老板定的四色
+    hit:{perfect:'#F3E3B8', good:'#9FCBF0'},
+    // 冷态：Pro 蓝那一家（STYLE §1.4）压得很沉，右上留一小块琥珀跟它对峙 —— 视频里那张画就是蓝金对峙
+    blobs:[['#2B4FB8',.75],['#FDBE5A',.28],['#1B2A5E',.9],['#4A3A8A',.55]],
+    // 热态：琥珀漫开，蓝退到角落（Ultra 那一家）
+    hotBlobs:[['#F59E8C',.75],['#FDBE5A',.85],['#6A2A2A',.9],['#B8912E',.6]],
+    words:'yunxi',
+  },
+};
+
+const S = {
+  skin:'phigros', auto:false,
+  fxScale:1, particles:8, fxLife:0.55,
+  heat:0.7, heatMax:30, bgGain:1.4,
+  tilt:1, tiltBack:1, sway:1,
+  noteW:1, noteHscale:1, approach:1.2, density:1,
+};
+
+// ── 老板拍板（2026-09-06）：swipe 标记两款随机、碎裂八款随机 ──
+// 模块由 bench-assemble.py 内联在上面（design/swipe/*.js、design/shatter/*.js），这里按名字挑。
+const pickBy = (arr, names) => names.map(n => (arr||[]).find(f => f.name===n)).filter(Boolean);
+const SWIPE_CHOSEN   = pickBy(window.SWIPE,   ['反向尾迹','风偏']);
+const SHATTER_CHOSEN = pickBy(window.SHATTER, ['方粒四散','切片错位','冲击光尘','扫描消散','溶解成光','樱瓣飘落','水晶棱柱','压扁弹回']);
+const pick = arr => arr[(Math.random()*arr.length)|0];
+function rngOf(seed){ let a=(seed*4294967296)>>>0; return () => { a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+
+// ── 画布 ──
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+let W=0, H=0, DPR=1;
+const bg = document.createElement('canvas'), bgx = bg.getContext('2d');   // 糊底：单独画，改热度才重画
+let bgHeatDrawn = -1, bgSkinDrawn = '';
+function resize(){
+  DPR = Math.min(devicePixelRatio||1, 2.5);
+  W = cv.clientWidth; H = cv.clientHeight;
+  cv.width = Math.round(W*DPR); cv.height = Math.round(H*DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  bg.width = Math.max(1, Math.round(W/4)); bg.height = Math.max(1, Math.round(H/4));   // 小图 + 放大 = 天然糊
+  bgHeatDrawn = -1;
+}
+addEventListener('resize', resize);
+
+function hexA(hex, a){ const n=parseInt(hex.slice(1),16); return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`; }
+function mixHex(a, b, f){
+  const A=parseInt(a.slice(1),16), B=parseInt(b.slice(1),16);
+  const r=Math.round(((A>>16)&255)*(1-f)+((B>>16)&255)*f), g=Math.round(((A>>8)&255)*(1-f)+((B>>8)&255)*f), bl=Math.round((A&255)*(1-f)+(B&255)*f);
+  return `#${((r<<16)|(g<<8)|bl).toString(16).padStart(6,'0')}`;
+}
+
+// 糊掉的画：四个大色块，位置固定（换热度只换色），用小画布再放大来糊
+const BLOB_POS = [[0.18,0.30,0.55],[0.78,0.25,0.5],[0.35,0.85,0.6],[0.85,0.8,0.45]];
+function drawBg(heatK){
+  const sk = SKINS[S.skin];
+  const key = Math.round(heatK*40);
+  if (key === bgHeatDrawn && bgSkinDrawn === S.skin) return;
+  bgHeatDrawn = key; bgSkinDrawn = S.skin;
+  const w = bg.width, h = bg.height;
+  bgx.setTransform(1,0,0,1,0,0);
+  bgx.fillStyle = '#0b0d12'; bgx.fillRect(0,0,w,h);
+  BLOB_POS.forEach((p,i) => {
+    const col = mixHex(sk.blobs[i][0], sk.hotBlobs[i][0], heatK);
+    const al  = sk.blobs[i][1]*(1-heatK) + sk.hotBlobs[i][1]*heatK;
+    const g = bgx.createRadialGradient(p[0]*w, p[1]*h, 0, p[0]*w, p[1]*h, p[2]*Math.max(w,h));
+    g.addColorStop(0, hexA(col, al*.55)); g.addColorStop(1, hexA(col, 0));
+    bgx.fillStyle = g; bgx.fillRect(0,0,w,h);
+  });
+  // 压暗：Phigros 的底很沉，音符才跳得出来（云曦皮色块本来就暗一档，少压一点）
+  bgx.fillStyle = 'rgba(8,10,14,.38)'; bgx.fillRect(0,0,w,h);
+}
+
+// ── 云曦皮的底：对话页 ThinkingGlow 的一比一移植（ui/ThinkingGlow.kt，数字原样抄）──
+// · 四团光各自独立相位：7.3 / 9.1 / 11.7 / 13.9 秒的三角波，周期互不成整数倍（#186），不然是一块色板在平移
+// · 色相 6 秒一圈：蓝(210)→青→绿→黄→橙→粉，**递减** 300°（方向别弄反）
+// · 粉彩 HSL(h, .62, .80)；四团 α = .28 / .20 / .15 / .13 × amount
+// · amount：待机 .55 → 思考 1.0。这里映射成「连击越高越亮」—— 连击起来 = 它在干活
+// · 「等你拍板」那档是琥珀不循环 —— 这里借给跳档那一瞬闪一下
+const tri = (t, ms) => { const p = (t*1000/ms) % 2; return p < 1 ? p : 2 - p; };
+// ⚠️ App 里是粉彩 HSL(h,.62,.80) 铺在浅色页上；这里是深底，同样的数会糊成一块灰。
+//    骨架（相位 / 周期 / 色相顺序 / 四团关系）原样保留，明度和半径按深色横屏改：
+//    饱和 70%、明度 58%；半径从「整个宽度」收到半个宽，四团在高度上也散开 —— 不然横屏上全叠在一起。
+const hslA = (h, a) => `hsla(${(((h%360)+360)%360).toFixed(1)},70%,58%,${Math.max(0,Math.min(1,a)).toFixed(3)})`;
+const AMBER = [38, 22, 45, 30];
+function drawThinkingGlow(t, amount, warmK, gain){
+  const w = bg.width, h = bg.height;
+  bgx.setTransform(1,0,0,1,0,0);
+  bgx.fillStyle = '#0b0d12'; bgx.fillRect(0,0,w,h);
+  const pa=tri(t,7300), pb=tri(t,9100), pc=tri(t,11700), pd=tri(t,13900);
+  const base = 210 - 300*((t/6)%1);
+  const blobs = [
+    [w*(0.10+0.55*pa), h*(0.10+0.45*pc), w*(0.50+0.10*pb), 0.34],
+    [w*(0.95-0.60*pb), h*(0.20+0.50*pd), w*(0.44+0.10*pc), 0.26],
+    [w*(0.30+0.50*pc), h*(0.35+0.45*pa), w*(0.40+0.12*pd), 0.20],
+    [w*(0.70-0.55*pd), h*(0.05+0.50*pb), w*(0.42+0.10*pa), 0.18],
+  ];
+  const paint = (hueOf, k) => blobs.forEach(([cx,cy,r,a],i) => {
+    const g = bgx.createRadialGradient(cx,cy,0,cx,cy,r);
+    g.addColorStop(0, hslA(hueOf(i), a*amount*gain*k)); g.addColorStop(1, hslA(hueOf(i), 0));
+    bgx.fillStyle = g; bgx.fillRect(0,0,w,h);
+  });
+  paint(i => base + i*22, 1);                       // 底色照走
+  if (warmK > 0) paint(i => AMBER[i], warmK*1.3);   // 跳档：琥珀**叠**上去闪一下（交叉淡出会跟青色混成灰）
+  // 压一层，音符才跳得出来
+  bgx.fillStyle = 'rgba(8,10,14,.25)'; bgx.fillRect(0,0,w,h);
+}
+
+// ── 谱面：程序生成、循环 ──
+let notes=[], t0=performance.now(), lastGen=0;
+// ⚠️ 老板定的两条谱面规则（2026-09-06）：
+//   · slide 按住的这段时间里**不再出任何别的块**（一根手指按着，别再要求他去点别处）
+//   · trace **不需要点**：落线的时候手指按在那条轨上就算（Phigros 里的 drag）
+let holdUntil = -1;                                   // 最近一个 slide 按到几秒
+function genAhead(now){
+  while (lastGen < now + 4){
+    lastGen += (0.40 + Math.random()*0.55) / S.density;
+    if (lastGen < holdUntil + 0.15) lastGen = holdUntil + 0.15;      // 长按没松手前别出块
+    const kind = KINDS[(Math.random()*4)|0];
+    const lane = (Math.random()*4)|0;
+    const n = {t:lastGen, lane, kind, judged:null, tailDone:false, dir:0, dur:0};
+    if (kind==='slide'){ n.dur = 0.35 + Math.random()*0.7; holdUntil = n.t + n.dur; }
+    if (kind==='swipe'){ n.dir = Math.random()<.5 ? -1 : 1; n.mark = SWIPE_CHOSEN.length ? pick(SWIPE_CHOSEN) : null; n.seed = Math.random(); }
+    notes.push(n);
+  }
+}
+
+// ── 局面 ──
+let combo=0, best=0, perfect=0, good=0, miss=0, score=0;
+let tiltAt=-9, tiltDir=0, lastTierAt=-9;
+const press=[-9,-9,-9,-9], flash=[-9,-9,-9,-9], held=[0,0,0,0];
+let bursts=[], words=[], missMarks=[], shatters=[];
+const now = () => (performance.now()-t0)/1000;
+const tierWord = c => { const t = TIERS.find(x=>x.at===c); return t?t.label:null; };
+const multOf = c => { let m=1; for (const t of TIERS) if (c>=t.at) m=t.mult; return m; };
+
+function hitLane(lane, want){
+  const t = now();
+  for (const n of notes){
+    if (n.lane!==lane || n.judged) continue;
+    const err = (t-n.t)*1000;
+    if (err < -GOOD_MS) break;
+    if (err > GOOD_MS) continue;
+    if (want && !want(n)) continue;
+    const j = Math.abs(err)<=PERFECT_MS ? 'perfect' : 'good';
+    land(n, j); return n;
+  }
+  return null;
+}
+function land(n, j){
+  n.judged = j; flash[n.lane] = now();
+  combo++; best = Math.max(best, combo);
+  if (j==='perfect') perfect++; else good++;
+  score += Math.round((j==='perfect'?1000:600) * multOf(combo));
+  bursts.push({at:now(), lane:n.lane, kind:n.kind, judge:j, dir:n.dir, seed:Math.random(),
+               parts:Array.from({length:S.particles}, () => ({a:Math.random()*6.283, v:0.6+Math.random()*1.0, s:0.5+Math.random()*0.9, r:Math.random()}))});
+  if (bursts.length>40) bursts.shift();
+  // 碎裂：音符本体按老板收藏的 8 款随机散掉（slide 只在按下那一瞬散头部）
+  if (SHATTER_CHOSEN.length){ shatters.push({fx: pick(SHATTER_CHOSEN), at: now(), lane: n.lane, kind: n.kind, seed: Math.random()}); if (shatters.length>30) shatters.shift(); }
+  // 只在档位跳级时喊一声（8 / 15 / 30）。每一下都弹字太吵 —— Phigros 一个字都不弹，克制才精致
+  const w = tierWord(combo);
+  if (w){ words.push({at:now(), text:w, big:true}); lastTierAt = now(); }
+  if (words.length>5) words.shift();
+}
+function breakCombo(n){
+  n.judged='miss'; miss++; combo=0;
+  missMarks.push({at:now(), lane:n.lane});
+  if (S.skin==='yunxi') words.push({at:now(), text:'Miss', big:false, miss:true});
+}
+const bumpTilt = d => { tiltAt=now(); tiltDir=d; };
+
+// ── 自动打（演示用）──
+function autoPlay(t){
+  for (const n of notes){
+    if (n.judged) continue;
+    const err = (t-n.t)*1000;
+    if (err > -20 && err <= GOOD_MS){          // 只要过了线就打，帧掉了也不会漏（截图会卡住 rAF）
+      land(n, 'perfect'); press[n.lane]=t;
+      if (n.kind==='trace'||n.kind==='swipe') bumpTilt(n.dir);
+    }
+  }
+}
+
+// ── 输入 ──
+const pointers = new Map();
+let geo = {deg:0, cx:0, cy:0, laneW:0};
+function laneOf(x,y){
+  const {deg,cx,cy,laneW} = geo, r=-deg*Math.PI/180, dx=x-cx, dy=y-cy;
+  const rx = dx*Math.cos(r) - dy*Math.sin(r) + cx;
+  return Math.max(0, Math.min(3, Math.floor(rx/laneW)));
+}
+cv.addEventListener('pointerdown', e => {
+  cv.setPointerCapture(e.pointerId);
+  const lane = laneOf(e.clientX, e.clientY);
+  pointers.set(e.pointerId, {lane, x0:e.clientX, y0:e.clientY, t0:now(), swiped:false, lastLane:lane});
+  press[lane]=now(); held[lane]++;
+  hitLane(lane, n => n.kind==='tick' || n.kind==='slide' || n.kind==='trace');
+});
+cv.addEventListener('pointermove', e => {
+  const p = pointers.get(e.pointerId); if (!p) return;
+  const dx = e.clientX-p.x0, dy = e.clientY-p.y0;
+  if (!p.swiped && Math.abs(dx) > W*0.045 && now()-p.t0 < 0.28){
+    const dir = dx>0?1:-1; p.swiped = true;
+    if (hitLane(p.lane, x => x.kind==='swipe' && x.dir===dir)) bumpTilt(dir);
+  }
+  if (Math.abs(dx) > W*0.02 || Math.abs(dy) > H*0.04){
+    const cur = laneOf(e.clientX, e.clientY);
+    if (cur !== p.lastLane){                         // 手指挪到别的轨：按着的状态跟着走（trace 靠这个）
+      const from = p.lastLane;
+      held[from]=Math.max(0,held[from]-1); held[cur]++; press[cur]=now(); p.lastLane=cur;
+    }
+  }
+});
+const up = e => { const p=pointers.get(e.pointerId); if(!p) return; held[p.lastLane]=Math.max(0,held[p.lastLane]-1); pointers.delete(e.pointerId); };
+cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+
+// ── 绘制 ──
+function draw(){
+  const t = now(), sk = SKINS[S.skin];
+  genAhead(t);
+  if (S.auto) autoPlay(t);
+  for (const n of notes){
+    // trace：到线的那一刻这条轨上有手指按着就算命中（不看点击时机）
+    if (!n.judged && n.kind==='trace' && held[n.lane] > 0 && Math.abs((t-n.t)*1000) <= GOOD_MS && t >= n.t - 0.02) land(n, 'perfect');
+    if (!n.judged && (t-n.t)*1000 > GOOD_MS) breakCombo(n);
+    if (n.judged && n.judged!=='miss' && n.kind==='slide' && !n.tailDone && t > n.t+n.dur) n.tailDone=true;
+  }
+  notes = notes.filter(n => t-n.t < 1.5 || !n.judged);
+
+  // 姿态：谱面自带的慢摆 + 玩家 trace/swipe 造成的甩动（弹簧回正）
+  const back = Math.exp(-(t-tiltAt)/(0.32/Math.max(.05,S.tiltBack)));
+  const kick = (t-tiltAt<3) ? tiltDir*6*S.tilt*back*Math.cos((t-tiltAt)*9) : 0;
+  const swayDeg = Math.sin(t*0.45)*2.2*S.sway;
+  const deg = Math.max(-9, Math.min(9, swayDeg + kick));
+  const laneW = W/4, judgeY = H*(0.78 + Math.sin(t*0.3)*0.02*S.sway);
+  const noteH = Math.min(44, Math.max(6, Math.min(11, H*0.011)) * S.noteHscale);   // 薄片 8px；拉高就是钢琴块
+  const noteW = Math.min(laneW*0.55, W*0.052) * S.noteW;             // Phigros 约 3% 屏宽；我们有轨道，给到 5% 好点
+  geo = {deg, cx:W/2, cy:judgeY, laneW};
+
+  // ── 糊底 ──
+  const heatK = Math.min(1, combo/S.heatMax) * Math.min(1, S.heat);
+  if (S.skin==='yunxi'){
+    const amount = 0.55 + 0.45*heatK;                                   // 待机 → 思考
+    const warmK = Math.max(0, 1 - (t - lastTierAt)/1.2);               // 跳档：琥珀闪 1.2 秒
+    drawThinkingGlow(t, amount, warmK*warmK, S.bgGain); bgHeatDrawn = -1;
+  } else drawBg(0);
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(bg, 0, 0, W, H);
+
+  ctx.save();
+  ctx.translate(W/2, judgeY); ctx.rotate(deg*Math.PI/180); ctx.translate(-W/2, -judgeY);
+  const over = H*0.2;
+
+  // 按下反馈：极淡，只说「你按了」
+  for (let l=0;l<4;l++){
+    const age = t-press[l];
+    if (age>=0 && age<=0.12){
+      const g = ctx.createLinearGradient(0, judgeY*0.5, 0, judgeY);
+      g.addColorStop(0,'rgba(255,255,255,0)'); g.addColorStop(1,`rgba(255,255,255,${.06*(1-age/0.12)})`);
+      ctx.fillStyle=g; ctx.fillRect(laneW*l, judgeY*0.5, laneW, judgeY*0.5);
+    }
+  }
+  // 漏：那段线短暂变暗红，不铺一大片
+  for (const m of missMarks){
+    const age=t-m.at; if (age>0.35) continue;
+    ctx.strokeStyle=`rgba(229,72,77,${.9*(1-age/0.35)})`; ctx.lineWidth=2.5;
+    ctx.beginPath(); ctx.moveTo(laneW*m.lane+8, judgeY); ctx.lineTo(laneW*(m.lane+1)-8, judgeY); ctx.stroke();
+  }
+  missMarks = missMarks.filter(m => t-m.at<=0.35);
+
+  // ── 判定线：白发丝 + 极窄的柔光；命中时那一瞬亮一下 ──
+  let glow=0; for (let l=0;l<4;l++){ const a=t-flash[l]; if (a>=0&&a<=0.14) glow=Math.max(glow,1-a/0.14); }
+  ctx.shadowColor = 'rgba(255,255,255,.55)'; ctx.shadowBlur = 6 + 10*glow;
+  ctx.strokeStyle = sk.line; ctx.lineWidth = 2.2 + 0.8*glow; ctx.globalAlpha = .92;
+  ctx.beginPath(); ctx.moveTo(-over, judgeY); ctx.lineTo(W+over, judgeY); ctx.stroke();
+  ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+
+  // ── 爆点（画在音符下面，让音符盖着它）──
+  for (const b of bursts) drawBurst(b, t-b.at, laneW*b.lane+laneW/2, judgeY, noteH, sk);
+  bursts = bursts.filter(b => t-b.at <= S.fxLife+0.05);
+
+  // ── 音符 ──
+  for (const n of notes){
+    const dt = n.t-t;
+    if (dt > S.approach) continue;
+    if (n.judged && n.kind!=='slide') continue;
+    if (n.judged && n.tailDone) continue;
+    const y = judgeY*(1-dt/S.approach);
+    const cx = laneW*n.lane + laneW/2, c = sk.note[n.kind];
+    const w = noteW, h = noteH;
+
+    if (n.kind==='slide'){
+      // 长按体：淡蓝半透明的柱子 + 白色细边，压到线为止
+      const tailY = Math.max(0, judgeY*(1-(n.t+n.dur-t)/S.approach));
+      const bottom = Math.min(y, judgeY);
+      if (bottom > tailY){
+        const holding = n.judged && n.judged!=='miss' && held[n.lane]>0;
+        const bw = w*0.9;
+        ctx.fillStyle = hexA(c, n.judged==='miss'?.10 : holding?.34 : .22);
+        ctx.fillRect(cx-bw/2, tailY, bw, bottom-tailY);
+        ctx.strokeStyle = `rgba(255,255,255,${holding?.75:.45})`; ctx.lineWidth = 1.2;
+        ctx.strokeRect(cx-bw/2+.5, tailY+.5, bw-1, bottom-tailY-1);
+        if (holding){   // 按着的时候，线上那一点持续冒光
+          const g = ctx.createRadialGradient(cx,judgeY,0,cx,judgeY,h*3);
+          g.addColorStop(0,hexA(c,.45)); g.addColorStop(1,hexA(c,0));
+          ctx.fillStyle=g; ctx.fillRect(cx-h*3, judgeY-h*3, h*6, h*6);
+        }
+      }
+    }
+    if (!n.judged && y>=-20 && y<=judgeY+h){
+      if (n.kind==='swipe' && n.mark){
+        ctx.save();
+        try { n.mark.draw(ctx, {x:cx, y, w, h, color:c, dir:n.dir, lineY:judgeY, laneX:laneW*n.lane, laneW}, (t%0.8)/0.8, rngOf(n.seed)); }
+        catch(e){}
+        ctx.restore();
+      } else sliver(cx, y, w, h, c, n);
+    }
+  }
+  // ── 碎裂（音符本体散掉）──
+  for (const sh of shatters){
+    const k = (t - sh.at)/0.6; if (k < 0 || k > 1) continue;
+    const w = noteW, h = noteH, cx = laneW*sh.lane + laneW/2;
+    ctx.save();
+    try { sh.fx.draw(ctx, {x: cx - w/2, y: judgeY - h/2, w, h, color: sk.note[sh.kind], seed: sh.seed}, k, rngOf(sh.seed)); } catch(e){}
+    ctx.restore();
+  }
+  shatters = shatters.filter(sh => t - sh.at <= 0.65);
+  ctx.restore();
+
+  drawHud(t, sk);
+  requestAnimationFrame(draw);
+}
+
+// 薄片音符：色身 + 白芯 + 两头尖角。trace 多一个指向箭头，swipe 是双尖角
+function sliver(cx, y, w, h, c, n){
+  ctx.save();
+  // 一圈很淡的同色光，让它像浮在底上，不是贴上去的
+  ctx.shadowColor = hexA(c,.7); ctx.shadowBlur = 8;
+  rr(cx-w/2, y-h/2, w, h, h/2, c);
+  ctx.shadowBlur = 0;
+  // 白芯：中间一条更亮的窄带
+  rr(cx-w/2+h*.35, y-h*.22, w-h*.7, h*.44, h*.22, 'rgba(255,255,255,.85)');
+  // 尖角 ‹ ›
+  ctx.strokeStyle='rgba(255,255,255,.95)'; ctx.lineWidth=1.6; ctx.lineCap='round'; ctx.lineJoin='round';
+  const cap = (x, dir) => { ctx.beginPath(); ctx.moveTo(x+dir*h*.55, y-h*.5); ctx.lineTo(x, y); ctx.lineTo(x+dir*h*.55, y+h*.5); ctx.stroke(); };
+  cap(cx-w/2-h*.35, 1); cap(cx+w/2+h*.35, -1);
+  if (n.kind==='trace'){
+    // trace：不用点，按着过线就行 —— 块身上三道竖纹（抓握感），没有方向箭头
+    ctx.fillStyle = 'rgba(255,255,255,.7)';
+    for (let g=-1; g<=1; g++) ctx.fillRect(cx + g*h*1.2 - 0.8, y - h*.3, 1.6, h*.6);
+  }
+  if (n.kind==='swipe'){
+    // 方向：往要去的那边再补一个尖角（swipe 两重，trace 一重加一段引线）
+    const d = n.dir>=0?1:-1, x = cx + d*(w/2 + h*1.3);
+    ctx.strokeStyle = c;
+    ctx.beginPath(); ctx.moveTo(x - d*h*.5, y-h*.6); ctx.lineTo(x, y); ctx.lineTo(x - d*h*.5, y+h*.6); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x+d*h*.5-d*h*.5, y-h*.6); ctx.lineTo(x+d*h*.5, y); ctx.lineTo(x+d*h*.5-d*h*.5, y+h*.6); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// 爆点：照 Phigros 的解剖 —— 圆先亮 → 正方框 + 菱形框撑开 → 两段弧转开 → 方块粒子减速漂走
+function drawBurst(b, age, cx, cy, h, sk){
+  const life = S.fxLife; if (age > life) return;
+  const k = age/life, fade = 1-k, ease = 1-Math.pow(1-k, 3);          // ease-out：一开始快，后面慢
+  const u = Math.max(h*2.6, H*0.03)*S.fxScale;                           // 基本尺度：撑满时方框约占屏高 11%（对着视频量的）
+  const col = b.judge==='perfect' ? sk.hit.perfect : sk.hit.good;
+  const tint = S.skin==='yunxi' ? mixHex(col, sk.note[b.kind], 0.35) : col;   // 云曦皮：爆点带一点音符自己的颜色（别太淡）
+  ctx.save();
+  ctx.translate(cx, cy);
+  // trace / swipe：整个爆点往方向那边斜一下（骨架不变，只是加个「劲」）
+  if (b.kind==='trace' || b.kind==='swipe'){ const d=b.dir>=0?1:-1; ctx.transform(1,0,-d*0.28*fade,1,0,0); }
+  ctx.lineWidth = 1.6; ctx.lineCap='round';
+
+  // 中心实心圆：一开始最大最亮，很快缩小
+  const r0 = u*(0.55 - 0.35*ease);
+  ctx.fillStyle = hexA(tint, .85*fade);
+  ctx.beginPath(); ctx.arc(0,0,r0,0,6.283); ctx.fill();
+  // 线上那一点：小圆，留到最后
+  ctx.fillStyle = hexA(tint, .9*fade); ctx.beginPath(); ctx.arc(0,0,h*.35,0,6.283); ctx.fill();
+
+  // 正方框（描边）+ 菱形框（很淡的填充）— 两个撑开速度不同
+  const s1 = u*(0.8 + 2.4*ease), s2 = u*(1.0 + 3.0*ease);
+  ctx.strokeStyle = hexA(tint, .85*fade);
+  ctx.strokeRect(-s1/2, -s1/2, s1, s1);
+  ctx.save(); ctx.rotate(Math.PI/4 + b.seed*0.15);
+  ctx.fillStyle = hexA(tint, .10*fade); ctx.fillRect(-s2/2, -s2/2, s2, s2);
+  ctx.strokeStyle = hexA(tint, .35*fade); ctx.strokeRect(-s2/2, -s2/2, s2, s2);
+  ctx.restore();
+  // 小一号的正方框跟在后面（视频里是两个同心方框）
+  if (k > 0.12){ const s3 = u*(0.3 + 1.6*ease); ctx.strokeStyle = hexA(tint, .55*fade); ctx.strokeRect(-s3/2,-s3/2,s3,s3); }
+
+  // 两段圆弧：半径撑开，同时慢慢转
+  ctx.strokeStyle = hexA(tint, .9*fade); ctx.lineWidth = 1.8;
+  const ra = u*(0.6 + 1.6*ease), rot = b.seed*6.28 + ease*1.2;
+  ctx.beginPath(); ctx.arc(0,0,ra, rot, rot+1.6); ctx.stroke();
+  ctx.beginPath(); ctx.arc(0,0,ra*0.62, rot+3.4, rot+4.6); ctx.stroke();
+
+  // 方块粒子：随机方向弹出，减速，边漂边淡
+  for (const p of b.parts){
+    const d = u*(0.5 + p.v*2.6*ease), x = Math.cos(p.a)*d, y = Math.sin(p.a)*d*0.8;
+    const sz = h*(0.45+0.5*p.s)*(1-0.3*k);
+    ctx.fillStyle = hexA(tint, (0.9-0.5*p.r)*fade);
+    ctx.fillRect(x-sz/2, y-sz/2, sz, sz);
+  }
+  ctx.restore();
+}
+
+// ── HUD ──
+function drawHud(t, sk){
+  ctx.save();
+  const thin = (px, w=300) => `${w} ${Math.round(px)}px system-ui,-apple-system,"Helvetica Neue",sans-serif`;
+  ctx.fillStyle = 'rgba(232,237,245,.92)'; ctx.textBaseline='middle';
+  // 进度条：左上一根发丝
+  ctx.fillStyle='rgba(255,255,255,.18)'; ctx.fillRect(0,0,W,1.5);
+  ctx.fillStyle='rgba(255,255,255,.7)'; ctx.fillRect(0,0,W*((t%60)/60),1.5);
+  // 分数：右上，7 位，等宽数字
+  ctx.textAlign='right'; ctx.font = thin(H*0.045, 300); ctx.fillStyle='rgba(232,237,245,.9)';
+  ctx.fillText(String(score).padStart(7,'0'), W-18, H*0.075);
+  // 曲名 / 难度：下面两角
+  ctx.textAlign='left'; ctx.font = thin(H*0.03, 300); ctx.fillStyle='rgba(232,237,245,.6)';
+  ctx.fillText(S.skin==='yunxi' ? '云曦节拍 · 试验台' : 'Confusion', 18, H-H*0.05);
+  ctx.textAlign='right'; ctx.fillText(S.skin==='yunxi' ? '试验 Lv.4' : 'EZ Lv.4', W-18, H-H*0.05);
+  // 连击：正中，细体大数字 + 小字 COMBO
+  if (combo >= 3){
+    const lastHit = Math.max(...flash), pop = Math.max(0, 1-(t-lastHit)/0.10);
+    ctx.textAlign='center';
+    ctx.font = thin(H*0.11*(1+0.06*pop), 300); ctx.fillStyle='rgba(232,237,245,.95)';
+    ctx.fillText(String(combo), W/2, H*0.10);
+    ctx.font = `500 ${Math.round(H*0.022)}px system-ui,sans-serif`; ctx.fillStyle='rgba(232,237,245,.5)';
+    ctx.letterSpacing = '0.18em'; ctx.fillText('COMBO', W/2, H*0.185); ctx.letterSpacing = '0';
+    const m = multOf(combo);
+    if (m>1 && S.skin==='yunxi'){ ctx.font = thin(H*0.03, 400); ctx.fillStyle = 'rgba(253,190,90,.9)'; ctx.fillText(`×${m.toFixed(1)}`, W/2, H*0.24); }
+  }
+  // 评价词
+  for (const w of words){
+    const age = t-w.at, life = w.big ? 1.2 : 0.45; if (age > life) continue;
+    if (S.skin==='yunxi') judgeWordYunxi(w, age/life); else judgeWordPlain(w, age/life);
+  }
+  words = words.filter(w => t-w.at <= 1.3);
+  ctx.restore();
+}
+
+// 评价词（原味）：细体、居中、淡出
+function judgeWordPlain(w, k){
+  if (!w.big) return;
+  ctx.save(); ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.globalAlpha = 1-k; ctx.font = `300 ${Math.round(H*0.06)}px system-ui,sans-serif`;
+  ctx.fillStyle='rgba(232,237,245,.95)'; ctx.fillText(w.text.toUpperCase(), W/2, H*0.36 - k*H*0.02);
+  ctx.restore();
+}
+// 评价词（云曦）：照老板的参考图 —— 粗斜体白字 + 深色细描边 + 黄/橙/蓝三道斜线 + 星点
+function judgeWordYunxi(w, k){
+  const inK = Math.min(1, k*6), pop = 1 + 0.25*(1-inK)*(1-inK);           // 砸进来：大 → 正常
+  const out = k > 0.72 ? (k-0.72)/0.28 : 0;                                // 最后 28% 上飘淡出
+  const size = H*(w.big ? 0.13 : 0.055), y = H*(w.big ? 0.42 : 0.50) - out*H*0.05;
+  ctx.save();
+  ctx.globalAlpha = (1-out) * (w.miss ? 0.75 : 1);
+  ctx.translate(W/2, y); ctx.scale(pop,pop); ctx.transform(1,0,-0.22,1,0,0);   // 斜体的「斜」用变换做，字体不一定有
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.font = `800 ${Math.round(size)}px "Helvetica Neue",Arial,system-ui,sans-serif`;
+  const tw = ctx.measureText(w.text).width;
+  if (w.big){
+    // 三道斜线：黄 / 橙 / 蓝，从左下往右上，长短不一
+    const cols = ['#FDBE5A','#F97316','#3B9BF6'];
+    ctx.lineCap='round';
+    cols.forEach((c,i) => {
+      const off = (i-1)*size*0.55, len = size*(1.4-0.3*i), a = (0.55+0.35*(1-inK));
+      ctx.strokeStyle = hexA(c, a*(1-out)); ctx.lineWidth = 2 + i*0.5;
+      ctx.beginPath(); ctx.moveTo(-tw/2 - size*0.3 + off, size*0.45 + i*size*0.08); ctx.lineTo(-tw/2 - size*0.3 + off + len, size*0.45 - len*0.8 + i*size*0.08); ctx.stroke();
+    });
+    // 星点
+    ctx.fillStyle = hexA('#F97316', .9*(1-out)); ctx.beginPath(); ctx.arc(tw/2 + size*0.35, -size*0.4, size*0.05, 0, 6.283); ctx.fill();
+    ctx.fillStyle = hexA('#3B9BF6', .9*(1-out)); ctx.beginPath(); ctx.arc(-tw/2 - size*0.5, size*0.25, size*0.035, 0, 6.283); ctx.fill();
+    star(tw/2 + size*0.15, size*0.35, size*0.08, hexA('#FFFFFF', .95*(1-out)));
+  }
+  // 字：深色细描边 + 白填充（描边在下）
+  ctx.lineJoin='round'; ctx.strokeStyle = w.miss ? 'rgba(229,72,77,.9)' : 'rgba(20,24,34,.85)'; ctx.lineWidth = size*0.06;
+  ctx.strokeText(w.text, 0, 0);
+  ctx.fillStyle = w.miss ? '#E5484D' : '#FFFFFF'; ctx.fillText(w.text, 0, 0);
+  // 首字母一抹橙（参考图里 P / A 的第一笔是橙的）
+  if (w.big){
+    ctx.save(); ctx.beginPath(); ctx.rect(-tw/2, -size*0.5, size*0.32, size); ctx.clip();
+    ctx.fillStyle = '#F97316'; ctx.fillText(w.text, 0, 0); ctx.restore();
+  }
+  ctx.restore();
+}
+function star(x,y,r,fill){
+  ctx.save(); ctx.fillStyle=fill; ctx.beginPath();
+  for (let i=0;i<8;i++){ const a=i*Math.PI/4, rr_=(i%2?r*0.35:r); ctx.lineTo(x+Math.cos(a)*rr_, y+Math.sin(a)*rr_); }
+  ctx.closePath(); ctx.fill(); ctx.restore();
+}
+function rr(x,y,w,h,r,fill){
+  if (w<=0||h<=0) return; r=Math.min(r,w/2,h/2);
+  ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
+  ctx.fillStyle=fill; ctx.fill();
+}
+
+// ── 面板 ──
+const panel = document.getElementById('panel');
+document.getElementById('gear').onclick = () => panel.classList.toggle('open');
+function segButtons(id, items, cur, onPick){
+  const box = document.getElementById(id); box.innerHTML='';
+  items.forEach(([val,name]) => {
+    const b = document.createElement('button'); b.textContent = name;
+    b.classList.toggle('on', val===cur());
+    b.onclick = () => { onPick(val); [...box.children].forEach(c=>c.classList.remove('on')); b.classList.add('on'); save(); };
+    box.appendChild(b);
+  });
+}
+segButtons('skin', Object.entries(SKINS).map(([k,v])=>[k,v.name]), ()=>S.skin, v=>{ S.skin=v; bgHeatDrawn=-1; });
+segButtons('auto', [[false,'我来打'],[true,'自动打']], ()=>S.auto, v=>{ S.auto=v; });
+const SLIDERS = ['fxScale','particles','fxLife','heat','heatMax','bgGain','noteHscale','tilt','tiltBack','sway','noteW','approach','density'];
+const INT = new Set(['particles','heatMax']);
+function syncSliders(){
+  SLIDERS.forEach(id => { const el=document.getElementById(id); el.value=S[id];
+    el.parentElement.querySelector('output').textContent = INT.has(id) ? String(S[id]) : (+S[id]).toFixed(2); });
+}
+SLIDERS.forEach(id => { const el=document.getElementById(id); el.oninput = () => { S[id]=+el.value; syncSliders(); save(); }; });
+function save(){ try{ localStorage.setItem('yxi-rhythm-bench-v2', JSON.stringify(S)); }catch(e){} }
+try{ const raw=localStorage.getItem('yxi-rhythm-bench-v2'); if (raw) Object.assign(S, JSON.parse(raw)); }catch(e){}
+S.auto = new URLSearchParams(location.search).has('auto') || S.auto;
+if (new URLSearchParams(location.search).get('skin')) S.skin = new URLSearchParams(location.search).get('skin');
+syncSliders();
+segButtons('skin', Object.entries(SKINS).map(([k,v])=>[k,v.name]), ()=>S.skin, v=>{ S.skin=v; bgHeatDrawn=-1; });
+segButtons('auto', [[false,'我来打'],[true,'自动打']], ()=>S.auto, v=>{ S.auto=v; });
+
+document.getElementById('copy').onclick = async () => {
+  const txt = [
+    `云曦节拍 · 试验台设置（皮肤=${SKINS[S.skin].name}）`,
+    `爆点 大小=${S.fxScale} 粒子=${S.particles} 时长=${S.fxLife}s`,
+    `热度 强度=${S.heat} 满热连击=${S.heatMax}`,
+    `校准线 摆动=${S.tilt} 回正=${S.tiltBack} 谱面摆动=${S.sway}`,
+    `音符 宽度=${S.noteW} 下落=${S.approach}s 密度=${S.density}`,
+  ].join('\n');
+  const el = document.getElementById('done');
+  try{ await navigator.clipboard.writeText(txt); el.textContent='复制好了，发给我就行'; }
+  catch(e){ el.textContent = txt; }
+};
+
+resize(); requestAnimationFrame(draw);
+</script>
+</body>
+</html>

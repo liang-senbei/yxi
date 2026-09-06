@@ -72,12 +72,1764 @@
 
   <h3>音符</h3>
   <div class="row"><label>宽度</label><input type="range" id="noteW" min="0.6" max="1.6" step="0.05"><output></output></div>
+  <div class="row"><label>高度</label><input type="range" id="noteHscale" min="1" max="4" step="0.1"><output></output></div>
+  <p class="note">高度拉到 3~4 就是「钢琴块」的比例 —— 碎裂特效是按块设计的，薄片上和块上你都看一眼。</p>
   <div class="row"><label>下落时长 秒</label><input type="range" id="approach" min="0.5" max="2.5" step="0.05"><output></output></div>
   <div class="row"><label>密度</label><input type="range" id="density" min="0.4" max="2.5" step="0.05"><output></output></div>
 
   <button id="copy">复制这组设置</button>
   <div id="done"></div>
 </div>
+
+<script>
+/* ── shatter/glass.js ── */
+// design/shatter/glass.js —— 钢琴块碎裂特效 × 5：玻璃 / 水晶 / 冰
+// 契约：draw(ctx, tile, t, rng)。t∈[0,1]，rng 每帧按 seed 重置。
+// 每个特效里所有 rng() 都在「几何生成」段调用、与 t 无关，所以任意 t 单独画一帧也一致；闭包里不存状态。
+(() => {
+'use strict';
+const TAU = Math.PI * 2, WH = [255, 255, 255], BK = [0, 0, 0];
+const clamp01 = v => v < 0 ? 0 : v > 1 ? 1 : v;
+const outQ = v => 1 - (1 - v) * (1 - v);
+const outC = v => 1 - (1 - v) ** 3;
+const hex = c => [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)];
+const mix = (c, k, to) => [c[0] + (to[0] - c[0]) * k | 0, c[1] + (to[1] - c[1]) * k | 0, c[2] + (to[2] - c[2]) * k | 0];
+const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${clamp01(a)})`;
+const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
+function path(ctx, pts) { ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]); ctx.closePath(); }
+function centroid(pts) { let x = 0, y = 0; for (const p of pts) { x += p[0]; y += p[1]; } return [x / pts.length, y / pts.length]; }
+// 冲击点到方块四角的最远距离
+const farCorner = (px, py, x, y, w, h) => Math.max(dist(px, py, x, y), dist(px, py, x + w, y), dist(px, py, x, y + h), dist(px, py, x + w, y + h));
+// 从 (px,py) 沿 (dx,dy) 射线打到矩形边界：[hx, hy, 周长参数 s（从左上角起顺时针）, 距离]
+function hitRect(px, py, dx, dy, x, y, w, h) {
+  const tx = dx > 0 ? (x + w - px) / dx : dx < 0 ? (x - px) / dx : Infinity;
+  const ty = dy > 0 ? (y + h - py) / dy : dy < 0 ? (y - py) / dy : Infinity;
+  const d = Math.min(tx, ty), hx = px + dx * d, hy = py + dy * d;
+  const s = tx < ty ? (dx > 0 ? w + (hy - y) : 2 * w + h + (y + h - hy)) : (dy > 0 ? w + h + (x + w - hx) : hx - x);
+  return [hx, hy, s, d];
+}
+
+// ① 碎玻璃：径向 + 环状裂纹先铺开，随后整块碎成不规则块，块面随翻转明暗变化（折射高光）
+function glass(ctx, tile, t, rng) {
+  const { x, y, w, h } = tile, base = hex(tile.color);
+  const px = x + w * (.3 + .4 * rng()), py = y + h * (.3 + .4 * rng());
+  const n = 9, F = Math.min(w, h) < 70 ? [.3, .62] : [.2, .45, .72], K = F.length, P = 2 * (w + h);
+  const sp = [];
+  for (let i = 0; i < n; i++) {
+    const a = i * TAU / n + (rng() - .5) * .5, dx = Math.cos(a), dy = Math.sin(a);
+    const [hx, hy, s, d] = hitRect(px, py, dx, dy, x, y, w, h);
+    sp.push({ dx, dy, hx, hy, s, d, g: 1 + .3 * rng(), pts: F.map(f => { const r = d * f * (.85 + .3 * rng()); return [px + dx * r, py + dy * r]; }) });
+  }
+  const corner = s => s === 0 ? [x, y] : s === w ? [x + w, y] : s === w + h ? [x + w, y + h] : [x, y + h];
+  const pieces = [{ pts: sp.map(s => s.pts[0]), ring: 0 }];
+  for (let i = 0; i < n; i++) {
+    const A = sp[i], B = sp[(i + 1) % n];
+    for (let k = 1; k < K; k++) pieces.push({ pts: [A.pts[k - 1], B.pts[k - 1], B.pts[k], A.pts[k]], ring: k });
+    let a = A.s, b = B.s; if (b <= a) b += P;   // 最外圈：沿周长把两条辐射线之间的角点补进来
+    const cs = [];
+    for (const c of [0, w, w + h, 2 * w + h]) { if (c > a && c < b) cs.push(c); if (c + P > a && c + P < b) cs.push(c + P); }
+    cs.sort((u, v) => v - u);
+    pieces.push({ pts: [A.pts[K - 1], B.pts[K - 1], [B.hx, B.hy], ...cs.map(c => corner(c % P)), [A.hx, A.hy]], ring: K });
+  }
+  for (const p of pieces) { p.v = .5 + .5 * rng(); p.rot = (rng() - .5) * 3; p.ph = rng() * TAU; p.dl = rng() * .04; }
+
+  const tc = .12;
+  ctx.lineJoin = ctx.lineCap = 'round'; ctx.lineWidth = 1;
+  if (t < tc) {
+    ctx.fillStyle = tile.color; ctx.fillRect(x, y, w, h);
+    const g = outC(t / tc);
+    ctx.strokeStyle = rgba(WH, .85); ctx.beginPath();
+    for (const s of sp) { const r = s.d * Math.min(1, g * s.g); ctx.moveTo(px, py); ctx.lineTo(px + s.dx * r, py + s.dy * r); }
+    ctx.stroke();
+    for (let k = 0; k < K; k++) {
+      const a = clamp01((g * 1.15 - F[k]) / .15); if (!a) continue;
+      ctx.strokeStyle = rgba(WH, .7 * a); path(ctx, sp.map(s => s.pts[k])); ctx.stroke();
+    }
+    ctx.fillStyle = rgba(WH, .9 * (1 - t / tc)); ctx.beginPath(); ctx.arc(px, py, Math.min(w, h) * (.03 + .06 * g), 0, TAU); ctx.fill();
+    return;
+  }
+  const G = .55 * h, S = .32 * Math.max(w, h), facet = clamp01((t - tc) / .1);
+  for (const p of pieces) {
+    const t0 = tc + p.ring * .045 + p.dl, tau = clamp01((t - t0) / (1 - t0));
+    const [cx, cy] = centroid(p.pts), dd = dist(cx, cy, px, py) || 1, ux = (cx - px) / dd, uy = (cy - py) / dd;
+    const fl = outC(tau) * S * p.v * (1.2 - .6 * p.ring / K), a = (1 - tau) ** 1.5, rot = p.rot * outQ(tau), sc = 1 - .15 * tau;
+    ctx.save();
+    ctx.translate(cx + ux * fl, cy + uy * fl + G * tau * tau); ctx.rotate(rot); ctx.scale(sc, sc); ctx.translate(-cx, -cy);
+    path(ctx, p.pts);
+    const lit = Math.sin(p.ph + rot * 4) * facet;
+    ctx.fillStyle = rgba(lit > 0 ? mix(base, .45 * lit * lit, WH) : mix(base, .22 * lit * lit, BK), .95 * a); ctx.fill();
+    ctx.strokeStyle = rgba(WH, .45 * a); ctx.stroke();
+    ctx.restore();
+  }
+}
+
+// ② 冰裂：裂纹像冰面一样带霜慢慢蔓延、长出枝杈，蔓延到边后冰片一块块沉落
+function ice(ctx, tile, t, rng) {
+  const { x, y, w, h } = tile, base = hex(tile.color);
+  const px = x + w * (.3 + .4 * rng()), py = y + h * (.3 + .4 * rng());
+  const cols = Math.max(2, Math.round(w / 40)), rows = Math.max(2, Math.round(h / 40)), cw = w / cols, ch = h / rows, cell = Math.min(cw, ch);
+  const N = [], HM = [], VM = [];   // 抖动网格节点 + 每条格边的中点（边界上的点只沿边界抖）
+  for (let r = 0; r <= rows; r++) { N[r] = []; for (let c = 0; c <= cols; c++) {
+    const bx = c === 0 || c === cols, by = r === 0 || r === rows;
+    N[r][c] = [x + c * cw + (bx ? 0 : (rng() - .5) * .5 * cw), y + r * ch + (by ? 0 : (rng() - .5) * .5 * ch)];
+  } }
+  for (let r = 0; r <= rows; r++) { HM[r] = []; for (let c = 0; c < cols; c++) {
+    const A = N[r][c], B = N[r][c + 1], bd = r === 0 || r === rows;
+    HM[r][c] = [(A[0] + B[0]) / 2 + (rng() - .5) * .2 * cw, (A[1] + B[1]) / 2 + (bd ? 0 : (rng() - .5) * .35 * ch)];
+  } }
+  for (let r = 0; r < rows; r++) { VM[r] = []; for (let c = 0; c <= cols; c++) {
+    const A = N[r][c], B = N[r + 1][c], bd = c === 0 || c === cols;
+    VM[r][c] = [(A[0] + B[0]) / 2 + (bd ? 0 : (rng() - .5) * .35 * cw), (A[1] + B[1]) / 2 + (rng() - .5) * .2 * ch];
+  } }
+  const segs = [], br = [];
+  const addEdge = (A, M, B, ang) => {
+    segs.push([A, M], [M, B]);
+    const a = ang + (rng() - .5) * 1.2, l = (.15 + .25 * rng()) * cell;
+    br.push([M, [M[0] + Math.cos(a) * l, M[1] + Math.sin(a) * l]]);
+  };
+  for (let r = 1; r < rows; r++) for (let c = 0; c < cols; c++) addEdge(N[r][c], HM[r][c], N[r][c + 1], rng() < .5 ? -Math.PI / 2 : Math.PI / 2);
+  for (let c = 1; c < cols; c++) for (let r = 0; r < rows; r++) addEdge(N[r][c], VM[r][c], N[r + 1][c], rng() < .5 ? 0 : Math.PI);
+  const cells = [];
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const pts = [N[r][c], HM[r][c], N[r][c + 1], VM[r][c + 1], N[r + 1][c + 1], HM[r + 1][c], N[r + 1][c], VM[r][c]];
+    const [cx, cy] = centroid(pts);
+    cells.push({ pts, cx, cy, d: dist(cx, cy, px, py), dl: rng() * .06, rot: (rng() - .5) * .5, dr: rng() - .5 });
+  }
+  const dust = [];
+  for (let i = 0; i < 20; i++) dust.push({ ox: x + rng() * w, oy: y + rng() * h, ts: .4 + rng() * .25, ph: rng() * TAU, r: .6 + rng() * 1.2 });
+
+  const tA = .38, Dm = farCorner(px, py, x, y, w, h), R = outQ(Math.min(1, t / tA)) * Dm * 1.05;
+  ctx.lineJoin = ctx.lineCap = 'round';
+  const seg = (A, B) => {   // 从离冲击点近的一端向远端生长
+    const da = dist(A[0], A[1], px, py), db = dist(B[0], B[1], px, py);
+    const [nr, fr, dn, df] = da <= db ? [A, B, da, db] : [B, A, db, da];
+    const k = clamp01((R - dn) / (df - dn + 1e-6)); if (!k) return;
+    ctx.moveTo(nr[0], nr[1]); ctx.lineTo(nr[0] + (fr[0] - nr[0]) * k, nr[1] + (fr[1] - nr[1]) * k);
+  };
+  const bseg = (M, E) => {
+    const k = clamp01((R - dist(M[0], M[1], px, py)) / (cell * .5)); if (!k) return;
+    ctx.moveTo(M[0], M[1]); ctx.lineTo(M[0] + (E[0] - M[0]) * k, M[1] + (E[1] - M[1]) * k);
+  };
+  if (t < tA) {
+    ctx.fillStyle = tile.color; ctx.fillRect(x, y, w, h);
+    ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();   // 霜从冲击点晕开
+    ctx.fillStyle = rgba(WH, .1); ctx.beginPath(); ctx.arc(px, py, R, 0, TAU); ctx.fill();
+    ctx.fillStyle = rgba(WH, .08); ctx.beginPath(); ctx.arc(px, py, R * .55, 0, TAU); ctx.fill();
+    ctx.restore();
+    ctx.beginPath();
+    for (const [A, B] of segs) seg(A, B);
+    for (const [M, E] of br) bseg(M, E);
+    ctx.lineWidth = 4; ctx.strokeStyle = rgba(WH, .1); ctx.stroke();
+    ctx.lineWidth = 1; ctx.strokeStyle = rgba(WH, .8); ctx.stroke();
+    return;
+  }
+  const fb = clamp01(1 - (t - tA) / .15);   // 枝杈裂纹随崩落淡出
+  if (fb) { ctx.beginPath(); for (const [M, E] of br) bseg(M, E); ctx.lineWidth = 1; ctx.strokeStyle = rgba(WH, .8 * fb); ctx.stroke(); }
+  ctx.lineWidth = 1;
+  for (const c of cells) { const t0 = tA + c.d / Dm * .18 + c.dl; c.tau = clamp01((t - t0) / (1 - t0)); }
+  for (const c of [...cells.filter(c => !c.tau), ...cells.filter(c => c.tau)]) {   // 在落的画在前面
+    const tau = c.tau, a = (1 - tau) ** 1.25;
+    ctx.save();
+    if (tau) { ctx.translate(c.cx + c.dr * .12 * w * tau, c.cy + .8 * h * tau * tau); ctx.rotate(c.rot * tau); ctx.translate(-c.cx, -c.cy); }
+    path(ctx, c.pts);
+    ctx.fillStyle = rgba(mix(base, .18 + .2 * tau, WH), .95 * a); ctx.fill();
+    ctx.strokeStyle = rgba(WH, .6 * a); ctx.stroke();
+    ctx.restore();
+  }
+  for (const d of dust) {
+    const tp = clamp01((t - d.ts) / (1 - d.ts)); if (!tp) continue;
+    ctx.fillStyle = rgba(WH, .8 * Math.sin(Math.PI * tp));
+    ctx.beginPath(); ctx.arc(d.ox + Math.sin(tp * 5 + d.ph) * cell * .08, d.oy + .5 * h * tp * tp, d.r * cell / 40, 0, TAU); ctx.fill();
+  }
+}
+
+// ③ 水晶棱柱：方块闪白后收缩消散，细长棱柱从中四散，棱面一亮一暗，伴随星点
+function prism(ctx, tile, t, rng) {
+  const { x, y, w, h } = tile, base = hex(tile.color), cx = x + w / 2, cy = y + h / 2, M = Math.max(w, h), m = Math.min(w, h);
+  const n = Math.max(24, Math.min(60, Math.round(w * h / 500)));
+  const sh = [];
+  for (let i = 0; i < n; i++) {
+    const ox = cx + (rng() - .5) * .8 * w, oy = cy + (rng() - .5) * .8 * h;
+    const ang = Math.atan2(oy - cy, ox - cx) + (rng() - .5) * .8;
+    const L = Math.max(6, (.1 + .2 * rng()) * m);
+    sh.push({ ox, oy, ux: Math.cos(ang), uy: Math.sin(ang), v: (.35 + .65 * rng()) * .5 * M, L, Wd: L * (.22 + .16 * rng()), dl: .08 * rng(), spin: (rng() - .5) * 5, a0: ang + (rng() - .5) * .6, ph: rng() * TAU });
+  }
+  const sp = [];
+  for (let i = 0; i < 36; i++) sp.push({ x: cx + (rng() - .5) * 1.15 * w, y: cy + (rng() - .5) * 1.15 * h, ts: .05 + .5 * rng(), s: (1.5 + 2.5 * rng()) * M / 160 });
+
+  const tk = .3;
+  if (t < tk) {   // 本体：闪白 → 缩小消散
+    const k = t / tk, s = 1 - .2 * k * k;
+    ctx.save(); ctx.translate(cx, cy); ctx.scale(s, s); ctx.translate(-cx, -cy);
+    ctx.fillStyle = rgba(mix(base, Math.max(0, 1 - t / .08) * .8, WH), (1 - k) ** 1.2); ctx.fillRect(x, y, w, h);
+    ctx.restore();
+  }
+  const G = .35 * h;
+  ctx.lineWidth = .8; ctx.lineJoin = 'round';
+  for (const s of sh) {
+    const tau = clamp01((t - s.dl) / (1 - s.dl)); if (!tau) continue;
+    const a = (1 - tau) ** 1.3, f = outC(tau) * s.v, ang = s.a0 + s.spin * tau, sc = 1 - .3 * tau;
+    const L = s.L, Wd = s.Wd, e = L * .22, g = Math.max(0, Math.sin(ang * 2 + s.ph)) ** 6;
+    ctx.save(); ctx.translate(s.ox + s.ux * f, s.oy + s.uy * f + G * tau * tau); ctx.rotate(ang); ctx.scale(sc, sc);
+    ctx.beginPath(); ctx.moveTo(-L / 2, 0); ctx.lineTo(-L / 2 + e, -Wd / 2); ctx.lineTo(L / 2 - e, -Wd / 2); ctx.lineTo(L / 2, 0); ctx.closePath();
+    ctx.fillStyle = rgba(mix(base, .45 + .5 * g, WH), a); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(-L / 2, 0); ctx.lineTo(L / 2, 0); ctx.lineTo(L / 2 - e, Wd / 2); ctx.lineTo(-L / 2 + e, Wd / 2); ctx.closePath();
+    ctx.fillStyle = rgba(mix(base, .35, BK), a); ctx.fill();
+    ctx.strokeStyle = rgba(WH, .7 * a); ctx.beginPath(); ctx.moveTo(-L / 2, 0); ctx.lineTo(L / 2, 0); ctx.stroke();
+    ctx.restore();
+  }
+  for (const p of sp) {
+    const k = clamp01((t - p.ts) / .22); if (!k || k === 1) continue;
+    const a = Math.sin(Math.PI * k), s = p.s * (.6 + .4 * a), q = s * .28;
+    ctx.fillStyle = rgba(WH, .9 * a);
+    ctx.beginPath(); ctx.moveTo(p.x, p.y - s); ctx.lineTo(p.x + q, p.y - q); ctx.lineTo(p.x + s, p.y); ctx.lineTo(p.x + q, p.y + q);
+    ctx.lineTo(p.x, p.y + s); ctx.lineTo(p.x - q, p.y + q); ctx.lineTo(p.x - s, p.y); ctx.lineTo(p.x - q, p.y - q); ctx.closePath(); ctx.fill();
+  }
+}
+
+// ④ 薄玻璃：从点击点瞬间炸开，冲击波环扫过，上百片半透明小三角翻着飞，侧面对光时一闪
+function thin(ctx, tile, t, rng) {
+  const { x, y, w, h } = tile, base = hex(tile.color), M = Math.max(w, h);
+  const px = x + w * (.25 + .5 * rng()), py = y + h * (.25 + .5 * rng());
+  const cell = Math.max(12, Math.min(24, Math.min(w, h) / 7));
+  const cols = Math.max(2, Math.round(w / cell)), rows = Math.max(2, Math.round(h / cell)), cw = w / cols, ch = h / rows;
+  const N = [];
+  for (let r = 0; r <= rows; r++) { N[r] = []; for (let c = 0; c <= cols; c++) {
+    const bx = c === 0 || c === cols, by = r === 0 || r === rows;
+    N[r][c] = [x + c * cw + (bx ? 0 : (rng() - .5) * .55 * cw), y + r * ch + (by ? 0 : (rng() - .5) * .55 * ch)];
+  } }
+  const tris = [], Dm = farCorner(px, py, x, y, w, h);
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const a = N[r][c], b = N[r][c + 1], d = N[r + 1][c + 1], e = N[r + 1][c];
+    for (const pts of (rng() < .5 ? [[a, b, d], [a, d, e]] : [[a, b, e], [b, d, e]])) {
+      const [cx, cy] = centroid(pts);
+      tris.push({ pts, cx, cy, dd: dist(cx, cy, px, py), ja: (rng() - .5) * 1.6, v: .08 + .92 * rng() ** 1.6, rot: (rng() - .5) * 4, w0: 3 + 5 * rng(), ph: rng() * TAU, dl: rng() * .03 });
+    }
+  }
+
+  const G = .85 * h, S = .5 * M;
+  ctx.lineWidth = .8; ctx.lineJoin = 'round';
+  for (const q of tris) {
+    const t0 = .03 + .1 * q.dd / Dm + q.dl, tau = clamp01((t - t0) / (1 - t0)), a = (1 - tau) ** 1.5;
+    ctx.save();
+    if (tau) {
+      const dd = q.dd || 1, an = Math.atan2(q.cy - py, q.cx - px) + q.ja * (1 - q.dd / Dm), ux = Math.cos(an), uy = Math.sin(an), f = outC(tau) * S * q.v * (1.15 - .55 * q.dd / Dm), sc = 1 + .45 * tau * (1 - q.dd / Dm);
+      let fl = Math.cos(q.ph + q.w0 * tau); if (Math.abs(fl) < .05) fl = fl < 0 ? -.05 : .05;   // 绕自身轴翻转，侧面时压成一条线
+      ctx.translate(q.cx + ux * f, q.cy + uy * f + G * tau * tau); ctx.rotate(q.rot * tau); ctx.scale(sc, sc * fl); ctx.translate(-q.cx, -q.cy);
+      const g = Math.max(0, Math.sin(q.ph * 1.7 + q.w0 * tau)) ** 12;
+      path(ctx, q.pts);
+      ctx.fillStyle = rgba(mix(base, g, WH), (.45 + .5 * g) * a); ctx.fill();
+      ctx.strokeStyle = rgba(WH, .6 * a); ctx.stroke();
+    } else {   // 还没脱离：按原色描边，拼起来就是完整方块
+      path(ctx, q.pts); ctx.fillStyle = ctx.strokeStyle = tile.color; ctx.fill(); ctx.stroke();
+    }
+    ctx.restore();
+  }
+  if (t < .3) {   // 冲击波环 + 点击闪光，限制在方块内
+    const k = t / .3;
+    ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+    ctx.lineWidth = 1.5 - k; ctx.strokeStyle = rgba(WH, .5 * (1 - k) ** 2); ctx.beginPath(); ctx.arc(px, py, outC(k) * Dm * 1.1, 0, TAU); ctx.stroke();
+    if (t < .1) { const r = Math.min(w, h) * (.05 + .1 * t / .1), g = ctx.createRadialGradient(px, py, 0, px, py, r); g.addColorStop(0, rgba(WH, .8 * (1 - t / .1))); g.addColorStop(1, rgba(WH, 0)); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(px, py, r, 0, TAU); ctx.fill(); }
+    ctx.restore();
+  }
+}
+
+// ⑤ 冰凌：竖向锯齿裂缝从点击处向两侧蔓延，冰条从点击处起一根根弹起再坠落
+function icicle(ctx, tile, t, rng) {
+  const { x, y, w, h } = tile, base = hex(tile.color);
+  const n = Math.max(4, Math.min(12, Math.round(w / 15))), m = Math.max(2, Math.min(6, Math.round(h / 45))), sw = w / n, sh = h / m;
+  const ix = x + w * (.2 + .6 * rng());
+  const lines = [];
+  for (let j = 0; j <= n; j++) {
+    const bd = j === 0 || j === n, pts = [];
+    for (let k = 0; k <= m; k++) pts.push([x + j * sw + (bd ? 0 : (rng() - .5) * .6 * sw), y + k * sh + (bd || k === 0 || k === m ? 0 : (rng() - .5) * .6 * sh)]);
+    lines.push(pts);
+  }
+  const strips = [];
+  for (let j = 0; j < n; j++) {
+    const cx = x + (j + .5) * sw, side = cx < ix ? -1 : 1;
+    strips.push({ pts: [...lines[j], ...lines[j + 1].slice().reverse()], cx, cy: y + h / 2, side, dx: Math.abs(cx - ix), rot: side * (.1 + .25 * rng()), dl: rng() * .04, hx: cx - sw * .5 + (.35 + .3 * rng()) * sw });
+  }
+
+  const tc = .12, R = outQ(Math.min(1, t / tc)) * w;
+  ctx.lineJoin = ctx.lineCap = 'round'; ctx.lineWidth = 1;
+  if (t < tc) {
+    ctx.fillStyle = tile.color; ctx.fillRect(x, y, w, h);
+    for (let j = 1; j < n; j++) {
+      const a = clamp01((R - Math.abs(x + j * sw - ix)) / (sw * 1.5)); if (!a) continue;
+      const L = lines[j];
+      ctx.strokeStyle = rgba(WH, .8 * a); ctx.beginPath(); ctx.moveTo(L[0][0], L[0][1]); for (let k = 1; k <= m; k++) ctx.lineTo(L[k][0], L[k][1]); ctx.stroke();
+    }
+    return;
+  }
+  const gr = ctx.createLinearGradient(0, y, 0, y + h);
+  gr.addColorStop(0, rgba(mix(base, .4, WH), 1)); gr.addColorStop(1, rgba(mix(base, .08, BK), 1));
+  for (const s of strips) {
+    const t0 = tc + Math.min(1, s.dx / (w * .5)) * .3 + s.dl, tau = clamp01((t - t0) / (1 - t0));
+    ctx.save();
+    ctx.globalAlpha = (1 - tau) ** 1.6;
+    if (tau) { ctx.translate(s.cx + s.side * .08 * w * tau, s.cy - .4 * h * tau + 1.05 * h * tau * tau); ctx.rotate(s.rot * tau); ctx.translate(-s.cx, -s.cy); }
+    path(ctx, s.pts);
+    ctx.fillStyle = gr; ctx.fill();
+    ctx.strokeStyle = rgba(WH, tau ? .55 : .4); ctx.stroke();
+    ctx.strokeStyle = rgba(WH, .22); ctx.beginPath(); ctx.moveTo(s.hx, y + h * .08); ctx.lineTo(s.hx, y + h * .7); ctx.stroke();   // 竖向高光
+    ctx.restore();
+  }
+}
+
+window.SHATTER = window.SHATTER || [];
+window.SHATTER.push(
+  { name: '碎玻璃', desc: '径向裂纹先铺开，再碎成不规则块，块面翻转时折射高光', draw: (ctx, tile, t, rng) => glass(ctx, tile, clamp01(t), rng) },
+  { name: '冰裂', desc: '裂纹像冰面一样带霜慢慢蔓延，长出枝杈，蔓延到边后冰片一块块沉落', draw: (ctx, tile, t, rng) => ice(ctx, tile, clamp01(t), rng) },
+  { name: '水晶棱柱', desc: '闪白后收缩消散，细长棱柱四散，棱面一亮一暗，伴随星点', draw: (ctx, tile, t, rng) => prism(ctx, tile, clamp01(t), rng) },
+  { name: '薄玻璃', desc: '从点击点瞬间炸开，冲击波扫过，半透明小片翻着飞、侧面对光一闪', draw: (ctx, tile, t, rng) => thin(ctx, tile, clamp01(t), rng) },
+  { name: '冰凌', desc: '竖向锯齿裂缝向两侧蔓延，冰条从点击处起一根根弹起坠落', draw: (ctx, tile, t, rng) => icicle(ctx, tile, clamp01(t), rng) },
+);
+})();
+
+</script>
+<script>
+/* ── shatter/light.js ── */
+// 钢琴块碎裂特效 · 光 / 能量 / 数字化 · 5 个
+// 契约：draw(ctx, tile, t, rng)，tile={x,y,w,h,color,seed}，t∈[0,1]，rng 每帧同序列，函数内不存状态。
+(() => {
+  const hex = c => [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)];
+  // k>0 向白混，k<0 向黑混
+  const rgba = (c, a, k = 0) => {
+    const f = k > 0 ? v => v + (255 - v) * k : v => v * (1 + k);
+    return `rgba(${f(c[0]) | 0},${f(c[1]) | 0},${f(c[2]) | 0},${a < 0 ? 0 : a > 1 ? 1 : a})`;
+  };
+  const clamp01 = v => v < 0 ? 0 : v > 1 ? 1 : v;
+  const outQuad = x => 1 - (1 - x) * (1 - x);
+  const outCubic = x => 1 - (1 - x) ** 3;
+  const TAU = Math.PI * 2;
+  // 起手一闪：0 → 峰值(0.06) → 0.22 熄
+  const flash = t => t < 0.06 ? t / 0.06 : clamp01(1 - (t - 0.06) / 0.16);
+  // 三层描线仿霓虹辉光（比 shadowBlur 便宜得多）
+  const glowStroke = (ctx, c, a, lw) => {
+    ctx.strokeStyle = rgba(c, a * 0.28); ctx.lineWidth = lw * 4; ctx.stroke();
+    ctx.strokeStyle = rgba(c, a * 0.7, 0.35); ctx.lineWidth = lw * 1.4; ctx.stroke();
+    ctx.strokeStyle = rgba(c, a, 0.95); ctx.lineWidth = lw * 0.6; ctx.stroke();
+  };
+
+  window.SHATTER = window.SHATTER || [];
+
+  // 1 ─────────────────────────────────────────────── 溶解成光
+  window.SHATTER.push({
+    name: '溶解成光',
+    desc: '溶解前沿自上而下扫过，方块化作光点缓缓上浮',
+    draw(ctx, tile, t, rng) {
+      const { x, y, w, h } = tile, c = hex(tile.color), s = Math.min(w, h) / 100;
+      const N = 180, P = [];
+      for (let i = 0; i < N; i++) P.push([rng(), rng(), rng(), rng(), rng(), rng()]);
+      const F = tt => outQuad(clamp01(tt / 0.85)); // 前沿走过的高度比例
+      const f = flash(t), top = y + F(t) * h;
+      if (top < y + h) {
+        ctx.fillStyle = rgba(c, 1 - t * t * 0.4, f * 0.6);
+        ctx.fillRect(x, top, w, y + h - top);
+        // 前沿亮边
+        const gh = Math.min(22, h * 0.3, y + h - top);
+        const g = ctx.createLinearGradient(0, top, 0, top + gh);
+        g.addColorStop(0, rgba(c, 0.9 * (1 - t), 0.95));
+        g.addColorStop(1, rgba(c, 0, 0.95));
+        ctx.fillStyle = g;
+        ctx.fillRect(x, top, w, gh);
+      }
+      ctx.globalCompositeOperation = 'lighter';
+      for (const [u, v, sp, sz, wh, dr] of P) {
+        const tb = u * 0.8; // 出生 = 前沿经过之时
+        if (t < tb) continue;
+        const age = (t - tb) / (1 - tb);
+        const e = outCubic(age);
+        const px = x + v * w + (dr - 0.5) * 14 * s * e;
+        const py = y + F(tb) * h - (0.25 + sp * 0.75) * h * 0.45 * e;
+        const a = (1 - age) ** 1.5;
+        if (a < 0.02) continue;
+        ctx.fillStyle = rgba(c, a, 0.15 + (0.3 + wh * 0.6) * (1 - age)); // 初生白热，渐冷回本色
+        ctx.beginPath(); ctx.arc(px, py, (0.5 + sz * sz * 1.6) * s, 0, TAU); ctx.fill();
+      }
+    }
+  });
+
+  // 2 ─────────────────────────────────────────────── 像素熄灭
+  window.SHATTER.push({
+    name: '像素熄灭',
+    desc: '方块像素化，格子按随机次序闪白后一个个熄灭',
+    draw(ctx, tile, t, rng) {
+      const { x, y, w, h } = tile, c = hex(tile.color);
+      const cell = Math.max(8, Math.min(w, h) / 8);
+      const cols = Math.max(3, Math.round(w / cell)), rows = Math.max(2, Math.round(h / cell));
+      const cw = w / cols, ch = h / rows;
+      const gap = Math.max(1, Math.min(cw, ch) * 0.14 * clamp01(t / 0.12)); // 间隙张开 = 像素化显形
+      const f = flash(t);
+      for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+        const r1 = rng(), r2 = rng();
+        // 熄灭时刻：随机为主，略带由中心向外
+        const d = Math.hypot((i + 0.5) / cols - 0.5, (j + 0.5) / rows - 0.5) * 1.4;
+        const td = 0.1 + 0.68 * clamp01(0.75 * r1 + 0.25 * d);
+        const age = (t - td) / 0.12;
+        if (age >= 1) continue;
+        let a = 1, k = f * 0.55, sc = 1;
+        if (age > 0) {          // 闪白 → 缩小消失
+          k = 1 - age * 0.4; a = 1 - age * age; sc = 1 - age * 0.6;
+        } else if (age > -0.5) { // 临熄前先提亮预警
+          k = Math.max(k, 0.5 * r2 * (age + 0.5) * 2);
+        }
+        const sw = (cw - gap) * sc, sh = (ch - gap) * sc;
+        ctx.fillStyle = rgba(c, a, k);
+        ctx.fillRect(x + i * cw + (cw - sw) / 2, y + j * ch + (ch - sh) / 2, sw, sh);
+      }
+    }
+  });
+
+  // 3 ─────────────────────────────────────────────── 扫描消散
+  window.SHATTER.push({
+    name: '扫描消散',
+    desc: '一道扫描线自上而下掠过，扫过的行撕成光带向两侧散去',
+    draw(ctx, tile, t, rng) {
+      const { x, y, w, h } = tile, c = hex(tile.color), s = Math.min(w, h) / 100;
+      const rowH = Math.max(3, h / 36), rows = Math.ceil(h / rowH);
+      const R = [];
+      for (let j = 0; j < rows; j++) R.push([rng(), rng(), rng()]);
+      const N = 70, P = [];
+      for (let i = 0; i < N; i++) P.push([rng(), rng(), rng(), rng()]);
+      const F = tt => outQuad(clamp01(tt / 0.8)); // 扫描线进度
+      const f = flash(t), ly = y + F(t) * h;
+      // 下方完整本体
+      if (ly < y + h) {
+        ctx.fillStyle = rgba(c, 1, f * 0.6);
+        ctx.fillRect(x, ly, w, y + h - ly);
+      }
+      // 上方各行：被扫过后横向撕开、变淡
+      for (let j = 0; j < rows; j++) {
+        const [r1, r2, r3] = R[j];
+        const q = Math.min((j + 0.5) / rows, 0.999);
+        const tp = 0.8 * (1 - Math.sqrt(1 - q)); // F(tp) = q
+        if (t < tp) continue;
+        const age = clamp01((t - tp) / Math.min(0.42, 1 - tp));
+        if (age >= 1) continue;
+        const e = outCubic(age), ry = y + j * rowH, rh = Math.max(1, rowH - 1);
+        const split = w * (0.2 + r1 * 0.6), slide = e * w * (0.15 + r2 * 0.25), k = 1 - e * (0.5 + r3 * 0.3);
+        ctx.fillStyle = rgba(c, (1 - age) ** 1.6, 0.35 + (1 - age) * 0.5);
+        const lw = split * k, rw = (w - split) * k; // 两半各自缩短，裂口从撕开点张大
+        ctx.fillRect(x + split - lw - slide, ry, lw, rh);
+        ctx.fillRect(x + split + slide, ry, rw, rh);
+      }
+      // 扫描线 + 上沿光晕
+      const la = 1 - t ** 3;
+      const gh = Math.min(16, h * 0.25, ly - y);
+      const g = ctx.createLinearGradient(0, ly - gh, 0, ly);
+      g.addColorStop(0, rgba(c, 0, 0.8));
+      g.addColorStop(1, rgba(c, 0.55 * la, 0.8));
+      ctx.fillStyle = g;
+      ctx.fillRect(x, ly - gh, w, gh);
+      ctx.fillStyle = rgba(c, la, 1);
+      ctx.fillRect(x, ly - 1, w, 2);
+      // 扫过时溅起的小光粒
+      ctx.globalCompositeOperation = 'lighter';
+      for (const [u, v, sp, sz] of P) {
+        const tb = u * 0.75;
+        if (t < tb) continue;
+        const age = (t - tb) / (1 - tb), e = outCubic(age);
+        const a = (1 - age) ** 2;
+        if (a < 0.02) continue;
+        const px = x + v * w, py = y + F(tb) * h - (0.1 + sp * 0.3) * h * e;
+        const r = (0.4 + sz * sz * 0.9) * s;
+        ctx.fillStyle = rgba(c, a, 0.7);
+        ctx.fillRect(px - r, py - r, r * 2, r * 2);
+      }
+    }
+  });
+
+  // 4 ─────────────────────────────────────────────── 霓虹裂开
+  window.SHATTER.push({
+    name: '霓虹裂开',
+    desc: '本体暗下只剩霓虹描边，裂纹自点击处炸开，描边断成数截散逸熄灭',
+    draw(ctx, tile, t, rng) {
+      const { x, y, w, h } = tile, c = hex(tile.color), s = Math.min(w, h) / 100;
+      const cx = x + w * (0.3 + rng() * 0.4), cy = y + h * (0.3 + rng() * 0.4);
+      // 裂纹：6 条射线，各 3 折，末点落在边框上
+      const NC = 6, cracks = [];
+      for (let i = 0; i < NC; i++) {
+        const th = ((i + 0.2 + rng() * 0.6) / NC) * TAU, dx = Math.cos(th), dy = Math.sin(th);
+        // 射线到矩形边的距离
+        const D = Math.min(dx > 0 ? (x + w - cx) / dx : dx < 0 ? (x - cx) / dx : 1e9,
+                           dy > 0 ? (y + h - cy) / dy : dy < 0 ? (y - cy) / dy : 1e9);
+        const pts = [[cx, cy]];
+        for (let k = 1; k <= 3; k++) {
+          const l = D * k / 3, jt = k < 3 ? (rng() - 0.5) * 0.18 * Math.min(w, h) : 0;
+          pts.push([cx + dx * l - dy * jt, cy + dy * l + dx * jt]);
+        }
+        cracks.push(pts);
+      }
+      // 描边分段：沿周长的切点
+      const NS = 10, per = 2 * (w + h), cuts = [];
+      for (let i = 0; i < NS; i++) cuts.push(((i + rng() * 0.8) / NS) * per);
+      const segs = [];
+      for (let i = 0; i < NS; i++) segs.push([rng(), rng(), rng()]);
+
+      const f = flash(t);
+      // 本体：闪白后迅速暗下
+      const ba = 1 - outQuad(clamp01(t / 0.35));
+      if (ba > 0) { ctx.fillStyle = rgba(c, ba, f * 0.7); ctx.fillRect(x, y, w, h); }
+
+      // 裂纹：0~0.3 长出，0.45 后熄
+      const grow = outCubic(clamp01(t / 0.3)), ca = 1 - outQuad(clamp01((t - 0.45) / 0.45));
+      if (ca > 0) {
+        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        ctx.beginPath();
+        for (const pts of cracks) {
+          const n = (pts.length - 1) * grow, full = Math.floor(n), fr = n - full;
+          ctx.moveTo(pts[0][0], pts[0][1]);
+          for (let k = 1; k <= full; k++) ctx.lineTo(pts[k][0], pts[k][1]);
+          if (full < pts.length - 1) {
+            const a = pts[full], b = pts[full + 1];
+            ctx.lineTo(a[0] + (b[0] - a[0]) * fr, a[1] + (b[1] - a[1]) * fr);
+          }
+        }
+        glowStroke(ctx, c, ca, (1.2 + f * 1.2) * s);
+      }
+
+      // 描边：0.3 前整圈，之后断成数截漂散熄灭
+      const perim = d => { // 周长参数 → 点（顺时针，从左上角起）
+        d = ((d % per) + per) % per;
+        return d < w ? [x + d, y] : d < w + h ? [x + w, y + d - w]
+             : d < 2 * w + h ? [x + w - (d - w - h), y + h] : [x, y + h - (d - 2 * w - h)];
+      };
+      const e = outQuad(clamp01((t - 0.3) / 0.7)), oa = 1 - e;
+      if (oa <= 0) return;
+      ctx.lineCap = 'butt'; ctx.lineJoin = 'miter';
+      if (e === 0) {
+        ctx.beginPath(); ctx.rect(x, y, w, h);
+        glowStroke(ctx, c, 1, (1.5 + f * 1.5) * s);
+        return;
+      }
+      const corners = [w, w + h, 2 * w + h];
+      for (let i = 0; i < NS; i++) {
+        const [dr, rt, sp] = segs[i];
+        const d0 = cuts[i], d1 = i + 1 < NS ? cuts[i + 1] : cuts[0] + per;
+        const pts = [perim(d0)];
+        for (const cn of corners) { if (cn > d0 && cn < d1) pts.push(perim(cn)); if (cn + per > d0 && cn + per < d1) pts.push(perim(cn + per)); }
+        pts.push(perim(d1));
+        // 外法线（用中点相对中心的方向近似）+ 随机
+        const m = perim((d0 + d1) / 2);
+        let nx = m[0] - (x + w / 2), ny = m[1] - (y + h / 2);
+        const nl = Math.hypot(nx, ny) || 1; nx /= nl; ny /= nl;
+        const dist = e * (6 + sp * 16) * s;
+        ctx.save();
+        ctx.translate(m[0] + (nx + (dr - 0.5) * 0.6) * dist, m[1] + (ny + (dr - 0.5) * 0.6) * dist);
+        ctx.rotate((rt - 0.5) * 0.35 * e);
+        ctx.translate(-m[0], -m[1]);
+        ctx.beginPath();
+        ctx.moveTo(pts[0][0], pts[0][1]);
+        for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k][0], pts[k][1]);
+        glowStroke(ctx, c, oa * oa, 1.5 * s);
+        ctx.restore();
+      }
+    }
+  });
+
+  // 5 ─────────────────────────────────────────────── 冲击光尘
+  window.SHATTER.push({
+    name: '冲击光尘',
+    desc: '一圈冲击波从点击处荡开，波前扫过之处方块震成光尘四散',
+    draw(ctx, tile, t, rng) {
+      const { x, y, w, h } = tile, c = hex(tile.color), s = Math.min(w, h) / 100;
+      const cx = x + w * (0.35 + rng() * 0.3), cy = y + h * (0.35 + rng() * 0.3);
+      const R = Math.hypot(Math.max(cx - x, x + w - cx), Math.max(cy - y, y + h - cy)); // 到最远角
+      const N = 230, P = [];
+      for (let i = 0; i < N; i++) P.push([rng(), rng(), rng(), rng(), rng()]);
+      const F = tt => outQuad(clamp01(tt / 0.7)); // 波进度
+      const f = flash(t), pr = F(t), r = pr * R;
+      // 震：起手抖一下
+      const sh = f * 2.2 * s;
+      ctx.translate(Math.sin(t * 190) * sh, Math.cos(t * 140) * sh * 0.6);
+
+      ctx.save();
+      ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+      // 本体：波内已成尘，只剩波外
+      if (pr < 1) {
+        ctx.beginPath(); ctx.rect(x, y, w, h); ctx.arc(cx, cy, r, 0, TAU, true);
+        ctx.fillStyle = rgba(c, 1, f * 0.7);
+        ctx.fill('evenodd');
+      }
+      // 波前：内侧拖一圈渐隐余晖 + 亮边
+      const ra = (1 - pr) ** 0.5;
+      if (ra > 0.01 && r > 0.5) {
+        const gw = Math.min(r, (10 + f * 6) * s);
+        const g = ctx.createRadialGradient(cx, cy, r - gw, cx, cy, r);
+        g.addColorStop(0, rgba(c, 0, 0.5));
+        g.addColorStop(1, rgba(c, 0.55 * ra, 0.5));
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU);
+        ctx.fillStyle = g; ctx.fill();
+        glowStroke(ctx, c, ra, (2 + f * 2) * s);
+      }
+      ctx.restore();
+
+      // 光尘：波扫到即离体，径向飞散
+      ctx.globalCompositeOperation = 'lighter';
+      for (const [u, v, sp, sz, wh] of P) {
+        const px = x + u * w, py = y + v * h;
+        const d = Math.hypot(px - cx, py - cy) || 1;
+        const tb = 0.7 * (1 - Math.sqrt(1 - Math.min(d / R, 0.999))); // F(tb) = d/R
+        if (t < tb) continue;
+        const age = (t - tb) / (1 - tb), e = outCubic(age);
+        const a = (1 - age) ** 1.5;
+        if (a < 0.02) continue;
+        const dist = e * (0.08 + sp * 0.2) * Math.min(w, h) * (0.5 + 0.5 * d / R);
+        const qx = px + (px - cx) / d * dist, qy = py + (py - cy) / d * dist;
+        const r2 = (0.45 + sz * sz * 1.1) * s * (1 - age * 0.5);
+        ctx.fillStyle = rgba(c, a, wh > 0.7 ? 0.9 : 0.3);
+        ctx.fillRect(qx - r2, qy - r2, r2 * 2, r2 * 2);
+      }
+    }
+  });
+})();
+
+</script>
+<script>
+/* ── shatter/physical.js ── */
+// 钢琴块碎裂特效 · 物理 / 材质组（5 个）
+// 契约：draw(ctx, tile, t, rng)，tile={x,y,w,h,color,seed}，t∈[0,1]（0.6s），rng 每帧从 seed 重来
+// 不存任何状态：先用 rng 把所有碎块参数派生出来，再按 t 用解析式算位置（位置 = 初速×t + ½gt²）
+(() => {
+  window.SHATTER = window.SHATTER || [];
+
+  const TAU = Math.PI * 2;
+  const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+  const smooth = (a, b, x) => { x = clamp((x - a) / (b - a), 0, 1); return x * x * (3 - 2 * x); };
+  // 主色深浅变体：k>0 向白靠、k<0 向黑靠
+  const shade = (hex, k) => {
+    const c = parseInt(hex.slice(1), 16), m = k < 0 ? 0 : 255, f = Math.abs(k);
+    const ch = s => Math.round(((c >> s) & 255) * (1 - f) + m * f);
+    return `rgb(${ch(16)},${ch(8)},${ch(0)})`;
+  };
+
+  // 上下圆角可分开的圆角矩形路径（不依赖 roundRect）
+  const pill = (ctx, x, y, w, h, rt, rb) => {
+    ctx.beginPath();
+    ctx.moveTo(x + rt, y); ctx.arcTo(x + w, y, x + w, y + h, rt); ctx.arcTo(x + w, y + h, x, y + h, rb);
+    ctx.arcTo(x, y + h, x, y, rb); ctx.arcTo(x, y, x + w, y, rt); ctx.closePath();
+  };
+
+  // 有地面的刚体运动（全解析）：抛物线 → 落地弹一次（弹性 e，水平速度打 6 折）→ 再落地就躺平、指数刹车
+  // p = {x0,y0,vx,vy,spin,floor}（floor 是质心能到的最低 y）；返回 [x, y, 角度, 首次落地时刻, 落地速度]
+  const rigid = (p, g, e, t) => {
+    const t1 = (-p.vy + Math.sqrt(Math.max(0, p.vy * p.vy - 2 * g * (p.y0 - p.floor)))) / g;
+    const vi = p.vy + g * t1;
+    if (t < t1) return [p.x0 + p.vx * t, p.y0 + p.vy * t + 0.5 * g * t * t, p.spin * t, t1, vi];
+    const vb = -e * vi, u = t - t1, u2 = -2 * vb / g;
+    if (u < u2) return [p.x0 + p.vx * (t1 + 0.6 * u), p.floor + vb * u + 0.5 * g * u * u, p.spin * (t1 + 0.5 * u), t1, vi];
+    const s = t1 + 0.6 * u2 + 0.6 * (1 - Math.exp(-10 * (u - u2))) / 10;   // 第二次落地后滑行距离（等效时间）
+    return [p.x0 + p.vx * s, p.floor, p.spin * (s - 0.1 * u2), t1, vi];
+  };
+
+  // 1 砖块崩塌 ————————————————————————————————————————————————
+  window.SHATTER.push({
+    name: '砖块崩塌',
+    desc: '错缝砖墙从点击处松动塌下来，砖块带重力落地弹一下、扬起一点灰',
+    draw(ctx, tile, t, rng) {
+      const { x, y, w, h, color } = tile;
+      const rows = clamp(Math.round(h / 26), 2, 8), cols = clamp(Math.round(w / 34), 2, 5);
+      const bh = h / rows, bw = w / cols, g = 16 * h;
+      const ix = x + w / 2, iy = y + h / 2;                    // 冲击点
+      const light = shade(color, 0.3), dark = shade(color, -0.4);
+      const fade = 1 - smooth(0.4, 1, t), M = ctx.getTransform();
+      for (let r = 0; r < rows; r++) {
+        const y0 = y + (r + 0.5) * bh;
+        for (let l = x - (r % 2) * bw / 2; l < x + w - 0.5; l += bw) {   // 奇数行错半块
+          const a = Math.max(l, x), b = Math.min(l + bw, x + w), pw = b - a, x0 = (a + b) / 2;
+          const dx = x0 - ix, dy = y0 - iy, d = Math.hypot(dx, dy) || 1;
+          const sp = (0.35 + 0.45 * rng()) * w * Math.max(0.3, 1 - d / w);   // 离冲击点越近推得越猛
+          const p = { x0, y0, floor: y + h - bh / 2 - rng() * bh * 0.7,   // 落点高低不一，堆成一堆而不是一排
+            vx: dx / d * sp + (rng() - 0.5) * 0.3 * w,
+            vy: -(0.2 + 0.9 * rng()) * h, spin: (rng() - 0.5) * 6 };
+          p.spin += p.vx / w * 3;
+          const tau = Math.max(0, t - d / w * 0.2);                  // 裂缝从冲击点往外传，远处的砖晚一点才松
+          const [px, py, ang, t1, vi] = rigid(p, g, 0.35, tau);
+          ctx.setTransform(M);
+          // 落地扬灰：一小团淡色圆，随时间扩散消散
+          const u = tau - t1;
+          if (u > 0 && u < 0.25) {
+            ctx.globalAlpha = fade * 0.16 * (1 - u / 0.25) * clamp(vi / (2 * h), 0.3, 1);
+            ctx.fillStyle = light;
+            ctx.beginPath(); ctx.arc(px, y + h - 1, bw * 0.2 + u * w * 0.7, 0, TAU); ctx.fill();
+          }
+          ctx.translate(px, py); ctx.rotate(ang);
+          ctx.globalAlpha = fade;
+          ctx.fillStyle = color; ctx.fillRect(-pw / 2 + 0.6, -bh / 2 + 0.6, pw - 1.2, bh - 1.2);
+          ctx.fillStyle = light; ctx.fillRect(-pw / 2 + 0.6, -bh / 2 + 0.6, pw - 1.2, 1.2);   // 上沿高光
+          ctx.fillStyle = dark; ctx.fillRect(-pw / 2 + 0.6, bh / 2 - 2.4, pw - 1.2, 1.8);     // 下沿阴影
+        }
+      }
+      ctx.setTransform(M);
+    }
+  });
+
+  // 2 纸片撕裂 ————————————————————————————————————————————————
+  window.SHATTER.push({
+    name: '纸片撕裂',
+    desc: '撕成毛边纸片，轻飘飘地摇着翻面落下，翻过来是浅色纸背',
+    draw(ctx, tile, t, rng) {
+      const { x, y, w, h, color } = tile;
+      const n = clamp(Math.round(w / 20), 3, 7), m = clamp(Math.round(h / 10), 4, 20);
+      const q = clamp(Math.round(h / 45), 1, 4);                       // 每条纸条横着撕成 q 段
+      const sw = w / n, sh = h / m;
+      // n+1 条上下贯穿的毛边撕口（首尾两条是方块直边）
+      const edges = [];
+      for (let j = 0; j <= n; j++) {
+        const e = [];
+        for (let k = 0; k <= m; k++)
+          e.push([x + j * sw + (j > 0 && j < n ? (rng() - 0.5) * sw * 0.4 : 0), y + k * sh]);
+        edges.push(e);
+      }
+      const back = shade(color, 0.6), fiber = 'rgba(255,255,255,0.35)';
+      const fade = 1 - smooth(0.45, 1, t), M = ctx.getTransform();
+      ctx.lineWidth = 0.8; ctx.lineJoin = 'round';
+      for (let j = 0; j < n; j++) {
+        const L = edges[j], R = edges[j + 1];
+        // 横撕口所在的行号（含首尾），每道口子两个毛边点
+        const cuts = [0], tears = [null];
+        for (let i = 1; i < q; i++) {
+          const kc = clamp(Math.round(m * (i / q + (rng() - 0.5) * 0.2)), 1, m - 1);
+          cuts.push(kc);
+          tears.push([1, 2].map(u => [L[kc][0] + (R[kc][0] - L[kc][0]) * u / 3, y + kc * sh + (rng() - 0.5) * sh]));
+        }
+        cuts.push(m); tears.push(null);
+        for (let seg = 0; seg < q; seg++) {
+          const a = cuts[seg], b = cuts[seg + 1];
+          const poly = [...L.slice(a, b + 1), ...(tears[seg + 1] || []), ...R.slice(a, b + 1).reverse(), ...(tears[seg] ? tears[seg].slice().reverse() : [])];
+          let cx = 0, cy = 0;
+          for (const v of poly) { cx += v[0]; cy += v[1]; }
+          cx /= poly.length; cy /= poly.length;
+          // 运动参数：上面的先走；向两侧散、左右摇、来回扭、三成的纸片会翻面
+          const d = seg * 0.08 + rng() * 0.08;
+          const vx = ((j + 0.5) / n - 0.5) * w * 1.5 * (0.5 + rng()), vy = (0.05 + 0.15 * rng()) * h, gp = (0.4 + 0.6 * rng()) * h;   // 每片下落快慢不一，免得堆成一坨
+          const A = 0.1 * w, om = 8 + 5 * rng(), ph = rng() * TAU;
+          const R0 = 0.3 + 0.2 * rng(), om2 = 6 + 4 * rng(), ph2 = rng() * TAU, drift = (rng() - 0.5) * 1.5;
+          const omf = rng() < 0.7 ? 0 : 4 + 3 * rng();
+          const tau = Math.max(0, t - d);
+          const px = cx + vx * tau + A * (Math.sin(om * tau + ph) - Math.sin(ph));
+          const py = cy + vy * tau + gp * tau * tau;
+          const ang = R0 * (Math.sin(om2 * tau + ph2) - Math.sin(ph2)) + drift * tau;
+          const flip = Math.cos(omf * tau);
+          ctx.setTransform(M); ctx.translate(px, py); ctx.rotate(ang); ctx.scale(Math.max(0.3, Math.abs(flip)), 1);
+          ctx.globalAlpha = fade;
+          ctx.beginPath();
+          for (const v of poly) ctx.lineTo(v[0] - cx, v[1] - cy);
+          ctx.closePath();
+          ctx.fillStyle = flip < 0 ? back : color; ctx.fill();
+          if (Math.abs(flip) > 0.35) { ctx.strokeStyle = fiber; ctx.stroke(); }   // 侧过来时不描边，免得成一根棍
+        }
+      }
+      ctx.setTransform(M);
+    }
+  });
+
+  // 3 压扁弹回 ————————————————————————————————————————————————
+  window.SHATTER.push({
+    name: '压扁弹回',
+    desc: '先被压扁、再弹起拉长，绷不住散成一把细碎屑落地',
+    draw(ctx, tile, t, rng) {
+      const { x, y, w, h, color } = tile;
+      const cx = x + w / 2, floor = y + h, tb = 0.28;             // tb：崩散时刻
+      const light = shade(color, 0.4), M = ctx.getTransform();
+      // 碎屑（先画，主体盖在上面）：24 块小渣 + 140 粒细屑，从崩散瞬间的主体里飞出，向两侧撑开 + 向上抛，带重力落地弹一下
+      const g = 12 * h, cap = 1 - smooth(0.5, 1, t), unit = w / 120;
+      for (let i = 0; i < 164; i++) {
+        const lx = (rng() - 0.5) * w * 0.8, ly = -rng() * h * 1.25;
+        const size = (i < 24 ? 4 + 5 * rng() : 1.5 + 2.5 * rng()) * unit;
+        const p = { x0: cx + lx, y0: floor + ly, floor: floor - size / 2,
+          vx: lx / w * 1.6 * w * (0.6 + 0.8 * rng()), vy: -(0.4 + 1.4 * rng()) * h, spin: (rng() - 0.5) * 12 };
+        const life = 0.35 + 0.35 * rng(), pale = rng() < 0.3;
+        const tau = t - tb;
+        if (tau <= 0) continue;
+        const a = Math.min(cap, 1 - tau / life);
+        if (a <= 0) continue;
+        const [px, py, ang] = rigid(p, g, 0.3, tau);
+        ctx.setTransform(M); ctx.translate(px, py); ctx.rotate(ang);
+        ctx.globalAlpha = a; ctx.fillStyle = pale ? light : color;
+        ctx.fillRect(-size / 2, -size / 2, size, size);
+      }
+      ctx.setTransform(M);
+      // 主体（画在碎屑上面，散掉前盖住碎屑）：底边固定，竖向 1 → 0.55（压扁）→ 1.3（弹起拉长）→ 崩散后继续胀大并消失
+      const sy = t < 0.14 ? 1 - 0.45 * smooth(0, 0.14, t) : t < tb ? 0.55 + 0.75 * smooth(0.14, tb, t) : 1.3 + (t - tb) * 1.5;
+      const sx = 1 + (1 - sy) * 0.7;
+      const bodyA = 1 - smooth(tb + 0.03, tb + 0.11, t);
+      if (bodyA > 0) {
+        ctx.globalAlpha = bodyA; ctx.fillStyle = color;
+        ctx.fillRect(cx - w * sx / 2, floor - h * sy, w * sx, h * sy);
+      }
+      // 触地那一下：底边一道白光，压得越狠越宽
+      const ga = 0.5 * smooth(0, 0.04, t) * (1 - smooth(0.06, 0.3, t));
+      if (ga > 0) {
+        ctx.globalAlpha = ga; ctx.fillStyle = '#fff';
+        ctx.fillRect(cx - w * sx * 0.6, floor - 0.75, w * sx * 1.2, 1.5);
+      }
+      ctx.setTransform(M);
+    }
+  });
+
+  // 4 墨滴溅开 ————————————————————————————————————————————————
+  window.SHATTER.push({
+    name: '墨滴溅开',
+    desc: '方块化成一滩墨塌下去摊开，墨点甩出去拉成水滴、落回地面',
+    draw(ctx, tile, t, rng) {
+      const { x, y, w, h, color } = tile;
+      const cx = x + w / 2, floor = y + h, g = 9 * h;
+      const dark = shade(color, -0.3), M = ctx.getTransform();
+      // 主体：从整块塌成一滩——顶边往地面沉、宽度摊开、角变圆；边缘鼓出几个圆包成溅开的形状
+      const k = smooth(0, 0.55, t);
+      const ph = h * (1 - 0.92 * k), pw = w * (1 + 0.55 * smooth(0.05, 0.7, t));
+      const rad = Math.min(pw, ph) / 2 * clamp(k * 1.4, 0, 1);
+      ctx.globalAlpha = 1 - smooth(0.55, 1, t);
+      ctx.fillStyle = color;
+      pill(ctx, cx - pw / 2, floor - ph, pw, ph, rad, rad); ctx.fill();
+      const bump = smooth(0.15, 0.6, t);
+      for (let i = 0; i < 8; i++) {
+        const side = i < 4 ? -1 : 1;
+        const bx = cx + side * pw / 2 * (0.7 + 0.35 * rng()), by = floor - ph * (0.2 + 0.7 * rng());
+        const br = ph * (0.3 + 0.4 * rng()) * bump;
+        ctx.beginPath(); ctx.arc(bx, by, br, 0, TAU); ctx.fill();
+      }
+      // 底部沉一层更深的墨
+      ctx.fillStyle = dark;
+      pill(ctx, cx - pw / 2, floor - ph * 0.3 * k, pw, ph * 0.3 * k, 0, Math.min(rad, ph * 0.3 * k)); ctx.fill();
+      // 墨滴：28 主滴 + 40 小星点，从方块上半部向上扇形甩出，沿速度方向拉长
+      const ox = cx, oy = y + h * 0.35, unit = Math.min(w, h) / 120;
+      const dropA = 1 - smooth(0.4, 1, t);
+      for (let i = 0; i < 68; i++) {
+        const small = i >= 28;
+        const th = (rng() - 0.5) * 2.6, s = 0.5 + 1.4 * rng();
+        const vx = Math.sin(th) * s * w * 0.9, vy = -Math.cos(th) * s * h * 1.1 - 0.2 * h;
+        const r = (small ? 0.6 + 0.7 * rng() : 1.2 + 2.2 * rng()) * unit;
+        const deep = rng() < 0.3;
+        const t1 = (-vy + Math.sqrt(vy * vy + 2 * g * (floor - oy))) / g;   // 落回地面时刻
+        ctx.fillStyle = deep ? dark : color;
+        if (t < t1) {
+          const vyt = vy + g * t, sp = Math.hypot(vx, vyt), el = clamp(1 + sp / (3 * h), 1, 2.2);
+          ctx.setTransform(M); ctx.translate(ox + vx * t, oy + vy * t + 0.5 * g * t * t); ctx.rotate(Math.atan2(vyt, vx));
+          ctx.globalAlpha = dropA;
+          ctx.beginPath(); ctx.ellipse(0, 0, r * el, r / Math.sqrt(el), 0, 0, TAU); ctx.fill();
+        } else if (t - t1 < 0.2 && !small) {
+          // 落地摊成一小片，很快没入地面
+          ctx.setTransform(M); ctx.globalAlpha = dropA * (1 - (t - t1) / 0.2);
+          ctx.beginPath(); ctx.ellipse(ox + vx * t1, floor - r * 0.3, r * 1.8, r * 0.45, 0, 0, TAU); ctx.fill();
+        }
+      }
+      ctx.setTransform(M);
+    }
+  });
+
+  // 5 积木塌落 ————————————————————————————————————————————————
+  window.SHATTER.push({
+    name: '积木塌落',
+    desc: '一格格小方块从底层开始失去支撑，塌下来滚开、在地上滑一段停住',
+    draw(ctx, tile, t, rng) {
+      const { x, y, w, h, color } = tile;
+      const s = clamp(Math.min(w, h) / 4, 10, 26);
+      const cols = clamp(Math.round(w / s), 2, 8), rows = clamp(Math.round(h / s), 2, 12);
+      const bw = w / cols, bh = h / rows, g = 18 * h;
+      const light = shade(color, 0.35), dark = shade(color, -0.35);
+      const fade = 1 - smooth(0.45, 1, t), M = ctx.getTransform();
+      ctx.globalAlpha = fade;
+      for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+        const x0 = x + (c + 0.5) * bw, y0 = y + (r + 0.5) * bh;
+        const side = (c + 0.5) / cols - 0.5;                            // -0.5..0.5，左负右正
+        const bottom = r === rows - 1;
+        const d = (rows - 1 - r) * 0.18 / rows + rng() * 0.06;          // 底层先塌、逐层往上
+        const p = { x0, y0, floor: y + h - bh / 2 - (bottom ? 0 : rng() * bh * 0.8),   // 上层的落在别的块上，堆起来
+          vx: (bottom ? Math.sign(side || 1) * (0.5 + 0.7 * rng()) : side * (1.2 + 1.5 * rng())) * w,
+          vy: -(bottom ? 0.4 + 0.8 * rng() : 0.1 + 0.4 * rng()) * h, spin: 0 };
+        p.spin = p.vx / w * 4 + (rng() - 0.5) * 3;
+        const tau = t - d;
+        const [px, py, ang] = tau > 0 ? rigid(p, g, 0.25, tau) : [x0, y0, 0];
+        ctx.setTransform(M); ctx.translate(px, py); ctx.rotate(ang);
+        ctx.fillStyle = color; ctx.fillRect(-bw / 2 + 0.5, -bh / 2 + 0.5, bw - 1, bh - 1);
+        ctx.fillStyle = light; ctx.fillRect(-bw / 2 + 0.5, -bh / 2 + 0.5, bw - 1, bh * 0.2);               // 顶面受光
+        ctx.fillStyle = dark; ctx.fillRect(-bw / 2 + 0.5, bh / 2 - 0.5 - bh * 0.14, bw - 1, bh * 0.14);   // 底面背光
+      }
+      ctx.setTransform(M);
+    }
+  });
+})();
+
+</script>
+<script>
+/* ── shatter/stylized.js ── */
+// 钢琴块碎裂特效 · 风格化 / 二次元音游味 · 5 款
+// 契约：draw(ctx, tile, t, rng)  tile={x,y,w,h,color,seed}  t 0..1  rng 每帧按 seed 重置
+// 除 window.SHATTER 外不留任何全局量。
+(() => {
+  const hex = s => [1, 3, 5].map(i => parseInt(s.slice(i, i + 2), 16));
+  const mix = (a, b, k) => [0, 1, 2].map(i => Math.round(a[i] + (b[i] - a[i]) * k));
+  const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a < 0 ? 0 : a > 1 ? 1 : a})`;
+  const W = [255, 255, 255], K = [0, 0, 0], TAU = Math.PI * 2;
+  const clamp = u => u < 0 ? 0 : u > 1 ? 1 : u;
+  const outExpo = u => u <= 0 ? 0 : u >= 1 ? 1 : 1 - 2 ** (-10 * u);
+  const outCubic = u => 1 - (1 - clamp(u)) ** 3;
+  const inQuad = u => clamp(u) ** 2;
+  const smooth = (a, b, v) => { const u = clamp((v - a) / (b - a)); return u * u * (3 - 2 * u); };
+
+  // 四角星芒：相邻两尖之间用二次曲线，控制点拉向对侧 → 臂细如针
+  const star4 = (ctx, cx, cy, lx, ly, rot, k = 0.25) => {
+    const co = Math.cos(rot), si = Math.sin(rot);
+    const P = (px, py) => [cx + px * co - py * si, cy + px * si + py * co];
+    const T = [[0, -ly], [lx, 0], [0, ly], [-lx, 0]];
+    let [ax, ay] = T[3];
+    ctx.beginPath();
+    ctx.moveTo(...P(ax, ay));
+    for (const [bx, by] of T) {
+      const [qx, qy] = P(-k * (ax + bx), -k * (ay + by));
+      ctx.quadraticCurveTo(qx, qy, ...P(bx, by));
+      ax = bx; ay = by;
+    }
+    ctx.fill();
+  };
+
+  // 樱花瓣：以原点为中心、尖端朝 -y、尖端带缺口
+  const petal = (ctx, L) => {
+    const wd = L * 0.62;
+    ctx.beginPath();
+    ctx.moveTo(0, -L * 0.7);
+    ctx.quadraticCurveTo(wd * 0.45, -L * 1.15, wd, -L * 0.45);
+    ctx.quadraticCurveTo(wd * 0.95, L * 0.35, 0, L);
+    ctx.quadraticCurveTo(-wd * 0.95, L * 0.35, -wd, -L * 0.45);
+    ctx.quadraticCurveTo(-wd * 0.45, -L * 1.15, 0, -L * 0.7);
+    ctx.fill();
+  };
+
+  window.SHATTER = window.SHATTER || [];
+  window.SHATTER.push({
+    name: '方粒四散',
+    desc: 'Phigros 式：小方块四散缩小，两层方框撑开淡出',
+    draw(ctx, tile, t, rng) {
+      const { x, y, w, h } = tile, c = hex(tile.color);
+      const cx = x + w / 2, cy = y + h / 2, m = Math.min(w, h), S = Math.sqrt(w * h);
+      const lit = mix(c, W, 0.5);
+      // 本体：白闪一下、微放大，0.04 内消失
+      if (t < 0.04) {
+        const u = t / 0.04, s = 1 + 0.06 * u;
+        ctx.fillStyle = rgba(mix(c, W, 0.6), 1 - u);
+        ctx.fillRect(cx - w * s / 2, cy - h * s / 2, w * s, h * s);
+      }
+      // 两层方框撑开：外层随方块长宽比，内层正方
+      ctx.lineWidth = 1.5;
+      for (let k = 0; k < 2; k++) {
+        const u = clamp((t - k * 0.06) / (1 - k * 0.06)), e = outExpo(u);
+        const fw = k ? m * (0.4 + 0.45 * e) : w * (0.5 + 0.65 * e), fh = k ? fw : h * (0.5 + 0.65 * e);
+        ctx.strokeStyle = rgba(k ? c : lit, 0.9 * (1 - smooth(0.05, 0.6, u)));
+        ctx.strokeRect(cx - fw / 2, cy - fh / 2, fw, fh);
+      }
+      // 方粒：沿贴着方块的椭圆随机方向冲出、边转边缩
+      const e = outExpo(t), a = 1 - smooth(0.35, 1, t), rx = w / 2 + m * 0.4, ry = h / 2 + m * 0.4;
+      for (let i = 0; i < 32; i++) {
+        const ang = rng() * TAU, d = (0.3 + 0.7 * rng()) * e, s0 = S * (0.03 + 0.04 * rng());
+        const rot = rng() * TAU + (rng() - 0.5) * 6 * t, tint = rng();
+        const s = s0 * (1 - 0.75 * t) / 2;
+        const px = cx + Math.cos(ang) * rx * d, py = cy + Math.sin(ang) * ry * d;
+        const co = Math.cos(rot) * s, si = Math.sin(rot) * s;
+        ctx.fillStyle = rgba(tint < 0.3 ? W : tint < 0.7 ? lit : c, a);
+        ctx.beginPath();
+        ctx.moveTo(px + co - si, py + si + co);
+        ctx.lineTo(px - co - si, py - si + co);
+        ctx.lineTo(px - co + si, py - si - co);
+        ctx.lineTo(px + co + si, py + si - co);
+        ctx.fill();
+      }
+    }
+  });
+
+  window.SHATTER.push({
+    name: '樱瓣飘落',
+    desc: '方块散成花瓣，旋着飘开、随风落下',
+    draw(ctx, tile, t, rng) {
+      const { x, y, w, h } = tile, c = hex(tile.color);
+      const cx = x + w / 2, cy = y + h / 2, L = Math.sqrt(w * h) * 0.1, drop = Math.max(h, w * 0.6);
+      // 本体：本色淡出（0.12 内）
+      if (t < 0.12) {
+        const u = t / 0.12;
+        ctx.fillStyle = rgba(c, (1 - u) ** 1.3);
+        ctx.fillRect(x, y, w, h);
+      }
+      for (let i = 0; i < 30; i++) {
+        const px0 = x + w * rng(), py0 = y + h * rng();
+        const ang = Math.atan2(py0 - cy, (px0 - cx) * 1.6) + (rng() - 0.5);
+        const burst = w * (0.03 + 0.32 * rng()), spin = (rng() - 0.5) * 9, rot0 = rng() * TAU;
+        const sway = rng() * TAU, fall = drop * (0.45 + 0.55 * rng()), tint = rng(), delay = rng() * 0.08;
+        const tt = clamp((t - delay) / (1 - delay)), e = outExpo(tt);
+        const px = px0 + Math.cos(ang) * burst * e + Math.sin(tt * 4 + sway) * w * 0.06 * tt;
+        const py = py0 + Math.sin(ang) * burst * e * 0.5 + fall * tt * tt;
+        ctx.fillStyle = rgba(mix(c, W, 0.1 + 0.55 * tint), smooth(0, 0.05, tt) * (1 - smooth(0.5, 1, tt)));
+        ctx.save();
+        ctx.translate(px, py);
+        ctx.rotate(rot0 + spin * tt);
+        petal(ctx, L * (0.7 + 0.6 * tint) * (1 - 0.3 * tt));
+        ctx.restore();
+      }
+    }
+  });
+
+  window.SHATTER.push({
+    name: '星芒聚散',
+    desc: '方块收成一点，星芒炸开再收拢成一粒光',
+    draw(ctx, tile, t, rng) {
+      const { x, y, w, h } = tile, c = hex(tile.color);
+      const cx = x + w / 2, cy = y + h / 2, m = Math.min(w, h), S = Math.sqrt(w * h);
+      const lx = w * 0.25 + m * 0.15, ly = h * 0.4 + m * 0.2, ring = Math.min(lx, ly) * 1.6;
+      const lit = mix(c, W, 0.6), fade = 1 - smooth(0.85, 1, t);
+      ctx.lineWidth = 1;
+      // 本体：0.12 内被吸成一点（ease-out，先快后慢）、微发白
+      if (t < 0.12) {
+        const u = t / 0.12, s = 1 - outCubic(u);
+        ctx.fillStyle = rgba(mix(c, W, u * 0.5), 1);
+        ctx.fillRect(cx - w * s / 2, cy - h * s / 2, w * s, h * s);
+      }
+      // 星芒：0~0.4 撑开，0.4~1 收拢
+      const g = t < 0.4 ? outExpo(t / 0.4) : 1 - inQuad((t - 0.4) / 0.6);
+      ctx.fillStyle = rgba(W, 0.95 * fade);
+      star4(ctx, cx, cy, lx * g, ly * g, 0, 0.3);
+      ctx.fillStyle = rgba(c, 0.8 * fade);
+      star4(ctx, cx, cy, ring * 0.45 * g, ring * 0.45 * g, Math.PI / 4);
+      // 光点：先冲出再回收
+      for (let i = 0; i < 12; i++) {
+        const ang = rng() * TAU, d = ring * (0.5 + 0.7 * rng()), r = S * (0.01 + 0.015 * rng());
+        ctx.fillStyle = rgba(rng() < 0.5 ? W : lit, 0.9 * fade);
+        ctx.beginPath();
+        ctx.arc(cx + Math.cos(ang) * d * g, cy + Math.sin(ang) * d * g, r * (0.5 + 0.5 * g) + 0.3, 0, TAU);
+        ctx.fill();
+      }
+      // 细环：0~0.5 扩散淡出
+      if (t < 0.5) {
+        const u = t / 0.5;
+        ctx.strokeStyle = rgba(lit, 0.7 * (1 - u));
+        ctx.beginPath();
+        ctx.arc(cx, cy, ring * outExpo(u), 0, TAU);
+        ctx.stroke();
+      }
+      // 核心光点：0.25 后浮现，0.6 最亮，1 消失
+      const core = S * 0.04 * smooth(0.25, 0.55, t) * (1 - smooth(0.6, 1, t));
+      if (core > 0.2) {
+        ctx.fillStyle = rgba(W, 1);
+        ctx.beginPath();
+        ctx.arc(cx, cy, core, 0, TAU);
+        ctx.fill();
+      }
+    }
+  });
+
+  window.SHATTER.push({
+    name: '速度线',
+    desc: '漫画集中线炸开，方块被压成一道细线闪没',
+    draw(ctx, tile, t, rng) {
+      const { x, y, w, h } = tile, c = hex(tile.color);
+      const cx = x + w / 2, cy = y + h / 2, S = Math.sqrt(w * h);
+      const lit = mix(c, W, 0.5);
+      // 本体：0~0.3 竖向压扁、横向微胀；0.3~0.55 横向收拢淡出
+      if (t < 0.55) {
+        const u1 = smooth(0, 0.3, t), u2 = inQuad((t - 0.3) / 0.25);
+        const bw = w * (1 + 0.2 * u1) * (1 - u2), bh = Math.max(h * (1 - 0.96 * u1), 2);
+        ctx.fillStyle = rgba(mix(c, W, 0.2 + 0.8 * u1), 1 - u2);
+        ctx.fillRect(cx - bw / 2, cy - bh / 2, bw, bh);
+        if (t < 0.08) {
+          ctx.fillStyle = rgba(W, 0.8 * (1 - t / 0.08));
+          ctx.fillRect(cx - bw / 2, cy - bh / 2, bw, bh);
+        }
+      }
+      // 集中线：从方块边缘外射出，尖端朝外；0.12 抽满，之后从根部退去
+      const recede = smooth(0.25, 0.75, t), a = 0.9 * (1 - smooth(0.4, 0.8, t));
+      for (let i = 0; i < 36; i++) {
+        const ang = rng() * TAU, len = S * (0.15 + 0.32 * rng()), wd = 1 + 2 * rng();
+        const gap = S * (0.04 + 0.12 * rng()), delay = rng() * 0.06, tint = rng();
+        const dx = Math.cos(ang), dy = Math.sin(ang);
+        const edge = Math.min(Math.abs(dx) > 1e-6 ? w / 2 / Math.abs(dx) : 1e9, Math.abs(dy) > 1e-6 ? h / 2 / Math.abs(dy) : 1e9);
+        const r0 = edge + gap + len * recede, r1 = edge + gap + len * outExpo((t - delay) / 0.12);
+        if (r1 <= r0) continue;
+        const nx = -dy * wd / 2, ny = dx * wd / 2;
+        ctx.fillStyle = rgba(tint < 0.4 ? W : lit, a);
+        ctx.beginPath();
+        ctx.moveTo(cx + dx * r0 + nx, cy + dy * r0 + ny);
+        ctx.lineTo(cx + dx * r0 - nx, cy + dy * r0 - ny);
+        ctx.lineTo(cx + dx * r1, cy + dy * r1);
+        ctx.fill();
+      }
+    }
+  });
+
+  window.SHATTER.push({
+    name: '切片错位',
+    desc: '方块拆成横向细条，抖动错位后左右滑出',
+    draw(ctx, tile, t, rng) {
+      const { x, y, w, h } = tile, c = hex(tile.color);
+      const n = Math.max(6, Math.min(16, Math.round(h / 12))), sh = h / n;
+      const dark = mix(c, K, 0.35), lit = mix(c, W, 0.55);
+      const frame = Math.floor(t * 36), fade = 1 - smooth(0.6, 1, t);
+      for (let i = 0; i < n; i++) {
+        const dir = rng() < 0.5 ? -1 : 1, delay = rng() * 0.25, dist = w * (0.35 + 0.55 * rng());
+        const shade = rng(), jit = Math.floor(rng() * 97);
+        const u = clamp((t - delay) / 0.45), e = outCubic(u);
+        // 滑出前：按帧量化的左右抖动
+        const jitter = u > 0 ? 0 : (((frame * 7 + i * 13 + jit) % 5) - 2) * w * 0.02;
+        const hh = sh * (1 - 0.5 * e), oy = y + i * sh + (sh - hh) / 2;
+        const ox = x + jitter + dir * dist * e, a = (1 - 0.85 * e) * fade;
+        // 残影：拖在身后，速度越快越长
+        const trail = dir * w * 0.12 * (1 - u) ** 2 * (u > 0 ? 1 : 0);
+        if (trail) {
+          ctx.fillStyle = rgba(lit, 0.5 * a);
+          ctx.fillRect(ox - trail, oy, w, hh);
+        }
+        ctx.fillStyle = rgba(shade < 0.25 ? dark : c, a);
+        ctx.fillRect(ox, oy, w, hh);
+      }
+      // 扫描线闪烁（0.2 内）
+      if (t < 0.2) {
+        ctx.fillStyle = rgba(W, 0.6 * (1 - t / 0.2));
+        for (let k = 0; k < 2; k++) {
+          const row = (frame * 31 + k * 17) % n;
+          ctx.fillRect(x - w * 0.05, y + row * sh, w * 1.1, 1);
+        }
+      }
+    }
+  });
+})();
+
+</script>
+<script>
+/* ── swipe/arrows.js ── */
+// design/swipe/arrows.js —— swipe 音块的左右方向标记 × 5：箭头 / 尖角 / 尾迹
+// 契约：draw(ctx, note, t, rng)。note = {x,y,w,h,color,dir,lineY,laneX,laneW}，t∈[0,1) 每 0.8s 一圈，rng 每帧按 seed 重开。
+// 五款都先把坐标系挪到音符中心、沿 dir 镜像（scale(dir,1)），下面一律当「方向 = +x」画。
+// 方向信息全落在形状上（静止帧就能分左右），动画只是加分；闭包里不存状态。
+(() => {
+'use strict';
+const WH = [255, 255, 255];
+const clamp01 = v => v < 0 ? 0 : v > 1 ? 1 : v;
+const hex = c => [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)];
+const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${clamp01(a)})`;
+const tint = (c, k) => [c[0] + (255 - c[0]) * k | 0, c[1] + (255 - c[1]) * k | 0, c[2] + (255 - c[2]) * k | 0];   // 往白靠 k
+// 环绕的三角脉冲：p 走到 at 时 = 1，半宽 wd
+const pulse = (p, at, wd) => Math.max(0, 1 - Math.abs(((p - at) % 1 + 1.5) % 1 - .5) / wd);
+
+function poly(ctx, pts) { ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]); ctx.closePath(); }
+function capsule(ctx, x0, x1, hh) {
+  ctx.beginPath(); ctx.moveTo(x0 + hh, -hh); ctx.lineTo(x1 - hh, -hh); ctx.arc(x1 - hh, 0, hh, -Math.PI / 2, Math.PI / 2);
+  ctx.lineTo(x0 + hh, hh); ctx.arc(x0 + hh, 0, hh, Math.PI / 2, Math.PI * 1.5); ctx.closePath();
+}
+// 尖角路径：尖端在 x、指向 +x，长 L 高 H（调用方自己 stroke）
+function chev(ctx, x, L, H) { ctx.beginPath(); ctx.moveTo(x - L, -H / 2); ctx.lineTo(x, 0); ctx.lineTo(x - L, H / 2); }
+// 进入音符局部坐标：原点在中心，+x = 要滑的方向
+function local(ctx, n) { ctx.translate(n.x, n.y); ctx.scale(n.dir < 0 ? -1 : 1, 1); ctx.lineCap = ctx.lineJoin = 'round'; }
+// 本体一圈很淡的同色光（跟 rhythm-bench 一致），画完本体记得 shadowBlur = 0
+function glow(ctx, c) { ctx.shadowColor = rgba(c, .6); ctx.shadowBlur = 8; }
+
+window.SWIPE = window.SWIPE || [];
+
+// ① 三重尖角：本体不动，尾端平口不画角；方向端盖一枚 ⟫⟫ 章——三个尖角嵌套，由近到远渐淡，亮脉冲从块里往外跑
+window.SWIPE.push({
+  name: '三重尖角',
+  desc: '方向端一枚 ⟫⟫ 章：三个尖角嵌套、由近到远渐淡，亮脉冲往外跑；尾端平口',
+  draw(ctx, n, t) {
+    local(ctx, n); const { w, h } = n, c = hex(n.color);
+    glow(ctx, c); capsule(ctx, -w / 2, w / 2, h / 2); ctx.fillStyle = n.color; ctx.fill(); ctx.shadowBlur = 0;
+    capsule(ctx, -w / 2 + h * .35, w / 2 - h * .35, h * .22); ctx.fillStyle = rgba(WH, .85); ctx.fill();
+    ctx.lineWidth = h * .26;
+    const L = h * .8, H = h * 1.7, x0 = w / 2 + h * .25 + L;
+    for (let i = 0; i < 3; i++) {
+      ctx.strokeStyle = rgba(tint(c, [1, .55, .15][i]), [1, .78, .55][i] + .35 * pulse(t, .2 + i * .17, .18));
+      chev(ctx, x0 + i * h * .62, L, H); ctx.stroke();
+    }
+  },
+});
+
+// ② 箭矢：整块就是一支箭——方向端一枚带倒钩的箭镞（比杆高），尾端平口 + 两对斜尾羽；一粒亮点顺着杆往镞上跑
+window.SWIPE.push({
+  name: '箭矢',
+  desc: '整块是一支箭：方向端带倒钩的箭镞、尾端两对尾羽，亮点顺杆往镞跑',
+  draw(ctx, n, t) {
+    local(ctx, n); const { w, h } = n, c = hex(n.color);
+    const xt = w / 2 + h * 1.0, hl = h * 2.0, hh = h * 1.05, nk = h * .6;   // 镞：尖 x / 长 / 半高 / 倒钩深
+    const xs1 = xt - hl + nk + h * .3;                                      // 杆插进镞里一点
+    glow(ctx, c); ctx.fillStyle = n.color;
+    ctx.fillRect(-w / 2, -h / 2, xs1 + w / 2, h);
+    poly(ctx, [[xt, 0], [xt - hl, -hh], [xt - hl + nk, 0], [xt - hl, hh]]); ctx.fill(); ctx.shadowBlur = 0;
+    // 镞的两条刃口提白
+    ctx.lineWidth = h * .2; ctx.strokeStyle = rgba(WH, .9);
+    ctx.beginPath(); ctx.moveTo(xt - hl + h * .1, -hh + h * .12); ctx.lineTo(xt - h * .05, 0); ctx.lineTo(xt - hl + h * .1, hh - h * .12); ctx.stroke();
+    // 杆芯 + 尾羽（两对，往后斜）
+    capsule(ctx, -w / 2 + h * .45, xs1 - h * .2, h * .22); ctx.fillStyle = rgba(WH, .6); ctx.fill();
+    ctx.lineWidth = h * .18; ctx.strokeStyle = rgba(WH, .8); ctx.beginPath();
+    for (let k = 0; k < 2; k++) {
+      const x = -w / 2 + h * .6 + k * h * .8;
+      ctx.moveTo(x, -h * .45); ctx.lineTo(x - h * .85, -h * 1.25); ctx.moveTo(x, h * .45); ctx.lineTo(x - h * .85, h * 1.25);
+    }
+    ctx.stroke();
+    // 亮点：从羽跑到镞，两头淡入淡出
+    const xa = -w / 2 + h * 1.6, xb = xs1 - h * 1.2, xg = xa + (xb - xa) * t;
+    capsule(ctx, xg - h * .8, xg + h * .8, h * .22); ctx.fillStyle = rgba(WH, .95 * Math.sin(Math.PI * t)); ctx.fill();
+  },
+});
+
+// ③ 彗尾：子弹头在前、身后拖一条渐细渐隐的尾迹（像流星），火星顺着尾巴往后飘
+//    尾巴放在方向的反面：亮头领路、尾在身后，是「流星」的通用读法。尾巴要「糊」不要「尖」——
+//    渐隐得快、看不到尾尖，否则远看像根针、会把方向读反；鼻子两条刃口提白，静止帧也是个 ›
+window.SWIPE.push({
+  name: '彗尾',
+  desc: '子弹头 + 身后一条渐细渐隐的尾迹，火星往后飘；亮头在前像流星',
+  draw(ctx, n, t, rng) {
+    local(ctx, n); const { w, h } = n, c = hex(n.color);
+    const TL = w * .62, x0 = -w / 2, xn = w / 2 - h * .7, xt = w / 2 + h * .7;   // 尾长 / 尾根 / 鼻根 / 鼻尖
+    // 身 + 尾一笔画：尾从整个身高收成一点，但颜色在半路就隐没了（看不见尖）
+    const g = ctx.createLinearGradient(x0 - TL, 0, x0 + h * .5, 0);
+    g.addColorStop(0, rgba(c, 0)); g.addColorStop(.4, rgba(c, .07)); g.addColorStop(.8, rgba(c, .35)); g.addColorStop(1, n.color);
+    glow(ctx, c); ctx.fillStyle = g;
+    poly(ctx, [[x0 - TL, 0], [x0, -h / 2], [xn, -h / 2], [xt, 0], [xn, h / 2], [x0, h / 2]]); ctx.fill(); ctx.shadowBlur = 0;
+    // 白芯往鼻子方向变宽变亮：热的一头在前
+    const gc = ctx.createLinearGradient(x0, 0, xt, 0); gc.addColorStop(0, rgba(WH, .35)); gc.addColorStop(1, rgba(WH, 1));
+    ctx.fillStyle = gc;
+    poly(ctx, [[x0 + h * .15, -h * .12], [xn - h * .1, -h * .27], [xt - h * .35, 0], [xn - h * .1, h * .27], [x0 + h * .15, h * .12]]); ctx.fill();
+    // 鼻子两条刃口提白
+    ctx.lineWidth = h * .18; ctx.strokeStyle = rgba(WH, .9);
+    ctx.beginPath(); ctx.moveTo(xn, -h / 2 + h * .08); ctx.lineTo(xt - h * .05, 0); ctx.lineTo(xn, h / 2 - h * .08); ctx.stroke();
+    // 尾里一道更细的白线，也是半路隐没
+    const gt = ctx.createLinearGradient(x0, 0, x0 - TL * .55, 0); gt.addColorStop(0, rgba(WH, .4)); gt.addColorStop(1, rgba(WH, 0));
+    ctx.fillStyle = gt; poly(ctx, [[x0, -h * .12], [x0 - TL * .55, 0], [x0, h * .12]]); ctx.fill();
+    // 火星：沿尾巴往后飘、散开，越远越小越淡
+    for (let i = 0; i < 6; i++) {
+      const k = (rng() + t * .5) % 1, y = (rng() - .5) * h * (.3 + k) * 1.1, r = .5 + rng() * 1.1 * (1 - k * .5);
+      ctx.fillStyle = rgba(tint(c, .7), (1 - k) * .85);
+      ctx.beginPath(); ctx.arc(x0 - h * .2 - k * TL * 1.15, y, r, 0, Math.PI * 2); ctx.fill();
+    }
+  },
+});
+
+// ④ 逐格尖角：本体头端削成铅笔尖；块外排四个越远越小的尖角格，一枚亮角一格一格往外跳，跳到头再从块里出来
+window.SWIPE.push({
+  name: '逐格尖角',
+  desc: '头端削尖，块外四个越远越小的尖角格，一枚亮角一格一格往外跳',
+  draw(ctx, n, t) {
+    local(ctx, n); const { w, h } = n, c = hex(n.color);
+    const xp = w / 2 - h * .55, xt = w / 2 + h * .25, r = h / 2;
+    glow(ctx, c); ctx.fillStyle = n.color;
+    ctx.beginPath(); ctx.moveTo(-w / 2 + r, -r); ctx.lineTo(xp, -r); ctx.lineTo(xt, 0); ctx.lineTo(xp, r); ctx.lineTo(-w / 2 + r, r);
+    ctx.arc(-w / 2 + r, 0, r, Math.PI / 2, Math.PI * 1.5); ctx.closePath(); ctx.fill(); ctx.shadowBlur = 0;
+    ctx.fillStyle = rgba(WH, .85);
+    poly(ctx, [[-w / 2 + h * .45, -h * .22], [xp - h * .15, -h * .22], [xt - h * .35, 0], [xp - h * .15, h * .22], [-w / 2 + h * .45, h * .22]]); ctx.fill();
+    // 四格：k 是这一步亮的那格，上一格留个残影
+    const N = 4, k = Math.floor(t * N), f = t * N - k;
+    ctx.lineWidth = h * .22;
+    for (let i = 0; i < N; i++) {
+      const H = h * (1.5 - i * .2), L = H * .5, x = xt + h * .45 + L + i * h * .95;
+      ctx.strokeStyle = i === k ? rgba(WH, 1 - .25 * f) : i === k - 1 ? rgba(tint(c, .5), .6 - .3 * f) : rgba(c, .38);
+      chev(ctx, x, L, H); ctx.stroke();
+    }
+  },
+});
+
+// ⑤ 箭形块：块本身削成一个 →——头端削尖（微微张开成镞），尾端剪出燕尾口；白芯同形，一道光带朝尖端扫
+window.SWIPE.push({
+  name: '箭形块',
+  desc: '块本身削成箭形：头端削尖、尾端剪出燕尾口，整块就是一个 →；光带朝尖端扫',
+  draw(ctx, n, t) {
+    local(ctx, n); const { w, h } = n, c = hex(n.color);
+    const r = h * .16, hh = h / 2 - r, xL = -w / 2 + r, xR = w / 2 - r, tipL = h * 1.5, nk = h * .55, fl = h * .22;
+    const body = [[xL, -hh], [xR - tipL, -hh], [xR - tipL + h * .3, -hh - fl], [xR + h * .2, 0], [xR - tipL + h * .3, hh + fl], [xR - tipL, hh], [xL, hh], [xL + nk, 0]];
+    // fill + 同色圆角 stroke：拐角圆一点点，尺寸刚好补回 r
+    glow(ctx, c); ctx.fillStyle = ctx.strokeStyle = n.color; ctx.lineWidth = r * 2;
+    poly(ctx, body); ctx.fill(); ctx.shadowBlur = 0; ctx.stroke();
+    // 白芯同形
+    const cc = h * .22, a = xL + h * .55, b = xR - h * .35;
+    ctx.fillStyle = rgba(WH, .85);
+    poly(ctx, [[a, -cc], [b - tipL * .4, -cc], [b, 0], [b - tipL * .4, cc], [a, cc], [a + nk * .45, 0]]); ctx.fill();
+    // 光带：前沿硬、后沿软，从尾扫到尖再消失
+    const p = t * 1.3 - .15, xs = -w / 2 + p * (w + h * .4);
+    const gs = ctx.createLinearGradient(xs - h * 2.2, 0, xs + h * .5, 0);
+    gs.addColorStop(0, rgba(WH, 0)); gs.addColorStop(.82, rgba(WH, .4)); gs.addColorStop(1, rgba(WH, 0));
+    poly(ctx, body); ctx.clip(); ctx.fillStyle = gs; ctx.fillRect(xs - h * 2.2, -h, h * 2.7, h * 2);
+  },
+});
+})();
+
+</script>
+<script>
+/* ── swipe/lane.js ── */
+// swipe 音块左右方向标记 · 轨道 / 环境提示类（标记画在块周围的空间里）· 5 款
+// 契约：draw(ctx, note, t, rng)，note={x,y,w,h,color,dir,lineY,laneX,laneW}，dir=-1 左 / +1 右，
+//      t∈[0,1] 每 0.8s 一圈，rng 每帧同序列，函数内不存状态。
+// 环境提示统一用 laneClip 裁在本轨道内、判定线以上，透明度 ≤ .35；本体画在裁剪外面（压线时不能被切）。
+(() => {
+  const hex = c => [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)];
+  // k>0 向白混，k<0 向黑混
+  const rgba = (c, a, k = 0) => {
+    const f = k > 0 ? v => v + (255 - v) * k : v => v * (1 + k);
+    return `rgba(${f(c[0]) | 0},${f(c[1]) | 0},${f(c[2]) | 0},${a < 0 ? 0 : a > 1 ? 1 : a})`;
+  };
+  const TAU = Math.PI * 2;
+  // 药丸路径（r 默认半高）
+  const pill = (ctx, x, y, w, h, r = h / 2) => {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  };
+  // 尖角：顶点 (x,y) 朝 d，半高 s；只添路径不描
+  const chev = (ctx, x, y, s, d) => { ctx.moveTo(x - d * s * .55, y - s); ctx.lineTo(x, y); ctx.lineTo(x - d * s * .55, y + s); };
+  const laneClip = (ctx, n) => { ctx.beginPath(); ctx.rect(n.laneX, 0, n.laneW, n.lineY); ctx.clip(); };
+  // 本体：圆角薄片（fill 可传渐变）+ 白芯 + 两头 ‹ ›，3 次绘制
+  const body = (ctx, n, fill) => {
+    const { x, y, w, h } = n, c = hex(n.color);
+    ctx.shadowColor = rgba(c, .7); ctx.shadowBlur = 8;
+    pill(ctx, x - w / 2, y - h / 2, w, h); ctx.fillStyle = fill || n.color; ctx.fill();
+    ctx.shadowBlur = 0;
+    pill(ctx, x - w / 2 + h * .35, y - h * .22, w - h * .7, h * .44); ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,.95)'; ctx.lineWidth = 1.6; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath(); chev(ctx, x - w / 2 - h * .35, y, h * .5, -1); chev(ctx, x + w / 2 + h * .35, y, h * .5, 1); ctx.stroke();
+  };
+
+  window.SWIPE = window.SWIPE || [];
+
+  // 1 ─────────────────────────────────────────────── 轨道尖角
+  window.SWIPE.push({
+    name: '轨道尖角',
+    desc: '块下方的轨道里横铺一排淡尖角全朝方向，方向侧渐亮，一点亮光顺着尖角往方向流',
+    draw(ctx, n, t) {
+      const { y, h, dir: d, laneX, laneW } = n, c = hex(n.color);
+      ctx.save(); laneClip(ctx, n);
+      const ry = y + h * 2.9, s = h * 1.2, N = 9, step = laneW / (N + 1);
+      // 垫一层极淡的渐变带：方向侧亮——缩到很小时靠它分左右
+      const g = ctx.createLinearGradient(laneX, 0, laneX + laneW, 0);
+      g.addColorStop(d > 0 ? 0 : 1, rgba(c, 0)); g.addColorStop(.5, rgba(c, .04)); g.addColorStop(d > 0 ? 1 : 0, rgba(c, .2));
+      ctx.fillStyle = g; ctx.fillRect(laneX, ry - s, laneW, s * 2);
+      ctx.lineWidth = 1.6; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      for (let i = 1; i <= N; i++) {
+        const u = d > 0 ? i / (N + 1) : 1 - i / (N + 1);      // 0..1 顺方向
+        const bump = Math.max(0, 1 - Math.abs(u - t) / .2);    // 一点亮光顺方向跑
+        ctx.strokeStyle = rgba(c, .05 + .23 * u * u + .07 * bump, .3 * bump);
+        ctx.beginPath(); chev(ctx, laneX + step * i, ry, s, d); ctx.stroke();
+      }
+      ctx.restore();
+      body(ctx, n);
+    }
+  });
+
+  // 2 ─────────────────────────────────────────────── 落点光带
+  window.SWIPE.push({
+    name: '落点光带',
+    desc: '判定线上、块将落的位置预先亮一道朝方向收窄的光楔，一粒光顺楔往方向跑，块越近楔越亮',
+    draw(ctx, n, t) {
+      const { x, y, w, h, dir: d, lineY } = n, c = hex(n.color);
+      const near = .55 + .45 * (y / lineY);
+      const x0 = x - d * w * .3, x1 = x + d * n.laneW * .42, H = h * 2.2, base = lineY - 1;
+      ctx.save(); laneClip(ctx, n);
+      // 光楔：落点处最高最亮，朝方向收成尖
+      const g = ctx.createLinearGradient(x0, 0, x1, 0);
+      g.addColorStop(0, rgba(c, .35 * near, .15)); g.addColorStop(1, rgba(c, 0));
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.moveTo(x0, base - H); ctx.lineTo(x1, base); ctx.lineTo(x0, base); ctx.closePath(); ctx.fill();
+      // 楔的斜边描一道细亮线，形状才立得住
+      ctx.strokeStyle = g; ctx.lineWidth = 1.2; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(x0, base - H); ctx.lineTo(x1, base); ctx.stroke();
+      // 落点：一短竖光
+      ctx.fillStyle = rgba(c, .35 * near, .5); ctx.fillRect(x - 1, base - H * 1.4, 2, H * 1.4);
+      // 一粒光顺楔跑
+      const px = x0 + (x1 - x0) * t;
+      ctx.fillStyle = rgba(c, .35 * (1 - t) * near, .6); ctx.fillRect(px - 6, base - 3, 12, 3);
+      ctx.restore();
+      body(ctx, n);
+    }
+  });
+
+  // 3 ─────────────────────────────────────────────── 反向尾迹
+  window.SWIPE.push({
+    name: '反向尾迹',
+    desc: '块朝反方向拖出逐级变淡的残像和细速度线，像已经在往方向冲；方向侧的头部尖角更亮更粗',
+    draw(ctx, n, t, rng) {
+      const { x, y, w, h, dir: d } = n, c = hex(n.color);
+      const br = 1 + .12 * Math.sin(TAU * t);                  // 尾迹一伸一缩
+      ctx.save(); laneClip(ctx, n);
+      for (let i = 1; i <= 3; i++) {
+        pill(ctx, x - d * w * .28 * i * br - w / 2, y - h / 2, w, h);
+        ctx.fillStyle = rgba(c, [.22, .12, .05][i - 1], -.15); ctx.fill();
+      }
+      // 速度线 ×4：从尾端往反方向甩出，长短由 rng 定（每帧同序列，不闪）
+      ctx.lineCap = 'round';
+      const xs = x - d * w * .5;
+      for (let i = 0; i < 4; i++) {
+        const ly = y + (i - 1.5) * h * .55, len = w * (.6 + rng() * .6) * br;
+        const g = ctx.createLinearGradient(xs, 0, xs - d * len, 0);
+        g.addColorStop(0, rgba(c, .32, .3)); g.addColorStop(1, rgba(c, 0));
+        ctx.strokeStyle = g; ctx.lineWidth = i % 2 ? 1 : 1.5;
+        ctx.beginPath(); ctx.moveTo(xs, ly); ctx.lineTo(xs - d * len, ly); ctx.stroke();
+      }
+      ctx.restore();
+      body(ctx, n);
+      // 头部：方向侧尖角加亮加粗一档
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.4;
+      ctx.beginPath(); chev(ctx, x + d * (w / 2 + h * .35), y, h * .55, d); ctx.stroke();
+    }
+  });
+
+  // 4 ─────────────────────────────────────────────── 偏光
+  window.SWIPE.push({
+    name: '偏光',
+    desc: '方向侧的轨道被一团柔光照亮、反方向侧压暗，块身也顺着这光一头亮一头暗',
+    draw(ctx, n, t) {
+      const { x, y, w, dir: d } = n, c = hex(n.color);
+      const R = w * 1.1, br = .27 + .08 * Math.sin(TAU * t);   // 呼吸
+      ctx.save(); laneClip(ctx, n);
+      // 方向侧：椭圆柔光（径向渐变压扁）
+      ctx.save(); ctx.translate(x + d * w * .8, y); ctx.scale(1, .34);
+      let g = ctx.createRadialGradient(0, 0, 0, 0, 0, R);
+      g.addColorStop(0, rgba(c, br, .2)); g.addColorStop(1, rgba(c, 0));
+      ctx.fillStyle = g; ctx.fillRect(-R, -R, 2 * R, 2 * R); ctx.restore();
+      // 反方向侧：压暗
+      ctx.save(); ctx.translate(x - d * w * .75, y); ctx.scale(1, .34);
+      g = ctx.createRadialGradient(0, 0, 0, 0, 0, R * .9);
+      g.addColorStop(0, 'rgba(0,0,0,.35)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g; ctx.fillRect(-R, -R, 2 * R, 2 * R); ctx.restore();
+      ctx.restore();
+      // 块身：方向头亮、反方向头暗
+      const bg = ctx.createLinearGradient(x - d * w / 2, 0, x + d * w / 2, 0);
+      bg.addColorStop(0, rgba(c, 1, -.4)); bg.addColorStop(1, rgba(c, 1, .45));
+      body(ctx, n, bg);
+    }
+  });
+
+  // 5 ─────────────────────────────────────────────── 边墙
+  window.SWIPE.push({
+    name: '边墙',
+    desc: '方向那侧的轨道边亮起一段竖光和 [ 形括角接着块，一条虚线从块牵到墙上、朝墙流动',
+    draw(ctx, n, t) {
+      const { x, y, w, h, dir: d, laneX, laneW } = n, c = hex(n.color);
+      const wx = d > 0 ? laneX + laneW - 2 : laneX + 2;         // 墙贴轨道边，留 2px 在轨道内
+      const near = .6 + .4 * (y / n.lineY), H = h * 5, gw = w * .4;
+      ctx.save(); laneClip(ctx, n);
+      // 竖光：贴墙一段柔光，往轨道里散开、上下淡出（径向渐变压成竖椭圆）
+      ctx.save(); ctx.translate(wx, y); ctx.scale(gw / H, 1);
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, H);
+      g.addColorStop(0, rgba(c, (.28 + .07 * Math.sin(TAU * t)) * near, .1)); g.addColorStop(1, rgba(c, 0));
+      ctx.fillStyle = g; ctx.fillRect(-H, -H, 2 * H, 2 * H); ctx.restore();
+      // 墙线 + 上下括角，开口朝块
+      ctx.strokeStyle = rgba(c, .35 * near, .5); ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      const b = h * 1.3, hh = h * 2.2;
+      ctx.beginPath(); ctx.moveTo(wx - d * b, y - hh); ctx.lineTo(wx, y - hh); ctx.lineTo(wx, y + hh); ctx.lineTo(wx - d * b, y + hh); ctx.stroke();
+      // 虚线：块的方向端 → 墙，dashOffset 递减 = 虚线往墙流
+      ctx.strokeStyle = rgba(c, .25 * near, .3); ctx.lineWidth = 1.2;
+      ctx.setLineDash([3, 6]); ctx.lineDashOffset = -t * 9;
+      ctx.beginPath(); ctx.moveTo(x + d * (w / 2 + h), y); ctx.lineTo(wx - d * (b + 3), y); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+      body(ctx, n);
+    }
+  });
+})();
+
+</script>
+<script>
+/* ── swipe/motion.js ── */
+// swipe 方向标记 · 运动 / 流动类 5 款。
+// 契约：draw(ctx, note, t, rng) 画完整音符；note = {x, y, w, h, color, dir, lineY, laneX, laneW}，
+// t 是 0..1 循环相位，rng 每帧同 seed 重开。静止帧靠形状分方向，动画只是加分。
+(() => {
+  'use strict';
+  const A = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`; };
+  const W = a => `rgba(255,255,255,${a})`;
+  const rr = (ctx, x, y, w, h, r) => {
+    r = Math.min(r, w / 2, h / 2);
+    ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  };
+  const fill = (ctx, style) => { ctx.fillStyle = style; ctx.fill(); };
+  const dot = (ctx, x, y, r, style) => { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); fill(ctx, style); };
+  const grad = (ctx, x0, x1, stops) => { const g = ctx.createLinearGradient(x0, 0, x1, 0); for (const [o, c] of stops) g.addColorStop(o, c); return g; };
+  // 五款都只画「朝右」的：坐标系摆成原点在音符中心、+x = 滑动方向
+  const face = (ctx, n) => { ctx.translate(n.x, n.y); ctx.scale(n.dir < 0 ? -1 : 1, 1); };
+
+  window.SWIPE = window.SWIPE || [];
+
+  // 1. 流光 —— 彗星：尾尖头圆，白芯往头越来越亮，一道脉冲沿芯朝方向跑
+  window.SWIPE.push({
+    name: '流光',
+    desc: '彗星形薄片：尾端收尖、头端圆亮，一道白光脉冲沿芯朝滑动方向跑',
+    draw(ctx, n, t) {
+      face(ctx, n);
+      const { w, h, color: c } = n, L = -w / 2, R = w / 2;
+      const comet = (L, R, hh) => {
+        const k = R - L;
+        ctx.beginPath(); ctx.moveTo(L, 0);
+        ctx.quadraticCurveTo(L + k * .12, -hh, L + k * .42, -hh); ctx.lineTo(R - hh, -hh);
+        ctx.arc(R - hh, 0, hh, -Math.PI / 2, Math.PI / 2);
+        ctx.lineTo(L + k * .42, hh); ctx.quadraticCurveTo(L + k * .12, hh, L, 0); ctx.closePath();
+      };
+      comet(L - 2, R + 2, h / 2 + 2); fill(ctx, A(c, .22));
+      comet(L, R, h / 2); fill(ctx, grad(ctx, L, R, [[0, A(c, .4)], [.55, c], [1, c]]));
+      comet(L + w * .2, R - h * .3, h * .22); fill(ctx, grad(ctx, L + w * .2, R, [[0, W(0)], [1, W(.95)]]));
+      const p = L + w * .25 + t * w * .7, k = Math.sin(Math.PI * t);      // 脉冲：起止渐隐
+      rr(ctx, p - h * .8, -h * .2, h * 1.6, h * .4, h * .2); fill(ctx, W(.85 * k));
+      dot(ctx, R - h * .5, 0, h * .28, '#fff');
+    },
+  });
+
+  // 2. 跑马 —— 子弹头薄片，芯里一排小楔子 ▸ 亮点从尾到头一段段跑过去
+  window.SWIPE.push({
+    name: '跑马',
+    desc: '子弹头薄片，芯槽里一排小楔子 ▸，亮点从尾到头一段段跑过去',
+    draw(ctx, n, t) {
+      face(ctx, n);
+      const { w, h, color: c } = n, L = -w / 2, R = w / 2, hh = h / 2;
+      const bullet = (L, R, hh, tip) => {
+        ctx.beginPath(); ctx.arc(L + hh, 0, hh, Math.PI / 2, Math.PI * 1.5);
+        ctx.lineTo(R - tip, -hh); ctx.lineTo(R, 0); ctx.lineTo(R - tip, hh); ctx.closePath();
+      };
+      bullet(L - 2, R + 2, hh + 2, h * 1.1); fill(ctx, A(c, .22));
+      bullet(L, R, hh, h * .9); fill(ctx, c);
+      const x0 = L + h * .9, x1 = R - h * 1.8;
+      rr(ctx, x0 - h * .45, -h * .22, x1 - x0 + h * .9, h * .44, h * .22); fill(ctx, 'rgba(0,0,0,.28)');   // 芯槽
+      const N = Math.max(4, Math.round((x1 - x0) / (h * .85))), uc = t * 1.6 - .3;   // 亮点中心：从尾外进来、从头外出去，循环处不跳
+      for (let i = 0; i < N; i++) {
+        const x = x0 + (x1 - x0) * i / (N - 1), lit = Math.max(0, 1 - Math.abs(i / (N - 1) - uc) / .3);
+        ctx.beginPath(); ctx.moveTo(x - h * .25, -h * .28); ctx.lineTo(x + h * .3, 0); ctx.lineTo(x - h * .25, h * .28); ctx.closePath();
+        fill(ctx, W(.45 + .55 * lit));
+      }
+      ctx.beginPath(); ctx.moveTo(R - h * 1.25, -hh * .8); ctx.lineTo(R - h * .08, 0); ctx.lineTo(R - h * 1.25, hh * .8); ctx.closePath();   // 白尖：远看就靠它
+      fill(ctx, '#fff');
+    },
+  });
+
+  // 3. 风偏 —— 整片斜体倒向滑动方向，尾后拖三道风线，本体一下一下被往那边推
+  window.SWIPE.push({
+    name: '风偏',
+    desc: '薄片斜体倒向滑动方向，尾后拖三道风线；本体一下一下被往那边推',
+    draw(ctx, n, t, rng) {
+      face(ctx, n);
+      const { w, h, color: c } = n, L = -w / 2, hh = h / 2;
+      const s = t < .25 ? Math.sin(t / .25 * Math.PI / 2) : Math.cos((t - .25) / .75 * Math.PI / 2);   // 快推慢回
+      ctx.translate(h * .35 * s, 0);
+      ctx.lineWidth = 1.2; ctx.lineCap = 'round';
+      for (let i = -1; i <= 1; i++) {
+        const len = w * (i ? .3 : .45) * (.8 + .2 * Math.sin(2 * Math.PI * (t + rng())));
+        const x1 = L - h * .45 - (i ? h * .45 : 0), y = i * h * .36;
+        ctx.strokeStyle = grad(ctx, x1 - len, x1, [[0, A(c, 0)], [1, A(c, .9)]]);
+        ctx.beginPath(); ctx.moveTo(x1 - len, y); ctx.lineTo(x1, y); ctx.stroke();
+      }
+      ctx.transform(1, 0, -.7, 1, 0, 0);    // 斜体：上沿往方向偏（圆角要小，圆头斜了看不出来）
+      rr(ctx, L - 2, -hh - 2, w + 4, h + 4, h * .3); fill(ctx, A(c, .22));
+      rr(ctx, L, -hh, w, h, h * .2); fill(ctx, c);
+      rr(ctx, L + h * .5, -h * .22, w - h, h * .44, h * .1); fill(ctx, W(.85));
+    },
+  });
+
+  // 4. 散粒 —— 头端收成喷口，朝滑动方向不断喷出小光粒，扇面越远越散越淡
+  window.SWIPE.push({
+    name: '散粒',
+    desc: '头端收成喷口，朝滑动方向不断喷出小光粒，扇面越远越散越淡',
+    draw(ctx, n, t, rng) {
+      face(ctx, n);
+      const { w, h, color: c } = n, L = -w / 2, R = w / 2, hh = h / 2;
+      const nozzle = (L, R, hh, m) => {
+        ctx.beginPath(); ctx.arc(L + hh, 0, hh, Math.PI / 2, Math.PI * 1.5);
+        ctx.lineTo(R - h * 1.3, -hh); ctx.lineTo(R, -m); ctx.lineTo(R, m); ctx.lineTo(R - h * 1.3, hh); ctx.closePath();
+      };
+      nozzle(L - 2, R + 2, hh + 2, h * .22 + 2); fill(ctx, A(c, .22));
+      nozzle(L, R, hh, h * .22); fill(ctx, c);
+      rr(ctx, L + h * .5, -h * .2, w - h * .7, h * .4, h * .2); fill(ctx, grad(ctx, L, R, [[0, W(.35)], [1, W(.95)]]));
+      dot(ctx, R, 0, h * .65, A(c, .55)); dot(ctx, R - h * .1, 0, h * .3, '#fff');   // 喷口发光（远看就靠这个亮点）
+      for (let i = 0; i < 14; i++) {
+        const ph = rng(), sp = rng() * 2 - 1, q = rng();
+        const u = (t + ph) % 1, k = (1 - u) * (1 - u);        // 近亮远淡
+        const r = (h * .1 + q * h * .12) * (1 - u * .4);
+        dot(ctx, R + h * .4 + u * w * .45, sp * (h * .08 + u * h), r, u < .4 ? W(.95 * k) : A(c, k));
+      }
+    },
+  });
+
+  // 5. 扫光 —— 尾端切平、越往头越实，头端一道白光棱；一道高光从尾扫到头，到头闪一下
+  window.SWIPE.push({
+    name: '扫光',
+    desc: '尾端切平、越往头越实，头端立一道白光棱；高光从尾扫到头，到头闪一下',
+    draw(ctx, n, t) {
+      face(ctx, n);
+      const { w, h, color: c } = n, L = -w / 2, R = w / 2, hh = h / 2;
+      const body = (L, R, hh) => {
+        ctx.beginPath(); ctx.moveTo(L, -hh); ctx.lineTo(R - hh, -hh);
+        ctx.arc(R - hh, 0, hh, -Math.PI / 2, Math.PI / 2); ctx.lineTo(L, hh); ctx.closePath();
+      };
+      body(L - 2, R + 2, hh + 2); fill(ctx, A(c, .2));
+      body(L, R, hh); fill(ctx, grad(ctx, L, R, [[0, A(c, .3)], [.75, c], [1, c]]));
+      rr(ctx, L + h * .2, -h * .2, w - h * .9, h * .4, h * .2); fill(ctx, grad(ctx, L, R, [[0, W(.1)], [1, W(.9)]]));
+      const p = L + (w - h) * Math.min(1, t / .7), flash = t < .7 ? 0 : 1 - (t - .7) / .3;   // 扫到头再闪一下
+      const a = .7 * Math.min(1, t / .1) * (1 - flash);                                         // 扫光带起止渐隐，循环处不跳
+      ctx.save(); body(L, R, hh); ctx.clip();
+      ctx.fillStyle = grad(ctx, p - h, p + h, [[0, W(0)], [.5, W(a)], [1, W(0)]]); ctx.fillRect(p - h, -hh, h * 2, h);
+      ctx.restore();
+      rr(ctx, R - h * .55, -h * .65, h * .28, h * 1.3, h * .14); fill(ctx, W(.75 + .25 * flash));   // 光棱，比本体高一点
+    },
+  });
+})();
+
+</script>
+<script>
+/* ── swipe/shape.js ── */
+// design/swipe/shape.js —— swipe 音块的左右标记 × 5：本体形状不对称
+// 契约：draw(ctx, note, t, rng)。note = {x,y,w,h,color,dir,lineY,laneX,laneW}，t∈[0,1] 循环相位。
+// 统一读法：细 / 尖 / 亮的那头 = 滑动方向；圆 / 厚 / 平的那头在后。白芯一律偏向前端，t 只驱动一道顺着方向流的光。
+// 所有几何都在「朝右」的局部坐标里画（前端 = +w/2），dir=-1 靠 scale(-1,1) 镜像。
+(() => {
+'use strict';
+const TAU = Math.PI * 2;
+const hex = c => [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)];
+const rgba = (c, a) => { const [r, g, b] = hex(c); return `rgba(${r},${g},${b},${a})`; };
+// k<0 往黑压，k>0 往白提
+const shade = (c, k) => { const [r, g, b] = hex(c), to = k < 0 ? 0 : 255, a = Math.abs(k); return `rgb(${r + (to - r) * a | 0},${g + (to - g) * a | 0},${b + (to - b) * a | 0})`; };
+const white = a => `rgba(255,255,255,${a})`;
+
+// 圆角多边形：每个角用 arcTo 倒 r
+function rpoly(ctx, pts, r) {
+  const n = pts.length;
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) {
+    const [ax, ay] = pts[i], [bx, by] = pts[(i + 1) % n], [cx, cy] = pts[(i + 2) % n];
+    if (i === 0) ctx.moveTo((ax + bx) / 2, (ay + by) / 2); else ctx.lineTo((ax + bx) / 2, (ay + by) / 2);
+    ctx.arcTo(bx, by, cx, cy, r);
+  }
+  ctx.closePath();
+}
+// 胶囊（圆角矩形，r = 半高）
+function pill(ctx, x0, x1, hh) {
+  ctx.beginPath();
+  ctx.moveTo(x0 + hh, -hh); ctx.lineTo(x1 - hh, -hh); ctx.arc(x1 - hh, 0, hh, -Math.PI / 2, Math.PI / 2);
+  ctx.lineTo(x0 + hh, hh); ctx.arc(x0 + hh, 0, hh, Math.PI / 2, -Math.PI / 2);
+  ctx.closePath();
+}
+// 珠 + 针：圆头在 bx（半径 r），针尖在 tx；针身从圆头 psi 角处出来，先快后慢地往轴心收
+function drop(ctx, bx, r, tx, psi) {
+  const px = bx + r * Math.cos(psi), py = r * Math.sin(psi), L = tx - px;
+  ctx.beginPath();
+  ctx.moveTo(px, -py); ctx.bezierCurveTo(px + L * .25, -py * .55, px + L * .6, -py * .18, tx, 0);
+  ctx.bezierCurveTo(px + L * .6, py * .18, px + L * .25, py * .55, px, py);
+  ctx.arc(bx, 0, r, psi, -psi, false);
+  ctx.closePath();
+}
+// 进入局部坐标：原点在音符中心，+x = 滑动方向；同色柔光当底
+function enter(ctx, n) {
+  ctx.translate(n.x, n.y); ctx.scale(n.dir < 0 ? -1 : 1, 1);
+  ctx.shadowColor = rgba(n.color, .7); ctx.shadowBlur = 8;
+}
+const flat = ctx => { ctx.shadowBlur = 0; };
+// 顺着方向流过去的一团光（调用方先 clip 到本体）
+function pulse(ctx, x0, x1, r, t, a) {
+  const px = x0 + (x1 - x0) * t;
+  const g = ctx.createRadialGradient(px, 0, 0, px, 0, r);
+  g.addColorStop(0, white(a)); g.addColorStop(1, white(0));
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(px, 0, r, 0, TAU); ctx.fill();
+}
+
+window.SWIPE = window.SWIPE || [];
+
+// ① 珠针：圆珠在后，整条身子拉成一根往轴心收的细针；越远越像一枚倒着的图钉
+window.SWIPE.push({
+  name: '珠针',
+  desc: '圆珠在后，身子拉成一根细针，针尖指向滑动方向',
+  draw(ctx, n, t) {
+    const { w, h, color } = n, R = h * .8, bx = -w / 2 + R, tx = w / 2, psi = Math.PI * .36;
+    enter(ctx, n);
+    drop(ctx, bx, R, tx, psi); ctx.fillStyle = color; ctx.fill();
+    flat(ctx);
+    ctx.clip();
+    drop(ctx, bx, R * .42, tx - h * .9, psi); ctx.fillStyle = white(.85); ctx.fill();
+    pulse(ctx, bx, tx - h * .4, h * .55, t, .6);
+  }
+});
+
+// ② 楔形：直边的梯形，后端厚而平、前端薄成一条刃
+window.SWIPE.push({
+  name: '楔形',
+  desc: '后端厚、前端薄的直边楔子，薄刃朝滑动方向',
+  draw(ctx, n, t) {
+    const { w, h, color } = n, a = h * .62, b = h * .17, x0 = -w / 2, x1 = w / 2;
+    enter(ctx, n);
+    rpoly(ctx, [[x0, -a], [x1, -b], [x1, b], [x0, a]], 1.2); ctx.fillStyle = color; ctx.fill();
+    flat(ctx);
+    ctx.clip();
+    rpoly(ctx, [[x0 + h * .55, -a * .44], [x1 - h * .5, -b * .44], [x1 - h * .5, b * .44], [x0 + h * .55, a * .44]], 1); ctx.fillStyle = white(.85); ctx.fill();
+    // 一道斜光沿楔子扫向刃口
+    const bw = w * .26, sx = x0 - bw + (w + bw) * t;
+    const g = ctx.createLinearGradient(sx, 0, sx + bw, 0);
+    g.addColorStop(0, white(0)); g.addColorStop(.5, white(.35)); g.addColorStop(1, white(0));
+    ctx.fillStyle = g; ctx.fillRect(sx, -a, bw, a * 2);
+  }
+});
+
+// ③ 子弹：胶囊后端削平（方角、压暗），前端留尖弧的圆头；白芯贴着圆头
+window.SWIPE.push({
+  name: '子弹',
+  desc: '胶囊后端削平压暗，前端圆头，白芯贴着圆头那边',
+  draw(ctx, n, t) {
+    const { w, h, color } = n, x0 = -w / 2, x1 = w / 2, L = h * 1.9, hh = h / 2;
+    enter(ctx, n);
+    ctx.beginPath();
+    ctx.moveTo(x0, -hh); ctx.lineTo(x1 - L, -hh);
+    ctx.bezierCurveTo(x1 - L * .35, -hh, x1 - L * .02, -h * .25, x1, 0);
+    ctx.bezierCurveTo(x1 - L * .02, h * .25, x1 - L * .35, hh, x1 - L, hh);
+    ctx.lineTo(x0, hh); ctx.closePath();
+    const g = ctx.createLinearGradient(x0, 0, x1, 0);
+    g.addColorStop(0, shade(color, -.42)); g.addColorStop(.55, color); g.addColorStop(1, color);
+    ctx.fillStyle = g; ctx.fill();
+    flat(ctx);
+    ctx.clip();
+    pill(ctx, -w * .1, x1 - h * .5, h * .22); ctx.fillStyle = white(.85); ctx.fill();
+    pulse(ctx, -w * .1, x1 - h * .5, h * .5, t, .55);
+  }
+});
+
+// ④ 斜身：整块向前倾成平行四边形，前上角是锐角，像斜体、像往前冲的人
+window.SWIPE.push({
+  name: '斜身',
+  desc: '整块朝滑动方向倾成平行四边形，前上角是锐角',
+  draw(ctx, n, t) {
+    const { w, h, color } = n, s = h * 1.7, hh = h / 2, x0 = -w / 2, x1 = w / 2;
+    enter(ctx, n);
+    rpoly(ctx, [[x0 + s / 2, -hh], [x1 + s / 2, -hh], [x1 - s / 2, hh], [x0 - s / 2, hh]], h * .22); ctx.fillStyle = color; ctx.fill();
+    flat(ctx);
+    ctx.clip();
+    const ch = h * .22, cs = s * .44, c0 = x0 + h * .9, c1 = x1 - h * .4;
+    rpoly(ctx, [[c0 + cs / 2, -ch], [c1 + cs / 2, -ch], [c1 - cs / 2, ch], [c0 - cs / 2, ch]], ch); ctx.fillStyle = white(.85); ctx.fill();
+    // 一道跟着斜边走的光扫向前端
+    const bw = w * .26, sx = x0 - bw + (w + bw + s) * t;
+    ctx.transform(1, 0, -s / h, 1, 0, 0);       // 剪切后再画竖条 = 斜条
+    const g = ctx.createLinearGradient(sx, 0, sx + bw, 0);
+    g.addColorStop(0, white(0)); g.addColorStop(.5, white(.35)); g.addColorStop(1, white(0));
+    ctx.fillStyle = g; ctx.fillRect(sx, -h, bw, h * 2);
+  }
+});
+
+// ⑤ 月牙：胶囊身子，前端是一弯两角朝前的月牙（外圆减去前移的内圆），月牙口里抱着一粒白珠
+window.SWIPE.push({
+  name: '月牙',
+  desc: '前端弯成两角朝前的 ⊂ 月牙，月牙口里抱着一粒白珠',
+  draw(ctx, n, t) {
+    const { w, h, color } = n, Ro = h, Ri = h * .85, e = h * .45;
+    const ix = (Ro * Ro - Ri * Ri + e * e) / (2 * e), iy = Math.sqrt(Ro * Ro - ix * ix);   // 两圆交点 = 月牙角尖
+    const cx = w / 2 - ix, a1 = Math.atan2(iy, ix), a2 = Math.atan2(iy, ix - e);
+    enter(ctx, n);
+    pill(ctx, -w / 2, cx - Ro + h * .35, h / 2); ctx.fillStyle = color; ctx.fill();
+    ctx.beginPath();
+    ctx.arc(cx, 0, Ro, -a1, a1, true);          // 外弧绕过后背
+    ctx.arc(cx + e, 0, Ri, a2, -a2, false);     // 内弧绕回来，角尖自然收细
+    ctx.closePath(); ctx.fill();
+    flat(ctx);
+    ctx.strokeStyle = white(.85); ctx.lineWidth = h * .44; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-w / 2 + h * .55, 0); ctx.lineTo(cx - Ro + h * .05, 0); ctx.stroke();
+    // 珠子往月牙口方向轻轻一送再回来
+    const bob = Math.sin(t * TAU) * .12 * h;
+    ctx.fillStyle = white(.92); ctx.beginPath(); ctx.arc(cx + ix - h * .3 + bob, 0, h * .3, 0, TAU); ctx.fill();
+  }
+});
+})();
+
+</script>
 
 <script>
 "use strict";
@@ -126,8 +1878,16 @@ const S = {
   fxScale:1, particles:8, fxLife:0.55,
   heat:0.7, heatMax:30, bgGain:1.4,
   tilt:1, tiltBack:1, sway:1,
-  noteW:1, approach:1.2, density:1,
+  noteW:1, noteHscale:1, approach:1.2, density:1,
 };
+
+// ── 老板拍板（2026-09-06）：swipe 标记两款随机、碎裂八款随机 ──
+// 模块由 bench-assemble.py 内联在上面（design/swipe/*.js、design/shatter/*.js），这里按名字挑。
+const pickBy = (arr, names) => names.map(n => (arr||[]).find(f => f.name===n)).filter(Boolean);
+const SWIPE_CHOSEN   = pickBy(window.SWIPE,   ['反向尾迹','风偏']);
+const SHATTER_CHOSEN = pickBy(window.SHATTER, ['方粒四散','切片错位','冲击光尘','扫描消散','溶解成光','樱瓣飘落','水晶棱柱','压扁弹回']);
+const pick = arr => arr[(Math.random()*arr.length)|0];
+function rngOf(seed){ let a=(seed*4294967296)>>>0; return () => { a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
 
 // ── 画布 ──
 const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
@@ -221,7 +1981,7 @@ function genAhead(now){
     const lane = (Math.random()*4)|0;
     const n = {t:lastGen, lane, kind, judged:null, tailDone:false, dir:0, dur:0};
     if (kind==='slide'){ n.dur = 0.35 + Math.random()*0.7; holdUntil = n.t + n.dur; }
-    if (kind==='swipe') n.dir = Math.random()<.5 ? -1 : 1;
+    if (kind==='swipe'){ n.dir = Math.random()<.5 ? -1 : 1; n.mark = SWIPE_CHOSEN.length ? pick(SWIPE_CHOSEN) : null; n.seed = Math.random(); }
     notes.push(n);
   }
 }
@@ -230,7 +1990,7 @@ function genAhead(now){
 let combo=0, best=0, perfect=0, good=0, miss=0, score=0;
 let tiltAt=-9, tiltDir=0, lastTierAt=-9;
 const press=[-9,-9,-9,-9], flash=[-9,-9,-9,-9], held=[0,0,0,0];
-let bursts=[], words=[], missMarks=[];
+let bursts=[], words=[], missMarks=[], shatters=[];
 const now = () => (performance.now()-t0)/1000;
 const tierWord = c => { const t = TIERS.find(x=>x.at===c); return t?t.label:null; };
 const multOf = c => { let m=1; for (const t of TIERS) if (c>=t.at) m=t.mult; return m; };
@@ -256,6 +2016,8 @@ function land(n, j){
   bursts.push({at:now(), lane:n.lane, kind:n.kind, judge:j, dir:n.dir, seed:Math.random(),
                parts:Array.from({length:S.particles}, () => ({a:Math.random()*6.283, v:0.6+Math.random()*1.0, s:0.5+Math.random()*0.9, r:Math.random()}))});
   if (bursts.length>40) bursts.shift();
+  // 碎裂：音符本体按老板收藏的 8 款随机散掉（slide 只在按下那一瞬散头部）
+  if (SHATTER_CHOSEN.length){ shatters.push({fx: pick(SHATTER_CHOSEN), at: now(), lane: n.lane, kind: n.kind, seed: Math.random()}); if (shatters.length>30) shatters.shift(); }
   // 只在档位跳级时喊一声（8 / 15 / 30）。每一下都弹字太吵 —— Phigros 一个字都不弹，克制才精致
   const w = tierWord(combo);
   if (w){ words.push({at:now(), text:w, big:true}); lastTierAt = now(); }
@@ -332,7 +2094,7 @@ function draw(){
   const swayDeg = Math.sin(t*0.45)*2.2*S.sway;
   const deg = Math.max(-9, Math.min(9, swayDeg + kick));
   const laneW = W/4, judgeY = H*(0.78 + Math.sin(t*0.3)*0.02*S.sway);
-  const noteH = Math.max(6, Math.min(11, H*0.011));                  // 薄片：Phigros 在 866p 上约 8px
+  const noteH = Math.min(44, Math.max(6, Math.min(11, H*0.011)) * S.noteHscale);   // 薄片 8px；拉高就是钢琴块
   const noteW = Math.min(laneW*0.55, W*0.052) * S.noteW;             // Phigros 约 3% 屏宽；我们有轨道，给到 5% 好点
   geo = {deg, cx:W/2, cy:judgeY, laneW};
 
@@ -407,9 +2169,23 @@ function draw(){
       }
     }
     if (!n.judged && y>=-20 && y<=judgeY+h){
-      sliver(cx, y, w, h, c, n);
+      if (n.kind==='swipe' && n.mark){
+        ctx.save();
+        try { n.mark.draw(ctx, {x:cx, y, w, h, color:c, dir:n.dir, lineY:judgeY, laneX:laneW*n.lane, laneW}, (t%0.8)/0.8, rngOf(n.seed)); }
+        catch(e){}
+        ctx.restore();
+      } else sliver(cx, y, w, h, c, n);
     }
   }
+  // ── 碎裂（音符本体散掉）──
+  for (const sh of shatters){
+    const k = (t - sh.at)/0.6; if (k < 0 || k > 1) continue;
+    const w = noteW, h = noteH, cx = laneW*sh.lane + laneW/2;
+    ctx.save();
+    try { sh.fx.draw(ctx, {x: cx - w/2, y: judgeY - h/2, w, h, color: sk.note[sh.kind], seed: sh.seed}, k, rngOf(sh.seed)); } catch(e){}
+    ctx.restore();
+  }
+  shatters = shatters.filter(sh => t - sh.at <= 0.65);
   ctx.restore();
 
   drawHud(t, sk);
@@ -595,7 +2371,7 @@ function segButtons(id, items, cur, onPick){
 }
 segButtons('skin', Object.entries(SKINS).map(([k,v])=>[k,v.name]), ()=>S.skin, v=>{ S.skin=v; bgHeatDrawn=-1; });
 segButtons('auto', [[false,'我来打'],[true,'自动打']], ()=>S.auto, v=>{ S.auto=v; });
-const SLIDERS = ['fxScale','particles','fxLife','heat','heatMax','bgGain','tilt','tiltBack','sway','noteW','approach','density'];
+const SLIDERS = ['fxScale','particles','fxLife','heat','heatMax','bgGain','noteHscale','tilt','tiltBack','sway','noteW','approach','density'];
 const INT = new Set(['particles','heatMax']);
 function syncSliders(){
   SLIDERS.forEach(id => { const el=document.getElementById(id); el.value=S[id];

@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>点击特效 · 30 款</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;background:#0b0d12;color:#E8EDF5;font:14px/1.5 system-ui,-apple-system,"PingFang SC","Noto Sans CJK SC",sans-serif;
+    -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+  header{padding:calc(14px + env(safe-area-inset-top)) 18px 6px}
+  h1{margin:0;font-size:16px;font-weight:500;letter-spacing:.02em}
+  .sub{color:#7E8798;font-size:12px;font-weight:300;margin-top:2px}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;padding:8px 18px 4px;align-items:center}
+  .bar button{padding:6px 12px;border-radius:100px;border:1px solid #ffffff1c;background:#ffffff08;color:#AEB7C6;font-size:12px;font-weight:300}
+  .bar button.on{background:#E8EDF5;color:#0b0d12;border-color:#E8EDF5;font-weight:500}
+  .bar .sp{flex:1}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;padding:10px 18px calc(24px + env(safe-area-inset-bottom))}
+  .cell{position:relative;background:#10141c;border:1px solid #ffffff10;border-radius:14px;overflow:hidden;aspect-ratio:1/1}
+  .cell canvas{display:block;width:100%;height:100%;touch-action:manipulation}
+  .cell .cap{position:absolute;left:0;right:0;bottom:0;padding:8px 10px 9px;background:linear-gradient(transparent,#0b0d12e6 55%);pointer-events:none}
+  .cell .n{font-size:13px;font-weight:500}
+  .cell .d{font-size:11px;color:#8FA0B8;font-weight:300;line-height:1.4;margin-top:1px}
+  .cell .idx{position:absolute;top:8px;left:10px;font-size:11px;color:#7E8798;font-variant-numeric:tabular-nums;letter-spacing:.06em}
+  .cell.ref .idx{color:#FDBE5A}
+  .cell.fav{border-color:#FDBE5A88}
+  .cell .star{position:absolute;top:6px;right:8px;width:28px;height:28px;border-radius:100px;border:0;background:transparent;color:#ffffff55;font-size:16px;line-height:28px;text-align:center}
+  .cell.fav .star{color:#FDBE5A}
+  .none{padding:40px 18px;color:#7E8798;text-align:center;font-weight:300}
+</style>
+</head>
+<body>
+<header>
+  <h1>点击特效 · 30 款</h1>
+  <div class="sub">点格子就在判定线上炸一下；再点再炸。00 号是现在 App 里用的（Phigros 那款），当对照。☆ 收藏，完了「复制收藏」发我。</div>
+</header>
+<div class="bar">
+  <span id="judge"></span>
+  <span id="colors"></span>
+  <span class="sp"></span>
+  <button id="loop">循环播</button>
+  <button id="copy">复制收藏</button>
+</div>
+<div class="grid" id="grid"></div>
+<div class="none" id="none" hidden>一个特效都没加载到 —— 子 agent 的文件还没并进来。</div>
+
+<!-- HITFX_MODULES -->
+
+<script>
+"use strict";
+// 0 号：现在 App 里那款（照 Phigros 解剖：圆 → 方框 + 菱形框 → 两段弧 → 方块粒子）。放最前面当对照，不算在 30 里。
+window.HITFX = window.HITFX || [];
+window.HITFX.unshift({
+  name: '现在用的', desc: 'Phigros 式：正方框 + 菱形框撑开，两段弧转开，方块粒子减速漂走', ref: true,
+  draw(ctx, hit, t, rng){
+    const u = hit.u*1.3, k = t, fade = 1-k, ease = 1-Math.pow(1-k,3), tint = hit.color;
+    const A = (a) => hexA(tint, a);
+    ctx.lineWidth = 1.6; ctx.lineCap='round';
+    ctx.fillStyle = A(.85*fade); ctx.beginPath(); ctx.arc(0,0,u*(0.55-0.35*ease),0,6.283); ctx.fill();
+    ctx.fillStyle = A(.9*fade); ctx.beginPath(); ctx.arc(0,0,hit.noteH*.35,0,6.283); ctx.fill();
+    const s1 = u*(0.8+2.4*ease), s2 = u*(1.0+3.0*ease);
+    ctx.strokeStyle = A(.85*fade); ctx.strokeRect(-s1/2,-s1/2,s1,s1);
+    ctx.save(); ctx.rotate(Math.PI/4 + rng()*0.15); ctx.fillStyle = A(.10*fade); ctx.fillRect(-s2/2,-s2/2,s2,s2); ctx.strokeStyle = A(.35*fade); ctx.strokeRect(-s2/2,-s2/2,s2,s2); ctx.restore();
+    if (k>0.12){ const s3=u*(0.3+1.6*ease); ctx.strokeStyle=A(.55*fade); ctx.strokeRect(-s3/2,-s3/2,s3,s3); }
+    ctx.strokeStyle = A(.9*fade); ctx.lineWidth = 1.8;
+    const ra = u*(0.6+1.6*ease), rot = rng()*6.28 + ease*1.2;
+    ctx.beginPath(); ctx.arc(0,0,ra,rot,rot+1.6); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0,0,ra*0.62,rot+3.4,rot+4.6); ctx.stroke();
+    for (let i=0;i<8;i++){ const a=rng()*6.283, v=0.6+rng()*1.0, s=0.5+rng()*0.9, r=rng();
+      const d=u*(0.5+v*2.6*ease), x=Math.cos(a)*d, y=Math.sin(a)*d*0.8, sz=hit.noteH*(0.45+0.5*s)*(1-0.3*k);
+      ctx.fillStyle = A((0.9-0.5*r)*fade); ctx.fillRect(x-sz/2,y-sz/2,sz,sz); }
+    // 竖向闪光：垂直于判定线，±10° 偏转
+    const kk = Math.min(1, t/0.2*2.5);
+    if (kk < 1){ const len = hit.noteH*(3.2+2.4*kk)*1.3; ctx.save(); ctx.rotate((rng()*20-10)*Math.PI/180);
+      ctx.strokeStyle=`rgba(255,255,255,${.8*(1-kk)})`; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(0,-len); ctx.lineTo(0,len*.35); ctx.stroke(); ctx.restore(); }
+  }
+});
+function hexA(hex, a){ const n=parseInt(hex.slice(1),16); return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${Math.max(0,Math.min(1,a))})`; }
+
+const JUDGE = {perfect:'#F3E3B8', good:'#9FCBF0'};
+const NOTE = {无:null, tick:'#FFC08A', slide:'#8AD4F5', trace:'#F5A8C8', swipe:'#9EE6A8'};
+const LIFE = 500;
+let judge = 'perfect', noteColor = null, loop = false;
+const list = (window.HITFX || []).slice(0, 60);
+const grid = document.getElementById('grid');
+if (list.length <= 1) document.getElementById('none').hidden = false;
+
+function mixHex(a, b, f){ const A=parseInt(a.slice(1),16), B=parseInt(b.slice(1),16);
+  const r=Math.round(((A>>16)&255)*(1-f)+((B>>16)&255)*f), g=Math.round(((A>>8)&255)*(1-f)+((B>>8)&255)*f), bl=Math.round((A&255)*(1-f)+(B&255)*f);
+  return `#${((r<<16)|(g<<8)|bl).toString(16).padStart(6,'0')}`; }
+function rngOf(seed){ let a=(seed*4294967296)>>>0; return () => { a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+let favs = new Set(); try{ favs = new Set(JSON.parse(localStorage.getItem('hit-favs')||'[]')); }catch(e){}
+
+const cells = list.map((fx, i) => {
+  const cell = document.createElement('div'); cell.className = 'cell' + (favs.has(fx.name)?' fav':'') + (fx.ref?' ref':'');
+  const idx = fx.ref ? '00' : String(i).padStart(2,'0');
+  cell.innerHTML = `<canvas></canvas><span class="idx">${idx}</span><button class="star">★</button>
+    <div class="cap"><div class="n">${fx.name}</div><div class="d">${fx.desc||''}</div></div>`;
+  grid.appendChild(cell);
+  const cv = cell.querySelector('canvas'), ctx = cv.getContext('2d');
+  const st = {fx, cv, ctx, at:-1, seed:Math.random(), i};
+  cv.addEventListener('pointerdown', () => { st.at = performance.now(); st.seed = Math.random(); });
+  cell.querySelector('.star').addEventListener('click', e => { e.stopPropagation();
+    if (favs.has(fx.name)) favs.delete(fx.name); else favs.add(fx.name);
+    cell.classList.toggle('fav', favs.has(fx.name));
+    try{ localStorage.setItem('hit-favs', JSON.stringify([...favs])); }catch(err){} });
+  return st;
+});
+function sizeAll(){ const dpr=Math.min(devicePixelRatio||1,2.5);
+  for (const c of cells){ const w=c.cv.clientWidth, h=c.cv.clientHeight;
+    if (c.cv.width!==Math.round(w*dpr)){ c.cv.width=Math.round(w*dpr); c.cv.height=Math.round(h*dpr); }
+    c.ctx.setTransform(dpr,0,0,dpr,0,0); } }
+addEventListener('resize', sizeAll); sizeAll();
+
+function frame(now){
+  for (const c of cells){
+    const {ctx, cv} = c, W=cv.clientWidth, H=cv.clientHeight;
+    ctx.clearRect(0,0,W,H);
+    const lineY = H*0.62, u = Math.max(14, Math.min(24, H*0.11)), noteH = 9;
+    // 判定线：白发丝 + 命中那一瞬亮一下
+    let age = c.at<0 ? 9 : (now-c.at)/LIFE;
+    if (loop && age > 1.6){ c.at = now; c.seed = Math.random(); age = 0; }
+    const glow = age>=0 && age<=0.28 ? 1-age/0.28 : 0;
+    ctx.shadowColor='rgba(255,255,255,.55)'; ctx.shadowBlur=5+8*glow;
+    ctx.strokeStyle='#fff'; ctx.lineWidth=2+0.8*glow; ctx.globalAlpha=.92;
+    ctx.beginPath(); ctx.moveTo(0,lineY); ctx.lineTo(W,lineY); ctx.stroke();
+    ctx.shadowBlur=0; ctx.globalAlpha=1;
+    if (age>=0 && age<=1){
+      const base = JUDGE[judge], color = noteColor ? mixHex(base, noteColor, 0.35) : base;
+      ctx.save(); ctx.translate(W/2, lineY);
+      try { c.fx.draw(ctx, {u, color, judge, noteH}, age, rngOf(c.seed)); }
+      catch(e){ ctx.restore(); ctx.save(); ctx.fillStyle='#E5484D'; ctx.font='11px system-ui'; ctx.fillText('出错：'+(e.message||e).slice(0,40), -W/2+8, -lineY+16); }
+      ctx.restore();
+    }
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+const jb = document.getElementById('judge');
+['perfect','good'].forEach(j => { const b=document.createElement('button'); b.textContent=j; b.classList.toggle('on', j===judge);
+  b.onclick=()=>{ judge=j; [...jb.children].forEach(x=>x.classList.remove('on')); b.classList.add('on'); }; jb.appendChild(b); });
+const cb = document.getElementById('colors');
+Object.entries(NOTE).forEach(([k,v]) => { const b=document.createElement('button'); b.textContent=k; if (v) b.style.borderColor=v+'88'; b.classList.toggle('on', v===noteColor);
+  b.onclick=()=>{ noteColor=v; [...cb.children].forEach(x=>x.classList.remove('on')); b.classList.add('on'); }; cb.appendChild(b); });
+document.getElementById('loop').onclick = e => { loop=!loop; e.target.classList.toggle('on', loop); if (loop) cells.forEach((c,i)=>{ c.at = performance.now() - (i*137)%800; }); };
+document.getElementById('copy').onclick = async () => {
+  const txt = '点击特效收藏：' + ([...favs].length ? [...favs].join('、') : '（还没收藏）');
+  try{ await navigator.clipboard.writeText(txt); document.getElementById('copy').textContent='复制好了'; } catch(e){ alert(txt); }
+};
+</script>
+</body>
+</html>
