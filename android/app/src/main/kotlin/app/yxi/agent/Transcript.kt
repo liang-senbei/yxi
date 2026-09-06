@@ -158,7 +158,7 @@ object Transcript {
         // ⚠️ 最后那个 lambda 不能省。`onCtx` 有默认值 `{}`，漏了它**编译照样通过**，
         // 只是 [ctx] 永远是 null —— 界面上表现为「上下文那一格永远不出现」，不报错。
         fun add(lines: Sequence<String>) =
-            parseInto(lines, out, calls, queued, said) { ctx = it }
+            parseInto(lines, out, calls, queued, said, ctx) { ctx = it }
 
         /** 当前快照。排队的挂在最后 —— 它们还没进对话，位置就在「此刻」。 */
         fun snapshot(): List<ChatItem> {
@@ -203,11 +203,19 @@ object Transcript {
         calls: HashMap<String, Int>,
         queued: ArrayList<String>,
         said: HashSet<String>,
+        /**
+         * 上一批解析到哪儿了（[Incremental] 传它自己的 [Incremental.ctx]）。
+         * ⚠️ **必须跨批传下来**：转录是一段一段追加解析的，而 `/model` 的回执
+         * 常常单独落在一批里（那一批只有一条 user 消息）。它是 null 的话，
+         * 下面「切了模型但还没回话」那一支直接被丢掉 —— 表现就是
+         * 「已经切到 Opus 5 了，顶栏还写着 fable-5-1」（老板 2026-09-06 报的）。
+         */
+        startCtx: Ctx? = null,
         onCtx: (Ctx) -> Unit = {},
     ) {
-        var lastCtx: Ctx? = null       // 最近一次报出来的用量，给「切了模型但还没回话」时套用
-        var lastMode = ""              // 最近一条 {"type":"mode"} 行
-        var lastPony = ""              // 最近一次 ponytail 注入报的强度
+        var lastCtx: Ctx? = startCtx   // 最近一次报出来的用量，给「切了模型但还没回话」时套用
+        var lastMode = startCtx?.mode.orEmpty()   // 最近一条 {"type":"mode"} 行
+        var lastPony = startCtx?.ponytail.orEmpty()  // 最近一次 ponytail 注入报的强度
         lines.forEach { line ->
             if (line.isBlank()) return@forEach
             val d = runCatching { JSONObject(line) }.getOrNull() ?: return@forEach
@@ -371,7 +379,13 @@ object Transcript {
         // 跟 ANSI 加粗序列长得一模一样，先清一遍会把它吃掉 → 显示成 `claude-opus-5]`。
         // 所以只在取出来的名字上摘掉首尾那对加粗标记（ESC 有无都兼容）。
         val raw = SET_MODEL.find(text)?.groupValues?.get(1)?.trim()?.replace("\u001B", "") ?: return null
-        return raw.removePrefix("[1m").removeSuffix("[22m").trim().takeIf { it.isNotBlank() }?.take(40)
+        // ⚠️ 回执把模型名包在**反引号**里，后面还常跟一个 `(default)`（那是「存成账号默认了」
+        //    这件事，不是模型名的一部分）。不摘掉的话顶栏会显示成
+        //    `` `Opus 5 (1M context) (default)` `` —— 带引号、还比别的名字长一截。
+        return raw.removePrefix("[1m").removeSuffix("[22m").trim()
+            .trim('`').trim()
+            .removeSuffix("(default)").trim()
+            .takeIf { it.isNotBlank() }?.take(40)
     }
 
     private fun uuidOf(d: JSONObject, line: String): String =

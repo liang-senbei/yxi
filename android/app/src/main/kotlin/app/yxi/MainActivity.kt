@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
@@ -69,7 +70,7 @@ private enum class Tab(private val zh: String, val ico: app.yxi.ui.Ico) {
  * 盖在标签页之上的**整页**。加一页就往这儿加一个值，再去 MainActivity 那个 `when` 里加一支 ——
  * ⚠️ **没有第三处要同步**（这正是「点底部导航纹丝不动」那个 bug 复发三次的根）。
  */
-private enum class Page { Member, Prefs, Tickets, Trend, Mail, Wish, Activity, Wallet, Shop, Abyss, Yunxi, Personalize }
+private enum class Page { Member, Prefs, Tickets, Trend, Mail, Wish, Activity, Wallet, Shop, Abyss, Yunxi, Personalize, Profile, Account }
 
 /** 工作区。它是**盖在标签页之上的整屏**，不是第四个标签 —— 见 D22。 */
 private data class Work(val host: Host, val session: String?, val cwd: String, val mode: Mode?)
@@ -90,10 +91,14 @@ class MainActivity : ComponentActivity() {
             // 我们自己的登录回调
             u.scheme == "io.yxi.app" -> app.yxi.agent.Account.pendingCallback = u
             // MCP 认证：浏览器把 http://localhost:<口>/callback?code=… 交给我们，
-            // 直接塞给正开着的连接流程 —— 省掉用户手抄地址回填那一步。
+            // 填进正开着的连接流程的输入框 —— 省掉用户手抄地址那一步。
             u.scheme == "http" && u.host == "localhost" && u.path == "/callback" ->
                 app.yxi.agent.Connect.pendingRedirect = u.toString()
+            else -> return
         }
+        // ⚠️ 吃掉就抹掉：onCreate 也会读一次 intent，而切深浅色 / 转屏会重建 Activity，
+        //    不抹的话同一个回调会被再放一遍，落进下一个流程里。
+        i.data = null
     }
 
     override fun onNewIntent(intent: AndroidIntent) {
@@ -384,6 +389,14 @@ class MainActivity : ComponentActivity() {
                         }
                         Page.Tickets -> { app.yxi.ui.TicketsScreen(modifier = m); return@Scaffold }
                         Page.Trend -> { app.yxi.ui.TrendScreen(shared.session, modifier = m); return@Scaffold }
+                        Page.Profile -> {
+                            app.yxi.ui.ProfileScreen(
+                                onEdit = {}, onAccount = { page = Page.Account },
+                                onSkins = { page = Page.Personalize }, modifier = m,
+                            )
+                            return@Scaffold
+                        }
+                        Page.Account -> { app.yxi.ui.AccountScreen(modifier = m); return@Scaffold }
                         Page.Mail -> { app.yxi.ui.MailScreen(modifier = m); return@Scaffold }
                         Page.Wallet -> { app.yxi.ui.WalletScreen(onShop = { page = Page.Shop }, onRedeem = { page = Page.Member }, modifier = m); return@Scaffold }
                         Page.Shop -> { app.yxi.ui.ShopScreen(onRedeem = { page = Page.Member }, modifier = m); return@Scaffold }
@@ -443,7 +456,8 @@ class MainActivity : ComponentActivity() {
                             onMember = { page = Page.Member }, mine = true,
                             onPrefs = { page = Page.Prefs }, onTickets = { page = Page.Tickets },
                             onTrend = { page = Page.Trend }, onMail = { page = Page.Mail }, onWallet = { page = Page.Wallet },
-                            onWish = { page = Page.Wish }, onActivity = { page = Page.Activity }, onYunxi = { page = Page.Yunxi }, onPersonalize = { page = Page.Personalize }, modifier = m,
+                            onWish = { page = Page.Wish }, onActivity = { page = Page.Activity }, onYunxi = { page = Page.Yunxi }, onPersonalize = { page = Page.Personalize },
+                            onProfile = { page = Page.Profile }, onAccount = { page = Page.Account }, modifier = m,
                         )
                     }
                 }
@@ -516,11 +530,30 @@ private fun YxiDrawer(
         }
         androidx.compose.material3.HorizontalDivider(Modifier.padding(horizontal = 18.dp))
         // ── 主机切换
-        Text(
-            t("主机"), Modifier.padding(18.dp, 14.dp, 18.dp, 6.dp),
-            style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline,
-        )
-        hosts.forEach { h ->
+        // ⚠️ 这一段可收起（老板 2026-09-06：「主机可以展开也可以收起…服务器多了会不会不方便」）。
+        //    **主机多了默认收起**：十几台机器会把下面的临时会话 / 配置 / 会员中心全顶出屏幕。
+        //    收起时只留当前那台 —— 你总得看得见自己在哪台上。
+        var hostsOpen by remember(hosts.size) { mutableStateOf(hosts.size <= 5) }
+        Row(
+            Modifier.fillMaxWidth().clickable { hostsOpen = !hostsOpen }
+                .padding(18.dp, 14.dp, 18.dp, 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                t("主机"), Modifier.weight(1f),
+                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline,
+            )
+            if (!hostsOpen) Text(
+                t("%d 台").format(hosts.size),
+                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline,
+            )
+            Text(
+                if (hostsOpen) " ▾" else " ▸",
+                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline,
+            )
+        }
+        // 收起时只画当前这台；展开时全画
+        hosts.filter { hostsOpen || it.id == current?.id }.forEach { h ->
             val on = h.id == current?.id
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 10.dp).clip(RoundedCornerShape(14.dp))
@@ -531,24 +564,31 @@ private fun YxiDrawer(
                 Box(Modifier.size(9.dp).clip(CircleShape).background(app.yxi.ui.hostColor(h.id)))
                 Text(h.alias, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
                 // 走 Tailscale 内网的标出来（老板 2026-09-06：「内网连的在侧边栏要标记」）。
-                // ⚠️ 用 tertiary 不用 secondary —— 选中那一行的底色就是 secondaryContainer，
-                //    拿同一个色当药丸底会糊成一片看不见。
+                // ⚠️ 用**描边**不用填充：这一行有两种底（抽屉底 / 选中行的 secondaryContainer），
+                //    填充色总会在其中一种上糊掉 —— tertiaryContainer 在浅色主题下正好是
+                //    SurfaceContainerHigh，跟抽屉底差 1.05:1，等于没有。描边两种底上都读得出。
                 if (h.viaTailscale) Text(
                     t("内网"),
-                    Modifier.clip(RoundedCornerShape(100.dp))
-                        .background(MaterialTheme.colorScheme.tertiaryContainer).padding(8.dp, 2.dp),
+                    Modifier.border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(100.dp))
+                        .padding(8.dp, 2.dp),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (on) Text("✓", color = MaterialTheme.colorScheme.onSecondaryContainer)
             }
         }
+        // 管理 / 加主机 —— 原来下面功能区还有一行「主机」，跟上面这张列表重了
+        // （老板 2026-09-06：「怎么有两个主机」），合并到这儿。
+        Text(
+            t("管理主机"),
+            Modifier.fillMaxWidth().clickable { onTab(Tab.Hosts) }.padding(22.dp, 8.dp, 18.dp, 8.dp),
+            style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary,
+        )
         Spacer(Modifier.height(10.dp))
         androidx.compose.material3.HorizontalDivider(Modifier.padding(horizontal = 18.dp))
         Spacer(Modifier.height(6.dp))
         // ── 功能入口（QQ 那种：彩色细线图标 + 标题 + 右边一个 ›）
         DrawerRow(app.yxi.ui.Ico.Bolt, t("临时会话"), Color(0xFFE8912D), tail = t("不保存")) { onTemp() }
-        DrawerRow(app.yxi.ui.Ico.Server, t("主机"), Color(0xFF4C8DF6)) { onTab(Tab.Hosts) }
         DrawerRow(app.yxi.ui.Ico.Sliders, t("配置"), Color(0xFF35B6A0)) { onTab(Tab.Config) }
         DrawerRow(
             app.yxi.ui.Ico.Crown, t("会员中心"), Color(0xFFE8912D),

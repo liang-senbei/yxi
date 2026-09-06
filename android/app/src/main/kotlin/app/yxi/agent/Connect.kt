@@ -288,6 +288,17 @@ object Connect {
     fun callbackPort(url: String): Int? =
         Regex("""localhost(?:%3A|:)(\d+)""").find(url)?.groupValues?.get(1)?.toIntOrNull()
 
+    /**
+     * 那个 tmux 会话还在不在。**必须自报家门**：`has-session` 没有时什么都不打印，
+     * 而 [SshSession.exec] 连接断了也返回空串 —— 两者字节级相同，靠「空」判断会把
+     * 「网抖了一下」误报成「流程结束了」（TROUBLESHOOTING #202 同款）。
+     * 所以两条路各打一个标记，空 = 什么都不知道，别下结论。
+     */
+    fun aliveCommand(key: String): String {
+        val t = tmuxFor(key)
+        return "tmux has-session -t '$t' 2>/dev/null && echo __ALIVE__ || echo __GONE__"
+    }
+
     /** 退路：把浏览器地址栏那串 localhost 地址粘回去（Claude Code 提示 `Or paste the redirect URL here:`）。 */
     fun pasteCommand(key: String, redirectUrl: String): String {
         val t = tmuxFor(key)

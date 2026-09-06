@@ -791,8 +791,10 @@ fun ChatScreen(
                         onClick = if (ssh != null && !modelBusy) ({
                             val s0 = ssh
                             scope.launch {
+                                // ⚠️ force：availCache 是进程级的，切完模型不重读，
+                                //    「默认」那个标记会一直挂在旧的那一行上（老板 2026-09-06 报的）。
                                 fastModels = app.yxi.ssh.catching {
-                                    app.yxi.agent.Model.available(s0, hostId)
+                                    app.yxi.agent.Model.available(s0, hostId, force = true)
                                 }.getOrNull() ?: app.yxi.agent.Model.Available(listOf("default", "opus", "sonnet", "haiku"), "")
                             }
                         }) else null,
@@ -1366,11 +1368,19 @@ fun ChatScreen(
                                 style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                                 color = if (isCur) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                             )
-                            if (name == av.default) Text(t("默认"), style = MaterialTheme.typography.labelSmall, color = Muted)
+                            // ⚠️ `av.default` 是 settings.json 里的 `model`。**没写过就是空的** ——
+                            //    那种情况下「默认」应该落在 `default` 这一行，不然整张表一个标记都没有
+                            //    （老板 2026-09-06：「为什么不显示默认呢」）。
+                            val isDefault = if (av.default.isBlank()) name == "default" else name == av.default
+                            if (isDefault) Text(t("默认"), style = MaterialTheme.typography.labelSmall, color = Muted)
                         }
                     }
                     Text(
                         t("点一下就切，顺便写成账号默认（以后新会话也用它）。"),
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline,
+                    )
+                    Text(
+                        t("default = 不指定型号，跟 Claude Code 自己当时的默认走。"),
                         style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline,
                     )
                     Spacer(Modifier.height(4.dp))

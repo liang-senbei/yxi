@@ -46,6 +46,13 @@ object Account {
         val avatar: String?,
         val signature: String,
         val email: String,
+        /**
+         * 登录方式，给「账号中心」显示「这个邮箱哪来的」用（契约 `logto_yxi/design/account.md`，
+         * 2026-09-06）：`email` | `google` | `github` | **以后还会冒出新的连接器名**。
+         * ⚠️ **别写穷举 `when`**：认不出来的值就只显示邮箱、不显示来源（logto_yxi 明确交代过）。
+         * 空 = 服务端还没给这个字段（老版本），同样按「不显示来源」处理。
+         */
+        val signInWith: String = "",
         val quotaLimit: Int,
         val quotaUsed: Int,
         /** null = 不限（ultra） */
@@ -652,6 +659,7 @@ object Account {
             avatar = pr.str("avatar").takeIf { it.isNotEmpty() },
             signature = pr.str("signature"),
             email = pr.str("email"),
+            signInWith = pr.str("signInWith"),
             balanceCents = o.optJSONObject("wallet")?.optLong("balanceCents") ?: 0L,
             autoRenewPriceCents = o.optJSONObject("wallet")?.let { w -> if (w.isNull("autoRenewPriceCents")) null else w.optLong("autoRenewPriceCents") },
             currency = o.optJSONObject("wallet").str("currency").ifEmpty { "CNY" },

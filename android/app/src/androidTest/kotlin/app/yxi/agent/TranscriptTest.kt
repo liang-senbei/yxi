@@ -69,6 +69,35 @@ class TranscriptTest {
      * ⚠️ 模式来自单独的 `{"type":"mode",…}` 行（**没有 message 字段**），
      * 得在「非消息行静默跳过」之前接住，否则永远读不到。
      */
+    /**
+     * **回执单独落在下一批里，也要认。**
+     *
+     * ⚠️ 转录是一段一段追加解析的（[Transcript.Incremental.add] 每来一段调一次），
+     * 而 `/model` 的回执经常**单独成一批**（那一批只有一条 user 消息）。
+     * 原来 `lastCtx` 是 `parseInto` 里的局部变量、每批重置成 null，
+     * 于是「切了模型但还没回话」那一支直接被丢掉 ——
+     * 表现是「已经切到 Opus 5 了，顶栏还写着 fable-5-1」（老板 2026-09-06 报的）。
+     *
+     * ⚠️ 上面那条用例把 assistant 和回执放在**同一个 add()** 里，所以一直是绿的，没抓到这个。
+     * 分两批才是真实情况。
+     */
+    @Test fun 回执单独一批也认() {
+        fun line(text: String) =
+            """{"type":"user","message":{"role":"user","content":${JSONObject.quote(text)}}}"""
+        val assistant =
+            """{"type":"assistant","message":{"role":"assistant","model":"claude-fable-5-1",""" +
+                """"usage":{"input_tokens":10,"cache_read_input_tokens":90},"content":[]}}"""
+
+        Transcript.Incremental().apply {
+            add(sequenceOf(assistant))                       // 第一批：只有回话
+            add(sequenceOf(line("<local-command-stdout>Set model to `Opus 5 (1M context) (default)` and saved as your default for new sessions</local-command-stdout>")))
+        }.let {
+            // 反引号和 `(default)` 都不是模型名的一部分，要摘掉
+            assertEquals("Opus 5 (1M context)", it.ctx?.model)
+            assertEquals(100L, it.ctx?.tokens)               // 用量沿用上一批的，别清零
+        }
+    }
+
     @Test fun 顶栏带思考强度和模式() {
         val assistant =
             """{"type":"assistant","effort":"max","message":{"role":"assistant","model":"claude-opus-5",""" +

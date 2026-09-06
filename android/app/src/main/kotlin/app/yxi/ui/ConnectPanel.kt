@@ -135,6 +135,18 @@ fun ConnectPanel(ssh: SshSession?, host: app.yxi.ssh.Host) {
         }
     }
 
+    // 回调回来了但连接框已经关了 —— 别一声不响地吞掉。
+    // ⚠️ 这时候那串码基本是废的：重开流程会 kill 掉旧的 tmux 会话重来一遍。
+    //    所以只能如实说「这次白跑了，重开一次」，不能假装能用。
+    LaunchedEffect(app.yxi.agent.Connect.pendingRedirect, flow) {
+        if (flow != null) return@LaunchedEffect
+        if (app.yxi.agent.Connect.pendingRedirect == null) return@LaunchedEffect
+        app.yxi.agent.Connect.pendingRedirect = null
+        android.widget.Toast.makeText(
+            ctx, t("认证回来了，但连接框已经关了 —— 重新点一次「连接」"), android.widget.Toast.LENGTH_LONG,
+        ).show()
+    }
+
     flow?.let { f ->
         FlowDialog(f, onClose = { f.cancelPolling(); flow = null; tick++ }, onOpen = { url ->
             runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
@@ -460,8 +472,10 @@ class Flow(
             hint = ""; note = t("交上去了，等结果…")
             // ⚠️ 先确认服务器那头还在：会话早没了的话 send-keys 是**静默的空操作**，
             //    用户会盯着「等着」一直等到 10 分钟超时，什么都不知道。
-            val pane = ssh.exec(Connect.peekCommand(tmux))
-            if (pane.isBlank()) {
+            // ⚠️⚠️ 但**「空」不等于「没了」**：exec 连接断了也返回空串。只有明确读到
+            //    __GONE__ 才敢说流程结束；读到空就当不知道，照发，让 waitDone 去判。
+            val alive = ssh.exec(Connect.aliveCommand(service.key))
+            if (alive.contains("__GONE__")) {
                 note = ""; hint = t("服务器那头的流程已经结束了 —— 关掉重来一次")
                 return@launch
             }
@@ -486,12 +500,17 @@ private fun FlowDialog(f: Flow, onClose: () -> Unit, onOpen: (String) -> Unit, o
     var pasted by remember { mutableStateOf("") }
     val step = f.step
     // 浏览器把 http://localhost:<口>/callback 交给 Yxi 了（manifest 那条 intent-filter）——
-    // 等于替用户按了「交上去」，省掉手抄地址。只在等授权那一步收，别的步骤丢掉就好。
+    // **只填进输入框，不替用户交上去**。
+    // ⚠️ 这条 intent-filter 是导出的：手机上任何 app 都能拿构造的 localhost/callback 唤起我们。
+    //    自动提交等于让别人隔空往你服务器的会话里塞东西（转义是干净的，但内容不是我们能信的）。
+    //    填进框里、由人按一下，省掉手抄的麻烦，又留了一道人眼。
+    // ⚠️ 无论当前哪一步都**立刻收走**：留着的话会在几秒后步骤翻到 Authorize 时自己冒出来，
+    //    那多半是上一轮的陈货（新流程已经把旧会话杀了重开，那串码是死的）。
     LaunchedEffect(app.yxi.agent.Connect.pendingRedirect, step) {
         val url = app.yxi.agent.Connect.pendingRedirect ?: return@LaunchedEffect
-        if (step !is Flow.Step.Authorize) return@LaunchedEffect
         app.yxi.agent.Connect.pendingRedirect = null
-        f.paste(url)
+        val st = step
+        if (st is Flow.Step.Authorize && !st.code) pasted = url
     }
     AlertDialog(
         onDismissRequest = onClose,

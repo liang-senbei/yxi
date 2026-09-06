@@ -86,6 +86,10 @@ fun SettingsScreen(
     onYunxi: () -> Unit = {},
     /** 个性化：装扮（聊天气泡 / 头像框 / 终端配色 / 快捷语包）分类进入 */
     onPersonalize: () -> Unit = {},
+    /** 点头像进「我的资料」（老板 2026-09-06） */
+    onProfile: () -> Unit = {},
+    /** 「账号中心」：邮箱 / 登录方式 / UID */
+    onAccount: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val ctx = LocalContext.current
@@ -120,6 +124,7 @@ fun SettingsScreen(
         // 新来的信要重启 App 才亮点，等于没通知。失败就用缓存的那份，别打断人。
         LaunchedEffect(Unit) { if (app.yxi.agent.Account.signedIn) app.yxi.agent.Account.refresh(ctx) }
 
+        GroupLabel(t("账号"))
         // ── 「我」：头像 / 昵称 / 签名（学 QQ 和 Gemini 的个人页：账号那块单独一张卡，摆最上面）
         var editMe by remember { mutableStateOf(false) }
         if (editMe) MeDialog { editMe = false }
@@ -134,7 +139,9 @@ fun SettingsScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                MeAvatar(52.dp)
+                // ⚠️ 头像单独一个点击区：点它进「我的资料」（只读详情），
+                //    点这张卡的其余地方还是打开编辑弹窗 —— 老板 2026-09-06 要的。
+                MeAvatar(52.dp, Modifier.clip(CircleShape).clickable { onProfile() })
                 Column(Modifier.weight(1f)) {
                     Text(
                         Me.name(ctx).ifBlank {
@@ -195,30 +202,31 @@ fun SettingsScreen(
             }
         }
 
-        // ── 个性化：装扮的正门（老板 2026-09-06，照 QQ 的个性化装扮）────
+        // ── 账号中心：邮箱 / 登录方式 / UID（老板 2026-09-06）。
+        //    ⚠️ 跟「会员中心」分开 —— 那边是买了什么，这边是「你是谁」。
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainerLow,
             shape = RoundedCornerShape(22.dp),
             modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)
-                .clip(RoundedCornerShape(22.dp)).clickable { onPersonalize() },
+                .clip(RoundedCornerShape(22.dp)).clickable { onAccount() },
         ) {
             Row(
                 Modifier.padding(16.dp, 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                GlyphIcon(Glyph.Palette, androidx.compose.ui.graphics.Color(0xFFB07AE8), 22.dp)
-                Column(Modifier.weight(1f)) {
-                    Text(t("个性化"), style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        t("装扮 · 聊天气泡 / 头像框 / 终端配色 / 快捷语包"),
-                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline,
-                    )
-                }
+                YxiIcon(Ico.Person, size = 22.dp, tint = androidx.compose.ui.graphics.Color(0xFF4C8DF6))
+                Text(t("账号中心"), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    app.yxi.agent.Account.me?.email.orEmpty(),
+                    style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline,
+                    maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
                 Text("›", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.outline)
             }
         }
 
+        GroupLabel(t("资产"))
         // ── 钱包 ────────────────────────────────────────────────────
         // ⚠️ **余额不写 ¥0.00**。服务端现在根本没有这个字段，写个 0 就是在说
         //    「你的余额是零」——那是假的（design/STYLE.md「不骗人」）。没开通就说没开通。
@@ -312,6 +320,31 @@ fun SettingsScreen(
                 }
                 spark?.takeIf { it.size >= 2 }?.let {
                     TrendSpark(it, Modifier.width(90.dp).height(34.dp))
+                }
+                Text("›", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.outline)
+            }
+        }
+
+        GroupLabel(t("功能"))
+        // ── 个性化：装扮的正门（老板 2026-09-06，照 QQ 的个性化装扮）────
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = RoundedCornerShape(22.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)
+                .clip(RoundedCornerShape(22.dp)).clickable { onPersonalize() },
+        ) {
+            Row(
+                Modifier.padding(16.dp, 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                GlyphIcon(Glyph.Palette, androidx.compose.ui.graphics.Color(0xFFB07AE8), 22.dp)
+                Column(Modifier.weight(1f)) {
+                    Text(t("个性化"), style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        t("装扮 · 聊天气泡 / 头像框 / 终端配色 / 快捷语包"),
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline,
+                    )
                 }
                 Text("›", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.outline)
             }
@@ -1143,6 +1176,20 @@ private fun FollowUp(id: String, onSent: () -> Unit) {
 
 /** QQ 那种分组小标题：卡片上面一行小灰字，把一堆设置分出层次 */
 /** 「我的」上那一格：圆角方块里一枚描边图标，底下一行字。四格一排。 */
+/**
+ * 「我的」页的分组小标题（老板 2026-09-06：「最好做好分类分块」）。
+ * ⚠️ 只在 `mine = true` 那一页用 —— 「设置」页是另一种排布，别混。
+ */
+@Composable
+private fun GroupLabel(text: String) {
+    Text(
+        text,
+        Modifier.padding(24.dp, 14.dp, 18.dp, 2.dp),
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.outline,
+    )
+}
+
 @Composable
 private fun GridEntry(
     ico: Ico,
