@@ -322,6 +322,9 @@ object Rhythm {
         val body = JSONObject()
             .put("chartId", chartId).put("perfect", perfect).put("good", good).put("miss", miss)
             .put("maxCombo", maxCombo).put("elapsedMs", elapsedMs).put("hits", hits)
+            // ⚠️ #297：requestId 在这里现生成 = 只跟「这次调用」绑定，不跟「这一局」绑定。今天没事全靠
+            //    ResultCard 一局只交一次、apiRaw 不重试；谁要加「重交」按钮或给 apiRaw 加重试，先把 id
+            //    挪到结算页 remember 里当参数传进来（祈愿 WishScreen 的 pendingId 写法），否则一局算两局。
             .put("requestId", UUID.randomUUID().toString()).toString()
         val (code, resp) = Account.apiRaw(ctx, "$BASE_PATH/plays", "POST", body) ?: return@withContext null
         runCatching {
