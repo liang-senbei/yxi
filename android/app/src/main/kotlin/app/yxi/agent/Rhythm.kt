@@ -53,10 +53,55 @@ object Rhythm {
         var tailDone = false   // 长按尾巴判过没有
     }
 
+    /**
+     * 判定线事件：让线**动起来**（老板 2026-09-06 看了 Phigros 之后要的）。
+     *
+     * 只有两种：绕线中心转 [ROTATE]（度，逆时针为正）、整条线上下挪 [MOVE_Y]（屏幕高度的比例，正 = 往下）。
+     * 横向平移和淡入淡出**先不做** —— 谱面里没有就别造。
+     *
+     * ⚠️ 关键在于**音符活在"线的坐标系"里**：它们垂直于线、跟着线一起转，沿着线的法线匀速过来。
+     *    所以一个线事件会把**全场还在飞的音符一起重新指向**，但**不改变任何一个音符的到达时刻** ——
+     *    判定完全不受影响。这也是为什么服务端不用改：判定计数一个都没变。
+     *
+     * ⚠️ 数值是**我们自己定的**（见 `design/music/make_songs.py`）。参考视频量出来的是"人家怎么做"，
+     *    具体的角度和时间属于谱面数据，不抄。
+     */
+    enum class LineOp { ROTATE, MOVE_Y }
+
+    data class LineEvent(val t: Float, val dur: Float, val op: LineOp, val from: Float, val to: Float, val ease: String) {
+        /** [now] 时刻这条事件贡献的值 */
+        fun valueAt(now: Float): Float {
+            if (now <= t) return from
+            if (now >= t + dur || dur <= 0f) return to
+            val k = (now - t) / dur
+            val e = when (ease) {
+                // 缓入缓出（三次）：位移的每帧增量是个钟形，起步和收尾都软 —— 线性看着像机器在推
+                "cubicInOut" -> if (k < 0.5f) 4f * k * k * k else 1f - ((-2f * k + 2f).let { it * it * it }) / 2f
+                // 只缓出：一下子过去、慢慢回来（踩点那种"沉一下"）
+                else -> 1f - (1f - k) * (1f - k) * (1f - k)
+            }
+            return from + (to - from) * e
+        }
+    }
+
     data class Chart(
         val song: String, val zh: String, val bpm: Int,
         val difficulty: String, val offset: Float, val notes: List<Note>,
+        /** 判定线的动作，按时间排好 */
+        val lines: List<LineEvent> = emptyList(),
     ) {
+        /** [now] 时刻的线姿态：转了多少度、往下挪了多少（屏幕高度的比例） */
+        fun poseAt(now: Float): Pair<Float, Float> {
+            var deg = 0f; var dy = 0f
+            for (e in lines) {
+                if (e.t > now) break
+                when (e.op) {
+                    LineOp.ROTATE -> deg = e.valueAt(now)
+                    LineOp.MOVE_Y -> dy = e.valueAt(now)
+                }
+            }
+            return deg to dy
+        }
         val id get() = "${song}_$difficulty"
         /** 长按算两个判定（头 + 尾），满分按这个数分 */
         val units get() = notes.size + notes.count { it.hold }
@@ -82,8 +127,20 @@ object Rhythm {
             val dur = o.optDouble("dur", 0.0).toFloat()
             notes += Note(o.getDouble("t").toFloat(), o.getInt("lane"), o.optString("type") == "hold", dur)
         }
+        val lines = ArrayList<LineEvent>()
+        j.optJSONArray("lines")?.let { la ->
+            for (i in 0 until la.length()) {
+                val o = la.getJSONObject(i)
+                val op = if (o.getString("op") == "rotate") LineOp.ROTATE else LineOp.MOVE_Y
+                lines += LineEvent(
+                    o.getDouble("t").toFloat(), o.optDouble("dur", 0.4).toFloat(), op,
+                    o.optDouble("from", 0.0).toFloat(), o.optDouble("to", 0.0).toFloat(),
+                    o.optString("ease", "cubicInOut"),
+                )
+            }
+        }
         return Chart(j.getString("song"), j.getString("zh"), j.getInt("bpm"),
-            j.getString("difficulty"), j.optDouble("offset", 0.0).toFloat(), notes)
+            j.getString("difficulty"), j.optDouble("offset", 0.0).toFloat(), notes, lines.sortedBy { it.t })
     }
 
     // ── 计分（确定性，跟深渊一个原则：不掺随机）─────────────────────────────

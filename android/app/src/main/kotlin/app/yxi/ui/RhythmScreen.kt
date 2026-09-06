@@ -287,9 +287,18 @@ private fun GameBoard(
     DisposableEffect(activity) {
         val w = activity?.window
         val c = w?.let { androidx.core.view.WindowInsetsControllerCompat(it, it.decorView) }
+        val oldCut = w?.attributes?.layoutInDisplayCutoutMode
+        if (android.os.Build.VERSION.SDK_INT >= 28) w?.attributes = w.attributes?.apply {
+            layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
         c?.hide(androidx.core.view.WindowInsetsCompat.Type.statusBars())
         c?.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        onDispose { c?.show(androidx.core.view.WindowInsetsCompat.Type.statusBars()) }
+        onDispose {
+            c?.show(androidx.core.view.WindowInsetsCompat.Type.statusBars())
+            if (android.os.Build.VERSION.SDK_INT >= 28 && oldCut != null) {
+                w?.attributes = w.attributes?.apply { layoutInDisplayCutoutMode = oldCut }
+            }
+        }
     }
 
     val press = remember { FloatArray(4) { -9f } }
@@ -369,7 +378,16 @@ private fun GameBoard(
         modifier.fillMaxSize().background(laneBg).pointerInput(chart) {
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
-                val lane = ((down.position.x / size.width) * 4).toInt().coerceIn(0, 3)
+                // 场地会转，所以先把手指的位置**转回线的坐标系**再判在哪条轨，
+                // 不然线一斜，看着按在这条轨、算出来是隔壁那条。
+                val (deg, dy) = chart.poseAt(now)
+                val pivotX = size.width / 2f
+                val pivotY = size.height * (0.80f + dy)
+                val rad = -deg * (Math.PI / 180f).toFloat()
+                val ox = down.position.x - pivotX
+                val oy = down.position.y - pivotY
+                val laneX = pivotX + ox * kotlin.math.cos(rad) - oy * kotlin.math.sin(rad)
+                val lane = ((laneX / size.width) * 4).toInt().coerceIn(0, 3)
                 live.held[lane] = true
                 press[lane] = now                     // 按下去就先亮一下（不管有没有打中），手感的一半在这
                 tapLane(live, lane, now, offset) { combo = live.combo; score = live.currentScore() }
@@ -383,18 +401,25 @@ private fun GameBoard(
     ) {
         Canvas(Modifier.fillMaxSize()) {
             val laneW = size.width / 4f
-            val judgeY = size.height * 0.80f
+            val (poseDeg, poseDy) = chart.poseAt(now)
+            val judgeY = size.height * (0.80f + poseDy)
+            // ⚠️ 整块场地（轨道 · 音符 · 判定线 · 爆点）**一起**绕线中心转：
+            //    音符垂直于线、跟着线走，这就是"音符活在线的坐标系里"。
+            //    线动**不改变任何音符的到达时刻** —— 判定完全不受影响，服务端也不用改。
             val noteH = (size.height * 0.026f).coerceIn(14f, 30f)   // 横版屏幕矮，音符按高度算，别用固定像素
 
-            // ── 轨道：越靠近判定线越亮一点（静态渐层，减弱动效也留着）──
+            // 底色**不跟着转**（转了四角会露出底下的浅色页面），先铺满整屏
             drawRect(Brush.verticalGradient(listOf(stageTop, laneBg)), Offset(0f, 0f), Size(size.width, size.height))
+            rotate(poseDeg, Offset(size.width / 2f, judgeY)) {
+            // 场地画得比屏幕宽一截：转起来两头才不会空出来
+            val over = size.height * 0.12f
             drawRect(
                 Brush.verticalGradient(
                     0f to Color.Transparent, 0.7f to noteColor.copy(alpha = .05f), 1f to noteColor.copy(alpha = .14f),
                 ),
-                Offset(0f, 0f), Size(size.width, judgeY),
+                Offset(-over, -over), Size(size.width + over * 2, judgeY + over),
             )
-            for (i in 1..3) drawLine(ink.copy(alpha = .08f), Offset(laneW * i, 0f), Offset(laneW * i, judgeY), 2f)
+            for (i in 1..3) drawLine(ink.copy(alpha = .08f), Offset(laneW * i, -over), Offset(laneW * i, judgeY), 2f)
 
             // ── 手指按下：这条轨亮一下。不管有没有打中都亮 —— 它反馈的是"你按了"，不是"你对了" ──
             if (motion) for (l in 0..3) {
@@ -414,10 +439,14 @@ private fun GameBoard(
             }.takeIf { motion } ?: 0f
             drawRect(
                 Brush.verticalGradient(listOf(Color.Transparent, judgeColor.copy(alpha = .10f + .18f * lineGlow))),
-                Offset(0f, judgeY - 26f - 16f * lineGlow), Size(size.width, 26f + 16f * lineGlow),
+                Offset(-over, judgeY - 26f - 16f * lineGlow), Size(size.width + over * 2, 26f + 16f * lineGlow),
             )
-            drawLine(judgeColor.copy(alpha = .85f), Offset(0f, judgeY), Offset(size.width, judgeY), 5f + 2f * lineGlow)
-            drawLine(Color.White.copy(alpha = .35f + .35f * lineGlow), Offset(0f, judgeY - 1.5f), Offset(size.width, judgeY - 1.5f), 1.5f)
+            // 线画到屏幕外一截，转起来才不会露出端点
+            drawLine(judgeColor.copy(alpha = .9f), Offset(-over, judgeY), Offset(size.width + over, judgeY), 5f + 2f * lineGlow)
+            drawLine(
+                Color.White.copy(alpha = .45f + .35f * lineGlow),
+                Offset(-over, judgeY - 1.5f), Offset(size.width + over, judgeY - 1.5f), 1.5f,
+            )
 
             // ── 命中：分层的爆点（见 hitBurst）。漏了不放爆点，只在线上留一小片暗红 ──
             if (motion) for (l in 0..3) {
@@ -474,6 +503,7 @@ private fun GameBoard(
                         Offset(x, y - h / 2), Size(w, h * .5f), CornerRadius(h / 2),
                     )
                 }
+            }
             }
         }
 
@@ -726,44 +756,51 @@ private class RhythmSfx(ctx: android.content.Context) {
  *   0–380   6 个小方块，朝上方 ±70° 散开，距离按减速曲线走到 2.4 个音符高
  */
 private fun DrawScope.hitBurst(cx: Float, cy: Float, age: Float, c: Color, unit: Float) {
-    val k = (age / 0.38f).coerceIn(0f, 1f)
-    if (k >= 1f) return
-    val fade = 1f - k * k                                   // 后段才明显淡出，前段保持亮
+    if (age < 0f || age > 0.43f) return
+    fun ease(t: Float) = 1f - (1f - t) * (1f - t)             // 减速：前段快、后段慢
+    fun life(inS: Float, outS: Float) = ((age - inS) / (outS - inS)).coerceIn(0f, 1f)
 
-    // 实心圆：炸开的那一下，很快缩成一个点
-    val ck = (age / 0.07f).coerceIn(0f, 1f)
-    drawCircle(c.copy(alpha = .85f * fade), unit * (1.0f - 0.78f * ck), Offset(cx, cy))
+    // 实心圆：一上来就是最大，往里缩；**不淡出**，是被缩没的
+    if (age < 0.33f) drawCircle(c.copy(alpha = .9f), unit * (1f - 0.82f * ease(life(0f, 0.33f))), Offset(cx, cy))
 
-    if (age > 0.04f) {
-        // 方框（正着放）+ 菱形（转 45°，半透明填充）
-        val bs = unit * (1.6f + 0.7f * k)
-        drawRect(c.copy(alpha = .55f * fade), Offset(cx - bs, cy - bs), Size(bs * 2, bs * 2), style = Stroke(2f))
-        val ds = unit * (1.4f + 1.1f * k)
+    // 菱形（45°，半透明填充）：**比方框大**，最早退场
+    if (age in 0.017f..0.26f) {
+        val k = life(0.017f, 0.26f)
+        val d = unit * (1.65f + 0.6f * ease(k))
         rotate(45f, Offset(cx, cy)) {
-            drawRect(c.copy(alpha = .18f * fade), Offset(cx - ds, cy - ds), Size(ds * 2, ds * 2))
+            drawRect(c.copy(alpha = .33f * (1f - k)), Offset(cx - d, cy - d), Size(d * 2, d * 2))
         }
     }
-    if (age > 0.06f) {
-        // 两段对开的弧，边转边扩
-        val r = unit * (0.8f + 0.8f * k)
-        val sw = 3f - 2f * k
-        rotate(55f * k, Offset(cx, cy)) {
-            for (start in listOf(20f, 200f)) drawArc(
-                c.copy(alpha = .7f * fade), start, 110f, false,
-                Offset(cx - r, cy - r), Size(r * 2, r * 2), style = Stroke(sw),
+    // 方框：扩得最急（150ms 就走完九成），也留得最久
+    if (age > 0.033f) {
+        val k = life(0.033f, 0.43f)
+        val e = 1f - (1f - (age - 0.033f).coerceAtMost(0.12f) / 0.12f).let { it * it * it }
+        val b = unit * (1.1f + 0.9f * e)
+        drawRect(c.copy(alpha = .6f * (1f - k)), Offset(cx - b, cy - b), Size(b * 2, b * 2), style = Stroke(2.5f))
+    }
+    // 两段对开的弧：**几乎不转**（180ms 转 12°，还在减速）—— 转得明显就不像"打中"，像风车
+    if (age in 0.033f..0.40f) {
+        val k = life(0.033f, 0.40f)
+        val r = unit * (1.5f + 0.5f * ease(k))
+        rotate(12f * ease((age / 0.18f).coerceAtMost(1f)), Offset(cx, cy)) {
+            for (start in listOf(25f, 205f)) drawArc(
+                c.copy(alpha = .75f * (1f - k)), start, 90f, false,
+                Offset(cx - r, cy - r), Size(r * 2, r * 2), style = Stroke(4f - 2f * k),
             )
         }
     }
-    // 小方块：朝上方散开，越飘越慢（减速用 1-(1-k)^2）
-    val out = 1f - (1f - k) * (1f - k)
-    for (i in 0 until 6) {
-        val a = (-90f + (i - 2.5f) * 26f) * (Math.PI / 180f).toFloat()
-        val d = unit * 2.4f * out * (0.7f + 0.1f * i)
-        val sz = unit * (0.22f - 0.08f * k)
-        drawRect(
-            c.copy(alpha = .8f * fade),
-            Offset(cx + kotlin.math.cos(a) * d - sz, cy + kotlin.math.sin(a) * d - sz),
-            Size(sz * 2, sz * 2),
-        )
+    // 小方块：**4 个**，边飞边**变大**再淡掉（不是缩小），方向大致四散
+    if (age < 0.34f) {
+        val k = life(0f, 0.34f)
+        val out = ease(k) * unit * 4.5f
+        for (i in 0 until 4) {
+            val a = (-140f + i * 55f) * (Math.PI / 180f).toFloat()
+            val sz = unit * (0.38f + 0.16f * k)
+            drawRect(
+                c.copy(alpha = .85f * (1f - k)),
+                Offset(cx + kotlin.math.cos(a) * out - sz / 2, cy + kotlin.math.sin(a) * out - sz / 2),
+                Size(sz, sz),
+            )
+        }
     }
 }
