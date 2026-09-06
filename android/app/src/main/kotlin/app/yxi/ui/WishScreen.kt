@@ -94,7 +94,8 @@ fun WishScreen(modifier: Modifier = Modifier) {
                 properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false),
             ) {
                 Box(
-                    Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface.copy(alpha = .97f)),
+                    // 舞台底色取短片自己的纸感背景：擦的那半（透明底立绘）和放的那半（视频）才接得上
+                    Modifier.fillMaxSize().background(WishReveal.Paper),
                     contentAlignment = Alignment.Center,
                 ) {
                     WipeReveal(
