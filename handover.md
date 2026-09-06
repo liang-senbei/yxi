@@ -55,6 +55,7 @@
 - **cc-Yxi · 「点了发送，话还留在框里」真根因**（`efb9007`）：Claude Code 忙时消息进排队，它把占位提示画进输入框，判据当成了草稿 → 补回车 → 报失败 → 老板再发 → **同一句进服务器五次**。（真会话复现 + 真抓屏用例 + 全套 255 条）详见 TROUBLESHOOTING #285。
 - **cc-Yxi · 音游里右滑不再被侧边栏吃掉**（同一提交）：玩的时候关抽屉手势，开着时照旧放开。
 - **cc-Yxi_Entertainment · 四种音块各自的打击音**（tick 22ms / slide 55ms / trace 45ms / swipe 40ms，make_sfx.py 合成，无采样包）。
+- **cc-Bug_solverYxi · 换模型说 not found、其实一直没换**：`availableModels` 里的短名（`fable-5-1[1m]`）不是 `/model` 吃的名字，要补成全名 `claude-fable-5-1[1m]`；顺带让 `switchFast` 切完看一眼屏幕，失败就照实报，别再一律弹「已切到」。详见 TROUBLESHOOTING #287。
 
 ⚠️ **发版前先跑一次全套**（`connectedDebugAndroidTest`），这一步以前不在关卡里 ——
 两条测试从 09-05 起一直红着没人发现（#286）。UploadStress 那 7 条要先配主机，配法见 #286。

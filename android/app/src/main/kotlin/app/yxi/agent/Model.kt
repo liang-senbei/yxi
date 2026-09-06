@@ -209,7 +209,8 @@ object Model {
 
     /**
      * 这台机器上能选哪些模型。**读的是 settings.json 的白名单**，不抓 TUI；拿不到就退回一份通用别名表。
-     * ⚠️ 名字就是 `/model` 能吃的那种（`sonnet[1m]` / `opus-4-6[1m]` / `haiku` / `default`）。
+     * ⚠️ 这里出来的是**白名单原样的短名**（`fable-5-1[1m]` / `opus-4-6[1m]` / `sonnet[1m]` / `default`）——
+     *    界面上照着显示没问题，但**送进 `/model` 之前必须过 [canonical]**，短名它不认。
      */
     suspend fun available(ssh: SshSession, hostId: String, force: Boolean = false): Available {
         if (!force) availCache[hostId]?.let { return it }
@@ -227,10 +228,41 @@ object Model {
     }
 
     /**
-     * 快路换模型：`/model <名字>` + 1.5 秒后 Enter 按掉确认框。**两个来回，不抓屏。**
-     * @return 出错原因；null = 发出去了。⚠️ 只在 [borrowable] 时发 —— 输入框里有半截草稿会被接上。
+     * ⚠️⚠️ **`availableModels` 里的名字不能原样喂给 `/model`。**（老板 2026-09-06 报的）
+     *
+     * settings.json 白名单写的是**短名** `fable-5-1[1m]`，而 `/model` 只吃三种：
+     *   · 别名 —— `sonnet` `opus` `haiku` `fable` `best` `opusplan`（可带 `[1m]`）
+     *   · `default`
+     *   · **全名** —— `claude-fable-5-1[1m]`
+     * 短名进去回一句「Model 'fable-5-1[1m]' not found」就完了，模型**没换**。
+     *
+     * 本机 2.1.259 逐个实测（`claude --model X -p`，不是推的）：
+     * ```
+     * fable-5-1[1m]  ✗    claude-fable-5-1[1m]  ✓
+     * opus-4-6[1m]   ✗    claude-opus-4-6[1m]   ✓
+     * sonnet[1m] ✓  ·  default ✓  ·  haiku ✓
+     * ```
+     * 差别就是那个 `claude-` 前缀。⚠️ **别名不能加前缀** —— `claude-sonnet[1m]` 不是模型名。
      */
-    suspend fun switchFast(ssh: SshSession, target: String, alias: String): String? {
+    private val ALIAS = setOf("default", "sonnet", "opus", "haiku", "fable", "best", "opusplan")
+    private val ONE_M = Regex("""\[1m\]$""", RegexOption.IGNORE_CASE)
+
+    fun canonical(name: String): String =
+        if (name.startsWith("claude-") || ONE_M.replace(name, "").lowercase() in ALIAS) name
+        else "claude-$name"
+
+    /**
+     * 送完 `/model` 之后屏幕上出现这几句 = **没切成**。
+     * `not found` = 名字不认；`Kept model as …` = 认得但没换（多半不在 availableModels 白名单里）。
+     */
+    private val FAILED = Regex("""Model '[^']*' not found|unrecognized_model|Kept model as [\w .()\[\]-]+""")
+
+    /**
+     * 快路换模型：`/model <名字>` + 1.5 秒后 Enter 按掉确认框。
+     * @return 出错原因；null = 真的切了。⚠️ 只在 [borrowable] 时发 —— 输入框里有半截草稿会被接上。
+     */
+    suspend fun switchFast(ssh: SshSession, target: String, name: String): String? {
+        val alias = canonical(name)
         if (!Regex("""^[A-Za-z0-9\-\[\]._]+$""").matches(alias)) return "模型名有怪字符：$alias"
         if (!borrowable(ssh.exec("tmux capture-pane -p -t ${app.yxi.ssh.Shell.q(target)}"))) return "它正忙着，或者输入框里有没发完的字 —— 等一下再点"
         val t = app.yxi.ssh.Shell.q(target)
@@ -241,7 +273,12 @@ object Model {
         kotlinx.coroutines.delay(1500)
         // 同一个模型再发一次不弹框；弹了就按掉，没弹这个 Enter 落在空输入框上是无害的
         ssh.exec("tmux send-keys -t $t Enter")
-        return null
+        // ⚠️ **切没切成必须看一眼。** 换模型失败时 Claude Code 只在屏幕上写一行，不弹框、
+        //    没有别的信号；不看就一律报「已切到 X」＝**骗人**（老板就是这么被骗的）。
+        //    ⚠️ 只翻**自己这条命令之后**那一截 —— 整屏找的话，上一次失败的旧账会被永远重报。
+        //    ⚠️ 先 [flat] 再找：手机上的窄窗格会把这行折断，子串匹配必然落空（同 #113/#133 的病根）。
+        val tail = flat(ssh.exec("tmux capture-pane -p -t $t")).substringAfterLast("/model $alias", "")
+        return FAILED.find(tail)?.value?.trim()
     }
 
     /** 思考强度：`/effort <级别>`。一个来回。⚠️ 同样会写成账号默认（回显明说的）。 */

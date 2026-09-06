@@ -108,6 +108,22 @@ class ModelTest {
         assertNull(Model.parse(perm))
     }
 
+    // ── 送进 `/model` 的名字 ──────────────────────────────────
+    @Test fun 白名单的短名要补全才喂得进model() {
+        // settings.json 的 availableModels 写短名，`/model` 不认 —— 老板 2026-09-06 那张
+        // 「Model 'fable-5-1[1m]' not found」就是这条。2.1.259 逐个实测过（见 Model.canonical）
+        assertEquals("claude-fable-5-1[1m]", Model.canonical("fable-5-1[1m]"))
+        assertEquals("claude-opus-4-6[1m]", Model.canonical("opus-4-6[1m]"))
+        // ⚠️ 别名本来就认，加了前缀反而变成不存在的名字
+        assertEquals("sonnet[1m]", Model.canonical("sonnet[1m]"))
+        assertEquals("opus", Model.canonical("opus"))
+        assertEquals("haiku", Model.canonical("haiku"))
+        assertEquals("default", Model.canonical("default"))
+        assertEquals("opusplan", Model.canonical("opusplan"))
+        // 模式面板里手写的是全名，原样放行
+        assertEquals("claude-opus-5[1m]", Model.canonical("claude-opus-5[1m]"))
+    }
+
     @Test fun 只有标题没有脚注也不认() {
         // 面板还没画完就抓屏了 —— 宁可再抓一次，也不能拿半个面板去点
         assertNull(Model.parse("   Select model\n     1. Opus   Opus 5\n"))

@@ -5442,3 +5442,18 @@ for d in $(unzip -l $A | awk '/classes.*dex/{print $4}'); do unzip -p $A $d | gr
 - **另外 7 条不是坏，是没配**：`UploadStressTest` 要连一台真 SSH 主机，**故意在没配时失败而不是静默跳过**（它自己的注释写着「没跑和跑过了必须分得清」）。配法：容器起 sshd → 服务器 `ssh -R 22299:127.0.0.1:<容器端口> mac` → 传参 `-e stressKey <base64url 私钥> -e stressHost 10.0.2.2 -e stressPort 22299 -e stressUser root`。配上之后 7 条全过，含 160MB 那档。
 - **根因**：发版前的关卡是「子代理审查 + E2E」，**全套测试不在关卡里**。而这几天每次发版都过了审查和 E2E —— 关卡本身是绿的，红的地方没人看。
 - **修法 / 怎么避开**：发版前那四步（发布 / 清单子 / 提交版本号 / 补已发布，见 #284）**前面再加一步：跑一次全套**。跑之前先把 UploadStress 的主机配上，否则那 7 条的红会把真问题盖住 —— **一直红着的测试等于没有测试**，看的人会开始忽略它。
+
+## #287 换模型报「Model 'x' not found」——白名单里的短名不是 `/model` 吃的名字（cc-Bug_solverYxi，2026-09-06）
+
+- **症状**：对话页点模型那一格 → 选单里挑一个（比如 `fable-5-1[1m]`）→ 会话里冒出 `Model 'fable-5-1[1m]' not found`，**模型没换**，可界面照样弹「已切到 fable-5-1[1m] · 也成了账号默认」。老板 2026-09-06 抓屏报的。
+- **根因**：两套名字被当成了一套。
+  · 选单名单读的是 `~/.claude/settings.json` 的 `availableModels`，那里写的是**短名**：`["default","fable-5-1[1m]","opus-4-6[1m]","sonnet[1m]","haiku"]`。
+  · 而 `/model <名字>` 只认三种：**别名**（`sonnet`/`opus`/`haiku`/`fable`/`best`/`opusplan`，可带 `[1m]`）、`default`、或**全名** `claude-fable-5-1[1m]`。
+  短名两头不沾 → not found。2.1.259 逐个实测（`claude --model X -p`）：`fable-5-1[1m]` ✗ · `claude-fable-5-1[1m]` ✓ · `opus-4-6[1m]` ✗ · `claude-opus-4-6[1m]` ✓ · `sonnet[1m]` ✓ · `default` ✓ · `haiku` ✓。差别只是一个 `claude-` 前缀。
+  Modes.kt 早就记着「`/model opus[1m]` 不认，认全名」，但只写进了那张手写命令表；从 settings.json 读出来的那条路没过同一道加工。
+- **为什么没人发现**：`switchFast` 送完键就 `return null`，**从不看屏幕**。失败时 Claude Code 只在屏幕上写一行，不弹框、没有别的信号 —— 于是失败和成功在界面上长得一模一样。跟 #285 是同一类病：**没有回执就自己编一个**。
+- **修法 / 怎么避开**：
+  · `Model.canonical()` —— 不是别名、不是 `default`、没带 `claude-` 前缀的，一律补 `claude-`；**别名绝不能补**（`claude-sonnet[1m]` 不是模型名）。放在 `switchFast` 入口，两条调用路（选单 / 模式面板手写命令）都走它。
+  · 送完之后抓一次屏，只翻**自己那条命令之后**那一截（整屏找会把上一次的旧错永远重报），压平再找（窄窗格会把这行折断，同 #113/#133）。看到 `not found` / `unrecognized_model` / `Kept model as …` 就当失败原样报出来。
+  · 用例 `ModelTest.白名单的短名要补全才喂得进model`。
+  · ⚠️ **改 Claude Code 版本要重验这张表** —— 认哪些名字是它内部的清单（2.1.259 在 `WP` / `B3t` 两个数组里），跟着版本走。
