@@ -164,15 +164,10 @@ fun ChatScreen(
     // ⚠️⚠️ **上传协程活得比一次 recomposition 长,断线重连后 `ssh` 参数会换成新对象。**
     //    每次尝试都从这儿重新读当前那条,别把启动那一刻的对象钉死(见 [app.yxi.agent.Uploader])。
     val latestSsh = rememberUpdatedState(ssh)
-    /** 等一条活着的连接,最多等 maxWaitMs。轮询、不用 snapshotFlow(结构相等时不发新值,会永远挂着) */
-    suspend fun aliveSsh(maxWaitMs: Long): app.yxi.ssh.SshSession? {
-        val t0 = System.currentTimeMillis()
-        while (true) {
-            latestSsh.value?.takeIf { it.isAlive }?.let { return it }
-            if (System.currentTimeMillis() - t0 >= maxWaitMs) return null
-            delay(500)
-        }
-    }
+    // ⚠️ 这份「等一条活着的连接」抽到了 [rememberAliveSsh]（全项目唯一那一份，见 #282）——
+    //    ConnectPanel 的授权流程、上传、发送都用它。**别再各写各的**：今天已经因为
+    //    「同一个判据抄两份、只修了一份」栽过（#281 的边框判据）。
+    val aliveSsh = rememberAliveSsh(ssh)
     fun startUpload(up: Upload) {
         if (ssh == null) { up.error = t("还没连上"); return }
         up.error = null; up.progress = 0f; up.cancelled = false
@@ -195,7 +190,7 @@ fun ChatScreen(
                 // ⚠️ 重试/续传/换通道的规矩都在 [app.yxi.agent.Uploader] 里 —— 抽出去是为了让压力测试
                 //    能跑到**这段真代码**(它原来在 Composable 里,测不着,修没修全靠读代码判断)。
                 val r = app.yxi.agent.Uploader.upload(
-                    aliveSsh = ::aliveSsh,
+                    aliveSsh = aliveSsh,
                     open = { ctx.contentResolver.openInputStream(up.uri) ?: error(t("这个文件读不出来")) },
                     total = size, sessionName = sessionName, name = up.name,
                     index = idx, isImage = up.isImage, stamp = stamp,
@@ -1231,7 +1226,7 @@ fun ChatScreen(
                         // 下次进来发过的话又冒出来一遍
                         Drafts.set(ctx, hostId, sessionName, "")
                         // ⚠️ **不能用界面的 scope** —— 点完立刻切走会把它取消，那句话就没了（见 [Sender]）
-                        Sender.send(ctx, ::aliveSsh, hostId, sessionName, t) { msg ->
+                        Sender.send(ctx, aliveSsh, hostId, sessionName, t) { msg ->
                             draft = Drafts.get(ctx, hostId, sessionName)   // 话还回来了，回填输入框
                             android.widget.Toast.makeText(ctx, msg, android.widget.Toast.LENGTH_LONG).show()
                         }
