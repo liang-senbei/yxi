@@ -982,6 +982,17 @@ internal object En {
         "码在会员中心 → 兑换码里输，同档会叠加。" to "Enter codes under Membership → Redeem code; same tier stacks.",
         // 我的资料 / 账号中心（cc-Yxi 2026-09-06）
         "管理主机" to "Manage hosts",
+        // 链接预览（cc-Yxi 2026-09-06）
+        "链接预览" to "Link previews",
+        "点了才抓" to "On tap",
+        "关" to "Off",
+        "点一下取预览" to "Tap for preview",
+        "正在取预览…" to "Fetching preview…",
+        "这个链接取不到预览" to "No preview for this link",
+        "这台机器上没有 curl —— 装上就能预览" to "This machine has no curl — install it to get previews",
+        "对话里的网址会自动取一次标题和图 —— 也就是访问它一次。带一次性码、内网、本机的地址一律不取。" to "Links in chat are fetched automatically for title and image — meaning each one is visited once. Links with one-time codes, or to private/local addresses, are never fetched.",
+        "网址只显示成链接，不取预览。" to "Links stay plain; nothing is fetched.",
+        "网址下面出现一条「点一下取预览」，点了才去访问。默认这个。" to "A “Tap for preview” row appears under each link; nothing is visited until you tap. This is the default.",
         "账号" to "Account",
         "资产" to "Assets",
         "功能" to "Features",

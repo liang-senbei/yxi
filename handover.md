@@ -43,6 +43,13 @@
 > 组规（老板 2026-09-05）：**所有组员都改好了才构建新版本，别频繁发**。修完一处先记在这儿，一行一条、写清是谁的；
 > 发版前 `yxi-hub all` 问一圈都齐了再 build + publish；发完清空。例外只有线上崩溃 / 数据风险，破例前先跟老板说。
 
+- **cc-Yxi_Entertainment · 音游打击感 + 三处修**（老板 2026-09-06「特效符合 UI/UX 风格，加点击音效、动效、震动」）：`c56ec90`（自己合成的 55ms 打击音，无采样包；震动走 `performHapticFeedback` **不申请 VIBRATE 权限**，因此自动尊重系统触感开关；玻璃语言重做轨道/判定线/命中光环；关了系统动效则装饰全停、音符照落）· `73af6f0`（审查：开关别用上一局的值）· `37c50be`（注释：press 裸数组为什么不能改成 Compose 状态）· `3867b67`（长按条不再拖到屏幕底下）· 祈愿文案去星号。审查 ship · 编译过 · i18n 归零 · 画面 Mac E2E 过。⚠️ **手感本身未验**（模拟器 -no-audio + 没马达），待老板真机试。
+- **cc-Yxi · 对话里网址的预览卡片**（老板 2026-09-06，参照 Threads 的链接卡）：`agent/LinkPreview.kt` + `ui/LinkCard.kt`（新），对话页每条消息最多摆 3 张，设置 → 界面 → 链接预览 三选一。
+  ⚠️ **默认「点了才抓」，这不是保守是有具体后果**：抓一个网址 = **访问它一次**，而对话里的网址不全是「网站」—— 1.1.14 的 MCP 认证就会在转录里留下 `http://localhost:57970/callback?code=…` 这种**带一次性码**的地址，自动全抓等于把它消耗掉。老板拍板「点了才抓」，随后又要求「放设置里让客户自定义」，所以做成 手动（默认）/ 自动 / 关。
+  ⚠️ **闸门在任何模式下都生效**（`previewable`）：只认公网 http/https；拦掉本机、10/172.16-31/192.168/169.254、**100.64-127（Tailscale 那段）**、以及带 `code=`/`token=`/`secret=` 等疑似凭据的参数；`user:pass@host` 按真实主机判（别被前缀骗）。
+  ⚠️ **抓取走服务器的 curl，不走手机**（跟 Yxi 的模型一致）；`--max-time 8` + `head -c 200k` 限住，别把 SSH 通道占死（#277）。头图才是手机直连下的，沿用 MailScreen 那套缓存，**没引 Coil**。
+  ⚠️ 结果分三种说：拿到了 / 取不到 / **这台机器没 curl**（干净 Ubuntu 真的没有，装机测试踩过）——混成一句「取不到」用户会以为功能坏了。同 #276 的「空 ≠ 不存在」。
+  **LinkPreviewTest 8 条**（凭据/内网/协议/user@host/正文挑址/og 两种排法/退回 title/HTML 实体）· **Mac 模拟器实测**：安全链接出「点一下取预览」、带 `code=` 的那条**完全没卡片**、点一下抓回 example.com + Example Domain；设置项在「界面」节里三选一正常。**编译过 · i18n 归零。审查还没做。**
 - 待办：看板头部主机名太长会折成两行挤按钮（截图 Thor-h/e）。
 - **待老板拍板 · 抽卡界面改 activetheory.net 风格**（老板 2026-09-05 问「能不能像素级复刻」）：提案已推实验室「抽卡动效」组（`祈愿 · 铬环（Active Theory 风）` 单抽 + `祈愿 · 铬环 · 十连`（其余 9 个用同款玻璃框铺 3×3）+ 真机对照图）。源码 `design/wish-activetheory.src.html`（`__ART__` 换成 card_yunxi.webp 的 base64、`__TEN__` 换 true/false 即得两版；纯 Canvas 2D）。
   **老板打回（「复刻的很垃圾」，要一模一样）→ 第二版走真 WebGL**：`design/wish-activetheory-webgl.src.html`（`__THREE__` 换成 three.js r147 UMD + UnrealBloom 几个 pass 的拼接，jsdelivr 上 `three@0.147.0/build/three.min.js` + `examples/js/postprocessing/*` + `examples/js/shaders/*`；本机没 npm，curl 拿的）。做法是读他们 `assets/shaders/compiled.vs` 里的真着色器逐层重建（环 = 深色玻璃折射背景 + 菲涅尔彩虹边 + 流动法线；星尘 = 距离缩放的 matcap 气泡点精灵；雾 = 加法光片进 bloom；后期 = UnrealBloom / RGB 错位 / 对比 / 角落渐变 / 噪点 / 右上角磨砂），几何按 390×844 真机截图逐像素量（`design/wish-activetheory-webgl-compare.jpg` 左他们 / 中我们 / 右差异热图；三区域亮度 ±4 以内）。实验室同组第三项「WebGL 复刻（真 3D · 会动）」，模拟器里 App 的实验室 WebView 能跑 WebGL 已验。老板追问「为什么不能动」「a 换成 Y」后补的：环里三段胶囊拼的 Y（同材质，挂在环上；⚠️ 胶囊 rotation.z 为负是顶端往 +x 倒，臂放反了就是箭头，踩过）；动 = 待机（相机 wobble .1、环慢转、星尘上飘、雾呼吸、导航字每 7 秒像素格显形）+ 手指（moveXY [.4,.2] 视差、星尘软排斥）+ 往下滑（相机 z 15.75→9.35 推进、星尘上涌、雾转紫、环染粉铬、大字像素格显形，照 live-m-05/07）。三态截图 `design/wish-activetheory-webgl-states.jpg`。像素格故障 = 他们 DefaultText.glsl 的 floor(uv·grid)/grid，用 2D 画布缩小再硬边放大实现，格子最粗 6px。

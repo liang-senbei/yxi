@@ -661,6 +661,37 @@ fun SettingsScreen(
 
         // ⚠️ 这一栏**不翻译**：正在看不懂当前语言的人，得能认出另一个选项。
         // 「简体中文 / English」两个名字都用它们自己的语言写，谁都找得到自己那个。
+        // 链接预览（老板 2026-09-06：「给客户在设置里面放权限吧不然可以自定义」）
+        // ⚠️ 默认「点了才抓」不是保守，是有具体后果：抓一个网址 = 访问它一次，
+        //    而对话里的网址不全是「网站」—— MCP 认证会留下带一次性码的 localhost 地址。
+        //    自动模式也有闸门兜着（见 LinkPreview.previewable），但把选择权交给用户。
+        var lp by remember { mutableStateOf(app.yxi.agent.LinkPreview.Prefs.mode(ctx)) }
+        val lpLabel = when (lp) {
+            app.yxi.agent.LinkPreview.Prefs.AUTO -> t("自动")
+            app.yxi.agent.LinkPreview.Prefs.OFF -> t("关")
+            else -> t("点了才抓")
+        }
+        Card(t("链接预览"), Glyph.Globe, subtitle = lpLabel) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(
+                    app.yxi.agent.LinkPreview.Prefs.MANUAL to t("点了才抓"),
+                    app.yxi.agent.LinkPreview.Prefs.AUTO to t("自动"),
+                    app.yxi.agent.LinkPreview.Prefs.OFF to t("关"),
+                ).forEach { (v, label) ->
+                    SegItem(label, lp == v, Modifier.weight(1f)) {
+                        lp = v; app.yxi.agent.LinkPreview.Prefs.setMode(ctx, v)
+                    }
+                }
+            }
+            Hint2(
+                when (lp) {
+                    app.yxi.agent.LinkPreview.Prefs.AUTO ->
+                        t("对话里的网址会自动取一次标题和图 —— 也就是访问它一次。带一次性码、内网、本机的地址一律不取。")
+                    app.yxi.agent.LinkPreview.Prefs.OFF -> t("网址只显示成链接，不取预览。")
+                    else -> t("网址下面出现一条「点一下取预览」，点了才去访问。默认这个。")
+                }
+            )
+        }
         Card(t("语言"), Glyph.Globe, subtitle = I18n.lang.label) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 I18n.Lang.entries.forEach { l ->
@@ -870,6 +901,23 @@ private fun Card(
 @Composable
 private fun Line(text: String, color: androidx.compose.ui.graphics.Color) =
     Text(text, style = MaterialTheme.typography.bodyMedium, color = color)
+
+/** 三选一的小药丸（跟 HostsScreen 里那个同款；那个是 private，不去动别人的文件）。 */
+@Composable
+private fun SegItem(text: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Surface(
+        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainer,
+        shape = RoundedCornerShape(100.dp),
+        modifier = modifier.height(40.dp).clip(RoundedCornerShape(100.dp)).clickable(onClick = onClick),
+    ) {
+        androidx.compose.foundation.layout.Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                text, style = MaterialTheme.typography.labelLarge,
+                color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.outline,
+            )
+        }
+    }
+}
 
 @Composable
 private fun Hint2(text: String) =

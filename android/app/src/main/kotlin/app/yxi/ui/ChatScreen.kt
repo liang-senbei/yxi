@@ -1825,6 +1825,13 @@ private fun Item(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
+        // 网址预览卡（老板 2026-09-06：「搜索链接比如网站和视频可以支持渲染出来」）。
+        // ⚠️ 默认「点了才抓」—— 抓一次 = 访问它一次，而对话里的网址不全是「网站」
+        //    （MCP 认证会留下带一次性码的 localhost 地址）。闸门和开关见 [app.yxi.agent.LinkPreview]。
+        // ⚠️ 一条消息最多摆 3 张，多了整屏都是卡片。
+        remember(item.markdown) { app.yxi.agent.LinkPreview.urlsIn(item.markdown) }
+            .forEach { u -> LinkCard(u, ssh) }
+
         // ⚠️ **必须有一条不依赖系统选择工具栏的复制路径。**
         // 用户报的：在 AI 回复里选中文字，弹出来的工具栏**只有「全选」没有「复制」**。
         // 那条工具栏是 Compose 的 `SelectionManager` 给的 —— 它拿不到可复制的文本时
