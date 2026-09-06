@@ -242,7 +242,7 @@ function genAhead(now){
 
 // ── 局面 ──
 let combo=0, best=0, perfect=0, good=0, miss=0, score=0;
-let tiltAt=-9, tiltDir=0, lastTierAt=-9;
+let tiltAt=-9, tiltDir=0, lastTierAt=-9, lastHitAt=-9;
 const press=[-9,-9,-9,-9], flash=[-9,-9,-9,-9], held=[0,0,0,0];
 let bursts=[], words=[], missMarks=[], shatters=[];
 const now = () => (performance.now()-t0)/1000;
@@ -263,7 +263,7 @@ function hitLane(lane, want, windowMs = GOOD_MS){
   return null;
 }
 function land(n, j){
-  n.judged = j; flash[n.lane] = now();
+  n.judged = j; flash[n.lane] = now(); lastHitAt = now();
   combo++; best = Math.max(best, combo);
   if (j==='perfect') perfect++; else good++;
   score += Math.round((j==='perfect'?1000:600) * multOf(combo));
@@ -357,8 +357,12 @@ function draw(){
   const heatK = Math.min(1, combo/S.heatMax) * Math.min(1, S.heat);
   if (S.skin==='yunxi'){
     const amount = 0.55 + 0.45*heatK;                                   // 待机 → 思考
-    // 跳档不再闪底光：老板反馈那一下「从 1.75 跳到 2.25 再回来」突兀 —— 评价词已经在喊，底不用再闪
-    drawThinkingGlow(t, amount, 0, S.bgGain); bgHeatDrawn = -1;
+    // 老板 2026-09-06 定的底光节奏：**每次打中闪一小下；跳档闪得更猛，而且亮度就保持在新档上**
+    const tierLevel = TIERS.filter(x => combo >= x.at).length;                     // 现在在第几档（断连归零）
+    const hitPulse  = Math.max(0, 1 - (t - lastHitAt)/0.15);                          // 每一下：150ms 小闪
+    const tierPulse = Math.pow(Math.max(0, 1 - (t - lastTierAt)/0.5), 2);            // 跳档：500ms 猛闪
+    const lit = amount + 0.12*tierLevel + 0.15*hitPulse + 0.45*tierPulse;
+    drawThinkingGlow(t, lit, tierPulse, S.bgGain); bgHeatDrawn = -1;                 // 跳档那下带琥珀
   } else drawBg(0);
   ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(bg, 0, 0, W, H);
