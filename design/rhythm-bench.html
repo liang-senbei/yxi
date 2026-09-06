@@ -2887,7 +2887,7 @@ function genAhead(now){
 let combo=0, best=0, perfect=0, good=0, miss=0, score=0;
 let tiltAt=-9, tiltDir=0, lastTierAt=-9, lastHitAt=-9;
 const press=[-9,-9,-9,-9], flash=[-9,-9,-9,-9], held=[0,0,0,0];
-let bursts=[], words=[], missMarks=[], shatters=[];
+let bursts=[], words=[], missMarks=[], shatters=[], vlines=[];
 const now = () => (performance.now()-t0)/1000;
 const tierWord = c => { const t = TIERS.find(x=>x.at===c); return t?t.label:null; };
 const multOf = c => { let m=1; for (const t of TIERS) if (c>=t.at) m=t.mult; return m; };
@@ -2913,6 +2913,12 @@ function land(n, j){
   bursts.push({at:now(), lane:n.lane, kind:n.kind, judge:j, dir:n.dir, seed:Math.random(), fx: HIT_CHOSEN.length ? pick(HIT_CHOSEN) : null,
                parts:Array.from({length:S.particles}, () => ({a:Math.random()*6.283, v:0.6+Math.random()*1.0, s:0.5+Math.random()*0.9, r:Math.random()}))});
   if (bursts.length>40) bursts.shift();
+  // 竖向校准线（老板 2026-09-06）：命中时在音符中心竖一道再淡出，概率按档位走 30% → 50% → 70% → 90%
+  const VLINE_P = [0.30, 0.50, 0.70, 0.90];
+  if (Math.random() < VLINE_P[Math.min(3, TIERS.filter(x => combo >= x.at).length)]){
+    vlines.push({at:now(), lane:n.lane, jitter:(Math.random()*20-10)});
+    if (vlines.length>20) vlines.shift();
+  }
   // 碎裂：音符本体按老板收藏的 8 款随机散掉（slide 只在按下那一瞬散头部）
   if (SHATTER_CHOSEN.length){ shatters.push({fx: pick(SHATTER_CHOSEN), at: now(), lane: n.lane, kind: n.kind, seed: Math.random()}); if (shatters.length>30) shatters.shift(); }
   // 只在档位跳级时喊一声（8 / 15 / 30）。每一下都弹字太吵 —— Phigros 一个字都不弹，克制才精致
@@ -3106,6 +3112,16 @@ function draw(){
       } else sliver(cx, y, w, h, c, n);
     }
   }
+  // ── 竖向校准线：垂直于判定线、±10° 偏转、白、0.28 秒淡出（Phigros 那一笔，按档位概率出现）──
+  for (const v of vlines){
+    const k = (t - v.at)/0.28; if (k < 0 || k > 1) continue;
+    const cx = laneW*v.lane + laneW/2, len = noteH*(3.2 + 2.4*k)*1.6;
+    ctx.save(); ctx.translate(cx, judgeY); ctx.rotate(v.jitter*Math.PI/180);
+    ctx.strokeStyle = `rgba(255,255,255,${.85*(1-k)})`; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(0, -len); ctx.lineTo(0, len*.35); ctx.stroke();
+    ctx.restore();
+  }
+  vlines = vlines.filter(v => t - v.at <= 0.3);
   // ── 碎裂（音符本体散掉）──
   for (const sh of shatters){
     const k = (t - sh.at)/0.6; if (k < 0 || k > 1) continue;
