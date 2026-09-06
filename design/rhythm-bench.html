@@ -66,6 +66,8 @@
   <p class="note">云曦皮的底 = 对话页「模型在思考」那套光（ThinkingGlow）一比一移植：四团光各自独立相位，色相 6 秒一圈蓝→青→绿→黄→橙→粉。连击越高，亮度从「待机」升到「思考」；跳档那一瞬闪一下「等你拍板」的琥珀。</p>
 
   <h3>校准线</h3>
+  <div class="seg" id="choreo"></div>
+  <p class="note">线会转、走、翻，甚至立起来变成一条持久的竖线；音符永远垂直于线、沿线的法线飞过来（老板 2026-09-06）。「竖线」是把它一直立着给你看。</p>
   <div class="row"><label>摆动幅度</label><input type="range" id="tilt" min="0" max="2" step="0.05"><output></output></div>
   <div class="row"><label>回正快慢</label><input type="range" id="tiltBack" min="0.1" max="3" step="0.05"><output></output></div>
   <div class="row"><label>谱面自带摆动</label><input type="range" id="sway" min="0" max="2" step="0.05"><output></output></div>
@@ -2773,7 +2775,7 @@ const S = {
   // 默认值 = 老板 2026-09-06 在试验台上调好的那组
   fxScale:1.1, particles:12, fxLife:0.6,
   heat:1.1, heatMax:30, bgGain:1.75,
-  tilt:1, tiltBack:2.7, sway:1.7,
+  tilt:1, tiltBack:2.7, sway:1.7, choreo:'light',
   noteW:1.2, noteHscale:1, approach:1.55, density:1.25,   // ⚠️ 下落时长 / 密度是谱面·难度的参数（老板），进 App 时从谱面读，不是全局常量
 };
 
@@ -2864,6 +2866,38 @@ function drawThinkingGlow(t, amount, warmK, gain){
   bgx.fillStyle = 'rgba(8,10,14,.25)'; bgx.fillRect(0,0,w,h);
 }
 
+// ── 判定线编舞（老板 2026-09-06：线会翻转、上下左右移动、倾斜，甚至变成持久的竖线；音符跟着走，永远垂直于线）──
+// 场地（轨道·音符·爆点·碎裂）全部画在线的坐标系里：先平移到线的中心，再转 deg。所以线怎么动，音符都垂直于它。
+let poseFrom = {deg:0, dx:0, dy:0}, poseTo = {deg:0, dx:0, dy:0}, poseT0 = 0, poseDur = 1, nextMoveAt = 5;
+const easeInOut = k => k < .5 ? 4*k*k*k : 1 - Math.pow(-2*k + 2, 3)/2;
+function poseAt(t){
+  if (S.choreo === 'off') return {deg:0, dx:0, dy:0};
+  if (S.choreo === 'vertical'){                                            // 一直立着：线在屏幕正中竖着
+    const target = {deg:90, dx:0, dy:H*0.5 - H*0.78};
+    if (poseTo.deg !== 90){ poseFrom = curPose(t); poseTo = target; poseT0 = t; poseDur = 1.4; }
+    return curPose(t);
+  }
+  if (t >= nextMoveAt){
+    poseFrom = curPose(t); poseT0 = t; poseDur = 1.2 + Math.random()*0.8;
+    const wild = S.choreo === 'wild', r = Math.random();
+    if (wild && r < 0.25)      poseTo = {deg: Math.random()<.5 ? 90 : -90, dx: (Math.random()-.5)*W*0.2, dy: H*0.5 - H*0.78};   // 立起来
+    else if (wild && r < 0.35) poseTo = {deg: 180, dx: 0, dy: H*0.5 - H*0.78};                                              // 翻个面：音符从下面来
+    else if (r < 0.75)         poseTo = {deg: (Math.random()-.5)*(wild ? 70 : 24), dx: (Math.random()-.5)*W*(wild ? .3 : .12), dy: (Math.random()-.5)*H*(wild ? .35 : .14)};
+    else                       poseTo = {deg:0, dx:0, dy:0};                                                                // 回正
+    nextMoveAt = t + poseDur + (wild ? 3 + Math.random()*3 : 4 + Math.random()*4);
+  }
+  return curPose(t);
+}
+function curPose(t){
+  const k = easeInOut(Math.max(0, Math.min(1, (t - poseT0)/poseDur)));
+  return {deg: poseFrom.deg + (poseTo.deg - poseFrom.deg)*k, dx: poseFrom.dx + (poseTo.dx - poseFrom.dx)*k, dy: poseFrom.dy + (poseTo.dy - poseFrom.dy)*k};
+}
+// 屏幕坐标 → 线的坐标系（输入用：手指点在哪条轨、往哪边划，都得按线的坐标算）
+function toLocal(x, y){
+  const {deg, cx, cy, lx, ly} = geo, r = -deg*Math.PI/180, dx = x-cx, dy = y-cy;
+  return {x: dx*Math.cos(r) - dy*Math.sin(r) + lx, y: dx*Math.sin(r) + dy*Math.cos(r) + ly};
+}
+
 // ── 谱面：程序生成、循环 ──
 let notes=[], t0=performance.now(), lastGen=0;
 // ⚠️ 老板定的两条谱面规则（2026-09-06）：
@@ -2947,12 +2981,8 @@ function autoPlay(t){
 
 // ── 输入 ──
 const pointers = new Map();
-let geo = {deg:0, cx:0, cy:0, laneW:0};
-function laneOf(x,y){
-  const {deg,cx,cy,laneW} = geo, r=-deg*Math.PI/180, dx=x-cx, dy=y-cy;
-  const rx = dx*Math.cos(r) - dy*Math.sin(r) + cx;
-  return Math.max(0, Math.min(3, Math.floor(rx/laneW)));
-}
+let geo = {deg:0, cx:0, cy:0, lx:0, ly:0, laneW:1};
+function laneOf(x,y){ return Math.max(0, Math.min(3, Math.floor(toLocal(x,y).x/geo.laneW))); }
 cv.addEventListener('pointerdown', e => {
   cv.setPointerCapture(e.pointerId);
   const lane = laneOf(e.clientX, e.clientY);
@@ -2962,7 +2992,8 @@ cv.addEventListener('pointerdown', e => {
 });
 cv.addEventListener('pointermove', e => {
   const p = pointers.get(e.pointerId); if (!p) return;
-  const dx = e.clientX-p.x0, dy = e.clientY-p.y0;
+  const a = toLocal(p.x0, p.y0), b2 = toLocal(e.clientX, e.clientY);      // 划动方向按线的坐标系算：线立着的时候「左右滑」就是屏幕上的上下滑
+  const dx = b2.x - a.x, dy = b2.y - a.y;
   // swipe 手势门槛放宽：划过 3% 屏宽、0.45 秒内都算（原来 4.5% / 0.28 秒），判定窗也用 SWIPE_MS
   if (!p.swiped && Math.abs(dx) > W*0.03 && now()-p.t0 < 0.45){
     const dir = dx>0?1:-1; p.swiped = true;
@@ -2996,11 +3027,13 @@ function draw(){
   const back = Math.exp(-(t-tiltAt)/(0.32/Math.max(.05,S.tiltBack)));
   const kick = (t-tiltAt<3) ? tiltDir*6*S.tilt*back*Math.cos((t-tiltAt)*9) : 0;
   const swayDeg = Math.sin(t*0.45)*2.2*S.sway;
-  const deg = Math.max(-9, Math.min(9, swayDeg + kick));
-  const laneW = W/4, judgeY = H*(0.78 + Math.sin(t*0.3)*0.02*S.sway);
+  const pose = poseAt(t);                                                   // 编舞（转 / 走 / 翻 / 立）
+  const deg = pose.deg + swayDeg + kick;                                    // 不再限 ±9°：线想怎么转就怎么转
+  const laneW = W/4, judgeY = H*0.78;                                       // 线的坐标系里线永远在这儿；屏幕上在哪由 pose 决定
+  const lineCx = W/2 + pose.dx, lineCy = judgeY + pose.dy + Math.sin(t*0.3)*H*0.02*S.sway;
   const noteH = Math.min(44, Math.max(6, Math.min(11, H*0.011)) * S.noteHscale);   // 薄片 8px；拉高就是钢琴块
   const noteW = Math.min(laneW*0.55, W*0.052) * S.noteW;             // Phigros 约 3% 屏宽；我们有轨道，给到 5% 好点
-  geo = {deg, cx:W/2, cy:judgeY, laneW};
+  geo = {deg, cx:lineCx, cy:lineCy, lx:W/2, ly:judgeY, laneW};
 
   // ── 糊底 ──
   const heatK = Math.min(1, combo/S.heatMax) * Math.min(1, S.heat);
@@ -3017,8 +3050,8 @@ function draw(){
   ctx.drawImage(bg, 0, 0, W, H);
 
   ctx.save();
-  ctx.translate(W/2, judgeY); ctx.rotate(deg*Math.PI/180); ctx.translate(-W/2, -judgeY);
-  const over = H*0.2;
+  ctx.translate(lineCx, lineCy); ctx.rotate(deg*Math.PI/180); ctx.translate(-W/2, -judgeY);
+  const over = Math.max(W, H)*0.6;                                          // 场地画得比屏幕大得多：转到任何角度都不露边
 
   // 按下反馈：极淡，只说「你按了」
   for (let l=0;l<4;l++){
@@ -3323,6 +3356,7 @@ function segButtons(id, items, cur, onPick){
 }
 segButtons('skin', Object.entries(SKINS).map(([k,v])=>[k,v.name]), ()=>S.skin, v=>{ S.skin=v; bgHeatDrawn=-1; });
 segButtons('auto', [[false,'我来打'],[true,'自动打']], ()=>S.auto, v=>{ S.auto=v; });
+segButtons('choreo', [['off','不动'],['light','轻'],['wild','疯'],['vertical','竖线']], ()=>S.choreo, v=>{ S.choreo=v; nextMoveAt = now(); if (v!=='vertical'){ poseFrom = curPose(now()); poseTo = {deg:0,dx:0,dy:0}; poseT0 = now(); poseDur = 1.2; } });
 const SLIDERS = ['fxScale','particles','fxLife','heat','heatMax','bgGain','noteHscale','tilt','tiltBack','sway','noteW','approach','density'];
 const INT = new Set(['particles','heatMax']);
 function syncSliders(){
@@ -3337,13 +3371,14 @@ if (new URLSearchParams(location.search).get('skin')) S.skin = new URLSearchPara
 syncSliders();
 segButtons('skin', Object.entries(SKINS).map(([k,v])=>[k,v.name]), ()=>S.skin, v=>{ S.skin=v; bgHeatDrawn=-1; });
 segButtons('auto', [[false,'我来打'],[true,'自动打']], ()=>S.auto, v=>{ S.auto=v; });
+segButtons('choreo', [['off','不动'],['light','轻'],['wild','疯'],['vertical','竖线']], ()=>S.choreo, v=>{ S.choreo=v; nextMoveAt = now(); if (v!=='vertical'){ poseFrom = curPose(now()); poseTo = {deg:0,dx:0,dy:0}; poseT0 = now(); poseDur = 1.2; } });
 
 document.getElementById('copy').onclick = async () => {
   const txt = [
     `云曦节拍 · 试验台设置（皮肤=${SKINS[S.skin].name}）`,
     `爆点 大小=${S.fxScale} 粒子=${S.particles} 时长=${S.fxLife}s`,
     `热度 强度=${S.heat} 满热连击=${S.heatMax} 底光亮度=${S.bgGain}`,
-    `校准线 摆动=${S.tilt} 回正=${S.tiltBack} 谱面摆动=${S.sway}`,
+    `校准线 摆动=${S.tilt} 回正=${S.tiltBack} 谱面摆动=${S.sway} 编舞=${S.choreo}`,
     `音符 宽度=${S.noteW} 高度=${S.noteHscale} 下落=${S.approach}s 密度=${S.density}`,
   ].join('\n');
   const el = document.getElementById('done');
