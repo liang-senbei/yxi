@@ -12,6 +12,7 @@ package app.yxi.ui
 internal object En {
     val map: Map<String, String> = mapOf(
         "语言" to "Language",
+        "临时会话没开成：%s" to "Couldn't start scratch session: %s",
         "包对不上（校验失败），没装 —— 换个网络再试一次" to "Checksum mismatch — not installed. Try another network.",
         "这个包的签名跟本机不一致，没装" to "That package is signed by someone else — not installed.",
         "免费档最多绑 2 台" to "Free plan: up to 2 hosts",

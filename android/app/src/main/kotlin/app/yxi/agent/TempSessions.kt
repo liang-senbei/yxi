@@ -5,8 +5,14 @@ import app.yxi.ssh.Shell
 import app.yxi.ssh.SshSession
 
 /**
- * **临时会话**（用户 2026-09-05：「侧边栏点一下发起新的临时会话，模型可自定义、默认 sonnet、
- * 思考中等，这个会话不保存、重启 Yxi 就消失」）。
+ * **临时会话**（用户 2026-09-05：「侧边栏点一下发起新的临时会话……这个会话不保存、
+ * 重启 Yxi 就消失」）。
+ *
+ * ⚠️ **2026-09-06 老板改口：点一下就直接开，不再弹框选。** 固定 [MODEL] + [EFFORT]
+ * （原话「直接就是默认的 5.0 opus 模型，思考模式直接定为 low」），选择弹窗已删。
+ * ⚠️ **别改回「跟线路的默认」** —— 那正是他要改掉的：他机器上 `settings.json` 的
+ * `effortLevel` 就是 `xhigh`，跟着线路走的话他点开还是 xhigh，等于没修。
+ * 线路配置照旧管**正式**会话；临时会话要的是可预期。
  *
  * 做法：在服务器 `/tmp/yxi-tmp/<id>` 里起一个 `cc-tmp-<id>` 的 tmux 会话，
  * `claude --model X --effort Y` —— **`--model` / `--effort` 是会话级参数，不碰账号默认**
@@ -21,6 +27,10 @@ import app.yxi.ssh.SshSession
  *    「不保存」才是真的不保存。
  */
 object TempSessions {
+    /** `opus` 是别名 = 最新的 Opus（`claude --help`：Provide an alias for the latest model）。 */
+    const val MODEL = "opus"
+    const val EFFORT = "low"
+
     private const val KEY = "tmp-sessions:"
     private fun p(ctx: Context) = ctx.getSharedPreferences("yxi", Context.MODE_PRIVATE)
 
@@ -36,6 +46,25 @@ object TempSessions {
 
     /** 进入这个临时会话时该不该先 `/clear`：刚开的不用，之前留着的要。 */
     fun needsClear(name: String): Boolean = if (fresh == name) { fresh = null; false } else true
+
+    sealed interface Opened {
+        data class Ok(val name: String, val cwd: String) : Opened
+        data class Failed(val why: String) : Opened
+    }
+
+    /**
+     * 开一个临时会话并记下来。**这是唯一的入口** —— 抽屉那两处都调它。
+     * ⚠️ `--model` / `--effort` 是会话级参数，不碰账号默认（#265）。
+     */
+    suspend fun open(ctx: Context, ssh: SshSession, hostId: String): Opened {
+        val id = newId(); val name = nameOf(id); val dir = dirOf(id)
+        val made = app.yxi.ssh.catching {
+            ssh.exec(Dirs.createCommand(dir, name, "claude", launchArgs = "--model $MODEL --effort $EFFORT"))
+        }.map { Dirs.madeFrom(it) }.getOrElse { Dirs.Made.Failed("unknown", it.message.orEmpty()) }
+        if (made is Dirs.Made.Failed) return Opened.Failed(made.code + " " + made.detail)
+        remember(ctx, hostId, name)
+        return Opened.Ok(name, dir)
+    }
 
     fun remember(ctx: Context, hostId: String, name: String) {
         fresh = name

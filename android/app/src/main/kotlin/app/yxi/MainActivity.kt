@@ -224,15 +224,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 if (editMe) app.yxi.ui.MeDialog { editMe = false }
-                // 临时会话：开成了直接跳进对话页；冷启动后第一次连上就把上次留下的收掉
-                var tempDlg by remember { mutableStateOf(false) }
-                if (tempDlg) host?.let { h ->
-                    app.yxi.ui.TempSessionDialog(
-                        shared.session, h.id,
-                        onOpen = { name, cwd -> tempDlg = false; work = Work(h, name, cwd, Mode.Chat) },
-                        onDismiss = { tempDlg = false },
-                    )
-                }
+                // 临时会话：冷启动后第一次连上就把上次留下的收掉（开会话在下面的 openTemp）
                 LaunchedEffect(shared.session, host?.id) {
                     val s = shared.session ?: return@LaunchedEffect
                     val h = host ?: return@LaunchedEffect
@@ -285,6 +277,37 @@ class MainActivity : ComponentActivity() {
                 val drawerWidthPx = with(LocalDensity.current) { drawerWidth.toPx() }
                 val openDrawer = { drawerScope.launch { drawer.open() }; Unit }
 
+                // 临时会话：**点一下直接开**，固定 opus + low，不弹框选（老板 2026-09-06）。
+                // 开成了直接跳进对话页；开不成弹个 Toast —— 没有弹窗可以显示错误了。
+                val tempAlive = app.yxi.ui.rememberAliveSsh(shared.session)
+                var tempBusy by remember { mutableStateOf(false) }
+                val openTemp = openTemp@{
+                    val h = host ?: return@openTemp
+                    if (tempBusy) return@openTemp
+                    tempBusy = true
+                    drawerScope.launch {
+                        // ⚠️ **finally 复位 tempBusy** —— `drawer.close()` 走 MutatorMutex，
+                        //    关抽屉的动画里再点抽屉别的条目会把这条协程取消掉；
+                        //    复位写在协程体里的话就永远卡在 true，这个入口从此点不动了。
+                        try {
+                            drawer.close()
+                            // ⚠️ 一次性动作要等一条活着的连接，别拿手里那个当场判死（#282）
+                            val s = tempAlive(20_000)
+                            val r = if (s == null) app.yxi.agent.TempSessions.Opened.Failed(t("连不上"))
+                            else app.yxi.agent.TempSessions.open(this@MainActivity, s, h.id)
+                            when (r) {
+                                is app.yxi.agent.TempSessions.Opened.Ok -> work = Work(h, r.name, r.cwd, Mode.Chat)
+                                is app.yxi.agent.TempSessions.Opened.Failed -> android.widget.Toast.makeText(
+                                    this@MainActivity, t("临时会话没开成：%s").format(r.why), android.widget.Toast.LENGTH_LONG,
+                                ).show()
+                            }
+                        } finally {
+                            tempBusy = false
+                        }
+                    }
+                    Unit
+                }
+
                 // ⚠️ 工作区**整屏**，没有底部栏：终端最缺竖向空间，
                 // 而软键盘弹起时底部栏会和键盘工具条、系统手势条挤成四层（D22）
                 // ⚠️ **但它要待在抽屉里面**：会话里也要能拉侧边栏（用户 2026-09-04）。
@@ -311,7 +334,7 @@ class MainActivity : ComponentActivity() {
                                     onPrefs = { page = Page.Prefs; work = null; drawerScope.launch { drawer.close() } },
                                     onTickets = { page = Page.Tickets; work = null; drawerScope.launch { drawer.close() } },
                                     onYunxi = { page = Page.Yunxi; work = null; drawerScope.launch { drawer.close() } },
-                                    onTemp = { tempDlg = true; drawerScope.launch { drawer.close() } },
+                                    onTemp = openTemp,
                                 )
                             }
                         },
@@ -351,7 +374,7 @@ class MainActivity : ComponentActivity() {
                                 onPrefs = { page = Page.Prefs; drawerScope.launch { drawer.close() } },
                                 onTickets = { page = Page.Tickets; drawerScope.launch { drawer.close() } },
                                 onYunxi = { page = Page.Yunxi; drawerScope.launch { drawer.close() } },
-                                onTemp = { tempDlg = true; drawerScope.launch { drawer.close() } },
+                                onTemp = openTemp,
                             )
                         }
                     },
