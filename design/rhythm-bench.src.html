@@ -127,10 +127,11 @@ const SKINS = {
 
 const S = {
   skin:'phigros', auto:false,
-  fxScale:1, particles:8, fxLife:0.55,
-  heat:0.7, heatMax:30, bgGain:1.4,
-  tilt:1, tiltBack:1, sway:1,
-  noteW:1, noteHscale:1, approach:1.2, density:1,
+  // 默认值 = 老板 2026-09-06 在试验台上调好的那组
+  fxScale:1.1, particles:12, fxLife:0.6,
+  heat:1.1, heatMax:30, bgGain:1.75,
+  tilt:1, tiltBack:2.7, sway:1.7,
+  noteW:1.2, noteHscale:1, approach:1.55, density:1.25,   // ⚠️ 下落时长 / 密度是谱面·难度的参数（老板），进 App 时从谱面读，不是全局常量
 };
 
 // ── 老板拍板（2026-09-06）：swipe 标记两款随机、碎裂八款随机 ──
@@ -354,8 +355,8 @@ function draw(){
   const heatK = Math.min(1, combo/S.heatMax) * Math.min(1, S.heat);
   if (S.skin==='yunxi'){
     const amount = 0.55 + 0.45*heatK;                                   // 待机 → 思考
-    const warmK = Math.max(0, 1 - (t - lastTierAt)/1.2);               // 跳档：琥珀闪 1.2 秒
-    drawThinkingGlow(t, amount, warmK*warmK, S.bgGain); bgHeatDrawn = -1;
+    // 跳档不再闪底光：老板反馈那一下「从 1.75 跳到 2.25 再回来」突兀 —— 评价词已经在喊，底不用再闪
+    drawThinkingGlow(t, amount, 0, S.bgGain); bgHeatDrawn = -1;
   } else drawBg(0);
   ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(bg, 0, 0, W, H);
@@ -642,9 +643,9 @@ document.getElementById('copy').onclick = async () => {
   const txt = [
     `云曦节拍 · 试验台设置（皮肤=${SKINS[S.skin].name}）`,
     `爆点 大小=${S.fxScale} 粒子=${S.particles} 时长=${S.fxLife}s`,
-    `热度 强度=${S.heat} 满热连击=${S.heatMax}`,
+    `热度 强度=${S.heat} 满热连击=${S.heatMax} 底光亮度=${S.bgGain}`,
     `校准线 摆动=${S.tilt} 回正=${S.tiltBack} 谱面摆动=${S.sway}`,
-    `音符 宽度=${S.noteW} 下落=${S.approach}s 密度=${S.density}`,
+    `音符 宽度=${S.noteW} 高度=${S.noteHscale} 下落=${S.approach}s 密度=${S.density}`,
   ].join('\n');
   const el = document.getElementById('done');
   try{ await navigator.clipboard.writeText(txt); el.textContent='复制好了，发给我就行'; }
