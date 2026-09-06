@@ -1429,6 +1429,9 @@ internal object En {
         "深渊 · 王棋彩框 · 第 %d 期" to "Abyss · King's Frame · Season %d",
         // 活动 · 云曦节拍（音游，cc-Yxi_Entertainment 2026-09-06）
         "云曦节拍" to "Yunxi Beat",
+        "节拍 · 限定气泡" to "Beat · Limited Bubble",
+        "未拥有 · %s" to "Not owned · %s",
+        "音游六张谱全 S 可得" to "from S-ranking all six Yunxi Beat charts",
         "跟着拍子点四条轨。三首曲子，六张谱。" to "Tap four lanes on the beat. Three tracks, six charts.",
         "已打过 %d / %d 张谱" to "Played %d / %d charts",
         "返回" to "Back",

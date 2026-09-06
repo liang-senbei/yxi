@@ -135,7 +135,10 @@ private fun BubbleShop(live: Boolean) {
                                 .clickable { Cosmetics.pick(ctx, Skins.BUBBLE, preview.id) }.padding(18.dp, 8.dp),
                             style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimary,
                         )
-                        else -> Text(t("未拥有 · 祈愿可得"), style = MaterialTheme.typography.labelMedium, color = Muted)
+                        else -> Text(
+                            preview.from?.let { t("未拥有 · %s").format(t(it)) } ?: t("未拥有 · 祈愿可得"),
+                            style = MaterialTheme.typography.labelMedium, color = Muted,
+                        )
                     }
                 }
             }

@@ -80,6 +80,12 @@ object Skins {
         private val darkBg: Color, private val darkOn: Color,
         /** 边 / 尾巴 / 描边 / 玻璃 / 角标，画法在 [BubbleBox]；默认 = 原来那种纯色圆角 */
         val style: BubbleStyle = BubbleStyle(),
+        /**
+         * 哪来的。null = 祈愿奖池里能抽到。
+         * ⚠️ 限定款（活动奖励，**不进奖池**）必须写清出处 —— 商店那句「祈愿可得」对它就是骗人：
+         *    抽一辈子也抽不到。
+         */
+        val from: String? = null,
     ) {
         val label: String get() = t(zh)
         // 读 Skin.style 是 Compose 状态：在组合里读到，切皮肤会自动重组
@@ -116,6 +122,11 @@ object Skins {
         // 像素：三级台阶的角 + 2dp 描边
         Bubble("bubble_pixel", "像素", Color(0xFFFFF6D6), Color(0xFF2B2622), Color(0xFF2A2418), Color(0xFFFFE9B0),
             BubbleStyle(edge = BubbleEdge.PIXEL, corner = 12.dp, outline = 2.dp)),
+
+        // 音游「云曦节拍」六张谱全 S 的限定（不进祈愿奖池，抽不到；服务端 id 由 cc-logto_yxi 定）：
+        // 暗底 + 一圈亮青描边，像舞台追光；尾巴那两个圈当作节拍的余音。
+        Bubble("bubble_beat", "节拍 · 限定气泡", Color(0xFF1B2430), Color(0xFFDCEBFF), Color(0xFF141C26), Color(0xFFDCEBFF),
+            BubbleStyle(tail = BubbleTail.DOTS, corner = 20.dp, outline = 2.dp), from = "音游六张谱全 S 可得"),
     )
 
     // ── 快捷语包 ────────────────────────────────────────────────────────────
