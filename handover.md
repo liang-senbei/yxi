@@ -43,24 +43,17 @@
 > 组规（老板 2026-09-05）：**所有组员都改好了才构建新版本，别频繁发**。修完一处先记在这儿，一行一条、写清是谁的；
 > 发版前 `yxi-hub all` 问一圈都齐了再 build + publish；发完清空。例外只有线上崩溃 / 数据风险，破例前先跟老板说。
 
-- **cc-Yxi_Entertainment · 音游打击感 + 三处修**（老板 2026-09-06「特效符合 UI/UX 风格，加点击音效、动效、震动」）：`c56ec90`（自己合成的 55ms 打击音，无采样包；震动走 `performHapticFeedback` **不申请 VIBRATE 权限**，因此自动尊重系统触感开关；玻璃语言重做轨道/判定线/命中光环；关了系统动效则装饰全停、音符照落）· `73af6f0`（审查：开关别用上一局的值）· `37c50be`（注释：press 裸数组为什么不能改成 Compose 状态）· `3867b67`（长按条不再拖到屏幕底下）· 祈愿文案去星号。审查 ship · 编译过 · i18n 归零 · 画面 Mac E2E 过。⚠️ **手感本身未验**（模拟器 -no-audio + 没马达），待老板真机试。
-- **cc-Yxi · 对话里网址的预览卡片**（老板 2026-09-06，参照 Threads 的链接卡）：`agent/LinkPreview.kt` + `ui/LinkCard.kt`（新），对话页每条消息最多摆 3 张，设置 → 界面 → 链接预览 三选一。
-  ⚠️ **默认「点了才抓」，这不是保守是有具体后果**：抓一个网址 = **访问它一次**，而对话里的网址不全是「网站」—— 1.1.14 的 MCP 认证就会在转录里留下 `http://localhost:57970/callback?code=…` 这种**带一次性码**的地址，自动全抓等于把它消耗掉。老板拍板「点了才抓」，随后又要求「放设置里让客户自定义」，所以做成 手动（默认）/ 自动 / 关。
-  ⚠️ **闸门在任何模式下都生效**（`previewable`）：只认公网 http/https；拦掉本机、10/172.16-31/192.168/169.254、**100.64-127（Tailscale 那段）**、以及带 `code=`/`token=`/`secret=` 等疑似凭据的参数；`user:pass@host` 按真实主机判（别被前缀骗）。
-  ⚠️ **抓取走服务器的 curl，不走手机**（跟 Yxi 的模型一致）；`--max-time 8` + `head -c 200k` 限住，别把 SSH 通道占死（#277）。头图才是手机直连下的，沿用 MailScreen 那套缓存，**没引 Coil**。
-  ⚠️ 结果分三种说：拿到了 / 取不到 / **这台机器没 curl**（干净 Ubuntu 真的没有，装机测试踩过）——混成一句「取不到」用户会以为功能坏了。同 #276 的「空 ≠ 不存在」。
-  **LinkPreviewTest 8 条**（凭据/内网/协议/user@host/正文挑址/og 两种排法/退回 title/HTML 实体）· **Mac 模拟器实测**：安全链接出「点一下取预览」、带 `code=` 的那条**完全没卡片**、点一下抓回 example.com + Example Domain；设置项在「界面」节里三选一正常。**编译过 · i18n 归零。审查还没做。**
-- **cc-Yxi · 「上传附件后点发送，话又回到输入框」**（老板 2026-09-06）：`Sender.send` 改成等一条活着的连接（`aliveSsh`，最多 20 秒）；`SessionProbe.send` 发完**回头查输入框空没空**（`Live.inputEmpty` 三态）再返回真假，`Sender`/`ShareActivity` 都认这个值。
-  ⚠️ **我第一个诊断是错的**（多行→括号粘贴→回车被吞），写压测打真 Claude Code 证伪了：12 条超长附件消息 + 模拟慢链路，新旧写法都 0 条卡住 —— 那 0.4 秒是**服务器端**在同一条命令里 sleep 的，网络拉不长它。真根因是**上传把连接换掉了而发送不等重连**。详见 TROUBLESHOOTING #282。
-  **E2E 判据是文件不是屏幕**：打好字 → `pkill sshd` 掐断 → 点发送 → 输入框清空、无失败提示、**桩日志收到那条消息**。单元测试 23 条全过。**编译过 · i18n 归零。审查还没做。**
-- **cc-Yxi_pilot · 授权流程等重连**（自查 #282 找到的，`627a719`）：`ConnectPanel.Flow` 抓住一个 SshSession 等最长 10 分钟，而用户正好在这段时间去浏览器授权 / 锁屏 / 切后台 —— 连接一换 exec 抛异常就弹「没成功」，可服务器上流程好好跑完了。**「授权明明成功，App 说失败」**，且每重试一次就把服务器那个好会话杀掉重开。改用共用的 `rememberAliveSsh`，分 `once`（一次性动作等 20 秒）/ `peek`（轮询，拿不到跳过这轮）两个口子。
-  顺带修一处同源的：**回调端口转发绑在具体连接上**，连接换了转发就没了、浏览器跳 localhost 落空 —— 这解释了「跳不回来」的**另一半**原因（cc-Yxi 上午那个 intent-filter 兜底只覆盖「浏览器不肯跳 localhost」那一种，两个都要留）。
-  审查 ship（自己引入的 UX 延迟也顺手修了）· **E2E 三条判据全过**：App 不误报失败 / 服务器流程正常完成 / 在服务器上确认那个 MCP 真的 Connected。编译过 · i18n 归零。
-- **cc-Yxi · 把「等一条活着的连接」抽成唯一那一份**（`70f14a6`）：`ui/AliveSsh.kt` 的 `rememberAliveSsh`，上传 / 发送 / 授权都用它。⚠️ 同一个判据抄两份迟早只修一份（#281 的边框判据就是这么栽的）。#282 里补了**适用边界**：规矩只对「一次性动作」硬，轮询/展示类「取不到就藏起来、下一轮自己好」的不用改。
+
+**1.1.15 之后攒的**（都已提交、编译过、i18n 归零；括号里是过关情况）：
+
+- **cc-Yxi_Entertainment · 音游**：四种音块（tick/slide/trace/swipe，各自配色配形）· 判定范围放宽 50%（老板拍板）· 连击档位倍率 ×8 Great 1.2 / ×15 Excellent 1.5 / ×30 Amazing 2.0，断连回 1.0 · 四档评价词（老板给的 AI 生成参考图 `design/judge-words-ref.png`，可直接照做）· 上报改判定序列 `hits`。**⚠️ 手感（音效/震动）模拟器验不了，待老板真机试。**
+- **cc-Yxi · 对话里网址出预览卡片**：默认「点了才抓」，设置 → 界面可改自动/关。（审查 + 44 条测试 + Mac 实测）⚠️ 安全要点见 TROUBLESHOOTING #283。
+- **cc-Yxi · 上传附件后点发送话回到输入框**（`54db696`）+ **共用的 `rememberAliveSsh`**（`70f14a6`）。（审查 + E2E 掐连接实测）根因见 #282。
+- **cc-Yxi_pilot · 授权流程等重连**（`627a719`）：授权途中换网不再误报失败；顺带修回调端口转发绑死在旧连接上。（审查 + E2E 三条判据）
+
+**不发版的两条**：
 - 待办：看板头部主机名太长会折成两行挤按钮（截图 Thor-h/e）。
-- **待老板拍板 · 抽卡界面改 activetheory.net 风格**（老板 2026-09-05 问「能不能像素级复刻」）：提案已推实验室「抽卡动效」组（`祈愿 · 铬环（Active Theory 风）` 单抽 + `祈愿 · 铬环 · 十连`（其余 9 个用同款玻璃框铺 3×3）+ 真机对照图）。源码 `design/wish-activetheory.src.html`（`__ART__` 换成 card_yunxi.webp 的 base64、`__TEN__` 换 true/false 即得两版；纯 Canvas 2D）。
-  **老板打回（「复刻的很垃圾」，要一模一样）→ 第二版走真 WebGL**：`design/wish-activetheory-webgl.src.html`（`__THREE__` 换成 three.js r147 UMD + UnrealBloom 几个 pass 的拼接，jsdelivr 上 `three@0.147.0/build/three.min.js` + `examples/js/postprocessing/*` + `examples/js/shaders/*`；本机没 npm，curl 拿的）。做法是读他们 `assets/shaders/compiled.vs` 里的真着色器逐层重建（环 = 深色玻璃折射背景 + 菲涅尔彩虹边 + 流动法线；星尘 = 距离缩放的 matcap 气泡点精灵；雾 = 加法光片进 bloom；后期 = UnrealBloom / RGB 错位 / 对比 / 角落渐变 / 噪点 / 右上角磨砂），几何按 390×844 真机截图逐像素量（`design/wish-activetheory-webgl-compare.jpg` 左他们 / 中我们 / 右差异热图；三区域亮度 ±4 以内）。实验室同组第三项「WebGL 复刻（真 3D · 会动）」，模拟器里 App 的实验室 WebView 能跑 WebGL 已验。老板追问「为什么不能动」「a 换成 Y」后补的：环里三段胶囊拼的 Y（同材质，挂在环上；⚠️ 胶囊 rotation.z 为负是顶端往 +x 倒，臂放反了就是箭头，踩过）；动 = 待机（相机 wobble .1、环慢转、星尘上飘、雾呼吸、导航字每 7 秒像素格显形）+ 手指（moveXY [.4,.2] 视差、星尘软排斥）+ 往下滑（相机 z 15.75→9.35 推进、星尘上涌、雾转紫、环染粉铬、大字像素格显形，照 live-m-05/07）。三态截图 `design/wish-activetheory-webgl-states.jpg`。像素格故障 = 他们 DefaultText.glsl 的 floor(uv·grid)/grid，用 2D 画布缩小再硬边放大实现，格子最粗 6px。
-  **老板 2026-09-06 再追问**（发了真机截图：铬脊椎 + 粉紫粒子云 + 玻璃卡；「每帧都精细」「交互没看完」「长方形卡片能点，感觉非常棒」）：已用伪造显卡的 playwright 把手机端全流程逐帧抓下（scratchpad `deep/`，25 帧；两张对照表推实验室）——往下滑：大字 → 脊椎升起 → 玻璃卡沿脊椎每屏一张滑过 → 点卡飞进详情（视频头图 + 文案 + CLOSE）。卡片 = 他们 WorkItemShader（已读全文）：带厚度的圆角玻璃板，顶点 sin 波动 + 斜切 + 悬停抬 z .2，折射背景（径向模糊、悬停放大 1.15）、菲涅尔彩虹边、缩略图→悬停切视频、项目色随鼠标发光、亮度脉动；点击 = 相机推进 1500ms `cubic-bezier(.29,.05,.06,.92)` + UI 染项目色 + 详情页 uTransition。方案已给老板（见本次会话），等拍板；推荐路线：先做玻璃卡系统（我们的九张角色卡沿滚动滑过、点开角色详情），再补粒子云密度和脊椎替代物，最后进 App。老板的录屏可经 `ssh laptop`（Windows，`C:\Users\dfhzw\Downloads`，中文名文件先 PowerShell 复制成 ASCII 名再 scp）拉回，`ffmpeg` 拆帧当逐状态基准。**没放的**：他们的 a 字商标、NB Architekt 字体（商业授权）、任何模型贴图。他们的引擎 Hydra 是闭源的，GitHub `activetheory` 只有 split-text / svg2msdf / activeframe 这类小工具，帮不上；真正帮上的是 three.js（他们的 UnrealBloom 就是 three.js 那个）。老板点头后：把抽卡出货（卡从环里升起等）搬进这个 WebGL 场景，App 里用 WebView 装载（App 已有 WebView 走 SVG 的先例）。结论：他们是整站 WebGL 3D（PBR 铬材质 / bloom / GPU 粒子，软件 GPU 直接被拦到 unsupported 页），**像素级复刻做不到、他们的 logo·字体（NB Architekt 商业授权）·模型也不能拿**；能做的是同一套视觉语言（黑场+青紫雾、铬环、景深星尘、光条、玻璃卡、故障字、细边药丸）用 Canvas 2D 重做，可原样搬进 `DropEffect.kt`/`WishScreen.kt`。采纳后再动 App（drop-effect 规格归 cc-logto_yxi，动之前先对）。**logto 2026-09-05 给的约束**：服务端契约不动；`rarity` 是 wish.json 里的展示名（红/紫/蓝/金，以后可能改名）**只拿来选颜色**，语义（出角色重置保底 / 天数奖 / 曦光）一律按 `kind` 判，客户端别写死「rarity==红 才是角色」。
+- **待老板拍板**：抽卡界面改 activetheory.net 风格。结论没变 —— 他们那根脊椎是 Blender 雕的美术资产（`spine.bin` + KTX2 贴图），程序化到不了那个精细度，要做得我们自己出一根。素材和商标不能拿。提案和对照图在实验室，源码 `design/wish-activetheory-cards.src.html`。
 
 ## 进度
 - ✅ **1.1.12（versionCode 168）已发布**（2026-09-05）：
