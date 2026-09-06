@@ -68,6 +68,39 @@ class LiveTest {
         assertNull(Live.parse(屏).status)
     }
 
+    /**
+     * **上边框里画着会话名，也得认出是边框。**
+     *
+     * ⚠️ Claude Code 现在把会话名画进输入框的上边框：`──────── omggrow_order ─`。
+     * 原来的判据要求「整行纯横线」，于是**一屏只认出下边框一条** →
+     * `dividers.size < 2` → [Model.borrowable] 永远 false →
+     * 点切模型永远弹「它正忙着，或者输入框里有没发完的字」，跟忙不忙无关（老板 2026-09-06 报的）。
+     * 样本取自真实 pane（cc-omggrow_order）：上边框 39 根横线 + 15 个其它字符。
+     */
+    @Test fun 上边框带会话名也算边框() {
+        val 上 = "─".repeat(39) + " omggrow_order ─"
+        val 下 = "─".repeat(54)
+
+        // 空闲：认得出两条边框 → 输入框是空的 → 可以借来送键
+        // ⚠️ 这块屏里**不能**放「正在跑」的状态行，否则 borrowable 会正确地因为「忙」而拒绝，
+        //    那验的就不是边框识别了（我第一版就这么写错的）。
+        val 空闲 = listOf("一些正文", "✻ Baked for 3s", 上, "❯", 下).joinToString("\n")
+        assertTrue("带名字的上边框要算边框", Model.borrowable(空闲))
+
+        // 在跑：状态行也要照常读到（boxTop 找不到时会退化成整屏搜，那是同一个根因的另一半）
+        val 在跑 = listOf("一些正文", "✽ Working… (3s)", 上, "❯", 下).joinToString("\n")
+        assertTrue(Live.parse(在跑).status.orEmpty().startsWith("Working…"))
+        assertFalse("忙的时候不该借", Model.borrowable(在跑))
+    }
+
+    /** ⚠️ 放宽之后正文不能被当成边框：横线要占整行 60% 以上。 */
+    @Test fun 正文里的横线不算边框() {
+        assertFalse(Live.isDivider("── 这一行大部分是字，只有开头几根横线 ──"))
+        assertFalse(Live.isDivider("短──"))
+        assertTrue(Live.isDivider("─".repeat(39) + " omggrow_order ─"))
+        assertTrue(Live.isDivider("─".repeat(54)))
+    }
+
     @Test fun 屏幕上只是提到状态词不算数() {
         // ⚠️ 这条测试**必须把真状态行去掉才有意义**。
         // 真状态行永远渲染在输出区最底下，而解析是倒着找第一条 ——

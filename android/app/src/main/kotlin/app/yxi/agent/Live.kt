@@ -26,10 +26,22 @@ data class Live(
     companion object {
         val IDLE = Live(busy = false, status = null)
 
-        /** 输入框那两条横线。整行几乎全是 `─` 才算。 */
-        private fun isDivider(l: String): Boolean {
+        /**
+         * 输入框那两条横线。
+         *
+         * ⚠️⚠️ **不能要求「整行纯横线」**：Claude Code 现在把**会话名画在上边框里** ——
+         * `──────────── omggrow_order ─`。要求纯横线的话上边框认不出来，
+         * 一屏只剩下边框一条，于是 `dividers.size < 2`：
+         *   · [Model.borrowable] 直接返回 false → 点切模型永远弹「它正忙着，或者输入框里有没发完的字」，
+         *     **跟忙不忙、有没有草稿都无关**（老板 2026-09-06 报的）；
+         *   · 这里 `boxTop` 落回 -1 → 状态行改在**整屏**里找，正文里的字可能被当成状态。
+         * 判据改成「横线占大头」：至少 8 根、且占整行 60% 以上 —— 带名字的上边框是 72%，正文过不了。
+         */
+        internal fun isDivider(l: String): Boolean {
             val t = l.trim()
-            return t.length >= 8 && t.all { it == '─' }
+            if (t.length < 8) return false
+            val dashes = t.count { it == '─' }
+            return dashes >= 8 && dashes * 5 >= t.length * 3
         }
 
         /**
