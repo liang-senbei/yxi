@@ -283,6 +283,35 @@ object Rhythm {
      */
     fun offsetMs(ctx: Context): Int = p(ctx).getInt("rhythm.offset", 0)
 
+    /**
+     * ── 手感（老板 2026-09-06：「这些你都让我自己调节，我试试那个最舒服就直接可以上线」）──
+     *
+     * 全部存在本地、当场生效。**默认值就是我调好的那一组**；老板改完觉得好，
+     * 把默认值改成他那组即可（一行常量），不用改逻辑。
+     *
+     * ⚠️ **判定窗口不给调**（完美 ±80ms / 不错 ±160ms 写死）：那不是手感是难度，
+     *    放宽了等于自己给自己发 S，服务端算分用的是同一套计数，改这个就是作弊。
+     */
+    /** 音符从冒头到判定线要多久（秒）。越大越慢、越好读谱 */
+    fun approach(ctx: Context): Float = p(ctx).getFloat("rhythm.approach", APPROACH)
+    fun setApproach(ctx: Context, v: Float) = p(ctx).edit().putFloat("rhythm.approach", v.coerceIn(0.9f, 2.6f)).apply()
+
+    /** 打击音音量 0–1 */
+    fun soundVol(ctx: Context): Float = p(ctx).getFloat("rhythm.vol", 0.9f)
+    fun setSoundVol(ctx: Context, v: Float) = p(ctx).edit().putFloat("rhythm.vol", v.coerceIn(0f, 1f)).apply()
+
+    /** 震动轻重：0 关 · 1 轻 · 2 中 · 3 重（走系统触感常量，不申请震动权限，所以系统里关了触感就自动不震） */
+    fun haptic(ctx: Context): Int = p(ctx).getInt("rhythm.haptic.level", 2)
+    fun setHaptic(ctx: Context, v: Int) = p(ctx).edit().putInt("rhythm.haptic.level", v.coerceIn(0, 3)).apply()
+
+    /** 命中特效的大小：0 = 不放，1 = 标准 */
+    fun fxScale(ctx: Context): Float = p(ctx).getFloat("rhythm.fx", 1f)
+    fun setFxScale(ctx: Context, v: Float) = p(ctx).edit().putFloat("rhythm.fx", v.coerceIn(0f, 1.6f)).apply()
+
+    /** 判定线晃动的幅度：0 = 完全不动，1 = 谱面里写的那么大 */
+    fun lineScale(ctx: Context): Float = p(ctx).getFloat("rhythm.line", 1f)
+    fun setLineScale(ctx: Context, v: Float) = p(ctx).edit().putFloat("rhythm.line", v.coerceIn(0f, 1.5f)).apply()
+
     /** 打击音效 / 震动的开关（默认都开；有人要安静地玩） */
     fun soundOn(ctx: Context) = p(ctx).getBoolean("rhythm.sound", true)
     fun setSoundOn(ctx: Context, on: Boolean) = p(ctx).edit().putBoolean("rhythm.sound", on).apply()

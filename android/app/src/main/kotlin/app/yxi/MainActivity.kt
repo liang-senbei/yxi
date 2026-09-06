@@ -415,7 +415,7 @@ class MainActivity : ComponentActivity() {
                         Page.Personalize -> { app.yxi.ui.PersonalizeScreen(modifier = m); return@Scaffold }
                         // 音游整屏通铺：它自己收了状态栏、也不画底栏，再套 Scaffold 的内边距
                         // 就会在收起来的状态栏那儿留一条亮边（横屏下特别显眼）。
-                        Page.Rhythm -> { app.yxi.ui.RhythmScreen(); return@Scaffold }
+                        Page.Rhythm -> { app.yxi.ui.RhythmScreen(modifier = m); return@Scaffold }
                         Page.Scan -> { app.yxi.ui.ScanScreen(onBack = { page = null }, modifier = m); return@Scaffold }
                         null -> Unit
                     }

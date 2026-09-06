@@ -35,6 +35,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -132,11 +133,11 @@ fun RhythmScreen(modifier: Modifier = Modifier) {
         r != null -> ResultCard(r.first, r.second, r.third, onAgain = {
             val song = Rhythm.SONGS.first { it.id == r.first.substringBefore('_') }
             result = null; playing = song to r.first.substringAfter('_')
-        }, onBack = { result = null; synced++ }, modifier = modifier)
+        }, onBack = { result = null; synced++ })                     // 结算页整屏通铺：不要 Scaffold 的内边距
 
         p != null -> GameBoard(p.first, p.second, onDone = { id, res, ms ->
             Rhythm.saveBest(ctx, id, res); playing = null; result = Triple(id, res, ms)
-        }, onQuit = { playing = null }, modifier = modifier)
+        }, onQuit = { playing = null })                              // 打谱面同理，整屏通铺
 
         else -> SongList(synced, onPick = { s, d -> playing = s to d }, modifier = modifier)
     }
@@ -187,13 +188,12 @@ private fun SongList(synced: Int, onPick: (Rhythm.Song, String) -> Unit, modifie
                 }
             }
         }
-        // 音效 / 震动开关：有人在安静的地方玩，得给关掉的路
-        var sound by remember { mutableStateOf(Rhythm.soundOn(ctx)) }
-        var haptic by remember { mutableStateOf(Rhythm.hapticOn(ctx)) }
+        // 手感自己调（老板 2026-09-06：「这些你都让我自己调节」）
+        var tuning by remember { mutableStateOf(false) }
         Row(Modifier.padding(20.dp, 10.dp, 20.dp, 0.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Toggle(t("打击音效"), sound) { sound = !sound; Rhythm.setSoundOn(ctx, sound) }
-            Toggle(t("震动"), haptic) { haptic = !haptic; Rhythm.setHapticOn(ctx, haptic) }
+            Toggle(t("手感调节"), tuning) { tuning = !tuning }
         }
+        if (tuning) FeelPanel()
         val off = Rhythm.offsetMs(ctx)
         if (off != 0) Text(
             t("判定偏移 %d ms（自动校准过）").format(off),
@@ -311,19 +311,17 @@ private fun GameBoard(
     DisposableEffect(sfx) { onDispose { sfx.release() } }
     // ⚠️ **不要 remember**：在结算页点「再来一次」会用同样的 song/difficulty 重进，
     //    remember 会把上一局的开关值留着 —— 玩家刚在选曲页关掉音效，再来一局还在响。
-    val soundOn = Rhythm.soundOn(ctx)
-    val hapticOn = Rhythm.hapticOn(ctx)
+    val soundVol = if (Rhythm.soundOn(ctx)) Rhythm.soundVol(ctx) else 0f
+    val hapticLv = if (Rhythm.hapticOn(ctx)) Rhythm.haptic(ctx) else 0
+    val fxScale = Rhythm.fxScale(ctx)
+    val lineScale = Rhythm.lineScale(ctx)
+    val approach = Rhythm.approach(ctx)
     // 打击反馈：判定发生的那一瞬，声音和震动一起来 —— 这两样是"打击感"的主体，画面只是补
-    DisposableEffect(live, soundOn, hapticOn) {
+    DisposableEffect(live, soundVol, hapticLv) {
         live.onJudge = { j, _ ->
             judgeShow = j
-            if (soundOn) sfx.play(j)
-            if (hapticOn) when (j) {
-                // 完美清脆一点、不错闷一点；漏了不震 —— 漏的时候再震一下是惩罚，不是反馈
-                Rhythm.Judge.PERFECT -> view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
-                Rhythm.Judge.GOOD -> view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                Rhythm.Judge.MISS -> Unit
-            }
+            sfx.play(j, soundVol)
+            if (j != Rhythm.Judge.MISS) view.hapticTick(hapticLv, j == Rhythm.Judge.PERFECT)
         }
         onDispose { live.onJudge = null }
     }
@@ -405,7 +403,8 @@ private fun GameBoard(
     ) {
         Canvas(Modifier.fillMaxSize()) {
             val laneW = size.width / 4f
-            val (poseDeg, poseDy) = chart.poseAt(now)
+            val (poseDeg0, poseDy0) = chart.poseAt(now)
+            val poseDeg = poseDeg0 * lineScale; val poseDy = poseDy0 * lineScale
             val judgeY = size.height * (0.80f + poseDy)
             // ⚠️ 整块场地（轨道 · 音符 · 判定线 · 爆点）**一起**绕线中心转：
             //    音符垂直于线、跟着线走，这就是"音符活在线的坐标系里"。
@@ -464,7 +463,7 @@ private fun GameBoard(
                         Offset(laneW * l, judgeY - 70f), Size(laneW, 70f),
                     )
                 } else {
-                    hitBurst(cx, judgeY, age, if (j == Rhythm.Judge.PERFECT) judgeColor else goodColor, noteH * 1.1f)
+                    if (fxScale > 0f) hitBurst(cx, judgeY, age, if (j == Rhythm.Judge.PERFECT) judgeColor else goodColor, noteH * 1.1f * fxScale)
                 }
             }
 
@@ -472,10 +471,10 @@ private fun GameBoard(
             val head = now + offset / 1000f
             chart.notes.forEach { n ->
                 val dt = n.t - head
-                if (dt > Rhythm.APPROACH || n.judged != null && !n.hold) return@forEach
+                if (dt > approach || n.judged != null && !n.hold) return@forEach
                 if (n.judged != null && n.tailDone) return@forEach
                 if (dt < -0.4f && !n.hold) return@forEach
-                val y = judgeY * (1f - dt / Rhythm.APPROACH)
+                val y = judgeY * (1f - dt / approach)
                 // 音符比轨道窄、居中：横版一条轨 600px 宽，照轨宽画就是一根大棍子。
                 // 判定还是按整条轨算（点哪儿都算），只是画得秀气些 —— 手感不变，好看。
                 val w = minOf(laneW * 0.72f, size.width * 0.10f)
@@ -483,7 +482,7 @@ private fun GameBoard(
                 if (n.hold) {
                     // 长按的条：**按到判定线为止**。头过了线就从下往上一点点被"吃掉"，
                     // 而不是继续往下画 —— 画到线以下等于告诉玩家"这段还要按"，其实早过去了。
-                    val tailY = (judgeY * (1f - (n.t + n.dur - head) / Rhythm.APPROACH)).coerceAtLeast(0f)
+                    val tailY = (judgeY * (1f - (n.t + n.dur - head) / approach)).coerceAtLeast(0f)
                     val bottom = minOf(y, judgeY)
                     if (bottom > tailY) {
                         val holding = n.judged != null && n.judged != Rhythm.Judge.MISS && live.held[n.lane]
@@ -766,12 +765,12 @@ private class RhythmSfx(ctx: android.content.Context) {
         id = runCatching { pool.load(ctx, app.yxi.R.raw.yx_tap, 1) }.getOrDefault(0)
     }
 
-    fun play(j: Rhythm.Judge) {
-        if (!ready || id == 0) return
+    fun play(j: Rhythm.Judge, vol: Float) {
+        if (!ready || id == 0 || vol <= 0f) return
         when (j) {
-            Rhythm.Judge.PERFECT -> pool.play(id, .9f, .9f, 1, 0, 1.0f)
-            Rhythm.Judge.GOOD -> pool.play(id, .5f, .5f, 1, 0, 0.92f)   // 闷一点、低一点，一耳朵听得出差别
-            Rhythm.Judge.MISS -> Unit                                    // 漏了不响：安静本身就是反馈
+            Rhythm.Judge.PERFECT -> pool.play(id, vol, vol, 1, 0, 1.0f)
+            Rhythm.Judge.GOOD -> pool.play(id, vol * .55f, vol * .55f, 1, 0, 0.92f)  // 闷一点、低一点，一耳朵听得出差别
+            Rhythm.Judge.MISS -> Unit                                                 // 漏了不响：安静本身就是反馈
         }
     }
 
@@ -837,5 +836,129 @@ private fun DrawScope.hitBurst(cx: Float, cy: Float, age: Float, c: Color, unit:
                 Size(sz, sz),
             )
         }
+    }
+}
+
+
+/** 震动轻重：0 关 · 1 轻 · 2 中 · 3 重。走系统触感常量（不申请震动权限 → 系统里关了触感就自动不震）。 */
+private fun android.view.View.hapticTick(level: Int, perfect: Boolean) {
+    val c = when (level) {
+        1 -> HapticFeedbackConstants.CLOCK_TICK
+        2 -> if (perfect) HapticFeedbackConstants.CONTEXT_CLICK else HapticFeedbackConstants.CLOCK_TICK
+        3 -> if (perfect) HapticFeedbackConstants.LONG_PRESS else HapticFeedbackConstants.CONTEXT_CLICK
+        else -> return
+    }
+    performHapticFeedback(c)
+}
+
+
+/**
+ * 手感面板（老板 2026-09-06：「震动什么的这些你都让我自己调节，我试试那个最舒服就直接可以上线」）。
+ *
+ * 每改一格**当场就能试**：点「试一下」会照当前这组设置放一次命中 —— 声音、震动、爆点一起来，
+ * 不用为了试一个数去打一整首。改完立刻存本地，下一局就是新的手感。
+ *
+ * ⚠️ **判定窗口不在这儿**（完美 ±80ms / 不错 ±160ms 写死）：那不是手感是难度，
+ *    放宽了等于自己给自己发 S，而服务端算分用的就是这套判定计数 —— 那就成作弊了。
+ */
+@Composable
+private fun FeelPanel() {
+    val ctx = LocalContext.current
+    val view = LocalView.current
+    val sfx = remember { RhythmSfx(ctx) }
+    DisposableEffect(sfx) { onDispose { sfx.release() } }
+
+    var approach by remember { mutableFloatStateOf(Rhythm.approach(ctx)) }
+    var vol by remember { mutableFloatStateOf(Rhythm.soundVol(ctx)) }
+    var hap by remember { mutableIntStateOf(if (Rhythm.hapticOn(ctx)) Rhythm.haptic(ctx) else 0) }
+    var fx by remember { mutableFloatStateOf(Rhythm.fxScale(ctx)) }
+    var line by remember { mutableFloatStateOf(Rhythm.lineScale(ctx)) }
+    var off by remember { mutableIntStateOf(Rhythm.offsetMs(ctx)) }
+    var demoAt by remember { mutableLongStateOf(0L) }
+
+    fun tryIt() {
+        demoAt = System.currentTimeMillis()
+        sfx.play(Rhythm.Judge.PERFECT, vol)
+        view.hapticTick(hap, true)
+    }
+
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow, shape = RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth().padding(14.dp, 10.dp),
+    ) {
+        Column(Modifier.padding(16.dp, 14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            // 试一下：照当前这组放一次命中（爆点画在这块小舞台上）
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(
+                    Modifier.weight(1f).height(74.dp).clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFF0E1117)).clickable { tryIt() },
+                ) {
+                    val burst = Color(0xFFFFB787)
+                    var t by remember { mutableFloatStateOf(9f) }
+                    LaunchedEffect(demoAt) {
+                        if (demoAt == 0L) return@LaunchedEffect
+                        val t0 = System.nanoTime()
+                        while (true) {
+                            withFrameNanos { }
+                            t = (System.nanoTime() - t0) / 1e9f
+                            if (t > 0.45f) break
+                        }
+                    }
+                    Canvas(Modifier.fillMaxSize()) {
+                        drawLine(burst.copy(alpha = .85f), Offset(0f, size.height * .72f), Offset(size.width, size.height * .72f), 4f)
+                        if (fx > 0f) hitBurst(size.width / 2f, size.height * .72f, t, burst, 13.dp.toPx() * fx)
+                    }
+                    Text(
+                        t("试一下"), Modifier.align(Alignment.TopStart).padding(10.dp, 8.dp),
+                        style = MaterialTheme.typography.labelMedium, color = Color(0xFFE8EDF5).copy(alpha = .7f),
+                    )
+                }
+            }
+            Feel(t("音符下落"), when { approach <= 1.2f -> t("快"); approach >= 2.0f -> t("慢"); else -> t("适中") }) {
+                approach = when { approach <= 1.2f -> 1.6f; approach <= 1.7f -> 2.2f; else -> 1.1f }
+                Rhythm.setApproach(ctx, approach)
+            }
+            Feel(t("打击音"), lvName(vol)) {
+                vol = if (vol >= .9f) 0f else (vol + .3f).coerceAtMost(.9f)
+                Rhythm.setSoundVol(ctx, vol); Rhythm.setSoundOn(ctx, vol > 0f); tryIt()
+            }
+            Feel(t("震动"), listOf(t("关"), t("轻"), t("中"), t("重"))[hap]) {
+                hap = (hap + 1) % 4
+                Rhythm.setHaptic(ctx, hap); Rhythm.setHapticOn(ctx, hap > 0); tryIt()
+            }
+            Feel(t("命中特效"), lvName(fx / 1.6f)) {
+                fx = if (fx >= 1.5f) 0f else (fx + .5f).coerceAtMost(1.6f)
+                Rhythm.setFxScale(ctx, fx); tryIt()
+            }
+            Feel(t("判定线晃动"), lvName(line / 1.5f)) {
+                line = if (line >= 1.4f) 0f else (line + .5f).coerceAtMost(1.5f)
+                Rhythm.setLineScale(ctx, line)
+            }
+            Feel(t("判定偏移"), t("%d ms").format(off)) {
+                off = if (off >= 60) -60 else off + 20
+                Rhythm.setOffsetMs(ctx, off)
+            }
+            Text(
+                t("打完一局在结算页可以按实际偏差自动校准。判定宽严不给调 —— 那是难度，不是手感。"),
+                style = MaterialTheme.typography.labelSmall, color = Muted,
+            )
+        }
+    }
+}
+
+@Composable
+private fun lvName(k: Float): String = when {
+    k <= 0.01f -> t("关"); k < 0.45f -> t("轻"); k < 0.8f -> t("中"); else -> t("重")
+}
+
+/** 手感面板里的一行：左边名字、右边当前档位，点一下换下一档 */
+@Composable
+private fun Feel(name: String, value: String, onNext: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { onNext() }.padding(4.dp, 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(name, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        Text(value, style = MaterialTheme.typography.labelLarge, color = Copper)
     }
 }
