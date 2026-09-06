@@ -140,10 +140,14 @@ object Rhythm {
             for (i in 0 until arr.length()) {
                 val c = arr.getJSONObject(i)
                 val b = c.optJSONObject("best") ?: continue
+                // ⚠️ 显示的评级用 **bestRating**（历史最佳评级），不是 best.rating。
+                //    分数含连击加成、评级只看准度，两者会背离：104.4 万/A 会盖掉 102.5 万/S，
+                //    于是"明明打出过 S 也领过奖"的谱在选曲页显示成 A —— 那是骗人。
+                val shown = c.optString("bestRating").ifBlank { b.optString("rating") }
                 // 服务端的成绩是权威的，本地存档只是离线时的镜子
                 p(ctx).edit().putString(
                     "rhythm.best.${c.getString("id")}",
-                    "${b.optInt("score")}|${b.optDouble("accuracy").toFloat()}|${b.optString("rating")}|${b.optInt("maxCombo")}",
+                    "${b.optInt("score")}|${b.optDouble("accuracy").toFloat()}|$shown|${b.optInt("maxCombo")}",
                 ).apply()
             }
             true
@@ -195,11 +199,24 @@ object Rhythm {
         return Result(a[0].toInt(), a[1].toFloat(), a[2], 0, 0, 0, a[3].toInt(), 0)
     }
 
-    /** 比原来好才覆盖（跟深渊「打平或更好才更新」一致），返回是不是新纪录 */
+    private val RANKS = listOf("C", "B", "A", "S")
+
+    /**
+     * 比原来好才覆盖（跟深渊「打平或更好才更新」一致），返回是不是新纪录。
+     * ⚠️ **评级单独取历史最好的那个**：分数含连击加成、评级只看准度，一局可能分更高但评级更低，
+     *    直接跟着分走会把已经拿到手的 S 显示成 A（服务端同理，用 bestRating）。
+     */
     fun saveBest(ctx: Context, chartId: String, r: Result): Boolean {
         val old = best(ctx, chartId)
-        if (old != null && old.score >= r.score) return false
-        p(ctx).edit().putString("rhythm.best.$chartId", "${r.score}|${r.acc}|${r.rank}|${r.maxCombo}").apply()
+        val rank = if (old == null) r.rank
+        else RANKS[maxOf(RANKS.indexOf(old.rank), RANKS.indexOf(r.rank)).coerceAtLeast(0)]
+        if (old != null && old.score >= r.score) {
+            if (rank != old.rank) {                              // 分没破纪录但评级破了，也得记下来
+                p(ctx).edit().putString("rhythm.best.$chartId", "${old.score}|${old.acc}|$rank|${old.maxCombo}").apply()
+            }
+            return false
+        }
+        p(ctx).edit().putString("rhythm.best.$chartId", "${r.score}|${r.acc}|$rank|${r.maxCombo}").apply()
         return true
     }
 

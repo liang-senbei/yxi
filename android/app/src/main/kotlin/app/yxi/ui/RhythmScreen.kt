@@ -43,6 +43,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -200,6 +203,16 @@ private fun GameBoard(
 
     val mp = remember { runCatching { MediaPlayer.create(ctx, song.raw) }.getOrNull() }
     DisposableEffect(mp) { onDispose { mp?.let { runCatching { it.stop() }; it.release() } } }
+    // 切后台（按 Home / 来电 / 锁屏）就停掉这局：不然音乐会在后台接着放，
+    // 而且回来时曲子已经跑远了，判定全是漏 —— 与其让人回来面对一屏 Miss，不如明说这局不算。
+    val owner = LocalLifecycleOwner.current
+    DisposableEffect(owner, mp) {
+        val obs = LifecycleEventObserver { _, e ->
+            if (e == Lifecycle.Event.ON_PAUSE) { mp?.let { runCatching { it.pause() } }; onQuit() }
+        }
+        owner.lifecycle.addObserver(obs)
+        onDispose { owner.lifecycle.removeObserver(obs) }
+    }
     if (mp == null) {                                   // 解码失败：如实说，别放一个没有声音的空谱
         Column(modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
             Text(t("这首曲子放不出来，先换一首。"), style = MaterialTheme.typography.bodyLarge)
