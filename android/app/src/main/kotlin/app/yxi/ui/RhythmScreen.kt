@@ -292,11 +292,13 @@ private fun GameBoard(
                 val x = laneW * n.lane + laneW * 0.12f
                 val w = laneW * 0.76f
                 if (n.hold) {
-                    val tailY = judgeY * (1f - (n.t + n.dur - head) / Rhythm.APPROACH)
-                    drawRoundRect(
+                    // 长按的条：**按到判定线为止**。头过了线就从下往上一点点被"吃掉"，
+                    // 而不是继续往下画 —— 画到线以下等于告诉玩家"这段还要按"，其实早过去了。
+                    val tailY = (judgeY * (1f - (n.t + n.dur - head) / Rhythm.APPROACH)).coerceAtLeast(0f)
+                    val bottom = minOf(y, judgeY)
+                    if (bottom > tailY) drawRoundRect(
                         noteColor.copy(alpha = if (n.judged == Rhythm.Judge.MISS) .25f else .55f),
-                        Offset(x, tailY.coerceAtLeast(0f)), Size(w, (y - tailY).coerceAtLeast(6f)),
-                        CornerRadius(w / 3),
+                        Offset(x, tailY), Size(w, bottom - tailY), CornerRadius(w / 3),
                     )
                 }
                 if (n.judged == null && y >= -20f) drawRoundRect(
