@@ -13,6 +13,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,8 +46,12 @@ fun AccountScreen(modifier: Modifier = Modifier) {
             modifier = Modifier.padding(18.dp, 14.dp, 18.dp, 4.dp),
         )
 
+        // ⚠️ **不能写「还没登录」**：LoginGate 把没登录的整个 App 都挡住了，
+        //    走到这一页 me 还是 null 只有一种可能 —— **登着，但 /api/me 还没回来**
+        //    （首装、离线、服务端 5xx）。写成「未登录」就是 TROUBLESHOOTING #240 原样重犯。
         if (me == null) {
-            Hint(t("还没登录。"))
+            LaunchedEffect(Unit) { if (Account.signedIn) runCatching { Account.refresh(ctx) } }
+            Hint(t("资料还没拉回来，稍等一下。"))
             return@Column
         }
 

@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -70,6 +71,14 @@ fun ScanScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
         granted = ok; denied = !ok
     }
     LaunchedEffect(Unit) { if (!granted) ask.launch(Manifest.permission.CAMERA) }
+    // ⚠️ **每次回到前台都重查一遍权限。** 只在 remember 里查一次的话，用户照着「去设置里开」授权完回来，
+    //   界面还停在「没有相机权限」—— 他会以为没生效（审查查出）。
+    LifecycleResumeEffect(Unit) {
+        if (!granted &&
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        ) { granted = true; denied = false }
+        onPauseOrDispose { }
+    }
 
     Column(modifier.fillMaxSize()) {
         Row(
@@ -125,7 +134,10 @@ fun ScanScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
     }
 
     hit?.let { text ->
-        val url = text.trim().takeIf { it.startsWith("http://") || it.startsWith("https://") }
+        // ⚠️ 判断用小写比（二维码的字母数字模式偏好大写，真有 HTTPS:// 开头的码），但**打开时用原文** —— 路径和查询串大小写敏感
+        val url = text.trim().takeIf { u ->
+            u.lowercase().let { it.startsWith("http://") || it.startsWith("https://") }
+        }
         AlertDialog(
             onDismissRequest = { hit = null },
             title = { Text(if (url != null) t("扫到一个网址") else t("扫到的内容")) },
@@ -170,10 +182,16 @@ private fun CameraPreview(paused: Boolean, onText: (String) -> Unit, onError: (S
     val ctx = LocalContext.current
     val owner = LocalLifecycleOwner.current
     val exec = remember { Executors.newSingleThreadExecutor() }
+    // ⚠️⚠️ **离开这一页必须 unbindAll。** 相机绑在 Activity 的生命周期上，光靠 composable 退出组合
+    //   **不会**解绑 —— 用户扫完点返回，相机还开着：状态栏绿点常亮、耗电、别的 App 打不开相机，
+    //   要到杀进程（或再进一次这一页、被 factory 里那句 unbindAll 顺手清掉）才释放。审查判定为发版阻断。
+    val provider = remember { mutableStateOf<ProcessCameraProvider?>(null) }
     val reader = remember { newReader() }
     /** 用 state 传给分析回调 —— 回调是长命的，直接捕获 paused 会读到进来那一刻的旧值 */
     val pausedNow by rememberUpdatedState(paused)
-    DisposableEffect(Unit) { onDispose { exec.shutdown() } }
+    DisposableEffect(Unit) {
+        onDispose { runCatching { provider.value?.unbindAll() }; exec.shutdown() }
+    }
 
     AndroidView(
         modifier = Modifier.fillMaxSize(),
@@ -182,7 +200,7 @@ private fun CameraPreview(paused: Boolean, onText: (String) -> Unit, onError: (S
             val future = ProcessCameraProvider.getInstance(c)
             future.addListener({
                 runCatching {
-                    val provider = future.get()
+                    val p = future.get().also { provider.value = it }
                     val preview = Preview.Builder().build().also { it.surfaceProvider = view.surfaceProvider }
                     val analysis = ImageAnalysis.Builder()
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
@@ -194,8 +212,8 @@ private fun CameraPreview(paused: Boolean, onText: (String) -> Unit, onError: (S
                             }
                         } finally { proxy.close() }   // ⚠️ 不 close 就再也收不到下一帧，画面直接冻住
                     }
-                    provider.unbindAll()
-                    provider.bindToLifecycle(owner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
+                    p.unbindAll()
+                    p.bindToLifecycle(owner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
                 }.onFailure { onError(t("相机打不开：%s").format(it.message ?: "")) }
             }, ContextCompat.getMainExecutor(c))
             view
@@ -222,8 +240,11 @@ private fun decode(proxy: ImageProxy, reader: MultiFormatReader): String? {
         val row = ByteArray(stride)
         var out = 0
         for (y in 0 until h) {
-            if (buf.remaining() < stride) break
-            buf.get(row, 0, stride)
+            // ⚠️ **最后一行只保证有 width 字节**（末行后面没有填充）。原来是 remaining < stride 就 break，
+            //   于是末行被跳过、留成一片 0。码贴着底边时就解不出来（审查查出）。
+            val take = minOf(stride, buf.remaining())
+            if (take < w) break
+            buf.get(row, 0, take)
             System.arraycopy(row, 0, data, out, w)
             out += w
         }

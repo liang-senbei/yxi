@@ -791,10 +791,12 @@ fun ChatScreen(
                         onClick = if (ssh != null && !modelBusy) ({
                             val s0 = ssh
                             scope.launch {
-                                // ⚠️ force：availCache 是进程级的，切完模型不重读，
-                                //    「默认」那个标记会一直挂在旧的那一行上（老板 2026-09-06 报的）。
+                                // ⚠️ **别在这儿 force**：这一步是「点一下立刻弹选单」，
+                                //    加一趟 cat 就把零往返变成等 SSH（老板报过「切换模型选单延迟很高」），
+                                //    而且抖一下还会用通用四项覆盖掉这台机器真实的 availableModels。
+                                //    缓存陈旧的正解是**切完就作废**（见 Model.switchFast），不是每次重读。
                                 fastModels = app.yxi.ssh.catching {
-                                    app.yxi.agent.Model.available(s0, hostId, force = true)
+                                    app.yxi.agent.Model.available(s0, hostId)
                                 }.getOrNull() ?: app.yxi.agent.Model.Available(listOf("default", "opus", "sonnet", "haiku"), "")
                             }
                         }) else null,
@@ -824,7 +826,7 @@ fun ChatScreen(
                     // ponytail: 固定阈值 15 万 —— 逼近常见的 20 万自动压缩线；模型窗口不同就改这个数
                     // ⚠️ 模型名里**明写**了 `[1m]` 才敢按 100 万算 —— 那是显式的窗口标记，不是从模型系列猜的
                     //    （猜窗口会显示出假百分比，见 [Transcript.Ctx] 的注释）。其余按 20 万那条常见的自动压缩线。
-                    val tight = cu.tokens >= if (cu.model.contains("[1m]")) 750_000 else 150_000
+                    val tight = cu.tokens >= if (cu.model.contains("[1m]") || cu.model.contains("1M")) 750_000 else 150_000
                     StatChip(
                         t("上下文 %s").format(tokenText(cu.tokens)),
                         if (tight) Amber else Copper, mono = true,   // 能点（发 /compact）→ 主色；吃紧了才转琥珀
@@ -1371,7 +1373,13 @@ fun ChatScreen(
                             // ⚠️ `av.default` 是 settings.json 里的 `model`。**没写过就是空的** ——
                             //    那种情况下「默认」应该落在 `default` 这一行，不然整张表一个标记都没有
                             //    （老板 2026-09-06：「为什么不显示默认呢」）。
-                            val isDefault = if (av.default.isBlank()) name == "default" else name == av.default
+                            // ⚠️ settings.json 没写 `model` 时 av.default 是空的。
+                            //    退回标 `default` 那一行 —— 但**有的机器 availableModels 里压根没有
+                            //    `default` 这一项**，那样还是一个标记都没有（半修不算修）。
+                            //    所以再退一步：整张表都没 default 行时，标第一行（Claude Code 自己也是取首个）。
+                            val fallbackName = if (av.models.contains("default")) "default" else av.models.firstOrNull()
+                            val isDefault =
+                                if (av.default.isBlank()) name == fallbackName else name == av.default
                             if (isDefault) Text(t("默认"), style = MaterialTheme.typography.labelSmall, color = Muted)
                         }
                     }

@@ -234,6 +234,9 @@ object Model {
         if (!borrowable(ssh.exec("tmux capture-pane -p -t ${app.yxi.ssh.Shell.q(target)}"))) return "它正忙着，或者输入框里有没发完的字 —— 等一下再点"
         val t = app.yxi.ssh.Shell.q(target)
         ssh.exec("tmux send-keys -t $t -l '/model $alias'; sleep 0.3; tmux send-keys -t $t Enter")
+        // ⚠️ `/model` 会把新模型写成账号默认（settings.json 的 `model`），
+        //    缓存不作废的话「默认」那个标记会一直挂在旧那行上。作废一次比每次开选单重读便宜。
+        availCache.keys.removeAll { true }
         kotlinx.coroutines.delay(1500)
         // 同一个模型再发一次不弹框；弹了就按掉，没弹这个 Enter 落在空输入框上是无害的
         ssh.exec("tmux send-keys -t $t Enter")

@@ -98,6 +98,24 @@ class TranscriptTest {
         }
     }
 
+    /**
+     * **模式 / ponytail 也要跨批活下来。**
+     *
+     * ⚠️ 第一版跨批修复是把它们塞进 [Transcript.Ctx] 捎带的，而 Ctx 只有见过
+     * 带用量的 assistant 行之后才存在 —— 「开着计划模式进对话页」时，那行 mode
+     * 在**更早的批**里，于是照样死在批边界上（审查抓到的，跟模型名是同一个 bug）。
+     * 现在用 [Transcript.Carry] 单独带。
+     */
+    @Test fun 模式和强度也跨批() {
+        val assistant =
+            """{"type":"assistant","message":{"role":"assistant","model":"claude-opus-5",""" +
+                """"usage":{"input_tokens":10,"cache_read_input_tokens":90},"content":[]}}"""
+        Transcript.Incremental().apply {
+            add(sequenceOf("""{"type":"mode","mode":"plan","sessionId":"s1"}"""))  // 第一批：只有模式
+            add(sequenceOf(assistant))                                             // 第二批：才有用量
+        }.let { assertEquals("plan", it.ctx?.mode) }
+    }
+
     @Test fun 顶栏带思考强度和模式() {
         val assistant =
             """{"type":"assistant","effort":"max","message":{"role":"assistant","model":"claude-opus-5",""" +

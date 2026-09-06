@@ -987,7 +987,7 @@ internal object En {
         "功能" to "Features",
         "我的资料" to "My profile",
         "账号中心" to "Account",
-        "还没登录。" to "Not signed in.",
+        "资料还没拉回来，稍等一下。" to "Your profile hasn’t loaded yet — one moment.",
         "还没起名" to "No name yet",
         "会员" to "Membership",
         "邮箱" to "Email",

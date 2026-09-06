@@ -40,7 +40,6 @@ import app.yxi.agent.Account
  */
 @Composable
 fun ProfileScreen(
-    onEdit: () -> Unit,
     onAccount: () -> Unit,
     onSkins: () -> Unit,
     modifier: Modifier = Modifier,
@@ -115,12 +114,14 @@ fun ProfileScreen(
         }
 
         // ── 装扮：这一页只给个入口，真正的挑选在装扮页（cc-Yxi_Entertainment 那块）
+        // ⚠️ 标题说「我正在用的」，尾巴就得是**正在用的东西**，不能是「去装扮」那种动词 ——
+        //    否则这一行什么信息都没给。
         Card(onClick = onSkins) {
-            RowLine(t("我正在用的装扮"), t("去装扮"))
+            RowLine(t("我正在用的装扮"), Skins.frame(ctx).label)
         }
 
         Card(onClick = onAccount) { RowLine(t("账号中心"), t("邮箱 · 登录方式")) }
-        Card(onClick = { editMe = true; onEdit() }) { RowLine(t("编辑资料"), t("昵称 · 签名 · 头像")) }
+        Card(onClick = { editMe = true }) { RowLine(t("编辑资料"), t("昵称 · 签名 · 头像")) }
 
         Spacer(Modifier.height(4.dp))
     }

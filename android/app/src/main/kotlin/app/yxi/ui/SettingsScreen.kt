@@ -137,7 +137,7 @@ fun SettingsScreen(
         // 新来的信要重启 App 才亮点，等于没通知。失败就用缓存的那份，别打断人。
         LaunchedEffect(Unit) { if (app.yxi.agent.Account.signedIn) app.yxi.agent.Account.refresh(ctx) }
 
-        GroupLabel(t("账号"))
+        SectionLabel(t("账号"))
         // ── 「我」：头像 / 昵称 / 签名（学 QQ 和 Gemini 的个人页：账号那块单独一张卡，摆最上面）
         var editMe by remember { mutableStateOf(false) }
         if (editMe) MeDialog { editMe = false }
@@ -229,9 +229,13 @@ fun SettingsScreen(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 YxiIcon(Ico.Person, size = 22.dp, tint = androidx.compose.ui.graphics.Color(0xFF4C8DF6))
-                Text(t("账号中心"), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                Text(t("账号中心"), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+                // ⚠️ 邮箱必须也带 weight：Compose 先按剩余宽度量**没有 weight** 的孩子，
+                //    邮箱会把整行吃掉，标题只剩几十 dp → 「账号中心」折成两行、长邮箱时连 › 都挤没。
+                //    `fill = false` = 短邮箱不占满、还是靠右。
                 Text(
                     app.yxi.agent.Account.me?.email.orEmpty(),
+                    Modifier.weight(1f, fill = false),
                     style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline,
                     maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
@@ -239,7 +243,7 @@ fun SettingsScreen(
             }
         }
 
-        GroupLabel(t("资产"))
+        SectionLabel(t("资产"))
         // ── 钱包 ────────────────────────────────────────────────────
         // ⚠️ **余额不写 ¥0.00**。服务端现在根本没有这个字段，写个 0 就是在说
         //    「你的余额是零」——那是假的（design/STYLE.md「不骗人」）。没开通就说没开通。
@@ -338,7 +342,7 @@ fun SettingsScreen(
             }
         }
 
-        GroupLabel(t("功能"))
+        SectionLabel(t("功能"))
         // ── 个性化：装扮的正门（老板 2026-09-06，照 QQ 的个性化装扮）────
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -1189,19 +1193,6 @@ private fun FollowUp(id: String, onSent: () -> Unit) {
 
 /** QQ 那种分组小标题：卡片上面一行小灰字，把一堆设置分出层次 */
 /** 「我的」上那一格：圆角方块里一枚描边图标，底下一行字。四格一排。 */
-/**
- * 「我的」页的分组小标题（老板 2026-09-06：「最好做好分类分块」）。
- * ⚠️ 只在 `mine = true` 那一页用 —— 「设置」页是另一种排布，别混。
- */
-@Composable
-private fun GroupLabel(text: String) {
-    Text(
-        text,
-        Modifier.padding(24.dp, 14.dp, 18.dp, 2.dp),
-        style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.outline,
-    )
-}
 
 @Composable
 private fun GridEntry(

@@ -391,7 +391,7 @@ class MainActivity : ComponentActivity() {
                         Page.Trend -> { app.yxi.ui.TrendScreen(shared.session, modifier = m); return@Scaffold }
                         Page.Profile -> {
                             app.yxi.ui.ProfileScreen(
-                                onEdit = {}, onAccount = { page = Page.Account },
+                                onAccount = { page = Page.Account },
                                 onSkins = { page = Page.Personalize }, modifier = m,
                             )
                             return@Scaffold

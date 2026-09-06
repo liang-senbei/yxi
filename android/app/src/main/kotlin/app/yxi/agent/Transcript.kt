@@ -157,8 +157,10 @@ object Transcript {
 
         // ⚠️ 最后那个 lambda 不能省。`onCtx` 有默认值 `{}`，漏了它**编译照样通过**，
         // 只是 [ctx] 永远是 null —— 界面上表现为「上下文那一格永远不出现」，不报错。
+        private val carry = Carry()
+
         fun add(lines: Sequence<String>) =
-            parseInto(lines, out, calls, queued, said, ctx) { ctx = it }
+            parseInto(lines, out, calls, queued, said, ctx, carry) { ctx = it }
 
         /** 当前快照。排队的挂在最后 —— 它们还没进对话，位置就在「此刻」。 */
         fun snapshot(): List<ChatItem> {
@@ -211,11 +213,18 @@ object Transcript {
          * 「已经切到 Opus 5 了，顶栏还写着 fable-5-1」（老板 2026-09-06 报的）。
          */
         startCtx: Ctx? = null,
+        /**
+         * 跨批传的「模式」和「ponytail 强度」。
+         * ⚠️ **不能靠 [Ctx] 捎带**：Ctx 只有在见过带用量的 assistant 行之后才存在，
+         * 而这两样常常在**更早的批**里就出现了（开着计划模式进对话页，第一批只有那行 mode）。
+         * 靠 Ctx 传的话它们会死在批边界上 —— 跟这次要修的模型名是同一个 bug。
+         */
+        carry: Carry = Carry(),
         onCtx: (Ctx) -> Unit = {},
     ) {
         var lastCtx: Ctx? = startCtx   // 最近一次报出来的用量，给「切了模型但还没回话」时套用
-        var lastMode = startCtx?.mode.orEmpty()   // 最近一条 {"type":"mode"} 行
-        var lastPony = startCtx?.ponytail.orEmpty()  // 最近一次 ponytail 注入报的强度
+        var lastMode = carry.mode      // 最近一条 {"type":"mode"} 行
+        var lastPony = carry.ponytail  // 最近一次 ponytail 注入报的强度
         lines.forEach { line ->
             if (line.isBlank()) return@forEach
             val d = runCatching { JSONObject(line) }.getOrNull() ?: return@forEach
@@ -333,7 +342,12 @@ object Transcript {
                 else -> Unit
             }
         }
+        carry.mode = lastMode
+        carry.ponytail = lastPony
     }
+
+    /** 跨批带着走的解析状态（见 [parseInto] 的 `carry` 参数）。 */
+    class Carry(var mode: String = "", var ponytail: String = "")
 
     /**
      * 从一条 assistant 消息里读出「这一轮发给模型多少上下文」。
@@ -382,10 +396,13 @@ object Transcript {
         // ⚠️ 回执把模型名包在**反引号**里，后面还常跟一个 `(default)`（那是「存成账号默认了」
         //    这件事，不是模型名的一部分）。不摘掉的话顶栏会显示成
         //    `` `Opus 5 (1M context) (default)` `` —— 带引号、还比别的名字长一截。
-        return raw.removePrefix("[1m").removeSuffix("[22m").trim()
-            .trim('`').trim()
-            .removeSuffix("(default)").trim()
-            .takeIf { it.isNotBlank() }?.take(40)
+        // ⚠️ 三种壳（ANSI 加粗、反引号、`(default)` 后缀）**嵌套顺序不固定**：
+        //    `` `[1mOpus 5[22m` `` 和 `` `Opus 5` (default) `` 都出现过。
+        //    一次性按固定顺序剥会漏（漏了就是顶栏显示 `Opus 5`` 或带 [1m）。反复剥到不动为止。
+        //    ⚠️ 对 `claude-opus-5[1m]` 无害：`[1m` 不在开头、`[22m` 不在结尾。
+        var r = raw
+        repeat(4) { r = r.trim().trim('`').removePrefix("[1m").removeSuffix("[22m").removeSuffix("(default)") }
+        return r.trim().takeIf { it.isNotBlank() }?.take(40)
     }
 
     private fun uuidOf(d: JSONObject, line: String): String =
