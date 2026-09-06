@@ -361,6 +361,9 @@ class MainActivity : ComponentActivity() {
                 Scaffold(
                     modifier = Modifier.offset { androidx.compose.ui.unit.IntOffset(((drawerWidthPx + push).coerceAtLeast(0f) * 0.85f).roundToInt(), 0) },
                     bottomBar = {
+                        // 音游是横屏整页，底栏会吃掉近两成高度（判定线都快贴到轨道了），
+                        // 而且横屏时它也不该出现。这一页不画底栏，退出就回来。
+                        if (page == Page.Rhythm) return@Scaffold
                         NavigationBar {
                             Tab.entries.forEach { t ->
                                 NavigationBarItem(

@@ -45,7 +45,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -236,12 +238,18 @@ private fun GameBoard(
     var countdown by remember { mutableIntStateOf(3) }
     var judgeShow by remember { mutableStateOf<Rhythm.Judge?>(null) }
     var score by remember { mutableIntStateOf(0) }
-    val ink = MaterialTheme.colorScheme.onSurface
-    val laneBg = MaterialTheme.colorScheme.surfaceContainerLow
-    val noteColor = MaterialTheme.colorScheme.primary
-    val judgeColor = Copper
-    val goodColor = Amber
-    val missColor = MaterialTheme.colorScheme.error                              // ⚠️ Copper/Muted 是 @Composable getter，Canvas 的 lambda 里取不到，先在这儿取出来
+    // ⚠️ 舞台**固定深色**，不跟浅色/深色主题走：音游得让音符和特效跳出来，
+    //    浅色底上一整片发白、命中的光一点都看不见。这是这一页的例外，别推广到别处。
+    val ink = Color(0xFFE8EDF5)
+    val laneBg = Color(0xFF0E1117)
+    val stageTop = Color(0xFF141A24)
+    val noteColor = Color(0xFF5CC8F5)                    // 冷青：在深色底上最跳，跟铜色的命中光是补色关系
+    // ⚠️ 舞台是固定深色，配色也固定取**深色皮肤那一套暖色**：浅色皮肤里的 `Copper` 其实是
+    //    Google 蓝（Palette.kt:87），在深色舞台上会跟青色音符糊成一片，命中光也不像"打中了"。
+    val judgeColor = Color(0xFFFFB787)                   // 完美 / 判定线：暖铜
+    val goodColor = Color(0xFFFFC46B)                    // 不错：琥珀
+    val rimColor = Color(0xFFE0B378)                     // 音符的暖描边，跟命中光同一家
+    val missColor = Color(0xFFE5484D)
     // 关了系统动画的人：**音符照落**（那是玩法本身，停了就没法玩了），
     // 但轨道的击中余光这类纯装饰不画。STYLE.md 那条管的是装饰，不是内容。
     val motion = remember {
@@ -256,6 +264,31 @@ private fun GameBoard(
     // ⚠️ 写在指针回调、读在 Canvas 的绘制 lambda —— **两边都在主线程**（Compose 的指针输入和绘制
     //    都跑在 UI 线程），所以裸数组就够，不需要 @Volatile / snapshotFlow。
     //    改成 Compose 状态反而更糟：它每帧都变，读在组合期就是每帧重组整页（见 TROUBLESHOOTING #13）。
+    // ── 横屏（老板 2026-09-06 看了 Phigros 之后定的：音游要横版）──
+    // 整个 App 是竖屏的，只有这一页转过去。三条前提：
+    // ① 还原写在 onDispose 里 —— 页面**怎么离开都还原**（返回键、手势、切后台、被杀），
+    //    不能只挂在「退出」按钮上；还原成 UNSPECIFIED 而不是硬写 PORTRAIT，免得跟以后的横屏页打架。
+    // ② **不要**去 Manifest 给 Activity 加 screenOrientation —— 那会影响所有页面。
+    // ③ ⚠️ **依赖 MainActivity 的 `android:configChanges="orientation|screenSize|…"`**：
+    //    有它转屏才不重建 Activity，正在打的这一局才不会被清掉。这一页 rememberSaveable 用量是 0，
+    //    哪天有人删了那行 configChanges，转屏的一瞬间整局游戏会丢干净。删之前先来改这里。
+    val activity = remember(ctx) { generateSequence(ctx) { (it as? android.content.ContextWrapper)?.baseContext }
+        .filterIsInstance<android.app.Activity>().firstOrNull() }
+    DisposableEffect(activity) {
+        val old = activity?.requestedOrientation
+        activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        onDispose { activity?.requestedOrientation = old ?: android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED }
+    }
+
+    // 状态栏收起来（横屏玩的时候顶上那条信号电量很碍眼）；跟朝向一样，离开就还原
+    DisposableEffect(activity) {
+        val w = activity?.window
+        val c = w?.let { androidx.core.view.WindowInsetsControllerCompat(it, it.decorView) }
+        c?.hide(androidx.core.view.WindowInsetsCompat.Type.statusBars())
+        c?.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        onDispose { c?.show(androidx.core.view.WindowInsetsCompat.Type.statusBars()) }
+    }
+
     val press = remember { FloatArray(4) { -9f } }
     val view = LocalView.current
     val sfx = remember { RhythmSfx(ctx) }
@@ -347,17 +380,18 @@ private fun GameBoard(
     ) {
         Canvas(Modifier.fillMaxSize()) {
             val laneW = size.width / 4f
-            val judgeY = size.height * 0.82f
+            val judgeY = size.height * 0.80f
+            val noteH = (size.height * 0.026f).coerceIn(14f, 30f)   // 横版屏幕矮，音符按高度算，别用固定像素
 
             // ── 轨道：越靠近判定线越亮一点（静态渐层，减弱动效也留着）──
+            drawRect(Brush.verticalGradient(listOf(stageTop, laneBg)), Offset(0f, 0f), Size(size.width, size.height))
             drawRect(
                 Brush.verticalGradient(
-                    0f to Color.Transparent, 0.72f to noteColor.copy(alpha = .04f),
-                    1f to noteColor.copy(alpha = .10f),
+                    0f to Color.Transparent, 0.7f to noteColor.copy(alpha = .05f), 1f to noteColor.copy(alpha = .14f),
                 ),
                 Offset(0f, 0f), Size(size.width, judgeY),
             )
-            for (i in 1..3) drawLine(ink.copy(alpha = .06f), Offset(laneW * i, 0f), Offset(laneW * i, judgeY), 2f)
+            for (i in 1..3) drawLine(ink.copy(alpha = .08f), Offset(laneW * i, 0f), Offset(laneW * i, judgeY), 2f)
 
             // ── 手指按下：这条轨亮一下。不管有没有打中都亮 —— 它反馈的是"你按了"，不是"你对了" ──
             if (motion) for (l in 0..3) {
@@ -382,31 +416,19 @@ private fun GameBoard(
             drawLine(judgeColor.copy(alpha = .85f), Offset(0f, judgeY), Offset(size.width, judgeY), 5f + 2f * lineGlow)
             drawLine(Color.White.copy(alpha = .35f + .35f * lineGlow), Offset(0f, judgeY - 1.5f), Offset(size.width, judgeY - 1.5f), 1.5f)
 
-            // ── 命中：判定线上一圈扩散的光环 + 一道往上冲的光柱；漏了则是一小片暗红 ──
+            // ── 命中：分层的爆点（见 hitBurst）。漏了不放爆点，只在线上留一小片暗红 ──
             if (motion) for (l in 0..3) {
                 val age = now - live.flash[l]
                 val j = live.flashJudge[l] ?: continue
-                if (age < 0f || age > 0.22f) continue
-                val k = age / 0.22f
+                if (age < 0f || age > 0.38f) continue
                 val cx = laneW * l + laneW / 2f
                 if (j == Rhythm.Judge.MISS) {
                     drawRect(
-                        Brush.verticalGradient(listOf(Color.Transparent, missColor.copy(alpha = .18f * (1 - k)))),
-                        Offset(laneW * l, judgeY - 90f), Size(laneW, 90f),
+                        Brush.verticalGradient(listOf(Color.Transparent, missColor.copy(alpha = .16f * (1 - age / 0.38f)))),
+                        Offset(laneW * l, judgeY - 70f), Size(laneW, 70f),
                     )
                 } else {
-                    val c = if (j == Rhythm.Judge.PERFECT) judgeColor else goodColor
-                    // 光环：从音符宽度扩到一轨半，边越扩越细 —— 像水面上的一圈
-                    drawCircle(
-                        c.copy(alpha = .55f * (1 - k)), laneW * (0.30f + 0.45f * k), Offset(cx, judgeY),
-                        style = Stroke(width = 6f * (1 - k) + 1f),
-                    )
-                    // 光柱：顺着轨道往上冲一小截，收得很快
-                    drawRect(
-                        Brush.verticalGradient(listOf(Color.Transparent, c.copy(alpha = .30f * (1 - k)))),
-                        Offset(laneW * l + laneW * .18f, judgeY - laneW * (0.9f + 1.6f * k)),
-                        Size(laneW * .64f, laneW * (0.9f + 1.6f * k)),
-                    )
+                    hitBurst(cx, judgeY, age, if (j == Rhythm.Judge.PERFECT) judgeColor else goodColor, noteH * 1.1f)
                 }
             }
 
@@ -418,8 +440,10 @@ private fun GameBoard(
                 if (n.judged != null && n.tailDone) return@forEach
                 if (dt < -0.4f && !n.hold) return@forEach
                 val y = judgeY * (1f - dt / Rhythm.APPROACH)
-                val x = laneW * n.lane + laneW * 0.12f
-                val w = laneW * 0.76f
+                // 音符比轨道窄、居中：横版一条轨 600px 宽，照轨宽画就是一根大棍子。
+                // 判定还是按整条轨算（点哪儿都算），只是画得秀气些 —— 手感不变，好看。
+                val w = minOf(laneW * 0.72f, size.width * 0.10f)
+                val x = laneW * n.lane + (laneW - w) / 2f
                 if (n.hold) {
                     // 长按的条：**按到判定线为止**。头过了线就从下往上一点点被"吃掉"，
                     // 而不是继续往下画 —— 画到线以下等于告诉玩家"这段还要按"，其实早过去了。
@@ -429,62 +453,83 @@ private fun GameBoard(
                         val holding = n.judged != null && n.judged != Rhythm.Judge.MISS && live.held[n.lane]
                         drawRoundRect(
                             noteColor.copy(alpha = if (n.judged == Rhythm.Judge.MISS) .18f else if (holding) .62f else .42f),
-                            Offset(x, tailY), Size(w, bottom - tailY), CornerRadius(w / 3),
+                            Offset(x, tailY), Size(w, bottom - tailY), CornerRadius(noteH / 2),
                         )
                         drawRoundRect(                                   // 左侧一道细高光，让它像有厚度
                             Color.White.copy(alpha = .18f),
-                            Offset(x + w * .12f, tailY), Size(w * .12f, bottom - tailY), CornerRadius(w / 8),
+                            Offset(x + w * .12f, tailY), Size(w * .10f, bottom - tailY), CornerRadius(noteH / 3),
                         )
                     }
                 }
-                if (n.judged == null && y >= -20f) {
-                    val h = 20f
+                if (n.judged == null && y >= -20f && y <= judgeY + noteH) {
+                    // 胶囊 + 一圈描边 + 顶部高光：横版下判定线很长，音符得一眼看清在哪条轨
+                    val h = noteH
+                    drawRoundRect(rimColor, Offset(x - 3f, y - h / 2 - 3f), Size(w + 6f, h + 6f), CornerRadius(h))
                     drawRoundRect(noteColor, Offset(x, y - h / 2), Size(w, h), CornerRadius(h / 2))
-                    drawRoundRect(                                        // 顶部高光
-                        Brush.verticalGradient(listOf(Color.White.copy(alpha = .40f), Color.Transparent)),
-                        Offset(x, y - h / 2), Size(w, h * .55f), CornerRadius(h / 2),
+                    drawRoundRect(
+                        Brush.verticalGradient(listOf(Color.White.copy(alpha = .45f), Color.Transparent)),
+                        Offset(x, y - h / 2), Size(w, h * .5f), CornerRadius(h / 2),
                     )
                 }
             }
         }
 
-        // ── HUD ──
+        // ── HUD（横版：退出在左上、连击在正中、分数在右上、曲名和难度在下两角）──
         // ⚠️ 这里**不读 now**：now 每帧都变，在组合里读一次就是每帧重组整页。
-        //    要跟着帧走的（连击的弹一下）放进 graphicsLayer 的 lambda，那是绘制阶段，不重组。
-        // 分数压在第一条轨上，音符会从它背后穿过去 —— 垫一层半透明的底，别让数字被音符切碎
-        Surface(
-            color = laneBg.copy(alpha = .72f), shape = RoundedCornerShape(0.dp, 0.dp, 18.dp, 0.dp),
-            modifier = Modifier.align(Alignment.TopStart),
+        //    要跟着帧走的（连击弹一下、进度条）放进 graphicsLayer / Canvas 的 lambda，那是绘制阶段。
+        Canvas(Modifier.fillMaxWidth().height(3.dp).align(Alignment.TopStart)) {
+            // 进度条：真的是这首歌播到哪了（不是装饰）
+            val k = (now / song.seconds.toFloat()).coerceIn(0f, 1f)
+            drawRect(judgeColor.copy(alpha = .55f), Offset(0f, 0f), Size(size.width * k, size.height))
+        }
+        TextButton(onQuit, Modifier.align(Alignment.TopStart).padding(4.dp, 6.dp)) {
+            Text(t("退出"), color = ink.copy(alpha = .7f), style = MaterialTheme.typography.labelLarge)
+        }
+        Column(
+            Modifier.align(Alignment.TopCenter).padding(top = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Column(Modifier.padding(18.dp, 10.dp, 20.dp, 12.dp)) {
-                Text("$score", style = MaterialTheme.typography.headlineSmall, fontFamily = FontFamily.Monospace)
-                Text(t(chart.zh) + " · " + t(if (difficulty == "hard") "认真" else "轻松"),
-                    style = MaterialTheme.typography.labelSmall, color = Muted)
+            if (combo >= 3) {
+                Text(
+                    "$combo",
+                    Modifier.graphicsLayer {
+                        val k = if (!motion) 1f else {
+                            val age = now - live.lastJudgeAt
+                            if (age in 0f..0.12f) 1f + 0.10f * (1f - age / 0.12f) else 1f
+                        }
+                        scaleX = k; scaleY = k
+                    },
+                    style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = Amber,
+                )
+                Text(t("连击"), style = MaterialTheme.typography.labelSmall, color = ink.copy(alpha = .55f))
             }
         }
-        if (combo >= 3) Text(
-            "$combo",
-            Modifier.align(Alignment.TopCenter).padding(top = 90.dp).graphicsLayer {
-                // 每次判定弹一下（120ms 回落）。关了动效就不弹，数字照常跳。
-                val k = if (!motion) 1f else {
-                    val age = now - live.lastJudgeAt
-                    if (age in 0f..0.12f) 1f + 0.10f * (1f - age / 0.12f) else 1f
-                }
-                scaleX = k; scaleY = k
-            },
-            style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold, color = Amber,
+        Text(
+            "%07d".format(score),
+            Modifier.align(Alignment.TopEnd).padding(14.dp, 10.dp),
+            style = MaterialTheme.typography.headlineSmall, fontFamily = FontFamily.Monospace, color = ink,
+        )
+        Text(
+            t(chart.zh),
+            Modifier.align(Alignment.BottomStart).padding(14.dp, 10.dp),
+            style = MaterialTheme.typography.labelMedium, color = ink.copy(alpha = .6f),
+        )
+        Text(
+            t(if (difficulty == "hard") "认真" else "轻松"),
+            Modifier.align(Alignment.BottomEnd).padding(14.dp, 10.dp),
+            style = MaterialTheme.typography.labelMedium, color = ink.copy(alpha = .6f),
         )
         judgeShow?.let { j ->
             Text(
                 t(when (j) { Rhythm.Judge.PERFECT -> "完美"; Rhythm.Judge.GOOD -> "不错"; else -> "漏了" }),
                 Modifier.align(Alignment.Center).graphicsLayer {
                     val age = (now - live.lastJudgeAt).coerceIn(0f, 0.35f)
-                    alpha = if (!motion) 1f else 1f - (age / 0.35f) * (age / 0.35f)   // 后段才明显淡出
+                    alpha = if (!motion) 1f else 1f - (age / 0.35f) * (age / 0.35f)
                     val k = if (!motion) 1f else 1f + 0.06f * (1f - age / 0.35f)
                     scaleX = k; scaleY = k
                 },
                 style = MaterialTheme.typography.titleLarge,
-                color = when (j) { Rhythm.Judge.PERFECT -> Copper; Rhythm.Judge.GOOD -> Amber; else -> Muted },
+                color = when (j) { Rhythm.Judge.PERFECT -> judgeColor; Rhythm.Judge.GOOD -> goodColor; else -> ink.copy(alpha = .5f) },
             )
         }
         if (countdown > 0) Text(
@@ -492,7 +537,6 @@ private fun GameBoard(
             Modifier.align(Alignment.Center),
             style = MaterialTheme.typography.displayLarge, color = Copper,
         )
-        TextButton(onQuit, Modifier.align(Alignment.TopEnd).padding(8.dp)) { Text(t("退出")) }
     }
 }
 
@@ -663,4 +707,59 @@ private class RhythmSfx(ctx: android.content.Context) {
     }
 
     fun release() = pool.release()
+}
+
+/**
+ * 命中的爆点。**结构**参考了下落式音游普遍的做法（老板 2026-09-06 让研究 Phigros 的视频，
+ * 我逐帧拆了它的命中特效）：一个实心圆炸开 → 圆缩成小点，外面展开方框 + 45° 菱形 + 两段旋转的弧
+ * → 几个小方块朝外上方飘散、减速。**配色和曲线是我们自己的**（铜 / 琥珀，不是他们的金色），
+ * 素材一个没拿 —— 全是这儿画出来的几何图形。
+ *
+ * 时间轴（毫秒，从命中那一刻算）：
+ *   0–70    实心圆 r: 1.0 → 0.22 个音符高
+ *   40–380  方框 1.6 → 2.3，菱形 1.4 → 2.5（半透明填充），一起淡出
+ *   60–380  两段对开的弧 r 0.8 → 1.6，转 55°，线宽 3 → 1
+ *   0–380   6 个小方块，朝上方 ±70° 散开，距离按减速曲线走到 2.4 个音符高
+ */
+private fun DrawScope.hitBurst(cx: Float, cy: Float, age: Float, c: Color, unit: Float) {
+    val k = (age / 0.38f).coerceIn(0f, 1f)
+    if (k >= 1f) return
+    val fade = 1f - k * k                                   // 后段才明显淡出，前段保持亮
+
+    // 实心圆：炸开的那一下，很快缩成一个点
+    val ck = (age / 0.07f).coerceIn(0f, 1f)
+    drawCircle(c.copy(alpha = .85f * fade), unit * (1.0f - 0.78f * ck), Offset(cx, cy))
+
+    if (age > 0.04f) {
+        // 方框（正着放）+ 菱形（转 45°，半透明填充）
+        val bs = unit * (1.6f + 0.7f * k)
+        drawRect(c.copy(alpha = .55f * fade), Offset(cx - bs, cy - bs), Size(bs * 2, bs * 2), style = Stroke(2f))
+        val ds = unit * (1.4f + 1.1f * k)
+        rotate(45f, Offset(cx, cy)) {
+            drawRect(c.copy(alpha = .18f * fade), Offset(cx - ds, cy - ds), Size(ds * 2, ds * 2))
+        }
+    }
+    if (age > 0.06f) {
+        // 两段对开的弧，边转边扩
+        val r = unit * (0.8f + 0.8f * k)
+        val sw = 3f - 2f * k
+        rotate(55f * k, Offset(cx, cy)) {
+            for (start in listOf(20f, 200f)) drawArc(
+                c.copy(alpha = .7f * fade), start, 110f, false,
+                Offset(cx - r, cy - r), Size(r * 2, r * 2), style = Stroke(sw),
+            )
+        }
+    }
+    // 小方块：朝上方散开，越飘越慢（减速用 1-(1-k)^2）
+    val out = 1f - (1f - k) * (1f - k)
+    for (i in 0 until 6) {
+        val a = (-90f + (i - 2.5f) * 26f) * (Math.PI / 180f).toFloat()
+        val d = unit * 2.4f * out * (0.7f + 0.1f * i)
+        val sz = unit * (0.22f - 0.08f * k)
+        drawRect(
+            c.copy(alpha = .8f * fade),
+            Offset(cx + kotlin.math.cos(a) * d - sz, cy + kotlin.math.sin(a) * d - sz),
+            Size(sz * 2, sz * 2),
+        )
+    }
 }
