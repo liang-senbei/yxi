@@ -51,6 +51,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -82,7 +83,7 @@ import kotlin.math.roundToInt
 fun RhythmScreen(modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
     var playing by remember { mutableStateOf<Pair<Rhythm.Song, String>?>(null) }
-    var result by remember { mutableStateOf<Triple<String, Rhythm.Result, Int>?>(null) }
+    var result by remember { mutableStateOf<Done?>(null) }
     var synced by remember { mutableIntStateOf(0) }
     // 规则和最好成绩以服务端为准（分数不是客户端说了算）；拿不到就用本地那份，照样能玩
     LaunchedEffect(Unit) { Rhythm.sync(ctx); synced++ }
@@ -130,18 +131,21 @@ fun RhythmScreen(modifier: Modifier = Modifier) {
     val r = result
     val p = playing
     when {
-        r != null -> ResultCard(r.first, r.second, r.third, onAgain = {
-            val song = Rhythm.SONGS.first { it.id == r.first.substringBefore('_') }
-            result = null; playing = song to r.first.substringAfter('_')
+        r != null -> ResultCard(r.chartId, r.result, r.elapsedMs, r.hits, onAgain = {
+            val song = Rhythm.SONGS.first { it.id == r.chartId.substringBefore('_') }
+            result = null; playing = song to r.chartId.substringAfter('_')
         }, onBack = { result = null; synced++ })                     // 结算页整屏通铺：不要 Scaffold 的内边距
 
-        p != null -> GameBoard(p.first, p.second, onDone = { id, res, ms ->
-            Rhythm.saveBest(ctx, id, res); playing = null; result = Triple(id, res, ms)
+        p != null -> GameBoard(p.first, p.second, onDone = { id, res, ms, hits ->
+            Rhythm.saveBest(ctx, id, res); playing = null; result = Done(id, res, ms, hits)
         }, onQuit = { playing = null })                              // 打谱面同理，整屏通铺
 
         else -> SongList(synced, onPick = { s, d -> playing = s to d }, modifier = modifier)
     }
 }
+
+/** 一局打完的结果：谱面 id · 本地算的成绩 · 用时 · 判定序列（上报给服务端重算） */
+private data class Done(val chartId: String, val result: Rhythm.Result, val elapsedMs: Int, val hits: String)
 
 // ── 选曲 ────────────────────────────────────────────────────────────────────
 @Composable
@@ -194,6 +198,13 @@ private fun SongList(synced: Int, onPick: (Rhythm.Song, String) -> Unit, modifie
             Toggle(t("手感调节"), tuning) { tuning = !tuning }
         }
         if (tuning) FeelPanel()
+        // 计分方式换了（加了连击倍率、满分从 110 万到约 210 万），服务端会把最好成绩清一次。
+        // 不解释的话，玩家会以为自己的成绩莫名其妙没了。
+        Text(
+            t("计分方式换了：连击到 8 / 15 / 30 有加成，最好成绩重新算。已经领过的奖励不受影响。"),
+            Modifier.padding(20.dp, 12.dp, 20.dp, 0.dp),
+            style = MaterialTheme.typography.labelSmall, color = Muted,
+        )
         val off = Rhythm.offsetMs(ctx)
         if (off != 0) Text(
             t("判定偏移 %d ms（自动校准过）").format(off),
@@ -223,6 +234,10 @@ private fun Toggle(label: String, on: Boolean, onClick: () -> Unit) {
 private class Live(val chart: Rhythm.Chart) {
     var perfect = 0; var good = 0; var miss = 0
     var combo = 0; var maxCombo = 0
+    /** 判定序列（P/G/M，按发生顺序）——上报给服务端算分用 */
+    val seq = StringBuilder()
+    /** 本地即时分数：按连击档位边打边加。服务端会用同一套规则重算，结算页以它为准 */
+    var live = 0.0
     val errs = ArrayList<Float>()
     /** 每条轨下一个还没判的音符下标，省得每帧从头扫 */
     val next = IntArray(4)
@@ -234,14 +249,43 @@ private class Live(val chart: Rhythm.Chart) {
     /** 判定发生时喊一声：音效 + 震动挂在这儿，绘制不管这些 */
     var onJudge: ((Rhythm.Judge, Int) -> Unit)? = null
 
+    // ── 玩家造成的校准线倾斜（trace / swipe 打中时把线往那个方向带一下）──
+    private var tiltDeg = 0f
+    private var tiltAt = -9f
+
+    /**
+     * 打中一个 trace / swipe：把倾斜**朝这次的方向拉一把**（不是累加）。
+     * 方向相反的两下挨着中，自然互相抵消，不会转飞。
+     */
+    fun tilt(now: Float, dir: Int) {
+        tiltDeg = (tiltAt(now) * 0.55f + dir * 4.5f).coerceIn(-6f, 6f)
+        tiltAt = now
+    }
+
+    /**
+     * [now] 时刻还剩多少倾斜。
+     * ⚠️ **按时间衰减，不按帧**（cc-Yxi 2026-09-06 提醒）：写成"每帧乘 0.9"的话，
+     *    120Hz 手机上的衰减速度是 60Hz 模拟器的两倍 —— 我在模拟器上调好的 0.4 秒回正，
+     *    到老板手机上就成了 0.2 秒，而且代码看着完全正确，根本查不出来。
+     *    `exp(-dt/τ)`，τ=0.15 秒 ≈ 0.4 秒回正，60/90/120Hz 一个手感。
+     */
+    fun tiltAt(now: Float): Float {
+        val dt = now - tiltAt
+        if (dt < 0f || dt > 2f) return 0f
+        return tiltDeg * kotlin.math.exp(-dt / 0.15f)
+    }
+
     val byLane: List<List<Rhythm.Note>> = (0..3).map { l -> chart.notes.filter { it.lane == l } }
 
     fun hit(j: Rhythm.Judge, at: Float, lane: Int = -1) {
         if (lane in 0..3) { flash[lane] = at; flashJudge[lane] = j }
+        seq.append(when (j) { Rhythm.Judge.PERFECT -> 'P'; Rhythm.Judge.GOOD -> 'G'; else -> 'M' })
         onJudge?.invoke(j, lane)
+        val per = Rhythm.rules.base / chart.units.coerceAtLeast(1)
         when (j) {
-            Rhythm.Judge.PERFECT -> { perfect++; combo++ }
-            Rhythm.Judge.GOOD -> { good++; combo++ }
+            // ⚠️ 倍率按**打这一下时**的连击算（连击先加再乘：第 8 下就享受 ×1.2）
+            Rhythm.Judge.PERFECT -> { perfect++; combo++; live += per * Rhythm.multAt(combo) }
+            Rhythm.Judge.GOOD -> { good++; combo++; live += per * Rhythm.rules.goodFactor * Rhythm.multAt(combo) }
             Rhythm.Judge.MISS -> { miss++; combo = 0 }
         }
         maxCombo = maxOf(maxCombo, combo)
@@ -262,7 +306,7 @@ private class Live(val chart: Rhythm.Chart) {
 private fun GameBoard(
     song: Rhythm.Song,
     difficulty: String,
-    onDone: (String, Rhythm.Result, Int) -> Unit,
+    onDone: (String, Rhythm.Result, Int, String) -> Unit,
     onQuit: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -275,13 +319,26 @@ private fun GameBoard(
     var combo by remember { mutableIntStateOf(0) }
     var countdown by remember { mutableIntStateOf(3) }
     var judgeShow by remember { mutableStateOf<Rhythm.Judge?>(null) }
+    var praise by remember { mutableStateOf<Pair<String, Long>?>(null) }
     var score by remember { mutableIntStateOf(0) }
     // ⚠️ 舞台**固定深色**，不跟浅色/深色主题走：音游得让音符和特效跳出来，
     //    浅色底上一整片发白、命中的光一点都看不见。这是这一页的例外，别推广到别处。
     val ink = Color(0xFFE8EDF5)
     val laneBg = Color(0xFF0E1117)
     val stageTop = Color(0xFF141A24)
-    val noteColor = Color(0xFF5CC8F5)                    // 冷青：在深色底上最跳，跟铜色的命中光是补色关系
+    // 四种音块的颜色（老板 2026-09-06 定：淡橙 / 浅蓝 / 樱粉 / 浅绿）。
+    // ⚠️ 全部写死常量 —— 舞台是固定深色，用主题色 getter 会跟着皮肤变（Copper 那条坑）。
+    // ⚠️ **颜色之外还要靠形状分得出**：色盲、强光下只看颜色是不够的，所以
+    //    slide 带尾轨、trace 带抓握纹和箭头、swipe 带方向尖角。
+    val kindColor = { k: Rhythm.Kind ->
+        when (k) {
+            Rhythm.Kind.TICK -> Color(0xFFFFC08A)        // 淡橙
+            Rhythm.Kind.SLIDE -> Color(0xFF8AD4F5)       // 浅蓝
+            Rhythm.Kind.TRACE -> Color(0xFFF5A8C8)       // 樱粉
+            Rhythm.Kind.SWIPE -> Color(0xFF9EE6A8)       // 浅绿
+        }
+    }
+    val noteColor = Color(0xFF5CC8F5)                    // 轨道渐层还用冷青
     // ⚠️ **固定深色的舞台上，一律不用主题色 getter**（Copper / Amber / Muted 都会跟着皮肤变）。
     //    `Copper` 是**槽位名 = 主操作色**，不是字面的铜色：深色皮肤里它是 #FFB787，
     //    浅色皮肤里故意是 Google 蓝 #0B57D0（Palette.kt:87 有注释）—— 那不是 bug，别去"修"它，
@@ -320,6 +377,7 @@ private fun GameBoard(
     DisposableEffect(live, soundVol, hapticLv) {
         live.onJudge = { j, _ ->
             judgeShow = j
+            praiseFor(live.combo)?.let { praise = it to System.currentTimeMillis() }
             sfx.play(j, soundVol)
             if (j != Rhythm.Judge.MISS) view.hapticTick(hapticLv, j == Rhythm.Judge.PERFECT)
         }
@@ -371,7 +429,8 @@ private fun GameBoard(
             now = if (abs(pred - now) > .25f) pred else maxOf(now, pred)   // 只前进，别抖回去
             judgeMisses(live, now, offset) { combo = live.combo; score = live.currentScore() }
             if (now > (chart.notes.lastOrNull()?.t ?: 0f) + 2.5f || (base > 0 && !mp.isPlaying)) {
-                onDone(chart.id, live.result(), (System.currentTimeMillis() - startedAt).toInt()); return@LaunchedEffect
+                onDone(chart.id, live.result(), (System.currentTimeMillis() - startedAt).toInt(), live.seq.toString())
+                return@LaunchedEffect
             }
         }
     }
@@ -382,29 +441,62 @@ private fun GameBoard(
                 val down = awaitFirstDown(requireUnconsumed = false)
                 // 场地会转，所以先把手指的位置**转回线的坐标系**再判在哪条轨，
                 // 不然线一斜，看着按在这条轨、算出来是隔壁那条。
-                val (deg, dy) = chart.poseAt(now)
-                val pivotX = size.width / 2f
-                val pivotY = size.height * (0.80f + dy)
-                val rad = -deg * (Math.PI / 180f).toFloat()
-                val ox = down.position.x - pivotX
-                val oy = down.position.y - pivotY
-                val laneX = pivotX + ox * kotlin.math.cos(rad) - oy * kotlin.math.sin(rad)
-                val lane = ((laneX / size.width) * 4).toInt().coerceIn(0, 3)
+                fun laneOf(pos: Offset): Int {
+                    val (deg, dy) = chart.poseAt(now)
+                    val pivotX = size.width / 2f
+                    val pivotY = size.height * (0.80f + dy)
+                    val rad = -(deg + live.tiltAt(now)) * (Math.PI / 180f).toFloat()
+                    val ox = pos.x - pivotX
+                    val oy = pos.y - pivotY
+                    val laneX = pivotX + ox * kotlin.math.cos(rad) - oy * kotlin.math.sin(rad)
+                    return ((laneX / size.width) * 4).toInt().coerceIn(0, 3)
+                }
+                var lane = laneOf(down.position)
                 live.held[lane] = true
                 press[lane] = now                     // 按下去就先亮一下（不管有没有打中），手感的一半在这
-                tapLane(live, lane, now, offset) { combo = live.combo; score = live.currentScore() }
-                do {
+                // 按下只吃 tick 和 slide 的头；swipe 要滑、trace 要拖，各走各的
+                hitLane(live, lane, now, offset) { it.kind == Rhythm.Kind.TICK || it.kind == Rhythm.Kind.SLIDE }
+                    .also { if (it) { combo = live.combo; score = live.currentScore() } }
+                val startX = down.position.x
+                var swiped = false
+                while (true) {
                     val ev = awaitPointerEvent()
-                    val up = ev.changes.all { !it.pressed }
-                    if (up) live.held[lane] = false
-                } while (!up)
+                    val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                    if (!ch.pressed) break
+                    val dx = ch.position.x - startX
+                    // 横着划够一段 = swipe（只认一次，别一路划一路判）
+                    if (!swiped && kotlin.math.abs(dx) > size.width * 0.055f) {
+                        swiped = true
+                        val dir = if (dx > 0) 1 else -1
+                        if (hitLane(live, lane, now, offset) {
+                                it.kind == Rhythm.Kind.SWIPE && (it.dir == 0 || it.dir == dir)
+                            }
+                        ) { combo = live.combo; score = live.currentScore(); live.tilt(now, dir) }
+                    }
+                    // 手指挪到另一条轨 = trace 到位
+                    val cur = laneOf(ch.position)
+                    if (cur != lane) {
+                        val from = lane
+                        if (hitLane(live, from, now, offset) {
+                                it.kind == Rhythm.Kind.TRACE && (from + it.dir).coerceIn(0, 3) == cur
+                            }
+                        ) { combo = live.combo; score = live.currentScore(); live.tilt(now, if (cur > from) 1 else -1) }
+                        live.held[from] = false
+                        lane = cur
+                        live.held[lane] = true
+                        press[lane] = now
+                    }
+                }
+                live.held[lane] = false
             }
         },
     ) {
         Canvas(Modifier.fillMaxSize()) {
             val laneW = size.width / 4f
             val (poseDeg0, poseDy0) = chart.poseAt(now)
-            val poseDeg = poseDeg0 * lineScale; val poseDy = poseDy0 * lineScale
+            // 谱面写的 + 玩家 trace/swipe 造成的，相加再封顶（倾斜只进画面和手指坐标反变换，不进时间判定）
+            val poseDeg = (poseDeg0 * lineScale + live.tiltAt(now)).coerceIn(-9f, 9f)
+            val poseDy = poseDy0 * lineScale
             val judgeY = size.height * (0.80f + poseDy)
             // ⚠️ 整块场地（轨道 · 音符 · 判定线 · 爆点）**一起**绕线中心转：
             //    音符垂直于线、跟着线走，这就是"音符活在线的坐标系里"。
@@ -463,7 +555,22 @@ private fun GameBoard(
                         Offset(laneW * l, judgeY - 70f), Size(laneW, 70f),
                     )
                 } else {
-                    if (fxScale > 0f) hitBurst(cx, judgeY, age, if (j == Rhythm.Judge.PERFECT) judgeColor else goodColor, noteH * 1.1f * fxScale)
+                    if (fxScale > 0f) {
+                        hitBurst(cx, judgeY, age, if (j == Rhythm.Judge.PERFECT) judgeColor else goodColor, noteH * 1.1f * fxScale)
+                        // 校准瞬间的竖线：**垂直于判定线**，带 ±10° 的随机偏转，很快淡出。
+                        // 随机数按轨号定死（不是每帧摇），不然它会在 0.2 秒里疯狂抖。
+                        val k = (age / 0.2f).coerceIn(0f, 1f)
+                        if (k < 1f) {
+                            val jitter = ((l * 37 % 21) - 10).toFloat()      // -10..+10 度，按轨固定
+                            val len = noteH * (3.2f + 2.4f * k) * fxScale
+                            rotate(jitter, Offset(cx, judgeY)) {
+                                drawLine(
+                                    Color.White.copy(alpha = .8f * (1f - k)),
+                                    Offset(cx, judgeY - len), Offset(cx, judgeY + len * .35f), 3f,
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
@@ -487,7 +594,7 @@ private fun GameBoard(
                     if (bottom > tailY) {
                         val holding = n.judged != null && n.judged != Rhythm.Judge.MISS && live.held[n.lane]
                         drawRoundRect(
-                            noteColor.copy(alpha = if (n.judged == Rhythm.Judge.MISS) .18f else if (holding) .62f else .42f),
+                            kindColor(n.kind).copy(alpha = if (n.judged == Rhythm.Judge.MISS) .18f else if (holding) .62f else .42f),
                             Offset(x, tailY), Size(w, bottom - tailY), CornerRadius(noteH / 2),
                         )
                         drawRoundRect(                                   // 左侧一道细高光，让它像有厚度
@@ -497,14 +604,44 @@ private fun GameBoard(
                     }
                 }
                 if (n.judged == null && y >= -20f && y <= judgeY + noteH) {
-                    // 胶囊 + 一圈描边 + 顶部高光：横版下判定线很长，音符得一眼看清在哪条轨
                     val h = noteH
+                    val c = kindColor(n.kind)
                     drawRoundRect(rimColor, Offset(x - 3f, y - h / 2 - 3f), Size(w + 6f, h + 6f), CornerRadius(h))
-                    drawRoundRect(noteColor, Offset(x, y - h / 2), Size(w, h), CornerRadius(h / 2))
+                    drawRoundRect(c, Offset(x, y - h / 2), Size(w, h), CornerRadius(h / 2))
                     drawRoundRect(
                         Brush.verticalGradient(listOf(Color.White.copy(alpha = .45f), Color.Transparent)),
                         Offset(x, y - h / 2), Size(w, h * .5f), CornerRadius(h / 2),
                     )
+                    // 形状特征：光靠颜色分不出来（色盲、强光），所以每种再给一个记号
+                    when (n.kind) {
+                        Rhythm.Kind.TRACE -> {
+                            // 抓握纹（三道竖线）+ 指向目标轨的箭头
+                            for (g in -1..1) drawRect(
+                                Color.White.copy(alpha = .55f),
+                                Offset(x + w / 2 + g * h * .45f - 1.5f, y - h * .22f), Size(3f, h * .44f),
+                            )
+                            val d = if (n.dir > 0) 1f else -1f
+                            val ax = if (n.dir > 0) x + w + h * .5f else x - h * .5f
+                            val p = Path()
+                            p.moveTo(ax + d * h * .42f, y)
+                            p.lineTo(ax - d * h * .18f, y - h * .34f)
+                            p.lineTo(ax - d * h * .18f, y + h * .34f)
+                            p.close()
+                            drawPath(p, c.copy(alpha = .9f))
+                        }
+                        Rhythm.Kind.SWIPE -> {
+                            // 方向尖角：往要滑的那边支出一个三角
+                            val sgn = if (n.dir >= 0) 1f else -1f
+                            val ax = if (n.dir >= 0) x + w else x
+                            val p = Path()
+                            p.moveTo(ax + sgn * h * .75f, y)
+                            p.lineTo(ax, y - h * .55f)
+                            p.lineTo(ax, y + h * .55f)
+                            p.close()
+                            drawPath(p, c)
+                        }
+                        else -> Unit
+                    }
                 }
             }
             }
@@ -537,7 +674,12 @@ private fun GameBoard(
                     },
                     style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = Amber,
                 )
-                Text(t("连击"), style = MaterialTheme.typography.labelSmall, color = ink.copy(alpha = .55f))
+                val mult = Rhythm.multAt(combo)
+                Text(
+                    if (mult > 1f) t("连击 ×%.1f").format(mult) else t("连击"),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (mult > 1f) goodColor else ink.copy(alpha = .55f),
+                )
             }
         }
         Text(
@@ -568,6 +710,11 @@ private fun GameBoard(
                 color = when (j) { Rhythm.Judge.PERFECT -> judgeColor; Rhythm.Judge.GOOD -> goodColor; else -> ink.copy(alpha = .5f) },
             )
         }
+        // 连击到点跳一次夸奖词（25 / 50 / 100 / 之后每 100）
+        praise?.let { (w, at) ->
+            PraiseWord(w, at, motion, Modifier.align(Alignment.Center).fillMaxWidth(0.7f).height(120.dp))
+        }
+        LaunchedEffect(praise) { if (praise != null) { kotlinx.coroutines.delay(950); praise = null } }
         if (countdown > 0) Text(
             "$countdown",
             Modifier.align(Alignment.Center),
@@ -577,26 +724,34 @@ private fun GameBoard(
     }
 }
 
-/** 这一拍点在哪条轨上：找这条轨最早一个还没判、且在窗口里的音符 */
-private fun tapLane(live: Live, lane: Int, now: Float, offset: Float, changed: () -> Unit) {
-    if (now < 0f) return
+/**
+ * 这一下打在哪条轨上：找这条轨里**最早一个还没判、在判定窗口内、且符合 [want] 的**音符。
+ * [want] 就是"这一下是什么打法"：按下只吃 tick / slide 的头，横划只吃 swipe，拖过去只吃 trace。
+ * 所以对着一个 swipe 音符猛点是打不中的 —— 它要求的就是划。返回是否打中。
+ */
+private fun hitLane(live: Live, lane: Int, now: Float, offset: Float, want: (Rhythm.Note) -> Boolean): Boolean {
+    if (now < 0f) return false
     val lanes = live.byLane[lane]
-    var i = live.next[lane]
     val head = now + offset / 1000f
-    // ⚠️ 只往前找目标，**不要写回 next[lane]**：长按的头判过了、尾巴还没判，
+    // ⚠️ 从游标往后扫，但**不写回 next[lane]**：slide 的头判过了、尾巴还没判，
     //    写回去就等于跳过这个音符，它的尾巴永远轮不到判 —— 一局就少一个判定，
     //    服务端「判定数对不上」直接把这局打回来（实测 77 ≠ 78）。next[lane] 归 judgeMisses 管。
-    while (i < lanes.size && lanes[i].judged != null) i++
-    if (i >= lanes.size) return
-    val n = lanes[i]
-    val err = (head - n.t) * 1000f
-    if (err < -Rhythm.GOOD_MS) return                         // 太早，不算这一下（也不罚）
-    val j = Rhythm.judge(err)
-    if (j == Rhythm.Judge.MISS) return                        // 太晚的由 judgeMisses 收
-    n.judged = j
-    live.errs += err
-    live.hit(j, now, lane)
-    changed()
+    var i = live.next[lane]
+    while (i < lanes.size) {
+        val n = lanes[i]
+        val err = (head - n.t) * 1000f
+        if (err < -Rhythm.GOOD_MS) return false           // 后面的都还太早
+        if (n.judged == null && err <= Rhythm.GOOD_MS && want(n)) {
+            val j = Rhythm.judge(err)
+            if (j == Rhythm.Judge.MISS) return false      // 太晚的交给 judgeMisses 收
+            n.judged = j
+            live.errs += err
+            live.hit(j, now, lane)
+            return true
+        }
+        i++
+    }
+    return false
 }
 
 /** 过了窗口还没判的算 Miss；长按到点了看手指还在不在 */
@@ -626,12 +781,14 @@ private fun judgeMisses(live: Live, now: Float, offset: Float, changed: () -> Un
     if (dirty) changed()
 }
 
-private fun Live.currentScore() = Rhythm.score(chart.units, perfect, good, maxCombo)
+/** 边打边显示的分数。没配档位时 [Live.live] 跟老公式等价，配了就带上倍率 —— 两种情况都跟服务端一致 */
+private fun Live.currentScore() =
+    (live + maxCombo.toFloat() / chart.units.coerceAtLeast(1) * Rhythm.rules.comboBonus).toInt()
 
 // ── 结算 ────────────────────────────────────────────────────────────────────
 @Composable
 private fun ResultCard(
-    chartId: String, local: Rhythm.Result, elapsedMs: Int,
+    chartId: String, local: Rhythm.Result, elapsedMs: Int, hits: String,
     onAgain: () -> Unit, onBack: () -> Unit, modifier: Modifier = Modifier,
 ) {
     val ctx = LocalContext.current
@@ -640,7 +797,7 @@ private fun ResultCard(
     var sending by remember { mutableStateOf(true) }
     // ⚠️ 分数以服务端为准（客户端只报判定计数）。没连上就照实说，别装作发过奖了。
     LaunchedEffect(chartId) {
-        sent = Rhythm.submit(ctx, chartId, local.perfect, local.good, local.miss, local.maxCombo, elapsedMs)
+        sent = Rhythm.submit(ctx, chartId, local.perfect, local.good, local.miss, local.maxCombo, elapsedMs, hits)
         sent?.result?.let { Rhythm.saveBest(ctx, chartId, it.copy(medianErrMs = local.medianErrMs)) }
         sending = false
     }
@@ -960,5 +1117,101 @@ private fun Feel(name: String, value: String, onNext: () -> Unit) {
     ) {
         Text(name, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
         Text(value, style = MaterialTheme.typography.labelLarge, color = Copper)
+    }
+}
+
+/**
+ * 连击到一定数就跳出来的**夸奖词**（老板 2026-09-06 给了参考图 `design/judge-words-ref.png`：
+ * 「你看看这个字体…连击了就可以触发这些提示」）。
+ *
+ * 那张参考图是**老板自己用 AI 生成的**（cc-Yxi 2026-09-06 核实），不是从别的音游扒的 ——
+ * 所以这套风格可以直接照着做，不用像音乐和 Phigros 素材那样绕开。
+ * 实现上仍然不带任何字形文件：系统字的最重字重 + 斜体，装饰（斜切色块、细斜线、四角星、圆点）
+ * 全是这儿画出来的几何体 —— 这是工程选择（省一个字体文件），不是版权限制。
+ *
+ * ⚠️ 参考图是**浅底 + 白填充 + 黑描边**；我们的舞台是**固定深色**，照搬会糊成一团 ——
+ *    改成亮色填充 + 深描边 + 一层外发光。抄的是结构不是配色。
+ *
+ * 触发点跟着**服务端下发的连击档位**走（老板 2026-09-06 定稿：×8 Great 1.2 · ×15 Excellent 1.5 ·
+ * ×30 Amazing 2.0；Perfect 留给单音符的完美判定；断连击直接掉回 1.0）。
+ * ⚠️ 门槛和词都不写死在客户端 —— 老板要调，服务端改一行 `comboTiers` 配置就生效，不用发版。
+ */
+private fun praiseFor(combo: Int): String? = Rhythm.tierWord(combo)?.takeIf { it.isNotBlank() }
+
+@Composable
+private fun PraiseWord(word: String, at: Long, motion: Boolean, modifier: Modifier = Modifier) {
+    var k by remember(at) { mutableFloatStateOf(if (motion) 0f else 1f) }
+    LaunchedEffect(at) {
+        if (!motion) return@LaunchedEffect
+        val t0 = System.nanoTime()
+        while (true) {
+            withFrameNanos { }
+            k = ((System.nanoTime() - t0) / 1e9f / 0.9f)
+            if (k >= 1f) { k = 1f; break }
+        }
+    }
+    val warm = Color(0xFFFFC46B)
+    val hot = Color(0xFFFF8A5C)
+    val cool = Color(0xFF7FD4F5)
+    Box(modifier) {
+        // 装饰：跟字同斜度的细斜线 + 斜切色块 + 音符/星点。按词长定死随机，别每帧抖。
+        Canvas(Modifier.matchParentSize()) {
+            val a = (1f - (k - 0.6f).coerceAtLeast(0f) / 0.4f).coerceIn(0f, 1f)
+            val slant = -14f * (Math.PI / 180f).toFloat()
+            val seed = word.length * 7
+            for (i in 0 until 5) {
+                val fx = ((seed + i * 53) % 100) / 100f
+                val fy = ((seed + i * 31) % 100) / 100f
+                val len = size.height * (0.5f + fx * 0.9f)
+                val x0 = size.width * (0.05f + fx * 0.9f)
+                val y0 = size.height * (0.1f + fy * 0.8f)
+                drawLine(
+                    (if (i % 2 == 0) warm else cool).copy(alpha = .5f * a),
+                    Offset(x0, y0),
+                    Offset(x0 + kotlin.math.sin(slant) * len, y0 - kotlin.math.cos(slant) * len * 0.35f),
+                    1.6f,
+                )
+            }
+            for (i in 0 until 4) {                                  // 四角星
+                val fx = ((seed + i * 71) % 100) / 100f
+                val fy = ((seed + i * 17) % 100) / 100f
+                val cx = size.width * (0.08f + fx * 0.86f)
+                val cy = size.height * (0.12f + fy * 0.76f)
+                val r = size.height * (0.05f + 0.04f * fx) * (0.6f + 0.4f * k)
+                val p = Path()
+                p.moveTo(cx, cy - r); p.lineTo(cx + r * .28f, cy - r * .28f)
+                p.lineTo(cx + r, cy); p.lineTo(cx + r * .28f, cy + r * .28f)
+                p.lineTo(cx, cy + r); p.lineTo(cx - r * .28f, cy + r * .28f)
+                p.lineTo(cx - r, cy); p.lineTo(cx - r * .28f, cy - r * .28f); p.close()
+                drawPath(p, Color.White.copy(alpha = .75f * a))
+            }
+            for (i in 0 until 3) {                                  // 斜切色块
+                val fx = ((seed + i * 43) % 100) / 100f
+                val w = size.height * 0.16f
+                val cx = size.width * (0.12f + fx * 0.7f)
+                val cy = size.height * (0.35f + fx * 0.3f)
+                val p = Path()
+                p.moveTo(cx, cy - w); p.lineTo(cx + w * .7f, cy - w * .5f)
+                p.lineTo(cx + w * .2f, cy + w); p.lineTo(cx - w * .5f, cy + w * .4f); p.close()
+                drawPath(p, listOf(hot, warm, cool)[i].copy(alpha = .8f * a))
+            }
+        }
+        // 字：亮色填充 + 深描边 + 外发光。斜体和最重字重都用系统字，不带任何字形文件。
+        val style = MaterialTheme.typography.displaySmall.copy(
+            fontWeight = FontWeight.Black, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+        )
+        val alpha = (1f - (k - 0.65f).coerceAtLeast(0f) / 0.35f).coerceIn(0f, 1f)
+        val scale = if (!motion) 1f else 0.86f + 0.14f * (1f - (1f - k.coerceAtMost(0.3f) / 0.3f).let { it * it })
+        Box(
+            Modifier.align(Alignment.Center).graphicsLayer {
+                scaleX = scale; scaleY = scale
+                translationY = -size.height * 0.10f * k
+                this.alpha = alpha
+            },
+        ) {
+            Text(word, style = style.copy(color = Color(0xFF1B1206), drawStyle = Stroke(width = 9f)))
+            Text(word, style = style.copy(color = warm.copy(alpha = .55f), drawStyle = Stroke(width = 5f)))
+            Text(word, color = Color(0xFFFFF3E4), style = style)
+        }
     }
 }

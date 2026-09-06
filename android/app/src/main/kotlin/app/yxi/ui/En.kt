@@ -1442,6 +1442,8 @@ internal object En {
         "深渊 · 王棋彩框 · 第 %d 期" to "Abyss · King's Frame · Season %d",
         // 活动 · 云曦节拍（音游，cc-Yxi_Entertainment 2026-09-06）
         "云曦节拍" to "Yunxi Beat",
+        "连击 ×%.1f" to "Combo ×%.1f",
+        "计分方式换了：连击到 8 / 15 / 30 有加成，最好成绩重新算。已经领过的奖励不受影响。" to "Scoring changed: combos of 8 / 15 / 30 now add a multiplier, so best scores are recalculated. Rewards already granted are unaffected.",
         "手感调节" to "Feel",
         "试一下" to "Try it",
         "音符下落" to "Note speed",

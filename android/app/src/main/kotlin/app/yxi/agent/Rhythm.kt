@@ -32,25 +32,71 @@ object Rhythm {
         val gradeS: Float = 0.96f, val gradeA: Float = 0.90f, val gradeB: Float = 0.80f,
     )
 
+    /**
+     * 连击档位（老板 2026-09-06：连击 ×8 起分数倍率 1.2，×15、×30 再往上）。
+     * **从服务端下发**（rhythm.json），客户端不写死门槛和倍率 —— 老板玩过觉得不对，服务端改一行就生效。
+     *
+     * ⚠️ **服务端没下发就等于没有这套机制**：那时客户端**不乘倍率**，显示的分数和结算页一致。
+     *    宁可暂时没有倍率，也不能出现"游戏里 180 万、结算页 92 万"。
+     */
+    data class Tier(val combo: Int, val mult: Float, val word: String)   // 契约里叫 {at, mult, label}
+
+    @Volatile var tiers: List<Tier> = emptyList(); private set
+
+    /** [combo] 连时的倍率；没配置档位就是 1 */
+    fun multAt(combo: Int): Float = tiers.lastOrNull { combo >= it.combo }?.mult ?: 1f
+
+    /** 刚好踩到某一档的门槛 → 返回该档的词（用来跳夸奖词）；否则 null */
+    fun tierWord(combo: Int): String? = tiers.firstOrNull { it.combo == combo }?.word
+
     @Volatile var rules = Rules(); private set
 
-    /** 判定窗口（毫秒）。比常见音游宽一点：这是活动里随手玩两把的东西，不是竞技谱 */
-    const val PERFECT_MS = 80f
-    const val GOOD_MS = 160f
+    /**
+     * 判定窗口（毫秒）。比常见音游宽不少：这是活动里随手玩两把的东西，不是竞技谱。
+     *
+     * **老板 2026-09-06 拍板再放宽 50%**（80→120 / 160→240）。三件事说清楚：
+     * · 这是改**默认难度**，不是把窗口开放给用户调 —— 手感面板里依然没有这一项，
+     *   放开了等于自己给自己发 S，而服务端算分用的就是这套判定计数。
+     * · **旧成绩不用清**：分数公式、分母（units）、评级门槛一个都没动，尺度没变，
+     *   只是当时更难拿。调平衡不清档，这跟上次"units 变了要清"不是一回事（cc-logto_yxi 2026-09-06）。
+     * · 服务端**没有任何按窗口设的阈值**，窗口纯在客户端；准度普遍上升 = S 更好拿，
+     *   这正是老板要的方向。真觉得 S 太便宜了，服务端改一行 `grades` 配置就行，不用发版。
+     */
+    const val PERFECT_MS = 120f
+    const val GOOD_MS = 240f
 
     /** 音符从冒头到判定线的时间（秒）。越大越"慢"、越好读谱 */
     const val APPROACH = 1.6f
 
     enum class Judge { PERFECT, GOOD, MISS }
 
+    /**
+     * 四种音块（老板 2026-09-06 定的规格）。**颜色之外还要靠形状分得出** —— 色盲和强光下只看形状也行。
+     *
+     * | 名字 | 怎么打 | 判定数 |
+     * |---|---|---|
+     * | [TICK]  | 点一下 | 1 |
+     * | [SLIDE] | 长按 + 滑（按住不松） | **2**（头 + 尾） |
+     * | [TRACE] | 拖到目标轨 | 1 |
+     * | [SWIPE] | 落下时左滑或右滑 | 1 |
+     *
+     * ⚠️ 判定数（[Chart.units]）是服务端算分、校验计数、卡 maxCombo 上限的分母。
+     *    改了音块构成 = 改了 units，**必须先给 cc-logto_yxi 新的 charts-meta.json**，
+     *    等他更新 rhythm.json 之后客户端才能发版，否则线上提交全被判 bad_counts。
+     */
+    enum class Kind { TICK, SLIDE, TRACE, SWIPE }
+
     data class Note(
         val t: Float,          // 秒，音符该被击中的时刻
         val lane: Int,         // 0..3
-        val hold: Boolean,
-        val dur: Float,        // 秒，长按时长；不是长按就是 0
+        val kind: Kind,
+        val dur: Float,        // 秒，SLIDE 的长度；其余为 0
+        /** TRACE 要拖到哪条轨、SWIPE 要往哪边滑：-1 左 / +1 右；其余 0 */
+        val dir: Int = 0,
     ) {
+        val hold get() = kind == Kind.SLIDE
         var judged: Judge? = null
-        var tailDone = false   // 长按尾巴判过没有
+        var tailDone = false   // SLIDE 的尾巴判过没有
     }
 
     /**
@@ -103,7 +149,7 @@ object Rhythm {
             return deg to dy
         }
         val id get() = "${song}_$difficulty"
-        /** 长按算两个判定（头 + 尾），满分按这个数分 */
+        /** SLIDE 算两个判定（头 + 尾），满分按这个数分 */
         val units get() = notes.size + notes.count { it.hold }
     }
 
@@ -125,7 +171,14 @@ object Rhythm {
         for (i in 0 until arr.length()) {
             val o = arr.getJSONObject(i)
             val dur = o.optDouble("dur", 0.0).toFloat()
-            notes += Note(o.getDouble("t").toFloat(), o.getInt("lane"), o.optString("type") == "hold", dur)
+            // 兼容老谱面：只有 tap / hold 的那版，读成 TICK / SLIDE
+            val kind = when (o.optString("type")) {
+                "slide", "hold" -> Kind.SLIDE
+                "trace" -> Kind.TRACE
+                "swipe" -> Kind.SWIPE
+                else -> Kind.TICK
+            }
+            notes += Note(o.getDouble("t").toFloat(), o.getInt("lane"), kind, dur, o.optInt("dir", 0))
         }
         val lines = ArrayList<LineEvent>()
         j.optJSONArray("lines")?.let { la ->
@@ -193,6 +246,15 @@ object Rhythm {
                     (g?.optDouble("B", 0.80) ?: 0.80).toFloat(),
                 )
             }
+            // 档位在 rules.comboTiers 里（契约 logto_yxi/design/rhythm.md）：[{at, mult, label}, …]
+            o.optJSONObject("rules")?.optJSONArray("comboTiers")?.let { ta ->
+                val list = ArrayList<Tier>()
+                for (i in 0 until ta.length()) {
+                    val e = ta.getJSONObject(i)
+                    list += Tier(e.optInt("at"), e.optDouble("mult", 1.0).toFloat(), e.optString("label"))
+                }
+                tiers = list.sortedBy { it.combo }
+            }
             val arr = o.optJSONArray("charts") ?: return@runCatching true
             for (i in 0 until arr.length()) {
                 val c = arr.getJSONObject(i)
@@ -212,12 +274,19 @@ object Rhythm {
     }
 
     /** 交这一局的判定计数。返回服务端算出来的成绩 + 这次发了什么；网络不通返回 null（成绩只留本地）。 */
+    /**
+     * 交这一局。[hits] 是**判定序列**（每个判定一个字符 P/G/M，按判定发生的时间顺序，长度 == units）——
+     * 服务端拿它自己算连击、倍率、分数、准度、评级（cc-logto_yxi 2026-09-06 定的：
+     * 序列是原始事实，比"客户端算完的结论"少一个可以撒谎的入口，以后改计分规则也不用改协议）。
+     * 聚合计数照旧一起报，服务端两边一对，不一致就打回 —— 就是抓到过我长按尾判丢一个的那道闸门。
+     */
     suspend fun submit(
         ctx: Context, chartId: String, perfect: Int, good: Int, miss: Int, maxCombo: Int, elapsedMs: Int,
+        hits: String,
     ): Submitted? = withContext(Dispatchers.IO) {
         val body = JSONObject()
             .put("chartId", chartId).put("perfect", perfect).put("good", good).put("miss", miss)
-            .put("maxCombo", maxCombo).put("elapsedMs", elapsedMs)
+            .put("maxCombo", maxCombo).put("elapsedMs", elapsedMs).put("hits", hits)
             .put("requestId", UUID.randomUUID().toString()).toString()
         val (code, resp) = Account.apiRaw(ctx, "$BASE_PATH/plays", "POST", body) ?: return@withContext null
         runCatching {
