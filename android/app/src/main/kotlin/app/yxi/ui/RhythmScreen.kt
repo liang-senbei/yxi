@@ -256,8 +256,10 @@ private fun GameBoard(
     val view = LocalView.current
     val sfx = remember { RhythmSfx(ctx) }
     DisposableEffect(sfx) { onDispose { sfx.release() } }
-    val soundOn = remember { Rhythm.soundOn(ctx) }
-    val hapticOn = remember { Rhythm.hapticOn(ctx) }
+    // ⚠️ **不要 remember**：在结算页点「再来一次」会用同样的 song/difficulty 重进，
+    //    remember 会把上一局的开关值留着 —— 玩家刚在选曲页关掉音效，再来一局还在响。
+    val soundOn = Rhythm.soundOn(ctx)
+    val hapticOn = Rhythm.hapticOn(ctx)
     // 打击反馈：判定发生的那一瞬，声音和震动一起来 —— 这两样是"打击感"的主体，画面只是补
     DisposableEffect(live, soundOn, hapticOn) {
         live.onJudge = { j, _ ->
