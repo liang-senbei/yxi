@@ -54,12 +54,30 @@ data class Live(
          */
         fun inputEmpty(screen: String): Boolean? {
             if (screen.isBlank()) return null
+            // ⚠️⚠️ **选单/审批框也是两条横线夹着的**（Claude Code 的 AskUserQuestion、
+            //    计划审批、权限确认都自己画横线）。只看「横线之间有几行」的话，
+            //    这些屏一律被判成 `false` = 「输入框里还堆着东西」，
+            //    而调用方（[app.yxi.agent.SessionProbe.send]）看到 false 会**补一次回车** ——
+            //    那就是**替用户按下了默认选项**。审查用本仓库真实截屏验过：
+            //    计划审批框的默认行是「Yes, and use auto mode」，补的第一个回车就把它按了。
+            //    更要命的是通知里「回一句」那条路：代码**故意**对危险命令不给一键批准按钮
+            //    （见 EventService 里引的那次事故：脚本删掉了 authorized_keys），只给自由文本回复 ——
+            //    补回车正好从这条路把那道防线绕开。
+            //    **所以：只要屏上是个待选的框，就返回 null（我不知道），绝不返回 false。**
+            if (app.yxi.agent.Prompt.parse(screen) != null) return null
+
             val lines = screen.split('\n').map { it.trimEnd() }
             val dividers = lines.indices.filter { isDivider(lines[it]) }
             if (dividers.size < 2) return null
             val body = lines.subList(dividers[dividers.size - 2] + 1, dividers.last())
-            if (body.size != 1) return false          // 多行 = 输入框里堆着东西
-            return body[0].trimStart().removePrefix("❯").isBlank()
+            // ⚠️ 输入框的标志是**第一行以 ❯ 开头**。不长这样就不是输入框（是别的框），
+            //    返回 null —— 宁可不下结论，也不能让调用方去补回车。
+            // ⚠️⚠️ **但不能要求「只有一行」**：带附件的草稿本来就是多行的
+            //    （头部若干行路径 + 正文），那正是这个判据要抓的场景。
+            //    我第一版写成 `singleOrNull` 把它一起判成 null 了，被自己的用例当场抓住。
+            val first = body.firstOrNull()?.trimStart() ?: return null
+            if (!first.startsWith("❯")) return null
+            return body.joinToString("").trimStart().removePrefix("❯").isBlank()
         }
 
         /**

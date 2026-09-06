@@ -332,9 +332,13 @@ object SessionProbe {
                 false -> session.exec("tmux send-keys -t $t Enter")   // 还卡着 → 再按一次回车
             }
         }
-        // 补了三次还在框里 —— 如实返回失败，让上面把话还给用户
+        // 补了三次之后再看最后一眼。
+        // ⚠️ **这里也要先等**：前面每轮都等了 700/1200ms 正是为了让 tmux 重绘完；
+        //    最后一次不等的话，第三个回车其实已经提交了、但屏还没画出来 → 判成失败 →
+        //    上面把话还回输入框 → 用户再发一遍 → **重复消息**（审查指出来的）。
+        kotlinx.coroutines.delay(1200)
         app.yxi.agent.Live.inputEmpty(
-            runCatching { session.exec("tmux capture-pane -p -t $t") }.getOrNull().orEmpty()
+            app.yxi.ssh.catching { session.exec("tmux capture-pane -p -t $t") }.getOrNull().orEmpty()
         ) != false
     }
 

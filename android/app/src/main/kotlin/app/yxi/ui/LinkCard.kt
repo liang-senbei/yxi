@@ -116,13 +116,23 @@ private fun CardImage(url: String) {
     val ctx = LocalContext.current
     var bmp by remember(url) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
     LaunchedEffect(url) {
+        // ⚠️ **头图的地址是那个网页给的，不是我们选的** —— 一样要过闸门，
+        //    否则等于让手机去访问对方指定的任意地址（内网、本机都行）。审查指出来的。
+        if (!app.yxi.agent.LinkPreview.previewable(url)) return@LaunchedEffect
         bmp = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             runCatching {
                 val f = Me.cachedRemote(ctx, url)
                 if (!f.exists() || f.length() == 0L) {
                     java.net.URL(url).openStream().use { i -> f.outputStream().use { i.copyTo(it) } }
                 }
-                android.graphics.BitmapFactory.decodeFile(f.path)?.asImageBitmap()
+                // ⚠️ **先量尺寸再解码**：一张「小文件、超大分辨率」的图能把 App 撑 OOM。
+                //    压到最多 2048 宽，卡片只有 160dp 高，够用有余。
+                val meta = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                android.graphics.BitmapFactory.decodeFile(f.path, meta)
+                var k = 1
+                while (meta.outWidth / k > 2048 || meta.outHeight / k > 2048) k *= 2
+                val opt = android.graphics.BitmapFactory.Options().apply { inSampleSize = k }
+                android.graphics.BitmapFactory.decodeFile(f.path, opt)?.asImageBitmap()
             }.getOrNull()
         }
     }

@@ -367,7 +367,7 @@ class EventService : Service() {
         val text = RemoteInput.getResultsFromIntent(i)?.getCharSequence(KEY_REPLY)?.toString()?.trim().orEmpty()
         if (text.isBlank()) return
         val s = live[hostId] ?: run { note(t("连接不在了，没送出去")); return }
-        val ok = runCatching { SessionProbe.send(s, full, text); true }.getOrDefault(false)
+        val ok = app.yxi.ssh.catching { SessionProbe.send(s, full, text) }.getOrDefault(false)
         val short = full.removePrefix("cc-")
         if (ok) {
             waiting -= short; waits.remove(short); refreshOngoing()

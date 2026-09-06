@@ -1,5 +1,6 @@
 package app.yxi.agent
 
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -54,6 +55,45 @@ class LinkPreviewTest {
     @Test fun 用户名密码不能骗过主机判断() {
         assertFalse(LinkPreview.previewable("http://example.com@127.0.0.1/x"))
         assertFalse(LinkPreview.previewable("http://a:b@192.168.0.5:8080/x"))
+    }
+
+    /**
+     * **审查逐个实测能打到本机的九种写法** —— 每一种都配一条用例，
+     * 免得下次改闸门时又漏掉其中某一种。
+     * ⚠️ 这些不是理论：审查把它们喂给真的 curl 8.5.0，确认都到达了 127.0.0.1。
+     */
+    @Test fun 九种绕法都得拦住() {
+        listOf(
+            "http://[::ffff:127.0.0.1]/",   // IPv6 内嵌 IPv4 —— 原来方括号让主机塌成 "["
+            "http://[::1]:8080/",           // IPv6 本机
+            "http://2130706433/",           // 十进制整个地址
+            "http://0177.0.0.1/",           // 八进制
+            "http://0x7f.0.0.1/",           // 十六进制
+            "http://127.1/",                // 短写
+            "http://localhost./",           // 结尾一个点
+            "http://%6cocalhost/",          // 百分号编码
+            "http://0/",                    // 0 = 0.0.0.0 = 本机
+            "http://2852039166/",           // 十进制的 169.254.169.254（云元数据）
+            "http://0251.0376.0251.0376/",  // 八进制的同一个地址
+        ).forEach { assertFalse(it, LinkPreview.previewable(it)) }
+    }
+
+    /** 归一化本身也要对：别把正常公网地址误拦了。 */
+    @Test fun 公网地址不能误拦() {
+        listOf(
+            "https://veritickets.com/tw", "http://172.32.0.1/x", "http://8.8.8.8/",
+            "https://xn--fiqs8s.cn/", "http://[2001:4860:4860::8888]/",
+        ).forEach { assertTrue(it, LinkPreview.previewable(it)) }
+    }
+
+    /** IPv4 的各种写法要归一成同一个地址。 */
+    @Test fun 各种写法归一成同一个地址() {
+        val 本机 = intArrayOf(127, 0, 0, 1)
+        listOf("127.0.0.1", "2130706433", "0177.0.0.1", "0x7f.0.0.1", "127.1", "127.0.1")
+            .forEach { assertArrayEquals(it, 本机, LinkPreview.ipv4Of(it)) }
+        assertArrayEquals("0", intArrayOf(0, 0, 0, 0), LinkPreview.ipv4Of("0"))
+        assertNull("域名不是 IP", LinkPreview.ipv4Of("example.com"))
+        assertNull("段超过 255", LinkPreview.ipv4Of("999.1.1.1"))
     }
 
     @Test fun 从正文里挑网址() {
