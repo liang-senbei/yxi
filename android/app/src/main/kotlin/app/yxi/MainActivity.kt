@@ -519,6 +519,16 @@ private fun YxiDrawer(
             ) {
                 Box(Modifier.size(9.dp).clip(CircleShape).background(app.yxi.ui.hostColor(h.id)))
                 Text(h.alias, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                // 走 Tailscale 内网的标出来（老板 2026-09-06：「内网连的在侧边栏要标记」）。
+                // ⚠️ 用 tertiary 不用 secondary —— 选中那一行的底色就是 secondaryContainer，
+                //    拿同一个色当药丸底会糊成一片看不见。
+                if (h.viaTailscale) Text(
+                    t("内网"),
+                    Modifier.clip(RoundedCornerShape(100.dp))
+                        .background(MaterialTheme.colorScheme.tertiaryContainer).padding(8.dp, 2.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
                 if (on) Text("✓", color = MaterialTheme.colorScheme.onSecondaryContainer)
             }
         }
