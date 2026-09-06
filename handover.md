@@ -98,6 +98,20 @@
 - **底光节奏**（老板定稿）：每次打中闪一小下（150ms，+0.15）；跳档闪得更猛（600ms，+0.9，带琥珀）**而且亮度保持在新档上**（每档 +0.2，断连归零）。
 - ⚠️ **手感（判定宽窄 / 音效延迟 / 震动）不在网页上定**，那三样浏览器和原生差最多，留在 App 的手感面板。
 
+## 音游画面按试验台重写 —— 进行中（cc-Yxi，2026-09-06 晚开工）
+
+**目标**：`ui/RhythmScreen.kt` 的画面部分照 `bench-final-20260906` 重写；判定 / 算分 / 上报（`agent/Rhythm.kt` 的 hits 序列、`Live`、`hitLane`/`judgeMisses`）不动，服务端不用改。
+**拆法**（新包 `ui/rhythm/`，每个文件能单独编译）：
+1. `StageGlow.kt` —— 底光（ThinkingGlow 移植：四团独立相位、色相 6s 一圈、连击→亮度、每下小闪、跳档猛闪+琥珀+台阶）
+2. `Notes.kt` —— 薄片音符 + ‹› 尖角 + trace 抓握纹 + swipe 两款标记（反向尾迹 / 风偏，随机）
+3. `HitFx.kt` —— 九款点击特效 + 宿主层统一（尺度归一 / 淡出包络 / 起手白芯）
+4. `Shatter.kt` —— 八款碎裂（命中时音符本体散掉）
+5. `Words.kt` —— 评价词 / 连击数字 / 倍率的字（粗斜体白字 + 深描边 + 首字母橙 + 三道斜线）
+6. `RhythmScreen.kt` 改：判定线纯白发丝；编舞（去 ±9° 限制、加 MOVE_X、竖线 / 翻面；输入按线的坐标系）；长按持续特效；竖向校准线按档概率；无线时刻；trace = 落线时按着就算；swipe 窗口 ±360ms + 手势 3% / 0.45s；slide 期间不出别的块（这条是谱面生成的事，标给 Entertainment 的脚本）
+7. `Rhythm.kt` 改：`LineOp.MOVE_X`；`Chart.approach`（谱面字段，没有就用默认）；`SWIPE_MS`
+**关卡**：opus 审查 + Mac 模拟器 E2E（判定序列长度 == units 不变、服务端不打回）+ 全套测试；真机由老板验手感。
+**接手要点**：Entertainment 交接的六条坑在 2026-09-06 的 hub 消息里，摘要：固定深色不用主题 getter · 衰减按时间 · 每帧状态别进 composition · `next[lane]` 只让 judgeMisses 写 · 覆盖层走 Dialog · 结算用 currentScore()。
+
 ## 进度
 - ✅ **1.1.12（versionCode 168）已发布**（2026-09-05）：
   - **对话页跳到几周前对话修复（#273 真根因）**：心跳空行字节漂移 → offset 超文件大小 → GNU tail `file truncated` 从 0 重放。修：空行不计字节 + `streamFrom` 起点夹到文件大小。Mac E2E 三轮全过。
