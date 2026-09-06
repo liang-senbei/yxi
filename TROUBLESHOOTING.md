@@ -5247,3 +5247,59 @@ adb 读 stdin，把还没执行的脚本正文当输入吞了。**修法**：脚
 
 顺带记一笔没查透的：一次 `assembleDebug` 里 Kotlin 守护进程报 `Backend Internal error: Exception during IR lowering` → `Daemon compilation failed`，
 Gradle 回退进程内编译后 BUILD SUCCESSFUL、包是新的；`touch` 一个文件重编不复现（内容没变 UP-TO-DATE）。再遇到先 `./gradlew --stop` 清守护进程重编。
+
+## #277 「上传失败」里最难看的一半:它根本不失败,它永远转圈(第三轮修上传)
+
+**症状**(老板 2026-09-06,第三次报):「一次上传很多图片还是失败,上传视频也还是失败」。前两轮修过 OOM(#267)和
+共享通道(#115),还是不行。
+
+**怎么抓到的**:Mac mini 模拟器 `adb emu network speed 1500:8000` + `delay 200:600`(模拟蜂窝),传输中途
+`speed 1:1` 断流 8 秒。旧包报 `inputstream is closed`;放宽保活后**变成十分钟一个文件都没传完**。
+`kill -3` 抓线程栈:
+
+```
+DefaultDispatcher-worker-1  TimedWaiting
+  java.io.PipedInputStream.read          ← 没有超时,只是 wait(1000) 循环等下去
+  com.jcraft.jsch.ChannelSftp.fill
+  com.jcraft.jsch.ChannelSftp.header
+  com.jcraft.jsch.ChannelSftp.checkStatus ← 在等一个永远不会来的 SFTP 应答
+"Connect thread ... session"  Native      ← 会话线程卡在原生 socket 写上
+```
+
+**根因(两层)**:
+1. **SFTP 的数据路径上没有任何超时**。链路一僵,`checkStatus` 就在管道流上无限等。
+2. **jsch 自己的保活这时候是失效的**:TCP 发送缓冲被塞满 → 会话线程卡在 native 写 → 心跳包发不出去 →
+   `serverAliveCountMax` 那套判死逻辑压根轮不到执行。**指望 SSH 层报错是不成立的。**
+
+所以用户看到的不是错误提示,是**附件卡片永远停在「传输中」、发送键永远灰着、一个字的解释都没有**。
+他把这个叫「上传失败」。
+
+**修法**(`agent/Uploader.kt`,新文件):
+- **没进度就掐**:60 秒没有任何字节动静 → 关通道(jsch 会关掉管道流,阻塞的 read 立刻抛);还不醒 →
+  断整条连接,交给重连看门狗;下一次尝试**从断点续传**,传过的字节不白费。
+- 收拾动作**扔独立守护线程**,不能 `launch` 成子协程 —— `coroutineScope` 会等所有子协程结束,
+  而关通道自己也可能卡住,那等于把「永远转圈」原样换个地方又造一遍(自己差点写出来)。
+- 顺带:传大文件期间把 `serverAliveCountMax` 从 2 放宽到 20(2s×20=40s)。**光这一条不够**
+  (上面第 2 层),但能挡住「慢链路上一次正常抖动就把连接判死」。字节码确认 jsch 在会话循环里
+  每次超时都现读这个字段,运行时改立刻生效。
+- 重试逻辑从 `ChatScreen` 的 Composable 里抽进 `Uploader`:**原来它测不着**,修没修全靠读代码判断。
+  `ShareActivity`(系统分享面板那条路)也切过来了 —— 它原来是一条共用通道 + 单次尝试。
+
+**测试**(`androidTest/UploadStressTest.kt`):
+- opus 审查指出原来那条「断流」测试**在链路没真出事时一次就成功、重试一行都没跑到**(会假过)。
+  补了两条**不靠网络**的确定性故障注入:① `aliveSsh` 前两次返回 null(连接还没回来)→ 必须等而不是判失败;
+  ② 传到一半直接 `disconnect()` → 必须重连 + 续传,且**服务器上的大小一字不差**(续传偏移算错的话
+  文件是坏的,而界面还会显示成功)。
+
+**一般规律**:**凡是阻塞等待远端应答的地方,都要有一个自己说了算的超时。** 别人的库(jsch)承诺的
+liveness,在它自己被网络卡住的时候是不成立的。判断「卡住」用**有没有进度**,不用「连接是否还活着」——
+后者在僵死连接上永远回答「活着」。
+
+**和 #276 是一件事的两面**(cc-Yxi 同日踩的):SSH 层**既不会及时报错**(本条),**报的错也丢了信息**
+(`SshSession.exec` 连接死掉时返回空串,调用方分不清「命令真没输出」和「连接断了」)。所以凡是靠
+exec / SFTP 判断状态的地方,都要让被读的那头**留下可区分的痕迹**(cc-Yxi 的做法:让命令自己打
+`__ALIVE__` / `__GONE__`),别从「没有」里推结论。
+
+**还没做的**(cc-Yxi_pilot 2026-09-06 提):`exec` 那条路(Connect.status 探状态、TailscaleStatus.fetch、
+微信探密钥)同样是在流上无限等,链路一僵面板就一直转圈。要做就在 `app.yxi.ssh` 里做一个统一的
+「多久没进展就判死」包装,别在每个调用点各写一个 `withTimeout`(会漏)。这次只修了上传这条路。

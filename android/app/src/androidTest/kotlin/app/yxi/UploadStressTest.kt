@@ -8,6 +8,8 @@ import app.yxi.ssh.SshSession
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -119,10 +121,138 @@ class UploadStressTest {
         } finally { s.disconnect() }
     }
 
+    /**
+     * ⚠️ 文件**故意小**(12 × 0.5MB):这条验的是「一批里每个文件各开一条通道」——通道开关、
+     * 保活在传/不传之间来回切。真吞吐由上面那条 8MB 负责;慢网 × 大文件一条要跑 25 分钟,测试循环里没法用。
+     */
+    /**
+     * **重试确定性验证之一:连接还没回来时要等,不能当场判失败。**
+     * 不靠限速、不靠断流 —— 直接让 `aliveSsh` 前两次返回 null(= 看门狗还没重连上),
+     * 第三次才给真连接。审查(2026-09-06)指出原来那条「断流」测试在链路没真出事时
+     * **一次就成功、重试逻辑一行都没跑到**,所以补这条。
+     */
+    @Test fun retry_waitsForReconnect_thenSucceeds(): Unit = runBlocking {
+        val s = connect()
+        try {
+            val f = blob(1.0)
+            try {
+                var calls = 0
+                val waited = ArrayList<Long>()
+                val r = app.yxi.agent.Uploader.upload(
+                    aliveSsh = { wait -> waited += wait; if (++calls <= 2) null else s },
+                    open = { f.inputStream().buffered() },
+                    total = f.length(),
+                    sessionName = "cc-upload-stress", name = "reconnect.bin",
+                    index = 1, isImage = false, stamp = "stress-" + System.nanoTime(),
+                    pause = { },                       // 别真等 1/2 秒,测的是逻辑不是时钟
+                )
+                val st = r.getOrElse { throw AssertionError("等到连接回来之后应该传成功：$it", it) }
+                assertEquals("应该正好试到第 3 次", 3, calls)
+                assertEquals("第一次不等,后面每次都给 30 秒窗口", listOf(0L, 30_000L, 30_000L), waited)
+                val sf = s.openSftp()
+                try { assertEquals("大小要一字不差", f.length(), sf.size(st.remotePath)); runCatching { sf.rm(st.remotePath) } }
+                finally { sf.close() }
+            } finally { f.delete() }
+        } finally { s.disconnect() }
+    }
+
+    /**
+     * **重试确定性验证之二:传到一半连接断掉,要重连 + 从断点续上,而且文件必须是完整的。**
+     * 这条是「上传视频失败」的正脸:不靠限速,直接在传输中途把 SSH 连接掐了。
+     * 断点续传如果算错偏移,大小对不上 —— 服务器上那份就是坏的,而界面还会显示成功。
+     */
+    @Test fun resume_afterMidTransferDisconnect_fileIsIntact(): Unit = runBlocking {
+        var cur = connect()
+        val first = cur
+        try {
+            val f = blob(48.0)                       // 局域网 3MB/s ≈ 16 秒,够在中途掐一刀
+            try {
+                var reconnects = 0
+                val killer = launch {
+                    delay(4_000)
+                    android.util.Log.i("UploadStress", "掐断连接(模拟切基站/进电梯)")
+                    runCatching { cur.disconnect() }
+                }
+                val r = app.yxi.agent.Uploader.upload(
+                    aliveSsh = { wait ->
+                        val t1 = System.currentTimeMillis()
+                        var got: app.yxi.ssh.SshSession? = null
+                        while (true) {
+                            if (cur.isAlive) { got = cur; break }
+                            val fresh = runCatching { connect() }.getOrNull()
+                            if (fresh != null) { cur = fresh; reconnects++; got = fresh; break }
+                            if (System.currentTimeMillis() - t1 >= wait) break
+                            delay(500)
+                        }
+                        got
+                    },
+                    open = { f.inputStream().buffered() },
+                    total = f.length(),
+                    sessionName = "cc-upload-stress", name = "resume.bin",
+                    index = 1, isImage = false, stamp = "stress-" + System.nanoTime(),
+                )
+                killer.cancel()
+                val st = r.getOrElse { throw AssertionError("断一次之后应该续传成功：$it", it) }
+                assertTrue("应该真的重连过(否则这条测试没测到东西)", reconnects >= 1)
+                val sf = cur.openSftp()
+                try {
+                    assertEquals("续传后大小必须一字不差", f.length(), sf.size(st.remotePath))
+                    runCatching { sf.rm(st.remotePath) }
+                } finally { sf.close() }
+                android.util.Log.i("UploadStress", "断线续传 OK,重连 $reconnects 次")
+            } finally { f.delete() }
+        } finally { runCatching { cur.disconnect() }; runCatching { first.disconnect() } }
+    }
+
+    /**
+     * **走 App 真正的重试路径**([Uploader.upload]):断了换新通道、从断点续传,最多 6 次。
+     * 上面那几条只调 [Attachments.upload](单次尝试),验的是传输本身;这条验的是**用户看到的结果** ——
+     * 链路抖一下到底还能不能传完。用户报的「一次上传很多图片还是失败」就是这条路。
+     */
+    @Test fun retry_12files_survivesAStall(): Unit = runBlocking {
+        // ⚠️ aliveSsh 要**会重连** —— App 里断线后看门狗会换一条新连接,测试不重连就等于
+        //    把「断了之后还能不能传完」这条路测没了(卡死看门狗掐断连接后正是走这条)
+        var cur = connect()
+        val s = cur
+        try {
+            val files = List(12) { blob(0.5) }
+            try {
+                files.forEachIndexed { i, f ->
+                    val t0 = System.currentTimeMillis()
+                    val r = app.yxi.agent.Uploader.upload(
+                        aliveSsh = { wait ->
+                            val t1 = System.currentTimeMillis()
+                            var got: app.yxi.ssh.SshSession? = null
+                            while (got == null) {
+                                if (cur.isAlive) { got = cur; break }
+                                runCatching { cur = connect() }.onFailure {
+                                    if (System.currentTimeMillis() - t1 >= wait) return@upload null
+                                    kotlinx.coroutines.delay(1000)
+                                }
+                            }
+                            got
+                        },
+                        open = { f.inputStream().buffered() },
+                        total = f.length(),
+                        sessionName = "cc-upload-stress", name = "retry-$i.bin",
+                        index = 1, isImage = false, stamp = "stress-" + System.nanoTime(),
+                    )
+                    val st = r.getOrElse { throw AssertionError("第 ${i + 1}/12 个最终还是失败了：$it", it) }
+                    val sf = cur.openSftp()
+                    try {
+                        assertEquals("第 ${i + 1} 个：服务器上的大小和本地对不上", f.length(), sf.size(st.remotePath))
+                        runCatching { sf.rm(st.remotePath) }
+                    } finally { sf.close() }
+                    android.util.Log.i("UploadStress", "重试路径 ${i + 1}/12：${System.currentTimeMillis() - t0} ms")
+                }
+            } finally { files.forEach { it.delete() } }
+        } finally { runCatching { cur.disconnect() }; runCatching { s.disconnect() } }
+    }
+
     @Test fun slow12x2MB_batch_likeAPhotoBatch(): Unit = runBlocking {
         val s = connect()
         try {
-            val files = List(12) { blob(2.0) }
+            val files = List(12) { blob(0.5) }
             try {
                 var i = 0
                 for (f in files) {

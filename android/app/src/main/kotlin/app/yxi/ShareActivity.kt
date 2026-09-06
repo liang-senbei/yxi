@@ -118,37 +118,57 @@ private fun SharePicker(store: HostStore, keys: KeyManager, text: String?, uris:
 
             withContext(Dispatchers.IO) {
                 if (uris.isEmpty()) return@withContext
-                val sftp = runCatching { s.openSftp() }.getOrNull()
-                if (sftp == null) { firstErr = t("开不了 SFTP 通道"); failed = uris.size; return@withContext }
-                try {
-                    for (uri in uris) {
-                        // ⚠️ 只收 content:。别的 App 能显式 Intent 打过来塞 `file:///data/data/app.yxi/…`，
-                        //    而 openInputStream 用的是**我们自己的 UID** —— 等于替它读我们的私有文件
-                        //    （confused deputy，2026-09-04 安全审计）。
-                        if (uri.scheme != "content") { failed++; continue }
-                        // ⚠️ **一张失败不能拖垮其余的**：每张各自 try，失败只记一笔继续下一张。
-                        val one = runCatching {
-                            // ⚠️ 流式，不 readBytes —— 分享一段视频过来原来就是在这儿 OOM 的（Sftp.write 那条注释）
-                            val size = ctx.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
-                            val input = ctx.contentResolver.openInputStream(uri) ?: error(t("这个文件读不出来"))
-                            val mime = ctx.contentResolver.getType(uri).orEmpty()
-                            val isImage = mime.startsWith("image/")
-                            val name = uri.lastPathSegment?.substringAfterLast('/') ?: if (isImage) "image" else "file"
-                            val stamp = java.text.SimpleDateFormat("MMdd-HHmmss-SSS", java.util.Locale.US).format(java.util.Date())
-                            Attachments.upload(
-                                sftp, target.name, name, input, size,
-                                staged.count { it.isImage == isImage } + 1, isImage, stamp,
-                            )
-                        }
-                        one.getOrNull()?.let { staged += it; uploaded++ }
-                            ?: run {
-                                failed++
-                                if (firstErr == null) {
-                                    firstErr = one.exceptionOrNull()?.let { app.yxi.ssh.Sftp.explain(it) }
-                                }
-                            }
+                // ⚠️ **和对话页走同一套重试**([app.yxi.agent.Uploader]):断了等重连、换新通道、从断点续传、
+                //    没进度就掐。原来这条路是**一条共用通道 + 单次尝试** —— 通道一坏,剩下的全部失败;
+                //    网络抖一下,那个文件直接算失败还不续传。从分享面板甩一段视频 / 一次甩十几张图
+                //    走的正是这里(审查 2026-09-06 指出这是上一轮修复漏掉的一半)。
+                var live: SshSession? = s
+                val alive: suspend (Long) -> SshSession? = { wait ->
+                    val t0 = System.currentTimeMillis()
+                    var got: SshSession? = null
+                    while (true) {
+                        live?.takeIf { it.isAlive }?.let { got = it; break }
+                        val h = host
+                        val fresh = if (h == null) null else runCatching {
+                            val cfg = store.configFor(h, keys) ?: return@runCatching null
+                            val sess = SshSession(cfg, KnownHosts(store, h.id, null))
+                            sess.connect(); sess
+                        }.getOrNull()
+                        if (fresh != null) { live = fresh; got = fresh; break }
+                        if (System.currentTimeMillis() - t0 >= wait) break
+                        kotlinx.coroutines.delay(1000)
                     }
-                } finally { runCatching { sftp.close() } }
+                    got
+                }
+                for (uri in uris) {
+                    // ⚠️ 只收 content:。别的 App 能显式 Intent 打过来塞 `file:///data/data/app.yxi/…`，
+                    //    而 openInputStream 用的是**我们自己的 UID** —— 等于替它读我们的私有文件
+                    //    （confused deputy，2026-09-04 安全审计）。
+                    if (uri.scheme != "content") { failed++; continue }
+                    // ⚠️ **一张失败不能拖垮其余的**：每张各自算，失败只记一笔继续下一张。
+                    val size = runCatching {
+                        ctx.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
+                    }.getOrDefault(-1L)
+                    if (size <= 0L) { failed++; if (firstErr == null) firstErr = t("这个文件读不出来"); continue }
+                    val mime = ctx.contentResolver.getType(uri).orEmpty()
+                    val isImage = mime.startsWith("image/")
+                    val name = uri.lastPathSegment?.substringAfterLast('/') ?: if (isImage) "image" else "file"
+                    val stamp = java.text.SimpleDateFormat("MMdd-HHmmss-SSS", java.util.Locale.US).format(java.util.Date())
+                    val one = app.yxi.agent.Uploader.upload(
+                        aliveSsh = alive,
+                        // 流式，不 readBytes —— 分享一段视频过来原来就是在这儿 OOM 的（Sftp.write 那条注释）
+                        open = { ctx.contentResolver.openInputStream(uri) ?: error(t("这个文件读不出来")) },
+                        total = size, sessionName = target.name, name = name,
+                        index = staged.count { it.isImage == isImage } + 1, isImage = isImage, stamp = stamp,
+                    )
+                    one.getOrNull()?.let { staged += it; uploaded++ }
+                        ?: run {
+                            failed++
+                            if (firstErr == null) {
+                                firstErr = one.exceptionOrNull()?.let { app.yxi.agent.Uploader.explain(it) }
+                            }
+                        }
+                }
             }
 
             val body = if (staged.isEmpty()) text.orEmpty()
