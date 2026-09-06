@@ -200,6 +200,15 @@ private fun GameBoard(
     val laneBg = MaterialTheme.colorScheme.surfaceContainerLow
     val noteColor = MaterialTheme.colorScheme.primary
     val judgeColor = Copper                              // ⚠️ Copper/Muted 是 @Composable getter，Canvas 的 lambda 里取不到，先在这儿取出来
+    // 关了系统动画的人：**音符照落**（那是玩法本身，停了就没法玩了），
+    // 但轨道的击中余光这类纯装饰不画。STYLE.md 那条管的是装饰，不是内容。
+    val motion = remember {
+        runCatching {
+            android.provider.Settings.Global.getFloat(
+                ctx.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f,
+            ) != 0f
+        }.getOrDefault(true)
+    }
 
     val mp = remember { runCatching { MediaPlayer.create(ctx, song.raw) }.getOrNull() }
     DisposableEffect(mp) { onDispose { mp?.let { runCatching { it.stop() }; it.release() } } }
@@ -263,7 +272,7 @@ private fun GameBoard(
             // 轨道分隔
             for (i in 1..3) drawLine(ink.copy(alpha = .07f), Offset(laneW * i, 0f), Offset(laneW * i, size.height), 2f)
             // 击中余光
-            for (l in 0..3) {
+            if (motion) for (l in 0..3) {
                 val age = now - live.flash[l]
                 if (age in 0f..0.18f) drawRect(
                     noteColor.copy(alpha = .18f * (1 - age / 0.18f)),
