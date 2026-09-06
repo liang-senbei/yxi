@@ -307,9 +307,21 @@ class Flow(
     var opened by mutableStateOf(false)
     /** 粘回去的码被拒了之类的提示（空 = 没有）。⚠️ 没有它，粘错码只会看到输入框被清空、什么都不说（模拟器实测）。 */
     var hint by mutableStateOf("")
+    /**
+     * 「交上去」之后的中性反馈（空 = 没有）。⚠️ 跟 [hint] 分开：那个是红色的「你错了」，
+     * 这个是「收到了，等结果」。没有它，点完「交上去」输入框和按钮一起消失、
+     * 上面还写着「等浏览器那边授权…」—— 用户完全看不出到底交没交上（老板 2026-09-06 报的）。
+     */
+    var note by mutableStateOf("")
     private var job: Job? = null
     private var port: Int? = null
     private val tmux = Connect.tmuxFor(service.key)
+
+    init {
+        // ⚠️ 开新流程时把上一次遗留的回调丢掉：浏览器可能在没开框的时候把 localhost 地址
+        //    交给过我们（那会儿没人接），留着的话会被下一个流程当成自己的结果吃掉。
+        Connect.pendingRedirect = null
+    }
 
     init { job = scope.launch { runCatching { run() }.onFailure { step = Step.Done(false, it.message ?: "?") } } }
 
@@ -431,7 +443,7 @@ class Flow(
             val pane = ssh.exec(Connect.peekCommand(tmux))
             // 登录成功后有的工具会停在「Press Enter to continue」—— 替用户按了，不然要等到超时
             if (pane.contains("Press Enter to continue")) ssh.exec(Connect.enterCommand(tmux))
-            if (pane.contains("Invalid code")) hint = t("码不对 —— 回页面把整串码重新复制一遍")
+            if (pane.contains("Invalid code")) { note = ""; hint = t("码不对 —— 回页面把整串码重新复制一遍") }
             when (Connect.parseDone(pane)) {
                 true -> { val msg = after(); finish(); step = Step.Done(true, msg); onChanged(); return }
                 false -> { finish(); step = Step.Done(false, Connect.failReason(pane)); return }
@@ -444,7 +456,17 @@ class Flow(
 
     /** 退路：把浏览器地址栏那串 localhost 地址粘回去 */
     fun paste(redirectUrl: String) {
-        scope.launch { ssh.exec(Connect.pasteCommand(service.key, redirectUrl)) }
+        scope.launch {
+            hint = ""; note = t("交上去了，等结果…")
+            // ⚠️ 先确认服务器那头还在：会话早没了的话 send-keys 是**静默的空操作**，
+            //    用户会盯着「等着」一直等到 10 分钟超时，什么都不知道。
+            val pane = ssh.exec(Connect.peekCommand(tmux))
+            if (pane.isBlank()) {
+                note = ""; hint = t("服务器那头的流程已经结束了 —— 关掉重来一次")
+                return@launch
+            }
+            ssh.exec(Connect.pasteCommand(service.key, redirectUrl))
+        }
     }
 
     private suspend fun finish() {
@@ -463,6 +485,14 @@ class Flow(
 private fun FlowDialog(f: Flow, onClose: () -> Unit, onOpen: (String) -> Unit, onCopy: (String) -> Unit) {
     var pasted by remember { mutableStateOf("") }
     val step = f.step
+    // 浏览器把 http://localhost:<口>/callback 交给 Yxi 了（manifest 那条 intent-filter）——
+    // 等于替用户按了「交上去」，省掉手抄地址。只在等授权那一步收，别的步骤丢掉就好。
+    LaunchedEffect(app.yxi.agent.Connect.pendingRedirect, step) {
+        val url = app.yxi.agent.Connect.pendingRedirect ?: return@LaunchedEffect
+        if (step !is Flow.Step.Authorize) return@LaunchedEffect
+        app.yxi.agent.Connect.pendingRedirect = null
+        f.paste(url)
+    }
     AlertDialog(
         onDismissRequest = onClose,
         title = { Text(t("连接 %s").format(f.service.name)) },
@@ -497,8 +527,9 @@ private fun FlowDialog(f: Flow, onClose: () -> Unit, onOpen: (String) -> Unit, o
                             singleLine = true,
                         )
                         if (f.hint.isNotEmpty()) Text(f.hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                        if (f.note.isNotEmpty()) Text(f.note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
                         if (if (step.code) pasted.isNotBlank() else pasted.startsWith("http")) {
-                            TextButton(onClick = { f.hint = ""; f.paste(pasted.trim()); pasted = "" }) { Text(t("交上去")) }
+                            TextButton(onClick = { f.paste(pasted.trim()); pasted = "" }) { Text(t("交上去")) }
                         }
                     }
                     is Flow.Step.Done -> Text(step.message, color = if (step.ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
@@ -508,12 +539,12 @@ private fun FlowDialog(f: Flow, onClose: () -> Unit, onOpen: (String) -> Unit, o
         confirmButton = {
             when (step) {
                 is Flow.Step.Code -> TextButton(onClick = { onCopy(step.code); f.opened = true; onOpen(step.url) }) { Text(t("复制码并打开 %s").format(f.service.name)) }
-                is Flow.Step.Authorize -> TextButton(onClick = { f.opened = true; onOpen(step.url) }) { Text(t("去浏览器授权")) }
+                is Flow.Step.Authorize -> TextButton(onClick = { f.opened = true; onOpen(step.url) }) { Text(t("认证")) }
                 is Flow.Step.Done -> TextButton(onClick = onClose) { Text(t("好")) }
                 is Flow.Step.Working -> {}
             }
         },
-        dismissButton = { if (step !is Flow.Step.Done) TextButton(onClick = onClose) { Text(t("先关掉")) } },
+        dismissButton = { if (step !is Flow.Step.Done) TextButton(onClick = onClose) { Text(t("关掉")) } },
     )
 }
 

@@ -1,5 +1,7 @@
 package app.yxi.agent
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import app.yxi.ssh.SshSession
 
 /**
@@ -271,6 +273,16 @@ object Connect {
     /** 屏幕上的授权 URL（含 redirect_uri 那条），没出来就 null。 */
     fun loginUrl(pane: String): String? =
         Regex("""https://\S+redirect_uri\S*""").find(pane)?.value?.trimEnd('.', ',', ')')
+
+    /**
+     * 浏览器把 `http://localhost:<口>/callback?code=…` 交给我们时先落在这儿，
+     * [app.yxi.ui.ConnectPanel] 里正开着的流程取走它，等于替用户按了「交上去」。
+     *
+     * ⚠️ 有些浏览器（荣耀自带的、各种应用内 WebView）不自己跳 localhost，
+     *    而是弹「使用以下方式打开」让用户挑 App —— 挑不到 Yxi 的话这一步就断了，
+     *    用户只能手抄地址回填（老板 2026-09-06 截图报的就是这个）。
+     */
+    var pendingRedirect by androidx.compose.runtime.mutableStateOf<String?>(null)
 
     /** 回调端口：`redirect_uri=http%3A%2F%2Flocalhost%3A64202%2Fcallback` */
     fun callbackPort(url: String): Int? =

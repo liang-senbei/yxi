@@ -85,7 +85,15 @@ class MainActivity : ComponentActivity() {
 
     /** 浏览器登录完会跳回 `io.yxi.app://callback?code=…`（manifest 里那条 intent-filter） */
     private fun readAuth(i: AndroidIntent?) {
-        i?.data?.let { if (it.scheme == "io.yxi.app") app.yxi.agent.Account.pendingCallback = it }
+        val u = i?.data ?: return
+        when {
+            // 我们自己的登录回调
+            u.scheme == "io.yxi.app" -> app.yxi.agent.Account.pendingCallback = u
+            // MCP 认证：浏览器把 http://localhost:<口>/callback?code=… 交给我们，
+            // 直接塞给正开着的连接流程 —— 省掉用户手抄地址回填那一步。
+            u.scheme == "http" && u.host == "localhost" && u.path == "/callback" ->
+                app.yxi.agent.Connect.pendingRedirect = u.toString()
+        }
     }
 
     override fun onNewIntent(intent: AndroidIntent) {

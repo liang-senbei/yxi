@@ -23,6 +23,8 @@
          12 用 SCHEDULE_EXACT_ALARM（默认已授）。见 yunxi/Reminders.kt -->
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
+    <!-- 云曦天气「用当前位置」：只要粗略定位（城市级），且只在用户点那个按钮时申请（老板 2026-09-06 拍板要定位）。见 yunxi/Weather.kt locate() -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <!-- 直接对本应用弹「后台不受限制」的授权框。
          ⚠️ 没有这条权限，那个 intent 会被拒，只能退回到「已放行应用列表」——
          而我们还没被放行，用户在那个列表里根本找不到这个 App。见 TROUBLESHOOTING #74 -->
@@ -63,6 +65,16 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="io.yxi.app" android:host="callback" />
+            </intent-filter>
+            <!-- MCP 认证跳回来：http://localhost:<口>/callback?code=…
+                 有些浏览器不自己跳 localhost，而是弹「使用以下方式打开」——
+                 没有这条，选单里没有 Yxi，用户只能手抄地址回填（老板 2026-09-06 报的）。
+                 ⚠️ 不写端口 = 任意端口都匹配；路径钉死 /callback，别把整个 localhost 都接过来。 -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" android:host="localhost" android:path="/callback" />
             </intent-filter>
         </activity>
 

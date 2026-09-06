@@ -267,7 +267,7 @@ fun SetupDialog(ssh: SshSession?, claude: Boolean = true, codex: Boolean = true,
             if (done != null) TextButton(onClick = { onClose(done) }) { Text(t("好")) }
         },
         dismissButton = {
-            if (done == null) TextButton(onClick = { onClose(null) }) { Text(t("先关掉（后台继续装）")) }
+            if (done == null) TextButton(onClick = { onClose(null) }) { Text(t("关掉（后台继续装）")) }
         },
     )
 }
