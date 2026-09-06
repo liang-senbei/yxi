@@ -135,6 +135,11 @@ object Rhythm {
         val difficulty: String, val offset: Float, val notes: List<Note>,
         /** 判定线的动作，按时间排好 */
         val lines: List<LineEvent> = emptyList(),
+        /**
+         * 下落时长（秒）。**谱面 / 难度的参数**（老板 2026-09-06：「根据关卡和难度来定义更好，比较容易随时改动」），
+         * 谱面里没写的老谱用手感面板那个值。
+         */
+        val approach: Float? = null,
     ) {
         /** [now] 时刻的线姿态：转了多少度、往下挪了多少（屏幕高度的比例） */
         fun poseAt(now: Float): Pair<Float, Float> {
@@ -153,13 +158,24 @@ object Rhythm {
         val units get() = notes.size + notes.count { it.hold }
     }
 
-    data class Song(val id: String, val zh: String, val raw: Int, val bpm: Int, val seconds: Int)
+    /**
+     * @param credit 外来曲子的署名（授权条款要求的原话，选曲页原样显示）；自家曲子为空。
+     *               魔王魂：「音楽：魔王魂」（规约要求尽量署名；商用 / 游戏免费，禁流媒体发行和转卖）。
+     *               授权证据在 `design/music/licenses/`。
+     */
+    data class Song(val id: String, val zh: String, val raw: Int, val bpm: Int, val seconds: Int, val credit: String = "")
 
-    /** 三首曲子。加曲子 = 跑一次生成脚本 + 往这儿加一行 */
+    /** 曲子列表。加曲子的完整步骤见 design/rhythm-spec.md §6.3（谱面 + 服务端 charts-meta 都要跟上） */
     val SONGS = listOf(
         Song("snow", "初雪", app.yxi.R.raw.yx_snow, 96, 63),
         Song("yunxi", "云曦", app.yxi.R.raw.yx_yunxi, 128, 63),
         Song("abyss", "入渊", app.yxi.R.raw.yx_abyss, 152, 66),
+        // 老板 2026-09-06：从免费商用池挑五首做关卡。全部来自魔王魂（短版），带人声
+        Song("shining", "シャイニングスター", app.yxi.R.raw.yx_shining, 158, 94, "音楽：魔王魂"),
+        Song("burning", "Burning Heart", app.yxi.R.raw.yx_burning, 142, 118, "音楽：魔王魂"),
+        Song("count", "12345", app.yxi.R.raw.yx_count, 195, 93, "音楽：魔王魂"),
+        Song("hikari", "ヒカリトリガー", app.yxi.R.raw.yx_hikari, 108, 99, "音楽：魔王魂"),
+        Song("piece", "Piece Maker", app.yxi.R.raw.yx_piece, 117, 101, "音楽：魔王魂"),
     )
 
     val DIFFS = listOf("easy", "hard")
@@ -193,7 +209,8 @@ object Rhythm {
             }
         }
         return Chart(j.getString("song"), j.getString("zh"), j.getInt("bpm"),
-            j.getString("difficulty"), j.optDouble("offset", 0.0).toFloat(), notes, lines.sortedBy { it.t })
+            j.getString("difficulty"), j.optDouble("offset", 0.0).toFloat(), notes, lines.sortedBy { it.t },
+            approach = if (j.has("approach")) j.getDouble("approach").toFloat() else null)
     }
 
     // ── 计分（确定性，跟深渊一个原则：不掺随机）─────────────────────────────

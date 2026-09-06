@@ -12,6 +12,7 @@ package app.yxi.ui
 internal object En {
     val map: Map<String, String> = mapOf(
         "语言" to "Language",
+        "跟着拍子点四条轨。曲子有我们自己写的，也有魔王魂的免费曲（署名在曲名下）。" to "Tap the four lanes to the beat. Some songs are ours, some are free tracks from Maou Damashii (credited under the title).",
         "临时会话没开成：%s" to "Couldn't start scratch session: %s",
         "包对不上（校验失败），没装 —— 换个网络再试一次" to "Checksum mismatch — not installed. Try another network.",
         "这个包的签名跟本机不一致，没装" to "That package is signed by someone else — not installed.",

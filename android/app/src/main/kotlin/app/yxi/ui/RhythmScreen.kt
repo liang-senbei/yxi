@@ -154,7 +154,7 @@ private fun SongList(synced: Int, onPick: (Rhythm.Song, String) -> Unit, modifie
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
         Text(t("云曦节拍"), Modifier.padding(20.dp, 18.dp, 20.dp, 4.dp), style = MaterialTheme.typography.headlineMedium)
         Text(
-            t("跟着拍子点四条轨。曲子是我们自己写的。"),
+            t("跟着拍子点四条轨。曲子有我们自己写的，也有魔王魂的免费曲（署名在曲名下）。"),
             Modifier.padding(20.dp, 0.dp, 20.dp, 14.dp),
             style = MaterialTheme.typography.bodyMedium, color = Muted,
         )
@@ -169,6 +169,8 @@ private fun SongList(synced: Int, onPick: (Rhythm.Song, String) -> Unit, modifie
                         Text(t(s.zh), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                         Text(t("%d BPM · %d 秒").format(s.bpm, s.seconds), style = MaterialTheme.typography.labelSmall, color = Muted)
                     }
+                    // 外来曲子的署名：授权条款要求的原话，原样显示（design/music/licenses/）
+                    if (s.credit.isNotBlank()) Text(s.credit, style = MaterialTheme.typography.labelSmall, color = Muted)
                     Spacer(Modifier.height(10.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Rhythm.DIFFS.forEach { d ->
@@ -375,7 +377,8 @@ private fun GameBoard(
     val hapticLv = if (Rhythm.hapticOn(ctx)) Rhythm.haptic(ctx) else 0
     val fxScale = Rhythm.fxScale(ctx)
     val lineScale = Rhythm.lineScale(ctx)
-    val approach = Rhythm.approach(ctx)
+    // 下落时长：谱面里写了就听谱面的（老板：按关卡和难度定），老谱没写才用手感面板那个值
+    val approach = chart.approach ?: Rhythm.approach(ctx)
     // 打击反馈：判定发生的那一瞬，声音和震动一起来 —— 这两样是"打击感"的主体，画面只是补
     DisposableEffect(live, soundVol, hapticLv) {
         live.onJudge = { j, _, kind ->

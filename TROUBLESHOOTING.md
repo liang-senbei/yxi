@@ -5508,3 +5508,10 @@ for d in $(unzip -l $A | awk '/classes.*dex/{print $4}'); do unzip -p $A $d | gr
   ```
   不再用「收尾提交以来」。⚠️ tag 打错位置（指到收尾提交或 HEAD）这条口径就又坏了，和现在一样 —— 打完顺手 `git show <tag> --stat` 看一眼是不是那个提交。
   ⚠️ 没有 tag 的那些老版本（1.1.17 及以前）别硬用 tag 口径倒推，回去查包：`ls -l` 看 APK 建于何时 + `unzip -p app-release.apk 'classes*.dex' | grep -a <改动里的新字符串>`。
+
+## #291 Kotlin 的块注释会嵌套 —— 注释里写个 `*.js` 路径，整个文件后半截都成了注释
+
+- **症状**：`Fx.kt:62:1 Syntax error: Unclosed comment`，同时别的文件里 `Named` / `HitFx` 全部 Unresolved —— 三个正在移植的子 agent 同时编不过，看着像他们的问题。
+- **根因**：Kotlin 的 `/* */` **允许嵌套**（Java 不允许）。文档注释里写了 `design/hit/*.js`，其中的 `/*` 又开了一层注释，之后再也没有配对的 `*/`，编译器把后面所有代码都当注释吃了。
+- **修法**：注释里别出现 `/*`（路径通配写成「design/hit 目录里的 js」）。查法：`grep -n '/\*' 文件` 看有没有多出来的开头。
+- **教训**：多人同时编一个模块时，**先怀疑共享文件**。三个人同时红，大概率是同一个源头。

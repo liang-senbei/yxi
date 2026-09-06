@@ -5,7 +5,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 
 /**
  * 音游特效的契约 —— 跟网页试验台（`design/rhythm-bench.src.html`，tag `bench-final-20260906`）**一字不差**。
- * 老板在网页上挑定的那些特效（`design/hit/*.js`、`design/shatter/*.js`、`design/swipe/*.js`）
+ * 老板在网页上挑定的那些特效（design/hit、design/shatter、design/swipe 三个目录里的 js）
  * 按这个契约逐个移植成 Kotlin；改动效先改网页给老板看，定了再搬过来。
  *
  * 三条硬规矩（试验台里就是这么约束的）：
