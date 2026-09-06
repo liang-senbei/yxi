@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>swipe 方向标记 · 20 款</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;background:#0b0d12;color:#E8EDF5;font:14px/1.5 system-ui,-apple-system,"PingFang SC","Noto Sans CJK SC",sans-serif;
+    -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+  header{padding:calc(14px + env(safe-area-inset-top)) 18px 6px}
+  h1{margin:0;font-size:16px;font-weight:500;letter-spacing:.02em}
+  .sub{color:#7E8798;font-size:12px;font-weight:300;margin-top:2px}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;padding:8px 18px 4px;align-items:center}
+  .bar button{padding:6px 12px;border-radius:100px;border:1px solid #ffffff1c;background:#ffffff08;color:#AEB7C6;font-size:12px;font-weight:300}
+  .bar button.on{background:#E8EDF5;color:#0b0d12;border-color:#E8EDF5;font-weight:500}
+  .bar .sp{flex:1}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;padding:10px 18px calc(24px + env(safe-area-inset-bottom))}
+  .cell{position:relative;background:#10141c;border:1px solid #ffffff10;border-radius:14px;overflow:hidden;aspect-ratio:16/9}
+  .cell canvas{display:block;width:100%;height:100%}
+  .cell .cap{position:absolute;left:0;right:0;bottom:0;padding:8px 10px 9px;background:linear-gradient(transparent,#0b0d12e6 55%);pointer-events:none}
+  .cell .n{font-size:13px;font-weight:500}
+  .cell .d{font-size:11px;color:#8FA0B8;font-weight:300;line-height:1.4;margin-top:1px}
+  .cell .idx{position:absolute;top:8px;left:10px;font-size:11px;color:#7E8798;font-variant-numeric:tabular-nums;letter-spacing:.06em}
+  .cell.fav{border-color:#FDBE5A88}
+  .cell .star{position:absolute;top:6px;right:8px;width:28px;height:28px;border-radius:100px;border:0;background:transparent;color:#ffffff55;font-size:16px;line-height:28px;text-align:center}
+  .cell.fav .star{color:#FDBE5A}
+  .none{padding:40px 18px;color:#7E8798;text-align:center;font-weight:300}
+</style>
+</head>
+<body>
+<header>
+  <h1>swipe 方向标记 · 20 款</h1>
+  <div class="sub">每格里音符不停往判定线落，左右方向轮着来。「远看」把画面缩到四分之一——远处也得分得出左右。☆ 收藏，收藏完点「复制收藏」发我。</div>
+</header>
+<div class="bar">
+  <button id="far">远看</button>
+  <button id="still">静止</button>
+  <span class="sp"></span>
+  <button id="copy">复制收藏</button>
+</div>
+<div class="grid" id="grid"></div>
+<div class="none" id="none" hidden>一个设计都没加载到 —— 子 agent 的文件还没并进来。</div>
+
+<!-- SWIPE_MODULES -->
+
+<script>
+"use strict";
+const COLOR = '#9EE6A8';                // swipe 的定色（浅绿）
+const FALL = 1400, LOOP = 800;          // 落一趟 1.4 秒；标记自己的动态 0.8 秒一圈
+let far = false, still = false;
+const list = (window.SWIPE || []).slice(0, 40);
+const grid = document.getElementById('grid');
+if (!list.length) document.getElementById('none').hidden = false;
+
+function rngOf(seed){ let a = (seed*4294967296)>>>0; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+let favs = new Set(); try{ favs = new Set(JSON.parse(localStorage.getItem('swipe-favs')||'[]')); }catch(e){}
+
+const cells = list.map((fx, i) => {
+  const cell = document.createElement('div'); cell.className = 'cell' + (favs.has(fx.name)?' fav':'');
+  cell.innerHTML = `<canvas></canvas><span class="idx">${String(i+1).padStart(2,'0')}</span><button class="star">★</button>
+    <div class="cap"><div class="n">${fx.name}</div><div class="d">${fx.desc||''}</div></div>`;
+  grid.appendChild(cell);
+  const cv = cell.querySelector('canvas'), ctx = cv.getContext('2d');
+  cell.querySelector('.star').addEventListener('click', () => {
+    if (favs.has(fx.name)) favs.delete(fx.name); else favs.add(fx.name);
+    cell.classList.toggle('fav', favs.has(fx.name));
+    try{ localStorage.setItem('swipe-favs', JSON.stringify([...favs])); }catch(err){} });
+  return {fx, cv, ctx, seed: 0.37 + i*0.031};
+});
+function sizeAll(){
+  const dpr = Math.min(devicePixelRatio||1, 2.5);
+  for (const c of cells){ const w=c.cv.clientWidth, h=c.cv.clientHeight;
+    if (c.cv.width !== Math.round(w*dpr)){ c.cv.width=Math.round(w*dpr); c.cv.height=Math.round(h*dpr); }
+    c.ctx.setTransform(dpr,0,0,dpr,0,0); }
+}
+addEventListener('resize', sizeAll); sizeAll();
+
+function frame(now){
+  const t = (now % LOOP) / LOOP;
+  const pass = Math.floor(now / FALL), k = (now % FALL) / FALL;     // 第几趟、落到哪
+  for (const c of cells){
+    const {ctx, cv} = c, W = cv.clientWidth, H = cv.clientHeight;
+    ctx.clearRect(0,0,W,H);
+    const sc = far ? 0.25 : 1;                                       // 「远看」：整格缩到 1/4
+    ctx.save(); ctx.translate(W*(1-sc)/2, H*(1-sc)/2); ctx.scale(sc, sc);
+    // 舞台：判定线 + 两条轨道分隔线（很淡）
+    const lineY = H*0.78, laneW = W/2, laneX = W/4;
+    ctx.strokeStyle='rgba(232,237,245,.08)'; ctx.lineWidth=1;
+    [laneX, laneX+laneW].forEach(x => { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,lineY); ctx.stroke(); });
+    ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.globalAlpha=.9;
+    ctx.beginPath(); ctx.moveTo(0,lineY); ctx.lineTo(W,lineY); ctx.stroke(); ctx.globalAlpha=1;
+    // 两个音符：一左一右，错开落
+    const w = Math.min(90, laneW*0.6), h = 9;
+    const specs = still ? [[-1, lineY*0.45], [1, lineY*0.72]]
+                        : [[pass%2 ? 1 : -1, lineY*Math.min(1, k*1.05)], [pass%2 ? -1 : 1, lineY*Math.min(1, ((k+0.5)%1)*1.05)]];
+    specs.forEach(([dir, y], j) => {
+      if (y >= lineY) return;
+      const x = laneX + laneW/2 + (j ? 0 : 0);
+      const note = {x, y, w, h, color:COLOR, dir, lineY, laneX, laneW};
+      ctx.save();
+      try { c.fx.draw(ctx, note, t, rngOf(c.seed + j*0.5)); }
+      catch(e){ ctx.restore(); ctx.save(); ctx.fillStyle='#E5484D'; ctx.font='11px system-ui'; ctx.fillText('出错：'+(e.message||e).slice(0,40), 8, 16); }
+      ctx.restore();
+    });
+    ctx.restore();
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+document.getElementById('far').onclick = e => { far = !far; e.target.classList.toggle('on', far); };
+document.getElementById('still').onclick = e => { still = !still; e.target.classList.toggle('on', still); };
+document.getElementById('copy').onclick = async () => {
+  const txt = 'swipe 标记收藏：' + ([...favs].length ? [...favs].join('、') : '（还没收藏）');
+  try{ await navigator.clipboard.writeText(txt); document.getElementById('copy').textContent='复制好了'; } catch(e){ alert(txt); }
+};
+</script>
+</body>
+</html>
