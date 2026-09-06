@@ -2786,6 +2786,12 @@ const pickBy = (arr, names) => names.map(n => (arr||[]).find(f => f.name===n)).f
 const SWIPE_CHOSEN   = pickBy(window.SWIPE,   ['反向尾迹','风偏']);
 const SHATTER_CHOSEN = pickBy(window.SHATTER, ['方粒四散','切片错位','冲击光尘','扫描消散','溶解成光','樱瓣飘落','水晶棱柱','压扁弹回']);
 const HIT_CHOSEN     = pickBy(window.HITFX,   ['快门','六边框','三角翻转','均衡器','方粒','火花','螺旋尘','聚爆','碎环']);   // 点击特效九款随机；「现在用的」那款退役
+// 九款出自五个人之手，放一起不齐。统一三样（不改他们的代码，只在宿主这层包）：
+//   · 尺度：按各组自报的撑满直径把每款归一到 ≈4.6u（frames 5.0~5.5u、particles 5.1~5.5u、rings ≤4.8u、lines ≤5u、flares ≈5u）
+//   · 淡出：共用一条包络 —— 头 0.15 全亮，之后 (1-t)^1.2；各款自己的淡出叠在这上面，尾巴就齐了
+//   · 起手：共用一记白芯闪（0~0.08，噪点大小），九款有同一个「打到了」的第一帧
+const HIT_SCALE = {'快门':.92, '六边框':.86, '三角翻转':.86, '均衡器':.95, '方粒':.86, '火花':.86, '螺旋尘':.84, '聚爆':.86, '碎环':.96};
+const hitEnvelope = k => k < 0.15 ? 1 : Math.pow(1 - (k-0.15)/0.85, 1.2);
 const pick = arr => arr[(Math.random()*arr.length)|0];
 function rngOf(seed){ let a=(seed*4294967296)>>>0; return () => { a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
 
@@ -3224,9 +3230,17 @@ function drawBurst(b, age, cx, cy, h, sk){
   const col = b.judge==='perfect' ? sk.hit.perfect : sk.hit.good;
   const tint = S.skin==='yunxi' ? mixHex(col, sk.note[b.kind], 0.35) : col;   // 云曦皮：爆点带一点音符自己的颜色（别太淡）
   if (b.fx){
-    // 老板选的九款之一（design/hit/*.js，契约：原点在命中点、u 基本尺度、t 0..1）
+    // 老板选的九款之一（design/hit/*.js，契约：原点在命中点、u 基本尺度、t 0..1）—— 外面包一层统一手感
     ctx.save(); ctx.translate(cx, cy);
-    try { b.fx.draw(ctx, {u: u/1.3, color: tint, judge: b.judge, noteH: h}, k, rngOf(b.seed)); } catch(e){}
+    ctx.globalAlpha = hitEnvelope(k);
+    try { b.fx.draw(ctx, {u: (u/1.3)*(HIT_SCALE[b.fx.name]||.9), color: tint, judge: b.judge, noteH: h}, k, rngOf(b.seed)); } catch(e){}
+    ctx.globalAlpha = 1;
+    if (k < 0.08){                                   // 共用的起手白芯：九款同一个第一帧
+      const f = 1 - k/0.08, r = h*0.9*(0.6+0.4*f);
+      const g = ctx.createRadialGradient(0,0,0,0,0,r*2.2);
+      g.addColorStop(0, `rgba(255,255,255,${.9*f})`); g.addColorStop(.4, `rgba(255,255,255,${.35*f})`); g.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0,0,r*2.2,0,6.283); ctx.fill();
+    }
     ctx.restore();
     return;
   }
@@ -3292,18 +3306,22 @@ function drawHud(t, sk){
   ctx.fillText(String(score).padStart(7,'0'), W-18, H*0.075);
   // 曲名 / 难度：下面两角
   ctx.textAlign='left'; ctx.font = thin(H*0.03, 300); ctx.fillStyle='rgba(232,237,245,.6)';
-  ctx.fillText(S.skin==='yunxi' ? '云曦节拍 · 试验台' : 'Confusion', 18, H-H*0.05);
-  ctx.textAlign='right'; ctx.fillText(S.skin==='yunxi' ? '试验 Lv.4' : 'EZ Lv.4', W-18, H-H*0.05);
-  // 连击：正中，细体大数字 + 小字 COMBO
+  ctx.fillText(S.skin==='yunxi' ? 'Yxi Dancing Beat' : 'Confusion', 18, H-H*0.05);       // 英文名（老板：左下角用英文，yxi…dancing）
+  ctx.textAlign='right'; ctx.fillText(S.skin==='yunxi' ? 'Lab · Lv.4' : 'EZ Lv.4', W-18, H-H*0.05);
+  // 连击：正中。云曦皮用评价词那套字（粗斜体白字 + 深色描边，老板：连击字体跟 Miss / Perfect 一样）；原味皮还是细体
   if (combo >= 3){
     const lastHit = Math.max(...flash), pop = Math.max(0, 1-(t-lastHit)/0.10);
     ctx.textAlign='center';
-    ctx.font = thin(H*0.11*(1+0.06*pop), 300); ctx.fillStyle='rgba(232,237,245,.95)';
-    ctx.fillText(String(combo), W/2, H*0.10);
+    if (S.skin==='yunxi'){
+      boldWord(String(combo), W/2, H*0.11, H*0.115*(1+0.06*pop), '#FFFFFF', 1);
+    } else {
+      ctx.font = thin(H*0.11*(1+0.06*pop), 300); ctx.fillStyle='rgba(232,237,245,.95)';
+      ctx.fillText(String(combo), W/2, H*0.10);
+    }
     ctx.font = `500 ${Math.round(H*0.022)}px system-ui,sans-serif`; ctx.fillStyle='rgba(232,237,245,.5)';
     ctx.letterSpacing = '0.18em'; ctx.fillText('COMBO', W/2, H*0.185); ctx.letterSpacing = '0px';
     const m = multOf(combo);
-    if (m>1 && S.skin==='yunxi'){ ctx.font = thin(H*0.03, 400); ctx.fillStyle = 'rgba(253,190,90,.9)'; ctx.fillText(`×${m.toFixed(1)}`, W/2, H*0.24); }
+    if (m>1 && S.skin==='yunxi') boldWord(`×${m.toFixed(1)}`, W/2, H*0.245, H*0.038, '#FDBE5A', .95);
   }
   // 评价词
   for (const w of words){
@@ -3314,6 +3332,16 @@ function drawHud(t, sk){
   ctx.restore();
 }
 
+// 评价词那套字（老板的参考图）：粗斜体、深色细描边、白填充 —— 连击数字、倍率也用它
+function boldWord(text, x, y, size, fill, alpha){
+  ctx.save(); ctx.globalAlpha = alpha;
+  ctx.translate(x, y); ctx.transform(1,0,-0.22,1,0,0);
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.font = `800 ${Math.round(size)}px "Helvetica Neue",Arial,system-ui,sans-serif`;
+  ctx.lineJoin='round'; ctx.strokeStyle='rgba(20,24,34,.85)'; ctx.lineWidth = size*0.06;
+  ctx.strokeText(text, 0, 0); ctx.fillStyle = fill; ctx.fillText(text, 0, 0);
+  ctx.restore();
+}
 // 评价词（原味）：细体、居中、淡出
 function judgeWordPlain(w, k){
   if (!w.big) return;
