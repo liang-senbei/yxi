@@ -88,6 +88,44 @@ fun RhythmScreen(modifier: Modifier = Modifier) {
 
     BackHandler(enabled = playing != null || result != null) { playing = null; result = null }
 
+    // ── 横屏（老板 2026-09-06 看了 Phigros 之后定的：音游要横版）──
+    // **打谱面和结算页都横着**，回到选曲页才转回来 —— 一局打完手机还横在手里，
+    // 结果页却竖过来，那一下很难受。
+    // ① 还原写在 onDispose 里：**怎么离开都还原**（返回键、手势、切后台、被杀），
+    //    还原成 UNSPECIFIED 而不是硬写 PORTRAIT，免得跟以后的横屏页打架。
+    // ② **不要**去 Manifest 给 Activity 加 screenOrientation，那会影响所有页面。
+    // ③ ⚠️ 依赖 MainActivity 的 `android:configChanges="orientation|screenSize|…"`：
+    //    有它转屏才不重建 Activity，正在打的这一局才不会被清掉。这一页 rememberSaveable 用量是 0，
+    //    哪天有人删了那行 configChanges，转屏的一瞬间整局游戏会丢干净。删之前先来改这里。
+    val activity = remember(ctx) {
+        generateSequence(ctx) { (it as? android.content.ContextWrapper)?.baseContext }
+            .filterIsInstance<android.app.Activity>().firstOrNull()
+    }
+    val landscape = playing != null || result != null
+    DisposableEffect(activity, landscape) {
+        val oldOri = activity?.requestedOrientation
+        val w = activity?.window
+        val c = w?.let { androidx.core.view.WindowInsetsControllerCompat(it, it.decorView) }
+        val oldCut = w?.attributes?.layoutInDisplayCutoutMode
+        if (landscape) {
+            activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            if (android.os.Build.VERSION.SDK_INT >= 28) w?.attributes = w.attributes?.apply {
+                layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+            c?.hide(androidx.core.view.WindowInsetsCompat.Type.statusBars())
+            c?.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+        onDispose {
+            if (landscape) {
+                activity?.requestedOrientation = oldOri ?: android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                c?.show(androidx.core.view.WindowInsetsCompat.Type.statusBars())
+                if (android.os.Build.VERSION.SDK_INT >= 28 && oldCut != null) {
+                    w?.attributes = w.attributes?.apply { layoutInDisplayCutoutMode = oldCut }
+                }
+            }
+        }
+    }
+
     val r = result
     val p = playing
     when {
@@ -267,40 +305,6 @@ private fun GameBoard(
     // ⚠️ 写在指针回调、读在 Canvas 的绘制 lambda —— **两边都在主线程**（Compose 的指针输入和绘制
     //    都跑在 UI 线程），所以裸数组就够，不需要 @Volatile / snapshotFlow。
     //    改成 Compose 状态反而更糟：它每帧都变，读在组合期就是每帧重组整页（见 TROUBLESHOOTING #13）。
-    // ── 横屏（老板 2026-09-06 看了 Phigros 之后定的：音游要横版）──
-    // 整个 App 是竖屏的，只有这一页转过去。三条前提：
-    // ① 还原写在 onDispose 里 —— 页面**怎么离开都还原**（返回键、手势、切后台、被杀），
-    //    不能只挂在「退出」按钮上；还原成 UNSPECIFIED 而不是硬写 PORTRAIT，免得跟以后的横屏页打架。
-    // ② **不要**去 Manifest 给 Activity 加 screenOrientation —— 那会影响所有页面。
-    // ③ ⚠️ **依赖 MainActivity 的 `android:configChanges="orientation|screenSize|…"`**：
-    //    有它转屏才不重建 Activity，正在打的这一局才不会被清掉。这一页 rememberSaveable 用量是 0，
-    //    哪天有人删了那行 configChanges，转屏的一瞬间整局游戏会丢干净。删之前先来改这里。
-    val activity = remember(ctx) { generateSequence(ctx) { (it as? android.content.ContextWrapper)?.baseContext }
-        .filterIsInstance<android.app.Activity>().firstOrNull() }
-    DisposableEffect(activity) {
-        val old = activity?.requestedOrientation
-        activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-        onDispose { activity?.requestedOrientation = old ?: android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED }
-    }
-
-    // 状态栏收起来（横屏玩的时候顶上那条信号电量很碍眼）；跟朝向一样，离开就还原
-    DisposableEffect(activity) {
-        val w = activity?.window
-        val c = w?.let { androidx.core.view.WindowInsetsControllerCompat(it, it.decorView) }
-        val oldCut = w?.attributes?.layoutInDisplayCutoutMode
-        if (android.os.Build.VERSION.SDK_INT >= 28) w?.attributes = w.attributes?.apply {
-            layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-        }
-        c?.hide(androidx.core.view.WindowInsetsCompat.Type.statusBars())
-        c?.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        onDispose {
-            c?.show(androidx.core.view.WindowInsetsCompat.Type.statusBars())
-            if (android.os.Build.VERSION.SDK_INT >= 28 && oldCut != null) {
-                w?.attributes = w.attributes?.apply { layoutInDisplayCutoutMode = oldCut }
-            }
-        }
-    }
-
     val press = remember { FloatArray(4) { -9f } }
     val view = LocalView.current
     val sfx = remember { RhythmSfx(ctx) }
@@ -644,67 +648,98 @@ private fun ResultCard(
     val r = sent?.result?.copy(
         perfect = local.perfect, good = local.good, miss = local.miss, medianErrMs = local.medianErrMs,
     ) ?: local
-    Column(
-        modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+
+    // 结算页跟着谱面一起横着（打完一局手机还横在手里）。底色沿用舞台的深色，
+    // 从游戏切过来不会闪一下白。⚠️ 所以这一页也**不能用主题色 getter**。
+    val ink = Color(0xFFE8EDF5)
+    val bg = Color(0xFF0E1117)
+    val accent = Color(0xFFFFB787)
+    val amber = Color(0xFFFFC46B)
+    val motion = remember {
+        runCatching {
+            android.provider.Settings.Global.getFloat(
+                ctx.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f,
+            ) != 0f
+        }.getOrDefault(true)
+    }
+    var shown by remember { mutableStateOf(!motion) }
+    LaunchedEffect(Unit) { shown = true }
+    val pop by animateFloatAsState(if (shown) 1f else 0.7f, tween(if (motion) 260 else 0), label = "rank")
+
+    Row(
+        modifier.fillMaxSize().background(bg).padding(32.dp, 20.dp),
+        horizontalArrangement = Arrangement.spacedBy(28.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Spacer(Modifier.height(40.dp))
-        val motion = remember {
-            runCatching {
-                android.provider.Settings.Global.getFloat(
-                    ctx.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f,
-                ) != 0f
-            }.getOrDefault(true)
+        // 左：评级 + 曲名。评级是这一页的主角，占一半高度
+        Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                r.rank,
+                Modifier.graphicsLayer {
+                    scaleX = pop; scaleY = pop; alpha = ((pop - 0.7f) / 0.3f).coerceIn(0f, 1f)
+                },
+                style = MaterialTheme.typography.displayLarge, color = accent, fontWeight = FontWeight.Bold,
+            )
+            Text(
+                t(chartId.substringBefore('_').let { id -> Rhythm.SONGS.first { it.id == id }.zh }) +
+                    " · " + t(if (chartId.endsWith("hard")) "认真" else "轻松"),
+                style = MaterialTheme.typography.labelMedium, color = ink.copy(alpha = .6f),
+            )
         }
-        var shown by remember { mutableStateOf(!motion) }
-        LaunchedEffect(Unit) { shown = true }
-        val pop by animateFloatAsState(if (shown) 1f else 0.7f, tween(if (motion) 260 else 0), label = "rank")
-        Text(
-            r.rank, Modifier.graphicsLayer { scaleX = pop; scaleY = pop; alpha = ((pop - 0.7f) / 0.3f).coerceIn(0f, 1f) },
-            style = MaterialTheme.typography.displayLarge, color = Copper, fontWeight = FontWeight.Bold,
-        )
-        Text("${r.score}", style = MaterialTheme.typography.headlineMedium, fontFamily = FontFamily.Monospace)
-        Text(t("准度 %.1f%%").format(r.acc * 100), style = MaterialTheme.typography.titleMedium, color = Amber)
-        Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-            Stat(t("完美"), r.perfect); Stat(t("不错"), r.good); Stat(t("漏了"), r.miss); Stat(t("连击"), r.maxCombo)
-        }
-        // 成绩上传的状态：发了什么、没发成为什么，都摆出来
-        val up = sent
-        Text(
-            when {
-                sending -> t("正在交成绩…")
-                up == null -> t("没连上服务器 —— 成绩只留在这台手机上，也没发奖励。")
-                up.error != null -> up.error
-                up.granted.isEmpty() -> t("成绩已记到账号上。")
-                else -> t("拿到了：%s").format(up.granted.joinToString("、"))
-            },
-            style = MaterialTheme.typography.labelMedium,
-            color = if (up?.granted?.isNotEmpty() == true) Amber else Muted,
-        )
-        // 判定偏差大到该校准了就直说，别让人以为是自己手残
-        if (abs(r.medianErrMs) >= 30) Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = RoundedCornerShape(16.dp),
-        ) {
-            Column(Modifier.padding(16.dp, 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        // 右：分数 · 准度 · 四个计数 · 上传状态 · 校准提示 · 两个按钮
+        Column(Modifier.weight(1.6f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                "%07d".format(r.score),
+                style = MaterialTheme.typography.displaySmall, fontFamily = FontFamily.Monospace, color = ink,
+            )
+            Text(t("准度 %.1f%%").format(r.acc * 100), style = MaterialTheme.typography.titleMedium, color = amber)
+            Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                Stat(t("完美"), r.perfect, ink); Stat(t("不错"), r.good, ink)
+                Stat(t("漏了"), r.miss, ink); Stat(t("连击"), r.maxCombo, ink)
+            }
+            val up = sent
+            Text(
+                when {
+                    sending -> t("正在交成绩…")
+                    up == null -> t("没连上服务器 —— 成绩只留在这台手机上，也没发奖励。")
+                    up.error != null -> up.error
+                    up.granted.isEmpty() -> t("成绩已记到账号上。")
+                    else -> t("拿到了：%s").format(up.granted.joinToString("、"))
+                },
+                style = MaterialTheme.typography.labelMedium,
+                color = if (up?.granted?.isNotEmpty() == true) amber else ink.copy(alpha = .55f),
+            )
+            // 判定偏差大到该校准了就直说，别让人以为是自己手残
+            if (abs(r.medianErrMs) >= 30) Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    t(if (r.medianErrMs > 0) "这局你平均按晚了 %d 毫秒" else "这局你平均按早了 %d 毫秒").format(abs(r.medianErrMs)),
-                    style = MaterialTheme.typography.bodyMedium,
+                    t(if (r.medianErrMs > 0) "这局你平均按晚了 %d 毫秒" else "这局你平均按早了 %d 毫秒")
+                        .format(abs(r.medianErrMs)),
+                    style = MaterialTheme.typography.labelMedium, color = ink.copy(alpha = .75f),
                 )
-                TextButton({ off -= r.medianErrMs; Rhythm.setOffsetMs(ctx, off) }) { Text(t("按这个校准判定")) }
+                TextButton({ off -= r.medianErrMs; Rhythm.setOffsetMs(ctx, off) }) {
+                    Text(t("按这个校准判定"), color = accent)
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                // 这一页是固定深色，按钮也别用主题主色（浅色皮肤下它是 Google 蓝，在这儿跳戏）
+                Button(
+                    onAgain,
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                        containerColor = accent, contentColor = Color(0xFF2A1C0E),
+                    ),
+                ) { Text(t("再来一次")) }
+                TextButton(onBack) { Text(t("换一首"), color = ink.copy(alpha = .7f)) }
             }
         }
-        Spacer(Modifier.height(8.dp))
-        Button(onAgain) { Text(t("再来一次")) }
-        TextButton(onBack) { Text(t("换一首")) }
     }
 }
 
 @Composable
-private fun Stat(label: String, v: Int) {
+private fun Stat(label: String, v: Int, ink: Color) {
+    // 大数字压小标签（标签约四成大小）—— 参考里那套两层排布确实好读，借这个，不借它的斜切
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("$v", style = MaterialTheme.typography.titleMedium)
-        Text(label, style = MaterialTheme.typography.labelSmall, color = Muted)
+        Text("$v", style = MaterialTheme.typography.titleLarge, color = ink)
+        Text(label, style = MaterialTheme.typography.labelSmall, color = ink.copy(alpha = .5f))
     }
 }
 
