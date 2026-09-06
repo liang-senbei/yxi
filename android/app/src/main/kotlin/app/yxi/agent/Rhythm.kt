@@ -226,5 +226,11 @@ object Rhythm {
      */
     fun offsetMs(ctx: Context): Int = p(ctx).getInt("rhythm.offset", 0)
 
+    /** 打击音效 / 震动的开关（默认都开；有人要安静地玩） */
+    fun soundOn(ctx: Context) = p(ctx).getBoolean("rhythm.sound", true)
+    fun setSoundOn(ctx: Context, on: Boolean) = p(ctx).edit().putBoolean("rhythm.sound", on).apply()
+    fun hapticOn(ctx: Context) = p(ctx).getBoolean("rhythm.haptic", true)
+    fun setHapticOn(ctx: Context, on: Boolean) = p(ctx).edit().putBoolean("rhythm.haptic", on).apply()
+
     fun setOffsetMs(ctx: Context, ms: Int) = p(ctx).edit().putInt("rhythm.offset", ms.coerceIn(-200, 200)).apply()
 }
