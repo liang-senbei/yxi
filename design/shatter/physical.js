@@ -36,7 +36,7 @@
   // 1 砖块崩塌 ————————————————————————————————————————————————
   window.SHATTER.push({
     name: '砖块崩塌',
-    desc: '错缝砖墙从点击处炸开，砖块带重力落地弹一下、扬起一点灰',
+    desc: '错缝砖墙从点击处松动塌下来，砖块带重力落地弹一下、扬起一点灰',
     draw(ctx, tile, t, rng) {
       const { x, y, w, h, color } = tile;
       const rows = clamp(Math.round(h / 26), 2, 8), cols = clamp(Math.round(w / 34), 2, 5);

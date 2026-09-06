@@ -109,7 +109,7 @@ function glass(ctx, tile, t, rng) {
     ctx.fillStyle = rgba(WH, .9 * (1 - t / tc)); ctx.beginPath(); ctx.arc(px, py, Math.min(w, h) * (.03 + .06 * g), 0, TAU); ctx.fill();
     return;
   }
-  const G = .55 * h, S = .45 * Math.max(w, h), facet = clamp01((t - tc) / .1);
+  const G = .55 * h, S = .32 * Math.max(w, h), facet = clamp01((t - tc) / .1);
   for (const p of pieces) {
     const t0 = tc + p.ring * .045 + p.dl, tau = clamp01((t - t0) / (1 - t0));
     const [cx, cy] = centroid(p.pts), dd = dist(cx, cy, px, py) || 1, ux = (cx - px) / dd, uy = (cy - py) / dd;
@@ -118,7 +118,7 @@ function glass(ctx, tile, t, rng) {
     ctx.translate(cx + ux * fl, cy + uy * fl + G * tau * tau); ctx.rotate(rot); ctx.scale(sc, sc); ctx.translate(-cx, -cy);
     path(ctx, p.pts);
     const lit = Math.sin(p.ph + rot * 4) * facet;
-    ctx.fillStyle = rgba(lit > 0 ? mix(base, .5 * lit * lit, WH) : mix(base, .3 * lit * lit, BK), .95 * a); ctx.fill();
+    ctx.fillStyle = rgba(lit > 0 ? mix(base, .45 * lit * lit, WH) : mix(base, .22 * lit * lit, BK), .95 * a); ctx.fill();
     ctx.strokeStyle = rgba(WH, .45 * a); ctx.stroke();
     ctx.restore();
   }
@@ -157,9 +157,9 @@ function ice(ctx, tile, t, rng) {
     cells.push({ pts, cx, cy, d: dist(cx, cy, px, py), dl: rng() * .06, rot: (rng() - .5) * .5, dr: rng() - .5 });
   }
   const dust = [];
-  for (let i = 0; i < 20; i++) dust.push({ ox: x + rng() * w, oy: y + rng() * h, ts: .45 + rng() * .25, ph: rng() * TAU, r: .6 + rng() * 1.2 });
+  for (let i = 0; i < 20; i++) dust.push({ ox: x + rng() * w, oy: y + rng() * h, ts: .4 + rng() * .25, ph: rng() * TAU, r: .6 + rng() * 1.2 });
 
-  const tA = .42, Dm = farCorner(px, py, x, y, w, h), R = outQ(Math.min(1, t / tA)) * Dm * 1.05;
+  const tA = .38, Dm = farCorner(px, py, x, y, w, h), R = outQ(Math.min(1, t / tA)) * Dm * 1.05;
   ctx.lineJoin = ctx.lineCap = 'round';
   const seg = (A, B) => {   // 从离冲击点近的一端向远端生长
     const da = dist(A[0], A[1], px, py), db = dist(B[0], B[1], px, py);
@@ -187,8 +187,9 @@ function ice(ctx, tile, t, rng) {
   const fb = clamp01(1 - (t - tA) / .15);   // 枝杈裂纹随崩落淡出
   if (fb) { ctx.beginPath(); for (const [M, E] of br) bseg(M, E); ctx.lineWidth = 1; ctx.strokeStyle = rgba(WH, .8 * fb); ctx.stroke(); }
   ctx.lineWidth = 1;
-  for (const c of cells) {
-    const t0 = tA + c.d / Dm * .28 + c.dl, tau = clamp01((t - t0) / (1 - t0)), a = (1 - tau) ** 1.4;
+  for (const c of cells) { const t0 = tA + c.d / Dm * .18 + c.dl; c.tau = clamp01((t - t0) / (1 - t0)); }
+  for (const c of [...cells.filter(c => !c.tau), ...cells.filter(c => c.tau)]) {   // 在落的画在前面
+    const tau = c.tau, a = (1 - tau) ** 1.25;
     ctx.save();
     if (tau) { ctx.translate(c.cx + c.dr * .12 * w * tau, c.cy + .8 * h * tau * tau); ctx.rotate(c.rot * tau); ctx.translate(-c.cx, -c.cy); }
     path(ctx, c.pts);
@@ -212,10 +213,10 @@ function prism(ctx, tile, t, rng) {
     const ox = cx + (rng() - .5) * .8 * w, oy = cy + (rng() - .5) * .8 * h;
     const ang = Math.atan2(oy - cy, ox - cx) + (rng() - .5) * .8;
     const L = Math.max(6, (.1 + .2 * rng()) * m);
-    sh.push({ ox, oy, ux: Math.cos(ang), uy: Math.sin(ang), v: (.35 + .65 * rng()) * .7 * M, L, Wd: L * (.22 + .16 * rng()), dl: .08 * rng(), spin: (rng() - .5) * 5, a0: ang + (rng() - .5) * .6, ph: rng() * TAU });
+    sh.push({ ox, oy, ux: Math.cos(ang), uy: Math.sin(ang), v: (.35 + .65 * rng()) * .5 * M, L, Wd: L * (.22 + .16 * rng()), dl: .08 * rng(), spin: (rng() - .5) * 5, a0: ang + (rng() - .5) * .6, ph: rng() * TAU });
   }
   const sp = [];
-  for (let i = 0; i < 36; i++) sp.push({ x: cx + (rng() - .5) * 1.3 * w, y: cy + (rng() - .5) * 1.3 * h, ts: .05 + .5 * rng(), s: (1.5 + 2.5 * rng()) * M / 160 });
+  for (let i = 0; i < 36; i++) sp.push({ x: cx + (rng() - .5) * 1.15 * w, y: cy + (rng() - .5) * 1.15 * h, ts: .05 + .5 * rng(), s: (1.5 + 2.5 * rng()) * M / 160 });
 
   const tk = .3;
   if (t < tk) {   // 本体：闪白 → 缩小消散
@@ -263,19 +264,19 @@ function thin(ctx, tile, t, rng) {
     const a = N[r][c], b = N[r][c + 1], d = N[r + 1][c + 1], e = N[r + 1][c];
     for (const pts of (rng() < .5 ? [[a, b, d], [a, d, e]] : [[a, b, e], [b, d, e]])) {
       const [cx, cy] = centroid(pts);
-      tris.push({ pts, cx, cy, dd: dist(cx, cy, px, py), v: .7 + .3 * rng(), rot: (rng() - .5) * 4, w0: 3 + 5 * rng(), ph: rng() * TAU, dl: rng() * .03 });
+      tris.push({ pts, cx, cy, dd: dist(cx, cy, px, py), ja: (rng() - .5) * 1.6, v: .08 + .92 * rng() ** 1.6, rot: (rng() - .5) * 4, w0: 3 + 5 * rng(), ph: rng() * TAU, dl: rng() * .03 });
     }
   }
 
-  const G = .7 * h, S = .75 * M;
+  const G = .85 * h, S = .5 * M;
   ctx.lineWidth = .8; ctx.lineJoin = 'round';
   for (const q of tris) {
     const t0 = .03 + .1 * q.dd / Dm + q.dl, tau = clamp01((t - t0) / (1 - t0)), a = (1 - tau) ** 1.5;
     ctx.save();
     if (tau) {
-      const dd = q.dd || 1, ux = (q.cx - px) / dd, uy = (q.cy - py) / dd, f = outC(tau) * S * q.v * (1.25 - .75 * q.dd / Dm);
+      const dd = q.dd || 1, an = Math.atan2(q.cy - py, q.cx - px) + q.ja * (1 - q.dd / Dm), ux = Math.cos(an), uy = Math.sin(an), f = outC(tau) * S * q.v * (1.15 - .55 * q.dd / Dm), sc = 1 + .45 * tau * (1 - q.dd / Dm);
       let fl = Math.cos(q.ph + q.w0 * tau); if (Math.abs(fl) < .05) fl = fl < 0 ? -.05 : .05;   // 绕自身轴翻转，侧面时压成一条线
-      ctx.translate(q.cx + ux * f, q.cy + uy * f + G * tau * tau); ctx.rotate(q.rot * tau); ctx.scale(1, fl); ctx.translate(-q.cx, -q.cy);
+      ctx.translate(q.cx + ux * f, q.cy + uy * f + G * tau * tau); ctx.rotate(q.rot * tau); ctx.scale(sc, sc * fl); ctx.translate(-q.cx, -q.cy);
       const g = Math.max(0, Math.sin(q.ph * 1.7 + q.w0 * tau)) ** 12;
       path(ctx, q.pts);
       ctx.fillStyle = rgba(mix(base, g, WH), (.45 + .5 * g) * a); ctx.fill();
@@ -288,8 +289,8 @@ function thin(ctx, tile, t, rng) {
   if (t < .3) {   // 冲击波环 + 点击闪光，限制在方块内
     const k = t / .3;
     ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
-    ctx.lineWidth = 2 - k; ctx.strokeStyle = rgba(WH, .6 * (1 - k)); ctx.beginPath(); ctx.arc(px, py, outC(k) * Dm * 1.1, 0, TAU); ctx.stroke();
-    if (t < .12) { ctx.fillStyle = rgba(WH, .7 * (1 - t / .12)); ctx.beginPath(); ctx.arc(px, py, Math.min(w, h) * (.08 + .3 * t / .12), 0, TAU); ctx.fill(); }
+    ctx.lineWidth = 1.5 - k; ctx.strokeStyle = rgba(WH, .5 * (1 - k) ** 2); ctx.beginPath(); ctx.arc(px, py, outC(k) * Dm * 1.1, 0, TAU); ctx.stroke();
+    if (t < .1) { const r = Math.min(w, h) * (.05 + .1 * t / .1), g = ctx.createRadialGradient(px, py, 0, px, py, r); g.addColorStop(0, rgba(WH, .8 * (1 - t / .1))); g.addColorStop(1, rgba(WH, 0)); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(px, py, r, 0, TAU); ctx.fill(); }
     ctx.restore();
   }
 }
@@ -297,12 +298,12 @@ function thin(ctx, tile, t, rng) {
 // ⑤ 冰凌：竖向锯齿裂缝从点击处向两侧蔓延，冰条从点击处起一根根弹起再坠落
 function icicle(ctx, tile, t, rng) {
   const { x, y, w, h } = tile, base = hex(tile.color);
-  const n = Math.max(4, Math.min(12, Math.round(w / 15))), m = Math.max(2, Math.min(8, Math.round(h / 32))), sw = w / n, sh = h / m;
+  const n = Math.max(4, Math.min(12, Math.round(w / 15))), m = Math.max(2, Math.min(6, Math.round(h / 45))), sw = w / n, sh = h / m;
   const ix = x + w * (.2 + .6 * rng());
   const lines = [];
   for (let j = 0; j <= n; j++) {
     const bd = j === 0 || j === n, pts = [];
-    for (let k = 0; k <= m; k++) pts.push([x + j * sw + (bd ? 0 : (rng() - .5) * .55 * sw), y + k * sh + (bd || k === 0 || k === m ? 0 : (rng() - .5) * .5 * sh)]);
+    for (let k = 0; k <= m; k++) pts.push([x + j * sw + (bd ? 0 : (rng() - .5) * .6 * sw), y + k * sh + (bd || k === 0 || k === m ? 0 : (rng() - .5) * .6 * sh)]);
     lines.push(pts);
   }
   const strips = [];
@@ -323,16 +324,16 @@ function icicle(ctx, tile, t, rng) {
     return;
   }
   const gr = ctx.createLinearGradient(0, y, 0, y + h);
-  gr.addColorStop(0, rgba(mix(base, .3, WH), 1)); gr.addColorStop(1, rgba(mix(base, .15, BK), 1));
+  gr.addColorStop(0, rgba(mix(base, .4, WH), 1)); gr.addColorStop(1, rgba(mix(base, .08, BK), 1));
   for (const s of strips) {
     const t0 = tc + Math.min(1, s.dx / (w * .5)) * .3 + s.dl, tau = clamp01((t - t0) / (1 - t0));
     ctx.save();
     ctx.globalAlpha = (1 - tau) ** 1.6;
-    if (tau) { ctx.translate(s.cx + s.side * .08 * w * tau, s.cy - .45 * h * tau + 1.2 * h * tau * tau); ctx.rotate(s.rot * tau); ctx.translate(-s.cx, -s.cy); }
+    if (tau) { ctx.translate(s.cx + s.side * .08 * w * tau, s.cy - .4 * h * tau + 1.05 * h * tau * tau); ctx.rotate(s.rot * tau); ctx.translate(-s.cx, -s.cy); }
     path(ctx, s.pts);
     ctx.fillStyle = gr; ctx.fill();
     ctx.strokeStyle = rgba(WH, tau ? .55 : .4); ctx.stroke();
-    ctx.strokeStyle = rgba(WH, .3); ctx.beginPath(); ctx.moveTo(s.hx, y + 2); ctx.lineTo(s.hx, y + h - 2); ctx.stroke();   // 竖向高光
+    ctx.strokeStyle = rgba(WH, .22); ctx.beginPath(); ctx.moveTo(s.hx, y + h * .08); ctx.lineTo(s.hx, y + h * .7); ctx.stroke();   // 竖向高光
     ctx.restore();
   }
 }
@@ -665,6 +666,13 @@ window.SHATTER.push(
     return `rgb(${ch(16)},${ch(8)},${ch(0)})`;
   };
 
+  // 上下圆角可分开的圆角矩形路径（不依赖 roundRect）
+  const pill = (ctx, x, y, w, h, rt, rb) => {
+    ctx.beginPath();
+    ctx.moveTo(x + rt, y); ctx.arcTo(x + w, y, x + w, y + h, rt); ctx.arcTo(x + w, y + h, x, y + h, rb);
+    ctx.arcTo(x, y + h, x, y, rb); ctx.arcTo(x, y, x + w, y, rt); ctx.closePath();
+  };
+
   // 有地面的刚体运动（全解析）：抛物线 → 落地弹一次（弹性 e，水平速度打 6 折）→ 再落地就躺平、指数刹车
   // p = {x0,y0,vx,vy,spin,floor}（floor 是质心能到的最低 y）；返回 [x, y, 角度, 首次落地时刻, 落地速度]
   const rigid = (p, g, e, t) => {
@@ -680,7 +688,7 @@ window.SHATTER.push(
   // 1 砖块崩塌 ————————————————————————————————————————————————
   window.SHATTER.push({
     name: '砖块崩塌',
-    desc: '错缝砖墙从点击处炸开，砖块带重力落地弹一下、扬起一点灰',
+    desc: '错缝砖墙从点击处松动塌下来，砖块带重力落地弹一下、扬起一点灰',
     draw(ctx, tile, t, rng) {
       const { x, y, w, h, color } = tile;
       const rows = clamp(Math.round(h / 26), 2, 8), cols = clamp(Math.round(w / 34), 2, 5);
@@ -808,7 +816,7 @@ window.SHATTER.push(
       // 主体（画在碎屑上面，散掉前盖住碎屑）：底边固定，竖向 1 → 0.55（压扁）→ 1.3（弹起拉长）→ 崩散后继续胀大并消失
       const sy = t < 0.14 ? 1 - 0.45 * smooth(0, 0.14, t) : t < tb ? 0.55 + 0.75 * smooth(0.14, tb, t) : 1.3 + (t - tb) * 1.5;
       const sx = 1 + (1 - sy) * 0.7;
-      const bodyA = t < tb ? 1 : 1 - smooth(tb, tb + 0.1, t);
+      const bodyA = 1 - smooth(tb + 0.03, tb + 0.11, t);
       if (bodyA > 0) {
         ctx.globalAlpha = bodyA; ctx.fillStyle = color;
         ctx.fillRect(cx - w * sx / 2, floor - h * sy, w * sx, h * sy);
@@ -837,7 +845,7 @@ window.SHATTER.push(
       const rad = Math.min(pw, ph) / 2 * clamp(k * 1.4, 0, 1);
       ctx.globalAlpha = 1 - smooth(0.55, 1, t);
       ctx.fillStyle = color;
-      ctx.beginPath(); ctx.roundRect(cx - pw / 2, floor - ph, pw, ph, rad); ctx.fill();
+      pill(ctx, cx - pw / 2, floor - ph, pw, ph, rad, rad); ctx.fill();
       const bump = smooth(0.15, 0.6, t);
       for (let i = 0; i < 8; i++) {
         const side = i < 4 ? -1 : 1;
@@ -847,7 +855,7 @@ window.SHATTER.push(
       }
       // 底部沉一层更深的墨
       ctx.fillStyle = dark;
-      ctx.beginPath(); ctx.roundRect(cx - pw / 2, floor - ph * 0.3 * k, pw, ph * 0.3 * k, [0, 0, rad, rad]); ctx.fill();
+      pill(ctx, cx - pw / 2, floor - ph * 0.3 * k, pw, ph * 0.3 * k, 0, Math.min(rad, ph * 0.3 * k)); ctx.fill();
       // 墨滴：28 主滴 + 40 小星点，从方块上半部向上扇形甩出，沿速度方向拉长
       const ox = cx, oy = y + h * 0.35, unit = Math.min(w, h) / 120;
       const dropA = 1 - smooth(0.4, 1, t);
