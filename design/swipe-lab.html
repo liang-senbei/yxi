@@ -551,12 +551,13 @@ function pill(ctx, x0, x1, hh) {
   ctx.lineTo(x0 + hh, hh); ctx.arc(x0 + hh, 0, hh, Math.PI / 2, -Math.PI / 2);
   ctx.closePath();
 }
-// 水滴：圆头在 bx（半径 r），尖在 tx，两条切线相连
-function drop(ctx, bx, r, tx) {
-  const L = tx - bx, px = bx + r * r / L, py = r * Math.sqrt(1 - (r * r) / (L * L)), phi = Math.acos(r / L);
+// 珠 + 针：圆头在 bx（半径 r），针尖在 tx；针身从圆头 psi 角处出来，先快后慢地往轴心收
+function drop(ctx, bx, r, tx, psi) {
+  const px = bx + r * Math.cos(psi), py = r * Math.sin(psi), L = tx - px;
   ctx.beginPath();
-  ctx.moveTo(tx, 0); ctx.lineTo(px, -py);
-  ctx.arc(bx, 0, r, -phi, phi, true);
+  ctx.moveTo(px, -py); ctx.bezierCurveTo(px + L * .25, -py * .55, px + L * .6, -py * .18, tx, 0);
+  ctx.bezierCurveTo(px + L * .6, py * .18, px + L * .25, py * .55, px, py);
+  ctx.arc(bx, 0, r, psi, -psi, false);
   ctx.closePath();
 }
 // 进入局部坐标：原点在音符中心，+x = 滑动方向；同色柔光当底
@@ -575,17 +576,17 @@ function pulse(ctx, x0, x1, r, t, a) {
 
 window.SWIPE = window.SWIPE || [];
 
-// ① 水滴：圆头在后、整条身子拉成一根尖朝前的针；越远越像一枚倒着的图钉
+// ① 珠针：圆珠在后，整条身子拉成一根往轴心收的细针；越远越像一枚倒着的图钉
 window.SWIPE.push({
-  name: '水滴',
-  desc: '圆头在后，身子拉成一根针，针尖指向滑动方向',
+  name: '珠针',
+  desc: '圆珠在后，身子拉成一根细针，针尖指向滑动方向',
   draw(ctx, n, t) {
-    const { w, h, color } = n, R = h * .68, bx = -w / 2 + R, tx = w / 2;
+    const { w, h, color } = n, R = h * .8, bx = -w / 2 + R, tx = w / 2, psi = Math.PI * .36;
     enter(ctx, n);
-    drop(ctx, bx, R, tx); ctx.fillStyle = color; ctx.fill();
+    drop(ctx, bx, R, tx, psi); ctx.fillStyle = color; ctx.fill();
     flat(ctx);
     ctx.clip();
-    drop(ctx, bx, R * .44, tx - h * .9); ctx.fillStyle = white(.85); ctx.fill();
+    drop(ctx, bx, R * .42, tx - h * .9, psi); ctx.fillStyle = white(.85); ctx.fill();
     pulse(ctx, bx, tx - h * .4, h * .55, t, .6);
   }
 });
@@ -597,7 +598,7 @@ window.SWIPE.push({
   draw(ctx, n, t) {
     const { w, h, color } = n, a = h * .62, b = h * .17, x0 = -w / 2, x1 = w / 2;
     enter(ctx, n);
-    rpoly(ctx, [[x0, -a], [x1, -b], [x1, b], [x0, a]], 1.6); ctx.fillStyle = color; ctx.fill();
+    rpoly(ctx, [[x0, -a], [x1, -b], [x1, b], [x0, a]], 1.2); ctx.fillStyle = color; ctx.fill();
     flat(ctx);
     ctx.clip();
     rpoly(ctx, [[x0 + h * .55, -a * .44], [x1 - h * .5, -b * .44], [x1 - h * .5, b * .44], [x0 + h * .55, a * .44]], 1); ctx.fillStyle = white(.85); ctx.fill();
@@ -614,12 +615,12 @@ window.SWIPE.push({
   name: '子弹',
   desc: '胶囊后端削平压暗，前端圆头，白芯贴着圆头那边',
   draw(ctx, n, t) {
-    const { w, h, color } = n, x0 = -w / 2, x1 = w / 2, L = h * 1.25, hh = h / 2;
+    const { w, h, color } = n, x0 = -w / 2, x1 = w / 2, L = h * 1.9, hh = h / 2;
     enter(ctx, n);
     ctx.beginPath();
     ctx.moveTo(x0, -hh); ctx.lineTo(x1 - L, -hh);
-    ctx.bezierCurveTo(x1 - L * .3, -hh, x1 - L * .02, -h * .3, x1, 0);
-    ctx.bezierCurveTo(x1 - L * .02, h * .3, x1 - L * .3, hh, x1 - L, hh);
+    ctx.bezierCurveTo(x1 - L * .35, -hh, x1 - L * .02, -h * .25, x1, 0);
+    ctx.bezierCurveTo(x1 - L * .02, h * .25, x1 - L * .35, hh, x1 - L, hh);
     ctx.lineTo(x0, hh); ctx.closePath();
     const g = ctx.createLinearGradient(x0, 0, x1, 0);
     g.addColorStop(0, shade(color, -.42)); g.addColorStop(.55, color); g.addColorStop(1, color);
@@ -636,12 +637,12 @@ window.SWIPE.push({
   name: '斜身',
   desc: '整块朝滑动方向倾成平行四边形，前上角是锐角',
   draw(ctx, n, t) {
-    const { w, h, color } = n, s = h * 1.1, hh = h / 2, x0 = -w / 2, x1 = w / 2;
+    const { w, h, color } = n, s = h * 1.7, hh = h / 2, x0 = -w / 2, x1 = w / 2;
     enter(ctx, n);
     rpoly(ctx, [[x0 + s / 2, -hh], [x1 + s / 2, -hh], [x1 - s / 2, hh], [x0 - s / 2, hh]], h * .22); ctx.fillStyle = color; ctx.fill();
     flat(ctx);
     ctx.clip();
-    const ch = h * .22, cs = s * .44, c0 = x0 + h * .6, c1 = x1 - h * .5;
+    const ch = h * .22, cs = s * .44, c0 = x0 + h * .9, c1 = x1 - h * .4;
     rpoly(ctx, [[c0 + cs / 2, -ch], [c1 + cs / 2, -ch], [c1 - cs / 2, ch], [c0 - cs / 2, ch]], ch); ctx.fillStyle = white(.85); ctx.fill();
     // 一道跟着斜边走的光扫向前端
     const bw = w * .26, sx = x0 - bw + (w + bw + s) * t;
@@ -652,22 +653,26 @@ window.SWIPE.push({
   }
 });
 
-// ⑤ 叉抱：胶囊身子，前端张开成一个 ⊂ 形的叉，叉里抱着一粒白珠
+// ⑤ 月牙：胶囊身子，前端是一弯两角朝前的月牙（外圆减去前移的内圆），月牙口里抱着一粒白珠
 window.SWIPE.push({
-  name: '叉抱',
-  desc: '前端张成 ⊂ 形的叉抱着一粒白珠，叉口朝滑动方向',
+  name: '月牙',
+  desc: '前端弯成两角朝前的 ⊂ 月牙，月牙口里抱着一粒白珠',
   draw(ctx, n, t) {
-    const { w, h, color } = n, Rc = h * .95, th = Math.PI * .3, cx = w / 2 - Rc * Math.cos(th), hh = h / 2;
+    const { w, h, color } = n, Ro = h, Ri = h * .85, e = h * .45;
+    const ix = (Ro * Ro - Ri * Ri + e * e) / (2 * e), iy = Math.sqrt(Ro * Ro - ix * ix);   // 两圆交点 = 月牙角尖
+    const cx = w / 2 - ix, a1 = Math.atan2(iy, ix), a2 = Math.atan2(iy, ix - e);
     enter(ctx, n);
-    pill(ctx, -w / 2, cx - Rc + h * .3, hh); ctx.fillStyle = color; ctx.fill();
-    ctx.strokeStyle = color; ctx.lineWidth = h * .5; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.arc(cx, 0, Rc, th, -th, false); ctx.stroke();
+    pill(ctx, -w / 2, cx - Ro + h * .35, h / 2); ctx.fillStyle = color; ctx.fill();
+    ctx.beginPath();
+    ctx.arc(cx, 0, Ro, -a1, a1, true);          // 外弧绕过后背
+    ctx.arc(cx + e, 0, Ri, a2, -a2, false);     // 内弧绕回来，角尖自然收细
+    ctx.closePath(); ctx.fill();
     flat(ctx);
-    ctx.strokeStyle = white(.85); ctx.lineWidth = h * .44;
-    ctx.beginPath(); ctx.moveTo(-w / 2 + h * .55, 0); ctx.lineTo(cx - Rc - h * .1, 0); ctx.stroke();
-    // 珠子往叉口方向轻轻一送再回来
-    const bob = Math.sin(t * TAU) * .15 * h;
-    ctx.fillStyle = white(.92); ctx.beginPath(); ctx.arc(cx + h * .1 + bob, 0, h * .3, 0, TAU); ctx.fill();
+    ctx.strokeStyle = white(.85); ctx.lineWidth = h * .44; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-w / 2 + h * .55, 0); ctx.lineTo(cx - Ro + h * .05, 0); ctx.stroke();
+    // 珠子往月牙口方向轻轻一送再回来
+    const bob = Math.sin(t * TAU) * .12 * h;
+    ctx.fillStyle = white(.92); ctx.beginPath(); ctx.arc(cx + ix - h * .3 + bob, 0, h * .3, 0, TAU); ctx.fill();
   }
 });
 })();
