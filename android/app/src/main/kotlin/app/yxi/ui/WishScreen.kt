@@ -79,7 +79,35 @@ fun WishScreen(modifier: Modifier = Modifier) {
         pool = Wish.pool(ctx)
         loading = false
     }
-    got?.let { d -> WishResult(d) { got = null } }
+    // 出货：**先擦星星**（老板 2026-09-06 的九宫格设定），擦完再走原来那套结算卡。
+    // ⚠️ 动画只是表现层 —— 东西在 draw 接口返回那一刻就已经是他的了，
+    //    擦到一半退出、杀进程、断网，收藏页里都在。所以这里不重发请求、也不把擦完当领取条件。
+    got?.let { d ->
+        var wiped by remember(d) { mutableStateOf(false) }
+        if (!wiped) {
+            val best = d.results.maxByOrNull { rank(it.rarity) }
+            // ⚠️ 必须走 Dialog：直接摆一个 fillMaxSize 的 Box 会被后面的页面内容盖住
+            //    （Compose 里同级后画的在上面），实测就是"擦星星画在祈愿页底下"。
+            //    结算卡 WishResult 也是这么做的。
+            Dialog(
+                onDismissRequest = { },
+                properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false),
+            ) {
+                Box(
+                    Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface.copy(alpha = .97f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    WipeReveal(
+                        best?.rarity.orEmpty(),
+                        Modifier.fillMaxWidth(0.92f),
+                        onDone = { wiped = true },
+                    )
+                }
+            }
+        } else {
+            WishResult(d, skipEffect = true) { got = null }
+        }
+    }
     // 卡牌库：《神之冠冕》八顶。**没抽到的只给剪影**，别让人以为已经有了。
     var library by remember { mutableStateOf(false) }
     var history by remember { mutableStateOf(false) }
@@ -345,7 +373,7 @@ fun WishScreen(modifier: Modifier = Modifier) {
  * ⚠️ 系统关了动效走 [DropStage] 的 reduced 分支：只闪一下光爆，立绘直接淡入。
  */
 @Composable
-private fun WishResult(d: Wish.Draw, onClose: () -> Unit) {
+private fun WishResult(d: Wish.Draw, skipEffect: Boolean = false, onClose: () -> Unit) {
     val ctx = LocalContext.current
     val motion = remember {
         runCatching {
@@ -358,7 +386,9 @@ private fun WishResult(d: Wish.Draw, onClose: () -> Unit) {
     val total = DONE + 50f + d.results.size * 110f + 520f
     val clock = remember { Animatable(if (motion) 0f else 1f) }
     LaunchedEffect(Unit) { if (motion) clock.animateTo(1f, tween(total.toInt(), easing = LinearEasing)) }
-    var skipped by remember { mutableStateOf(!motion) }
+    // skipEffect：前面已经放过「擦星星」了，这里就直接落到卡片，别再放一遍星轨光爆 ——
+    // 两段动画叠着看，第二段就成了等待
+    var skipped by remember { mutableStateOf(skipEffect || !motion) }
     val p = if (skipped) 1f else clock.value
     val ms = p * total
 
