@@ -1248,7 +1248,7 @@ internal object En {
         "这 %d 天合计" to "%d-day total",
         "《神之冠冕》· %d 位" to "Crowns of the Gods · %d characters",
         "祈愿还没开通。开了之后：签到攒「曦光」，一张曦光换一次祈愿；\n" to "Wishing isn't live yet. Once it is: check in to earn Rays, and one Ray buys one wish;\n",
-        "奖池的 UP 是**角色**（第一个是云曦）—— 抽到她会一并带上她的立绘头像、\n" to "the pool's featured pulls are **characters** (the first is Yunxi) — get her and you also get her portrait,\n",
+        "奖池的 UP 是「角色」（第一个是云曦）—— 抽到她会一并带上她的立绘头像、\n" to "the pool's featured pulls are characters (the first is Yunxi) — get her and you also get her portrait,\n",
         "专属光环、专属开屏和主题配色。其余是单件装扮，另有少量会员天数。\n" to "her exclusive aura, splash screen, and theme colors. Everything else is a single skin, plus a few days of membership.\n",
         "⚠️ 摇号在服务端，概率会公示 —— 公示的和实际发奖的是同一套数。" to "⚠️ The draw runs on the server, and drop rates are published — what's published is exactly what's used.",
         "%d 抽内必出稀有" to "Guaranteed rare within %d pulls",
