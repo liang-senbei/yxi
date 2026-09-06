@@ -43,6 +43,13 @@ data class Host(
     val connectHost get() = if (useTailscale && !tailscaleIp.isNullOrBlank()) tailscaleIp else hostname
     val viaTailscale get() = connectHost != hostname
     val display get() = "$username@$connectHost" + if (port != 22) ":$port" else ""
+    /**
+     * **连接身份**：地址 / 端口 / 用户名 / 认证方式（含密码密文）。持有连接的地方要按它记忆，**不按 [id]**。
+     * 按 id 记的话：用户改了密钥或密码，id 没变，连接器手里还是旧的 Host 快照，继续拿旧凭据去认证 →
+     * 进会话一直「认证被拒」，直到重启 App（老板 2026-09-06 报的）。
+     * [alias] / [hostKey] / [watch] 不在里面 —— 它们变了不需要重连（hostKey 恰恰是首次连上之后才写回来的，进了键会连完立刻再连一次）。
+     */
+    val connKey get() = "$connectHost:$port:$username:$useKey:${sealedPassword.hashCode()}"
 }
 
 /**

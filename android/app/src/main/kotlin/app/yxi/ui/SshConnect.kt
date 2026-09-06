@@ -77,7 +77,8 @@ fun rememberSshConnector(
         )
     }
 
-    return remember(host.id) {
+    // ⚠️ 按 connKey 记，不按 id：改了密钥 / 密码 / 地址要换一个连接器（老板 2026-09-06「改了密钥进会话还是认证失败」）
+    return remember(host.connKey) {
         object : Connect {
             override fun invoke(auth: HostConfig.Auth?): Connector? {
                 val cfg = if (auth != null)
@@ -165,62 +166,75 @@ fun rememberHostSession(store: HostStore, keys: KeyManager, host: Host?): HostSe
     // 15 秒 × 2 = 30 秒才判死。这条是常驻的、大多时候空闲，
     // 用终端那套 4 秒的标准会被手机的调度抖动打死
     val connect = rememberSshConnector(store, keys, host, aliveIntervalMs = 15_000)
-    var session by remember(host.id) { mutableStateOf<SshSession?>(null) }
-    var error by remember(host.id) { mutableStateOf<String?>(null) }
+    // ⚠️ 全按 host.connKey 记（地址 / 端口 / 用户名 / 认证），不按 id —— 凭据一改这条连接整个重来，
+    //    不然改完密钥进会话还是拿旧凭据认证、一直「认证被拒」到重启 App（老板 2026-09-06）。
+    var session by remember(host.connKey) { mutableStateOf<SshSession?>(null) }
+    var error by remember(host.connKey) { mutableStateOf<String?>(null) }
     // 手动重连 = 换一代，让下面那个 effect 整个重来（退避也跟着归零）
-    var generation by remember(host.id) { mutableIntStateOf(0) }
+    var generation by remember(host.connKey) { mutableIntStateOf(0) }
 
-    LaunchedEffect(host.id, generation) {
+    LaunchedEffect(host.connKey, generation) {
         var wait = 1_000L
-        while (true) {
-            // ⚠️ **先看盯梢服务有没有现成的。** 那条连接是前台服务维持的，
-            // App 切后台它照样活着 —— 借来用等于**省掉整整一次重连（实测 2.9–3.4 秒）**，
-            // 而且不多花一分内存一分电：它本来就开着，不借也在那儿。
-            // ⚠️ 借来的**不许 disconnect**（会把后台盯梢一起弄死），
-            // 所以这里只把它交出去，`connect()` 那条自建的路径不受影响。
-            app.yxi.watch.EventService.liveConn(host.id)?.let {
-                session = it; error = null
-                // 借到了就守着它：它断了（服务重连会换新对象）再回到下面自己连
-                while (it.isConnected) delay(1_000)
-                session = null
-                continue
-            }
-            val c = connect()
-            if (c == null) { error = t("这台主机还没有可用的认证方式"); return@LaunchedEffect }
-            val err = runCatching { c.session.connect() }.exceptionOrNull()
-            if (err == null) {
-                session = c.session; error = null; wait = 1_000L
-                // ⚠️ **连上不是终点。** 原来这里直接 return —— 之后连接掉了
-                // 就再也没人管：看板一直显示「刷新失败」，而 ssh 还非 null，
-                // 连重连按钮都不出现，用户只能杀掉 App 重开。
-                // 现在守着它，断了就回到上面重连。
-                while (c.session.isAlive) kotlinx.coroutines.delay(3_000)
-                session = null
-                error = t("连接断了，正在重连…")
-                app.yxi.ui.DevMode.log("host", t("连接掉了，自动重连"))
-                continue
-            }
+        // ⚠️ 自己建的那条要自己收。原来靠 DisposableEffect 收，但两处都读同一个 state：换 connKey 时 state 已经换成新的（null），
+        //    旧连接谁也不断 —— 改一次凭据漏一条 TCP（审查查出）。改成 effect 自己记着 owned，取消 / 换代 / 离开时 finally 里断。
+        //    也顺带堵住「retry 刚断、旧 effect 还没被取消就又 connect 了一条」的竞态：那条会记进 owned，一样被收。
+        //    借来的（盯梢服务那条）不记进 owned，永远不断它。
+        var owned: SshSession? = null
+        try {
+            while (true) {
+                // ⚠️ **先看盯梢服务有没有现成的。** 那条连接是前台服务维持的，
+                // App 切后台它照样活着 —— 借来用等于**省掉整整一次重连（实测 2.9–3.4 秒）**，
+                // 而且不多花一分内存一分电：它本来就开着，不借也在那儿。
+                // ⚠️ 借来的**不许 disconnect**（会把后台盯梢一起弄死），
+                // 所以这里只把它交出去，`connect()` 那条自建的路径不受影响。
+                app.yxi.watch.EventService.liveConn(host.id)?.let {
+                    session = it; error = null
+                    // 借到了就守着它：它断了（服务重连会换新对象）再回到下面自己连
+                    while (it.isConnected) delay(1_000)
+                    session = null
+                    continue
+                }
+                val c = connect()
+                if (c == null) { error = t("这台主机还没有可用的认证方式"); return@LaunchedEffect }
+                val err = runCatching { c.session.connect() }.exceptionOrNull()
+                if (err == null) {
+                    session = c.session; error = null; wait = 1_000L
+                owned = c.session
+                    // ⚠️ **连上不是终点。** 原来这里直接 return —— 之后连接掉了
+                    // 就再也没人管：看板一直显示「刷新失败」，而 ssh 还非 null，
+                    // 连重连按钮都不出现，用户只能杀掉 App 重开。
+                    // 现在守着它，断了就回到上面重连。
+                    while (c.session.isAlive) kotlinx.coroutines.delay(3_000)
+                    session = null
+                    error = t("连接断了，正在重连…")
+                    app.yxi.ui.DevMode.log("host", t("连接掉了，自动重连"))
+                    continue
+                }
 
-            // ⚠️ **取消不是失败。** 这是第五处同样的错（见 TROUBLESHOOTING #78）：
-            // 界面重组 / 换主机时这个 effect 被取消，挂起点抛 CancellationException，
-            // 被 runCatching 一起接住 → explain 兜底返回「连不上：JobCancellationException」，
-            // 而 error 是记住的状态，那句话就永远钉在界面上了。
-            if (err is kotlinx.coroutines.CancellationException) throw err
+                // ⚠️ **取消不是失败。** 这是第五处同样的错（见 TROUBLESHOOTING #78）：
+                // 界面重组 / 换主机时这个 effect 被取消，挂起点抛 CancellationException，
+                // 被 runCatching 一起接住 → explain 兜底返回「连不上：JobCancellationException」，
+                // 而 error 是记住的状态，那句话就永远钉在界面上了。
+                if (err is kotlinx.coroutines.CancellationException) throw err
 
-            // ⚠️ **失败要自己重试。** 原来失败一次就把错误钉住、再也不动 ——
-            // 手机上网络本来就时断时续（切基站、锁屏、地铁），
-            // 「连一次不成就永久显示连不上」等于把一次抖动变成一次故障。
-            // 指纹变了不重试：那不是网络问题，重试只会一遍遍撞同一堵墙。
-            if (c.known.changedDetected) { error = c.explain(err); return@LaunchedEffect }
-            error = c.explain(err)
-            app.yxi.ui.DevMode.log("host", "连接失败，${wait}ms 后重试")
-            kotlinx.coroutines.delay(wait)
-            wait = (wait * 2).coerceAtMost(15_000)
+                // ⚠️ **失败要自己重试。** 原来失败一次就把错误钉住、再也不动 ——
+                // 手机上网络本来就时断时续（切基站、锁屏、地铁），
+                // 「连一次不成就永久显示连不上」等于把一次抖动变成一次故障。
+                // 指纹变了不重试：那不是网络问题，重试只会一遍遍撞同一堵墙。
+                if (c.known.changedDetected) { error = c.explain(err); return@LaunchedEffect }
+                error = c.explain(err)
+                app.yxi.ui.DevMode.log("host", "连接失败，${wait}ms 后重试")
+                kotlinx.coroutines.delay(wait)
+                wait = (wait * 2).coerceAtMost(15_000)
+            }
+        } finally {
+            owned?.let { s -> if (s !== app.yxi.watch.EventService.liveConn(host.id)) runCatching { s.disconnect() } }
         }
     }
-    // 换主机 / 界面销毁时收掉，别留着一条没人用的连接
-    DisposableEffect(host.id) {
-        onDispose { session?.let { s -> runCatching { s.disconnect() } } }
-    }
-    return HostSession(session, error, retry = { session = null; error = null; generation++ })
+    return HostSession(session, error, retry = {
+        // ⚠️ 先把手里这条断掉再换代：原来只是丢引用，健康连接上「下拉刷新」一次就漏一条 TCP。
+        //    借来的（盯梢服务那条）不许断 —— 断了后台盯梢一起死；丢引用即可，下一轮会再借回来。
+        session?.let { s -> if (s !== app.yxi.watch.EventService.liveConn(host.id)) runCatching { s.disconnect() } }
+        session = null; error = null; generation++
+    })
 }

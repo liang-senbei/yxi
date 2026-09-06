@@ -1286,6 +1286,7 @@ internal object En {
         "微信已连接" to "WeChat connected",
         "密钥提取失败 —— WeFlow 在运行吗？" to "Key extraction failed — is WeFlow running?",
         "  （Tailscale 内网，公网 %s）" to "  (via Tailscale; public address %s)",
+        "当前位置" to "Current location",
         // 深渊（cc-Yxi_Entertainment 2026-09-05）
         "深渊" to "Abyss",
         "还没有角色 —— 先去祈愿抽一位。旅人自己也能打前几层。" to "No characters yet — wish for one first. The Traveler alone can clear the first floors.",

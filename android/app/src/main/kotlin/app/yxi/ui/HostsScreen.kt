@@ -13,7 +13,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,6 +37,7 @@ import java.util.UUID
 private val Pill = RoundedCornerShape(100.dp)
 
 /** 主机列表。**不是预置列表** —— 随时能加「以后才有的」服务器（PRD §2.4）。 */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HostsScreen(
     store: HostStore,
@@ -42,9 +45,16 @@ fun HostsScreen(
     /** 此刻在用的那台（看板/对话连的就是它）—— 多台时要一眼看出来 */
     current: String? = null,
     onOpen: (Host) -> Unit,
+    /**
+     * 下拉刷新：重读 hosts.json + 把共享的两条连接断掉重连（老板 2026-09-06：「改了密钥进会话还是认证失败，
+     * 手往下拉一下就该同步」）。凭据改了本来就会自动重连（[Host.connKey]），这是给「不放心、想手动来一下」的。
+     */
+    onRefresh: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var refreshing by remember { mutableStateOf(false) }
     var batteryHint by remember { mutableStateOf(false) }
     val hosts by store.hosts.collectAsState()
     var adding by remember { mutableStateOf(false) }
@@ -84,8 +94,17 @@ fun HostsScreen(
                 )
             }
         } else {
+            PullToRefreshBox(
+                isRefreshing = refreshing,
+                onRefresh = {
+                    if (onRefresh == null || refreshing) return@PullToRefreshBox
+                    // 重连是异步的、这里等不到结果；转一小会儿让人知道「动了」，卡片上的状态随后自己变
+                    scope.launch { refreshing = true; onRefresh(); delay(900); refreshing = false }
+                },
+                modifier = Modifier.weight(1f),
+            ) {
             LazyColumn(
-                Modifier.weight(1f),
+                Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(14.dp, 0.dp, 14.dp, 18.dp),
                 verticalArrangement = Arrangement.spacedBy(9.dp),
             ) {
@@ -108,6 +127,7 @@ fun HostsScreen(
                     )
                 }
             }
+            }   // PullToRefreshBox
         }
     }
 

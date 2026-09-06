@@ -423,6 +423,8 @@ class MainActivity : ComponentActivity() {
                             store, keys,
                             current = host?.id,
                             onOpen = { hostId = it.id; tab = Tab.Sessions },
+                            // 下拉刷新 = 重读主机文件 + 两条共享连接断掉重连（老板 2026-09-06「改了密钥进会话还是认证失败」）
+                            onRefresh = { store.reload(); shared.retry(); warm.retry() },
                             modifier = m,
                         )
                         Tab.Config -> if (host == null) {
