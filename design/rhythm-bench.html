@@ -62,6 +62,8 @@
   <h3>背景热度（连击越高越烫）</h3>
   <div class="row"><label>强度</label><input type="range" id="heat" min="0" max="1.5" step="0.05"><output></output></div>
   <div class="row"><label>满热连击</label><input type="range" id="heatMax" min="5" max="60" step="1"><output></output></div>
+  <div class="row"><label>底光亮度</label><input type="range" id="bgGain" min="0.5" max="3" step="0.05"><output></output></div>
+  <p class="note">云曦皮的底 = 对话页「模型在思考」那套光（ThinkingGlow）一比一移植：四团光各自独立相位，色相 6 秒一圈蓝→青→绿→黄→橙→粉。连击越高，亮度从「待机」升到「思考」；跳档那一瞬闪一下「等你拍板」的琥珀。</p>
 
   <h3>校准线</h3>
   <div class="row"><label>摆动幅度</label><input type="range" id="tilt" min="0" max="2" step="0.05"><output></output></div>
@@ -122,7 +124,7 @@ const SKINS = {
 const S = {
   skin:'phigros', auto:false,
   fxScale:1, particles:8, fxLife:0.55,
-  heat:0.7, heatMax:30,
+  heat:0.7, heatMax:30, bgGain:1.4,
   tilt:1, tiltBack:1, sway:1,
   noteW:1, approach:1.2, density:1,
 };
@@ -170,6 +172,41 @@ function drawBg(heatK){
   bgx.fillStyle = 'rgba(8,10,14,.38)'; bgx.fillRect(0,0,w,h);
 }
 
+// ── 云曦皮的底：对话页 ThinkingGlow 的一比一移植（ui/ThinkingGlow.kt，数字原样抄）──
+// · 四团光各自独立相位：7.3 / 9.1 / 11.7 / 13.9 秒的三角波，周期互不成整数倍（#186），不然是一块色板在平移
+// · 色相 6 秒一圈：蓝(210)→青→绿→黄→橙→粉，**递减** 300°（方向别弄反）
+// · 粉彩 HSL(h, .62, .80)；四团 α = .28 / .20 / .15 / .13 × amount
+// · amount：待机 .55 → 思考 1.0。这里映射成「连击越高越亮」—— 连击起来 = 它在干活
+// · 「等你拍板」那档是琥珀不循环 —— 这里借给跳档那一瞬闪一下
+const tri = (t, ms) => { const p = (t*1000/ms) % 2; return p < 1 ? p : 2 - p; };
+// ⚠️ App 里是粉彩 HSL(h,.62,.80) 铺在浅色页上；这里是深底，同样的数会糊成一块灰。
+//    骨架（相位 / 周期 / 色相顺序 / 四团关系）原样保留，明度和半径按深色横屏改：
+//    饱和 70%、明度 58%；半径从「整个宽度」收到半个宽，四团在高度上也散开 —— 不然横屏上全叠在一起。
+const hslA = (h, a) => `hsla(${(((h%360)+360)%360).toFixed(1)},70%,58%,${Math.max(0,Math.min(1,a)).toFixed(3)})`;
+const AMBER = [38, 22, 45, 30];
+function drawThinkingGlow(t, amount, warmK, gain){
+  const w = bg.width, h = bg.height;
+  bgx.setTransform(1,0,0,1,0,0);
+  bgx.fillStyle = '#0b0d12'; bgx.fillRect(0,0,w,h);
+  const pa=tri(t,7300), pb=tri(t,9100), pc=tri(t,11700), pd=tri(t,13900);
+  const base = 210 - 300*((t/6)%1);
+  const blobs = [
+    [w*(0.10+0.55*pa), h*(0.10+0.45*pc), w*(0.50+0.10*pb), 0.34],
+    [w*(0.95-0.60*pb), h*(0.20+0.50*pd), w*(0.44+0.10*pc), 0.26],
+    [w*(0.30+0.50*pc), h*(0.35+0.45*pa), w*(0.40+0.12*pd), 0.20],
+    [w*(0.70-0.55*pd), h*(0.05+0.50*pb), w*(0.42+0.10*pa), 0.18],
+  ];
+  const paint = (hueOf, k) => blobs.forEach(([cx,cy,r,a],i) => {
+    const g = bgx.createRadialGradient(cx,cy,0,cx,cy,r);
+    g.addColorStop(0, hslA(hueOf(i), a*amount*gain*k)); g.addColorStop(1, hslA(hueOf(i), 0));
+    bgx.fillStyle = g; bgx.fillRect(0,0,w,h);
+  });
+  paint(i => base + i*22, 1);                       // 底色照走
+  if (warmK > 0) paint(i => AMBER[i], warmK*1.3);   // 跳档：琥珀**叠**上去闪一下（交叉淡出会跟青色混成灰）
+  // 压一层，音符才跳得出来
+  bgx.fillStyle = 'rgba(8,10,14,.25)'; bgx.fillRect(0,0,w,h);
+}
+
 // ── 谱面：程序生成、循环 ──
 let notes=[], t0=performance.now(), lastGen=0;
 function genAhead(now){
@@ -187,7 +224,7 @@ function genAhead(now){
 
 // ── 局面 ──
 let combo=0, best=0, perfect=0, good=0, miss=0, score=0;
-let tiltAt=-9, tiltDir=0;
+let tiltAt=-9, tiltDir=0, lastTierAt=-9;
 const press=[-9,-9,-9,-9], flash=[-9,-9,-9,-9], held=[0,0,0,0];
 let bursts=[], words=[], missMarks=[];
 const now = () => (performance.now()-t0)/1000;
@@ -217,7 +254,7 @@ function land(n, j){
   if (bursts.length>40) bursts.shift();
   // 只在档位跳级时喊一声（8 / 15 / 30）。每一下都弹字太吵 —— Phigros 一个字都不弹，克制才精致
   const w = tierWord(combo);
-  if (w) words.push({at:now(), text:w, big:true});
+  if (w){ words.push({at:now(), text:w, big:true}); lastTierAt = now(); }
   if (words.length>5) words.shift();
 }
 function breakCombo(n){
@@ -296,17 +333,13 @@ function draw(){
 
   // ── 糊底 ──
   const heatK = Math.min(1, combo/S.heatMax) * Math.min(1, S.heat);
-  drawBg(S.skin==='yunxi' ? heatK : 0);
+  if (S.skin==='yunxi'){
+    const amount = 0.55 + 0.45*heatK;                                   // 待机 → 思考
+    const warmK = Math.max(0, 1 - (t - lastTierAt)/1.2);               // 跳档：琥珀闪 1.2 秒
+    drawThinkingGlow(t, amount, warmK*warmK, S.bgGain); bgHeatDrawn = -1;
+  } else drawBg(0);
   ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(bg, 0, 0, W, H);
-  // 云曦皮：热起来时再叠一层很淡的暖光，像输入框那股「气」（STYLE §2.2）
-  if (S.skin==='yunxi' && heatK>0){
-    const g = ctx.createLinearGradient(0,H,W,0);
-    const hue = (t*60/6)%360;   // 6 秒一圈的色相流动，跟 App 一致
-    g.addColorStop(0, `hsla(${hue},70%,60%,${0.06*heatK})`);
-    g.addColorStop(1, `hsla(${(hue+60)%360},70%,60%,${0.06*heatK})`);
-    ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
-  }
 
   ctx.save();
   ctx.translate(W/2, judgeY); ctx.rotate(deg*Math.PI/180); ctx.translate(-W/2, -judgeY);
@@ -553,7 +586,7 @@ function segButtons(id, items, cur, onPick){
 }
 segButtons('skin', Object.entries(SKINS).map(([k,v])=>[k,v.name]), ()=>S.skin, v=>{ S.skin=v; bgHeatDrawn=-1; });
 segButtons('auto', [[false,'我来打'],[true,'自动打']], ()=>S.auto, v=>{ S.auto=v; });
-const SLIDERS = ['fxScale','particles','fxLife','heat','heatMax','tilt','tiltBack','sway','noteW','approach','density'];
+const SLIDERS = ['fxScale','particles','fxLife','heat','heatMax','bgGain','tilt','tiltBack','sway','noteW','approach','density'];
 const INT = new Set(['particles','heatMax']);
 function syncSliders(){
   SLIDERS.forEach(id => { const el=document.getElementById(id); el.value=S[id];
