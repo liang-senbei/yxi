@@ -53,7 +53,11 @@ import app.yxi.ui.theme.Amber
 import app.yxi.ui.theme.Copper
 import app.yxi.ui.theme.Muted
 import app.yxi.yunxi.Memo
+import app.yxi.yunxi.LocationUnavailable
 import app.yxi.yunxi.Memos
+import app.yxi.yunxi.Priority
+import app.yxi.yunxi.Status
+import app.yxi.yunxi.NoLocationPermission
 import app.yxi.yunxi.NoCityException
 import app.yxi.yunxi.Reminders
 import app.yxi.yunxi.Repeat
@@ -95,10 +99,10 @@ fun YunxiScreen(
             say(result)
         }
     }
-    // 10 秒没人理她就自己嘟囔一句；台词 6 秒后收起
+    // 台词停 9 秒再收（一句话要读完，6 秒短了，E2E 截图都赶不上）；收起后再安静 6 秒她自己嘟囔一句
     LaunchedEffect(lineAt) {
-        delay(6000); line = ""
-        delay(4000); if (line.isEmpty()) say(YunxiLines.idle())
+        delay(9000); line = ""
+        delay(6000); if (line.isEmpty()) say(YunxiLines.idle())
     }
 
     // ── 数据 ─────────────────────────────────────────────────────────────
@@ -112,6 +116,8 @@ fun YunxiScreen(
 
     LaunchedEffect(Unit) {
         Memos.load(ctx)
+        // 进页第一句：看板上还有几件没做（老板：「提醒我们还有什么东西没做」）。没有没做的就按时段问候
+        YunxiLines.todo(Memos.list)?.let { say(it) }
         launch { val c = Wish.checkIn(ctx); if (c == null) checkInFailed = true else checkIn = c }
         launch { abyss = Abyss.state(ctx) }
     }
@@ -140,7 +146,7 @@ fun YunxiScreen(
             modifier = Modifier.padding(top = 6.dp),
         )
 
-        MemoCard(onSaved = { withReminder -> doing { if (withReminder) t("记下了。到时候我叫你。") else t("记下了，我替你收好。") } })
+        TaskBoardCard(onSaved = { withReminder -> doing { if (withReminder) t("记下了。到时候我叫你。") else t("记下了，我替你收好。") } })
         ReminderCard()
         WeatherCard(
             weather, weatherErr, weatherLoading,
@@ -172,6 +178,19 @@ internal object YunxiLines {
     }
     private val idles = listOf("又有一颗星熄灭了……不过没关系，它的梦我收好了。", "风好安静。", "云飘过去了一朵，又一朵。")
     fun idle(): String = t(idles.random())
+    /** 看板上还有几件没做；全做完了另说一句；看板是空的返回 null（照常问候） */
+    fun todo(list: List<Memo>): String? {
+        if (list.isEmpty()) return null
+        val open = list.count { !it.done }
+        if (open == 0) return t("都做完了，歇一歇。")
+        val high = list.count { !it.done && it.priority == Priority.HIGH }
+        val od = list.count { it.overdue() }
+        val extra = buildList {
+            if (high > 0) add(t("%d 件高优先").format(high))
+            if (od > 0) add(t("%d 件已过期").format(od))
+        }
+        return t("还有 %d 件没做").format(open) + (if (extra.isEmpty()) "" else "（" + extra.joinToString("，") + "）") + "。"
+    }
 }
 
 // ── 卡片骨架 ──────────────────────────────────────────────────────────────
@@ -215,28 +234,52 @@ private fun LinkRow(text: String, onClick: () -> Unit) {
     }
 }
 
-// ── 备忘录（+ 给一条设提醒）──────────────────────────────────────────────
+// ── 任务看板（老板 2026-09-06：照 omggrow 的任务看板 —— 四栏 · 优先级 · 截止 · 随手记；备忘录升级而来，同一份数据）──
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MemoCard(onSaved: (withReminder: Boolean) -> Unit) {
+private fun TaskBoardCard(onSaved: (withReminder: Boolean) -> Unit) {
     val ctx = LocalContext.current
     var text by remember { mutableStateOf("") }
+    var priority by remember { mutableStateOf(Priority.MID) }
+    var dueAt by remember { mutableStateOf<Long?>(null) }
+    var pickDue by remember { mutableStateOf(false) }
     var remindAt by remember { mutableStateOf<Long?>(null) }
     var repeat by remember { mutableStateOf(Repeat.NONE) }
     var pickTime by remember { mutableStateOf(false) }
+    var filter by remember { mutableStateOf<Status?>(null) }      // null = 全部
     var editing by remember { mutableStateOf<String?>(null) }     // 展开的那条
     var confirmDelete by remember { mutableStateOf<String?>(null) }
     val memos = Memos.list
+    val counts = Memos.counts()
+    val open = memos.count { !it.done }
 
-    Card(t("备忘录"), trailing = if (memos.isEmpty()) null else t("%d 条").format(memos.size)) {
+    Card(t("任务看板"), trailing = if (open > 0) t("还有 %d 件没做").format(open) else null) {
+        // 四栏：手机上竖着放不下四列，用筹片切栏，数字就是每栏几件
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Pill(t("全部"), on = filter == null) { filter = null }
+            Status.entries.forEach { st -> Pill("${statusLabel(st)} ${counts[st] ?: 0}", on = filter == st) { filter = st } }
+        }
+
+        // ── 随手记 ──
         OutlinedTextField(
             text, { text = it.take(Memos.MAX_LEN) },
-            placeholder = { Text(t("写点什么给明天的自己……")) },
+            placeholder = { Text(t("随手记一件……")) },
             shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth(), maxLines = 4,
         )
-        // 提醒：快捷四个 + 自定义；选了就显示时间，再点一下取消
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(t("优先级"), style = MaterialTheme.typography.labelSmall, color = Muted)
+            Priority.entries.forEach { pr -> Pill(priorityLabel(pr), on = priority == pr) { priority = pr } }
+        }
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(t("截止"), style = MaterialTheme.typography.labelSmall, color = Muted)
+            Pill(dueAt?.let { dayStamp(it) } ?: t("不设"), on = dueAt != null) { dueAt = null }
+            Pill(t("今天")) { dueAt = endOfDay(0) }
+            Pill(t("明天")) { dueAt = endOfDay(1) }
+            Pill(t("选日期…")) { pickDue = true }
+        }
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(t("提醒"), style = MaterialTheme.typography.labelSmall, color = Muted)
             Pill(remindAt?.let { clockStamp(it) } ?: t("不提醒"), on = remindAt != null) { remindAt = null }
             Pill(t("30 分钟后")) { remindAt = System.currentTimeMillis() + 30 * 60_000 }
             Pill(t("1 小时后")) { remindAt = System.currentTimeMillis() + 60 * 60_000 }
@@ -258,9 +301,9 @@ private fun MemoCard(onSaved: (withReminder: Boolean) -> Unit) {
         Surface(
             color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(100.dp),
             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(100.dp)).clickable(enabled = text.isNotBlank()) {
-                val ok = Memos.add(ctx, text.trim(), remindAt, repeat)
-                if (ok == null) android.widget.Toast.makeText(ctx, t("备忘录满了（%d 条），删几条再记。").format(Memos.MAX), android.widget.Toast.LENGTH_SHORT).show()
-                else { onSaved(remindAt != null); text = ""; remindAt = null; repeat = Repeat.NONE }
+                val ok = Memos.add(ctx, text.trim(), remindAt, repeat, priority = priority, dueAt = dueAt)
+                if (ok == null) android.widget.Toast.makeText(ctx, t("看板满了（%d 件），清几件再记。").format(Memos.MAX), android.widget.Toast.LENGTH_SHORT).show()
+                else { onSaved(remindAt != null); text = ""; remindAt = null; repeat = Repeat.NONE; dueAt = null; priority = Priority.MID }
             }.alpha(if (text.isNotBlank()) 1f else 0.5f),
         ) {
             Text(
@@ -269,42 +312,16 @@ private fun MemoCard(onSaved: (withReminder: Boolean) -> Unit) {
             )
         }
 
-        if (memos.isEmpty()) Text(t("备忘录空空的，写点什么给明天的自己吧。"), style = MaterialTheme.typography.bodySmall, color = Muted)
-        memos.forEach { m ->
-            val open = editing == m.id
-            Column(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable { editing = if (open) null else m.id }
-                    .padding(6.dp, 8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    // 勾：完成 / 取消完成
-                    Box(
-                        Modifier.size(20.dp).clip(CircleShape)
-                            .background(if (m.done) Copper else MaterialTheme.colorScheme.surfaceContainerHighest)
-                            .clickable { Memos.toggleDone(ctx, m.id) },
-                        contentAlignment = Alignment.Center,
-                    ) { if (m.done) Text("✓", style = MaterialTheme.typography.labelSmall, color = Color.White) }
-                    Text(
-                        m.text, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium,
-                        color = if (m.done) Muted else MaterialTheme.colorScheme.onSurface,
-                        textDecoration = if (m.done) TextDecoration.LineThrough else null,
-                        maxLines = if (open) Int.MAX_VALUE else 2, overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                m.remindAt?.let { at ->
-                    Text(
-                        (if (m.pending()) t("提醒 %s") else t("已提醒 %s")).format(clockStamp(at)) +
-                            when (m.repeat) { Repeat.DAILY -> " · " + t("每天"); Repeat.WEEKLY -> " · " + t("每周"); else -> "" },
-                        Modifier.padding(start = 30.dp), style = MaterialTheme.typography.labelSmall,
-                        color = if (m.pending()) Amber else Muted,
-                    )
-                }
-                if (open) Row(Modifier.padding(start = 30.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (m.hasReminder) Pill(t("取消提醒")) { Memos.update(ctx, m.copy(remindAt = null, repeat = Repeat.NONE)) }
-                    Pill(t("删除")) { confirmDelete = m.id }
-                }
-            }
+        // ── 列表（Memos.list 已按 未完成在前 → 优先级 → 截止 → 更新时间 排好）──
+        val shown = memos.filter { filter == null || it.status == filter }
+        if (memos.isEmpty()) Text(t("看板空空的，随手记一件吧。"), style = MaterialTheme.typography.bodySmall, color = Muted)
+        else if (shown.isEmpty()) Text(t("这一栏没有。"), style = MaterialTheme.typography.bodySmall, color = Muted)
+        shown.forEach { m ->
+            TaskRow(
+                m, expanded = editing == m.id,
+                onToggle = { editing = if (editing == m.id) null else m.id },
+                onDelete = { confirmDelete = m.id },
+            )
         }
     }
 
@@ -318,16 +335,112 @@ private fun MemoCard(onSaved: (withReminder: Boolean) -> Unit) {
             dismissButton = { TextButton({ pickTime = false }) { Text(t("取消")) } },
         )
     }
+    if (pickDue) {
+        val ds = androidx.compose.material3.rememberDatePickerState(initialSelectedDateMillis = dueAt ?: System.currentTimeMillis())
+        androidx.compose.material3.DatePickerDialog(
+            onDismissRequest = { pickDue = false },
+            confirmButton = {
+                TextButton({
+                    // DatePicker 给的是那一天 UTC 0 点的毫秒；截止按手机时钟那一天的 23:59 算
+                    ds.selectedDateMillis?.let { utc ->
+                        val d = java.time.Instant.ofEpochMilli(utc).atZone(java.time.ZoneOffset.UTC).toLocalDate()
+                        dueAt = d.atTime(23, 59).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+                    }
+                    pickDue = false
+                }) { Text(t("好")) }
+            },
+            dismissButton = { TextButton({ pickDue = false }) { Text(t("取消")) } },
+        ) { androidx.compose.material3.DatePicker(state = ds) }
+    }
     confirmDelete?.let { id ->
         AlertDialog(
             onDismissRequest = { confirmDelete = null },
-            title = { Text(t("删掉这条备忘？")) },
+            title = { Text(t("删掉这件？")) },
             text = { Text(t("有提醒的话一起取消。")) },
             confirmButton = { TextButton({ Memos.remove(ctx, id); confirmDelete = null; if (editing == id) editing = null }) { Text(t("删除"), color = MaterialTheme.colorScheme.error) } },
             dismissButton = { TextButton({ confirmDelete = null }) { Text(t("取消")) } },
         )
     }
 }
+
+/** 一件：优先级标 · 标题 · 状态；下面一行截止 / 提醒；展开后能改状态、优先级、取消提醒、删除 */
+@Composable
+private fun TaskRow(m: Memo, expanded: Boolean, onToggle: () -> Unit, onDelete: () -> Unit) {
+    val ctx = LocalContext.current
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable(onClick = onToggle).padding(6.dp, 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            PriorityTag(m.priority)
+            Text(
+                m.text, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium,
+                color = if (m.done) Muted else MaterialTheme.colorScheme.onSurface,
+                textDecoration = if (m.done) TextDecoration.LineThrough else null,
+                maxLines = if (expanded) Int.MAX_VALUE else 2, overflow = TextOverflow.Ellipsis,
+            )
+            Text(statusLabel(m.status), style = MaterialTheme.typography.labelSmall, color = statusColor(m.status))
+        }
+        val meta = buildList {
+            m.dueAt?.let { if (m.overdue()) add(t("已过期 %s").format(dayStamp(it))) else if (!m.done) add(t("截止 %s").format(dayStamp(it))) }
+            m.remindAt?.let { at ->
+                add((if (m.pending()) t("提醒 %s") else t("已提醒 %s")).format(clockStamp(at)) +
+                    when (m.repeat) { Repeat.DAILY -> " · " + t("每天"); Repeat.WEEKLY -> " · " + t("每周"); else -> "" })
+            }
+        }
+        if (meta.isNotEmpty()) Text(
+            meta.joinToString(" · "), Modifier.padding(start = 2.dp), style = MaterialTheme.typography.labelSmall,
+            color = if (m.overdue()) MaterialTheme.colorScheme.error else if (m.pending()) Amber else Muted,
+        )
+        if (expanded) {
+            // 状态：一行四个，点哪个就换到哪栏（同 omggrow 那个下拉，这里用筹片更顺手）
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Status.entries.forEach { st -> Pill(statusLabel(st), on = m.status == st) { Memos.setStatus(ctx, m.id, st) } }
+            }
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Priority.entries.forEach { pr -> Pill(priorityLabel(pr), on = m.priority == pr) { Memos.setPriority(ctx, m.id, pr) } }
+                if (m.hasReminder) Pill(t("取消提醒")) { Memos.update(ctx, m.copy(remindAt = null, repeat = Repeat.NONE)) }
+                Pill(t("删除")) { onDelete() }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PriorityTag(p: Priority) {
+    val (label, color) = when (p) {
+        Priority.HIGH -> t("高") to MaterialTheme.colorScheme.error
+        Priority.MID -> t("中") to Amber
+        Priority.LOW -> t("低") to Muted
+    }
+    Text(
+        label,
+        Modifier.clip(RoundedCornerShape(6.dp)).background(color.copy(alpha = 0.12f)).padding(6.dp, 1.dp),
+        style = MaterialTheme.typography.labelSmall, color = color,
+    )
+}
+
+private fun statusLabel(s: Status): String = when (s) {
+    Status.TODO -> t("待办"); Status.DOING -> t("在做"); Status.BLOCKED -> t("受阻"); Status.DONE -> t("已完成")
+}
+private fun priorityLabel(p: Priority): String = when (p) { Priority.HIGH -> t("高"); Priority.MID -> t("中"); Priority.LOW -> t("低") }
+
+@Composable
+private fun statusColor(s: Status): Color = when (s) {
+    Status.TODO -> MaterialTheme.colorScheme.onSurfaceVariant
+    Status.DOING -> Copper
+    Status.BLOCKED -> MaterialTheme.colorScheme.error
+    Status.DONE -> Muted
+}
+
+/** 截止用「哪一天」显示（按手机时钟），不显示时分 */
+private fun dayStamp(epochMs: Long): String =
+    java.time.Instant.ofEpochMilli(epochMs).atZone(java.time.ZoneId.systemDefault())
+        .format(java.time.format.DateTimeFormatter.ofPattern("MM-dd"))
+
+/** 今天 + [days] 天的 23:59（手机时钟） */
+private fun endOfDay(days: Long): Long =
+    java.time.LocalDate.now().plusDays(days).atTime(23, 59).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
 
 /**
  * 提醒 / 取数时刻的显示：**按手机时钟**（`ZoneId.systemDefault()`），不走 [app.yxi.agent.Tz] 选的时区。
@@ -380,9 +493,40 @@ private fun WeatherCard(w: Weather?, err: String?, loading: Boolean, onRefresh: 
     var searching by remember { mutableStateOf(false) }
     var searchErr by remember { mutableStateOf<String?>(null) }
 
+    // 定位（老板 2026-09-06 拍板「用手机定位」）：只要粗略定位权限，拿一次位置反查成城市，不保存坐标（服务层 WeatherApi.locate）
+    var locating by remember { mutableStateOf(false) }
+    var locErr by remember { mutableStateOf<String?>(null) }
+    fun locate() {
+        locating = true; locErr = null
+        scope.launch {
+            WeatherApi.locate(ctx).fold(
+                onSuccess = { c -> WeatherApi.setCity(ctx, c); picking = false; hits = emptyList(); q = ""; onCityPicked() },
+                onFailure = { e ->
+                    locErr = when (e) {
+                        is NoLocationPermission -> t("没有定位权限 —— 手动选城市也行。")
+                        is LocationUnavailable -> t("定位没拿到（手机可能关了定位）—— 手动选城市也行。")
+                        else -> t("定位失败……手动选城市也行。")
+                    }
+                },
+            )
+            locating = false
+        }
+    }
+    val askLocation = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+    ) { granted -> if (granted) locate() else locErr = t("没有定位权限 —— 手动选城市也行。") }
+
     Card(t("天气"), trailing = w?.city?.name) {
         if (picking) {
             Text(t("先告诉我你在哪座城。"), style = MaterialTheme.typography.bodySmall, color = Muted)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Pill(if (locating) t("定位中…") else t("用当前位置"), enabled = !locating) {
+                    if (WeatherApi.hasLocationPermission(ctx)) locate()
+                    else askLocation.launch(android.Manifest.permission.ACCESS_COARSE_LOCATION)
+                }
+                Text(t("只用一次粗略位置，不保存。"), style = MaterialTheme.typography.labelSmall, color = Muted)
+            }
+            locErr?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(q, { q = it }, Modifier.weight(1f), placeholder = { Text(t("城市名，中文就行")) }, singleLine = true, shape = MaterialTheme.shapes.medium)
                 Pill(if (searching) t("找…") else t("找"), enabled = q.isNotBlank() && !searching) {
