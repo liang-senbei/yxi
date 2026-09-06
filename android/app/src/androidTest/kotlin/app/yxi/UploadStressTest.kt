@@ -41,7 +41,12 @@ class UploadStressTest {
             ?.let { String(android.util.Base64.decode(it, android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP)) }
             ?: java.io.File("/sdcard/yxi-stress-key").takeIf { it.canRead() }?.readText()
         if (fixed != null) {
-            val cfg = app.yxi.ssh.HostConfig("dev", "10.0.2.2", 22, "root", app.yxi.ssh.HostConfig.Auth.PrivateKey(fixed))
+            // ⚠️ 模拟器在 Mac mini 上跑之后 10.0.2.2 是那台 Mac(没有 root/sshd),目标机要能指定:
+            //    -Pandroid.testInstrumentationRunnerArguments.stressHost=<ip> stressPort=22 stressUser=root
+            val args = InstrumentationRegistry.getArguments()
+            val cfg = app.yxi.ssh.HostConfig("dev", args.getString("stressHost") ?: "10.0.2.2",
+                args.getString("stressPort")?.toIntOrNull() ?: 22, args.getString("stressUser") ?: "root",
+                app.yxi.ssh.HostConfig.Auth.PrivateKey(fixed))
             val s = SshSession(cfg, null)
             runBlocking { s.connect() }
             return s
@@ -93,6 +98,38 @@ class UploadStressTest {
                     android.util.Log.i("UploadStress", "%.1fMB 用了 %d ms（%.1f MB/s）".format(mb, ms, mb * 1000.0 / maxOf(ms, 1)))
                 } finally { f.delete() }
             }
+        } finally { s.disconnect() }
+    }
+
+    /**
+     * **慢网场景**(用户 2026-09-06:「一次上传很多图片 / 传视频还是失败」)。
+     * 跑之前在模拟器外面限速:`adb emu network speed 1500:8000`(上行 1.5Mbps ≈ 手机蜂窝)+ `network delay 200:600`。
+     * ⚠️ 方法名用 ASCII:`am instrument -e class 类#方法` 的中文方法名穿过 ssh/adb 会被改掉,JUnit 报 Invalid test class。
+     * 局域网 3MB/s 下这两条永远过;真机上传视频失败的根就在慢上行 + 抖动:SFTP 把上行塞满,心跳排在数据后面,
+     * 2s×2 的保活等不到回包就把整条连接判死。跑完记得 `network speed full` / `network delay none`。
+     */
+    @Test fun slow8MB_singleFile_likeAShortVideo(): Unit = runBlocking {
+        val s = connect()
+        try {
+            val f = blob(8.0)
+            try {
+                val ms = uploadOne(s, f, "slow-8MB")
+                android.util.Log.i("UploadStress", "慢网 8MB 用了 %d ms（%.0f KB/s）".format(ms, 8.0 * 1024 * 1000.0 / maxOf(ms, 1)))
+            } finally { f.delete() }
+        } finally { s.disconnect() }
+    }
+
+    @Test fun slow12x2MB_batch_likeAPhotoBatch(): Unit = runBlocking {
+        val s = connect()
+        try {
+            val files = List(12) { blob(2.0) }
+            try {
+                var i = 0
+                for (f in files) {
+                    val ms = uploadOne(s, f, "slow-batch-${i++}")
+                    android.util.Log.i("UploadStress", "慢网 批 $i/12：$ms ms")
+                }
+            } finally { files.forEach { it.delete() } }
         } finally { s.disconnect() }
     }
 

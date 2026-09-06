@@ -161,14 +161,28 @@ fun ChatScreen(
     //
     // ⚠️ **可以一次选多个**（用户要的）。用 `GetMultipleContents` 不是 `GetContent`：
     // 一张一张选、传完再点加号再选，五张图就是五轮操作 —— 手机上这个代价很实在。
+    // ⚠️⚠️ **上传协程活得比一次 recomposition 长,断线重连后 `ssh` 参数会换成新对象。**
+    //    每次尝试都从这儿重新读当前那条,别把启动那一刻的对象钉死。原来 `val s0 = ssh` 捕获一次用到底:
+    //    选中一批图片时每张都记下同一个旧 SshSession,中途断一次、看门狗重连出新连接后,
+    //    排队里剩下的每张仍拿着死连接重试 4 次,全部失败 —— 「一次传很多图片还是失败」(用户 2026-09-06)。
+    val latestSsh = rememberUpdatedState(ssh)
+    /** 等一条活着的连接,最多等 [maxWaitMs]。轮询、不用 snapshotFlow(MainActivity 那段注释:结构相等时不发新值,会永远挂着) */
+    suspend fun aliveSsh(maxWaitMs: Long): SshSession? {
+        val t0 = System.currentTimeMillis()
+        while (true) {
+            latestSsh.value?.takeIf { it.isAlive }?.let { return it }
+            if (System.currentTimeMillis() - t0 >= maxWaitMs) return null
+            delay(500)
+        }
+    }
     fun startUpload(up: Upload) {
-        val s0 = ssh ?: run { up.error = t("还没连上"); return }
+        if (ssh == null) { up.error = t("还没连上"); return }
         up.error = null; up.progress = 0f; up.cancelled = false
         up.job = scope.launch {
             try {
-            // ⚠️⚠️ **不再把整个文件读进内存。** 原来这里 `readBytes()`，一段视频就是一次几百 MB 的分配，
-            //    直接 OOM / 被系统杀 —— 「上传视频经常失败」的根（Sftp.write 那条注释）。
-            //    现在只先探一下**读不读得出来 + 多大**（授权过期、文件没了这类错跟「传失败」是两码事，要分开报），
+            // ⚠️⚠️ **不再把整个文件读进内存。** 原来这里 `readBytes()`,一段视频就是一次几百 MB 的分配,
+            //    直接 OOM / 被系统杀 —— 「上传视频经常失败」的根(Sftp.write 那条注释)。
+            //    现在只先探一下**读不读得出来 + 多大**(授权过期、文件没了这类错跟「传失败」是两码事,要分开报),
             //    真正的字节在传的时候从流里边读边发。
             val size = withContext(Dispatchers.IO) {
                 app.yxi.ssh.catching {
@@ -176,60 +190,63 @@ fun ChatScreen(
                 }.getOrNull()
             }
             if (size == null || size == 0L) { up.error = t("这个文件读不出来"); return@launch }
-            // 排队：一个一个传，序号才连得上（并发时每个协程读到同一份 staged，五张全叫「图片1」，#156）
+            // 排队:一个一个传,序号才连得上(并发时每个协程读到同一份 staged,五张全叫「图片1」,#156)
             uploadLock.withLock {
                 if (up.cancelled) return@withLock
                 val idx = staged.count { it.isImage == up.isImage } + 1
                 val stamp = java.text.SimpleDateFormat("MMdd-HHmmss-SSS", java.util.Locale.US).format(java.util.Date())
                 val path = app.yxi.agent.Attachments.remotePath(sessionName, up.name, stamp)
-                // ⚠️ **每次开一条新 SFTP 通道，别复用共享那条。** 复用的那条空闲久了会被服务器关掉、
-                // 或上一次出错后进了坏状态，之后每次 put 都失败 —— 原话「附件上传要好几次才能成功」。
-                // 还是试两次：新通道也可能撞上网络抖动。
+                // ⚠️ **每次开一条新 SFTP 通道,别复用共享那条。** 复用的那条空闲久了会被服务器关掉、
+                // 或上一次出错后进了坏状态,之后每次 put 都失败 —— 原话「附件上传要好几次才能成功」。
                 var ok: app.yxi.agent.Attachments.Staged? = null
                 var lastErr: Throwable? = null
-                // ⚠️ **最多 4 次、失败了不删、下一次从断点续传。** 原来只试 2 次、每次失败都把半个文件
-                //    删掉从头来 —— 手机网络一抖大文件就永远传不完，用户只能一遍遍点重试（2026-09-05）。
-                //    现在链路抖一下只是多等一会儿，传过的字节不白传。间隔 1s / 2s / 4s，别把抖动的链路越抖越坏。
-                for (attempt in 0 until 4) {
+                // ⚠️ **最多 6 次;断了就等重连(最多 30 秒)再从断点续传,不在死连接上空转。**
+                //    原来 4 次、间隔 1/2/4 秒 —— 看门狗重连一次就要好几秒,四次全撞在连接没好的时候,
+                //    续传从来没机会用上;失败了不删半个文件,下一次接着传。间隔 1/2/4/8/8 秒。
+                for (attempt in 0 until 6) {
                     if (ok != null || up.cancelled) break
-                    if (attempt > 0) delay(1000L shl (attempt - 1))
-                    val fresh = app.yxi.ssh.catching { s0.openSftp() }.getOrNull()
+                    if (attempt > 0) delay(minOf(1000L shl (attempt - 1), 8000L))
+                    val cur = aliveSsh(if (attempt == 0) 0 else 30_000)
+                    if (cur == null) { lastErr = IllegalStateException(t("连接断了,等了 30 秒没接上")); continue }
+                    val fresh = app.yxi.ssh.catching { cur.openSftp() }.getOrNull()
                     if (fresh == null) { lastErr = IllegalStateException(t("开不了 SFTP 通道")); continue }
                     try {
-                        // 每次尝试重新开流：续传时 jsch 自己会 skip 掉远端已有的那段
+                        // 每次尝试重新开流:续传时 jsch 自己会 skip 掉远端已有的那段
                         val input = ctx.contentResolver.openInputStream(up.uri) ?: error(t("这个文件读不出来"))
                         ok = app.yxi.agent.Attachments.upload(
                             fresh, sessionName, up.name, input, size, idx, up.isImage, stamp,
                             progress = { done, total ->
                                 up.progress = if (total > 0) done.toFloat() / total else 0f
-                                !up.cancelled          // ✕ 按下去这里返回 false，jsch 就停
+                                !up.cancelled          // ✕ 按下去这里返回 false,jsch 就停
                             },
                             resume = attempt > 0,
                         ).copy(localUri = up.uri.toString())
                     } catch (e: Throwable) {
                         if (e is kotlinx.coroutines.CancellationException) throw e
                         lastErr = e
-                        // 取消才删；失败留着，下一次续传接着用
+                        // 取消才删;失败留着,下一次续传接着用
                         if (up.cancelled) runCatching { fresh.rm(path) }
                     } finally {
                         runCatching { fresh.close() }
                     }
                 }
-                // 四次都没成：半个文件别留在服务器上
-                if (ok == null && !up.cancelled) runCatching { s0.openSftp().let { f -> try { f.rm(path) } finally { f.close() } } }
+                // 六次都没成:半个文件别留在服务器上(连接活着才删得掉;不活就交给 3 天的自动清理)
+                if (ok == null && !up.cancelled) runCatching {
+                    latestSsh.value?.takeIf { it.isAlive }?.openSftp()?.let { f -> try { f.rm(path) } finally { f.close() } }
+                }
                 when {
                     up.cancelled -> {}
                     ok != null -> { staged = app.yxi.agent.Attachments.renumber(staged + ok!!); queue.remove(up) }
                     else -> up.error = app.yxi.ssh.Sftp.explain(lastErr ?: RuntimeException())
                 }
             }
-            runCatching { app.yxi.agent.Attachments.sweep(s0) }   // 顺手清 3 天前的
+            latestSsh.value?.let { s -> runCatching { app.yxi.agent.Attachments.sweep(s) } }   // 顺手清 3 天前的
             } finally {
                 // ⚠️⚠️ **任何退出路径都必须让这张卡进入终态。**
-                //    留在队列里而 `error == null` 意味着「还在传」，而发送按钮的条件是
-                //    `queue.none { it.error == null }` —— 于是这张卡会把发送**永久变灰**，
-                //    屏幕上还不给任何理由（用户 2026-09-04：「点发送在对话里没有发送出去」）。
-                //    协程被取消（切页面、进程回收）时最容易撞上：那时候下面那个 when 根本不会执行。
+                //    留在队列里而 `error == null` 意味着「还在传」,而发送按钮的条件是
+                //    `queue.none { it.error == null }` —— 于是这张卡会把发送**永久变灰**,
+                //    屏幕上还不给任何理由(用户 2026-09-04:「点发送在对话里没有发送出去」)。
+                //    协程被取消(切页面、进程回收)时最容易撞上:那时候下面那个 when 根本不会执行。
                 if (!up.cancelled && up.error == null && queue.contains(up)) {
                     up.error = t("传输中断了")
                 }

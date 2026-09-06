@@ -27,7 +27,11 @@ import java.io.ByteArrayOutputStream
  *   当年只给 Shell 修了，SFTP 一直漏着）：两条通道同时往一条连接写就把包流写坏，
  *   表现是「第一张还没传完就点第二张，第二张失败」。
  */
-class Sftp internal constructor(private val ch: ChannelSftp, private val lock: Mutex) {
+class Sftp internal constructor(
+    private val ch: ChannelSftp, private val lock: Mutex,
+    /** 传大文件前后通知会话放宽/恢复保活(见 [SshSession.bulk]);测试里可以不传 */
+    private val bulk: (Boolean) -> Unit = {},
+) {
 
 
     data class Entry(
@@ -103,7 +107,8 @@ class Sftp internal constructor(private val ch: ChannelSftp, private val lock: M
             lock.withLock {
                 into.parentFile?.mkdirs()
                 var n = 0L
-                ch.get(path).use { input ->
+                bulk(true)
+                try { ch.get(path).use { input ->
                     into.outputStream().use { out ->
                         val buf = ByteArray(64 * 1024)
                         while (true) {
@@ -113,7 +118,7 @@ class Sftp internal constructor(private val ch: ChannelSftp, private val lock: M
                             onProgress(n)
                         }
                     }
-                }
+                } } finally { bulk(false) }
                 n
             }
         }
@@ -151,7 +156,8 @@ class Sftp internal constructor(private val ch: ChannelSftp, private val lock: M
     ) = withContext(Dispatchers.IO) {
         lock.withLock {
             val mode = if (resume) ChannelSftp.RESUME else ChannelSftp.OVERWRITE
-            input.use { inp ->
+            bulk(true)
+            try { input.use { inp ->
                 if (progress == null) ch.put(inp, path, mode)
                 else {
                     // RESUME 时 jsch 会从「已传到的字节」起报 count；这里的 done 也从远端大小起算，进度条才不倒退
@@ -163,7 +169,7 @@ class Sftp internal constructor(private val ch: ChannelSftp, private val lock: M
                     }
                     ch.put(inp, path, mon, mode)
                 }
-            }
+            } } finally { bulk(false) }
         }
     }
 

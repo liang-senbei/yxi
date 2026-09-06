@@ -518,6 +518,7 @@ internal object En {
         "%d 小时前查的" to "checked %dh ago",
         "这个文件读不出来 —— 换一张试试" to "Can't read this file — try another",
         "开不了 SFTP 通道" to "Couldn't open an SFTP channel",
+        "连接断了,等了 30 秒没接上" to "Connection dropped; waited 30 s but it did not come back",
         "传失败：%s" to "Upload failed: %s",
         "盯着 %d 台" to "watching %d",
         "一台都没开" to "none on",

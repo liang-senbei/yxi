@@ -66,6 +66,8 @@ class SshSession(
      * 抛异常被吞），所以它同时还是一条**心跳**，白送的。
      */
     companion object {
+        /** 传大文件时允许连丢几次心跳(× 2 秒) */
+        const val BULK_ALIVE_COUNT = 20
         fun follow(command: String): String =
             "$command & __p=\$!; " +
                 // ⚠️ 两个 trap 要分开写。合成一个 `trap 'kill …' EXIT PIPE …` 的话，
@@ -317,8 +319,25 @@ class SshSession(
             val s = requireNotNull(session) { "还没 connect()" }
             val ch = s.openChannel("sftp") as com.jcraft.jsch.ChannelSftp
             ch.connect(10_000)
-            Sftp(ch, sftpLock)
+            Sftp(ch, sftpLock, ::bulk)
         }
+    }
+
+    /** 此刻有几个大文件在传(嵌套计数:对话页排队传 + 分享页可能同时在传) */
+    private val bulkCount = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /**
+     * **大文件传输期间放宽保活。** 2s × 2 = 4 秒没回包就判死,对手机上传视频来说太狠:
+     * 蜂窝网切基站、进电梯、无线电状态切换,上行停 4 秒以上是常态;而一段视频要传一两分钟,
+     * 几乎一定撞上一次 —— 整条连接连同传了一半的文件一起被**我们自己**掐掉,
+     * 表现就是「传视频还是失败」(用户 2026-09-06)。局域网压测 3MB/s、RTT 几毫秒,永远复现不了。
+     * 传输中把连丢次数放宽到 [BULK_ALIVE_COUNT](2s × 20 = 40 秒),传完恢复 2。
+     * jsch 每次读超时都重新读 serverAliveCountMax,运行时改立刻生效(mwiede 2.28)。
+     * ⚠️ 只放宽**判死**,不放宽心跳间隔:连接真断了,40 秒后照样发现、照样重连。
+     */
+    internal fun bulk(on: Boolean) {
+        val n = if (on) bulkCount.incrementAndGet() else bulkCount.decrementAndGet()
+        runCatching { session?.serverAliveCountMax = if (n > 0) BULK_ALIVE_COUNT else 2 }
     }
 
     /**
