@@ -1806,26 +1806,44 @@ private fun Item(
     // 选择手柄 + 复制条，长按即起，双击选词。
     // （代价：长按被选择消费掉了，所以这一支不能再挂 combinedClickable。）
     is ChatItem.AssistantText -> Column(Modifier.fillMaxWidth()) {
-        androidx.compose.foundation.text.selection.SelectionContainer {
-            // ⚠️ `remember`：一条长回复每次重组都重扫一遍正则不划算，而它只跟原文有关
-            val md = remember(item.markdown) { app.yxi.agent.Linkify.apply(item.markdown) }
-            Markdown(
-                md,
-                // ⚠️ 一定要传 —— 库默认把 `##` 渲染成 45sp（正文的 3 倍）。见 [yxiMarkdown]
-                typography = yxiMarkdown(),
-                // 表格换成自己画的：横向滚动 + 单元格换行，不再一堆省略号（见 [MarkdownScrollTable]）
-                components = com.mikepenz.markdown.compose.components.markdownComponents(
-                    table = { MarkdownScrollTable(it) },
-                ),
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
+        // ⚠️ `remember`：一条长回复每次重组都重扫一遍正则不划算，而它只跟原文有关
+        val md = remember(item.markdown) { app.yxi.agent.Linkify.apply(item.markdown) }
         // 网址预览卡（老板 2026-09-06：「搜索链接比如网站和视频可以支持渲染出来」）。
         // ⚠️ 默认「点了才抓」—— 抓一次 = 访问它一次，而对话里的网址不全是「网站」
         //    （MCP 认证会留下带一次性码的 localhost 地址）。闸门和开关见 [app.yxi.agent.LinkPreview]。
         // ⚠️ 一条消息最多摆 3 张，多了整屏都是卡片。
-        remember(item.markdown) { app.yxi.agent.LinkPreview.urlsIn(item.markdown) }
-            .forEach { u -> LinkCard(u, ssh) }
+        // ⚠️ **卡片跟在它所属那一段的下面**，不堆在整条消息末尾（老板 2026-09-07：
+        //    「最好紧紧跟在对应的链接下面」）—— 一条回复里好几个来源时，堆在最后就分不清哪张对哪条。
+        //    做法：按空行把正文切块（[app.yxi.agent.MdChunks] 不切断代码块和列表），一块一块渲染，
+        //    每块渲染完把**这一块里首次出现**的网址摆上。
+        val blocks = remember(md) {
+            val chunks = app.yxi.agent.MdChunks.split(md)
+            val quota = app.yxi.agent.LinkPreview.urlsIn(md)      // 全条消息的白名单 + 去重 + 封顶 3 张
+            val used = HashSet<String>()
+            chunks.map { c ->
+                val here = app.yxi.agent.LinkPreview.urlsIn(c).filter { it in quota && used.add(it) }
+                c to here
+            }
+        }
+        // ⚠️ **块之间要自己补间距。** 段落间距原来由 markdown 渲染器在**一次调用内部**给，
+        //    拆成多次调用之后，块与块的接缝处就是 0dp —— 表现是「有的段落分得开、有的挤在一起」（审查查出）。
+        androidx.compose.foundation.text.selection.SelectionContainer {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                blocks.forEach { (chunk, urls) ->
+                    Markdown(
+                        chunk,
+                        // ⚠️ 一定要传 —— 库默认把 `##` 渲染成 45sp（正文的 3 倍）。见 [yxiMarkdown]
+                        typography = yxiMarkdown(),
+                        // 表格换成自己画的：横向滚动 + 单元格换行，不再一堆省略号（见 [MarkdownScrollTable]）
+                        components = com.mikepenz.markdown.compose.components.markdownComponents(
+                            table = { MarkdownScrollTable(it) },
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    urls.forEach { u -> LinkCard(u, ssh) }
+                }
+            }
+        }
 
         // ⚠️ **必须有一条不依赖系统选择工具栏的复制路径。**
         // 用户报的：在 AI 回复里选中文字，弹出来的工具栏**只有「全选」没有「复制」**。
