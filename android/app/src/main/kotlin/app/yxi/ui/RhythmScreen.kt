@@ -167,7 +167,7 @@ private fun SongList(synced: Int, onPick: (Rhythm.Song, String) -> Unit, modifie
                 Column(Modifier.padding(16.dp, 14.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(t(s.zh), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                        Text("${s.bpm} BPM · ${s.seconds}s", style = MaterialTheme.typography.labelSmall, color = Muted)
+                        Text(t("%d BPM · %d 秒").format(s.bpm, s.seconds), style = MaterialTheme.typography.labelSmall, color = Muted)
                     }
                     Spacer(Modifier.height(10.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -241,7 +241,7 @@ private class Live(val chart: Rhythm.Chart) {
     val errs = ArrayList<Float>()
     /** 每条轨下一个还没判的音符下标，省得每帧从头扫 */
     val next = IntArray(4)
-    val held = BooleanArray(4)
+    val heldCount = IntArray(4)          // 同一条轨可能不止一根手指；抬起一根不能把长按判死
     val flash = FloatArray(4) { -9f }  // 每条轨最后一次判定的时刻（秒）
     val flashJudge = arrayOfNulls<Rhythm.Judge>(4)
     var lastJudge: Rhythm.Judge? = null
@@ -296,7 +296,10 @@ private class Live(val chart: Rhythm.Chart) {
         val acc = Rhythm.accuracy(chart.units, perfect, good)
         val med = if (errs.isEmpty()) 0 else errs.sorted()[errs.size / 2].roundToInt()
         return Rhythm.Result(
-            Rhythm.score(chart.units, perfect, good, maxCombo), acc, Rhythm.rank(acc),
+            // ⚠️ 用**边打边累计的那个分**（含连击倍率），不是 Rhythm.score() 那条老公式。
+            //    用老公式的话：游戏里 201 万 → 结算页一瞬间掉到 110 万 → 服务端回话又跳回 211 万。
+            //    "两个数对不上"正是加倍率时最该防的事（审查抓到的）。
+            currentScore(), acc, Rhythm.rank(acc),
             perfect, good, miss, maxCombo, med,
         )
     }
@@ -452,7 +455,7 @@ private fun GameBoard(
                     return ((laneX / size.width) * 4).toInt().coerceIn(0, 3)
                 }
                 var lane = laneOf(down.position)
-                live.held[lane] = true
+                live.heldCount[lane]++
                 press[lane] = now                     // 按下去就先亮一下（不管有没有打中），手感的一半在这
                 // 按下只吃 tick 和 slide 的头；swipe 要滑、trace 要拖，各走各的
                 hitLane(live, lane, now, offset) { it.kind == Rhythm.Kind.TICK || it.kind == Rhythm.Kind.SLIDE }
@@ -473,21 +476,25 @@ private fun GameBoard(
                             }
                         ) { combo = live.combo; score = live.currentScore(); live.tilt(now, dir) }
                     }
-                    // 手指挪到另一条轨 = trace 到位
-                    val cur = laneOf(ch.position)
+                    // 手指挪到另一条轨 = trace 到位。
+                    // ⚠️ 要求**手指真的动过**：场地会转，一根不动的手指也可能被转过轨道边界，
+                    //    那不是玩家的操作，不该判成换轨（现在幅度小撞不上，幅度一大就会）。
+                    val moved = kotlin.math.abs(dx) > size.width * 0.02f ||
+                        kotlin.math.abs(ch.position.y - down.position.y) > size.height * 0.04f
+                    val cur = if (moved) laneOf(ch.position) else lane
                     if (cur != lane) {
                         val from = lane
                         if (hitLane(live, from, now, offset) {
                                 it.kind == Rhythm.Kind.TRACE && (from + it.dir).coerceIn(0, 3) == cur
                             }
                         ) { combo = live.combo; score = live.currentScore(); live.tilt(now, if (cur > from) 1 else -1) }
-                        live.held[from] = false
+                        live.heldCount[from] = (live.heldCount[from] - 1).coerceAtLeast(0)
                         lane = cur
-                        live.held[lane] = true
+                        live.heldCount[lane]++
                         press[lane] = now
                     }
                 }
-                live.held[lane] = false
+                live.heldCount[lane] = (live.heldCount[lane] - 1).coerceAtLeast(0)
             }
         },
     ) {
@@ -592,7 +599,7 @@ private fun GameBoard(
                     val tailY = (judgeY * (1f - (n.t + n.dur - head) / approach)).coerceAtLeast(0f)
                     val bottom = minOf(y, judgeY)
                     if (bottom > tailY) {
-                        val holding = n.judged != null && n.judged != Rhythm.Judge.MISS && live.held[n.lane]
+                        val holding = n.judged != null && n.judged != Rhythm.Judge.MISS && live.heldCount[n.lane] > 0
                         drawRoundRect(
                             kindColor(n.kind).copy(alpha = if (n.judged == Rhythm.Judge.MISS) .18f else if (holding) .62f else .42f),
                             Offset(x, tailY), Size(w, bottom - tailY), CornerRadius(noteH / 2),
@@ -769,7 +776,7 @@ private fun judgeMisses(live: Live, now: Float, offset: Float, changed: () -> Un
             if (n.hold && !n.tailDone && head >= n.t + n.dur) {
                 n.tailDone = true
                 live.hit(
-                    if (live.held[lane] && n.judged != Rhythm.Judge.MISS) Rhythm.Judge.PERFECT else Rhythm.Judge.MISS,
+                    if (live.heldCount[lane] > 0 && n.judged != Rhythm.Judge.MISS) Rhythm.Judge.PERFECT else Rhythm.Judge.MISS,
                     now, lane,
                 )
                 dirty = true
