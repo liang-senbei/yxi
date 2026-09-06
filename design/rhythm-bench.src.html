@@ -290,7 +290,7 @@ function autoPlay(t){
     if (n.judged) continue;
     const err = (t-n.t)*1000;
     if (err > -20 && err <= GOOD_MS){          // 只要过了线就打，帧掉了也不会漏（截图会卡住 rAF）
-      land(n, 'perfect'); press[n.lane]=t;
+      land(n, 'perfect'); press[n.lane]=t; if (n.kind==='slide') n.autoHold = true;
       if (n.kind==='trace'||n.kind==='swipe') bumpTilt(n.dir);
     }
   }
@@ -360,8 +360,8 @@ function draw(){
     // 老板 2026-09-06 定的底光节奏：**每次打中闪一小下；跳档闪得更猛，而且亮度就保持在新档上**
     const tierLevel = TIERS.filter(x => combo >= x.at).length;                     // 现在在第几档（断连归零）
     const hitPulse  = Math.max(0, 1 - (t - lastHitAt)/0.15);                          // 每一下：150ms 小闪
-    const tierPulse = Math.pow(Math.max(0, 1 - (t - lastTierAt)/0.5), 2);            // 跳档：500ms 猛闪
-    const lit = amount + 0.12*tierLevel + 0.15*hitPulse + 0.45*tierPulse;
+    const tierPulse = Math.pow(Math.max(0, 1 - (t - lastTierAt)/0.6), 2);            // 跳档：600ms 猛闪
+    const lit = amount + 0.20*tierLevel + 0.15*hitPulse + 0.90*tierPulse;             // 老板：跳档的亮度变化要大（闪 +0.9，每档台阶 +0.2）
     drawThinkingGlow(t, lit, tierPulse, S.bgGain); bgHeatDrawn = -1;                 // 跳档那下带琥珀
   } else drawBg(0);
   ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
@@ -414,16 +414,43 @@ function draw(){
       const tailY = Math.max(0, judgeY*(1-(n.t+n.dur-t)/S.approach));
       const bottom = Math.min(y, judgeY);
       if (bottom > tailY){
-        const holding = n.judged && n.judged!=='miss' && held[n.lane]>0;
+        const holding = n.judged && n.judged!=='miss' && (held[n.lane]>0 || (S.auto && n.autoHold)) && t <= n.t + n.dur;
         const bw = w*0.9;
         ctx.fillStyle = hexA(c, n.judged==='miss'?.10 : holding?.34 : .22);
         ctx.fillRect(cx-bw/2, tailY, bw, bottom-tailY);
         ctx.strokeStyle = `rgba(255,255,255,${holding?.75:.45})`; ctx.lineWidth = 1.2;
         ctx.strokeRect(cx-bw/2+.5, tailY+.5, bw-1, bottom-tailY-1);
-        if (holding){   // 按着的时候，线上那一点持续冒光
-          const g = ctx.createRadialGradient(cx,judgeY,0,cx,judgeY,h*3);
-          g.addColorStop(0,hexA(c,.45)); g.addColorStop(1,hexA(c,0));
-          ctx.fillStyle=g; ctx.fillRect(cx-h*3, judgeY-h*3, h*6, h*6);
+        if (holding){
+          // ── 长按期间的持续特效（老板：不然长按没有体验感）──
+          const ht = t - n.t;                                              // 按了多久
+          // ① 线上那点呼吸发光
+          const br = .38 + .14*Math.sin(ht*25);
+          const g = ctx.createRadialGradient(cx,judgeY,0,cx,judgeY,h*3.2);
+          g.addColorStop(0,hexA(c,br)); g.addColorStop(1,hexA(c,0));
+          ctx.fillStyle=g; ctx.fillRect(cx-h*3.2, judgeY-h*3.2, h*6.4, h*6.4);
+          // ② 每 0.35 秒荡出一圈涟漪
+          const rk = (ht % 0.35)/0.35;
+          ctx.strokeStyle = hexA(c, .55*(1-rk)); ctx.lineWidth = 1.4;
+          ctx.beginPath(); ctx.arc(cx, judgeY, h*1.2 + rk*h*4.5, 0, 6.283); ctx.stroke();
+          // ③ 光屑沿着长按体往上飘
+          for (let i=0;i<8;i++){
+            const ph = (ht*1.4 + i*0.137) % 1, x = cx + Math.sin(i*7.3 + ht*3)*bw*0.38, y = judgeY - ph*Math.min(judgeY-tailY, h*12);
+            if (y < tailY) continue;
+            const sz = 1.5 + (i%3);
+            ctx.fillStyle = `rgba(255,255,255,${.75*(1-ph)})`; ctx.fillRect(x-sz/2, y-sz/2, sz, sz);
+          }
+          // ④ 体内一道光带往上流
+          const fk = (ht*1.1) % 1, fy = bottom - fk*(bottom-tailY), bh = h*1.6;
+          const gb = ctx.createLinearGradient(0, fy+bh, 0, fy-bh);
+          gb.addColorStop(0, 'rgba(255,255,255,0)'); gb.addColorStop(.5, `rgba(255,255,255,${.28*(1-fk*0.6)})`); gb.addColorStop(1, 'rgba(255,255,255,0)');
+          ctx.fillStyle = gb; ctx.fillRect(cx-bw/2, Math.max(tailY, fy-bh), bw, Math.min(bh*2, bottom-Math.max(tailY, fy-bh)));
+          // ⑤ 每 0.22 秒在线上补一次小号的点击特效（Phigros：长按期间爆点连续复发）
+          if (!(n.lastPulse >= 0) || ht - n.lastPulse >= 0.22){
+            n.lastPulse = ht;
+            bursts.push({at:now(), lane:n.lane, kind:n.kind, judge:'good', dir:0, seed:Math.random(), scale:0.6,
+                         parts:Array.from({length:Math.max(3, S.particles>>1)}, () => ({a:Math.random()*6.283, v:0.6+Math.random()*1.0, s:0.5+Math.random()*0.9, r:Math.random()}))});
+            if (bursts.length>40) bursts.shift();
+          }
         }
       }
     }
@@ -483,7 +510,7 @@ function sliver(cx, y, w, h, c, n){
 function drawBurst(b, age, cx, cy, h, sk){
   const life = S.fxLife; if (age > life) return;
   const k = age/life, fade = 1-k, ease = 1-Math.pow(1-k, 3);          // ease-out：一开始快，后面慢
-  const u = Math.max(h*2.6, H*0.03)*S.fxScale;                           // 基本尺度：撑满时方框约占屏高 11%（对着视频量的）
+  const u = Math.max(h*2.6, H*0.03)*S.fxScale*(b.scale||1);              // 基本尺度：撑满时方框约占屏高 11%（对着视频量的）；长按复发用小号
   const col = b.judge==='perfect' ? sk.hit.perfect : sk.hit.good;
   const tint = S.skin==='yunxi' ? mixHex(col, sk.note[b.kind], 0.35) : col;   // 云曦皮：爆点带一点音符自己的颜色（别太淡）
   ctx.save();
