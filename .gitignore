@@ -45,3 +45,4 @@ ios/**/.build/
 # sherpa-onnx 的 AAR（47MB，dev/fetch-libs.sh 下）
 android/app/libs/*.aar
 android/.kotlin/
+design/music/incoming/
