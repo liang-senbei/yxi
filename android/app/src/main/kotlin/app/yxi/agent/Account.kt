@@ -88,6 +88,13 @@ object Account {
         val unreadTickets: Int = 0,
         /** 手上几张曦光（祈愿用） */
         val tickets: Int = 0,
+        /**
+         * 手上几点微曦 —— 重复返还的**零头**，满 [microPerTicket] 点服务端**自动**变成 1 张曦光，
+         * 所以这个数永远小于换算基数。⚠️ 它不是"第二种货币"，只是曦光的小数位。
+         */
+        val micro: Int = 0,
+        /** 几点微曦换 1 张曦光（服务端给，**别在客户端写死 10**——这是奖池旋钮，改了不发版）。 */
+        val microPerTicket: Int = 10,
         /** 离保底还差几抽。⚠️ 是「**还差**」不是「已累计」—— 歧义写进字段名里解决（对方定的）。 */
         val pityRemaining: Int = 0,
     )
@@ -668,6 +675,11 @@ object Account {
             unclaimedMail = o.optInt("unclaimedMail", 0),
             unreadTickets = o.optInt("unreadTickets", 0),
             tickets = o.optJSONObject("wish")?.optInt("tickets") ?: 0,
+            micro = o.optJSONObject("wish")?.optInt("micro") ?: 0,
+            // ⚠️ 默认值要写在 `optInt` 里,不能只靠 `?:` —— elvis 只在 `wish` **整个对象缺失**时触发;
+            //    对象在、键不在时 `optInt(name)` 返回 **0**,于是换算基数成 0,
+            //    文案会变成「折 5 微曦（）」「满 0 点自动换 1 张」。
+            microPerTicket = o.optJSONObject("wish")?.optInt("microPerTicket", 10) ?: 10,
             pityRemaining = o.optJSONObject("wish")?.optInt("pityRemaining") ?: 0,
             quotaLimit = q?.optInt("limit") ?: 0,
             quotaUsed = q?.optInt("used") ?: 0,

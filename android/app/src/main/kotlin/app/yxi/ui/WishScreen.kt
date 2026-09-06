@@ -162,9 +162,14 @@ fun WishScreen(modifier: Modifier = Modifier) {
 
     // 手上几张曦光 / 离保底还差几抽 —— 真相源是 /api/me；刚抽完用返回值先更新，不等下一次拉取
     var tickets by remember { mutableStateOf(Account.me?.tickets ?: 0) }
+    var micro by remember { mutableStateOf(Account.me?.micro ?: 0) }
+    var perTicket by remember { mutableStateOf(Account.me?.microPerTicket ?: 10) }
     var pityLeft by remember { mutableStateOf(Account.me?.pityRemaining ?: 0) }
     LaunchedEffect(Account.me) {
-        Account.me?.let { tickets = it.tickets; pityLeft = it.pityRemaining }
+        Account.me?.let {
+            tickets = it.tickets; pityLeft = it.pityRemaining
+            micro = it.micro; perTicket = it.microPerTicket
+        }
     }
     // ⚠️ **幂等键**：一次「点击」一个 uuid，重试要用**同一个** ——
     //    抽奖每抽扣一张曦光，换个 id 重试就是扣两次（对方契约里专门写了这条）。
@@ -255,6 +260,12 @@ fun WishScreen(modifier: Modifier = Modifier) {
                         Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
                             Text(t("曦光 ×%d").format(tickets), style = MaterialTheme.typography.bodyLarge)
+                            // ⚠️ 零头必须露出来。重复返还给的是微曦，攒不满一张时曦光那个数**一动不动** ——
+                            //    不显示零头，玩家会以为返还没到账（他一眼就能看出数字没变，这号人很敏感）。
+                            if (micro > 0) Text(
+                                t("另有 %d 微曦（满 %d 点自动换 1 张）").format(micro, perTicket),
+                                style = MaterialTheme.typography.labelSmall, color = Muted,
+                            )
                             Text(
                                 t("离保底还差 %d 抽").format(pityLeft.coerceAtLeast(0)),
                                 style = MaterialTheme.typography.labelSmall, color = Muted,
@@ -294,6 +305,9 @@ fun WishScreen(modifier: Modifier = Modifier) {
                                         if (d != null) {
                                             got = d
                                             tickets = d.tickets
+                                            // 只在服务端**确实给了**的时候才覆盖（见 Wish.kt 的哨兵）
+                                            if (d.micro >= 0) micro = d.micro
+                                            if (d.microPerTicket > 0) perTicket = d.microPerTicket
                                             pityLeft = d.pityRemaining
                                             pendingId = null      // 这一次成了，下一次换新 id
                                         }
@@ -520,13 +534,35 @@ private fun WishResult(d: Wish.Draw, skipEffect: Boolean = false, onClose: () ->
                                     style = MaterialTheme.typography.labelSmall, color = glow,
                                 )
                             }
-                            g.dupConvertedTo?.let { (k, n2) ->
+                            // 重复的东西折成了什么。三种情况，别混：
+                            //   micro   → 折成微曦。⚠️ **数字变大但价值变小**（5 微曦 = 半抽），
+                            //             所以文案必须带换算，只写「折 5 微曦」会被当成赚了。
+                            //   tickets → 老契约的直接折曦光（服务端已切到 micro，留着兼容历史记录）。
+                            //   null 且不是新的 → 六命前的重复角色：**只进命座、不返还**，
+                            //             这一张的价值就是命座本身，得说出来，不然像是白抽。
+                            val dup = g.dupConvertedTo
+                            if (dup != null) {
+                                val (k, n2) = dup
                                 Text(
-                                    if (k == "tickets") t("已有 · 折 %d 曦光").format(n2) else t("已有"),
+                                    when (k) {
+                                        "micro" -> t("已有 · 折 %d 微曦（%s）").format(n2, pulls(n2, d.microPerTicket))
+                                        // 老契约的直接折曦光。**这一支实际到不了** ——
+                                        // 结算页只渲染刚抽回来的新结果，历史记录走 [WishHistory]
+                                        // （那边才是真的要兼容两种 kind 的地方）。留着是防服务端回滚。
+                                        "tickets" -> t("已有 · 折 %d 曦光").format(n2)
+                                        else -> t("已有")
+                                    },
                                     Modifier.padding(end = 10.dp),
                                     style = MaterialTheme.typography.labelSmall, color = Muted,
                                 )
-                            }
+                            } else if (!g.isNew) Text(
+                                // ⚠️ 判据要带 kind：返还为 0 今天只可能是六命前的重复角色，
+                                //    但那取决于奖池配置（某个稀有度配成 0，重复**装扮**也会走到这儿，
+                                //    而装扮没有命座）。跟 [WishHistory] 的判据保持一致。
+                                if (g.kind == "character") t("已有 · 命座 +1") else t("已有"),
+                                Modifier.padding(end = 10.dp),
+                                style = MaterialTheme.typography.labelSmall, color = Muted,
+                            )
                             if (g.amount > 0) Text(
                                 "×" + g.amount,
                                 style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace),
@@ -566,6 +602,21 @@ internal fun reducedMotion(): Boolean {
                 ctx.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f,
             ) == 0f
         }.getOrDefault(false)
+    }
+}
+
+/**
+ * 把微曦说成"几抽" —— 光给微曦数没用，玩家心里的单位是**抽**。
+ * ⚠️ 基数从服务端来（`microPerTicket`），别写死 10：那是奖池旋钮，改了不发版。
+ */
+private fun pulls(micro: Long, per: Int): String {
+    if (per <= 0) return ""
+    val whole = micro / per
+    val rest = micro % per
+    return when {
+        rest == 0L -> t("%d 抽").format(whole)
+        whole == 0L && rest * 2 == per.toLong() -> t("半抽")
+        else -> t("%.1f 抽").format(micro.toFloat() / per)
     }
 }
 

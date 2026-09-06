@@ -82,6 +82,10 @@ object Wish {
     data class Draw(
         val results: List<Got>,
         val tickets: Int,
+        /** 抽完之后手上的微曦零头（满 [microPerTicket] 已经自动进曦光了，所以恒小于它）。 */
+        val micro: Int = 0,
+        /** 几点微曦换 1 张曦光。**别写死 10** —— 服务端两个接口都给。 */
+        val microPerTicket: Int = 10,
         val pityRemaining: Int,
         val drawId: Long,
         val replay: Boolean,
@@ -140,6 +144,12 @@ object Wish {
             Draw(
                 results = o.optJSONArray("results").list(::got),
                 tickets = o.optInt("tickets"),
+                // ⚠️ 哨兵 −1 = **服务端没给这个字段**，跟"真的是 0"要分开。
+                //    重试命中幂等时服务端的 replay 分支不带 micro / microPerTicket，
+                //    当成 0 会把余额行的零头抹掉、换算基数退回写死的 10。
+                //    同 `CheckIn.tickets` 那一处的写法。
+                micro = o.optInt("micro", -1),
+                microPerTicket = o.optInt("microPerTicket", -1),
                 pityRemaining = o.optInt("pityRemaining"),
                 drawId = o.optLong("drawId"),
                 replay = o.optBoolean("replay"),

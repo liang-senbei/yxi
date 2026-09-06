@@ -166,7 +166,18 @@ private fun Line(g: Wish.Got) {
 private fun note(g: Wish.Got): String? = when {
     // ⚠️ 整句当 key、数字走 format 占位符。把句子拆成两半再跟数字拼起来，
     //    英文语序一变就拼不回来；而且拆出来的半句会被 dev/i18n-check.sh 当成待翻条目。
-    g.dupConvertedTo != null -> t("重复 · 折曦光 ×%d").format(g.dupConvertedTo.second)
+    // ⚠️ **必须按 kind 分开写**。服务端历史返回的是**当时存的原值、没做迁移**
+    //    （cc-logto_yxi 2026-09-07 确认：库里 tickets 70 条、micro 18 条并存），
+    //    一律写成「折曦光 ×N」的话，5 微曦会显示成「折曦光 ×5」——**价值差 10 倍**。
+    //    不迁移是对的：旧那一发真的给了 1 曦光，曦光流水里也真的进过账；
+    //    历史该记录发生过什么，不是记录"按今天的规则本该是什么"。
+    g.dupConvertedTo != null -> when (g.dupConvertedTo.first) {
+        "micro" -> t("重复 · 折微曦 ×%d").format(g.dupConvertedTo.second)
+        else -> t("重复 · 折曦光 ×%d").format(g.dupConvertedTo.second)
+    }
+    // 六命前的重复角色：不返还，价值是命座本身。没这一条的话历史里它**什么标都没有**，
+    // 看起来像白抽（结算页已经说了「命座 +1」，历史得对得上）。
+    !g.isNew && g.kind == "character" -> t("重复 · 命座 +1")
     g.isNew && g.kind in setOf("character", "cosmetic") -> t("NEW")
     g.kind == "membership_days" && g.amount > 0 -> t("会员 %d 天").format(g.amount)
     g.kind == "tickets" && g.amount > 0 -> "×%d".format(g.amount)
