@@ -244,8 +244,11 @@ private fun GameBoard(
     val laneBg = Color(0xFF0E1117)
     val stageTop = Color(0xFF141A24)
     val noteColor = Color(0xFF5CC8F5)                    // 冷青：在深色底上最跳，跟铜色的命中光是补色关系
-    // ⚠️ 舞台是固定深色，配色也固定取**深色皮肤那一套暖色**：浅色皮肤里的 `Copper` 其实是
-    //    Google 蓝（Palette.kt:87），在深色舞台上会跟青色音符糊成一片，命中光也不像"打中了"。
+    // ⚠️ **固定深色的舞台上，一律不用主题色 getter**（Copper / Amber / Muted 都会跟着皮肤变）。
+    //    `Copper` 是**槽位名 = 主操作色**，不是字面的铜色：深色皮肤里它是 #FFB787，
+    //    浅色皮肤里故意是 Google 蓝 #0B57D0（Palette.kt:87 有注释）—— 那不是 bug，别去"修"它，
+    //    全 app 两百多处靠这个名字换风格。这块舞台不跟皮肤走，所以颜色自己写死。
+    //    （结算页不是固定深色、跟着主题走，那儿用 Copper 当主操作色是对的。）
     val judgeColor = Color(0xFFFFB787)                   // 完美 / 判定线：暖铜
     val goodColor = Color(0xFFFFC46B)                    // 不错：琥珀
     val rimColor = Color(0xFFE0B378)                     // 音符的暖描边，跟命中光同一家
@@ -535,7 +538,8 @@ private fun GameBoard(
         if (countdown > 0) Text(
             "$countdown",
             Modifier.align(Alignment.Center),
-            style = MaterialTheme.typography.displayLarge, color = Copper,
+            // 舞台是固定深色 → 用舞台自己的暖色常量，不用 Copper（见上面那段注释）
+            style = MaterialTheme.typography.displayLarge, color = judgeColor,
         )
     }
 }
