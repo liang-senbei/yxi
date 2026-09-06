@@ -88,6 +88,17 @@ dependencies {
     implementation(libs.bouncycastle)
     implementation(libs.kotlinx.coroutines.android)
 
+    // 扫一扫：CameraX 取景 + ZXing 解码。
+    // ⚠️ **刻意不用 ML Kit / Play 服务那套扫码**：老板手机的 GMS 是关的（同语音识别那个坑），
+    //    走 Play 服务的方案在他机器上是死的。ZXing 的 core 是纯 Java、不依赖任何 Google 服务。
+    // ⚠️ 只拉 zxing 的 **core**，不拉 zxing-android-embedded —— 那个把整套界面也带进来，白涨体积。
+    // ⚠️ **别换成 ML Kit / play-services-code-scanner**：老板手机 GMS 默认关着，那条路在他机器上是死的。理由和实测证据见 ui/ScanScreen.kt 的类注释。
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
+    implementation(libs.zxing.core)
+
     // 手机上直接做语音识别（sherpa-onnx + SenseVoice）。
     // ⚠️ AAR **不进 git**（47MB），`dev/fetch-libs.sh` 下。见 android/app/libs/README。
     implementation(fileTree("libs") { include("*.aar") })

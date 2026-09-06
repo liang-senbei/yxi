@@ -58,6 +58,8 @@ fun SettingsScreen(
     connectError: String? = null,
     /** 点「会员中心」跳过去（那一页在 MainActivity 那层管） */
     onMember: () -> Unit = {},
+    /** 「我的」标题行右边那个扫一扫（只有 mine = true 时显示） */
+    onScan: () -> Unit = {},
     /**
      * 这一页是「我的」还是「设置」。
      *
@@ -113,11 +115,22 @@ fun SettingsScreen(
         modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text(
-            if (mine) t("我的") else t("设置"),
-            style = MaterialTheme.typography.headlineMedium,
-            modifier = Modifier.padding(18.dp, 14.dp, 18.dp, 4.dp),
-        )
+        // 标题行：左边「我的 / 设置」，右边一个扫一扫（老板 2026-09-06：「以后扫东西就不用用微信扫」）。
+        // ⚠️ 只有「我的」那一栏给扫一扫；`mine = false` 是设置页，那儿摆个相机图标没道理。
+        Row(
+            Modifier.fillMaxWidth().padding(18.dp, 14.dp, 10.dp, 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                if (mine) t("我的") else t("设置"),
+                Modifier.weight(1f),
+                style = MaterialTheme.typography.headlineMedium,
+            )
+            if (mine) Box(
+                Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onScan),
+                contentAlignment = Alignment.Center,
+            ) { YxiIcon(Ico.Scan, size = 23.dp, tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
         if (mine) {
 
         // 每次进「我的」拉一次 /api/me —— 红点、余额、曦光都靠它。不拉的话只有冷启动那一次是准的，

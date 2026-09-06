@@ -28,7 +28,7 @@ import androidx.compose.ui.unit.dp
  *
  * ⚠️ 没引图标库：离线构建加不了依赖，而且这几个形状用路径写就是几行。
  */
-enum class Ico { Chat, Server, Sliders, Gear, Crown, Moon, Person, Bolt, Wallet, Mail, Wish, Gift }
+enum class Ico { Chat, Server, Sliders, Gear, Crown, Moon, Person, Bolt, Wallet, Mail, Wish, Gift, Scan }
 
 @Composable
 fun YxiIcon(ico: Ico, size: Dp = 22.dp, tint: Color = LocalContentColor.current, modifier: Modifier = Modifier) {
@@ -116,6 +116,15 @@ fun YxiIcon(ico: Ico, size: Dp = 22.dp, tint: Color = LocalContentColor.current,
                 // 蝴蝶结：两个小圈
                 drawCircle(tint, 2.1f * k, Offset(9.4f * k, 7.2f * k), style = Stroke(width = w))
                 drawCircle(tint, 2.1f * k, Offset(14.6f * k, 7.2f * k), style = Stroke(width = w))
+            }
+            Ico.Scan -> {                                           // 扫一扫：四角取景框 + 中间一条扫描线
+                // ⚠️ 画四个角、不画整个方框 —— 整框跟「设置」那类方形图标撞脸，取景角才一眼是扫码
+                val a1 = 4f; val b1 = 20f; val arm = 4.6f
+                line(a1, a1 + arm, a1, a1); line(a1, a1, a1 + arm, a1)          // 左上
+                line(b1 - arm, a1, b1, a1); line(b1, a1, b1, a1 + arm)          // 右上
+                line(a1, b1 - arm, a1, b1); line(a1, b1, a1 + arm, b1)          // 左下
+                line(b1 - arm, b1, b1, b1); line(b1, b1, b1, b1 - arm)          // 右下
+                line(3f, 12f, 21f, 12f)                                          // 扫描线
             }
             Ico.Bolt -> drawPath(                                   // 闪电：会话状态那条的开关 / 「模式」标记
                 // ⚠️ 这里原来直接写 emoji「⚡」（用户 2026-09-04：「看起来很违和」）。

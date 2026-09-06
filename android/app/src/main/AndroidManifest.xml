@@ -25,6 +25,10 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
     <!-- 云曦天气「用当前位置」：只要粗略定位（城市级），且只在用户点那个按钮时申请（老板 2026-09-06 拍板要定位）。见 yunxi/Weather.kt locate() -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- 扫一扫。⚠️ **点「扫一扫」的那一刻才申请**，不在启动时要 —— 一开 App 就弹相机权限很劝退（cc-Yxi 2026-09-06）。
+         camera 声明成 not required：没有摄像头的设备照样能装，只是这个入口用不了。 -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
     <!-- 直接对本应用弹「后台不受限制」的授权框。
          ⚠️ 没有这条权限，那个 intent 会被拒，只能退回到「已放行应用列表」——
          而我们还没被放行，用户在那个列表里根本找不到这个 App。见 TROUBLESHOOTING #74 -->

@@ -49,7 +49,7 @@ import kotlinx.coroutines.launch
  * 画出来的连续天数是假的，用户会照着它以为自己签了。
  */
 @Composable
-fun ActivityScreen(onAbyss: () -> Unit = {}, modifier: Modifier = Modifier) {
+fun ActivityScreen(onAbyss: () -> Unit = {}, onRhythm: () -> Unit = {}, modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var st by remember { mutableStateOf<Wish.CheckIn?>(null) }
@@ -73,6 +73,7 @@ fun ActivityScreen(onAbyss: () -> Unit = {}, modifier: Modifier = Modifier) {
             s == null -> {
                 Hint(t("活动暂未开放，敬请期待。"))
                 AbyssEntry(onAbyss)
+                RhythmEntry(onRhythm)
             }
             else -> {
                 Surface(
@@ -132,6 +133,7 @@ fun ActivityScreen(onAbyss: () -> Unit = {}, modifier: Modifier = Modifier) {
                     }
                 }
                 AbyssEntry(onAbyss)
+                RhythmEntry(onRhythm)
             }
         }
     }
@@ -187,6 +189,47 @@ private fun AbyssEntry(onOpen: () -> Unit) {
                         failed -> t("取不到 —— 网络不通，或者登录过期了。")
                         else -> t("正在取…")
                     },
+                    style = MaterialTheme.typography.labelMedium, color = Muted,
+                )
+            }
+            Text("›", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.outline)
+        }
+    }
+}
+
+/**
+ * 活动中心里的**云曦节拍**（音游）入口卡。副标题是"打过几张谱"，不掺服务端数据，
+ * 所以断网也照常摆得出来（成绩现在存本地，服务端契约见 logto_yxi/design/rhythm.md）。
+ */
+@Composable
+private fun RhythmEntry(onOpen: () -> Unit) {
+    val ctx = LocalContext.current
+    val played = app.yxi.agent.Rhythm.SONGS.sumOf { s ->
+        app.yxi.agent.Rhythm.DIFFS.count { app.yxi.agent.Rhythm.best(ctx, "${s.id}_$it") != null }
+    }
+    val total = app.yxi.agent.Rhythm.SONGS.size * app.yxi.agent.Rhythm.DIFFS.size
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = RoundedCornerShape(22.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp).clip(RoundedCornerShape(22.dp)).clickable { onOpen() },
+    ) {
+        Row(
+            Modifier.padding(18.dp, 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Box {
+                GlyphIcon(Glyph.Music, Color(0xFF3FA9A0), 24.dp)
+                if (played == 0) Box(
+                    Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-3).dp).size(8.dp)
+                        .clip(CircleShape).background(MaterialTheme.colorScheme.error),
+                )
+            }
+            Column(Modifier.weight(1f)) {
+                Text(t("云曦节拍"), style = MaterialTheme.typography.titleMedium)
+                Text(
+                    if (played == 0) t("跟着拍子点四条轨。三首曲子，六张谱。")
+                    else t("已打过 %d / %d 张谱").format(played, total),
                     style = MaterialTheme.typography.labelMedium, color = Muted,
                 )
             }
