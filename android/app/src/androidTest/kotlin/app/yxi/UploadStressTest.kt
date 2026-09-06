@@ -53,12 +53,17 @@ class UploadStressTest {
             runBlocking { s.connect() }
             return s
         }
+        // ⚠️⚠️ **测试绝不往 App 的主机表里写东西。** 原来这里「没配主机就自己种一台指向 10.0.2.2」——
+        //    模拟器搬到 Mac mini 之后 10.0.2.2 是那台 Mac(没有 sshd),于是这台 stress-dev 连不上、
+        //    App 反复弹指纹确认框把界面卡死,而**模拟器是三个人共用的**:2026-09-06 cc-Yxi_Entertainment
+        //    撞上,只好清空 hosts.json 才能干活。测试留下的东西要能自己收走,收不走就别留。
+        //    现在:没给密钥直接失败并说清怎么跑,不碰 HostStore。
         val store = HostStore(ctx); val keys = KeyManager(ctx)
-        // 没配主机就自己种一台指向宿主机（模拟器里 10.0.2.2 = 跑模拟器的那台）。
-        // 公钥打到 logcat 里 —— 第一次跑要把它贴进服务器的 authorized_keys。
-        val h = store.hosts.value.firstOrNull()
-            ?: app.yxi.ssh.Host(id = "stress-dev", alias = "dev", hostname = "10.0.2.2", username = "root").also { store.upsert(it) }
         android.util.Log.i("UploadStress", "PUBKEY " + keys.publicKeyLine())
+        val h = store.hosts.value.firstOrNull() ?: error(
+            "没传 stressKey,App 里也没有配好的主机 —— 这个测试**不会**替你种一台(会污染共用模拟器)。\n" +
+            "跑法:-Pandroid.testInstrumentationRunnerArguments.stressKey=<base64url 私钥> " +
+            "stressHost=<目标机> [stressPort=22 stressUser=root]")
         val cfg = store.configFor(h, keys) ?: error("主机 ${h.alias} 没有可用的认证方式")
         // ⚠️ 测试对着回环，不做主机指纹校验（真 App 一定做，见 KnownHosts）
         val s = SshSession(cfg, null)
