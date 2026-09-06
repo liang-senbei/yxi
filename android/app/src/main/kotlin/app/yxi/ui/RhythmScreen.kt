@@ -252,7 +252,11 @@ private fun GameBoard(
         }.getOrDefault(true)
     }
 
-    val press = remember { FloatArray(4) { -9f } }        // 每条轨最后一次"手指按下"的时刻
+    // 每条轨最后一次"手指按下"的时刻。
+    // ⚠️ 写在指针回调、读在 Canvas 的绘制 lambda —— **两边都在主线程**（Compose 的指针输入和绘制
+    //    都跑在 UI 线程），所以裸数组就够，不需要 @Volatile / snapshotFlow。
+    //    改成 Compose 状态反而更糟：它每帧都变，读在组合期就是每帧重组整页（见 TROUBLESHOOTING #13）。
+    val press = remember { FloatArray(4) { -9f } }
     val view = LocalView.current
     val sfx = remember { RhythmSfx(ctx) }
     DisposableEffect(sfx) { onDispose { sfx.release() } }
