@@ -15,6 +15,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Path
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -25,12 +29,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.imageResource
@@ -77,14 +82,22 @@ object WishReveal {
         else -> app.yxi.R.raw.yx_wish_blue
     }
 
-    /** 舞台底色：取自短片自己的纸感背景，这样"擦"的那半（透明底立绘）和"放"的那半（视频）接得上 */
-    val Paper = Color(0xFFE1DAD7)
+    /** 舞台底色 = **短片自己的底色**。擦完那张就是短片第 1 帧，两半接得严丝合缝。 */
+    val Paper = Color(0xFFE3E3E3)
 
-    fun artOf(rarity: String): Int = when {
-        rarity.contains("金") || rarity.equals("gold", true) -> app.yxi.R.drawable.yx_wish_gold
-        rarity.contains("红") || rarity.equals("red", true) -> app.yxi.R.drawable.yx_wish_red
-        rarity.contains("紫") || rarity.equals("purple", true) -> app.yxi.R.drawable.yx_wish_purple
-        else -> app.yxi.R.drawable.yx_wish_blue
+    /** 结算卡的底色。片尾淡到它，换卡那一刻两边同色，看不出接缝。 */
+    val Stage = Color(0xFF0B0D12)
+
+    /**
+     * 每档短片的时长（秒，实测）。**越稀有揭晓段越长**，通用蓄力段四档一样。
+     * ⚠️ 片尾自带 0.45 秒淡入结算卡底色（`0xFF0B0D12`），所以放完那一刻直接换成结算卡
+     * **看不出接缝** —— 不用在 App 里叠两层弹窗做交叉淡入。改片子就要改这张表。
+     */
+    fun lenOf(rarity: String): Float = when {
+        rarity.contains("金") || rarity.equals("gold", true) -> 7.27f
+        rarity.contains("红") || rarity.equals("red", true) -> 7.30f
+        rarity.contains("紫") || rarity.equals("purple", true) -> 6.87f
+        else -> 6.43f
     }
 }
 
@@ -101,17 +114,21 @@ fun WipeReveal(
     autoAfter: Float = 3.5f,
     onDone: () -> Unit = {},
 ) {
-    val ctx = LocalContext.current
     val idle = ImageBitmap.imageResource(app.yxi.R.drawable.yx_wish_idle)
-    val done = ImageBitmap.imageResource(WishReveal.artOf(rarity))
-    val tint = WishReveal.colorOf(rarity)
     val motion = !reducedMotion()   // ⚠️ 只有一处读这个系统开关（[reducedMotion]）
+    val clipLen = WishReveal.lenOf(rarity)
 
     // 擦到哪儿了：把画面切成 12×12 的格子，手指扫过就点亮一格。
     // 用格子不用路径：省内存、好算覆盖率，而且天然有"擦开的形状"。
     val grid = remember(rarity) { BooleanArray(GRID * GRID) }
     var wiped by remember(rarity) { mutableFloatStateOf(0f) }
     var burstAt by remember(rarity) { mutableStateOf(-1f) }
+    // ⚠️ **收尾计时的零点是 [playAt]（播放器真的 start 那一刻），不是擦完那一刻。**
+    //    起播要先 attach → onSurfaceTextureAvailable → prepare → start，实测 0.1–0.4 秒；
+    //    拿擦完当零点就会短算这一段，短片每次被砍掉尾巴 —— 片尾那段淡入结算卡底色的收尾
+    //    正好被切掉，接缝原样回来，而且越慢的机器越明显。
+    var playAt by remember(rarity) { mutableFloatStateOf(-1f) }
+    var bail by remember(rarity) { mutableStateOf(false) }   // 放不了 / 切后台 / 用户点了跳过
     var now by remember(rarity) { mutableFloatStateOf(0f) }
 
     LaunchedEffect(rarity) {
@@ -121,15 +138,46 @@ fun WipeReveal(
             now = (System.nanoTime() - t0) / 1e9f
             // 没人擦也别卡住：到点自己擦开
             if (burstAt < 0f && (wiped >= 0.62f || now >= autoAfter || !motion)) burstAt = now
-            if (burstAt >= 0f && now - burstAt > BURST) break
+            if (bail) break                                              // 放不了就立刻收，别让人干等
+            if (playAt >= 0f && now - playAt > clipLen) break            // 正常：从真的开播算满一整条
+            if (burstAt >= 0f && now - burstAt > clipLen + 2.5f) break    // 兜底：起播卡死也不能永远等
         }
         onDone()
     }
 
+    // ⚠️ 整屏底色也要跟着片尾一起淡到结算卡底色。只淡中间那块视频的话，
+    //    换成结算卡的那一刻四周会从浅灰"啪"地变黑 —— 接缝就露在这一圈上。
+    //    写在 drawBehind 里而不是 composition 里：`now` 每帧都变，读在 composition 里会整页重组。
     Box(
-        // 舞台按短片的比例排（540×878）：视频才不会被拉扁；立绘是方的，居中等比放进去，
-        // 上下那点留白正好落在纸底色上，两半接得住。
-        modifier.aspectRatio(540f / 878f).pointerInput(rarity) {
+        modifier.drawBehind {
+            // ⚠️ 窗口按**实测**对齐视频里烤好的那段淡入（`[clipLen-0.60, clipLen-0.134]`，
+            //    末尾那 0.134 秒是定格的黑帧）。差 0.13 秒就会在视频黑透之后、四周还是中灰，
+            //    黑片子外面框一圈灰边 —— 新的接缝。零点同样用 [playAt]。
+            val t0 = if (playAt >= 0f) playAt else return@drawBehind drawRect(WishReveal.Paper)
+            // ⚠️ **宁可比视频晚，别比它早**。实测（22 秒录屏）四周按 clipLen-0.60 起淡时，
+            //    比画面里真正变暗早了约 0.3 秒 —— 屏幕上是「黑框套着一块还亮着的视频」，
+            //    比"浅色的边"更扎眼。往后挪、并且收得更快，让它在片尾之前追上。
+            val tail = (((now - t0) - (clipLen - 0.40f)) / 0.28f).coerceIn(0f, 1f)
+            // ⚠️ **不用 lerp**：`Color` 的 lerp 走 Oklab，而视频里的淡入是编码域线性（ffmpeg fade），
+            //    两条曲线中段差七八级。叠一层 alpha 走 source-over，正好跟视频同域。
+            drawRect(WishReveal.Paper)
+            if (tail > 0f) drawRect(WishReveal.Stage.copy(alpha = tail))
+        }
+            // ⚠️ 短片期间**点一下要能跳过**。结算卡本来就能点着关,唯独这七秒不能跳的话,
+            //    最坏路径是「擦 3.5 秒 + 放 7.3 秒」全程不可跳、返回键还是空实现,
+            //    解码失败时更是对着一张静止图干等。
+            .pointerInput(rarity) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    if (burstAt >= 0f) bail = true
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+    Box(
+        // 舞台按短片的真实比例排（608×1000）—— TextureView 是**拉伸填充**的，
+        // 比例不对视频就会被压扁。擦拭那张图是同一段视频的第 1 帧，比例天生一致。
+        Modifier.fillMaxWidth(0.92f).aspectRatio(608f / 1000f).pointerInput(rarity) {
             awaitEachGesture {
                 val d = awaitFirstDown(requireUnconsumed = false)
                 fun mark(p: Offset) {
@@ -155,36 +203,42 @@ fun WipeReveal(
         Canvas(Modifier.fillMaxSize()) {
             val burst = if (burstAt < 0f) -1f else now - burstAt
             // 呼吸：整张图非常轻微地起伏（±1.2%），加上一点上下浮动 —— 静止的立绘看着像卡住了
-            val breath = if (!motion) 0f else kotlin.math.sin(now * 1.6f)
+            // 开播之后就别摆了：视频是不缩放的，底图还在 ±1.2% 呼吸会在首帧到位时跳一下。
+            // 停在开播那一刻最安全 —— 那一帧视频已经盖住底图，跳变看不见。
+            val breath = if (!motion || playAt >= 0f) 0f else kotlin.math.sin(now * 1.6f)
             val sc = 1f + 0.012f * breath
             val dy = -size.height * 0.008f * breath
-            // 立绘是正方形：按宽度铺满、居中，上下留白（舞台比它高）
-            val side = size.width * sc
-            val w2 = side; val h2 = side
+            // 短片是竖构图，铺满整个舞台（跟视频同比例，见上面的 aspectRatio）
+            val w2 = size.width * sc; val h2 = size.height * sc
             val ox = (size.width - w2) / 2f; val oy = (size.height - h2) / 2f + dy
             drawImage(
                 idle,
                 dstOffset = IntOffset(ox.toInt(), oy.toInt()),
                 dstSize = IntSize(w2.toInt(), h2.toInt()),
             )
-            // 擦开的格子里画"出货那张"——**擦到哪儿，颜色就露到哪儿**（颜色在落定之前就说话）
+            // ⚠️ **擦的过程里不能有任何品质色**（老板 2026-09-07：「擦拭之前颜色和光晕不能变，
+            //    擦拭完立马变」）。底下铺的是那张**中性的灰黑星星**（短片第 1 帧），
+            //    没擦到的格子蒙一层**半透明**的霜 —— 星星始终看得见，擦开只是把霜抹掉。
+            //    ⚠️ 霜**不能是不透明的**：那样擦之前是一片空白灰，
+            //    老板要的是「擦拭的前面是灰黑星星」（2026-09-07），看不见就不算。
+            //    颜色第一次出现是在短片开播那一帧，手心的光晕直接就是这一抽的品质色。
             val cw = size.width / GRID; val ch = size.height / GRID
             if (burst < 0f) {
+                // ⚠️ **攒成一个 Path 画一次**，别逐格 drawRect：格子边界是浮点、
+                //    Compose 的 Paint 默认开抗锯齿，相邻两格各覆盖半个像素，
+                //    合成后边界比格心深一档 → 画面上浮出 11 竖 11 横的浅色格纹。
+                //    单个 Path 是先合并覆盖率再混合，共享边天然没缝，也更省。
+                val frost = Path()
                 for (i in grid.indices) {
-                    if (!grid[i]) continue
+                    if (grid[i]) continue
                     val gx = (i % GRID) * cw; val gy = (i / GRID) * ch
-                    clipRect(gx, gy, gx + cw, gy + ch) {
-                        drawImage(
-                            done,
-                            dstOffset = IntOffset(ox.toInt(), oy.toInt()),
-                            dstSize = IntSize(w2.toInt(), h2.toInt()),
-                        )
-                    }
+                    frost.addRect(Rect(gx, gy, gx + cw, gy + ch))
                 }
-                // 星星上一点微光，告诉你这儿可以擦
+                drawPath(frost, WishReveal.Paper.copy(alpha = FROST))
+                // 星星上一点微光，告诉你这儿可以擦。**白的，不带品质色。**
                 if (motion) {
                     val pulse = 0.35f + 0.25f * kotlin.math.sin(now * 3f)
-                    drawCircle(tint.copy(alpha = .18f * pulse), size.minDimension * .12f, starCenter(size))
+                    drawCircle(Color.White.copy(alpha = .22f * pulse), size.minDimension * .12f, starCenter(size))
                     // 星尘：慢慢往上飘的小点，飘出去就从下面回来（靠取模循环，不用管理粒子列表）
                     val c0 = starCenter(size)
                     for (i in 0 until 7) {
@@ -199,34 +253,39 @@ fun WipeReveal(
                 }
             }
         }
-        // 爆开：放这一档的短片（有动效、有声音）。⚠️ 视频只负责"演"，
+        // 擦完就放这一档的短片（有动效、有声音）。⚠️ 视频只负责"演"，
         //    结果早在 draw 接口返回时就落库了 —— 播不播、播完没播完都不影响归属。
-        // 一记白闪接缝：短片是从中段切出来的，跟擦完那一帧对不上。
-        // **闪一下再切**是最老实的遮法 —— 参考视频自己在 6.3 秒也是这么干的。
-        if (burstAt >= 0f && motion) {
-            val fa = ((now - burstAt) / 0.22f).coerceIn(0f, 1f)
-            if (fa < 1f) Canvas(Modifier.matchParentSize()) {
-                drawRect(Color.White.copy(alpha = (1f - fa) * 0.9f))
-            }
-        }
-        // ⚠️ 白闪之后才挂播放器：AndroidView 是真的子 View，盖在 Compose 画的东西上面，
-        //    白闪要是跟它同时存在就会被压住。**先闪 0.18 秒、再挂视频**，顺便给解码器准备的时间。
-        if (burstAt >= 0f && now - burstAt > 0.18f) RarityClip(
+        // ⚠️ **不再垫白闪、也不再延迟挂载**：延迟挂载会让「擦完立刻亮」变成
+        //    「擦完等一下才亮」，正是老板挑掉的毛病；垫白闪则是平白多闪一次。
+        //    ⚠️ 别把"擦拭图和短片首帧一模一样"当成论据 —— **实测不一样**
+        //    （逐像素 mean|Δ| 5–9，平坦背景角上差约 11 级），是有一点跳变的。
+        //    留着它是因为「擦完立刻变」本来就要一下变化，不是因为它无缝。
+        if (burstAt >= 0f) RarityClip(
             WishReveal.clipOf(rarity),
             Modifier.matchParentSize(),
-            onEnd = { /* 时长由外面的 LaunchedEffect 统一收尾 */ },
+            // 真的开播了才起表 —— 收尾时刻由这一下决定，不是由擦完那一下
+            onStart = { if (playAt < 0f) playAt = now },
+            onFail = { bail = true },
         )
         if (burstAt < 0f) Text(
             t("擦一擦"),
             Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = .45f),
+            color = Color(0xFF5A5A5A),   // 固定深灰（5.37:1）：这块底是短片自己的浅灰，不跟皮肤走
         )
+    }
     }
 }
 
 private const val GRID = 12
-private const val BURST = 1.9f      // 四段短片里最长的那段
+
+/**
+ * 霜的浓度：**必须半透明** —— 星星要一直看得见，擦只是把霜抹掉。
+ * ⚠️ 实测过对比度（星星最暗处 `#4F4242` vs 底 `#E2E0DF`，原图 7.29:1）：
+ *    0.72 → **1.55:1**（日光下基本看不见，等于又变回空白灰）· 0.60 → 1.92:1 · **0.50 → 2.35:1**。
+ *    老板要的是「擦拭的前面是灰黑星星」，看不见就不算数，所以取 0.50。
+ */
+private const val FROST = 0.50f
 
 /** 星星在她怀里，大约在画面中偏下 —— 光环和星点都从这儿发 */
 private fun starCenter(size: Size) = Offset(size.width * 0.42f, size.height * 0.52f)
@@ -234,51 +293,80 @@ private fun starCenter(size: Size) = Offset(size.width * 0.42f, size.height * 0.
 /**
  * 放一段出货短片（`res/raw` 里的 mp4，带声音）。
  *
- * 用 **TextureView + MediaPlayer**，不引第三方播放器：这是一段 1.5 秒的小视频，
+ * 用 **TextureView + MediaPlayer**，不引第三方播放器：七秒的小视频，
  * ExoPlayer 那一套（几百 KB 依赖 + 一堆生命周期）不值当。
  * ⚠️ 不用 `VideoView`：它是 SurfaceView，在 Dialog 里会有层级问题（盖不住 / 被盖住）。
  *
- * ⚠️ **静音开关跟着打击音那套走不合适**，这里跟随系统媒体音量即可；
- *    播放失败（解码不了、文件坏了）就**什么都不放**，直接当播完 —— 绝不卡住出货流程，
- *    因为东西早就是玩家的了。
+ * ⚠️ **[onStart] 必须真的在 `start()` 之后回调**：外面那套收尾计时是拿它当零点的。
+ *    拿"擦完那一刻"当零点会短算 —— 起播（解码器实例化 + prepare）实测 0.1–0.4 秒，
+ *    低端机更久，于是短片每次都被砍掉尾巴，**片尾那段淡入结算卡底色的收尾正好被切掉**，
+ *    好不容易消掉的接缝原样回来，而且专挑慢机型出现。
+ * ⚠️ 用 `prepareAsync()` 不用 `MediaPlayer.create()`：后者在主线程里同步 prepare，
+ *    那 0.1–0.4 秒是**卡住主线程**的（擦拭的手感当场就掉帧）。
+ * ⚠️ 播放失败（解码不了、文件坏了）就**立刻**回调 [onFail]，让外面马上收 ——
+ *    绝不让人对着一张静止图干等七秒。东西早就是玩家的了，不差这一段表演。
+ * ⚠️ 切后台要停：Activity 只是 stopped 时 View 不 detach，
+ *    `onSurfaceTextureDestroyed` 不触发，声音会在后台继续放七秒。
  */
 @Composable
-private fun RarityClip(resId: Int, modifier: Modifier = Modifier, onEnd: () -> Unit = {}) {
-    val ctx = LocalContext.current
+private fun RarityClip(
+    resId: Int,
+    modifier: Modifier = Modifier,
+    onStart: () -> Unit = {},
+    onFail: () -> Unit = {},
+) {
+    // ⚠️ `AndroidView` 的 factory 只跑一次，闭包捕获的是**第一次组合**的那个 lambda。
+    //    不用 rememberUpdatedState 包一层的话，这两个回调是死引用。
+    val started by rememberUpdatedState(onStart)
+    val failed by rememberUpdatedState(onFail)
+    val hold = remember { arrayOfNulls<Any>(2) }   // [0]=MediaPlayer [1]=Surface，给生命周期那边收
+
+    val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(owner) {
+        val ob = androidx.lifecycle.LifecycleEventObserver { _, e ->
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
+                runCatching { (hold[0] as? android.media.MediaPlayer)?.release() }
+                runCatching { (hold[1] as? android.view.Surface)?.release() }
+                hold[0] = null; hold[1] = null
+                failed()          // 回到前台时直接是结算卡，不留一段放不动的画面
+            }
+        }
+        owner.lifecycle.addObserver(ob)
+        onDispose { owner.lifecycle.removeObserver(ob) }
+    }
+
     androidx.compose.ui.viewinterop.AndroidView(
         modifier = modifier,
         factory = { c ->
             android.view.TextureView(c).apply {
                 surfaceTextureListener = object : android.view.TextureView.SurfaceTextureListener {
-                    private var mp: android.media.MediaPlayer? = null
-
-                    // ⚠️ Surface 得自己 release：`MediaPlayer.release()` 不管它，
-                    //    `onSurfaceTextureDestroyed` 里 return true 释放的是 SurfaceTexture、不是这层包装。
-                    private var sf: android.view.Surface? = null
-
                     override fun onSurfaceTextureAvailable(st: android.graphics.SurfaceTexture, w: Int, h: Int) {
-                        // ⚠️ 先把播放器接在手上再 try：create 成功但 setSurface/start 抛了的话，
-                        //    整段 runCatching 会返回 null，那个已经创建出来的播放器就再也没人 release 了。
-                        val player = runCatching { android.media.MediaPlayer.create(c, resId) }.getOrNull()
-                        mp = player
-                        if (player == null) { onEnd(); return }
+                        val player = android.media.MediaPlayer()
+                        hold[0] = player
                         val surface = android.view.Surface(st)
-                        sf = surface
+                        hold[1] = surface
                         runCatching {
+                            c.resources.openRawResourceFd(resId).use { fd ->
+                                player.setDataSource(fd.fileDescriptor, fd.startOffset, fd.length)
+                            }
                             player.setSurface(surface)
-                            player.setOnCompletionListener { onEnd() }
-                            player.start()
+                            player.setOnPreparedListener { it.start(); started() }
+                            player.setOnErrorListener { _, _, _ -> failed(); true }
+                            player.prepareAsync()
                         }.onFailure {
-                            // 放不了就当放完，别把出货卡住
                             runCatching { player.release() }
                             runCatching { surface.release() }
-                            mp = null; sf = null; onEnd()
+                            hold[0] = null; hold[1] = null
+                            failed()
                         }
                     }
                     override fun onSurfaceTextureSizeChanged(st: android.graphics.SurfaceTexture, w: Int, h: Int) = Unit
                     override fun onSurfaceTextureDestroyed(st: android.graphics.SurfaceTexture): Boolean {
-                        runCatching { mp?.release() }; mp = null
-                        runCatching { sf?.release() }; sf = null
+                        // ⚠️ Surface 得自己 release：`MediaPlayer.release()` 不管它，
+                        //    这里 return true 释放的是 SurfaceTexture、不是这层包装。
+                        runCatching { (hold[0] as? android.media.MediaPlayer)?.release() }
+                        runCatching { (hold[1] as? android.view.Surface)?.release() }
+                        hold[0] = null; hold[1] = null
                         return true
                     }
                     override fun onSurfaceTextureUpdated(st: android.graphics.SurfaceTexture) = Unit

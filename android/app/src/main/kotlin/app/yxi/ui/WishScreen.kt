@@ -93,30 +93,39 @@ fun WishScreen(modifier: Modifier = Modifier) {
         // 系统关了动画就别擦、也别放视频，直接给结果（跟 [WishResult] 同一个开关）
         val reduced = reducedMotion()
         var wiped by remember(d) { mutableStateOf(reduced) }
-        if (!wiped) {
+        // ⚠️ **两个 Dialog 必须交叠一小段**。它俩是各自独立的窗口，直接 `if/else` 换的话，
+        //    中间有一两帧**谁都没盖住屏幕**，底下浅色的祈愿页会透出来 ——
+        //    实测录屏在换卡那一刻有两帧 `#FCF9FC` 的白闪（22 秒录像第 13.20–13.27 秒）。
+        //    片尾淡得再准也救不了这一下，因为问题不在颜色而在"没人盖住"。
+        var covered by remember(d) { mutableStateOf(reduced) }
+        LaunchedEffect(wiped) { if (wiped && !covered) { kotlinx.coroutines.delay(220); covered = true } }
+        if (!covered) {
             val best = d.results.maxByOrNull { rank(it.rarity) }
             // ⚠️ 必须走 Dialog：直接摆一个 fillMaxSize 的 Box 会被后面的页面内容盖住
             //    （Compose 里同级后画的在上面），实测就是"擦星星画在祈愿页底下"。
             //    结算卡 WishResult 也是这么做的。
             Dialog(
                 onDismissRequest = { },
-                properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false),
+                // ⚠️ `decorFitsSystemWindows = false` 不能少:结算卡那个 Dialog 传了,
+                //    这个不传的话**状态栏和导航栏两条带子在擦拭期间不是舞台底色**,
+                //    换成结算卡时那两条会「啪」地变 —— 中间淡得再准,边上照样露馅。
+                properties = DialogProperties(
+                    usePlatformDefaultWidth = false,
+                    dismissOnClickOutside = false,
+                    decorFitsSystemWindows = false,
+                ),
             ) {
-                Box(
-                    // 舞台底色取短片自己的纸感背景：擦的那半（透明底立绘）和放的那半（视频）才接得上
-                    Modifier.fillMaxSize().background(WishReveal.Paper),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    WipeReveal(
-                        best?.rarity.orEmpty(),
-                        Modifier.fillMaxWidth(0.92f),
-                        onDone = { wiped = true },
-                    )
-                }
+                // 整屏底色由 [WipeReveal] 自己画 —— 片尾要跟着一起淡到结算卡底色，
+                // 分两处画就会在换卡那一刻露出一圈没淡的浅灰。
+                WipeReveal(
+                    best?.rarity.orEmpty(),
+                    Modifier.fillMaxSize(),
+                    onDone = { wiped = true },
+                )
             }
-        } else {
-            WishResult(d, skipEffect = true) { got = null }
         }
+        // 结算卡后组合 = 后加的窗口 = 盖在上面；等它盖住了，上面那层才撤（见 covered）
+        if (wiped) WishResult(d, skipEffect = true) { got = null }
     }
     // 卡牌库：《神之冠冕》八顶。**没抽到的只给剪影**，别让人以为已经有了。
     var library by remember { mutableStateOf(false) }
@@ -421,7 +430,10 @@ private fun WishResult(d: Wish.Draw, skipEffect: Boolean = false, onClose: () ->
         // 写死 dp 在大字体下会被它盖住最后一张卡（字号一大就折成两行）。
         var footerH by remember { mutableStateOf(0) }
         Box(
-            Modifier.fillMaxSize().background(Color(0xF20B0D12))
+            // ⚠️ **必须跟 [WishReveal.Stage] 是同一个常量**：短片片尾淡到的就是它。
+            //    这里要是留 0xF2 的半透明,切卡瞬间背后的祈愿页会透出 5%(浅色主题下接近白),
+            //    颜色从 #0B0D12 跳到 #151619,接缝就出在这一下。
+            Modifier.fillMaxSize().background(WishReveal.Stage)
                 .clickable { if (ms >= total * 0.95f) onClose() else skipped = true },
         ) {
             // ── 星轨 / 光爆 / 冲击波 / 粒子 / 光柱，全在 [DropStage] 里，四层同色
