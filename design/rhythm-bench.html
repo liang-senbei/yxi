@@ -80,6 +80,7 @@
   <div class="row"><label>密度</label><input type="range" id="density" min="0.4" max="2.5" step="0.05"><output></output></div>
 
   <button id="copy">复制这组设置</button>
+  <div class="seg" style="margin-top:8px"><button id="restart">重开一局（分数 / 连击 / 无线时刻归零）</button></div>
   <div id="done"></div>
 </div>
 
@@ -2922,14 +2923,19 @@ let combo=0, best=0, perfect=0, good=0, miss=0, score=0;
 let tiltAt=-9, tiltDir=0, lastTierAt=-9, lastHitAt=-9;
 const press=[-9,-9,-9,-9], flash=[-9,-9,-9,-9], held=[0,0,0,0];
 let bursts=[], words=[], missMarks=[], shatters=[], vlines=[];
+// 无线时刻（老板 2026-09-06）：只在最高档可能出现；线闪烁后消失，全屏皆可校准；随机 10~13 秒；一局最多一次
+let free = {on:false, used:false, start:0, until:0};
+const FREE_FLICKER = 0.8;                                   // 线闪烁 0.8 秒再消失 / 再闪回来
+const freeLive = t => free.on && t >= free.start + FREE_FLICKER && t < free.until;   // 真正「无线」的那段
 const now = () => (performance.now()-t0)/1000;
 const tierWord = c => { const t = TIERS.find(x=>x.at===c); return t?t.label:null; };
 const multOf = c => { let m=1; for (const t of TIERS) if (c>=t.at) m=t.mult; return m; };
 
 function hitLane(lane, want, windowMs = GOOD_MS){
   const t = now();
+  const anyLane = freeLive(t);                                   // 无线时刻：点哪都算，不看轨道
   for (const n of notes){
-    if (n.lane!==lane || n.judged) continue;
+    if ((!anyLane && n.lane!==lane) || n.judged) continue;
     const err = (t-n.t)*1000;
     if (err < -windowMs) break;
     if (err > windowMs) continue;
@@ -2947,6 +2953,11 @@ function land(n, j){
   bursts.push({at:now(), lane:n.lane, kind:n.kind, judge:j, dir:n.dir, seed:Math.random(), fx: HIT_CHOSEN.length ? pick(HIT_CHOSEN) : null,
                parts:Array.from({length:S.particles}, () => ({a:Math.random()*6.283, v:0.6+Math.random()*1.0, s:0.5+Math.random()*0.9, r:Math.random()}))});
   if (bursts.length>40) bursts.shift();
+  // 无线时刻：最高档（≥30 连击）每一下 25% 的机会触发，一局只一次
+  if (!free.used && TIERS.filter(x => combo >= x.at).length >= 3 && Math.random() < 0.25){
+    free.used = true; free.on = true; free.start = now(); free.until = now() + FREE_FLICKER + 10 + Math.random()*3;
+    words.push({at:now(), text:'Free', big:true});
+  }
   // 竖向校准线（老板 2026-09-06）：命中时在音符中心竖一道再淡出，概率按档位走 30% → 50% → 70% → 90%
   const VLINE_P = [0.30, 0.50, 0.70, 0.90];
   if (Math.random() < VLINE_P[Math.min(3, TIERS.filter(x => combo >= x.at).length)]){
@@ -2997,7 +3008,7 @@ cv.addEventListener('pointermove', e => {
   // swipe 手势门槛放宽：划过 3% 屏宽、0.45 秒内都算（原来 4.5% / 0.28 秒），判定窗也用 SWIPE_MS
   if (!p.swiped && Math.abs(dx) > W*0.03 && now()-p.t0 < 0.45){
     const dir = dx>0?1:-1; p.swiped = true;
-    if (hitLane(p.lane, x => x.kind==='swipe' && x.dir===dir, SWIPE_MS)) bumpTilt(dir);
+    if (hitLane(p.lane, x => x.kind==='swipe' && (x.dir===dir || freeLive(now())), SWIPE_MS)) bumpTilt(dir);
   }
   if (Math.abs(dx) > W*0.02 || Math.abs(dy) > H*0.04){
     const cur = laneOf(e.clientX, e.clientY);
@@ -3017,7 +3028,7 @@ function draw(){
   if (S.auto) autoPlay(t);
   for (const n of notes){
     // trace：到线的那一刻这条轨上有手指按着就算命中（不看点击时机）
-    if (!n.judged && n.kind==='trace' && held[n.lane] > 0 && Math.abs((t-n.t)*1000) <= GOOD_MS && t >= n.t - 0.02) land(n, 'perfect');
+    if (!n.judged && n.kind==='trace' && (held[n.lane] > 0 || (freeLive(t) && pointers.size > 0)) && Math.abs((t-n.t)*1000) <= GOOD_MS && t >= n.t - 0.02) land(n, 'perfect');
     if (!n.judged && (t-n.t)*1000 > (n.kind==='swipe' ? SWIPE_MS : GOOD_MS)) breakCombo(n);
     if (n.judged && n.judged!=='miss' && n.kind==='slide' && !n.tailDone && t > n.t+n.dur) n.tailDone=true;
   }
@@ -3071,10 +3082,17 @@ function draw(){
   missMarks = missMarks.filter(m => t-m.at<=0.35);
 
   // ── 判定线：白发丝 + 极窄的柔光；命中时那一瞬亮一下 ──
+  // 无线时刻：开头 0.8 秒闪烁（12Hz 方波）→ 消失 → 结束前 0.8 秒闪回
+  let lineA = 1;
+  if (free.on){
+    if (t >= free.until + FREE_FLICKER){ free.on = false; }
+    else if (t < free.start + FREE_FLICKER || t >= free.until) lineA = (Math.floor((t*12)%2) ? 1 : 0.15);
+    else lineA = 0;
+  }
   let glow=0; for (let l=0;l<4;l++){ const a=t-flash[l]; if (a>=0&&a<=0.14) glow=Math.max(glow,1-a/0.14); }
   ctx.shadowColor = 'rgba(255,255,255,.55)'; ctx.shadowBlur = 6 + 10*glow;
-  ctx.strokeStyle = sk.line; ctx.lineWidth = 2.2 + 0.8*glow; ctx.globalAlpha = .92;
-  ctx.beginPath(); ctx.moveTo(-over, judgeY); ctx.lineTo(W+over, judgeY); ctx.stroke();
+  ctx.strokeStyle = sk.line; ctx.lineWidth = 2.2 + 0.8*glow; ctx.globalAlpha = .92*lineA;
+  if (lineA > 0){ ctx.beginPath(); ctx.moveTo(-over, judgeY); ctx.lineTo(W+over, judgeY); ctx.stroke(); }
   ctx.shadowBlur = 0; ctx.globalAlpha = 1;
 
   // ── 爆点（画在音符下面，让音符盖着它）──
@@ -3096,7 +3114,7 @@ function draw(){
       const tailY = Math.max(0, judgeY*(1-(n.t+n.dur-t)/S.approach));
       const bottom = Math.min(y, judgeY);
       if (bottom > tailY){
-        const holding = n.judged && n.judged!=='miss' && (held[n.lane]>0 || (S.auto && n.autoHold)) && t <= n.t + n.dur;
+        const holding = n.judged && n.judged!=='miss' && (held[n.lane]>0 || (freeLive(t) && pointers.size>0) || (S.auto && n.autoHold)) && t <= n.t + n.dur;
         const bw = w*0.9;
         ctx.fillStyle = hexA(c, n.judged==='miss'?.10 : holding?.34 : .22);
         ctx.fillRect(cx-bw/2, tailY, bw, bottom-tailY);
@@ -3255,6 +3273,15 @@ function drawBurst(b, age, cx, cy, h, sk){
 // ── HUD ──
 function drawHud(t, sk){
   ctx.save();
+  if (freeLive(t)){
+    const br = .10 + .06*Math.sin(t*6);
+    const g = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.35, W/2, H/2, Math.max(W,H)*0.75);
+    g.addColorStop(0,'rgba(255,255,255,0)'); g.addColorStop(1,`rgba(255,255,255,${br})`);
+    ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.font = `500 ${Math.round(H*0.022)}px system-ui,sans-serif`; ctx.fillStyle='rgba(232,237,245,.6)';
+    ctx.letterSpacing = '0.2em'; ctx.fillText('无线 · 点哪都算', W/2, H*0.29 + (combo>=3 ? H*0.05 : 0)); ctx.letterSpacing='0px';
+  }
   const thin = (px, w=300) => `${w} ${Math.round(px)}px system-ui,-apple-system,"Helvetica Neue",sans-serif`;
   ctx.fillStyle = 'rgba(232,237,245,.92)'; ctx.textBaseline='middle';
   // 进度条：左上一根发丝
@@ -3274,7 +3301,7 @@ function drawHud(t, sk){
     ctx.font = thin(H*0.11*(1+0.06*pop), 300); ctx.fillStyle='rgba(232,237,245,.95)';
     ctx.fillText(String(combo), W/2, H*0.10);
     ctx.font = `500 ${Math.round(H*0.022)}px system-ui,sans-serif`; ctx.fillStyle='rgba(232,237,245,.5)';
-    ctx.letterSpacing = '0.18em'; ctx.fillText('COMBO', W/2, H*0.185); ctx.letterSpacing = '0';
+    ctx.letterSpacing = '0.18em'; ctx.fillText('COMBO', W/2, H*0.185); ctx.letterSpacing = '0px';
     const m = multOf(combo);
     if (m>1 && S.skin==='yunxi'){ ctx.font = thin(H*0.03, 400); ctx.fillStyle = 'rgba(253,190,90,.9)'; ctx.fillText(`×${m.toFixed(1)}`, W/2, H*0.24); }
   }
@@ -3373,6 +3400,7 @@ segButtons('skin', Object.entries(SKINS).map(([k,v])=>[k,v.name]), ()=>S.skin, v
 segButtons('auto', [[false,'我来打'],[true,'自动打']], ()=>S.auto, v=>{ S.auto=v; });
 segButtons('choreo', [['off','不动'],['light','轻'],['wild','疯'],['vertical','竖线']], ()=>S.choreo, v=>{ S.choreo=v; nextMoveAt = now(); if (v!=='vertical'){ poseFrom = curPose(now()); poseTo = {deg:0,dx:0,dy:0}; poseT0 = now(); poseDur = 1.2; } });
 
+document.getElementById('restart').onclick = () => { combo=0; best=0; perfect=0; good=0; miss=0; score=0; free={on:false, used:false, start:0, until:0}; notes=[]; lastGen=now()+1; holdUntil=-1; };
 document.getElementById('copy').onclick = async () => {
   const txt = [
     `云曦节拍 · 试验台设置（皮肤=${SKINS[S.skin].name}）`,
