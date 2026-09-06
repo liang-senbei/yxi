@@ -247,7 +247,7 @@ private class Live(val chart: Rhythm.Chart) {
     var lastJudge: Rhythm.Judge? = null
     var lastJudgeAt = 0f
     /** 判定发生时喊一声：音效 + 震动挂在这儿，绘制不管这些 */
-    var onJudge: ((Rhythm.Judge, Int) -> Unit)? = null
+    var onJudge: ((Rhythm.Judge, Int, Rhythm.Kind) -> Unit)? = null
 
     // ── 玩家造成的校准线倾斜（trace / swipe 打中时把线往那个方向带一下）──
     private var tiltDeg = 0f
@@ -277,10 +277,10 @@ private class Live(val chart: Rhythm.Chart) {
 
     val byLane: List<List<Rhythm.Note>> = (0..3).map { l -> chart.notes.filter { it.lane == l } }
 
-    fun hit(j: Rhythm.Judge, at: Float, lane: Int = -1) {
+    fun hit(j: Rhythm.Judge, at: Float, lane: Int = -1, kind: Rhythm.Kind = Rhythm.Kind.TICK) {
         if (lane in 0..3) { flash[lane] = at; flashJudge[lane] = j }
         seq.append(when (j) { Rhythm.Judge.PERFECT -> 'P'; Rhythm.Judge.GOOD -> 'G'; else -> 'M' })
-        onJudge?.invoke(j, lane)
+        onJudge?.invoke(j, lane, kind)
         val per = Rhythm.rules.base / chart.units.coerceAtLeast(1)
         when (j) {
             // ⚠️ 倍率按**打这一下时**的连击算（连击先加再乘：第 8 下就享受 ×1.2）
@@ -378,10 +378,10 @@ private fun GameBoard(
     val approach = Rhythm.approach(ctx)
     // 打击反馈：判定发生的那一瞬，声音和震动一起来 —— 这两样是"打击感"的主体，画面只是补
     DisposableEffect(live, soundVol, hapticLv) {
-        live.onJudge = { j, _ ->
+        live.onJudge = { j, _, kind ->
             judgeShow = j
             praiseFor(live.combo)?.let { praise = it to System.currentTimeMillis() }
-            sfx.play(j, soundVol)
+            sfx.play(kind, j, soundVol)
             if (j != Rhythm.Judge.MISS) view.hapticTick(hapticLv, j == Rhythm.Judge.PERFECT)
         }
         onDispose { live.onJudge = null }
@@ -753,7 +753,7 @@ private fun hitLane(live: Live, lane: Int, now: Float, offset: Float, want: (Rhy
             if (j == Rhythm.Judge.MISS) return false      // 太晚的交给 judgeMisses 收
             n.judged = j
             live.errs += err
-            live.hit(j, now, lane)
+            live.hit(j, now, lane, n.kind)
             return true
         }
         i++
@@ -770,14 +770,14 @@ private fun judgeMisses(live: Live, now: Float, offset: Float, changed: () -> Un
         while (i < lanes.size) {
             val n = lanes[i]
             if (n.judged == null && (head - n.t) * 1000f > Rhythm.GOOD_MS) {
-                n.judged = Rhythm.Judge.MISS; live.hit(Rhythm.Judge.MISS, now, lane); dirty = true
+                n.judged = Rhythm.Judge.MISS; live.hit(Rhythm.Judge.MISS, now, lane, n.kind); dirty = true
             }
             if (n.judged == null) break
             if (n.hold && !n.tailDone && head >= n.t + n.dur) {
                 n.tailDone = true
                 live.hit(
                     if (live.heldCount[lane] > 0 && n.judged != Rhythm.Judge.MISS) Rhythm.Judge.PERFECT else Rhythm.Judge.MISS,
-                    now, lane,
+                    now, lane, n.kind,
                 )
                 dirty = true
             }
@@ -923,20 +923,29 @@ private class RhythmSfx(ctx: android.content.Context) {
                 .setUsage(AudioAttributes.USAGE_GAME)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build(),
         ).build()
-    private var id = 0
+    // 四种音块各一个音（老板 2026-09-06：「四种音块的点击音效要各不相同」）。
+    // 都很短、都不刺耳，只在音色上分 —— 不然连打起来像四个不同的游戏。
+    private val ids = HashMap<Rhythm.Kind, Int>()
     private var ready = false
 
     init {
-        pool.setOnLoadCompleteListener { _, _, status -> ready = status == 0 }
-        id = runCatching { pool.load(ctx, app.yxi.R.raw.yx_tap, 1) }.getOrDefault(0)
+        pool.setOnLoadCompleteListener { _, _, status -> if (status == 0) ready = true }
+        runCatching {
+            ids[Rhythm.Kind.TICK] = pool.load(ctx, app.yxi.R.raw.yx_tick, 1)
+            ids[Rhythm.Kind.SLIDE] = pool.load(ctx, app.yxi.R.raw.yx_slide, 1)
+            ids[Rhythm.Kind.TRACE] = pool.load(ctx, app.yxi.R.raw.yx_trace, 1)
+            ids[Rhythm.Kind.SWIPE] = pool.load(ctx, app.yxi.R.raw.yx_swipe, 1)
+        }
     }
 
-    fun play(j: Rhythm.Judge, vol: Float) {
-        if (!ready || id == 0 || vol <= 0f) return
+    fun play(kind: Rhythm.Kind, j: Rhythm.Judge, vol: Float) {
+        if (!ready || vol <= 0f) return
+        val id = ids[kind] ?: return
         when (j) {
             Rhythm.Judge.PERFECT -> pool.play(id, vol, vol, 1, 0, 1.0f)
-            Rhythm.Judge.GOOD -> pool.play(id, vol * .55f, vol * .55f, 1, 0, 0.92f)  // 闷一点、低一点，一耳朵听得出差别
-            Rhythm.Judge.MISS -> Unit                                                 // 漏了不响：安静本身就是反馈
+            // 不错：闷一点、低一点，一耳朵听得出差别（还是同一个音，不另做一套文件）
+            Rhythm.Judge.GOOD -> pool.play(id, vol * .55f, vol * .55f, 1, 0, 0.92f)
+            Rhythm.Judge.MISS -> Unit                                     // 漏了不响：安静本身就是反馈
         }
     }
 
@@ -1044,7 +1053,7 @@ private fun FeelPanel() {
 
     fun tryIt() {
         demoAt = System.currentTimeMillis()
-        sfx.play(Rhythm.Judge.PERFECT, vol)
+        sfx.play(Rhythm.Kind.TICK, Rhythm.Judge.PERFECT, vol)
         view.hapticTick(hap, true)
     }
 
