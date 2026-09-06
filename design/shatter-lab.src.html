@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>钢琴块碎裂 · 20 款</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;background:#0b0d12;color:#E8EDF5;font:14px/1.5 system-ui,-apple-system,"PingFang SC","Noto Sans CJK SC",sans-serif;
+    -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+  header{padding:calc(14px + env(safe-area-inset-top)) 18px 6px}
+  h1{margin:0;font-size:16px;font-weight:500;letter-spacing:.02em}
+  .sub{color:#7E8798;font-size:12px;font-weight:300;margin-top:2px}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;padding:8px 18px 4px;align-items:center}
+  .bar button{padding:6px 12px;border-radius:100px;border:1px solid #ffffff1c;background:#ffffff08;color:#AEB7C6;font-size:12px;font-weight:300}
+  .bar button.on{background:#E8EDF5;color:#0b0d12;border-color:#E8EDF5;font-weight:500}
+  .bar .sp{flex:1}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;padding:10px 18px calc(24px + env(safe-area-inset-bottom))}
+  .cell{position:relative;background:#10141c;border:1px solid #ffffff10;border-radius:14px;overflow:hidden;aspect-ratio:3/4}
+  .cell canvas{display:block;width:100%;height:100%;touch-action:manipulation}
+  .cell .cap{position:absolute;left:0;right:0;bottom:0;padding:8px 10px 9px;background:linear-gradient(transparent,#0b0d12e6 55%);pointer-events:none}
+  .cell .n{font-size:13px;font-weight:500}
+  .cell .d{font-size:11px;color:#8FA0B8;font-weight:300;line-height:1.4;margin-top:1px}
+  .cell .idx{position:absolute;top:8px;left:10px;font-size:11px;color:#7E8798;font-variant-numeric:tabular-nums;letter-spacing:.06em}
+  .cell.fav{border-color:#FDBE5A88}
+  .cell .star{position:absolute;top:6px;right:8px;width:28px;height:28px;border-radius:100px;border:0;background:transparent;color:#ffffff55;font-size:16px;line-height:28px;text-align:center}
+  .cell.fav .star{color:#FDBE5A}
+  .none{padding:40px 18px;color:#7E8798;text-align:center;font-weight:300}
+</style>
+</head>
+<body>
+<header>
+  <h1>钢琴块碎裂 · 20 款</h1>
+  <div class="sub">点一下方块就碎；再点再碎。右上角 ☆ 收藏，收藏完点「复制收藏」发我。</div>
+</header>
+<div class="bar">
+  <span id="colors"></span>
+  <span class="sp"></span>
+  <button id="playall">全部播一遍</button>
+  <button id="copy">复制收藏</button>
+</div>
+<div class="grid" id="grid"></div>
+<div class="none" id="none" hidden>一个特效都没加载到 —— 子 agent 的文件还没并进来。</div>
+
+<!-- SHATTER_MODULES -->
+
+<script>
+"use strict";
+// ── 宿主：把 window.SHATTER 里注册的特效各放进一个格子。契约见各模块头部注释 ──
+const COLORS = {tick:'#FFC08A', slide:'#8AD4F5', trace:'#F5A8C8', swipe:'#9EE6A8'};
+const LIFE = 600;                       // 一次碎裂播 0.6 秒（跟 App 的爆点同量级）
+let color = COLORS.slide;
+const list = (window.SHATTER || []).slice(0, 40);
+const grid = document.getElementById('grid');
+if (!list.length) document.getElementById('none').hidden = false;
+
+// 确定性随机：mulberry32，按 seed 每帧重开
+function rngOf(seed){ let a = (seed*4294967296)>>>0; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+let favs = new Set(); try{ favs = new Set(JSON.parse(localStorage.getItem('shatter-favs')||'[]')); }catch(e){}
+const cells = list.map((fx, i) => {
+  const cell = document.createElement('div'); cell.className = 'cell' + (favs.has(fx.name)?' fav':'');
+  cell.innerHTML = `<canvas></canvas><span class="idx">${String(i+1).padStart(2,'0')}</span><button class="star">★</button>
+    <div class="cap"><div class="n">${fx.name}</div><div class="d">${fx.desc||''}</div></div>`;
+  grid.appendChild(cell);
+  const cv = cell.querySelector('canvas'), ctx = cv.getContext('2d');
+  const st = {fx, cv, ctx, at:-1, seed:Math.random(), cell};
+  cv.addEventListener('pointerdown', () => { st.at = performance.now(); st.seed = Math.random(); });
+  cell.querySelector('.star').addEventListener('click', e => { e.stopPropagation();
+    if (favs.has(fx.name)) favs.delete(fx.name); else favs.add(fx.name);
+    cell.classList.toggle('fav', favs.has(fx.name));
+    try{ localStorage.setItem('shatter-favs', JSON.stringify([...favs])); }catch(err){} });
+  return st;
+});
+
+function sizeAll(){
+  const dpr = Math.min(devicePixelRatio||1, 2.5);
+  for (const c of cells){ const w = c.cv.clientWidth, h = c.cv.clientHeight;
+    if (c.cv.width !== Math.round(w*dpr)){ c.cv.width = Math.round(w*dpr); c.cv.height = Math.round(h*dpr); }
+    c.ctx.setTransform(dpr,0,0,dpr,0,0); }
+}
+addEventListener('resize', sizeAll); sizeAll();
+
+function tileRect(c){
+  const W = c.cv.clientWidth, H = c.cv.clientHeight;
+  const w = Math.round(W*0.42), h = Math.round(H*0.42);
+  return {x: Math.round((W-w)/2), y: Math.round(H*0.22), w, h, color, seed:c.seed};
+}
+function drawTile(ctx, r){
+  // 完整的块：跟 App 里 slide 长按体一个语言 —— 半透明色身 + 白细边 + 顶部高光
+  ctx.fillStyle = r.color + 'cc'; ctx.fillRect(r.x, r.y, r.w, r.h);
+  ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 1.2; ctx.strokeRect(r.x+.5, r.y+.5, r.w-1, r.h-1);
+  const g = ctx.createLinearGradient(0, r.y, 0, r.y + r.h*0.5);
+  g.addColorStop(0,'rgba(255,255,255,.35)'); g.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.fillStyle = g; ctx.fillRect(r.x, r.y, r.w, r.h*0.5);
+}
+function frame(now){
+  for (const c of cells){
+    const {ctx, cv} = c, W = cv.clientWidth, H = cv.clientHeight;
+    ctx.clearRect(0,0,W,H);
+    const r = tileRect(c);
+    const t = c.at < 0 ? -1 : (now - c.at)/LIFE;
+    if (t < 0 || t > 1.05){ drawTile(ctx, r); continue; }
+    ctx.save();
+    try { c.fx.draw(ctx, r, Math.min(1, t), rngOf(c.seed)); }
+    catch (e) { ctx.restore(); ctx.save(); ctx.fillStyle='#E5484D'; ctx.font='11px system-ui'; ctx.fillText('出错：'+(e.message||e).slice(0,40), 8, 16); }
+    ctx.restore();
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// 颜色切换：四种音块的颜色
+const colorsBox = document.getElementById('colors');
+Object.entries(COLORS).forEach(([k,v]) => {
+  const b = document.createElement('button'); b.textContent = k; b.style.borderColor = v + '88'; b.classList.toggle('on', v===color);
+  b.onclick = () => { color = v; [...colorsBox.children].forEach(x=>x.classList.remove('on')); b.classList.add('on'); };
+  colorsBox.appendChild(b);
+});
+document.getElementById('playall').onclick = () => cells.forEach((c,i) => setTimeout(() => { c.at = performance.now(); c.seed = Math.random(); }, i*90));
+document.getElementById('copy').onclick = async () => {
+  const txt = '碎裂收藏：' + ([...favs].length ? [...favs].join('、') : '（还没收藏）');
+  try{ await navigator.clipboard.writeText(txt); document.getElementById('copy').textContent = '复制好了'; }
+  catch(e){ alert(txt); }
+};
+</script>
+</body>
+</html>
