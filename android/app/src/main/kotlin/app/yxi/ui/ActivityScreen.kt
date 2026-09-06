@@ -228,7 +228,7 @@ private fun RhythmEntry(onOpen: () -> Unit) {
             Column(Modifier.weight(1f)) {
                 Text(t("云曦节拍"), style = MaterialTheme.typography.titleMedium)
                 Text(
-                    if (played == 0) t("跟着拍子点四条轨。三首曲子，六张谱。")
+                    if (played == 0) t("跟着拍子点四条轨。%d 首曲子，%d 张谱。").format(app.yxi.agent.Rhythm.SONGS.size, app.yxi.agent.Rhythm.SONGS.size * app.yxi.agent.Rhythm.DIFFS.size)   // 数字从曲目表算，加曲子不用改这儿
                     else t("已打过 %d / %d 张谱").format(played, total),
                     style = MaterialTheme.typography.labelMedium, color = Muted,
                 )

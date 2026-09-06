@@ -18,7 +18,32 @@
   `tmux` / `~/.claude/projects` / sshd 自带的 SFTP。只有「手机主动响」需要在那台机器上装 `yxi-hook`。
 - **开发回路**：本机 `/dev/kvm` 可用、嵌套虚拟化已开 → **AVD 模拟器硬件加速**，`adb install` 迭代（MuMuPlayer 无 Linux 版）。
 - **鉴权**：复用 SSH 公钥认证，私钥存 Android Keystore。**不需要 CA 证书 / mTLS / token / Tailscale / 改 ufw**——见 PRD §2.3。手机丢了 = 删一行 `authorized_keys`。
-- **怎么跑**：`dev/run.sh`（构建→模拟器→装→起→截图）；测试 `cd android && ./gradlew connectedDebugAndroidTest`（15 条）。
+- **怎么跑**（2026-09-07 更新，cc-Bug_solverYxi 摸出来的实际流程 + cc-Yxi_pilot 的锁规矩）：
+  ⚠️ **`dev/run.sh` 已经过期**：它 `ensure_emu` 调 `dev/avd.sh` 拉**本机** AVD，而测试早搬去 **Mac mini** 了，本机连 adb 都没有。
+  真实流程（本机构建 → 传到 Mac → 在 Mac 上装和跑）：
+  ```bash
+  # 0. 先占机器（三个 agent 共用这一台，今天互相顶掉过三次）
+  ssh mac "~/yxi-build/emu.sh claim cc-你的名字"
+  # 1. 本机构建两个包
+  cd android && ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest
+  # 2. 传过去（各一个）
+  scp app/build/outputs/apk/debug/app-debug.apk mac:/tmp/x.apk
+  scp app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk mac:/tmp/x-test.apk
+  # 3. 装 + 跑（EMU_WHO 必带，否则被自己的锁拦住）
+  ssh mac "EMU_WHO=cc-你的名字 ~/yxi-build/emu.sh install /tmp/x.apk"
+  ssh mac "EMU_WHO=cc-你的名字 ~/yxi-build/emu.sh adb install -r -t /tmp/x-test.apk"
+  ssh mac "EMU_WHO=cc-你的名字 ~/yxi-build/emu.sh adb shell am instrument -w \
+      -e class app.yxi.某测试类 app.yxi.test/androidx.test.runner.AndroidJUnitRunner"
+  # 4. 下机
+  ssh mac "EMU_WHO=cc-你的名字 ~/yxi-build/emu.sh release"
+  ```
+  · **全套是 256 条**（1.1.18 全绿那次），不是 15 条。发版前必须跑一次全套（见下面那条 ⚠️）。
+  · ⚠️ **debug 没有 `applicationIdSuffix`**，跟 release 签名不同 —— 装 debug 会**顶掉机器上的正式包**
+    （`emu.sh install` 遇到签名冲突会自动卸了重装，数据一起没）。跑完记得把 release 装回去。
+  · ⚠️ **模拟器是 `-no-audio` 起的，也没有马达** —— 声音和震动在这台机器上**验不了**
+    （音游打击音、抽卡短片的音轨都属于这类）。看到「声音没问题」的结论，多半是没验，不是验过了。
+  · ⚠️ **别在跑 `am instrument` 的时候点屏幕 / force-stop**：被打断的表现是「某一条莫名 Process crashed」，
+    不看时间线根本想不到是人为。锁就是为这个加的。
   APK 产物 `Yxi-0.1.0-debug.apk`，手机直接下的地址见下面「APK 分发」。
 
 ### SSH 接入（App 连这台机器用）
@@ -60,12 +85,16 @@
 > 例外只有线上崩溃 / 数据风险，破例前先跟老板说。
 
 **1.1.18 之后攒的**：
-- **cc-Yxi · 五首新曲的关卡**（老板 2026-09-06 晚派的，不用他审）：魔王魂五首短版（シャイニングスター / Burning Heart / 12345 / ヒカリトリガー / Piece Maker），`design/music/chart_from_audio.py` 从音频出谱（拍网格 + 起音 + 质心分轨 + 四种音块配额 + 编舞关键帧，slide 期间不出块），easy / hard 各一张；选曲页署名「音楽：魔王魂」；`Chart.approach` 从谱面读。（编译过 · i18n 归零 · **等 logto 更新服务端 charts** · 模拟器 E2E 待跑）
+- **cc-Yxi · 五首新曲的关卡**（老板 2026-09-06 晚派的，不用他审）：魔王魂五首短版（シャイニングスター / Burning Heart / 12345 / ヒカリトリガー / Piece Maker），`design/music/chart_from_audio.py` 从音频出谱，easy / hard 各一张；选曲页署名「音楽：魔王魂」；`Chart.approach` 从谱面读。（编译 · i18n · **服务端 16 张谱已上线** · 模拟器 E2E：完整打一局，判定数 115 == units，**服务端「成绩已记到账号上」**；顺带抓到并修了 #293 提前结算）
 - **cc-Yxi · 音游功能文档** `design/rhythm-spec.md`（老板要的，唯一权威规格）。
-- **cc-Yxi · 音游画面按试验台重写** —— 进行中（三个子 agent 在移植 19 款特效，我做舞台 / 编舞 / 无线时刻 / 字体）。
+- **cc-Yxi · 音游画面按试验台重写**（`ui/rhythm/` 六个文件 + RhythmScreen 的 GameBoard 整段）：底光 / 白发丝线 / 薄片音符 / 两款 swipe 标记 / 九款点击特效 / 八款碎裂 / 长按持续特效 / 竖向校准线 / 编舞不限幅 + MOVE_X / 无线时刻 / 评价词字体 / swipe 放宽 / trace 按着就算。（opus 审查三条已修 · 全套 269 条全绿 · 模拟器 E2E 打完一局服务端收了 · 真机待老板）
 
 ⚠️ **发版前先跑一次全套**（`connectedDebugAndroidTest`），这一步以前不在关卡里 ——
 两条测试从 09-05 起一直红着没人发现（#286）。UploadStress 那 7 条要先配主机，配法见 #286。
+
+**待老板拍板（加了十张谱的两个连带后果，logto 2026-09-07 指出，不是 bug）**：
+- 「全 S 限定装扮」的门槛从 6 张谱变成 16 张（判据是「每张谱都领过 S 奖」，加谱自动变难；已领到的人不受影响）。要维持原难度得改规则（比如「任意 6 张 S」或按曲子算）。
+- 音游可拿的曦光从 18 涨到 48（每张谱首次 B 给 1、首次 S 给 2 × 16 张）——和「抽卡越抽越多」是同一个池子，收紧经济时要一起算。
 
 **待办（不急）**：
 - **指纹框会无限弹、取消也关不掉**（Entertainment 2026-09-06 在模拟器上撞到：一台指纹对不上的主机 → 弹框 → 取消 → 盯梢服务重连 → 再弹，界面卡死）。真用户换了主机密钥也会被困住。要么取消后这台主机这次运行里不再自动重连，要么弹框只弹一次、后续静默记状态。文件是 pilot 的（Connect / HostsScreen），动之前先说。
@@ -100,7 +129,7 @@
 - **底光节奏**（老板定稿）：每次打中闪一小下（150ms，+0.15）；跳档闪得更猛（600ms，+0.9，带琥珀）**而且亮度保持在新档上**（每档 +0.2，断连归零）。
 - ⚠️ **手感（判定宽窄 / 音效延迟 / 震动）不在网页上定**，那三样浏览器和原生差最多，留在 App 的手感面板。
 
-## 音游画面按试验台重写 —— 进行中（cc-Yxi，2026-09-06 晚开工）
+## 音游画面按试验台重写 —— 已完成（cc-Yxi，2026-09-06 晚 → 09-07 凌晨；在待发版清单里）
 
 **目标**：`ui/RhythmScreen.kt` 的画面部分照 `bench-final-20260906` 重写；判定 / 算分 / 上报（`agent/Rhythm.kt` 的 hits 序列、`Live`、`hitLane`/`judgeMisses`）不动，服务端不用改。
 **拆法**（新包 `ui/rhythm/`，每个文件能单独编译）：

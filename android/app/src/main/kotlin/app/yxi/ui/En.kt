@@ -12,6 +12,8 @@ package app.yxi.ui
 internal object En {
     val map: Map<String, String> = mapOf(
         "语言" to "Language",
+        "跟着拍子点四条轨。%d 首曲子，%d 张谱。" to "Tap the four lanes to the beat. %d songs, %d charts.",
+        "无线 · 点哪都算" to "No line · tap anywhere",
         "跟着拍子点四条轨。曲子有我们自己写的，也有魔王魂的免费曲（署名在曲名下）。" to "Tap the four lanes to the beat. Some songs are ours, some are free tracks from Maou Damashii (credited under the title).",
         "临时会话没开成：%s" to "Couldn't start scratch session: %s",
         "包对不上（校验失败），没装 —— 换个网络再试一次" to "Checksum mismatch — not installed. Try another network.",
@@ -1470,7 +1472,6 @@ internal object En {
         "节拍 · 限定气泡" to "Beat · Limited Bubble",
         "未拥有 · %s" to "Not owned · %s",
         "音游六张谱全 S 可得" to "from S-ranking all six Yunxi Beat charts",
-        "跟着拍子点四条轨。三首曲子，六张谱。" to "Tap four lanes on the beat. Three tracks, six charts.",
         "已打过 %d / %d 张谱" to "Played %d / %d charts",
         "返回" to "Back",
         "正在交成绩…" to "Submitting your run…",

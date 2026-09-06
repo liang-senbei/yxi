@@ -64,6 +64,11 @@ object Rhythm {
      */
     const val PERFECT_MS = 120f
     const val GOOD_MS = 240f
+    /** swipe 的窗口放宽到 ±360（老板 2026-09-06：「滑动的判定可以放宽松点」）；手势门槛也放宽（见 RhythmScreen） */
+    const val SWIPE_MS = 360f
+
+    /** 判定窗口按种类：swipe 宽一档 */
+    fun windowMs(kind: Kind): Float = if (kind == Kind.SWIPE) SWIPE_MS else GOOD_MS
 
     /** 音符从冒头到判定线的时间（秒）。越大越"慢"、越好读谱 */
     const val APPROACH = 1.6f
@@ -97,6 +102,10 @@ object Rhythm {
         val hold get() = kind == Kind.SLIDE
         var judged: Judge? = null
         var tailDone = false   // SLIDE 的尾巴判过没有
+        /** 画面用的、跟判定无关的东西：swipe 用哪款标记（0/1）、特效的随机种子、长按复发爆点的上次时刻 */
+        var markIdx = 0
+        var seed = 0.5f
+        var lastPulse = -1f
     }
 
     /**
@@ -112,7 +121,7 @@ object Rhythm {
      * ⚠️ 数值是**我们自己定的**（见 `design/music/make_songs.py`）。参考视频量出来的是"人家怎么做"，
      *    具体的角度和时间属于谱面数据，不抄。
      */
-    enum class LineOp { ROTATE, MOVE_Y }
+    enum class LineOp { ROTATE, MOVE_Y, MOVE_X }
 
     data class LineEvent(val t: Float, val dur: Float, val op: LineOp, val from: Float, val to: Float, val ease: String) {
         /** [now] 时刻这条事件贡献的值 */
@@ -141,17 +150,21 @@ object Rhythm {
          */
         val approach: Float? = null,
     ) {
-        /** [now] 时刻的线姿态：转了多少度、往下挪了多少（屏幕高度的比例） */
-        fun poseAt(now: Float): Pair<Float, Float> {
-            var deg = 0f; var dy = 0f
+        /**
+         * [now] 时刻的线姿态：转了多少度（**不限幅**，老板 2026-09-06 定的编舞：可以 ±90° 立成竖线、180° 翻面）、
+         * 横向挪多少（屏宽比例）、往下挪多少（屏高比例）。
+         */
+        fun poseAt(now: Float): Pose {
+            var deg = 0f; var dx = 0f; var dy = 0f
             for (e in lines) {
                 if (e.t > now) break
                 when (e.op) {
                     LineOp.ROTATE -> deg = e.valueAt(now)
                     LineOp.MOVE_Y -> dy = e.valueAt(now)
+                    LineOp.MOVE_X -> dx = e.valueAt(now)
                 }
             }
-            return deg to dy
+            return Pose(deg, dx, dy)
         }
         val id get() = "${song}_$difficulty"
         /** SLIDE 算两个判定（头 + 尾），满分按这个数分 */
@@ -163,6 +176,8 @@ object Rhythm {
      *               魔王魂：「音楽：魔王魂」（规约要求尽量署名；商用 / 游戏免费，禁流媒体发行和转卖）。
      *               授权证据在 `design/music/licenses/`。
      */
+    data class Pose(val deg: Float, val dx: Float, val dy: Float)
+
     data class Song(val id: String, val zh: String, val raw: Int, val bpm: Int, val seconds: Int, val credit: String = "")
 
     /** 曲子列表。加曲子的完整步骤见 design/rhythm-spec.md §6.3（谱面 + 服务端 charts-meta 都要跟上） */
@@ -194,13 +209,16 @@ object Rhythm {
                 "swipe" -> Kind.SWIPE
                 else -> Kind.TICK
             }
-            notes += Note(o.getDouble("t").toFloat(), o.getInt("lane"), kind, dur, o.optInt("dir", 0))
+            notes += Note(o.getDouble("t").toFloat(), o.getInt("lane"), kind, dur, o.optInt("dir", 0)).also { n ->
+                n.markIdx = (i * 7919) % 2                      // swipe 两款标记随机（按下标定死，同一张谱每次一样）
+                n.seed = ((i * 2654435761L) % 100000L) / 100000f
+            }
         }
         val lines = ArrayList<LineEvent>()
         j.optJSONArray("lines")?.let { la ->
             for (i in 0 until la.length()) {
                 val o = la.getJSONObject(i)
-                val op = if (o.getString("op") == "rotate") LineOp.ROTATE else LineOp.MOVE_Y
+                val op = when (o.getString("op")) { "rotate" -> LineOp.ROTATE; "move_x" -> LineOp.MOVE_X; else -> LineOp.MOVE_Y }
                 lines += LineEvent(
                     o.getDouble("t").toFloat(), o.optDouble("dur", 0.4).toFloat(), op,
                     o.optDouble("from", 0.0).toFloat(), o.optDouble("to", 0.0).toFloat(),
