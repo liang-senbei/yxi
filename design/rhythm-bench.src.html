@@ -100,6 +100,7 @@
 // ─────────────────────────────────────────────────────────────────────────
 const KINDS = ['tick','slide','trace','swipe'];
 const PERFECT_MS = 120, GOOD_MS = 240;
+const SWIPE_MS = 360;                 // swipe 的窗口放宽到 1.5 倍（老板 2026-09-06：「滑动的判定可以放宽松点」）
 const TIERS = [{at:8,mult:1.2,label:'Great'},{at:15,mult:1.5,label:'Excellent'},{at:30,mult:2.0,label:'Amazing'}];
 
 const SKINS = {
@@ -248,13 +249,13 @@ const now = () => (performance.now()-t0)/1000;
 const tierWord = c => { const t = TIERS.find(x=>x.at===c); return t?t.label:null; };
 const multOf = c => { let m=1; for (const t of TIERS) if (c>=t.at) m=t.mult; return m; };
 
-function hitLane(lane, want){
+function hitLane(lane, want, windowMs = GOOD_MS){
   const t = now();
   for (const n of notes){
     if (n.lane!==lane || n.judged) continue;
     const err = (t-n.t)*1000;
-    if (err < -GOOD_MS) break;
-    if (err > GOOD_MS) continue;
+    if (err < -windowMs) break;
+    if (err > windowMs) continue;
     if (want && !want(n)) continue;
     const j = Math.abs(err)<=PERFECT_MS ? 'perfect' : 'good';
     land(n, j); return n;
@@ -313,9 +314,10 @@ cv.addEventListener('pointerdown', e => {
 cv.addEventListener('pointermove', e => {
   const p = pointers.get(e.pointerId); if (!p) return;
   const dx = e.clientX-p.x0, dy = e.clientY-p.y0;
-  if (!p.swiped && Math.abs(dx) > W*0.045 && now()-p.t0 < 0.28){
+  // swipe 手势门槛放宽：划过 3% 屏宽、0.45 秒内都算（原来 4.5% / 0.28 秒），判定窗也用 SWIPE_MS
+  if (!p.swiped && Math.abs(dx) > W*0.03 && now()-p.t0 < 0.45){
     const dir = dx>0?1:-1; p.swiped = true;
-    if (hitLane(p.lane, x => x.kind==='swipe' && x.dir===dir)) bumpTilt(dir);
+    if (hitLane(p.lane, x => x.kind==='swipe' && x.dir===dir, SWIPE_MS)) bumpTilt(dir);
   }
   if (Math.abs(dx) > W*0.02 || Math.abs(dy) > H*0.04){
     const cur = laneOf(e.clientX, e.clientY);
@@ -336,7 +338,7 @@ function draw(){
   for (const n of notes){
     // trace：到线的那一刻这条轨上有手指按着就算命中（不看点击时机）
     if (!n.judged && n.kind==='trace' && held[n.lane] > 0 && Math.abs((t-n.t)*1000) <= GOOD_MS && t >= n.t - 0.02) land(n, 'perfect');
-    if (!n.judged && (t-n.t)*1000 > GOOD_MS) breakCombo(n);
+    if (!n.judged && (t-n.t)*1000 > (n.kind==='swipe' ? SWIPE_MS : GOOD_MS)) breakCombo(n);
     if (n.judged && n.judged!=='miss' && n.kind==='slide' && !n.tailDone && t > n.t+n.dur) n.tailDone=true;
   }
   notes = notes.filter(n => t-n.t < 1.5 || !n.judged);
