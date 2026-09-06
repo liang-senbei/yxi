@@ -44,7 +44,8 @@ import app.yxi.ui.theme.Muted
  * 没对上而列表是空的，写「你还没有任何装扮」就是骗人 —— 那时要说的是「没对上，按上次的显示」。
  */
 @Composable
-fun SkinPicker(live: Boolean = false, header: Boolean = true, modifier: Modifier = Modifier) {
+/** [only]：只显示一个分栏（"frame" / "terminal" / "bubble" / "phrase"），个性化页按分类进来时用；null = 全部 */
+fun SkinPicker(live: Boolean = false, header: Boolean = true, only: String? = null, modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
     val owned = Cosmetics.owned(ctx)
 
@@ -92,6 +93,7 @@ fun SkinPicker(live: Boolean = false, header: Boolean = true, modifier: Modifier
                     style = MaterialTheme.typography.labelSmall, color = Muted,
                 )
             }
+            if (only == null || only == "frame") {
             item { SectionTitle(t("头像框")) }
             items(frames.size) { i ->
                 val f = frames[i]
@@ -102,7 +104,9 @@ fun SkinPicker(live: Boolean = false, header: Boolean = true, modifier: Modifier
                     onPick = { Cosmetics.pick(ctx, Skins.FRAME, f.id) },
                 ) { FrameSwatch(f) }
             }
+            }
 
+            if (only == null || only == "terminal") {
             item { SectionTitle(t("终端配色")) }
             items(Skins.TERMS.size) { i ->
                 val s = Skins.TERMS[i]
@@ -113,8 +117,10 @@ fun SkinPicker(live: Boolean = false, header: Boolean = true, modifier: Modifier
                     onPick = { Cosmetics.pick(ctx, Skins.TERMINAL, s.id) },
                 ) { TermSwatch(s) }
             }
+            }
 
-            item { SectionTitle(t("气泡配色")) }
+            if (only == null || only == "bubble") {
+            item { SectionTitle(t("聊天气泡")) }
             items(Skins.BUBBLES.size) { i ->
                 val s = Skins.BUBBLES[i]
                 SkinRow(
@@ -124,7 +130,9 @@ fun SkinPicker(live: Boolean = false, header: Boolean = true, modifier: Modifier
                     onPick = { Cosmetics.pick(ctx, Skins.BUBBLE, s.id) },
                 ) { BubbleSwatch(s) }
             }
+            }
 
+            if (only == null || only == "phrase") {
             item { SectionTitle(t("快捷语包")) }
             items(Skins.PHRASE_PACKS.size) { i ->
                 val pk = Skins.PHRASE_PACKS[i]
@@ -137,6 +145,7 @@ fun SkinPicker(live: Boolean = false, header: Boolean = true, modifier: Modifier
                     onPick = null,
                     stateText = if (pk.id in owned) t("已生效") else null,
                 ) { PackSwatch(pk) }
+            }
             }
         }
     }
@@ -219,17 +228,11 @@ private fun TermSwatch(s: Skins.Term) {
     }
 }
 
-/** 气泡小样：右下角那个尖，跟真气泡同一个形状。 */
+/** 气泡小样：**就是真气泡缩小版**（同一段画法 [BubbleBox]），描边 / 尾巴 / 角标一个不少。 */
 @Composable
 private fun BubbleSwatch(s: Skins.Bubble) {
-    // id 为空 = 跟着主题走，小样也得画主题色，不然「默认」看着像另一套配色
-    val bg = if (s.id.isEmpty()) MaterialTheme.colorScheme.primaryContainer else s.bg
-    val on = if (s.id.isEmpty()) MaterialTheme.colorScheme.onPrimaryContainer else s.on
-    Box(
-        Modifier.size(58.dp, 34.dp).clip(RoundedCornerShape(12.dp, 12.dp, 4.dp, 12.dp)).background(bg),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text("Aa", style = MaterialTheme.typography.labelMedium, color = on)
+    Box(Modifier.size(72.dp, 52.dp), contentAlignment = Alignment.Center) {
+        BubbleBox(s, compact = true) { Text("Aa", Modifier.padding(10.dp, 5.dp), style = MaterialTheme.typography.labelMedium, color = bubbleInk(s)) }
     }
 }
 

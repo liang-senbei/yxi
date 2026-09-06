@@ -1992,21 +1992,17 @@ private fun UserBubble(
             }
             // ⚠️ 只有附件、没打字时**不画空气泡**（很常见：直接发一张图）
             if (body.isNotBlank() || refs.isEmpty())
-            Surface(
-                // 气泡配色可以换。⚠️ **默认那套故意没有颜色**（id 为空）——
-                // 默认气泡必须跟着主题走，在 Skins 里塞一份固定色就等于把主题掀了。
-                color = if (bub.id.isEmpty()) MaterialTheme.colorScheme.primaryContainer else bub.bg,
-                shape = RoundedCornerShape(26.dp, 26.dp, 8.dp, 26.dp),
-                modifier = Modifier.clip(RoundedCornerShape(26.dp, 26.dp, 8.dp, 26.dp)).combinedClickable(
-                    onClick = {},
-                    onLongClick = { menu = true },
-                ),
+            // 气泡的底色 / 描边 / 尾巴 / 角标由装扮决定，画法在 BubbleBox（个性化商店的预览用的是同一段，所见即所得）。
+            // ⚠️ **默认那套故意没有颜色**（id 为空）—— 默认气泡必须跟着主题走，见 bubbleFill / bubbleInk。
+            BubbleBox(
+                bub,
+                modifier = Modifier.combinedClickable(onClick = {}, onLongClick = { menu = true }),
             ) {
                 Text(
                     body.ifBlank { text },
                     Modifier.padding(18.dp, 14.dp),
                     style = MaterialTheme.typography.bodyLarge,
-                    color = if (bub.id.isEmpty()) MaterialTheme.colorScheme.onPrimaryContainer else bub.on,
+                    color = bubbleInk(bub),
                 )
             }
           }

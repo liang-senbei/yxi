@@ -84,6 +84,8 @@ fun SettingsScreen(
     onActivity: () -> Unit = {},
     /** 云曦小管家（备忘 / 提醒 / 天气 + 会动的她） */
     onYunxi: () -> Unit = {},
+    /** 个性化：装扮（聊天气泡 / 头像框 / 终端配色 / 快捷语包）分类进入 */
+    onPersonalize: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val ctx = LocalContext.current
@@ -189,6 +191,30 @@ fun SettingsScreen(
                     else app.yxi.agent.Account.me?.tier?.name ?: t("已登录"),
                     style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline,
                 )
+                Text("›", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.outline)
+            }
+        }
+
+        // ── 个性化：装扮的正门（老板 2026-09-06，照 QQ 的个性化装扮）────
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = RoundedCornerShape(22.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)
+                .clip(RoundedCornerShape(22.dp)).clickable { onPersonalize() },
+        ) {
+            Row(
+                Modifier.padding(16.dp, 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                GlyphIcon(Glyph.Palette, androidx.compose.ui.graphics.Color(0xFFB07AE8), 22.dp)
+                Column(Modifier.weight(1f)) {
+                    Text(t("个性化"), style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        t("装扮 · 聊天气泡 / 头像框 / 终端配色 / 快捷语包"),
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline,
+                    )
+                }
                 Text("›", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.outline)
             }
         }

@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 import app.yxi.agent.Wish
 import app.yxi.ui.theme.TerminalBg
 import app.yxi.ui.theme.TerminalFg
@@ -77,6 +78,8 @@ object Skins {
         private val zh: String,
         private val lightBg: Color, private val lightOn: Color,
         private val darkBg: Color, private val darkOn: Color,
+        /** 边 / 尾巴 / 描边 / 玻璃 / 角标，画法在 [BubbleBox]；默认 = 原来那种纯色圆角 */
+        val style: BubbleStyle = BubbleStyle(),
     ) {
         val label: String get() = t(zh)
         // 读 Skin.style 是 Compose 状态：在组合里读到，切皮肤会自动重组
@@ -94,6 +97,25 @@ object Skins {
         Bubble("bubble_cool", "气泡·冷", Color(0xFFD9E7F7), Color(0xFF16324A), Color(0xFF1B3350), Color(0xFFD8E6F8)),
         Bubble("bubble_ink", "气泡·墨", Color(0xFFE4E1DA), Color(0xFF2A2723), Color(0xFF343029), Color(0xFFE6E2DA)),
         Bubble("bubble_dawn", "气泡·晨", Color(0xFFF7DCE4), Color(0xFF4A1B2A), Color(0xFF4A2230), Color(0xFFF6DDE5)),
+        // ── 2026-09-06 老板：照 QQ 的聊天气泡商店做几款（前两款是复刻他发的「心理活动框」「思考小睫」）──
+        // 白底墨边、尾巴两个空心小圆圈；深色皮肤下反过来（墨底白边）
+        Bubble("bubble_thought", "心理活动框", Color(0xFFFFFFFF), Color(0xFF1F1F1F), Color(0xFF1C1C21), Color(0xFFEDEDED),
+            BubbleStyle(tail = BubbleTail.DOTS, corner = 22.dp, outline = 2.dp)),
+        // 同上 + 右下角探出 Q 版云曦的头
+        Bubble("bubble_yunxi_peek", "云曦想想", Color(0xFFFFFFFF), Color(0xFF1F1F1F), Color(0xFF1C1C21), Color(0xFFEDEDED),
+            BubbleStyle(tail = BubbleTail.DOTS, corner = 22.dp, outline = 2.dp, peek = app.yxi.R.drawable.yunxi_q_head)),
+        // 只有一圈蓝线，没有底色（字也是那个蓝）
+        Bubble("bubble_outline", "素描边", Color.Transparent, Color(0xFF2F5FC0), Color.Transparent, Color(0xFF8AB4F8),
+            BubbleStyle(outline = 1.5.dp, corner = 24.dp)),
+        // 云朵边 —— 云曦的主题
+        Bubble("bubble_cloud", "云朵", Color(0xFFFFFFFF), Color(0xFF3D5A80), Color(0xFF26303F), Color(0xFFDCE8FF),
+            BubbleStyle(edge = BubbleEdge.CLOUD, tail = BubbleTail.DOTS, corner = 24.dp, outline = 1.5.dp)),
+        // 玻璃：半透明 + 高光 + 细边，跟输入框那颗药丸一家
+        Bubble("bubble_glass", "玻璃", Color(0xFFFFFFFF), Color(0xFF2A2F3A), Color(0xFF1C1C21), Color(0xFFECEAF2),
+            BubbleStyle(glass = true, corner = 26.dp, outline = 1.dp)),
+        // 像素：三级台阶的角 + 2dp 描边
+        Bubble("bubble_pixel", "像素", Color(0xFFFFF6D6), Color(0xFF2B2622), Color(0xFF2A2418), Color(0xFFFFE9B0),
+            BubbleStyle(edge = BubbleEdge.PIXEL, corner = 12.dp, outline = 2.dp)),
     )
 
     // ── 快捷语包 ────────────────────────────────────────────────────────────
