@@ -5457,3 +5457,36 @@ for d in $(unzip -l $A | awk '/classes.*dex/{print $4}'); do unzip -p $A $d | gr
   · 送完之后抓一次屏，只翻**自己那条命令之后**那一截（整屏找会把上一次的旧错永远重报），压平再找（窄窗格会把这行折断，同 #113/#133）。看到 `not found` / `unrecognized_model` / `Kept model as …` 就当失败原样报出来。
   · 用例 `ModelTest.白名单的短名要补全才喂得进model`。
   · ⚠️ **改 Claude Code 版本要重验这张表** —— 认哪些名字是它内部的清单（2.1.259 在 `WP` / `B3t` 两个数组里），跟着版本走。
+
+## #288 结算页「一屏塞得下」是假设不是事实 —— 十连在大字体下被切掉，切掉的那几张永远看不到（cc-Yxi_Entertainment，2026-09-06）
+
+- **症状**：祈愿十连的结算弹窗，抽到角色时是「一张立绘 + 九张小卡」。默认字号下**刚好**卡在屏幕边缘看着没事；
+  把系统字号调到 1.5，第 10 条整个在屏幕外。想滑一下看看 —— 弹窗直接关了，那一条到死也看不到。
+- **根因**：两个叠一起。
+  · 结算卡是个**不滚动**的 `Column`（`fillMaxSize` + `Arrangement.Center`）。内容超一屏就是被裁掉，Compose 不会替你加滚动。
+  · 外面那层 `Box` 挂着 `clickable { onClose() }`。**没有滚动的孩子去消费拖动手势**，一划就变成一次点击 → 关窗。
+  开发时只在默认字号、只在没出角色的十连（10 条正好排满）上看过，所以从来没露过。
+- **修法 / 怎么避开**：
+  · 给那个 `Column` 加 `Modifier.verticalScroll(rememberScrollState())`。加完顺带解决了误关 —— 滚动的孩子会先吃掉拖动，单纯的点击照样穿到父层。
+  · ⚠️ **不用**再套 `BoxWithConstraints` + `heightIn(min = 一屏)` 去保住居中。`verticalScroll` 测量孩子时用的是
+    `constraints.copy(maxHeight = Infinity)`，**`copy` 会把 `minHeight` 原样留着**，所以
+    `Arrangement.Center` 在内容没超屏时本来就还是居中的。多套那一层的代价是真的：
+    `BoxWithConstraints` 是 `SubcomposeLayout`，而它的 content 里读了每帧都在变的动画时间 —— 整棵子树每帧在测量阶段重新子组合；
+    再加上 px→dp→px 的往返误差会让 `minHeight` 比视口多 1px，单抽那张卡从此永远能滚一格（有过冲光晕）。
+  · 底部悬浮的那行提示（「点一下关闭」）要 ①有渐变底衬，不然滚动时卡片从白字底下穿过去两样都看不清；
+    ②给列表留出的底部空间**别写死 dp** —— 字号一大它就折成两行。用 `onSizeChanged` 量它实际多高再让位，
+    并且它自己要 `windowInsetsPadding(WindowInsets.navigationBars)`（`decorFitsSystemWindows = false` 的弹窗里，
+    写死的 34dp 有一半被手势条吃掉）。
+
+## #289 同一份 JSON 解析抄了两份，服务端加字段只有一半界面能看见（cc-Yxi_Entertainment，2026-09-06）
+
+- **症状**：服务端给抽卡结果加了 `byPity`（这一发是不是保底给的）。祈愿**历史页**能显示「保底」小标，**十连结算页**死活不显示。
+- **根因**：`Wish.kt` 里 `Got` 的解析写了两份 —— `got()` 一份，`draw()` 里手抄了一份一模一样的。
+  加字段时只改了 `got()`。讽刺的是 `got()` 的注释原文就写着「history 与 draw 共用一个形状，解析也只该有一处」，
+  抄的人没看见，看的人没删。
+- **修法 / 怎么避开**：`draw()` 改成 `o.optJSONArray("results").list(::got)`。
+  · 一般规律：**同一个 data class 的解析在仓库里只准有一处**。加字段前先 `grep` 一遍构造点
+    （`grep -n 'Got(' `），有两处就先合并再加字段，别加完两处对着调。
+  · 顺带一条计数的同类错：卡牌库印「已收集 27 / 9」—— 分子用的是服务端给的**全部藏品 id**（角色 + 装扮 + 语包），
+    分母只有角色数。`owned.size` 看着天经地义，但 `owned` 从来就不是「角色的集合」。
+    修成 `CROWNS.count { owned.contains(it.id) }`。**分子分母来自不同集合时，先问一句它俩是不是同一个域。**
