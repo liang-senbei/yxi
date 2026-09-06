@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>云曦节拍 · 试验台</title>
+<style>
+  :root{
+    --ink:#E8EDF5; --stage-top:#141A24; --stage-bot:#0E1117;
+    --tick:#FFC08A; --slide:#8AD4F5; --trace:#F5A8C8; --swipe:#9EE6A8;
+    --judge:#FFB787; --good:#FFC46B; --rim:#E0B378; --miss:#E5484D; --cool:#5CC8F5;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--stage-bot);
+    color:var(--ink);font:14px/1.5 system-ui,-apple-system,"PingFang SC","Noto Sans CJK SC",sans-serif;
+    -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
+  #cv{display:block;width:100%;height:100%;touch-action:none}
+
+  /* 竖屏提示：这游戏是横的 */
+  #rotate{position:fixed;inset:0;display:none;place-items:center;text-align:center;
+    background:var(--stage-bot);z-index:30;padding:24px}
+  @media (orientation:portrait){#rotate{display:grid}}
+  #rotate p{color:#9AA6B8;max-width:22em}
+
+  /* 设置抽屉 */
+  #gear{position:fixed;top:calc(8px + env(safe-area-inset-top));right:calc(10px + env(safe-area-inset-right));
+    z-index:20;width:40px;height:40px;border-radius:100px;border:1px solid #ffffff22;
+    background:#ffffff10;color:var(--ink);font-size:17px;line-height:38px;text-align:center;backdrop-filter:blur(8px)}
+  #panel{position:fixed;top:0;right:0;bottom:0;width:min(340px,86vw);z-index:25;
+    background:#121722f2;backdrop-filter:blur(14px);border-left:1px solid #ffffff1a;
+    padding:calc(12px + env(safe-area-inset-top)) 16px 20px;overflow-y:auto;
+    transform:translateX(101%);transition:transform .22s ease}
+  #panel.open{transform:none}
+  #panel h2{margin:.2em 0 .1em;font-size:15px;font-weight:600}
+  #panel h3{margin:1.1em 0 .3em;font-size:12px;font-weight:600;letter-spacing:.06em;color:#8FA0B8;text-transform:uppercase}
+  .row{display:flex;align-items:center;gap:10px;margin:7px 0}
+  .row label{flex:0 0 8.2em;color:#B7C2D4;font-size:12.5px}
+  .row input[type=range]{flex:1;min-width:0;accent-color:var(--judge)}
+  .row output{flex:0 0 3.6em;text-align:right;font-variant-numeric:tabular-nums;font-size:12px;color:#8FA0B8}
+  .seg{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 2px}
+  .seg button{flex:1 1 auto;padding:6px 9px;border-radius:100px;border:1px solid #ffffff22;
+    background:#ffffff0d;color:#B7C2D4;font-size:12px}
+  .seg button.on{background:#ffffff1c;color:var(--ink);border-color:#ffffff44}
+  .note{color:#7E8CA0;font-size:11.5px;line-height:1.55;margin:.5em 0 0}
+  #copy{width:100%;margin-top:14px;padding:10px;border-radius:12px;border:0;
+    background:var(--judge);color:#2A1C0E;font-weight:600;font-size:13px}
+  #done{color:#8FA0B8;font-size:11.5px;text-align:center;min-height:1.4em;margin-top:6px}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<button id="gear" aria-label="设置">⚙</button>
+<div id="rotate"><p>把手机横过来 —— 这个界面跟 App 里一样是横版的。</p></div>
+
+<div id="panel">
+  <h2>试验台</h2>
+  <p class="note">改完直接玩，看着调。定下来点最下面「复制这组设置」发我，我照着改进 App。<br>
+  <b>手感（判定宽窄、打击音延迟、震动）在这儿调不准</b> —— 浏览器和原生差最多的就是这三样，那几项还得在 App 的手感面板里试。</p>
+
+  <h3>命中特效</h3>
+  <div class="row"><label>点 tick</label><div class="seg" id="fx-tick"></div></div>
+  <div class="row"><label>滑 slide</label><div class="seg" id="fx-slide"></div></div>
+  <div class="row"><label>拖 trace</label><div class="seg" id="fx-trace"></div></div>
+  <div class="row"><label>挥 swipe</label><div class="seg" id="fx-swipe"></div></div>
+  <div class="row"><label>特效大小</label><input type="range" id="fxScale" min="0" max="2" step="0.05"><output></output></div>
+
+  <h3>背景热度（连击越高越烫）</h3>
+  <div class="row"><label>热度强度</label><input type="range" id="heat" min="0" max="1.5" step="0.05"><output></output></div>
+  <div class="row"><label>满热连击数</label><input type="range" id="heatMax" min="5" max="60" step="1"><output></output></div>
+  <div class="seg" id="heatRamp"></div>
+  <p class="note">底色本来是死的深蓝灰。这条是你要的「越打越烫」，App 里还没有 —— 在这儿定下来我再搬进去。</p>
+
+  <h3>校准线</h3>
+  <div class="row"><label>摆动幅度</label><input type="range" id="tilt" min="0" max="2" step="0.05"><output></output></div>
+  <div class="row"><label>回正快慢</label><input type="range" id="tiltBack" min="0.1" max="3" step="0.05"><output></output></div>
+
+  <h3>音块</h3>
+  <div class="row"><label>大小</label><input type="range" id="noteScale" min="0.6" max="1.8" step="0.05"><output></output></div>
+  <div class="row"><label>下落时长 秒</label><input type="range" id="approach" min="0.5" max="2.5" step="0.05"><output></output></div>
+  <div class="row"><label>密度</label><input type="range" id="density" min="0.4" max="2.5" step="0.05"><output></output></div>
+
+  <button id="copy">复制这组设置</button>
+  <div id="done"></div>
+</div>
+
+<script>
+"use strict";
+// ───────────────────────────────────────────────────────────────
+// 云曦节拍 · 网页试验台
+// ⚠️ 这里**只定外观和玩法**。判定宽窄照搬 App 的 120 / 240ms 只是为了手感接近，
+//    但浏览器的触摸和音频延迟跟原生不一样 —— 手感面板那六项别在这儿定。
+// 视觉规格逐条对着 ui/RhythmScreen.kt 抄的，改完能一比一搬回 Kotlin。
+// ───────────────────────────────────────────────────────────────
+const C = {
+  tick:'#FFC08A', slide:'#8AD4F5', trace:'#F5A8C8', swipe:'#9EE6A8',
+  judge:'#FFB787', good:'#FFC46B', rim:'#E0B378', miss:'#E5484D',
+  cool:'#5CC8F5', ink:'#E8EDF5', stageTop:'#141A24', stageBot:'#0E1117',
+};
+const KINDS = ['tick','slide','trace','swipe'];
+const PERFECT_MS = 120, GOOD_MS = 240;          // 跟 Rhythm.kt 一致
+const TIERS = [{at:8,mult:1.2,label:'Great'},{at:15,mult:1.5,label:'Excellent'},{at:30,mult:2.0,label:'Amazing'}];
+
+// ── 可调项（默认值 = 现在 App 里的样子；热度是新的，先给个保守值）──
+const FX_STYLES = {
+  tick:  ['圆环扩散','星芒','实心爆点'],
+  slide: ['光带横扫','拖尾火花','圆环扩散'],
+  trace: ['彗尾','环+箭头','星芒'],
+  swipe: ['方向扇形','人字冲击','光带横扫'],
+};
+const S = {
+  fx:{tick:0, slide:0, trace:0, swipe:0},
+  fxScale:1, heat:0.55, heatMax:30, heatRamp:0,
+  tilt:1, tiltBack:1, noteScale:1, approach:1.15, density:1,
+};
+const RAMPS = [
+  {name:'蓝→紫→暖', stops:[[0x14,0x1A,0x24],[0x2A,0x22,0x4A],[0x4A,0x24,0x3C],[0x5A,0x2E,0x22]]},
+  {name:'青→洋红',   stops:[[0x14,0x1A,0x24],[0x14,0x33,0x4A],[0x40,0x22,0x4E],[0x63,0x22,0x3E]]},
+  {name:'只加亮',     stops:[[0x14,0x1A,0x24],[0x1C,0x24,0x30],[0x26,0x30,0x40],[0x33,0x3E,0x52]]},
+];
+
+// ── 画布 ──
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+let W = 0, H = 0, DPR = 1;
+function resize(){
+  DPR = Math.min(devicePixelRatio || 1, 2.5);
+  W = cv.clientWidth; H = cv.clientHeight;
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+addEventListener('resize', resize);
+
+// ── 谱面：程序生成、循环。不是真曲子，只为了看四种块 ──
+let notes = [], t0 = performance.now(), lastGen = 0;
+function genAhead(now){
+  const until = now + 4;
+  while (lastGen < until){
+    lastGen += (0.42 + Math.random()*0.5) / S.density;
+    const kind = KINDS[(Math.random()*4)|0];
+    const lane = (Math.random()*4)|0;
+    const n = {t:lastGen, lane, kind, judged:null, tailDone:false, dir:0, dur:0};
+    if (kind === 'slide'){ n.dur = 0.35 + Math.random()*0.7; }
+    if (kind === 'trace'){ n.dir = lane === 0 ? 1 : lane === 3 ? -1 : (Math.random()<.5?-1:1); }
+    if (kind === 'swipe'){ n.dir = Math.random()<.5 ? -1 : 1; }
+    notes.push(n);
+  }
+}
+
+// ── 局面 ──
+let combo = 0, best = 0, hits = 0, perfect = 0, good = 0, miss = 0;
+let tiltVal = 0, tiltAt = -9, tiltDir = 0;
+const press = [-9,-9,-9,-9], flash = [-9,-9,-9,-9], held = [0,0,0,0];
+let bursts = [];                                  // 命中特效
+let words = [];                                   // 判定词 / 评价词
+let missMarks = [];
+
+function now(){ return (performance.now() - t0)/1000; }
+
+function tierWord(c){ const t = TIERS.find(x => x.at === c); return t ? t.label : null; }
+function multOf(c){ let m = 1; for (const t of TIERS) if (c >= t.at) m = t.mult; return m; }
+
+// ── 判定 ──
+function judgeAt(errMs){
+  const a = Math.abs(errMs);
+  return a <= PERFECT_MS ? 'perfect' : a <= GOOD_MS ? 'good' : null;
+}
+function hitLane(lane, want){
+  const t = now();
+  for (const n of notes){
+    if (n.lane !== lane || n.judged) continue;
+    const errMs = (t - n.t) * 1000;
+    if (errMs < -GOOD_MS) break;                  // 后面的都还太早
+    if (errMs > GOOD_MS) continue;
+    if (want && !want(n)) continue;
+    const j = judgeAt(errMs);
+    if (!j) continue;
+    land(n, j);
+    return n;
+  }
+  return null;
+}
+function land(n, j){
+  n.judged = j;
+  flash[n.lane] = now();
+  combo++; best = Math.max(best, combo); hits++;
+  if (j === 'perfect') perfect++; else good++;
+  addBurst(n, j);
+  const w = tierWord(combo);
+  words.push({at:now(), text:w || (j === 'perfect' ? '完美' : '不错'),
+              big:!!w, color:w ? C.judge : (j === 'perfect' ? C.judge : C.good)});
+  if (words.length > 6) words.shift();
+}
+function breakCombo(n){
+  n.judged = 'miss'; miss++; combo = 0;
+  missMarks.push({at:now(), lane:n.lane});
+  words.push({at:now(), text:'漏了', big:false, color:C.miss});
+  if (words.length > 6) words.shift();
+}
+function bumpTilt(dir){ tiltAt = now(); tiltDir = dir; }
+
+// ── 特效 ──
+function addBurst(n, j){
+  bursts.push({at:now(), lane:n.lane, kind:n.kind, judge:j, dir:n.dir,
+               style:S.fx[n.kind], seed:Math.random()});
+  if (bursts.length > 40) bursts.shift();
+}
+
+// ── 输入 ──
+const pointers = new Map();
+function laneOf(x, y, geo){
+  // 反变换：场地整体绕判定线中心转过 poseDeg，手指坐标要转回去再分轨
+  const {deg, cx, cy, laneW} = geo;
+  const r = -deg * Math.PI/180, dx = x - cx, dy = y - cy;
+  const rx = dx*Math.cos(r) - dy*Math.sin(r) + cx;
+  return Math.max(0, Math.min(3, Math.floor(rx / laneW)));
+}
+let geo = {deg:0, cx:0, cy:0, laneW:0};
+
+cv.addEventListener('pointerdown', e => {
+  cv.setPointerCapture(e.pointerId);
+  const lane = laneOf(e.clientX, e.clientY, geo);
+  pointers.set(e.pointerId, {lane, x0:e.clientX, y0:e.clientY, x:e.clientX, y:e.clientY,
+                             t0:now(), swiped:false, lastLane:lane});
+  press[lane] = now(); held[lane]++;
+  // 点下去先试 tick / slide 头（swipe 和 trace 要等动作）
+  hitLane(lane, n => n.kind === 'tick' || n.kind === 'slide');
+});
+cv.addEventListener('pointermove', e => {
+  const p = pointers.get(e.pointerId); if (!p) return;
+  p.x = e.clientX; p.y = e.clientY;
+  const dx = p.x - p.x0, dy = p.y - p.y0;
+  const moved = Math.abs(dx) > W*0.02 || Math.abs(dy) > H*0.04;
+  // swipe：快速横划
+  if (!p.swiped && Math.abs(dx) > W*0.045 && (now()-p.t0) < 0.28){
+    const dir = dx > 0 ? 1 : -1;
+    const n = hitLane(p.lane, x => x.kind === 'swipe' && x.dir === dir);
+    p.swiped = true;
+    if (n) bumpTilt(dir);
+  }
+  // trace：手指挪到另一条轨
+  if (moved){
+    const cur = laneOf(p.x, p.y, geo);
+    if (cur !== p.lastLane){
+      const from = p.lastLane;
+      const n = hitLane(from, x => x.kind === 'trace' &&
+                                   Math.max(0, Math.min(3, from + x.dir)) === cur);
+      if (n) bumpTilt(cur > from ? 1 : -1);
+      held[from] = Math.max(0, held[from]-1); held[cur]++;
+      press[cur] = now(); p.lastLane = cur;
+    }
+  }
+});
+function up(e){
+  const p = pointers.get(e.pointerId); if (!p) return;
+  held[p.lastLane] = Math.max(0, held[p.lastLane]-1);
+  pointers.delete(e.pointerId);
+}
+cv.addEventListener('pointerup', up);
+cv.addEventListener('pointercancel', up);
+
+// ── 绘制 ──
+function draw(){
+  const t = now();
+  genAhead(t);
+
+  // 过期未判 → 漏；slide 尾巴走完就收
+  for (const n of notes){
+    if (!n.judged && (t - n.t)*1000 > GOOD_MS) breakCombo(n);
+    if (n.judged && n.judged !== 'miss' && n.kind === 'slide' && !n.tailDone && t > n.t + n.dur) n.tailDone = true;
+  }
+  notes = notes.filter(n => t - n.t < 1.2 || !n.judged);
+
+  // 场地姿态
+  const back = Math.exp(-(t - tiltAt) / (0.30 / Math.max(.05,S.tiltBack)));
+  tiltVal = (t - tiltAt < 3 ? tiltDir * 7 * S.tilt * back : 0);
+  const deg = Math.max(-9, Math.min(9, tiltVal));
+  const laneW = W/4, judgeY = H*0.80, noteH = Math.max(14, Math.min(30, H*0.026)) * S.noteScale;
+  geo = {deg, cx:W/2, cy:judgeY, laneW};
+
+  // ── 底色：热度（连击越高越烫）。不跟着转，转了四角会露白 ──
+  const heatK = Math.min(1, combo / S.heatMax) * S.heat;
+  const ramp = RAMPS[S.heatRamp].stops;
+  const seg = Math.min(ramp.length-1, heatK * (ramp.length-1));
+  const i0 = Math.floor(seg), i1 = Math.min(ramp.length-1, i0+1), f = seg - i0;
+  const mix = (a,b) => `rgb(${Math.round(a[0]+(b[0]-a[0])*f)},${Math.round(a[1]+(b[1]-a[1])*f)},${Math.round(a[2]+(b[2]-a[2])*f)})`;
+  const top = mix(ramp[i0], ramp[i1]);
+  const g0 = ctx.createLinearGradient(0,0,0,H);
+  g0.addColorStop(0, top); g0.addColorStop(1, C.stageBot);
+  ctx.fillStyle = g0; ctx.fillRect(0,0,W,H);
+
+  ctx.save();
+  ctx.translate(W/2, judgeY); ctx.rotate(deg*Math.PI/180); ctx.translate(-W/2, -judgeY);
+
+  // 轨道渐层 + 分隔线
+  const over = H*0.12;
+  const g1 = ctx.createLinearGradient(0,-over,0,judgeY);
+  g1.addColorStop(0,'rgba(92,200,245,0)'); g1.addColorStop(0.7,'rgba(92,200,245,.05)'); g1.addColorStop(1,'rgba(92,200,245,.14)');
+  ctx.fillStyle = g1; ctx.fillRect(-over,-over,W+over*2,judgeY+over);
+  ctx.strokeStyle = 'rgba(232,237,245,.08)'; ctx.lineWidth = 2;
+  for (let i=1;i<4;i++){ ctx.beginPath(); ctx.moveTo(laneW*i,-over); ctx.lineTo(laneW*i,judgeY); ctx.stroke(); }
+
+  // 按下：这条轨亮一下（反馈「你按了」，不是「你对了」）
+  for (let l=0;l<4;l++){
+    const age = t - press[l];
+    if (age >= 0 && age <= 0.13){
+      const a = .13*(1-age/0.13);
+      const g = ctx.createLinearGradient(0,judgeY*0.45,0,judgeY);
+      g.addColorStop(0,'rgba(92,200,245,0)'); g.addColorStop(1,`rgba(92,200,245,${a})`);
+      ctx.fillStyle = g; ctx.fillRect(laneW*l, judgeY*0.45, laneW, judgeY*0.55);
+    }
+  }
+
+  // 漏了：那条轨往上泛红
+  for (const m of missMarks){
+    const age = t - m.at; if (age > 0.38) continue;
+    const a = .16*(1-age/0.38);
+    const g = ctx.createLinearGradient(0,judgeY-70,0,judgeY);
+    g.addColorStop(0,'rgba(229,72,77,0)'); g.addColorStop(1,`rgba(229,72,77,${a})`);
+    ctx.fillStyle = g; ctx.fillRect(laneW*m.lane, judgeY-70, laneW, 70);
+  }
+  missMarks = missMarks.filter(m => t - m.at <= 0.38);
+
+  // 判定线：底光 + 线 + 亮芯
+  let glow = 0;
+  for (let l=0;l<4;l++){ const a = t - flash[l]; if (a>=0 && a<=0.16) glow = Math.max(glow, 1-a/0.16); }
+  const gl = ctx.createLinearGradient(0,judgeY-26,0,judgeY+26);
+  gl.addColorStop(0,'rgba(255,183,135,0)');
+  gl.addColorStop(.5,`rgba(255,183,135,${.10+.22*glow})`);
+  gl.addColorStop(1,'rgba(255,183,135,0)');
+  ctx.fillStyle = gl; ctx.fillRect(-over, judgeY-26, W+over*2, 52);
+  ctx.strokeStyle = C.judge; ctx.lineWidth = 2.5; ctx.globalAlpha = .85;
+  ctx.beginPath(); ctx.moveTo(-over,judgeY); ctx.lineTo(W+over,judgeY); ctx.stroke();
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.globalAlpha = .35+.5*glow;
+  ctx.beginPath(); ctx.moveTo(-over,judgeY); ctx.lineTo(W+over,judgeY); ctx.stroke();
+  ctx.globalAlpha = 1;
+
+  // ── 命中特效（四种各不一样）──
+  for (const b of bursts){
+    const age = t - b.at; if (age > 0.6) continue;
+    const cx = laneW*b.lane + laneW/2, col = b.judge === 'perfect' ? C.judge : C.good;
+    const kc = C[b.kind];
+    drawFx(b, age, cx, judgeY, noteH, col, kc);
+  }
+  bursts = bursts.filter(b => t - b.at <= 0.6);
+
+  // ── 音符 ──
+  for (const n of notes){
+    const dt = n.t - t;
+    if (dt > S.approach) continue;
+    if (n.judged && n.kind !== 'slide') continue;
+    if (n.judged && n.tailDone) continue;
+    const y = judgeY * (1 - dt/S.approach);
+    const w = Math.min(laneW*0.72, W*0.10);
+    const x = laneW*n.lane + (laneW-w)/2;
+
+    if (n.kind === 'slide'){
+      const tailY = Math.max(0, judgeY * (1 - (n.t + n.dur - t)/S.approach));
+      const bottom = Math.min(y, judgeY);
+      if (bottom > tailY){
+        const holding = n.judged && n.judged !== 'miss' && held[n.lane] > 0;
+        ctx.globalAlpha = n.judged === 'miss' ? .18 : holding ? .62 : .42;
+        rr(x, tailY, w, bottom-tailY, noteH/2, C.slide);
+        ctx.globalAlpha = .18; rr(x+w*.12, tailY, w*.10, bottom-tailY, noteH/3, '#fff');
+        ctx.globalAlpha = 1;
+      }
+    }
+    if (!n.judged && y >= -20 && y <= judgeY + noteH){
+      const h = noteH, c = C[n.kind];
+      rr(x-3, y-h/2-3, w+6, h+6, h, C.rim);
+      rr(x, y-h/2, w, h, h/2, c);
+      const g = ctx.createLinearGradient(0,y-h/2,0,y);
+      g.addColorStop(0,'rgba(255,255,255,.45)'); g.addColorStop(1,'rgba(255,255,255,0)');
+      rr(x, y-h/2, w, h*.5, h/2, g);
+      // 记号：光靠颜色分不出来（色盲 / 强光）
+      if (n.kind === 'trace'){
+        ctx.fillStyle = 'rgba(255,255,255,.55)';
+        for (let g2=-1; g2<=1; g2++) ctx.fillRect(x+w/2+g2*h*.45-1.5, y-h*.22, 3, h*.44);
+        const d = n.dir > 0 ? 1 : -1, ax = n.dir > 0 ? x+w+h*.5 : x-h*.5;
+        tri(ax+d*h*.42, y, ax-d*h*.18, y-h*.34, ax-d*h*.18, y+h*.34, c, .9);
+      } else if (n.kind === 'swipe'){
+        const sgn = n.dir >= 0 ? 1 : -1, ax = n.dir >= 0 ? x+w : x;
+        tri(ax+sgn*h*.75, y, ax, y-h*.55, ax, y+h*.55, c, 1);
+      }
+    }
+  }
+  ctx.restore();
+
+  drawHud(t);
+  requestAnimationFrame(draw);
+}
+
+// 四种命中特效
+function drawFx(b, age, cx, cy, noteH, col, kc){
+  const s = S.fxScale; if (s <= 0) return;
+  const k = Math.min(1, age/0.42), fade = 1-k;
+  const u = noteH * 1.1 * s;
+  ctx.save();
+  ctx.lineCap = 'round';
+  const style = FX_STYLES[b.kind][b.style] || FX_STYLES[b.kind][0];
+
+  if (style === '圆环扩散'){
+    ctx.strokeStyle = col; ctx.globalAlpha = .85*fade; ctx.lineWidth = 3.5*s*fade + 1;
+    ctx.beginPath(); ctx.arc(cx, cy, u*(0.5+3.2*k), 0, 6.284); ctx.stroke();
+    ctx.globalAlpha = .35*fade; ctx.lineWidth = 2*s;
+    ctx.beginPath(); ctx.arc(cx, cy, u*(0.3+1.8*k), 0, 6.284); ctx.stroke();
+  } else if (style === '星芒'){
+    ctx.strokeStyle = col; ctx.globalAlpha = .9*fade; ctx.lineWidth = 2.5*s;
+    for (let i=0;i<8;i++){
+      const a = i*Math.PI/4 + b.seed*0.6, r0 = u*(0.4+1.2*k), r1 = u*(0.8+3.4*k);
+      ctx.beginPath();
+      ctx.moveTo(cx+Math.cos(a)*r0, cy+Math.sin(a)*r0);
+      ctx.lineTo(cx+Math.cos(a)*r1, cy+Math.sin(a)*r1); ctx.stroke();
+    }
+  } else if (style === '实心爆点'){
+    const g = ctx.createRadialGradient(cx,cy,0,cx,cy,u*(1+2.6*k));
+    g.addColorStop(0, hexA(col, .55*fade)); g.addColorStop(1, hexA(col, 0));
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx,cy,u*(1+2.6*k),0,6.284); ctx.fill();
+  } else if (style === '光带横扫'){
+    const wdt = u*(1.5+5*k);
+    const g = ctx.createLinearGradient(cx-wdt,0,cx+wdt,0);
+    g.addColorStop(0, hexA(kc,0)); g.addColorStop(.5, hexA(kc,.5*fade)); g.addColorStop(1, hexA(kc,0));
+    ctx.fillStyle = g; ctx.fillRect(cx-wdt, cy-u*.55, wdt*2, u*1.1);
+  } else if (style === '拖尾火花'){
+    ctx.strokeStyle = col; ctx.globalAlpha = .8*fade;
+    for (let i=0;i<6;i++){
+      const a = -Math.PI/2 + (i-2.5)*0.20, r = u*(1+3.2*k)*(0.7+0.3*((b.seed*7+i)%1));
+      ctx.lineWidth = 2.2*s*fade+.6;
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx+Math.cos(a)*r, cy+Math.sin(a)*r); ctx.stroke();
+    }
+  } else if (style === '彗尾'){
+    const d = b.dir >= 0 ? 1 : -1, len = u*(1.5+5.5*k);
+    const g = ctx.createLinearGradient(cx, cy, cx+d*len, cy);
+    g.addColorStop(0, hexA(kc,.75*fade)); g.addColorStop(1, hexA(kc,0));
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.moveTo(cx, cy-u*.5); ctx.lineTo(cx+d*len, cy); ctx.lineTo(cx, cy+u*.5); ctx.closePath(); ctx.fill();
+  } else if (style === '环+箭头'){
+    ctx.strokeStyle = kc; ctx.globalAlpha = .8*fade; ctx.lineWidth = 3*s;
+    ctx.beginPath(); ctx.arc(cx, cy, u*(0.6+2.4*k), 0, 6.284); ctx.stroke();
+    const d = b.dir >= 0 ? 1 : -1, ax = cx + d*u*(1+2.4*k);
+    tri(ax+d*u*.5, cy, ax, cy-u*.5, ax, cy+u*.5, kc, .85*fade);
+  } else if (style === '方向扇形'){
+    const d = b.dir >= 0 ? 1 : -1;
+    ctx.globalAlpha = .55*fade; ctx.fillStyle = kc;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, u*(1+4.5*k), d>0 ? -0.75 : Math.PI+0.75, d>0 ? 0.75 : Math.PI-0.75, d<0);
+    ctx.closePath(); ctx.fill();
+  } else if (style === '人字冲击'){
+    const d = b.dir >= 0 ? 1 : -1;
+    ctx.strokeStyle = kc; ctx.globalAlpha = .85*fade;
+    for (let i=0;i<3;i++){
+      const off = u*(0.8+3.6*k) + i*u*0.7;
+      ctx.lineWidth = (3-i*0.7)*s;
+      ctx.beginPath();
+      ctx.moveTo(cx+d*off - d*u*.5, cy-u*.7);
+      ctx.lineTo(cx+d*off, cy);
+      ctx.lineTo(cx+d*off - d*u*.5, cy+u*.7);
+      ctx.stroke();
+    }
+  }
+
+  // 校准瞬间那道竖线：垂直于判定线，±10° 随机偏转，很快淡出（跟 App 一致，四种都有）
+  const kk = Math.min(1, age/0.2);
+  if (kk < 1){
+    const jitter = ((b.lane*37 % 21) - 10) * Math.PI/180;
+    const len = noteH*(3.2+2.4*kk)*s;
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(jitter);
+    ctx.strokeStyle = `rgba(255,255,255,${.8*(1-kk)})`; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(0,-len); ctx.lineTo(0,len*.35); ctx.stroke();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+function drawHud(t){
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  // 连击 + 倍率角标
+  if (combo > 0){
+    const m = multOf(combo);
+    const pop = Math.max(0, 1 - (t - (flash.reduce((a,b)=>Math.max(a,b),-9)))/0.12);
+    ctx.font = `700 ${Math.round(H*0.14*(1+0.10*pop))}px system-ui,sans-serif`;
+    ctx.fillStyle = 'rgba(232,237,245,.92)';
+    ctx.fillText(String(combo), W/2, H*0.20);
+    ctx.font = `600 ${Math.round(H*0.035)}px system-ui,sans-serif`;
+    ctx.fillStyle = 'rgba(232,237,245,.45)';
+    ctx.fillText('COMBO', W/2, H*0.29);
+    if (m > 1){
+      ctx.font = `700 ${Math.round(H*0.045)}px system-ui,sans-serif`;
+      ctx.fillStyle = C.judge;
+      ctx.fillText(`×${m.toFixed(1)}`, W/2, H*0.345);
+    }
+  }
+  // 判定词 / 评价词
+  for (const w of words){
+    const age = t - w.at; if (age > (w.big ? 1.1 : 0.5)) continue;
+    const k = age/(w.big ? 1.1 : 0.5);
+    ctx.globalAlpha = 1-k;
+    ctx.font = `700 ${Math.round(H*(w.big ? 0.075 : 0.042))}px system-ui,sans-serif`;
+    ctx.fillStyle = w.color;
+    ctx.fillText(w.text, W/2, H*(w.big ? 0.46 : 0.55) - k*H*0.03);
+    ctx.globalAlpha = 1;
+  }
+  words = words.filter(w => t - w.at <= 1.2);
+  // 左上：统计
+  ctx.textAlign = 'left';
+  ctx.font = `500 ${Math.round(Math.max(11, H*0.028))}px system-ui,sans-serif`;
+  ctx.fillStyle = 'rgba(232,237,245,.5)';
+  ctx.fillText(`完美 ${perfect} · 不错 ${good} · 漏 ${miss} · 最高连击 ${best}`,
+               12 + (innerWidth>W?0:0), 18 + Math.max(0, H*0.02));
+  ctx.restore();
+}
+
+// 小工具
+function rr(x,y,w,h,r,fill){
+  if (w <= 0 || h <= 0) return;
+  r = Math.min(r, w/2, h/2);
+  ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
+  ctx.fillStyle = fill; ctx.fill();
+}
+function tri(x1,y1,x2,y2,x3,y3,fill,alpha){
+  ctx.save(); ctx.globalAlpha = alpha == null ? 1 : alpha;
+  ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.lineTo(x3,y3); ctx.closePath();
+  ctx.fillStyle = fill; ctx.fill(); ctx.restore();
+}
+function hexA(hex, a){
+  const n = parseInt(hex.slice(1),16);
+  return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;
+}
+
+// ── 设置面板 ──
+const panel = document.getElementById('panel');
+document.getElementById('gear').onclick = () => panel.classList.toggle('open');
+function segify(id, kind){
+  const box = document.getElementById(id);
+  FX_STYLES[kind].forEach((name, i) => {
+    const b = document.createElement('button');
+    b.textContent = name;
+    b.onclick = () => { S.fx[kind] = i; [...box.children].forEach((c,j)=>c.classList.toggle('on', j===i)); save(); };
+    box.appendChild(b);
+  });
+  [...box.children].forEach((c,j)=>c.classList.toggle('on', j===S.fx[kind]));
+}
+KINDS.forEach(k => segify('fx-'+k, k));
+{
+  const box = document.getElementById('heatRamp');
+  RAMPS.forEach((r,i) => {
+    const b = document.createElement('button');
+    b.textContent = r.name;
+    b.onclick = () => { S.heatRamp = i; [...box.children].forEach((c,j)=>c.classList.toggle('on', j===i)); save(); };
+    box.appendChild(b);
+  });
+  [...box.children].forEach((c,j)=>c.classList.toggle('on', j===S.heatRamp));
+}
+const SLIDERS = ['fxScale','heat','heatMax','tilt','tiltBack','noteScale','approach','density'];
+SLIDERS.forEach(id => {
+  const el = document.getElementById(id), out = el.parentElement.querySelector('output');
+  const sync = () => { out.textContent = (+el.value).toFixed(id === 'heatMax' ? 0 : 2); };
+  el.value = S[id]; sync();
+  el.oninput = () => { S[id] = +el.value; sync(); save(); };
+});
+function save(){ try{ localStorage.setItem('yxi-rhythm-bench', JSON.stringify(S)); }catch(e){} }
+try{
+  const raw = localStorage.getItem('yxi-rhythm-bench');
+  if (raw) Object.assign(S, JSON.parse(raw));
+  SLIDERS.forEach(id => { const el = document.getElementById(id);
+    el.value = S[id]; el.parentElement.querySelector('output').textContent = (+el.value).toFixed(id==='heatMax'?0:2); });
+  KINDS.forEach(k => { const box = document.getElementById('fx-'+k);
+    [...box.children].forEach((c,j)=>c.classList.toggle('on', j===S.fx[k])); });
+  [...document.getElementById('heatRamp').children].forEach((c,j)=>c.classList.toggle('on', j===S.heatRamp));
+}catch(e){}
+
+document.getElementById('copy').onclick = async () => {
+  const txt = [
+    '云曦节拍 · 试验台设置',
+    `命中特效： 点=${FX_STYLES.tick[S.fx.tick]} 滑=${FX_STYLES.slide[S.fx.slide]} 拖=${FX_STYLES.trace[S.fx.trace]} 挥=${FX_STYLES.swipe[S.fx.swipe]}`,
+    `特效大小 ${S.fxScale}`,
+    `热度 强度=${S.heat} 满热连击=${S.heatMax} 色标=${RAMPS[S.heatRamp].name}`,
+    `校准线 摆动=${S.tilt} 回正=${S.tiltBack}`,
+    `音块 大小=${S.noteScale} 下落=${S.approach}s 密度=${S.density}`,
+  ].join('\n');
+  const el = document.getElementById('done');
+  try{ await navigator.clipboard.writeText(txt); el.textContent = '复制好了，发给我就行'; }
+  catch(e){ el.textContent = txt; }
+  setTimeout(()=>{ if (el.textContent.startsWith('复制好了')) el.textContent=''; }, 3000);
+};
+
+resize();
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>

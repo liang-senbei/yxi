@@ -21,7 +21,9 @@ class AttachmentsTest {
         val out = renumber(listOf(a, b))
         assertEquals(listOf("图片1", "图片2"), out.map { it.label })
         // ⚠️ 标签重了 header 就废了：Claude 拿到两条同名映射，不知道该用哪条
-        assertEquals(2, header(out).lines().size)
+        // ⚠️ header 结尾**有个换行**（它要跟正文隔开），所以按非空行数着，别数 lines().size ——
+        //    原来那句写的是老契约，09-05 给 header 补了结尾换行之后它就一直红着没人发现。
+        assertEquals(2, header(out).lines().count { it.isNotBlank() })
         assertTrue("/tmp/a.png" in header(out) && "/tmp/b.png" in header(out))
     }
 

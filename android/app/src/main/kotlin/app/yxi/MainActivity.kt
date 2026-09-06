@@ -362,6 +362,12 @@ class MainActivity : ComponentActivity() {
 
                 ModalNavigationDrawer(
                     drawerState = drawer,
+                    // ⚠️ **音游里右滑是玩法**（swipe 音块要左右划），抽屉手势会把它整个吃掉 ——
+                    //    老板 2026-09-06 截图：一右滑侧边栏就拉开，那个音块直接判「漏了」。
+                    //    所以玩的时候关掉手势。**但开着的时候必须放开**，否则点外面也关不掉
+                    //    （Material3 里遮罩层的「点外面关闭」跟 gesturesEnabled 绑在一起，
+                    //    见上面会话那层同一条注释，2026-09-04 栽过）。
+                    gesturesEnabled = drawer.isOpen || page != Page.Rhythm,
                     scrimColor = Color.Black.copy(alpha = 0.12f),
                     drawerContent = {
                         ModalDrawerSheet(Modifier.width(drawerWidth), drawerShape = RoundedCornerShape(0.dp, 28.dp, 28.dp, 0.dp)) {

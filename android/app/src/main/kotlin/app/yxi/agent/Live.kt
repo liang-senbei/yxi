@@ -52,6 +52,9 @@ data class Live(
          * 拿 borrowable 判会一直是 false，就会误以为没发出去、反复补回车。
          * ⚠️ **`null` 和 `false` 不能混**：读不到屏就别下结论，更别补回车（#276 的老规矩）。
          */
+        /** 排队时输入框里的占位提示 —— 它出现 = 话已经收下进队列了，不是没发出去。 */
+        private val QUEUED_HINT = Regex("""^press up to edit queued messages?\.?$""", RegexOption.IGNORE_CASE)
+
         fun inputEmpty(screen: String): Boolean? {
             if (screen.isBlank()) return null
             // ⚠️⚠️ **选单/审批框也是两条横线夹着的**（Claude Code 的 AskUserQuestion、
@@ -77,7 +80,15 @@ data class Live(
             //    我第一版写成 `singleOrNull` 把它一起判成 null 了，被自己的用例当场抓住。
             val first = body.firstOrNull()?.trimStart() ?: return null
             if (!first.startsWith("❯")) return null
-            return body.joinToString("").trimStart().removePrefix("❯").isBlank()
+            val inBox = body.joinToString("").trimStart().removePrefix("❯").trim()
+            // ⚠️⚠️ **框里那句「Press up to edit queued messages」是占位提示，不是用户的草稿。**
+            //    Claude Code 忙着的时候你发的话会进**排队**，这时它把这句画进输入框里
+            //    （真会话实测，见 PromptRealTest 里那两份抓屏）。原来判成「还堆着东西」→
+            //    补三次回车 → 再报「没发出去」→ 把话还回输入框。老板 2026-09-06 录屏为证：
+            //    服务器上那条消息**到了五次**，他每次看到「没发出去」就再发一遍。
+            //    **有这句恰恰证明消息已经收下了**（排队 = 收下了，只是还没轮到）。
+            if (QUEUED_HINT.matches(inBox)) return true
+            return inBox.isBlank()
         }
 
         /**

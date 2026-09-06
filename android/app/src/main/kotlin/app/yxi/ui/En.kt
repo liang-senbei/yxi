@@ -1156,7 +1156,7 @@ internal object En {
         "组规" to "Rules",
         "「%s」的组规" to "Rules for “%s”",
         "写给这个组每个 agent 的话。每个会话开始时（含接回、/compact 之后）自动注入，不用建文件、不用改 CLAUDE.md。" to "A note for every agent in this group. Injected automatically whenever a session starts (including resume and after /compact) — no files, no CLAUDE.md edits.",
-        "例：遇到值得记录的架构信息 / 密钥位置，按分组归档到 E:\\资料，方便各项目取用。" to "e.g. When you come across architecture facts or key locations worth keeping, file them by group under E:\\资料 for other projects to use.",
+        "例：遇到值得记录的架构信息 / 密钥位置，按分组归档到 E:\\资料，方便各项目取用。" to "e.g. When you come across architecture facts or key locations worth keeping, file them by group under E:\\Reference for other projects to use.",
         "空着保存 = 删掉这条组规。agent 里随时能用 yxi-hub rules 看自己组的组规。" to "Save empty to remove the rule. Agents can run yxi-hub rules to read their groups' rules any time.",
         "存并发给在跑的 %d 个" to "Save and tell the %d running now",
         "「%s」组规已存，并发给了 %d 个在跑的会话" to "Rules for “%s” saved and sent to %d running sessions",
