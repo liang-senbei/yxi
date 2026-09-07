@@ -37,8 +37,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -68,6 +70,7 @@ import app.yxi.ui.theme.Amber
 import app.yxi.ui.theme.Copper
 import app.yxi.ui.theme.Muted
 import kotlin.math.abs
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import app.yxi.ui.rhythm.Hit
@@ -150,7 +153,7 @@ fun RhythmScreen(modifier: Modifier = Modifier) {
     val p = playing
     when {
         r != null -> ResultCard(r.chartId, r.result, r.elapsedMs, r.hits, auto = r.auto, onAgain = {
-            val song = Rhythm.SONGS.first { it.id == r.chartId.substringBefore('_') }
+            val song = Rhythm.songs(ctx).first { it.id == r.chartId.substringBefore('_') }
             result = null; demo = r.auto; playing = song to r.chartId.substringAfter('_')
         }, onBack = { result = null; synced++ })                     // 结算页整屏通铺：不要 Scaffold 的内边距
 
@@ -170,6 +173,12 @@ private data class Done(val chartId: String, val result: Rhythm.Result, val elap
 @Composable
 private fun SongList(synced: Int, onPick: (Rhythm.Song, String) -> Unit, onDemo: (Rhythm.Song, String) -> Unit, modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
+    var listTick by remember { mutableIntStateOf(0) }
+    val songs = remember(synced, listTick) { Rhythm.songs(ctx) }
+    // 关卡联网（老板 09-07）：进来先拉一次公网清单，拉到就刷新列表；拉不到静默用本地
+    LaunchedEffect(Unit) { if (Rhythm.refresh(ctx)) listTick++ }
+    val scope = rememberCoroutineScope()
+    val downloading = remember { mutableStateMapOf<String, Float>() }
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
         Text(t("云曦节拍"), Modifier.padding(20.dp, 18.dp, 20.dp, 4.dp), style = MaterialTheme.typography.headlineMedium)
         Text(
@@ -190,7 +199,7 @@ private fun SongList(synced: Int, onPick: (Rhythm.Song, String) -> Unit, onDemo:
                 }
             }
         }
-        Rhythm.SONGS.forEach { s ->
+        songs.forEach { s ->
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainerLow,
                 shape = RoundedCornerShape(20.dp),
@@ -204,7 +213,26 @@ private fun SongList(synced: Int, onPick: (Rhythm.Song, String) -> Unit, onDemo:
                     // 外来曲子的署名：授权条款要求的原话，原样显示（design/music/licenses/）
                     if (s.credit.isNotBlank()) Text(s.credit, style = MaterialTheme.typography.labelSmall, color = Muted)
                     Spacer(Modifier.height(10.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    val ready = remember(s, listTick, downloading[s.id]) { Rhythm.ready(ctx, s) }
+                    if (!ready) {
+                        // 清单独有的曲子：先下音频（一两 MB），下完这张卡就变成正常的难度按钮
+                        val p = downloading[s.id]
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable(enabled = p == null) {
+                                downloading[s.id] = 0f
+                                scope.launch {
+                                    val ok = Rhythm.download(ctx, s) { downloading[s.id] = it }
+                                    downloading.remove(s.id); if (ok) listTick++
+                                }
+                            },
+                        ) {
+                            Column(Modifier.padding(14.dp, 10.dp)) {
+                                Text(if (p == null) "⤓ " + t("下载这首") else t("下载中 %d%%").format((p * 100).toInt()), style = MaterialTheme.typography.titleSmall)
+                                Text(if (s.audioBytes > 0) "%.1f MB".format(s.audioBytes / 1048576.0) else t("曲子在公网上，下一次就好"), style = MaterialTheme.typography.labelSmall, color = Muted)
+                            }
+                        }
+                    } else Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         s.diffs.forEach { d ->
                             val best = remember(synced) { Rhythm.best(ctx, "${s.id}_$d") }
                             Surface(
@@ -474,7 +502,12 @@ private fun GameBoard(
         onDispose { live.onJudge = null }
     }
 
-    val mp = remember { runCatching { MediaPlayer.create(ctx, song.raw) }.getOrNull() }
+    val mp = remember {
+        runCatching {
+            if (song.remoteAudio) MediaPlayer().apply { setDataSource(Rhythm.audioFile(ctx, song).path); prepare() }   // 公网下载的曲子（关卡联网）
+            else MediaPlayer.create(ctx, song.raw)
+        }.getOrNull()
+    }
     DisposableEffect(mp) { onDispose { mp?.let { runCatching { it.stop() }; it.release() } } }
     val owner = LocalLifecycleOwner.current
     DisposableEffect(owner, mp) {

@@ -233,7 +233,97 @@ object Rhythm {
         val id: String, val zh: String, val raw: Int, val bpm: Int, val seconds: Int, val credit: String = "",
         /** 这首有哪几张谱，按由易到难；「演示」放最难的那张 */
         val diffs: List<String> = DIFFS,
-    )
+        /** 公网清单里的条目（老板 09-07：「关卡联网，不用每次更新 App」）：audio 是清单里的相对路径，raw==0 表示音频要下载 */
+        val audio: String = "", val version: Int = 0, val audioBytes: Long = 0,
+    ) {
+        val remoteAudio get() = raw == 0
+    }
+
+    // ── 关卡联网（老板 2026-09-07）────────────────────────────────────────
+    // 清单 songs.json 放公网（hk13，同一台下载机），结构见 design/rhythm-spec.md §6.4。
+    // 规则：**清单里有的曲子，谱面以清单为准**（谱 JSON 小，刷新时顺手下）；音频内置的用内置，清单独有的曲子点「下载」才下。
+    // 服务端认不认识新谱由发布脚本（design/music/publish_songs.py）保证：先跑 logto 的 rhythm-sync 再公开清单。
+    const val REMOTE_BASE = "https://yxi.keuury.com/rhythm/"
+    private fun dir(ctx: Context) = java.io.File(ctx.filesDir, "rhythm").apply { mkdirs() }
+    private fun manifestFile(ctx: Context) = java.io.File(dir(ctx), "songs.json")
+    fun audioFile(ctx: Context, s: Song) = java.io.File(dir(ctx), "${s.id}/${s.id}.ogg")
+    private fun chartFile(ctx: Context, song: String, diff: String) = java.io.File(dir(ctx), "$song/chart_${song}_$diff.json")
+    @Volatile private var remoteCache: List<Song>? = null
+
+    private fun parseManifest(text: String): List<Song> {
+        val j = JSONObject(text); val arr = j.optJSONArray("songs") ?: return emptyList()
+        val out = ArrayList<Song>()
+        for (i in 0 until arr.length()) {
+            val o = arr.getJSONObject(i)
+            val id = o.getString("id")
+            val bundled = SONGS.firstOrNull { it.id == id }
+            val charts = o.optJSONObject("charts")
+            val diffs = ArrayList<String>()
+            for (d in listOf("easy", "hard", "frenzy")) if (charts?.has(d) == true) diffs += d
+            out += Song(id, o.optString("zh", bundled?.zh ?: id), bundled?.raw ?: 0, o.optInt("bpm", bundled?.bpm ?: 120),
+                o.optInt("seconds", bundled?.seconds ?: 60), o.optString("credit", bundled?.credit ?: ""),
+                if (diffs.isEmpty()) (bundled?.diffs ?: DIFFS) else diffs,
+                audio = o.optString("audio"), version = o.optInt("version", 1), audioBytes = o.optLong("audioBytes", 0))
+        }
+        return out
+    }
+
+    /** 曲目表 = 内置 + 公网清单（清单里的同名曲子覆盖内置条目的元数据；清单拉不到就只有内置） */
+    fun songs(ctx: Context): List<Song> {
+        val remote = remoteCache ?: runCatching { parseManifest(manifestFile(ctx).readText()) }.getOrDefault(emptyList()).also { remoteCache = it }
+        val byId = LinkedHashMap<String, Song>()
+        SONGS.forEach { byId[it.id] = it }
+        remote.forEach { byId[it.id] = it }
+        return byId.values.toList()
+    }
+
+    /** 这首能不能开打：音频在（内置或已下载）且清单要求的谱都在本地 */
+    fun ready(ctx: Context, s: Song): Boolean {
+        if (s.remoteAudio && !audioFile(ctx, s).exists()) return false
+        if (s.audio.isBlank()) return true                                 // 纯内置：谱在 assets 里
+        return s.diffs.all { chartFile(ctx, s.id, it).exists() }
+    }
+
+    private fun fetch(url: String, into: java.io.File, onProgress: (Float) -> Unit = {}) {
+        val c = (java.net.URL(url).openConnection() as java.net.HttpURLConnection).apply { connectTimeout = 10_000; readTimeout = 30_000 }
+        try {
+            if (c.responseCode !in 200..299) error("HTTP ${c.responseCode} $url")
+            val total = c.contentLengthLong
+            val tmp = java.io.File(into.path + ".part"); into.parentFile?.mkdirs()
+            c.inputStream.use { ins -> tmp.outputStream().use { out ->
+                val buf = ByteArray(64 * 1024); var got = 0L
+                while (true) { val n = ins.read(buf); if (n < 0) break; out.write(buf, 0, n); got += n; if (total > 0) onProgress(got.toFloat() / total) }
+            } }
+            if (!tmp.renameTo(into)) { into.delete(); tmp.renameTo(into) }
+        } finally { c.disconnect() }
+    }
+
+    /** 拉清单 + 补齐清单里各曲子的谱 JSON（小文件）。网络不通返回 false，本地照旧能玩 */
+    suspend fun refresh(ctx: Context): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            fetch(REMOTE_BASE + "songs.json", manifestFile(ctx))
+            remoteCache = null
+            val list = parseManifest(manifestFile(ctx).readText())
+            val charts = JSONObject(manifestFile(ctx).readText()).getJSONArray("songs")
+            for (i in 0 until charts.length()) {
+                val o = charts.getJSONObject(i); val id = o.getString("id"); val ver = o.optInt("version", 1)
+                val verFile = java.io.File(dir(ctx), "$id/version")
+                val have = verFile.takeIf { it.exists() }?.readText()?.trim()?.toIntOrNull() ?: -1
+                val cj = o.optJSONObject("charts") ?: continue
+                for (d in cj.keys()) {
+                    val f = chartFile(ctx, id, d)
+                    if (!f.exists() || have != ver) fetch(REMOTE_BASE + cj.getString(d), f)
+                }
+                verFile.parentFile?.mkdirs(); verFile.writeText(ver.toString())
+            }
+            list.isNotEmpty()
+        }.getOrDefault(false)
+    }
+
+    /** 下载清单独有曲子的音频（一两 MB）。进度 0..1 */
+    suspend fun download(ctx: Context, s: Song, onProgress: (Float) -> Unit): Boolean = withContext(Dispatchers.IO) {
+        runCatching { fetch(REMOTE_BASE + s.audio, audioFile(ctx, s), onProgress); true }.getOrDefault(false)
+    }
     fun diffName(d: String) = when (d) { "hard" -> "认真"; "frenzy" -> "狂热"; else -> "轻松" }
 
     /** 曲子列表。加曲子的完整步骤见 design/rhythm-spec.md §6.3（谱面 + 服务端 charts-meta 都要跟上） */
@@ -251,7 +341,10 @@ object Rhythm {
 
 
     fun load(ctx: Context, song: String, difficulty: String): Chart {
-        val j = JSONObject(ctx.assets.open("charts/chart_${song}_$difficulty.json").use { it.readBytes() }.decodeToString())
+        // 公网下来的谱优先（关卡联网）；没有才用 APK 里打包的
+        val cached = chartFile(ctx, song, difficulty)
+        val text = if (cached.exists()) cached.readText() else ctx.assets.open("charts/chart_${song}_$difficulty.json").use { it.readBytes() }.decodeToString()
+        val j = JSONObject(text)
         val arr = j.getJSONArray("notes")
         val notes = ArrayList<Note>(arr.length())
         for (i in 0 until arr.length()) {
