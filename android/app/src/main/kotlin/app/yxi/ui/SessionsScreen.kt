@@ -138,9 +138,18 @@ fun SessionsScreen(
     }
     LaunchedEffect(ssh, host.id) {
         val s = ssh ?: return@LaunchedEffect
+        var lastKey = ""; var lastAt = 0L
         while (true) {
-            models = runCatching { app.yxi.agent.Lines.models(s, latestSessions.value) }.getOrDefault(models)
-            delay(60_000)
+            // ⚠️ **不能只是「60 秒一轮」**：进看板那一下会话表还是空的，第一轮读了个空，
+            //    然后睡满 60 秒 —— 表现是「模型名要等一分钟才出来」（模拟器上实测到的）。
+            //    所以：会话表一变（空→有 也算）立刻读一次，之后才按 60 秒的慢节奏。
+            val key = latestSessions.value.joinToString(",") { it.name }
+            val now = System.currentTimeMillis()
+            if (key.isNotEmpty() && (key != lastKey || now - lastAt > 60_000)) {
+                models = runCatching { app.yxi.agent.Lines.models(s, latestSessions.value) }.getOrDefault(models)
+                lastKey = key; lastAt = now
+            }
+            delay(2000)
         }
     }
     // 卡片上那行小字。⚠️ **只有官方登录才补模型**（老板 2026-09-07 圈的就是这一行）——
