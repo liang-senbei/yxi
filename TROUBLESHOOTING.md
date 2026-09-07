@@ -5741,3 +5741,65 @@ for d in $(unzip -l $A | awk '/classes.*dex/{print $4}'); do unzip -p $A $d | gr
 **症状**：脚本开头 `emu.sh claim cc-Yxi >/dev/null`，其实 pilot 正占着；后面的 `adb install / shell input` 走的是裸 adb（不经 emu.sh 的锁守卫），在别人的 E2E 中间装包、跑局；只有最后经 emu.sh 的 `shot / release` 被拦（退出码 9）。
 **根因**：锁只拦 emu.sh 的子命令，裸 adb 绕过；claim 的返回值没检查。
 **怎么避开**：claim 必须判返回（`grep -q 占用模拟器` 或 exit code），失败就退出或轮询等；所有会动设备的操作一律走 `EMU_WHO=… emu.sh adb …`，不用裸 adb（#292 那条的延伸）。
+
+## #311 主机是 macOS 时，探测命令里的 `timeout` / `/dev/tcp` / 裸 `tailscale` 全是空的（cc-Yxi_pilot，2026-09-07）
+
+**症状**：拿 Mac mini 当主机做「从机」功能的 E2E，两处同时不对 ——
+① 主机卡片里点「内网设备」，明明 Tailscale 装着也登着，App 说「这台机器没装 Tailscale 或没登录」；
+② 从机页点任何一台设备，永远落到最泛的那一支「连不上这台机器」，**永远判不出 ACL**（而真实原因恰恰是 ACL）。
+在 Linux 主机上跑同样的命令一切正常。
+
+**根因**——三个独立的 macOS 坑，凑在同一条命令里：
+- **BSD 没有 `timeout`**：那是 GNU coreutils 的东西，macOS 自带的只有 `gtimeout`（还得先 brew）。
+  `timeout 6 bash -c '…'` 直接 command not found → 端口探测恒为「不通」。
+- **`tailscale` 不在非交互 shell 的 PATH 里**：App Store 版**连 `/usr/local/bin/tailscale` 那个软链都没有**，
+  CLI 只存在于 `/Applications/Tailscale.app/Contents/MacOS/Tailscale`。`command -v tailscale` 必然空手而归。
+- 非交互 shell 的 PATH 还缺 `~/.local/bin` 和 `/opt/homebrew/bin`（从机侧的 `tmux` / `claude` 常在那儿）。
+
+**修法**（`agent/Slave.kt` / `agent/TailscaleStatus.kt`）：
+- 端口通不通**不再单独探**，直接从 `ssh` 自己的报错里读（"timed out" / "Connection refused" / "No route to host" …）——
+  少一次往返，而且天然可移植：`ssh` 有自己的 `ConnectTimeout`，到哪儿都在。
+- ping 用 `tailscale` 自带的 `--timeout 5s`，不借外部 `timeout`。
+- `tailscale` 先 `command -v`，找不到就退到 app 包内那个绝对路径；PATH **主机侧和从机侧各补一次**（两层 shell）。
+
+**怎么避开**：凡是要在「用户的机器」上跑的 shell，先问一句**它可能是 macOS 吗**。
+判据：用了 GNU 专有命令（timeout / date -d / sed -i 无参 / readlink -f）、依赖 bash 扩展（`/dev/tcp`）、
+或者假设某个 CLI 在 PATH 里 —— 这三类在 BSD/macOS 上都会**静默地**表现成「功能没坏，只是永远探不到」。
+
+## #312 诊断类的判据别用短子串：两次误诊都栽在「失败输出里蹭到了成功的字样」（cc-Yxi_pilot，2026-09-07）
+
+**症状**：从机诊断把「机器根本没开机」判成「tailnet 的 ACL 挡了 SSH」，让人去改一个根本没问题的地方。
+后来给这条写测试时，**测试自己又犯了一模一样的错**。
+
+**根因**：两处都是拿一个太短的子串当判据。
+- `pingPart.contains("pong")` —— 失败输出 `no pong` 里含 "pong"，被判成 ping 通 → 误诊成 ACL。
+  （`tailscale ping` 真实的成功是 `pong from <名字> (100.x) via … in 39ms`，真实的失败是 `no matching peer`。）
+- 断言 `!cmd.contains("timeout ")` —— 命令里 `tailscale ping --timeout 5s` 就含 "timeout "，测试红了但代码是对的。
+
+**修法**：判**真实输出里稳定的那一段**，不判一个碰巧的短词 —— `contains("pong from")`；
+判命令位置上的词用正则锚一下：`Regex("""(^|[;&|(] *)timeout """)`。测试样本一律**贴实测的原文**
+（去机器上跑一次失败的命令，把输出抄回来），别自己编一个「差不多长这样」的字符串。
+
+**怎么避开**：诊断代码的价值全在**分对因**，分错的代价比不分更大（诬陷一个好地方）。
+所以每加一支诊断，配一条**反向测试**：拿另一支的真实输出喂进去，断言它**不**落到这一支。
+
+## #313 只装了测试 APK 没装主 APK → 跑的是旧代码，绿和红都不算数（cc-Yxi_pilot，2026-09-07）
+
+**症状**：改完 `Slave.parse` 重新构建、把 `app-debug-androidTest.apk` scp 到 Mac 装上、跑测试，
+那条刚修好的用例**照样红**；盯着源码怎么看都是对的。
+
+**根因**：instrumented 测试是两个 APK —— 被测代码在 `app-debug.apk` 里，测试代码在 `…-androidTest.apk` 里。
+只装后者，跑的还是**上一次装进去的主 APK**，等于拿新测试测旧代码。
+（这次还叠了另一半：同组的会话在中间用裸 adb 装过他自己的包，主 APK 早被换掉了。）
+
+**修法 / 怎么避开**：两个 APK **永远一起装**，顺序 app → androidTest：
+```
+adb install -r app-debug.apk && adb install -r -t app-debug-androidTest.apk
+```
+结果可疑时先确认装的是不是自己那份：`adb shell dumpsys package app.yxi | grep lastUpdateTime`（见 #279）。
+
+## #311 同一个名字的两个后台任务都能 claim 到模拟器 → 自己撞自己，全套「Process crashed」（cc-Yxi，2026-09-07）
+
+**症状**：截图任务和全套任务都用 `emu.sh claim cc-Yxi` 排队；锁按名字认，同名再 claim 直接成功，两个任务同时上机，截图任务中途 `adb install` 重装了包，全套里 UploadStressTest 报 `Process crashed`（#292 那种）。
+**根因**：锁是「按人」不是「按任务」；一个人开两个后台任务就没有互斥。
+**怎么避开**：同一个会话同一时间只排一个上机任务；要串行就写进同一个脚本，或第二个任务先 `emu.sh status` 看自己是否已在机上。跑全套期间别起任何别的上机任务。
