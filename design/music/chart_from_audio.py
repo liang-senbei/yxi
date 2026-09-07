@@ -145,6 +145,8 @@ def main():
     meta = []
     for hard in (False, True):
         c = build(a, hard, args.song_id, args.zh)
+        from lanes import spread                                   # 4 轨 → 12 轨（老板 09-07），见 lanes.py
+        c['notes'] = spread(c['notes'], args.song_id + c['difficulty'])
         p = os.path.join(args.out, f'chart_{args.song_id}_{c["difficulty"]}.json')
         with open(p, 'w') as f:
             json.dump(c, f, ensure_ascii=False, separators=(',', ':'))

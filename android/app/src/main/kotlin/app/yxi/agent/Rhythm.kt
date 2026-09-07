@@ -70,6 +70,13 @@ object Rhythm {
     /** 判定窗口按种类：swipe 宽一档 */
     fun windowMs(kind: Kind): Float = if (kind == Kind.SWIPE) SWIPE_MS else GOOD_MS
 
+    /**
+     * 轨道数（老板 2026-09-07：「不一定只有 4 条，手机总长度除以音符长度能放几条就放几条」）。
+     * 音符长度 = 屏宽 × 0.0811（原来的 0.0624 加长 30%），1 / 0.0811 = 12.3 → 12 条，和机型无关（都按屏宽比例）。
+     * 谱面里的 lane 就是 0..11。手指判定放宽到相邻一条（±1），不然 200px 的轨太考验准头。
+     */
+    const val LANES = 12
+
     /** 音符从冒头到判定线的时间（秒）。越大越"慢"、越好读谱 */
     const val APPROACH = 1.55f   // 老板 09-06 在试验台上定的；新谱自带 approach，这只是旧谱和「试一下」的默认
 
@@ -93,7 +100,7 @@ object Rhythm {
 
     data class Note(
         val t: Float,          // 秒，音符该被击中的时刻
-        val lane: Int,         // 0..3
+        val lane: Int,         // 0 until LANES
         val kind: Kind,
         val dur: Float,        // 秒，SLIDE 的长度；其余为 0
         /** TRACE 要拖到哪条轨、SWIPE 要往哪边滑：-1 左 / +1 右；其余 0 */
