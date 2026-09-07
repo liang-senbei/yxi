@@ -40,12 +40,18 @@ def songs_from_kotlin():
     return out
 
 
-def chart_meta(path):
+def audio_ms(path):
+    """曲子真实时长（ffprobe）。durationMs 必须是**曲子**的长度不是最后一个音符的时刻：服务端按 elapsedMs >= durationMs × 0.9 拦提前结算，
+    一局是放完整首才结束的（logto 09-07 对出 count_frenzy 两个数差 3.2 秒，就是这里用了最后音符）。"""
+    r = subprocess.run(['ffprobe', '-v', 'quiet', '-show_entries', 'format=duration', '-of', 'csv=p=0', path], capture_output=True, text=True)
+    return int(round(float(r.stdout.strip()) * 1000))
+
+
+def chart_meta(path, dur_ms):
     c = json.load(open(path)); ns = c['notes']
     cnt = {k: sum(1 for x in ns if x['type'] == k) for k in ('tick', 'slide', 'trace', 'swipe')}
-    dur = max(n['t'] + n.get('dur', 0) for n in ns)
     return dict(notes=len(ns), ticks=cnt['tick'], slides=cnt['slide'], traces=cnt['trace'], swipes=cnt['swipe'],
-                units=len(ns) + cnt['slide'], durationMs=int(round(dur * 1000)))
+                units=len(ns) + cnt['slide'], durationMs=dur_ms)
 
 
 def build():
@@ -63,7 +69,7 @@ def build():
             diff = os.path.basename(p)[len(f'chart_{sid}_'):-5]
             subprocess.run(['cp', p, d], check=True)
             entry['charts'][diff] = f'{sid}/{os.path.basename(p)}'
-            entry['chartsMeta'][f'{sid}_{diff}'] = chart_meta(p)
+            entry['chartsMeta'][f'{sid}_{diff}'] = chart_meta(p, audio_ms(audio_src))
         # 谱面版本 = 谱文件内容的哈希前 8 位转成数字（内容变了客户端才重下）
         import hashlib
         h = hashlib.sha256(''.join(open(os.path.join(d, os.path.basename(v))).read() for v in entry['charts'].values()).encode()).hexdigest()
