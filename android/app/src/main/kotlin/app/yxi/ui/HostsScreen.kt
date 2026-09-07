@@ -50,6 +50,8 @@ fun HostsScreen(
      * 手往下拉一下就该同步」）。凭据改了本来就会自动重连（[Host.connKey]），这是给「不放心、想手动来一下」的。
      */
     onRefresh: (() -> Unit)? = null,
+    /** 点内网设备 = 进从机页（主机是谁 + 那台设备）。 */
+    onOpenSlave: (Host, app.yxi.agent.TailscaleStatus.Device) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -117,6 +119,7 @@ fun HostsScreen(
                         keys = keys,
                         onClick = { onOpen(h) },
                         onEdit = { editing = h },
+                        onOpenSlave = { d -> onOpenSlave(h, d) },
                         onWatch = {
                             val on = !h.watch
                             store.upsert(h.copy(watch = on))
@@ -175,6 +178,8 @@ private fun HostRow(
     onClick: () -> Unit,
     onEdit: () -> Unit,
     onWatch: () -> Unit,
+    /** 点内网设备 = 把它当从机点进去看会话（老板 2026-09-07） */
+    onOpenSlave: (app.yxi.agent.TailscaleStatus.Device) -> Unit = {},
 ) {
     // ⚠️ **长按 = 展开额度**（用户要的）。原来长按是「改主机」，挪进展开区里那个按钮。
     var expanded by remember(h.id) { mutableStateOf(false) }
@@ -277,7 +282,7 @@ private fun HostRow(
         }
         // ⚠️ **默认什么都不画**（用户要的）。长按展开才显示 5h / 7d 两档额度。
         androidx.compose.animation.AnimatedVisibility(visible = expanded) {
-            HostQuota(h, ctx, store, keys, onEdit, expandAt)
+            HostQuota(h, ctx, store, keys, onEdit, expandAt, onOpenSlave)
         }
         }
     }
@@ -296,6 +301,8 @@ private fun HostQuota(
     onEdit: () -> Unit,
     /** 长按一次变一次 —— 变了就重查 */
     refreshAt: Int,
+    /** 点内网设备 = 把它当从机点进去看会话 */
+    onOpenSlave: (app.yxi.agent.TailscaleStatus.Device) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val connect = rememberSshConnector(store, keys, h, aliveIntervalMs = 15_000)
@@ -580,10 +587,16 @@ private fun HostQuota(
             tsDevices?.let { devices ->
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     devices.forEach { d ->
+                        // ⚠️ **本机那条不给点**：点它等于「从这台机器 ssh 回它自己」，没有意义。
+                        //    离线的也不给点 —— 点了必然失败，不如让它看着就是不可点的。
+                        val canOpen = !d.isSelf && d.online && d.ip.isNotBlank()
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable(enabled = canOpen) { onOpenSlave(d) }
+                                .padding(vertical = 2.dp),
                         ) {
                             // 状态点
                             Box(
@@ -605,6 +618,8 @@ private fun HostQuota(
                                     color = Dim,
                                 )
                             }
+                            // 能点的才给箭头 —— 「看它上面的会话」这件事得看得出来能点
+                            if (canOpen) Text("›", style = MaterialTheme.typography.labelLarge, color = Muted)
                         }
                     }
                     // 刷新按钮

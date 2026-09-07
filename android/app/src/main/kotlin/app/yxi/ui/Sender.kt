@@ -53,6 +53,8 @@ object Sender {
                 val s = aliveSsh(20_000) ?: return@runCatching false
                 SessionProbe.send(s, session, text)
             }.getOrDefault(false)
+            // ⚠️ 记在**发成功之后**：发失败的话已经还回输入框了，把它记进「发过的话」就是骗人。
+            if (ok) SentLog.add(app, hostId, session, text)
             if (!ok) {
                 // 把话还给草稿 —— 宁可让它重新出现在输入框，也不能让用户以为发了、其实没发
                 val cur = Drafts.get(app, hostId, session)

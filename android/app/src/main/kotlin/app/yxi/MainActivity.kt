@@ -70,10 +70,14 @@ private enum class Tab(private val zh: String, val ico: app.yxi.ui.Ico) {
  * 盖在标签页之上的**整页**。加一页就往这儿加一个值，再去 MainActivity 那个 `when` 里加一支 ——
  * ⚠️ **没有第三处要同步**（这正是「点底部导航纹丝不动」那个 bug 复发三次的根）。
  */
-private enum class Page { Member, Prefs, Tickets, Trend, Mail, Wish, Activity, Entertainment, Wallet, Shop, Abyss, Yunxi, Personalize, Profile, Account, Rhythm, Scan }
+private enum class Page { Member, Prefs, Tickets, Trend, Mail, Wish, Activity, Entertainment, Wallet, Shop, Abyss, Yunxi, Personalize, Profile, Account, Rhythm, Scan, Slave }
 
 /** 工作区。它是**盖在标签页之上的整屏**，不是第四个标签 —— 见 D22。 */
-private data class Work(val host: Host, val session: String?, val cwd: String, val mode: Mode?)
+private data class Work(
+    val host: Host, val session: String?, val cwd: String, val mode: Mode?,
+    /** 进终端后先跑这一条（从机：`ssh <从机> -t tmux attach …`）。空 = 照常 attach 本机会话。 */
+    val bootCommand: String = "",
+)
 
 class MainActivity : ComponentActivity() {
 
@@ -209,6 +213,8 @@ class MainActivity : ComponentActivity() {
                  * 「盖着东西没有」是 `page != null`，「收掉」是 `page = null`，编译器帮着数。
                  */
                 var page by remember { mutableStateOf<Page?>(null) }
+                /** 点进去看的那台从机（主机 + 内网设备）。见 [app.yxi.ui.SlaveScreen] */
+                var slave by remember { mutableStateOf<Pair<Host, app.yxi.agent.TailscaleStatus.Device>?>(null) }
                 // 提醒通知点进来：直达云曦页（只认得 yunxi；别的值忽略）
                 val wantPage by openPage
                 LaunchedEffect(wantPage) { if (wantPage == "yunxi") { page = Page.Yunxi; openPage.value = null } }
@@ -348,6 +354,7 @@ class MainActivity : ComponentActivity() {
                         androidx.compose.runtime.key(w.host.id, w.session, w.cwd, w.mode) {
                             Workspace(
                                 store, keys, w.host, w.session, w.cwd, w.mode,
+                                bootCommand = w.bootCommand,
                                 preconnected = warm.session,
                                 // ⚠️ 只吃底部的 inset，不吃状态栏那段（学 Gemini：状态栏跟 App 融为一体，光晕铺到最顶上，
                                 //    内容滑到状态栏下面时用一层淡渐变压一下）。页眉自己 statusBarsPadding。
@@ -447,6 +454,32 @@ class MainActivity : ComponentActivity() {
                         // 就会在收起来的状态栏那儿留一条亮边（横屏下特别显眼）。
                         Page.Rhythm -> { app.yxi.ui.RhythmScreen(modifier = m); return@Scaffold }
                         Page.Scan -> { app.yxi.ui.ScanScreen(onBack = { page = null }, modifier = m); return@Scaffold }
+                        Page.Slave -> {
+                            val (mh, dev) = slave ?: run { page = null; return@Scaffold }
+                            // ⚠️⚠️ **连的必须是 `mh`（那台设备所属的主机），不是当前选中的主机。**
+                            //   主机页长按展开一张卡片**不会**把它选中，内网设备列表也是用它自己那条连接拉的 ——
+                            //   所以用 `shared.session` 会变成「在 A 主机上探 B 主机的内网设备」：
+                            //   诊断页说连不上、点进去的终端却在另一台机器上好好地连着（审查抓到的）。
+                            val mhConn = app.yxi.ui.rememberHostSession(store, keys, mh)
+                            app.yxi.ui.SlaveScreen(
+                                // ⚠️ 传「等一条活着的连接」，不传抓好的 session —— exec 在死连接上返回空串，
+                                //    会把手机自己掉线报成从机的毛病。见 Slave.probe。
+                                alive = app.yxi.ui.rememberAliveSsh(mhConn.session),
+                                // ⚠️ 目标用**内网 IP**：主机名要靠 MagicDNS 才解析得出来，关掉的人不少，
+                                //    而 100.x 的地址一定能用（能点进来就说明 ip 非空，见 HostsScreen 的 canOpen）。
+                                target = dev.ip,
+                                title = dev.hostName.ifBlank { dev.ip },
+                                tailscaleIp = dev.ip,
+                                onOpenSession = { name, attach ->
+                                    // 在**主机**的终端里跳过去接从机的会话：工作区照常开，只是进去先跑这条
+                                    page = null
+                                    work = Work(mh, null, ".", Mode.Terminal, bootCommand = attach)
+                                },
+                                onBack = { page = null },
+                                modifier = m,
+                            )
+                            return@Scaffold
+                        }
                         null -> Unit
                     }
                     when (tab) {
@@ -475,6 +508,7 @@ class MainActivity : ComponentActivity() {
                             onOpen = { hostId = it.id; tab = Tab.Sessions },
                             // 下拉刷新 = 重读主机文件 + 两条共享连接断掉重连（老板 2026-09-06「改了密钥进会话还是认证失败」）
                             onRefresh = { store.reload(); shared.retry(); warm.retry() },
+                            onOpenSlave = { h2, d -> slave = h2 to d; page = Page.Slave },
                             modifier = m,
                         )
                         Tab.Config -> if (host == null) {

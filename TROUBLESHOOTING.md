@@ -5803,3 +5803,23 @@ adb install -r app-debug.apk && adb install -r -t app-debug-androidTest.apk
 **症状**：截图任务和全套任务都用 `emu.sh claim cc-Yxi` 排队；锁按名字认，同名再 claim 直接成功，两个任务同时上机，截图任务中途 `adb install` 重装了包，全套里 UploadStressTest 报 `Process crashed`（#292 那种）。
 **根因**：锁是「按人」不是「按任务」；一个人开两个后台任务就没有互斥。
 **怎么避开**：同一个会话同一时间只排一个上机任务；要串行就写进同一个脚本，或第二个任务先 `emu.sh status` 看自己是否已在机上。跑全套期间别起任何别的上机任务。
+
+## #314 tmux 的 `-t =名字` 精确匹配，`=` 顶在引号外会被 zsh 当成命令路径展开（cc-Yxi_pilot，2026-09-07）
+
+**症状**：从机页点一个会话，终端里 `ssh` 过去了，却回一句
+`zsh:1: cc-macdemo not found`，然后 `Connection to … closed.` —— 会话根本没接上。
+在从机的 shell 里手敲同一条命令**是好的**（那台机器的交互 shell 也是 zsh）。
+
+**根因**：tmux 用 `-t =名字` 表示**精确匹配**（不加 `=` 走前缀/通配匹配）。
+我把它拼成了 `-t ='cc-macdemo'` —— `=` 在引号**外面**。
+而 zsh 有个 `=command` 展开（`=ls` → `/bin/ls`），**它先于 tmux 看到这个词**：
+zsh 拿 `cc-macdemo` 去 PATH 里找可执行文件，找不到就报 `not found`。
+bash 没有这个展开，所以在 bash 从机上一切正常 —— 这条只在**从机的登录 shell 是 zsh**（macOS 默认）时炸。
+
+**修法**：把 `=` 放进引号里，整体引用：`Shell.q("=$session")` → `'=cc-macdemo'`。
+zsh 不对引号内的内容做 `=` 展开，tmux 拿到的还是 `=cc-macdemo`，精确匹配照旧生效。
+
+**怎么避开**：往别人的 shell 里送命令时，**每一个不是普通字符的符号都要问一句「这个 shell 会不会先解释它」** ——
+`=` 开头（zsh 的 EQUALS）、`~` 开头（波浪展开）、`{a,b}`（花括号展开）、`^`（zsh 的 EXTENDED_GLOB）
+都属于「bash 上没事、zsh 上有事」。**引号是最省事的答案：连同前缀符号一起引起来**。
+⚠️ 单测很难抓这一类：命令串本身长得完全正确，错的是**对端 shell 的方言**。这条是真机 E2E 抓到的。

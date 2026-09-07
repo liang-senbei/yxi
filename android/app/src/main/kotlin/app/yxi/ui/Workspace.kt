@@ -98,6 +98,11 @@ fun Workspace(
      * 它归 MainActivity 所有，**这里不许 disconnect** —— 断了下次又要重连。
      */
     preconnected: SshSession? = null,
+    /**
+     * 进终端之后**先跑这一条**，跑完就把终端交给它（从机用：`ssh <从机> -t tmux attach …`）。
+     * 空 = 照常 attach 本机上的 [startSession]。见 [app.yxi.agent.Slave.attachCommand]。
+     */
+    bootCommand: String = "",
     /** 点 ☰ 拉侧边栏（抽屉在 MainActivity 那层） */
     onMenu: () -> Unit = {},
     modifier: Modifier = Modifier,
@@ -119,6 +124,14 @@ fun Workspace(
     var status by remember(host.id) { mutableStateOf<String?>(t("连接中…")) }
     /** 终端当前 attach 在哪个会话上。跟 [sessionName] 不一致时要切过去 */
     var attached by remember(host.id) { mutableStateOf<String?>(null) }
+    /**
+     * 进终端要先跑的那条命令（从机：`ssh 从机 … tmux attach`）。
+     *
+     * ⚠️ 做成**状态**不是直接用参数：在从机终端里换会话时要把它清掉，否则重开的 shell 又跳回从机去了。
+     */
+    var boot by remember(host.id) { mutableStateOf(bootCommand) }
+    /** 只重开 shell、不重连 SSH 的计数器（从机 → 主机切会话用） */
+    var shellGen by remember(host.id) { mutableIntStateOf(0) }
     /** null = 还没查；"" = 有转录；非空 = 没有的原因 */
     var chatBlocked by remember(host.id, sessionName) { mutableStateOf<String?>(null) }
     var mode by remember(host.id) {
@@ -279,7 +292,7 @@ fun Workspace(
     }
 
     // 第一次进终端模式才开 shell
-    LaunchedEffect(mode, ssh) {
+    LaunchedEffect(mode, ssh, shellGen) {
         if (mode != Mode.Terminal || shell != null) return@LaunchedEffect
         val s = ssh ?: return@LaunchedEffect
         runCatching {
@@ -322,7 +335,14 @@ fun Workspace(
                     if (!ready.isCompleted) ready.complete(Unit)
                 }
             }
-            if (sessionName != null) {
+            // 从机：跳过去接**那台机器**上的会话，不碰本机的 tmux
+            if (boot.isNotBlank()) {
+                runCatching { kotlinx.coroutines.withTimeout(8000) { ready.await() } }
+                withTimeoutOrNull(3_000) {
+                    while (System.currentTimeMillis() - lastOutput.get() < 250) delay(60)
+                }
+                sh.write(boot + "\n")
+            } else if (sessionName != null) {
                 // ⚠️ 不能连上就写：登录 shell（starship 那种）初始化时写进去的字节
                 // 会被 tty 回显后冲掉 —— 实测现象是命令回显了却没执行（TROUBLESHOOTING #18）。
                 //
@@ -363,6 +383,15 @@ fun Workspace(
     LaunchedEffect(sessionName, shell) {
         val target = sessionName ?: return@LaunchedEffect
         val s = ssh ?: return@LaunchedEffect
+        // ⚠️ **从机终端里换会话 = 回到主机上。** 这一支原来直接被下面那行 `attached == null` 挡掉：
+        //    顶栏的名字换了、终端还挂在从机的会话上，**一声不吭**。换会话是这个 app 最高频的动作，
+        //    最不能哑的就是它。清掉 boot 再把 shell 重开一次（不重连 SSH），走回正常的 attach 路。
+        if (shell != null && boot.isNotBlank()) {
+            boot = ""
+            runCatching { shell?.close() }; shell = null
+            shellGen++
+            return@LaunchedEffect
+        }
         if (shell == null || attached == null || attached == target) return@LaunchedEffect
         runCatching {
             s.exec("tmux has-session -t ${app.yxi.ssh.Shell.q(target)} 2>/dev/null || tmux new-session -d -s ${app.yxi.ssh.Shell.q(target)}")

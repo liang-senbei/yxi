@@ -444,11 +444,15 @@ fun ChatScreen(
     val barsFrac = (barsOff / barsMax).coerceIn(0f, 1f)
     LaunchedEffect(barsFrac) { onBars(barsFrac) }
     val imeOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
-    // 长按「对话」翻自己发过的话（老板 2026-09-07）。数据直接从转录里滤，不另存一份 —— 见 [SentHistory]
+    // 长按「对话」翻自己发过的话（老板 2026-09-07）。数据来自 [SentLog]（落盘、留三天），不是转录 —— 转录够不到远处
     var sentOpen by remember(sessionName) { mutableStateOf(false) }
-    LaunchedEffect(openSentTick) { if (openSentTick > 0) { sentOpen = true; onSentShown() } }
+    // ⚠️ 每次打开都重读：这中间可能又发了几条，也顺手把过期的清了
+    var sentList by remember(sessionName) { mutableStateOf<List<SentLog.Entry>>(emptyList()) }
+    LaunchedEffect(openSentTick) {
+        if (openSentTick > 0) { sentList = SentLog.read(ctx, hostId, sessionName); sentOpen = true; onSentShown() }
+    }
     if (sentOpen) SentHistory(
-        items = items,
+        sent = sentList,
         onPick = { setDraft(it) },
         onCopy = { copy(ctx, it) },
         onClose = { sentOpen = false },
