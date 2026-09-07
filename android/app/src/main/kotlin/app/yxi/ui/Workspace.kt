@@ -426,6 +426,8 @@ fun Workspace(
     var barsFrac by remember(host.id) { mutableFloatStateOf(0f) }
     LaunchedEffect(mode) { barsFrac = 0f }
     var headerH by remember(host.id) { mutableIntStateOf(0) }
+    /** 长按「对话」+1，[ChatScreen] 看到变化就弹「发过的话」。用计数不用布尔：省掉一个回来复位的回调。 */
+    var sentTick by remember(host.id) { mutableIntStateOf(0) }
     val header = remember {
         movableContentOf {
         val bg = MaterialTheme.colorScheme.background
@@ -595,7 +597,7 @@ fun Workspace(
                 }
             }
     
-            if (!folded) ModeSwitcher(mode, chatBlocked) { mode = it }
+            if (!folded) ModeSwitcher(mode, chatBlocked, onPick = { mode = it }, onLongChat = { sentTick++ })
             }
             }
     
@@ -646,6 +648,8 @@ fun Workspace(
                     showStats = stats,
                     headerPx = if (mode == Mode.Chat) headerH else 0,
                     onBars = { barsFrac = it },
+                    openSentTick = sentTick,
+                    onSentShown = { sentTick = 0 },
                     modifier = Modifier.fillMaxSize(),
                 )
                 Mode.Files -> FilesScreen(
@@ -778,7 +782,13 @@ fun Workspace(
 }
 
 @Composable
-private fun ModeSwitcher(mode: Mode, chatBlocked: String?, onPick: (Mode) -> Unit) {
+private fun ModeSwitcher(
+    mode: Mode,
+    chatBlocked: String?,
+    onPick: (Mode) -> Unit,
+    /** 长按「对话」= 翻这个会话里自己发过的话（老板 2026-09-07）。别的模式长按不做事。 */
+    onLongChat: () -> Unit = {},
+) {
     var why by remember { mutableStateOf<String?>(null) }
     Surface(
         // 半透明：光晕铺到页眉之后，这条实心灰会像一道横杠把光切断
@@ -791,10 +801,18 @@ private fun ModeSwitcher(mode: Mode, chatBlocked: String?, onPick: (Mode) -> Uni
                 Surface(
                     color = if (m == mode) SurfaceContainerHighest else androidx.compose.ui.graphics.Color.Transparent,
                     shape = Pill,
-                    modifier = Modifier.weight(1f).height(38.dp).clip(Pill).clickable {
-                        // 置灰的不是「点不动」而是「点了告诉你为什么」
-                        if (blocked) why = chatBlocked else onPick(m)
-                    },
+                    modifier = Modifier.weight(1f).height(38.dp).clip(Pill)
+                        .combinedClickable(
+                            onClick = {
+                                // 置灰的不是「点不动」而是「点了告诉你为什么」
+                                if (blocked) why = chatBlocked else onPick(m)
+                            },
+                            // ⚠️ 只有「对话」有长按。别的芯片长按什么也不做 —— 与其给个空手感，
+                            //    不如让人一试就知道「这个手势只属于对话」。
+                            onLongClick = if (m == Mode.Chat && !blocked) {
+                                { if (mode != Mode.Chat) onPick(Mode.Chat); onLongChat() }
+                            } else null,
+                        ),
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(

@@ -1338,6 +1338,13 @@ internal object En {
         "当前位置" to "Current location",
         // 扫一扫（cc-Yxi_pilot 2026-09-06）
         "连接断了，等不到重连" to "Connection lost — reconnect timed out",
+        // 发过的话（长按「对话」，cc-Yxi_pilot 2026-09-07）
+        "发过的话" to "What you've sent",
+        "%d 条" to "%d messages",
+        "这个会话里还没发过话。" to "You haven't sent anything in this session yet.",
+        "点一条填回输入框 · 长按复制" to "Tap to put it back in the box · long-press to copy",
+        "（只有附件）" to "(attachment only)",
+        "📎%d" to "📎%d",
         "扫一扫" to "Scan",
         "要用相机才能扫" to "Scanning needs the camera",
         "没有相机权限，扫不了" to "No camera permission — can't scan",

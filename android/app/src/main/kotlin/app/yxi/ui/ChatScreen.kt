@@ -111,6 +111,15 @@ fun ChatScreen(
     /** 悬浮页眉的高度（px）。⚠️ **内容永远按它留白，不跟着收起变** —— 学 X：栏是盖在正文上的，
      *  退场时只是把栏挪走，底下的字本来就在那儿，不重排、不跳。 */
     headerPx: Int = 0,
+    /** 长按「对话」芯片时 +1 —— 变了就弹「发过的话」（见 [SentHistory]）。 */
+    openSentTick: Int = 0,
+    /**
+     * 面板弹出来之后回调，由 [Workspace] 把计数清零。
+     * ⚠️ **必须有这个回调**：原来想「用计数省掉复位」，但切到终端再切回来时 ChatScreen 是**重建**的 ——
+     *   `sentOpen` 回到 false，而 `openSentTick` 还是旧的非零值，`LaunchedEffect` 首次组合就触发，
+     *   面板**自己弹出来**，而且每次切模式都弹、永远重复（审查查出）。
+     */
+    onSentShown: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -414,6 +423,15 @@ fun ChatScreen(
     val barsFrac = (barsOff / barsMax).coerceIn(0f, 1f)
     LaunchedEffect(barsFrac) { onBars(barsFrac) }
     val imeOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    // 长按「对话」翻自己发过的话（老板 2026-09-07）。数据直接从转录里滤，不另存一份 —— 见 [SentHistory]
+    var sentOpen by remember(sessionName) { mutableStateOf(false) }
+    LaunchedEffect(openSentTick) { if (openSentTick > 0) { sentOpen = true; onSentShown() } }
+    if (sentOpen) SentHistory(
+        items = items,
+        onPick = { draft = it },
+        onCopy = { copy(ctx, it) },
+        onClose = { sentOpen = false },
+    )
     // 点一下空白处 = 上下栏收/展互切（学阅读器）。每次点 +1，effect 按 key 重启
     var barsTap by remember(sessionName) { mutableIntStateOf(0) }
     LaunchedEffect(barsTap) {
