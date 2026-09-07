@@ -466,6 +466,7 @@ private fun GameBoard(
     val hapticLv = if (Rhythm.hapticOn(ctx)) Rhythm.haptic(ctx) else 0
     val fxScale = Rhythm.fxScale(ctx)
     val lineScale = Rhythm.lineScale(ctx)
+    val flashOn = Rhythm.flashOn(ctx)                        // 癫狂难度的闪屏 / 抖动：用户可关（光敏）
     // 下落时长：谱面里写了就听谱面的（老板：按关卡和难度定），老谱没写才用手感面板那个值
     val approach = chart.approach ?: Rhythm.approach(ctx)
 
@@ -604,7 +605,7 @@ private fun GameBoard(
                     val fx = chart.stageAt(now)
                     if (chart.stage.isEmpty()) return p
                     val w = size.width.toFloat(); val h = size.height.toFloat()
-                    val (shx, shy) = shakeAt(now, fx.shake, h, motion)
+                    val (shx, shy) = shakeAt(now, fx.shake, h, motion && flashOn)
                     val ox = p.x - (w / 2f + shx); val oy = p.y - (h / 2f + shy)
                     val rad = -fx.spin * (Math.PI / 180f).toFloat()
                     val rx = ox * kotlin.math.cos(rad) - oy * kotlin.math.sin(rad); val ry = ox * kotlin.math.sin(rad) + oy * kotlin.math.cos(rad)
@@ -707,7 +708,7 @@ private fun GameBoard(
             val amount = 0.55f + 0.45f * heatK + 0.20f * tierLevel + 0.45f * hitPulse + 0.90f * tierPulse + 0.35f * energy
             if (fx.bg == 0 || !motion) with(StageGlow) { drawStageGlow(t, if (motion) amount else 0.55f, if (motion) tierPulse else 0f, 1.75f, if (motion) energy else 0f) }
             else with(WildBg) { drawWildBg(fx.bg, t, ((t * chart.bpm / 60f) % 1f + 1f) % 1f, energy) }
-            val (shakeX, shakeY) = shakeAt(t, fx.shake, H, motion)
+            val (shakeX, shakeY) = shakeAt(t, fx.shake, H, motion && flashOn)
             withTransform({                                           // 镜头：整个场地一起缩放 / 拉伸 / 转 / 抖（触摸那边 unCamera 反变换）
                 translate(W / 2f + shakeX, H / 2f + shakeY)
                 rotate(fx.spin, Offset.Zero)
@@ -852,7 +853,7 @@ private fun GameBoard(
             }   // for lineK
             }   // 镜头
             // 闪屏（癫狂难度）：减弱动效时不闪
-            if (motion && fx.flash > 0f) drawRect(Color.White.copy(alpha = fx.flash * 0.85f), Offset.Zero, Size(W, H))
+            if (motion && flashOn && fx.flash > 0f) drawRect(Color.White.copy(alpha = fx.flash * 0.85f), Offset.Zero, Size(W, H))
             // 无线时刻：四边一圈呼吸柔光（不转）
             if (stage.freeLive(t)) {
                 val br = .10f + .06f * kotlin.math.sin(t * 6f)
@@ -1352,6 +1353,8 @@ private fun FeelPanel() {
                     )
                 }
             }
+            var flash by remember { mutableStateOf(Rhythm.flashOn(ctx)) }
+            Feel(t("闪屏 / 抖动"), if (flash) t("开") else t("关")) { flash = !flash; Rhythm.setFlashOn(ctx, flash) }   // 癫狂难度专用，光敏的人关掉
             Feel(t("音符下落"), when { approach <= 1.2f -> t("快"); approach >= 2.0f -> t("慢"); else -> t("适中") }) {
                 approach = when { approach <= 1.2f -> 1.55f; approach <= 1.7f -> 2.2f; else -> 1.1f }
                 Rhythm.setApproach(ctx, approach)

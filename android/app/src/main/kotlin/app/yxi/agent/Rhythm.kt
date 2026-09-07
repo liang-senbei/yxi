@@ -654,6 +654,9 @@ object Rhythm {
     fun setLineScale(ctx: Context, v: Float) = p(ctx).edit().putFloat("rhythm.line", v.coerceIn(0f, 1.5f)).apply()
 
     /** 打击音效 / 震动的开关（默认都开；有人要安静地玩） */
+    /** 癫狂难度的闪屏 / 抖动开关（审查：6Hz 白闪超过光敏安全线，系统「减弱动效」多数人不开，给个独立开关） */
+    fun flashOn(ctx: Context) = p(ctx).getBoolean("rhythm.flash", true)
+    fun setFlashOn(ctx: Context, on: Boolean) = p(ctx).edit().putBoolean("rhythm.flash", on).apply()
     fun soundOn(ctx: Context) = p(ctx).getBoolean("rhythm.sound", true)
     fun setSoundOn(ctx: Context, on: Boolean) = p(ctx).edit().putBoolean("rhythm.sound", on).apply()
     fun hapticOn(ctx: Context) = p(ctx).getBoolean("rhythm.haptic", true)
