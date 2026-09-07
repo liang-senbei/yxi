@@ -78,7 +78,7 @@ object StageGlow {
             }
         }
         paint({ i -> base + i * (22f + 34f * e) }, 1f)       // 底色照走；高潮时四团色相拉开（22° → 56°），层次更足
-        paint({ i -> AMBER[i] }, min(1f, warmK * 1.3f))     // 跳档：琥珀**叠**上去闪一下（交叉淡出会跟青色混成灰）
+        paint({ i -> AMBER[i % AMBER.size] }, min(1f, warmK * 1.3f))     // 跳档：琥珀**叠**上去闪一下（交叉淡出会跟青色混成灰）。六团 → 琥珀表环绕（审查：越界必崩）
         if (e > 0.05f) drawRect(                            // 高潮：四边压暗，中间的光就"立"起来了
             Brush.radialGradient(listOf(Color.Transparent, Color(0xFF0B0D12).copy(alpha = 0.55f * e)), center = Offset(w / 2f, h / 2f), radius = max(w, h) * 0.75f),
             Offset.Zero, Size(w, h),
