@@ -902,7 +902,7 @@ private fun DrawScope.drawHoldFx(
     )
     if (n.lastPulse < 0f || ht - n.lastPulse >= 0.22f) {
         n.lastPulse = ht
-        stage.bursts += StageState.Burst(t, n.lane, n.kind, false, stage.rnd.nextFloat(), stage.pickHit(), 0.6f)
+        stage.bursts += StageState.Burst(t, n.line * Rhythm.LANES + n.lane, n.kind, false, stage.rnd.nextFloat(), stage.pickHit(), 0.6f)
         if (stage.bursts.size > 40) stage.bursts.removeAt(0)
     }
 }
@@ -946,9 +946,10 @@ private class LinePose(val deg: Float, val cx: Float, val cy: Float, val sLane: 
 private fun linePose(chart: Rhythm.Chart, line: Int, live: Live, t: Float, lineScale: Float, w: Float, h: Float): LinePose {
     val pose = chart.poseAt(t, line)
     val sway = 1.7f * lineScale
-    val deg = pose.deg * lineScale + sin(t * 0.45f) * 2.2f * sway + live.tiltAt(t)
+    val ph = t + line * 1.7f                                  // 多线各自错开相位，不然平行的两条同步摆像一块板（审查建议）
+    val deg = pose.deg * lineScale + sin(ph * 0.45f) * 2.2f * sway + live.tiltAt(t)
     val cx = w / 2f + pose.dx * lineScale * w
-    val cy = h * 0.78f + pose.dy * lineScale * h + sin(t * 0.3f) * h * 0.02f * sway
+    val cy = h * 0.78f + pose.dy * lineScale * h + sin(ph * 0.3f) * h * 0.02f * sway
     // 线立起来（±90°）时：四条轨要压进屏高（不然外侧两轨在屏幕外够不着），飞行距离拉到半屏宽（不然音符从屏幕中间凭空冒出来）。
     // 按 |sin| 平滑过渡，0° / 180° 时正好是 1。横屏 w>h 才需要。
     val rad = deg * (Math.PI / 180f).toFloat()
