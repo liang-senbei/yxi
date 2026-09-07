@@ -84,6 +84,7 @@ App 侧：场地画在**线的坐标系**里（`RhythmScreen.kt` 的 `withTransf
 | `design/music/lanes.py` | 4 轨 → 12 轨铺开（同时的音符 ≥2 轨间距、连续 ≤6 轨跳） |
 | `design/music/energy_all.py` | 能量包络写进谱面 |
 | `design/music/levelkit.py` | **自定义关卡接口**（放线 / 放块 / 动作 / 分裂 / 阵型 / 自检） |
+| `design/music/showpiece.py` | 表演关生成器：主线节奏模板 + 能量最高两段进阵型（菱形放大缩小闪烁 / 六边形旋转）+ 分裂段 + 正方形收束；`python3 showpiece.py <id> <曲名> <音频> --bpm N --out remote/<id>` |
 | `design/music/make_remote_songs.py` | 把 `incoming/*.json` 描述的新曲子批量出谱（easy + hard）到 `remote/<id>/` |
 | `design/music/publish_songs.py` | 发布：攒 dist → 上传 hk13 → 先跑 logto 的 rhythm-sync 再公开清单 |
 | `design/music/licenses/` | 每个来源的条款快照（商用 / 法人 / App 组込 / 署名） |
