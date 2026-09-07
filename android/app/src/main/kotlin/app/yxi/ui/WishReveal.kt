@@ -4,6 +4,8 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
@@ -28,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
@@ -140,6 +143,9 @@ fun WipeReveal(
             if (burstAt < 0f && (wiped >= 0.62f || now >= autoAfter || !motion)) burstAt = now
             if (bail) break                                              // 放不了就立刻收，别让人干等
             if (playAt >= 0f && now - playAt > clipLen) break            // 正常：从真的开播算满一整条
+            // 起播根本没来（静默失败：onPrepared / onError 都不回调）——**别让人对着一块空画面等**。
+            // ⚠️ 起播实测 0.1–0.4 秒，2.5 秒已经很宽；到这儿还没帧，等下去也不会有。
+            if (burstAt >= 0f && playAt < 0f && now - burstAt > 2.5f) break
             if (burstAt >= 0f && now - burstAt > clipLen + 2.5f) break    // 兜底：起播卡死也不能永远等
         }
         onDone()
@@ -272,6 +278,19 @@ fun WipeReveal(
             onStart = { if (playAt < 0f) playAt = now },
             onFail = { bail = true },
         )
+        // ⚠️ 跳过**要看得见**。「点哪儿都能跳」早就有了（外面那个 pointerInput），
+        //    但没有任何提示就等于没人知道能点（老板 2026-09-07：「加一个跳过按键吧」）。
+        //    ⚠️ 默认仍然是走完整流程 —— 不点它就照常擦、照常放完，这是他明说的。
+        if (burstAt >= 0f) Text(
+            t("跳过"),
+            Modifier.align(Alignment.TopEnd).padding(10.dp)
+                .clip(RoundedCornerShape(50))
+                .background(Color(0x59000000))
+                .clickable { bail = true }
+                .padding(14.dp, 7.dp),
+            style = MaterialTheme.typography.labelMedium,
+            color = Color.White,
+        )
         if (burstAt < 0f) Text(
             t("擦一擦"),
             Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
@@ -329,15 +348,20 @@ private fun RarityClip(
     //    不用 rememberUpdatedState 包一层的话，这两个回调是死引用。
     val started by rememberUpdatedState(onStart)
     val failed by rememberUpdatedState(onFail)
-    val hold = remember { arrayOfNulls<Any>(2) }   // [0]=MediaPlayer [1]=Surface，给生命周期那边收
+    val hold = remember { arrayOfNulls<Any>(3) }   // [0]=MediaPlayer [1]=Surface [2]=AssetFileDescriptor
+    // ⚠️ 三样**一起收**，别再分散写三份：漏收哪一样都是「模拟器好好的、真机出事」那种账（见下面 fd 那条）
+    fun drop() {
+        runCatching { (hold[0] as? android.media.MediaPlayer)?.release() }
+        runCatching { (hold[1] as? android.view.Surface)?.release() }
+        runCatching { (hold[2] as? android.content.res.AssetFileDescriptor)?.close() }
+        hold[0] = null; hold[1] = null; hold[2] = null
+    }
 
     val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     DisposableEffect(owner) {
         val ob = androidx.lifecycle.LifecycleEventObserver { _, e ->
             if (e == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
-                runCatching { (hold[0] as? android.media.MediaPlayer)?.release() }
-                runCatching { (hold[1] as? android.view.Surface)?.release() }
-                hold[0] = null; hold[1] = null
+                drop()
                 failed()          // 回到前台时直接是结算卡，不留一段放不动的画面
             }
         }
@@ -349,6 +373,10 @@ private fun RarityClip(
         modifier = modifier,
         factory = { c ->
             android.view.TextureView(c).apply {
+                // ⚠️ 第二道防线：默认 TextureView 是**不透明**的，首帧到达之前那块就是一片黑
+                //    （真机上量到 #181B22）。透明的话，没有帧的时候底下 Compose 画的擦拭图透出来，
+                //    最坏也只是「静止图代替短片」，不会是一个黑洞。
+                isOpaque = false
                 surfaceTextureListener = object : android.view.TextureView.SurfaceTextureListener {
                     override fun onSurfaceTextureAvailable(st: android.graphics.SurfaceTexture, w: Int, h: Int) {
                         val player = android.media.MediaPlayer()
@@ -356,17 +384,24 @@ private fun RarityClip(
                         val surface = android.view.Surface(st)
                         hold[1] = surface
                         runCatching {
-                            c.resources.openRawResourceFd(resId).use { fd ->
-                                player.setDataSource(fd.fileDescriptor, fd.startOffset, fd.length)
-                            }
+                            // ⚠️⚠️ **这个 fd 不能 `use` 掉**（老板 2026-09-07 报的「抽卡黑屏」真根因）。
+                            //    `prepareAsync()` 是异步的，**真正去读这个 fd 发生在它之后**；
+                            //    `use { }` 在块尾就把 AssetFileDescriptor 关了 → prepare 拿到一个已经关掉的 fd。
+                            //    部分真机上这是**静默失败**：onPrepared 不回调、onError 也不回调 ——
+                            //    于是外面的 playAt 永远是 -1，屏幕上停着一块一帧都没有的 TextureView
+                            //    （截图量出来：舞台那块 #181B22，四周还是 Paper，正好对上 tail=0）。
+                            //    ⚠️ 模拟器（swiftshader 软解）容忍这个写法，所以 E2E 全绿、真机一开就黑 ——
+                            //    「模拟器过了」在这类 fd/解码器的账上**不算数**。
+                            //    afd 存进 hold[2]，跟播放器、Surface 一起收。
+                            val afd = c.resources.openRawResourceFd(resId)
+                            hold[2] = afd
+                            player.setDataSource(afd)      // API 24+ 的重载，自己吃 afd（minSdk 26）
                             player.setSurface(surface)
                             player.setOnPreparedListener { it.start(); started() }
                             player.setOnErrorListener { _, _, _ -> failed(); true }
                             player.prepareAsync()
                         }.onFailure {
-                            runCatching { player.release() }
-                            runCatching { surface.release() }
-                            hold[0] = null; hold[1] = null
+                            drop()
                             failed()
                         }
                     }
@@ -374,9 +409,7 @@ private fun RarityClip(
                     override fun onSurfaceTextureDestroyed(st: android.graphics.SurfaceTexture): Boolean {
                         // ⚠️ Surface 得自己 release：`MediaPlayer.release()` 不管它，
                         //    这里 return true 释放的是 SurfaceTexture、不是这层包装。
-                        runCatching { (hold[0] as? android.media.MediaPlayer)?.release() }
-                        runCatching { (hold[1] as? android.view.Surface)?.release() }
-                        hold[0] = null; hold[1] = null
+                        drop()
                         return true
                     }
                     override fun onSurfaceTextureUpdated(st: android.graphics.SurfaceTexture) = Unit

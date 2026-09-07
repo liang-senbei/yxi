@@ -5687,3 +5687,22 @@ for d in $(unzip -l $A | awk '/classes.*dex/{print $4}'); do unzip -p $A $d | gr
   · 同一批还踩到：`code` 和「可领」**不是互斥的** —— 后台发信表单把四种附件拼进同一个数组，
     「码 + 曦光」是常态不是边角。分支写成 `when { code -> …; grantable -> … }` 会把
     混合信的「会自动入账」那半吞掉，正是用户最在意的一半。四种组合要各有各的话。
+
+## #305 抽卡黑屏：`prepareAsync()` 之前 `use { }` 把 fd 关了 —— 部分真机静默失败（根因 cc-Yxi_Entertainment 定位，2026-09-07）
+
+- **症状**（老板 2026-09-07 截图）：抽到东西、擦完之后，屏幕中间**一整块深色**十来秒，四周还是浅灰，然后才跳结算卡。模拟器上从来复现不出来，E2E 全绿。
+- **怎么从一张截图定位到版本和状态的**（留着当查法）：量那块深色的实心 bbox —— `1163×918` 比例 **0.6623**，跟 `608/918` 完全相等（三代舞台比例 0.615 / 0.608 / 0.662，只有这一代对得上）→ **他在 1.1.21，查的是现网代码**；宽/屏宽 0.920 = `fillMaxWidth(0.92)` → 那块就是舞台。再看**四周还是 Paper**（浅灰）：片尾淡入结算卡底色是整屏一起淡的，四周没淡 ⇒ `tail == 0` ⇒ **`playAt` 一直是 -1**，也就是播放器**从来没开播**，不是「停在片尾黑帧」。
+- **根因**：`RarityClip` 里
+  ```kotlin
+  c.resources.openRawResourceFd(resId).use { fd ->
+      player.setDataSource(fd.fileDescriptor, fd.startOffset, fd.length)
+  }
+  player.prepareAsync()          // ← 真正去读 fd 发生在这之后
+  ```
+  `use { }` 在块尾就把 `AssetFileDescriptor` 关了，而 `prepareAsync()` 是**异步**的：不少 OEM 实现要到 prepare 阶段才真去读那个 fd，此时 fd 已关 → prepare 失败，而且**部分机型是静默失败**：`onPrepared` 不回调、`onError` 也不回调。于是 `playAt` 永远 -1，屏幕停在一块一帧都没有的 TextureView 上（TextureView 默认不透明 → 显示成 #181B22），一直等到 `burstAt + clipLen + 2.5s` 那条兜底才收。
+  这个洞是把 `MediaPlayer.create()`（内部自己管 fd）改成 `prepareAsync()`（为了不在主线程同步 prepare 卡 0.1–0.4 秒）时引入的，`use` 顺手包上去的。
+- **修法 / 怎么避开**：
+  · **afd 不要 `use`** —— 用 API 24+ 的 `setDataSource(afd)` 重载，afd 存起来（这儿是 `hold[2]`），跟 MediaPlayer / Surface **一起收**（三个释放点统一走一个 `drop()`，别再分散写三份）。
+  · **兜底要认「起播没来」这一种**：`burstAt >= 0 && playAt < 0 && now - burstAt > 2.5s` 就收 —— 静默失败没有任何回调，只能靠「该来的没来」判。起播实测 0.1–0.4 秒。
+  · `TextureView.isOpaque = false`：首帧到达前让底下的擦拭图透出来。**这只是第二道防线**（把黑洞变成静止图），不是修复。
+- ⚠️ **这类账「模拟器过了」不算数**：模拟器是 swiftshader + 软解，容忍已关闭的 fd；真机不容忍。凡是碰 fd / 解码器 / GPU 路径的改动，绿的 E2E 说明不了问题，要么真机验，要么把失败路径设计成可观测的（就是上面那条兜底）。

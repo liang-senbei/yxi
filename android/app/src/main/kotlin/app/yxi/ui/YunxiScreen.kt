@@ -529,7 +529,8 @@ private fun WeatherCard(w: Weather?, err: String?, loading: Boolean, onRefresh: 
             locErr?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(q, { q = it }, Modifier.weight(1f), placeholder = { Text(t("城市名，中文就行")) }, singleLine = true, shape = MaterialTheme.shapes.medium)
-                Pill(if (searching) t("找…") else t("找"), enabled = q.isNotBlank() && !searching) {
+                // 老板 2026-09-07：单字「找」一律换成 🔍。图标不用翻译，En.kt 里那两条已经删了
+                Pill(if (searching) "🔍…" else "🔍", enabled = q.isNotBlank() && !searching) {
                     searching = true; searchErr = null
                     scope.launch {
                         hits = runCatching { WeatherApi.search(q.trim()) }.getOrElse { searchErr = t("没搜到……可能是网不太好。"); emptyList() }
