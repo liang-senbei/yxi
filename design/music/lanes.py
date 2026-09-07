@@ -32,7 +32,8 @@ def spread(notes, seed):
         if lane is None:                          # 三个候选都不行：往外找最近的空位
             for d in range(2, LANES):
                 for c in (base - d, base + d):
-                    if 0 <= c < LANES and not any(abs(t - n['t']) < 0.08 and abs(l - c) < 2 for t, l in placed):
+                    if 0 <= c < LANES and not any(abs(t - n['t']) < 0.08 and abs(l - c) < 2 for t, l in placed) \
+                            and not any(abs(t - n['t']) < 0.20 and abs(l - c) > 6 for t, l in placed):   # 回退也守「别让手飞」（审查）
                         lane = c; break
                 if lane is not None:
                     break

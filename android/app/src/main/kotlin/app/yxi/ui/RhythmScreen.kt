@@ -545,6 +545,7 @@ private fun GameBoard(
                 }
                 fun laneOf(pos: Offset): Int = ((toLocal(pos).x / size.width) * Rhythm.LANES).toInt().coerceIn(0, Rhythm.LANES - 1)
                 var lane = laneOf(down.position)
+                android.util.Log.d("YxiRhythm", "down lane=$lane now=$now pos=${down.position}")
                 live.heldCount[lane]++; anyPointer[0]++
                 press[lane] = now
                 val free = stage.freeLive(now)
@@ -565,9 +566,9 @@ private fun GameBoard(
                         swiped = true
                         val dir = if (dx > 0) 1 else -1
                         val freeNow = stage.freeLive(now)
-                        if (hitNear(live, lane, now, offset, freeNow) { it.kind == Rhythm.Kind.SWIPE && (freeNow || it.dir == 0 || it.dir == dir) }) {
-                            combo = live.combo; score = live.currentScore(); live.tilt(now, dir)
-                        }
+                        val ok = hitNear(live, lane, now, offset, freeNow) { it.kind == Rhythm.Kind.SWIPE && (freeNow || it.dir == 0 || it.dir == dir) }
+                        android.util.Log.d("YxiRhythm", "swipe lane=$lane dx=${dx.toInt()} dir=$dir now=$now dt=${now - downAt} hit=$ok")
+                        if (ok) { combo = live.combo; score = live.currentScore(); live.tilt(now, dir) }
                     }
                     val moved = kotlin.math.abs(dx) > size.width * 0.02f || kotlin.math.abs(dy) > size.height * 0.04f
                     val cur = if (moved) laneOf(ch.position) else lane
@@ -898,6 +899,7 @@ private fun hitLane(live: Live, lane: Int, now: Float, offset: Float, anyLane: B
             n.judged = j
             live.errs += err
             live.hit(j, now, lane, n.kind)
+            android.util.Log.d("YxiRhythm", "hit $j ${n.kind} lane=$lane err=${err.toInt()}ms t=${n.t}")
             return true
         }
         i++
@@ -938,6 +940,7 @@ private fun judgeMisses(live: Live, now: Float, offset: Float, changed: () -> Un
             val n = lanes[i]
             if (n.judged == null && (head - n.t) * 1000f > Rhythm.windowMs(n.kind)) {
                 n.judged = Rhythm.Judge.MISS; live.hit(Rhythm.Judge.MISS, now, lane, n.kind); dirty = true
+                android.util.Log.d("YxiRhythm", "miss ${n.kind} lane=$lane t=${n.t} now=$head")
             }
             if (n.judged == null) break
             if (n.hold && !n.tailDone && head >= n.t + n.dur) {
