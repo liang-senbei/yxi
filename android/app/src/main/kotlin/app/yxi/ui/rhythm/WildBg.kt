@@ -18,8 +18,12 @@ object WildBg {
     private val RAINBOW = intArrayOf(0xFFFF3B5C.toInt(), 0xFFFF9F1C.toInt(), 0xFFFFE733.toInt(), 0xFF5CE65C.toInt(), 0xFF2EC4F5.toInt(), 0xFF7B61FF.toInt(), 0xFFFF5CE1.toInt())
     private fun rb(i: Int, a: Float = 1f) = Color(RAINBOW[((i % RAINBOW.size) + RAINBOW.size) % RAINBOW.size]).copy(alpha = a)
 
-    /** @param style 1 网点 / 2 射线轮 / 3 螺旋点阵 / 4 纯色闪切；[t] 秒；[beat] 拍相位 0..1（踩拍用） */
-    fun DrawScope.drawWildBg(style: Int, t: Float, beat: Float, energy: Float) {
+    /**
+     * @param style 1 网点 / 2 射线轮 / 3 螺旋点阵 / 4 纯色闪切；[t] 秒；[beat] 拍相位 0..1（踩拍用）
+     * @param calm 用户关了「闪屏 / 抖动」或系统减弱动效：会自闪的样式（4）放慢到 0.5Hz —— 这层闪是客户端自己产生的，谱面断言看不见，
+     *             所以门槛钉在这里：默认 2.5Hz（光敏阈值 3Hz 以下），calm 时 0.5Hz（Entertainment 09-07 指出的）
+     */
+    fun DrawScope.drawWildBg(style: Int, t: Float, beat: Float, energy: Float, calm: Boolean = false) {
         val w = size.width; val h = size.height
         when (style) {
             1 -> {                                                  // 黑白网点：白底黑点，点的大小随拍子呼吸，整片慢慢平移
@@ -62,8 +66,8 @@ object WildBg {
                     drawCircle(rb(i / 8, 0.85f), h * (0.006f + 0.016f * k) * (0.8f + 0.4f * beat), Offset(x, y))
                 }
             }
-            else -> {                                               // 纯色硬切：每拍换一个颜色，中间一道对比色横带
-                val i = (t * 4f).toInt()
+            else -> {                                               // 纯色硬切：换色频率钉死 2.5Hz（不跟 BPM 走，别超光敏阈值）；calm 时 0.5Hz
+                val i = (t * (if (calm) 0.5f else 2.5f)).toInt()
                 drawRect(rb(i), Offset.Zero, Size(w, h))
                 drawRect(rb(i + 3), Offset(0f, h * 0.36f), Size(w, h * 0.28f))
             }

@@ -707,7 +707,7 @@ private fun GameBoard(
             val energy = chart.energyAt(t)
             val amount = 0.55f + 0.45f * heatK + 0.20f * tierLevel + 0.45f * hitPulse + 0.90f * tierPulse + 0.35f * energy
             if (fx.bg == 0 || !motion) with(StageGlow) { drawStageGlow(t, if (motion) amount else 0.55f, if (motion) tierPulse else 0f, 1.75f, if (motion) energy else 0f) }
-            else with(WildBg) { drawWildBg(fx.bg, t, ((t * chart.bpm / 60f) % 1f + 1f) % 1f, energy) }
+            else with(WildBg) { drawWildBg(fx.bg, t, ((t * chart.bpm / 60f) % 1f + 1f) % 1f, energy, calm = !flashOn) }   // motion=false 已经走上面那支
             val (shakeX, shakeY) = shakeAt(t, fx.shake, H, motion && flashOn)
             withTransform({                                           // 镜头：整个场地一起缩放 / 拉伸 / 转 / 抖（触摸那边 unCamera 反变换）
                 translate(W / 2f + shakeX, H / 2f + shakeY)
