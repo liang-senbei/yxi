@@ -38,83 +38,106 @@ def motif(kind, t0, step, rnd):
     return []
 
 
+# 一小节 16 格（4/4）的节奏模板（老板 09-07：「有些钢琴块太无规律了，要跟着节奏来」）：整小节用同一个模板，音符就有型了
+TEMPLATES = {
+    'quarter':  [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0],
+    'eighth':   [1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0],
+    'gallop':   [1,0,0,1, 1,0,0,1, 1,0,0,1, 1,0,0,1],
+    'offbeat':  [1,0,1,0, 0,0,1,0, 1,0,1,0, 0,0,1,0],
+    'syncop':   [1,0,1,1, 0,1,0,1, 1,0,1,1, 0,1,0,1],
+    'burst':    [1,1,1,1, 1,0,0,0, 1,1,1,1, 1,0,0,0],
+    'run':      [1,1,1,1, 1,1,1,1, 1,1,1,1, 1,1,1,1],
+}
+# 一小节里音符落轨的「形状」：跑上 / 跑下 / 之字 / 左右手交替 / 波浪 —— 眼睛能读出规律
+def shape_lanes(name, n, rnd):
+    if n <= 0:
+        return []
+    if name == 'stairUp':
+        s = rnd.randint(0, 3); return [min(11, s + i * max(1, 10 // max(1, n - 1))) for i in range(n)]
+    if name == 'stairDown':
+        s = rnd.randint(8, 11); return [max(0, s - i * max(1, 10 // max(1, n - 1))) for i in range(n)]
+    if name == 'zigzag':
+        lo, hi = rnd.randint(1, 3), rnd.randint(8, 10); return [lo + (i // 2) if i % 2 == 0 else hi - (i // 2) for i in range(n)]
+    if name == 'hands':
+        l, r = rnd.randint(2, 4), rnd.randint(7, 9); return [(l if i % 2 == 0 else r) + rnd.choice((-1, 0, 1)) for i in range(n)]
+    c = rnd.randint(4, 7); amp = rnd.randint(3, 5)
+    return [max(0, min(11, int(round(c + amp * np.sin(i * np.pi / max(2, n - 1) * 2))))) for i in range(n)]
+
+
 def build_frenzy(a, song_id, zh):
     rnd = random.Random(f'frenzy-{song_id}')
     spb, phase, dur = a['spb'], a['phase'], a['dur']
     step = spb / 4
-    grid = []
-    t = phase + 2 * spb
-    while t < dur - 1.5:
-        grid.append(t); t += step
-    strengths = np.array([a['onset'](t) for t in grid])
-    thr = float(np.quantile(strengths, 0.30))
-    cs = np.array([a['cent'](t) for t in grid])
-    q = np.quantile(cs, np.linspace(0, 1, LANES + 1)[1:-1])
-
-    notes = []
-    occupied = {}                                          # 取整到 1ms 的时刻 → 已用轨
-    def put(t, lane, kind='tick', dur_=0.0, dir_=0):
-        key = round(t, 3)
-        used = occupied.setdefault(key, [])
-        if any(abs(lane - u) < 3 for u in used):          # 同时的音符至少隔 3 条
-            return False
-        if lane < 0 or lane >= LANES:
-            return False
-        notes.append(dict(t=round(t, 4), lane=lane, type=kind, dur=dur_, dir=dir_))
-        used.append(lane)
-        return True
-
-    # 1) 花样：每 4 小节的段首一个，类型轮着来
     bar = 4 * spb
-    kinds = ['stair', 'mirror', 'fan', 'zigzag']
-    motif_times = set()
-    seg_i = 0
-    tt = phase + 4 * bar
-    while tt < dur - 2 * bar:
-        for (mt, ml) in motif(kinds[seg_i % 4], tt, step, rnd):
-            if put(mt, ml):
-                motif_times.add(round(mt, 3))
-        seg_i += 1
-        tt += 4 * bar
+    n_bars = int((dur - 1.5 - phase) / bar)
+    notes = []
+    occupied = {}
+    def put(t, lane, kind='tick', dur_=0.0, dir_=0):
+        key = round(t, 3); used = occupied.setdefault(key, [])
+        if not 0 <= lane < LANES or any(abs(lane - u) < 3 for u in used):
+            return False
+        notes.append(dict(t=round(t, 4), lane=lane, type=kind, dur=dur_, dir=dir_)); used.append(lane); return True
 
-    # 2) 网格音符
-    prev_lane = 5
-    hold_until = -1.0
-    quota = dict(swipe=int(len(grid) * 0.12 * 0.5), trace=int(len(grid) * 0.08 * 0.5), slide=int(len(grid) * 0.04 * 0.5))
+    # 1) 花样：每 4 小节的段首（第 4 小节起）；这些小节不再铺模板
+    kinds = ['stair', 'mirror', 'fan', 'zigzag']
+    motif_bars = set()
+    for si, b in enumerate(range(4, n_bars - 2, 4)):
+        t0 = phase + b * bar
+        for (mt, ml) in motif(kinds[si % 4], t0, step, rnd):
+            put(mt, ml)
+        motif_bars.add(b)
+
+    # 2) 逐小节选模板 + 形状
+    all_s = np.array([a['onset'](phase + k * step) for k in range(n_bars * 16)])
+    hi = float(np.quantile(all_s, 0.9)) or 1.0
+    quota = dict(swipe=int(n_bars * 0.6), trace=int(n_bars * 0.5), slide=int(n_bars * 0.12))
     used = dict(swipe=0, trace=0, slide=0)
-    last_kind = 'tick'
-    for i, t in enumerate(grid):
-        key = round(t, 3)
-        if key in motif_times or t < hold_until:
+    prev_tpl, prev_shape = None, None
+    same_run = 0
+    hold_until = -1.0
+    for b in range(1, n_bars):
+        if b in motif_bars:
             continue
-        s = strengths[i]
-        if s < thr:
-            continue
-        lane = int(np.searchsorted(q, cs[i]))
-        if abs(lane - prev_lane) > 5:
-            lane = prev_lane + (5 if lane > prev_lane else -5)
-        lane = max(0, min(LANES - 1, lane))
-        on_beat = abs(((t - phase) / spb) - round((t - phase) / spb)) < 1e-3
-        strong = s > np.quantile(strengths, 0.80)
-        kind, d, dr = 'tick', 0.0, 0
-        nxt_strong = strengths[i + 1] > thr if i + 1 < len(grid) else False
-        sustained = all(a['rms'](t + k * step) >= 0.7 * a['rms'](t) for k in range(1, 6)) and not nxt_strong
-        if sustained and used['slide'] < quota['slide'] and last_kind != 'slide':
-            kind, d = 'slide', round(1.5 * spb, 3); used['slide'] += 1
-            hold_until = t + d + 0.15
-        elif on_beat and used['swipe'] < quota['swipe'] and last_kind != 'swipe' and rnd.random() < 0.35:
-            kind = 'swipe'; dr = 1 if (i + 1 < len(grid) and cs[i + 1] > cs[i]) else -1; used['swipe'] += 1
-        elif abs(lane - prev_lane) >= 3 and used['trace'] < quota['trace'] and last_kind != 'trace' and rnd.random() < 0.5:
-            kind = 'trace'; dr = 1 if lane > prev_lane else -1; used['trace'] += 1
-        if put(t, lane, kind, d, dr):
-            last_kind = kind
-            prev_lane = lane
-            # 和弦：强拍 + 起音很强 → 再加 1~2 个，隔 3 条以上
-            if on_beat and strong and kind == 'tick':
-                for extra in rnd.sample([lane - 4, lane + 4, lane - 7, lane + 7], 2 if rnd.random() < 0.4 else 1):
-                    put(t, extra)
+        t0 = phase + b * bar
+        prof = np.clip(all_s[b * 16:(b + 1) * 16] / hi, 0, 1)
+        e = float(np.mean(prof))
+        strong = [k for k in range(16) if prof[k] > 0.55]; weak = [k for k in range(16) if prof[k] < 0.30]
+        best, best_score = 'eighth', -1e9
+        for name, tpl in TEMPLATES.items():
+            hits = [k for k in range(16) if tpl[k]]
+            cover = sum(1 for k in strong if tpl[k]) / max(1, len(strong))          # 强起音有没有被接住
+            junk = sum(1 for k in hits if k in weak) / max(1, len(hits))            # 打在没声音的格上
+            dens = len(hits) / 16
+            score = cover - 0.6 * junk + 0.25 * dens * e
+            if name == 'run': score -= 0.2 if (e > 0.7 and b % 4 == 3) else 1.0     # 16 分连打只给响的小节末尾做填充
+            if name == 'burst': score -= 0.0 if e > 0.7 else 0.5
+            if name == 'eighth': score += 0.12                                      # 八分是底色
+            if name == prev_tpl: score += 0.15 if same_run < 2 else -0.3            # 同型连两小节像乐句，连四小节就单调了
+            score += rnd.uniform(-0.04, 0.04)
+            if score > best_score: best, best_score = name, score
+        tpl = TEMPLATES[best]
+        slots = [k for k in range(16) if tpl[k]]
+        shape = rnd.choice([s for s in ('stairUp', 'stairDown', 'zigzag', 'hands', 'wave') if s != prev_shape])
+        lanes = shape_lanes(shape, len(slots), rnd)
+        strong_bar = e > 0.7
+        for j, k in enumerate(slots):
+            t = t0 + k * step
+            if t < hold_until:
+                continue
+            lane = lanes[j]
+            kind, d, dr = 'tick', 0.0, 0
+            # 长音：本小节是 quarter 且能量持得住 → 强拍变 slide（1.5 拍），后面清场
+            if best == 'quarter' and k % 4 == 0 and used['slide'] < quota['slide'] and all(a['rms'](t + m * step) >= 0.7 * a['rms'](t) for m in range(1, 6)):
+                kind, d = 'slide', round(1.5 * spb, 3); used['slide'] += 1; hold_until = t + d + 0.15
+            elif j == len(slots) - 1 and used['swipe'] < quota['swipe'] and rnd.random() < 0.6:      # 小节末尾一划
+                kind = 'swipe'; dr = 1 if lanes[j] >= lanes[max(0, j - 1)] else -1; used['swipe'] += 1
+            elif j > 0 and abs(lane - lanes[j - 1]) >= 4 and used['trace'] < quota['trace'] and rnd.random() < 0.45:
+                kind = 'trace'; dr = 1 if lane > lanes[j - 1] else -1; used['trace'] += 1
+            if put(t, lane, kind, d, dr) and kind == 'tick' and k == 0 and strong_bar:
+                put(t, lane + (4 if lane < 6 else -4))                # 强拍和弦
+        same_run = same_run + 1 if best == prev_tpl else 0
+        prev_tpl, prev_shape = best, shape
     notes.sort(key=lambda n: (n['t'], n['lane']))
-    # slide 期间清场（花样可能落在里面）
     holds = [(n['t'], n['t'] + n['dur'] + 0.15) for n in notes if n['type'] == 'slide']
     notes = [n for n in notes if n['type'] == 'slide' or not any(h0 < n['t'] < h1 for h0, h1 in holds)]
     for n in notes:
@@ -141,17 +164,19 @@ def assign_lines(notes, energy, spb, phase, dur, rnd):
     win2 = sorted(seg4[:2])
     # 分配：窗口里的音符，按时刻分组
     by_t = {}
+    alt = [0]
     for n in notes:
         by_t.setdefault(round(n['t'], 3), []).append(n)
     for key, grp in by_t.items():
         t = grp[0]['t']
         in1 = any(a <= t <= b for a, b in win1)
         in2 = any(a <= t <= b for a, b in win2)
-        if in1 and len(grp) >= 2:                          # 和弦：伴音去第 1 条线（最靠边的那个）
+        if in1 and len(grp) >= 2:                          # 和弦：伴音去分裂出来的那条（最靠边的那个）
             grp.sort(key=lambda n: abs(n['lane'] - 5.5))
             grp[-1]['line'] = 1
-        elif in1 and rnd.random() < 0.30:
-            grp[0]['line'] = 1
+        elif in1:                                          # 分裂期间两根线交替接音符（老板：两根都能校准）
+            alt[0] ^= 1
+            if alt[0]: grp[0]['line'] = 1
         elif in2 and rnd.random() < 0.55:
             grp[0]['line'] = 2
     return [(1, a, b) for a, b in win1] + [(2, a, b) for a, b in win2]
@@ -200,6 +225,38 @@ def choreo_frenzy(song_id, spb, phase, dur):
     return sorted(rot.out + mx.out + my.out + dips, key=lambda e: (e['t'], e['op']))
 
 
+def pose_at(lines, t):
+    """和 App 的 Chart.poseAt 一样：每个 op 取最近开始的那条关键帧在 t 的值。"""
+    def ease(name, k):
+        if name == 'linear': return k
+        if name == 'cubicInOut': return 4 * k ** 3 if k < 0.5 else 1 - ((-2 * k + 2) ** 3) / 2
+        return 1 - (1 - k) ** 3
+    val = {'rotate': 0.0, 'move_x': 0.0, 'move_y': 0.0}
+    for e in sorted(lines, key=lambda e: e['t']):
+        if e['t'] > t: break
+        if e['dur'] <= 0 or t >= e['t'] + e['dur']: val[e['op']] = e['to']
+        else: val[e['op']] = e['from'] + (e['to'] - e['from']) * ease(e['ease'], (t - e['t']) / e['dur'])
+    return val
+
+
+def split_choreo(main_lines, windows, spb, rnd):
+    """「一根线突然分裂成两根」（老板 09-07）：副线从主线此刻的姿态**原地长出来**，0.5 秒内分开（角度错开 ±22°、往上挪），
+    窗口结束前 0.5 秒又合回主线的姿态再淡掉。两根都能校准（音符按 assign_lines 分配）。"""
+    out = []
+    for (a, b) in windows:
+        p0 = pose_at(main_lines, a); p1 = pose_at(main_lines, b)
+        d = rnd.choice([22.0, -22.0])
+        out += [dict(t=round(a, 3), dur=0.0, op='rotate', **{'from': p0['rotate'], 'to': p0['rotate']}, ease='linear'),
+                dict(t=round(a, 3), dur=0.0, op='move_x', **{'from': p0['move_x'], 'to': p0['move_x']}, ease='linear'),
+                dict(t=round(a, 3), dur=0.0, op='move_y', **{'from': p0['move_y'], 'to': p0['move_y']}, ease='linear'),
+                dict(t=round(a + 0.25, 3), dur=0.5, op='rotate', **{'from': p0['rotate'], 'to': p0['rotate'] + d}, ease='cubicInOut'),
+                dict(t=round(a + 0.25, 3), dur=0.5, op='move_y', **{'from': p0['move_y'], 'to': p0['move_y'] - 0.30}, ease='cubicInOut'),
+                dict(t=round(b - 0.7, 3), dur=0.5, op='rotate', **{'from': p0['rotate'] + d, 'to': p1['rotate']}, ease='cubicInOut'),
+                dict(t=round(b - 0.7, 3), dur=0.5, op='move_x', **{'from': p0['move_x'], 'to': p1['move_x']}, ease='cubicInOut'),
+                dict(t=round(b - 0.7, 3), dur=0.5, op='move_y', **{'from': p0['move_y'] - 0.30, 'to': p1['move_y']}, ease='cubicInOut')]
+    return sorted(out, key=lambda e: (e['t'], e['op']))
+
+
 def side_choreo(line, windows, spb, rnd):
     """副线的动作：第 1 条平行在主线上方（dy -0.42）轻轻摆；第 2 条斜着（±32°）从边上进来。每个窗口自己一套关键帧。"""
     rot, mx, my = _Track('rotate'), _Track('move_x'), _Track('move_y')
@@ -232,7 +289,8 @@ def main():
     for line in (1, 2):
         ws = [(f, to) for (l, f, to) in wins if l == line]
         for (f, to) in ws:                                   # 每个窗口一条 judge（出现 / 消失各自淡入淡出）
-            judges.append(dict(**{'from': round(f - 0.4, 3), 'to': round(to + 0.4, 3)}, lines=side_choreo(line, [(f, to)], a['spb'], rnd)))
+            lines_k = split_choreo(main_lines, [(f - 0.4, to + 0.4)], a['spb'], rnd) if line == 1 else side_choreo(line, [(f, to)], a['spb'], rnd)
+            judges.append(dict(**{'from': round(f - 0.4, 3), 'to': round(to + 0.4, 3)}, lines=lines_k))
     # 音符的 line 号要对上 judges 的下标：窗口按 (line, from) 顺序追加
     idx = {}
     for j_i, j in enumerate(judges[1:], start=1):

@@ -559,8 +559,8 @@ private fun GameBoard(
                     while (i < lanes.size && lanes[i].judged != null) i++
                     if (i >= lanes.size) continue
                     val n = lanes[i]
-                    if (frenzy) {
-                        // 狂热演示（老板 09-07：「不要等到线上，提前让它们爆掉，更有观赏性」）：每个音符在半空某处炸，位置按种子散开
+                    if (frenzy && stage.freeLive(now)) {
+                        // 狂热演示的「半空提前爆」只在无线时刻（老板 09-07 二次：「应该只有校准线消失才可以随便校准」）：线在的时候一律到线再判
                         val lead = (0.15f + 0.45f * n.seed) * approach
                         if (head >= n.t - lead) {
                             stage.judgeYk = (1f - (n.t - head) / approach).coerceIn(0.05f, 1f)
