@@ -200,7 +200,7 @@ if [ "${1:-}" = "--publish" ]; then
     fi
     # ⚠️ 传 `.part` 再改名：mv 在同一文件系统上是原子的，
     #    所以那个正式文件名要么不存在、要么就是完整的，不会有中间态。
-    ssh hk13 "mv $DST/$VER_APK.part $DST/$VER_APK"
+    ssh hk13 "mv $DST/$VER_APK.part $DST/$VER_APK && chmod 644 $DST/$VER_APK"   # rsync 会带上本机 0600，nginx 读不了 → 公网 403（1.1.26 那次）
     if command -v rsync >/dev/null; then
       rsync --partial -e ssh "$EVENTS_DIR/Yxi.apk" "hk13:$DST/Yxi.apk.part"
     else
