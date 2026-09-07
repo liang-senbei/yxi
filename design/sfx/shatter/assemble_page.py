@@ -1,6 +1,6 @@
 """把四个家族的 manifest_*.json + wav 拼成一张试听页（wav 以 data URI 内联，单文件，直接丢到 /lab/ 下）。
 用法：python3 assemble_page.py [输出路径，默认 ../../shatter-sfx.html]"""
-import base64, glob, json, os, sys, wave
+import base64, glob, json, os, subprocess, sys, wave
 
 here = os.path.dirname(os.path.abspath(__file__))
 out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(here, '../../shatter-sfx.html')
@@ -15,14 +15,16 @@ for fam in FAMILY:
         p = os.path.join(here, e['file'])
         with wave.open(p) as w:
             secs = w.getnframes() / w.getframerate()
-        b64 = base64.b64encode(open(p, 'rb').read()).decode()
+        # 内联用 Vorbis（q4 约 8~15 KB/个）：wav 内联会到 1 MB，超过 yxi-lab 的推送上限；安卓 WebView / Chrome 都放 ogg
+        ogg = subprocess.run(['ffmpeg', '-v', 'quiet', '-i', p, '-c:a', 'libvorbis', '-q:a', '4', '-f', 'ogg', '-'], capture_output=True).stdout
+        b64 = base64.b64encode(ogg).decode()
         items.append(dict(fam=fam, name=e['name'], desc=e.get('desc', ''), file=e['file'], secs=secs, b64=b64))
 
 cards = []
 for i, it in enumerate(items, 1):
     cards.append(f'''<div class="card" data-fam="{it['fam']}"><button class="play" data-i="{i}" aria-label="播放 {it['name']}">▶</button>
 <div class="meta"><div class="name">{i:02d} · {it['name']}</div><div class="desc">{it['desc']}</div><div class="sub">{FAMILY[it['fam']]} · {it['secs']:.2f}s · {it['file']}</div></div>
-<audio id="a{i}" preload="auto" src="data:audio/wav;base64,{it['b64']}"></audio></div>''')
+<audio id="a{i}" preload="auto" src="data:audio/ogg;base64,{it['b64']}"></audio></div>''')
 
 html = f'''<!doctype html><html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>碎裂音效 · 试听</title>
