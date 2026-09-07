@@ -396,7 +396,8 @@ object Rhythm {
             arr?.let { la ->
             for (i in 0 until la.length()) {
                 val o = la.getJSONObject(i)
-                val op = when (o.getString("op")) { "rotate" -> LineOp.ROTATE; "move_x" -> LineOp.MOVE_X; "alpha" -> LineOp.ALPHA; else -> LineOp.MOVE_Y }
+                // ⚠️ 不认识的 op 一律跳过（以前 else 当 move_y：新谱用了新 op，老客户端会把线甩飞）
+                val op = when (o.getString("op")) { "rotate" -> LineOp.ROTATE; "move_x" -> LineOp.MOVE_X; "move_y" -> LineOp.MOVE_Y; "alpha" -> LineOp.ALPHA; else -> continue }
                 lines += LineEvent(
                     o.getDouble("t").toFloat(), o.optDouble("dur", 0.4).toFloat(), op,
                     o.optDouble("from", 0.0).toFloat(), o.optDouble("to", 0.0).toFloat(),
