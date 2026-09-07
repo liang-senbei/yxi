@@ -195,6 +195,9 @@ object Rhythm {
      */
     data class Pose(val deg: Float, val dx: Float, val dy: Float)
 
+    /** 基础难度。⚠️ 必须声明在 SONGS 前面：Song 的默认参数引用它，object 按声明顺序初始化，放后面就是 ExceptionInInitializerError（模拟器上进活动页直接崩） */
+    val DIFFS = listOf("easy", "hard")
+
     data class Song(
         val id: String, val zh: String, val raw: Int, val bpm: Int, val seconds: Int, val credit: String = "",
         /** 这首有哪几张谱，按由易到难；「演示」放最难的那张 */
@@ -215,7 +218,6 @@ object Rhythm {
         Song("piece", "Piece Maker", app.yxi.R.raw.yx_piece, 117, 101, "音楽：魔王魂"),
     )
 
-    val DIFFS = listOf("easy", "hard")
 
     fun load(ctx: Context, song: String, difficulty: String): Chart {
         val j = JSONObject(ctx.assets.open("charts/chart_${song}_$difficulty.json").use { it.readBytes() }.decodeToString())
