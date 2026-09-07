@@ -5654,3 +5654,9 @@ for d in $(unzip -l $A | awk '/classes.*dex/{print $4}'); do unzip -p $A $d | gr
 **症状**：进活动页直接崩，`ExceptionInInitializerError at ActivityScreen.kt:207`（第一次碰 `Rhythm` 对象的地方）。
 **根因**：`data class Song(..., val diffs: List<String> = DIFFS)`，`SONGS` 列表在 `DIFFS` **之前**声明；object 初始化到 SONGS 时 DIFFS 还是 null，默认参数求值 NPE，被包成 ExceptionInInitializerError。编译器不报。
 **修法**：被默认参数引用的常量放到使用它的声明**前面**（已加注释钉住）。看到 ExceptionInInitializerError 先查 object 里的声明顺序。
+
+## #302 在 hk13 上用 urllib 拉自己的公网 URL 被 403；发布清单先同步服务端再公开（cc-Yxi，2026-09-07）
+
+**症状**：发布脚本在 hk13 上跑 logto 的 `rhythm-sync.py https://yxi.keuury.com/rhythm/songs.json.new --apply`，`urllib.error.HTTPError: 403 Forbidden`；本机 curl 同一个 URL 却 200。
+**根因**：从服务器自己出去再回来的请求走了带 UA 过滤的那一层（python-urllib 的默认 UA 被拦），curl 的 UA 不拦。
+**修法**：同一台机器上直接传**本机路径** `/var/www/yxi/rhythm/songs.json.new`（脚本本来就吃路径）。顺序不能反：先 sync（服务端认识新谱）再把 `.new` 改名公开，否则客户端下到谱、服务端 `no_such_chart`。
