@@ -70,7 +70,7 @@ private enum class Tab(private val zh: String, val ico: app.yxi.ui.Ico) {
  * 盖在标签页之上的**整页**。加一页就往这儿加一个值，再去 MainActivity 那个 `when` 里加一支 ——
  * ⚠️ **没有第三处要同步**（这正是「点底部导航纹丝不动」那个 bug 复发三次的根）。
  */
-private enum class Page { Member, Prefs, Tickets, Trend, Mail, Wish, Activity, Wallet, Shop, Abyss, Yunxi, Personalize, Profile, Account, Rhythm, Scan }
+private enum class Page { Member, Prefs, Tickets, Trend, Mail, Wish, Activity, Entertainment, Wallet, Shop, Abyss, Yunxi, Personalize, Profile, Account, Rhythm, Scan }
 
 /** 工作区。它是**盖在标签页之上的整屏**，不是第四个标签 —— 见 D22。 */
 private data class Work(val host: Host, val session: String?, val cwd: String, val mode: Mode?)
@@ -433,7 +433,8 @@ class MainActivity : ComponentActivity() {
                         Page.Wallet -> { app.yxi.ui.WalletScreen(onShop = { page = Page.Shop }, onRedeem = { page = Page.Member }, modifier = m); return@Scaffold }
                         Page.Shop -> { app.yxi.ui.ShopScreen(onRedeem = { page = Page.Member }, modifier = m); return@Scaffold }
                         Page.Wish -> { app.yxi.ui.WishScreen(modifier = m); return@Scaffold }
-                        Page.Activity -> { app.yxi.ui.ActivityScreen(onAbyss = { page = Page.Abyss }, onRhythm = { page = Page.Rhythm }, modifier = m); return@Scaffold }
+                        Page.Activity -> { app.yxi.ui.ActivityScreen(onAbyss = { page = Page.Abyss }, modifier = m); return@Scaffold }
+                        Page.Entertainment -> { app.yxi.ui.EntertainmentScreen(onRhythm = { page = Page.Rhythm }, modifier = m); return@Scaffold }
                         Page.Abyss -> { app.yxi.ui.AbyssScreen(modifier = m); return@Scaffold }
                         Page.Yunxi -> {
                             app.yxi.ui.YunxiScreen(
@@ -492,7 +493,7 @@ class MainActivity : ComponentActivity() {
                             onMember = { page = Page.Member }, mine = true,
                             onPrefs = { page = Page.Prefs }, onTickets = { page = Page.Tickets },
                             onTrend = { page = Page.Trend }, onMail = { page = Page.Mail }, onWallet = { page = Page.Wallet },
-                            onWish = { page = Page.Wish }, onActivity = { page = Page.Activity }, onYunxi = { page = Page.Yunxi }, onPersonalize = { page = Page.Personalize },
+                            onWish = { page = Page.Wish }, onActivity = { page = Page.Activity }, onEntertainment = { page = Page.Entertainment }, onYunxi = { page = Page.Yunxi }, onPersonalize = { page = Page.Personalize },
                             onProfile = { page = Page.Profile }, onAccount = { page = Page.Account },
                             onScan = { page = Page.Scan }, modifier = m,
                         )

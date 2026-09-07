@@ -28,7 +28,7 @@ import androidx.compose.ui.unit.dp
  *
  * ⚠️ 没引图标库：离线构建加不了依赖，而且这几个形状用路径写就是几行。
  */
-enum class Ico { Chat, Server, Sliders, Gear, Crown, Moon, Person, Bolt, Wallet, Mail, Wish, Gift, Scan }
+enum class Ico { Chat, Server, Sliders, Gear, Crown, Moon, Person, Bolt, Wallet, Mail, Wish, Gift, Scan, Game }
 
 @Composable
 fun YxiIcon(ico: Ico, size: Dp = 22.dp, tint: Color = LocalContentColor.current, modifier: Modifier = Modifier) {
@@ -116,6 +116,12 @@ fun YxiIcon(ico: Ico, size: Dp = 22.dp, tint: Color = LocalContentColor.current,
                 // 蝴蝶结：两个小圈
                 drawCircle(tint, 2.1f * k, Offset(9.4f * k, 7.2f * k), style = Stroke(width = w))
                 drawCircle(tint, 2.1f * k, Offset(14.6f * k, 7.2f * k), style = Stroke(width = w))
+            }
+            Ico.Game -> {                                           // 娱乐中心：手柄（圆角块 + 十字键 + 两个钮）
+                drawRoundRect(tint, Offset(3f * k, 7.5f * k), Size(18f * k, 10f * k), CornerRadius(4.5f * k), style = st)
+                line(7.2f, 10.6f, 7.2f, 14.4f); line(5.3f, 12.5f, 9.1f, 12.5f)
+                drawCircle(tint, 1.1f * k, Offset(15.2f * k, 11.4f * k))
+                drawCircle(tint, 1.1f * k, Offset(17.6f * k, 13.6f * k))
             }
             Ico.Scan -> {                                           // 扫一扫：四角取景框 + 中间一条扫描线
                 // ⚠️ 画四个角、不画整个方框 —— 整框跟「设置」那类方形图标撞脸，取景角才一眼是扫码

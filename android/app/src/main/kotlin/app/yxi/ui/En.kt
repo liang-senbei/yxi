@@ -1503,6 +1503,8 @@ internal object En {
         "还没打过" to "Not played",
         "演示" to "Demo",
         "狂热" to "Frenzy",
+        "娱乐中心" to "Games",
+        "玩一会儿。成绩记在账号上，奖励照发。" to "Take a break. Scores go to your account, rewards still drop.",
         "下载这首" to "Download",
         "下载中 %d%%" to "Downloading %d%%",
         "曲子在公网上，下一次就好" to "Hosted online; download once",

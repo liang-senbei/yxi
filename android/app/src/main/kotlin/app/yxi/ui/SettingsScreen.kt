@@ -85,6 +85,8 @@ fun SettingsScreen(
     onWish: () -> Unit = {},
     /** 活动中心（签到等） */
     onActivity: () -> Unit = {},
+    /** 娱乐中心（云曦节拍等，老板 2026-09-07：「加一个娱乐中心，单独把节拍放进去」） */
+    onEntertainment: () -> Unit = {},
     /** 云曦小管家（备忘 / 提醒 / 天气 + 会动的她） */
     onYunxi: () -> Unit = {},
     /** 个性化：装扮（聊天气泡 / 头像框 / 终端配色 / 快捷语包）分类进入 */
@@ -399,7 +401,14 @@ fun SettingsScreen(
             LaunchedEffect(unread) { Badges.clamp(ctx, Badges.MAIL, unread) }
             GridEntry(Ico.Mail, t("邮件"), Color(0xFF4C8DF6), Modifier.weight(1f), dot = Badges.dot(ctx, Badges.MAIL, unread)) { onMail() }
             GridEntry(Ico.Wish, t("祈愿"), Color(0xFFB07AE8), Modifier.weight(1f)) { onWish() }
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
             GridEntry(Ico.Gift, t("活动中心"), Color(0xFFE8912D), Modifier.weight(1f)) { onActivity() }
+            GridEntry(Ico.Game, t("娱乐中心"), Color(0xFF3FA9A0), Modifier.weight(1f)) { onEntertainment() }   // 六格分两行（老板 09-07 加的）
             // 工单格同一套：有没看过的官方回复就亮（unreadTickets 由 /api/me 给）
             val unreadT = app.yxi.agent.Account.me?.unreadTickets ?: 0
             LaunchedEffect(unreadT) { Badges.clamp(ctx, Badges.TICKETS, unreadT) }

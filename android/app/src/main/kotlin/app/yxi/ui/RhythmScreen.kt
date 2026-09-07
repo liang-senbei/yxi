@@ -857,11 +857,10 @@ private fun GameBoard(
                 if (mult > 1f) Words.Bold("×%.1f".format(mult), MaterialTheme.typography.titleMedium.fontSize, fill = Words.YELLOW)
             }
         }
-        Text(
-            "%07d".format(score),
-            Modifier.align(Alignment.TopEnd).padding(14.dp, 10.dp),
-            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Light), color = ink.copy(alpha = .9f),
-        )
+        Row(Modifier.align(Alignment.TopEnd).padding(14.dp, 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            MeAvatar(30.dp)                                        // 老板 09-07：得分左边放自己的头像，跟得分差不多大
+            Text("%07d".format(score), style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Light), color = ink.copy(alpha = .9f))
+        }
         // 左下角英文名（老板 09-06：「左下角用英文，yxi…dancing」）；曲名挪到右下跟难度一起
         Text("Yxi Dancing Beat", Modifier.align(Alignment.BottomStart).padding(14.dp, 10.dp), style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Light), color = ink.copy(alpha = .6f))
         Text(t(chart.zh) + " · " + t(Rhythm.diffName(difficulty)), Modifier.align(Alignment.BottomEnd).padding(14.dp, 10.dp), style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Light), color = ink.copy(alpha = .6f))

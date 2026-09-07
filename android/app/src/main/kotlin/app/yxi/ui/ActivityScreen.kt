@@ -49,7 +49,7 @@ import kotlinx.coroutines.launch
  * 画出来的连续天数是假的，用户会照着它以为自己签了。
  */
 @Composable
-fun ActivityScreen(onAbyss: () -> Unit = {}, onRhythm: () -> Unit = {}, modifier: Modifier = Modifier) {
+fun ActivityScreen(onAbyss: () -> Unit = {}, modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var st by remember { mutableStateOf<Wish.CheckIn?>(null) }
@@ -73,7 +73,6 @@ fun ActivityScreen(onAbyss: () -> Unit = {}, onRhythm: () -> Unit = {}, modifier
             s == null -> {
                 Hint(t("活动暂未开放，敬请期待。"))
                 AbyssEntry(onAbyss)
-                RhythmEntry(onRhythm)
             }
             else -> {
                 Surface(
@@ -133,7 +132,6 @@ fun ActivityScreen(onAbyss: () -> Unit = {}, onRhythm: () -> Unit = {}, modifier
                     }
                 }
                 AbyssEntry(onAbyss)
-                RhythmEntry(onRhythm)
             }
         }
     }
@@ -201,6 +199,19 @@ private fun AbyssEntry(onOpen: () -> Unit) {
  * 活动中心里的**云曦节拍**（音游）入口卡。副标题是"打过几张谱"，不掺服务端数据，
  * 所以断网也照常摆得出来（成绩现在存本地，服务端契约见 logto_yxi/design/rhythm.md）。
  */
+@Composable
+/** 娱乐中心（老板 2026-09-07：「加一个娱乐中心，单独把节拍放进去」）：游戏类的都进这儿，活动中心只留签到 / 活动 */
+fun EntertainmentScreen(onRhythm: () -> Unit = {}, modifier: Modifier = Modifier) {
+    Column(
+        modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(t("娱乐中心"), style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(18.dp, 14.dp, 18.dp, 4.dp))
+        Text(t("玩一会儿。成绩记在账号上，奖励照发。"), style = MaterialTheme.typography.bodyMedium, color = Muted, modifier = Modifier.padding(horizontal = 18.dp))
+        RhythmEntry(onRhythm)
+    }
+}
+
 @Composable
 private fun RhythmEntry(onOpen: () -> Unit) {
     val ctx = LocalContext.current
