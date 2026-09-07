@@ -595,6 +595,48 @@ object Lines {
             }
         }
 
+
+    /**
+     * 每个会话**现在用的是哪个模型**（老板 2026-09-07：「官方登录那行还要显示具体模型」）。
+     * 读的是这个 cwd 最新那份转录里最后一条 `"model":"…"`。
+     *
+     * ⚠️ **必须按会话读，不能拿 settings.json 的账号默认糊上去**：实测同一台机器上各会话不一样
+     *    （Yxi 在 fable-5-1、别的在 opus-5），糊上去就是显示一个假的 —— 比不显示更糟。
+     * ⚠️ **不并进 [labels] 那条 5 秒轮询**：每个 cwd 要 ls + tail + grep 三个进程，三十个会话
+     *    就是每 5 秒近百个进程，压在一台跑着一堆 agent 的机器上不合适。模型极少变，
+     *    界面上单独挂一条慢轮询（60 秒）就够。
+     * ⚠️ 目录名编码跟 Claude Code 一致：**非字母数字一律换成 `-`**（同 [Dirs] 里 resume 那段）。
+     * @return 会话名 → 短模型名（去掉 `claude-` 前缀，跟对话页顶栏一个写法）
+     */
+    suspend fun models(ssh: SshSession?, sessions: List<Session>): Map<String, String> = withContext(Dispatchers.IO) {
+        val s = ssh ?: return@withContext emptyMap()
+        val cwds = sessions.asSequence().filter { !it.isCodex }.mapNotNull { safeCwd(it.cwd) }.toSet()
+        if (cwds.isEmpty()) return@withContext emptyMap()
+        val script = buildString {
+            cwds.forEach { c ->
+                append("enc=${'$'}(printf %s ").append(Shell.q(c)).append(" | sed 's/[^A-Za-z0-9]/-/g'); ")
+                append("f=${'$'}(ls -t \"${'$'}HOME/.claude/projects/${'$'}enc\"/*.jsonl 2>/dev/null | head -1); ")
+                append("[ -n \"${'$'}f\" ] && tail -c 32768 \"${'$'}f\" | grep -o '\"model\":\"[^\"]*\"' | tail -1; ")
+                // ⚠️ cwd 走 printf 的**参数**，不嵌进格式串 —— 路径里一个 ' 会毁掉整段脚本（同 [labels]）
+                append("printf '\\n@@M %s\\n' ").append(Shell.q(c)).append("; ")
+            }
+        }
+        val out = runCatching { s.exec(script) }.getOrNull() ?: return@withContext emptyMap()
+        val byCwd = HashMap<String, String>()
+        var buf = StringBuilder()
+        out.lineSequence().forEach { ln ->
+            if (ln.startsWith("@@M ")) {
+                Regex("\"model\":\"([^\"]+)\"").find(buf)?.groupValues?.get(1)
+                    ?.removePrefix("claude-")?.takeIf { it.isNotBlank() }
+                    ?.let { byCwd[ln.removePrefix("@@M ")] = it }
+                buf = StringBuilder()
+            } else buf.append(ln).append('\n')
+        }
+        val res = HashMap<String, String>()
+        sessions.forEach { sess -> safeCwd(sess.cwd)?.let { c -> byCwd[c]?.let { res[sess.name] = it } } }
+        res
+    }
+
     // ── 看板：每个会话走的是什么 ────────────────────────────────────────────
 
     /** 给看板显示的一行小字。[custom] = 设了但不在清单里（电脑上用 CC Switch 切的、或手改的）。 */

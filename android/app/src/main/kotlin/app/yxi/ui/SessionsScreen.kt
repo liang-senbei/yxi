@@ -121,16 +121,34 @@ fun SessionsScreen(
     var groups by remember(host.id) { mutableStateOf(app.yxi.agent.Recent.groups(ctx, host.id)) }
     // 每个会话走哪条线路（cc-Yxi_pilot 的 Lines.labels，一次 SSH 往返）。读不到的不在 Map 里，卡片就不画。
     // ⚠️ 单独一条 5 秒轮询，不挂进 snapshotFull 那条链 —— 线路读失败不该拖累会话列表。
-    var lineLabels by remember(host.id) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var lineLabels by remember(host.id) { mutableStateOf<Map<String, app.yxi.agent.Lines.Label>>(emptyMap()) }
+    // 会话名 → 现在用的模型。⚠️ 单独一条**慢**轮询（60 秒）：读它每个 cwd 要 ls+tail+grep 三个进程，
+    //    并进上面那条 5 秒的就是每 5 秒近百个进程压在服务器上；而模型极少变。见 [Lines.models]。
+    var models by remember(host.id) { mutableStateOf<Map<String, String>>(emptyMap()) }
     val latestSessions = androidx.compose.runtime.rememberUpdatedState(sessions)
     // 线路 v2（cc-Yxi_pilot）过审后放开：一次 SSH 往返拿全部会话的线路标签，跟看板同一个 5 秒节奏
     LaunchedEffect(ssh, host.id) {
         val s = ssh ?: return@LaunchedEffect
         while (true) {
             lineLabels = runCatching {
-                app.yxi.agent.Lines.labels(s, latestSessions.value).mapValues { it.value.text }
+                app.yxi.agent.Lines.labels(s, latestSessions.value)
             }.getOrDefault(lineLabels)
             delay(5000)
+        }
+    }
+    LaunchedEffect(ssh, host.id) {
+        val s = ssh ?: return@LaunchedEffect
+        while (true) {
+            models = runCatching { app.yxi.agent.Lines.models(s, latestSessions.value) }.getOrDefault(models)
+            delay(60_000)
+        }
+    }
+    // 卡片上那行小字。⚠️ **只有官方登录才补模型**（老板 2026-09-07 圈的就是这一行）——
+    //    走中转的那行已经写着线路名，模型由中转那头定，写上去像是我们知道它在跑什么，其实不知道。
+    val lineText = remember(lineLabels, models) {
+        lineLabels.mapValues { (name, lb) ->
+            val m = models[name]
+            if (m != null && lb.lineName == null && !lb.custom) "${lb.text} · $m" else lb.text
         }
     }
     /// 正在给哪个会话选组
@@ -561,7 +579,7 @@ fun SessionsScreen(
                     ReorderablePinned(
                         tops = tops,
                         favedNames = faved,
-                        lines = lineLabels,
+                        lines = lineText,
                         onOpen = { onOpenChat(it.name, it.cwd) },
                         onReply = { replyTo = it },
                         onUnpin = { pinned = pinned - it.name; Pinned.set(ctx, host.id, pinned) },
@@ -635,7 +653,7 @@ fun SessionsScreen(
                         ) {
                         SessionCard(
                             members[i],
-                            line = lineLabels[members[i].name],
+                            line = lineText[members[i].name],
                             faved = members[i].name in faved,
                             pinned = members[i].name in pinned,
                             onOpen = { onOpenChat(members[i].name, members[i].cwd) },
@@ -676,7 +694,7 @@ fun SessionsScreen(
                         ) {
                         SessionCard(
                             group[i],
-                            line = lineLabels[group[i].name],
+                            line = lineText[group[i].name],
                             faved = group[i].name in faved,
                             pinned = group[i].name in pinned,
                             // 点卡片 = 进对话；气泡按钮 = 不进对话直接回一句
