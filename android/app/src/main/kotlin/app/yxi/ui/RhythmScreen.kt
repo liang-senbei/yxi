@@ -1022,9 +1022,8 @@ private fun Stat(label: String, v: Int, ink: Color) {
 
 
 /**
- * 打击音效。用 [SoundPool] 而不是 MediaPlayer：一局要响一两百次，SoundPool 是为这种短音设计的，
- * 延迟低、能叠着播。样本只有一个（`yx_tap`，我们自己合成的 55 毫秒「嗒」），
- * 靠音量和速率分出「完美」和「不错」两种手感 —— 两个文件没必要。
+ * 命中音效（音符碎裂声）。用 [SoundPool] 而不是 MediaPlayer：一局要响一两百次，SoundPool 是为这种短音设计的，
+ * 延迟低、能叠着播。三个样本按音块种类分，靠音量和速率分出「完美」和「不错」两种手感。
  *
  * ⚠️ 加载是异步的：刚进页面的头几十毫秒可能还没准备好，那就先不响，别为此卡住开局。
  */
@@ -1035,28 +1034,32 @@ private class RhythmSfx(ctx: android.content.Context) {
                 .setUsage(AudioAttributes.USAGE_GAME)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build(),
         ).build()
-    // 四种音块各一个音（老板 2026-09-06：「四种音块的点击音效要各不相同」）。
-    // 都很短、都不刺耳，只在音色上分 —— 不然连打起来像四个不同的游戏。
+    // 命中音 = 音符碎裂的声音（老板 2026-09-07 从 20 款里挑的三款，「不同的方块用不同的」）：
+    //   光尘 → tick（swipe 也用它，速率 1.15 提亮一点）· 风铃散 → trace · 樱瓣 → slide。
+    // 源文件 design/sfx/shatter/magic_{1,3,4}.wav，另外 17 款在同目录，换音只改这张表。
     private val ids = HashMap<Rhythm.Kind, Int>()
+    private val rate = mapOf(Rhythm.Kind.TICK to 1.0f, Rhythm.Kind.SWIPE to 1.15f, Rhythm.Kind.TRACE to 1.0f, Rhythm.Kind.SLIDE to 1.0f)
     private var ready = false
 
     init {
         pool.setOnLoadCompleteListener { _, _, status -> if (status == 0) ready = true }
         runCatching {
-            ids[Rhythm.Kind.TICK] = pool.load(ctx, app.yxi.R.raw.yx_tick, 1)
-            ids[Rhythm.Kind.SLIDE] = pool.load(ctx, app.yxi.R.raw.yx_slide, 1)
-            ids[Rhythm.Kind.TRACE] = pool.load(ctx, app.yxi.R.raw.yx_trace, 1)
-            ids[Rhythm.Kind.SWIPE] = pool.load(ctx, app.yxi.R.raw.yx_swipe, 1)
+            val dust = pool.load(ctx, app.yxi.R.raw.yx_sh_dust, 1)
+            ids[Rhythm.Kind.TICK] = dust
+            ids[Rhythm.Kind.SWIPE] = dust
+            ids[Rhythm.Kind.TRACE] = pool.load(ctx, app.yxi.R.raw.yx_sh_chime, 1)
+            ids[Rhythm.Kind.SLIDE] = pool.load(ctx, app.yxi.R.raw.yx_sh_petal, 1)
         }
     }
 
     fun play(kind: Rhythm.Kind, j: Rhythm.Judge, vol: Float) {
         if (!ready || vol <= 0f) return
         val id = ids[kind] ?: return
+        val r = rate[kind] ?: 1f
         when (j) {
-            Rhythm.Judge.PERFECT -> pool.play(id, vol, vol, 1, 0, 1.0f)
+            Rhythm.Judge.PERFECT -> pool.play(id, vol, vol, 1, 0, r)
             // 不错：闷一点、低一点，一耳朵听得出差别（还是同一个音，不另做一套文件）
-            Rhythm.Judge.GOOD -> pool.play(id, vol * .55f, vol * .55f, 1, 0, 0.92f)
+            Rhythm.Judge.GOOD -> pool.play(id, vol * .55f, vol * .55f, 1, 0, r * 0.92f)
             Rhythm.Judge.MISS -> Unit                                     // 漏了不响：安静本身就是反馈
         }
     }
