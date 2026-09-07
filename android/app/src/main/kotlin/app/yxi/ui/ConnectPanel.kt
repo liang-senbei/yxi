@@ -56,7 +56,7 @@ import kotlinx.coroutines.launch
  * ⚠️ 框关掉**不杀服务器那头的流程** —— 用户可能是切去浏览器了；等他回来刷新一下就是最新状态。
  */
 @Composable
-fun ConnectPanel(ssh: SshSession?, host: app.yxi.ssh.Host) {
+fun ConnectPanel(ssh: SshSession?, host: app.yxi.ssh.Host, refreshKey: Int = 0) {
     var status by remember(host.id) { mutableStateOf<Connect.Status?>(null) }
     var tick by remember { mutableIntStateOf(0) }
     var flow by remember { mutableStateOf<Flow?>(null) }
@@ -69,8 +69,10 @@ fun ConnectPanel(ssh: SshSession?, host: app.yxi.ssh.Host) {
     // 授权流程要等十分钟，中途连接大概率被换掉 —— 统一走这一份（TROUBLESHOOTING #282）
     val alive = rememberAliveSsh(ssh)
 
-    LaunchedEffect(ssh, host.id, tick) {
-        if (tick == 0) status = null
+    // refreshKey = 父级下拉刷新（[ConfigScreen]）。⚠️ 跟自家的 tick 一样：**刷新时不清空 status**，
+    //    清了整块会闪成转圈。
+    LaunchedEffect(ssh, host.id, tick, refreshKey) {
+        if (tick == 0 && refreshKey == 0) status = null
         status = Connect.status(ssh)
     }
 

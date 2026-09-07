@@ -57,6 +57,7 @@ fun ConfigScreen(
     // 下拉刷新（老板 2026-09-07：「会话和主机都能下拉刷新了，配置和我的也要」）
     var refreshing by remember { mutableStateOf(false) }
     var tick by remember(host.id) { mutableIntStateOf(0) }
+    val bg = androidx.compose.runtime.rememberCoroutineScope()
 
     LaunchedEffect(ssh, host.id) {
         tools = null
@@ -67,7 +68,6 @@ fun ConfigScreen(
     LaunchedEffect(tick) {
         if (tick == 0) return@LaunchedEffect
         runCatching { ConfigRemote.load(ssh) }.getOrNull()?.let { tools = it }
-        refreshing = false
     }
 
     open?.let { item ->
@@ -119,15 +119,25 @@ fun ConfigScreen(
                 )
             }
         }
-        if (panel == "lines") { LinesPanel(ssh, host, sessions); return@Column }
-        if (panel == "connect") { ConnectPanel(ssh, host); return@Column }
-
-        val ts = tools
+        // ⚠️ **三个面板共用这一个下拉刷新。** 进这一页默认看到的是「连接」——
+        //    只给第三个面板（Agent 配置）接，等于老板拉不到（他要的就是这一页）。
+        //    刷新 = tick++，三个面板各自按它重读自己那份。
         PullToRefreshBox(
             isRefreshing = refreshing,
-            onRefresh = { if (!refreshing) { refreshing = true; tick++ } },
+            onRefresh = {
+                if (!refreshing) {
+                    refreshing = true; tick++
+                    // 各面板重读是异步的、这里等不到结果；转一小会儿让人知道「动了」（同 HostsScreen）
+                    bg.launch { kotlinx.coroutines.delay(900); refreshing = false }
+                }
+            },
             modifier = Modifier.weight(1f),
         ) {
+        when (panel) {
+            "lines" -> LinesPanel(ssh, host, sessions, refreshKey = tick)
+            "connect" -> ConnectPanel(ssh, host, refreshKey = tick)
+            else -> {
+        val ts = tools
         when {
             ts == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(Modifier.size(30.dp), strokeWidth = 2.5.dp)
@@ -164,6 +174,8 @@ fun ConfigScreen(
                         }
                     }
                 }
+            }
+        }
             }
         }
         }   // PullToRefreshBox

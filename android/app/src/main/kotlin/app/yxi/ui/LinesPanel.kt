@@ -69,7 +69,7 @@ import kotlinx.coroutines.launch
  * 机器上有 Codex 会话时明说一句，别让人以为一起换了。
  */
 @Composable
-fun LinesPanel(ssh: SshSession?, host: Host?, sessions: List<Session>) {
+fun LinesPanel(ssh: SshSession?, host: Host?, sessions: List<Session>, refreshKey: Int = 0) {
     val bg = rememberCoroutineScope()
     val key = host?.id
     var lines by remember(key) { mutableStateOf<List<Lines.Line>?>(null) }
@@ -120,6 +120,9 @@ fun LinesPanel(ssh: SshSession?, host: Host?, sessions: List<Session>) {
         reload()
         loading = false
     }
+    // 父级下拉刷新（[ConfigScreen] 的 PullToRefreshBox）：重读一遍。
+    // ⚠️ **不置 loading** —— 置了整块闪成转圈，下拉的人只是想让它重读，不是想把看着的东西弄没。
+    LaunchedEffect(refreshKey) { if (refreshKey > 0) runCatching { reload() } }
 
     suspend fun doApplyCodex(line: Lines.Line?) {
         val err = Lines.applyCodex(ssh, line)
