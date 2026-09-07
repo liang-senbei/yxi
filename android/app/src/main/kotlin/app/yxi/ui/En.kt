@@ -1536,6 +1536,7 @@ internal object En {
         "狂热" to "Frenzy",
         "癫狂" to "Wild",
         "闪屏 / 抖动" to "Flash / shake",
+        "开" to "On",
         "娱乐中心" to "Games",
         "玩一会儿。成绩记在账号上，奖励照发。" to "Take a break. Scores go to your account, rewards still drop.",
         "下载这首" to "Download",
