@@ -854,6 +854,23 @@ private fun GameBoard(
             }   // 镜头
             // 闪屏（癫狂难度）：减弱动效时不闪
             if (motion && flashOn && fx.flash > 0f) drawRect(Color.White.copy(alpha = fx.flash * 0.85f), Offset.Zero, Size(W, H))
+            // 连击边框流光（老板 09-07 晚：像手机「圈选屏幕」那圈流动的彩光）：连击到第二档才出现，档位越高越亮，命中那下亮一下
+            if (motion && tierLevel >= 2) {
+                val k = ((tierLevel - 1).coerceAtMost(3)) / 3f
+                val ph = (t * 0.22f) % 1f
+                val cols = listOf(Color(0xFFFF6EC7), Color(0xFF7B61FF), Color(0xFF2EC4F5), Color(0xFF5CE65C), Color(0xFFFFE733), Color(0xFFFF9F1C))
+                val stops = Array(cols.size + 1) { i -> ((i.toFloat() / cols.size + ph) % 1f) to cols[i % cols.size] }.sortedBy { it.first }
+                val fixed = ArrayList<Pair<Float, Color>>(stops.size + 2)
+                if (stops.first().first > 0f) fixed += 0f to stops.last().second
+                fixed += stops
+                if (stops.last().first < 1f) fixed += 1f to stops.first().second
+                val brush = Brush.sweepGradient(*fixed.toTypedArray(), center = Offset(W / 2f, H / 2f))
+                val m = 4f * bench; val r = CornerRadius(26f * bench)
+                val a = (0.30f + 0.70f * k) * (0.72f + 0.28f * hitPulse)
+                for ((wd, al) in listOf(30f to 0.10f, 16f to 0.22f, 7f to 0.55f, 3f to 1.0f)) {
+                    drawRoundRect(brush, Offset(m, m), Size(W - 2f * m, H - 2f * m), r, style = Stroke(wd * bench), alpha = (a * al).coerceIn(0f, 1f))
+                }
+            }
             // 无线时刻：四边一圈呼吸柔光（不转）
             if (stage.freeLive(t)) {
                 val br = .10f + .06f * kotlin.math.sin(t * 6f)
