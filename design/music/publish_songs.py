@@ -13,7 +13,7 @@
       "charts": {"easy": "<id>/chart_<id>_easy.json", ...},
       "chartsMeta": {"<id>_easy": {"notes", "slides", "traces", "swipes", "ticks", "units", "durationMs"}, ...}} ] }
 
-曲目元数据（zh / bpm / seconds / credit）从 Rhythm.kt 的 SONGS 表读，保证和 App 内置一致；清单独有的新曲子写在下面 EXTRA 里。
+曲目元数据（zh / bpm / seconds / credit）从 Rhythm.kt 的 SONGS 表读，保证和 App 内置一致；清单独有的新曲子来自 remote/<id>/song.json（make_remote_songs.py 生成）。
 用法：python3 publish_songs.py [--dry]   （--dry 只攒 dist 不上传）
 ⚠️ 跑完提醒 logto：他要把 service/rhythm.json 一起提进 git，不然下次部署会覆盖回去。
 """
@@ -28,8 +28,16 @@ HK = 'hk13'
 REMOTE_DIR = '/var/www/yxi/rhythm'
 URL = 'https://yxi.keuury.com/rhythm/'
 SYNC = 'cd /root/src/workplace/logto_yxi && python3 scripts/rhythm-sync.py'
-# 清单独有的曲子（不进 APK）：id → dict(zh, bpm, seconds, credit, audio=本地 ogg 路径)
-EXTRA = {}
+REMOTE = os.path.join(here, 'remote')          # 清单独有的曲子（不进 APK）：make_remote_songs.py 生成的 remote/<id>/
+
+
+def remote_songs():
+    out = []
+    for p in sorted(glob.glob(os.path.join(REMOTE, '*', 'song.json'))):
+        s = json.load(open(p)); d = os.path.dirname(p)
+        s['audio_src'] = os.path.join(d, f"{s['id']}.ogg"); s['chart_dir'] = d
+        out.append(s)
+    return out
 
 
 def songs_from_kotlin():
@@ -59,13 +67,13 @@ def build():
         subprocess.run(['rm', '-rf', dist], check=True)
     os.makedirs(dist)
     songs = []
-    for s in songs_from_kotlin() + [dict(id=k, **v) for k, v in EXTRA.items()]:
+    for s in songs_from_kotlin() + remote_songs():
         sid = s['id']; d = os.path.join(dist, sid); os.makedirs(d)
-        audio_src = s.get('audio') or os.path.join(raw, f'yx_{sid}.ogg')
+        audio_src = s.get('audio_src') or os.path.join(raw, f'yx_{sid}.ogg')
         subprocess.run(['cp', audio_src, os.path.join(d, f'{sid}.ogg')], check=True)
         entry = dict(id=sid, zh=s['zh'], bpm=s['bpm'], seconds=s['seconds'], credit=s.get('credit', ''), version=1,
                      audio=f'{sid}/{sid}.ogg', audioBytes=os.path.getsize(audio_src), charts={}, chartsMeta={})
-        for p in sorted(glob.glob(os.path.join(charts, f'chart_{sid}_*.json'))):
+        for p in sorted(glob.glob(os.path.join(s.get('chart_dir') or charts, f'chart_{sid}_*.json'))):
             diff = os.path.basename(p)[len(f'chart_{sid}_'):-5]
             subprocess.run(['cp', p, d], check=True)
             entry['charts'][diff] = f'{sid}/{os.path.basename(p)}'

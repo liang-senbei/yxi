@@ -601,7 +601,7 @@ private fun GameBoard(
                 val lineIdx = run {
                     var best = 0; var bestD = Float.MAX_VALUE
                     for (k in 0 until chart.lineCount) {
-                        if (chart.judgeLines[k].alphaAt(now) <= 0f) continue
+                        if (chart.lineAlphaAt(now, k) <= 0f) continue
                         val lp = linePose(chart, k, live, now, lineScale, size.width.toFloat(), size.height.toFloat())
                         val rad = -lp.deg * (Math.PI / 180f).toFloat()
                         val ox = down.position.x - lp.cx; val oy = down.position.y - lp.cy
@@ -693,7 +693,7 @@ private fun GameBoard(
             with(StageGlow) { drawStageGlow(t, if (motion) amount else 0.55f, if (motion) tierPulse else 0f, 1.75f, if (motion) energy else 0f) }
 
             for (lineK in 0 until chart.lineCount) {
-            val lineAlpha = chart.judgeLines[lineK].alphaAt(t)
+            val lineAlpha = chart.lineAlphaAt(t, lineK)                // 出现窗口 × alpha 关键帧（闪烁）
             if (lineAlpha <= 0f) continue
             val lp = linePose(chart, lineK, live, t, lineScale, W, H)
             val deg = lp.deg; val lineCx = lp.cx; val lineCy = lp.cy

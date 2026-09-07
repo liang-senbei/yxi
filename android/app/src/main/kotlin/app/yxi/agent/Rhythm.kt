@@ -131,7 +131,7 @@ object Rhythm {
      * ⚠️ 数值是**我们自己定的**（见 `design/music/make_songs.py`）。参考视频量出来的是"人家怎么做"，
      *    具体的角度和时间属于谱面数据，不抄。
      */
-    enum class LineOp { ROTATE, MOVE_Y, MOVE_X }
+    enum class LineOp { ROTATE, MOVE_Y, MOVE_X, ALPHA }   // ALPHA：线的亮度 0..1（闪烁 / 渐隐，老板 09-07 的「闪闪闪」）
 
     data class LineEvent(val t: Float, val dur: Float, val op: LineOp, val from: Float, val to: Float, val ease: String) {
         /** [now] 时刻这条事件贡献的值 */
@@ -199,9 +199,17 @@ object Rhythm {
                     LineOp.ROTATE -> deg = e.valueAt(now)
                     LineOp.MOVE_Y -> dy = e.valueAt(now)
                     LineOp.MOVE_X -> dx = e.valueAt(now)
+                    LineOp.ALPHA -> Unit
                 }
             }
             return Pose(deg, dx, dy)
+        }
+        /** 这条线此刻的亮度：出现窗口的淡入淡出 × 关键帧 alpha（没写 alpha 关键帧就是 1） */
+        fun lineAlphaAt(now: Float, line: Int): Float {
+            val j = judgeLines[line]
+            var a = 1f
+            for (e in j.lines) { if (e.t > now) break; if (e.op == LineOp.ALPHA) a = e.valueAt(now) }
+            return (j.alphaAt(now) * a).coerceIn(0f, 1f)
         }
         fun poseAt(now: Float): Pose {
             var deg = 0f; var dx = 0f; var dy = 0f
@@ -211,6 +219,7 @@ object Rhythm {
                     LineOp.ROTATE -> deg = e.valueAt(now)
                     LineOp.MOVE_Y -> dy = e.valueAt(now)
                     LineOp.MOVE_X -> dx = e.valueAt(now)
+                    LineOp.ALPHA -> Unit
                 }
             }
             return Pose(deg, dx, dy)
@@ -387,7 +396,7 @@ object Rhythm {
             arr?.let { la ->
             for (i in 0 until la.length()) {
                 val o = la.getJSONObject(i)
-                val op = when (o.getString("op")) { "rotate" -> LineOp.ROTATE; "move_x" -> LineOp.MOVE_X; else -> LineOp.MOVE_Y }
+                val op = when (o.getString("op")) { "rotate" -> LineOp.ROTATE; "move_x" -> LineOp.MOVE_X; "alpha" -> LineOp.ALPHA; else -> LineOp.MOVE_Y }
                 lines += LineEvent(
                     o.getDouble("t").toFloat(), o.optDouble("dur", 0.4).toFloat(), op,
                     o.optDouble("from", 0.0).toFloat(), o.optDouble("to", 0.0).toFloat(),
