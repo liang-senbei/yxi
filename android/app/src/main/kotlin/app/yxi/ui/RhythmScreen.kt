@@ -698,6 +698,8 @@ private fun GameBoard(
             val lp = linePose(chart, lineK, live, t, lineScale, W, H)
             val deg = lp.deg; val lineCx = lp.cx; val lineCy = lp.cy
             val gBase = lineK * Rhythm.LANES                           // 这条线的全局轨号起点
+            val su = kotlin.math.sqrt(lp.sLane * lp.sTravel)             // 特效用的等比系数（抵消场地的非等比缩放，见爆点处注释）
+            val kx = su / lp.sLane; val ky = su / lp.sTravel
             withTransform({
                 translate(lineCx, lineCy)
                 rotate(deg, Offset.Zero)
@@ -748,14 +750,16 @@ private fun GameBoard(
                         val tint = mix(col, kindColor(b.kind), 0.35f)      // 爆点带一点音符自己的颜色
                         val u = maxOf(noteH * 2.6f, H * 0.03f) * fxScale * b.scale
                         val env = StageState.hitEnvelope(k)
-                        withAlphaLayer(env, Offset(cx - u * 4f, judgeY - u * 4f), Size(u * 8f, u * 10f)) {   // 下边多留 2u：火花落到 5u 以下会被裁（审查 P3）
-                            withTransform({ translate(cx, judgeY); scale(bench, bench, Offset.Zero) }) {
+                        // 场地在线立起来时是非等比缩放的（sLane / sTravel）。音符跟着压扁还行，爆点压扁就难看（老板 09-07）：
+                        // 这里把非等比的部分抵消掉，只留一个等比系数 su = √(sLane·sTravel)，爆点在任何角度都是圆的
+                        withAlphaLayer(env, Offset(cx - u * 4f * kx, judgeY - u * 4f * ky), Size(u * 8f * kx, u * 10f * ky)) {   // 下边多留 2u：火花落到 5u 以下会被裁（审查 P3）
+                            withTransform({ translate(cx, judgeY); scale(bench * kx, bench * ky, Offset.Zero) }) {
                                 with(b.fx.fx) { draw(Hit((u / 1.3f) * (StageState.HIT_SCALE[b.fx.name] ?: .9f) / bench, tint, b.perfect, noteH / bench), k, Rng(b.seed)) }
+                                if (k < 0.08f) {                                   // 共用的起手白芯：九款同一个第一帧（同样不压扁）
+                                    val f = 1f - k / 0.08f; val r = noteH * 0.9f * (0.6f + 0.4f * f) / bench
+                                    drawCircle(Brush.radialGradient(listOf(Color.White.copy(alpha = .9f * f), Color.White.copy(alpha = .35f * f), Color.Transparent), Offset.Zero, r * 2.2f), r * 2.2f, Offset.Zero)
+                                }
                             }
-                        }
-                        if (k < 0.08f) {                                   // 共用的起手白芯：九款同一个第一帧
-                            val f = 1f - k / 0.08f; val r = noteH * 0.9f * (0.6f + 0.4f * f)
-                            drawCircle(Brush.radialGradient(listOf(Color.White.copy(alpha = .9f * f), Color.White.copy(alpha = .35f * f), Color.Transparent), Offset(cx, judgeY), r * 2.2f), r * 2.2f, Offset(cx, judgeY))
                         }
                     }
                 }
@@ -814,8 +818,9 @@ private fun GameBoard(
                         val k = (t - sh.at) / 0.6f
                         if (k < 0f || k > 1f || sh.lane / Rhythm.LANES != lineK) continue
                         val cx = laneW * (sh.lane % Rhythm.LANES) + laneW / 2f
-                        withTransform({ scale(bench, bench, Offset.Zero) }) {
-                            with(sh.fx) { draw(Tile((cx - noteW / 2) / bench, (judgeY * sh.yk - noteH / 2) / bench, noteW / bench, noteH / bench, kindColor(sh.kind), sh.seed), k, Rng(sh.seed)) }
+                        val jy = judgeY * sh.yk
+                        withTransform({ translate(cx, jy); scale(kx, ky, Offset.Zero); translate(-cx, -jy); scale(bench, bench, Offset.Zero) }) {   // 碎片也不压扁（绕音符中心抵消非等比）
+                            with(sh.fx) { draw(Tile((cx - noteW / 2) / bench, (jy - noteH / 2) / bench, noteW / bench, noteH / bench, kindColor(sh.kind), sh.seed), k, Rng(sh.seed)) }
                         }
                     }
                 }
