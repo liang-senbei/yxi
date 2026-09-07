@@ -11,6 +11,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import org.junit.Assume.assumeTrue
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -60,11 +61,20 @@ class UploadStressTest {
         //    现在:没给密钥直接失败并说清怎么跑,不碰 HostStore。
         val store = HostStore(ctx); val keys = KeyManager(ctx)
         android.util.Log.i("UploadStress", "PUBKEY " + keys.publicKeyLine())
-        val h = store.hosts.value.firstOrNull() ?: error(
-            "没传 stressKey,App 里也没有配好的主机 —— 这个测试**不会**替你种一台(会污染共用模拟器)。\n" +
-            "跑法:-Pandroid.testInstrumentationRunnerArguments.stressKey=<base64url 私钥> " +
-            "stressHost=<目标机> [stressPort=22 stressUser=root]")
-        val cfg = store.configFor(h, keys) ?: error("主机 ${h.alias} 没有可用的认证方式")
+        // ⚠️ 没有可用主机时**跳过**,不是失败。
+        //    这几条要一台真 SSH 目标机才跑得动,而全套里没人会带 stressKey ——
+        //    以前直接 error() 的话,全套永远红 7 条,红得有理由但会**稀释信号**:
+        //    看惯了红的人也就不看红的了(cc-Yxi_pilot 2026-09-07 跑全套 306/红 7 全是这几条)。
+        //    assumeTrue 出来的是「跳过 + 原因」,和「通过」仍然分得清 —— 项目那条
+        //    「没跑和跑过了必须分得清」照旧成立,只是不再冒充失败。
+        val h = store.hosts.value.firstOrNull()
+        assumeTrue("上传压测需要一台 SSH 目标机,跳过。跑法:" +
+            "-Pandroid.testInstrumentationRunnerArguments.stressKey=<base64url 私钥> " +
+            "stressHost=<目标机> [stressPort=22 stressUser=root]", h != null)
+        h!!
+        val cfg = store.configFor(h, keys)
+        assumeTrue("主机 ${h.alias} 没有可用的认证方式,跳过", cfg != null)
+        cfg!!
         // ⚠️ 测试对着回环，不做主机指纹校验（真 App 一定做，见 KnownHosts）
         val s = SshSession(cfg, null)
         runBlocking { s.connect() }
