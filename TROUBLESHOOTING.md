@@ -5600,3 +5600,13 @@ for d in $(unzip -l $A | awk '/classes.*dex/{print $4}'); do unzip -p $A $d | gr
 - **修法 / 怎么避开**：状态改存 `TextFieldValue`（text + selection 一体），`ChatScreen` 里 `draftV`；插字统一走 `insertSpoken(cur, said)` —— 按 `selection.start` 插、插完把光标放到插入内容之后，框自己就滚过去了。用例 `ui/SpokenInsertTest`（5 条：插在光标处 / 空草稿不带前导空格 / 尾部只留一个空格 / 选中一段只插不删 / 光标越界夹回）。
 - ⚠️ **别把 TextFieldValue 拆成 text + selection 再拼一个新的**（那样看着更省事）：拼的时候 `composition` 会丢，中文输入法正拼一半的那段被打断 —— #224「输了文字删不掉了」就是这一类。要么整个原样存回去，要么别碰。
 - ⚠️ 语音是**补话不是替换**：选区是一段范围时按 `start` 插、不删选中的字。吃掉用户已经打好的字是不可逆的。
+
+## #299 音游 swipe 真机划不中、模拟器 adb 快甩能中 —— 判定看的是「动作形状」不是「有没有划」（cc-Yxi，2026-09-07）
+
+**症状**：老板真机「左滑右滑都没有真正被触发」；我在 Mac 模拟器上用 `adb shell input swipe` 按谱面时刻甩，三个 swipe 全 PERFECT。代码和网页试验台一模一样，读不出毛病。
+
+**根因**：原规则是「手指**落下 0.45 秒内**划过 3% 屏宽，且**一次触摸只认一回**」。adb 的 swipe 就是 DOWN 立刻 MOVE 再 UP，正好是这个形状；真人常见的却是**先按住等音符到线再划**（落下早就超过 0.45 秒）、或者**手指不抬着连着左右扫**（第二下起全被 `swiped=true` 吃掉）。两种都判不中，屏幕上看不出任何差别。
+
+**修法**：改成看**最近 0.18 秒内的位移**（`trail` 轨迹）> 3% 屏宽就算一次 swipe；换方向立刻可再触发，同方向 0.30 秒后可再触发。用 `adb shell input motionevent DOWN / MOVE / UP` 复现「按住 0.8 秒再划」「不抬手右→左」两种形状，改后都中（logcat 标签 `YxiRhythm` 里能看到每个判定和 swipe 触发）。
+
+**怎么避开**：触摸手势的 E2E 别只用 `input swipe` —— 它只代表一种手型。至少再补「按住再动」「不抬手连做」两种 `motionevent` 序列；判定日志打到 logcat（屏幕上只看得到结果，看不到「为什么没中」）。
