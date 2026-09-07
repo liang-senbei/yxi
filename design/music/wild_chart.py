@@ -36,7 +36,10 @@ def build_stage(chart):
     top2 = set(sorted(range(len(segs)), key=lambda i: -es[i])[:2])
     quiet = set(sorted(range(len(segs)), key=lambda i: es[i])[:max(1, len(segs) // 4)])
     st = []
-    bg_cycle = [1, 2, 3, 4, 2, 1, 3]
+    # 20 种背景里每张谱随机挑 3~4 种轮着用（老板 09-07 晚：「做 20 种，每个关卡随机三四个」）；同一首固定，不同首不同
+    import random
+    rnd = random.Random(f"wildbg-{chart['song']}")
+    bg_cycle = rnd.sample(range(1, 21), rnd.choice([3, 4]))
     cur_sx, cur_sy, cur_hue = 1.0, 1.0, 0.0
     for i, (a, b) in enumerate(segs):
         ta = phase + a * bar
