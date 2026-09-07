@@ -369,6 +369,8 @@ class EventService : Service() {
         val s = live[hostId] ?: run { note(t("连接不在了，没送出去")); return }
         val ok = app.yxi.ssh.catching { SessionProbe.send(s, full, text) }.getOrDefault(false)
         val short = full.removePrefix("cc-")
+        // 从通知回的也是「自己发出去的话」，一样进「发过的话」（老板要的是**每一条**）
+        if (ok) app.yxi.ui.SentLog.add(this, hostId, full, text)
         if (ok) {
             waiting -= short; waits.remove(short); refreshOngoing()
             runCatching { NotificationManagerCompat.from(this).cancel((hostId + short).hashCode()) }

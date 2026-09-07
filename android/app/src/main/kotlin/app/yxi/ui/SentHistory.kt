@@ -62,7 +62,7 @@ fun SentHistory(
                 if (sent.isEmpty()) {
                     Box(Modifier.fillMaxWidth().padding(20.dp, 10.dp, 20.dp, 26.dp), contentAlignment = Alignment.Center) {
                         Text(
-                            t("这个会话里还没发过话。"),
+                            t("这三天里，这个会话没发过话。"),
                             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.outline,
                         )
                     }

@@ -125,6 +125,11 @@ class MainActivity : ComponentActivity() {
         app.yxi.agent.Tz.load(this)
         app.yxi.ui.Skin.load(this)
         app.yxi.agent.Account.load(this)
+        // 「发过的话」只留三天 —— 光靠打开面板时清是不够的：**不再打开的会话会永远留着**，
+        // 主机删了之后那些文件更是没人再认得。开 App 扫一遍，三天就是三天。（磁盘活儿，别占主线程）
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            runCatching { app.yxi.ui.SentLog.sweep(applicationContext) }
+        }
         // ⚠️ 只挡**多任务卡片**的系统快照（它把对话内容存进 /data/system_ce/，我们清不掉）。
         //    故意不加 FLAG_SECURE：用户录屏是我们主要的 bug 输入来源，加了他只会说「录不了」。
         if (Build.VERSION.SDK_INT >= 33) runCatching { setRecentsScreenshotEnabled(false) }

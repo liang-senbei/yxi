@@ -202,6 +202,9 @@ private fun SharePicker(store: HostStore, keys: KeyManager, text: String?, uris:
                 }
             }
 
+            // 分享进来的这条也算「自己发出去的话」——「发过的话」要的是**每一条**
+            if (sent) host?.let { app.yxi.ui.SentLog.add(ctx, it.id, target.name, body) }
+
             // ⚠️ **如实说清到底成了几步。** 「没送出去」这四个字最坑：文件明明传上去了，
             //    用户以为要重来一遍，于是又传一遍（服务器上就有了两份）。
             val msg = when {

@@ -453,7 +453,9 @@ fun ChatScreen(
     }
     if (sentOpen) SentHistory(
         sent = sentList,
-        onPick = { setDraft(it) },
+        // ⚠️ **接在草稿后面，不是覆盖。** 这个面板现在是个「翻着看」的地方，
+        //    点错一条就把正在打的半句话冲没了，还没有撤销 —— 空草稿时两者等价。
+        onPick = { setDraft(if (draft.isBlank()) it else draft.trimEnd() + "\n" + it) },
         onCopy = { copy(ctx, it) },
         onClose = { sentOpen = false },
     )

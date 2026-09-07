@@ -793,7 +793,11 @@ fun SessionsScreen(
                 // ⚠️ 认 send 的返回值：它现在会回头查输入框空没空，没送到会返回 false。
                 //    原来「没抛异常」就报「已送达」—— 那是猜的（#282）。
                 else app.yxi.ssh.catching {
-                    if (SessionProbe.send(s, target.name, msg)) t("已送达") else t("没送到 —— 再试一次")
+                    if (SessionProbe.send(s, target.name, msg)) {
+                        // 这儿发的也算「自己发出去的话」，进「发过的话」
+                        app.yxi.ui.SentLog.add(ctx, host.id, target.name, msg)
+                        t("已送达")
+                    } else t("没送到 —— 再试一次")
                 }
             },
             muted = target.name in muted,

@@ -1347,6 +1347,7 @@ internal object En {
         // 发过的话（长按「对话」，cc-Yxi_pilot 2026-09-07）
         "发过的话" to "What you've sent",
         "%d 条" to "%d messages",
+        "这三天里，这个会话没发过话。" to "Nothing sent in this session in the last 3 days.",
         "这个会话里还没发过话。" to "You haven't sent anything in this session yet.",
         "点一条填回输入框 · 长按复制 · 只留三天" to "Tap to put it back in the box · long-press to copy · kept 3 days",
         "（只有附件）" to "(attachment only)",

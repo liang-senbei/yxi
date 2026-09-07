@@ -105,6 +105,71 @@ class SentLogTest {
         assertEquals(listOf("好的那条"), SentLog.read(ctx, h, "s1").map { it.text })
     }
 
+    /**
+     * ⚠️ **追加，不是整份回写。** 第一版是「读全表 → 过滤 → writeText 回去」——
+     * `writeText` 先清空再写，写到一半被杀（国产 ROM 后台杀得凶）整个会话的历史就没了；
+     * 读一次失败更是把「只有新这条」写回去，瞬时错误变永久全丢。
+     * 判据：文件里必须**保留旧行**，而且行数只增一。
+     */
+    @Test fun 记新的一条不动老的() {
+        SentLog.add(ctx, h, "s1", "老的")
+        val f = File(ctx.filesDir, "sent").listFiles()!!.single()
+        val before = f.readText()
+        SentLog.add(ctx, h, "s1", "新的")
+        val after = f.readText()
+        assertTrue("老的那条被整份覆盖没了", after.startsWith(before))
+        assertEquals(2, after.trim().lines().size)
+    }
+
+    /** 每条结尾要有换行，否则下一条接在上一行屁股后面，两条一起解析失败 */
+    @Test fun 每条都以换行收尾() {
+        SentLog.add(ctx, h, "s1", "一")
+        val f = File(ctx.filesDir, "sent").listFiles()!!.single()
+        assertTrue("没换行结尾，下一条会粘上来", f.readText().endsWith("\n"))
+        SentLog.add(ctx, h, "s1", "二")
+        assertEquals(listOf("二", "一"), SentLog.read(ctx, h, "s1").map { it.text })
+    }
+
+    /**
+     * ⚠️ 升级坑：**上一版是整份回写、末尾不带换行的**。装了新版之后第一次发话要是直接追加，
+     * 新的一条就粘在老的最后一行屁股后面，两条一起解析失败 —— 老用户的历史当场少两条。
+     */
+    @Test fun 老格式没有末尾换行_追加不粘行() {
+        val dir = File(ctx.filesDir, "sent").apply { mkdirs() }
+        SentLog.add(ctx, h, "s1", "占位")            // 先让文件名生成出来
+        val f = dir.listFiles()!!.single()
+        val now = System.currentTimeMillis()
+        // 复刻老版本写出来的样子：两行、**末尾没有换行**
+        f.writeText("""{"t":$now,"a":0,"x":"老一"}""" + "\n" + """{"t":$now,"a":0,"x":"老二"}""")
+        SentLog.add(ctx, h, "s1", "新的")
+        assertEquals(listOf("新的", "老二", "老一"), SentLog.read(ctx, h, "s1").map { it.text })
+    }
+
+    /**
+     * ⚠️ 「记三天」不能只在你**正在用的那个会话**里成立：不再打开的会话、以及主机删掉之后
+     * 那些没人再认得的文件，都得跟着过期。开 App 扫一遍。
+     */
+    @Test fun 扫全盘_把不再打开的会话也清掉() {
+        SentLog.add(ctx, h, "还在用", "新的")
+        SentLog.add(ctx, h, "不再打开", "老的")
+        val dir = File(ctx.filesDir, "sent")
+        val old = dir.listFiles()!!.first { it.readText().contains("老的") }
+        old.writeText("""{"t":${System.currentTimeMillis() - 4L * 24 * 3600 * 1000},"a":0,"x":"老的"}""" + "\n")
+        assertEquals(1, SentLog.sweep(ctx))
+        assertTrue("过期会话的文件还在", !old.exists())
+        assertEquals(listOf("新的"), SentLog.read(ctx, h, "还在用").map { it.text })
+    }
+
+    /** 压缩写到一半崩了会留个 .tmp —— 扫的时候顺手收掉，别把它当成一个会话 */
+    @Test fun 扫的时候收掉半道上的tmp() {
+        SentLog.add(ctx, h, "s1", "好的")
+        val tmp = File(File(ctx.filesDir, "sent"), "x.jsonl.tmp")
+        tmp.writeText("半截")
+        SentLog.sweep(ctx)
+        assertTrue(!tmp.exists())
+        assertEquals(listOf("好的"), SentLog.read(ctx, h, "s1").map { it.text })
+    }
+
     @Test fun 空话不记() {
         SentLog.add(ctx, h, "s1", "   ")
         assertTrue(SentLog.read(ctx, h, "s1").isEmpty())
