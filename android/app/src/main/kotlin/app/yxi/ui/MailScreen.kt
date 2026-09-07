@@ -165,6 +165,23 @@ fun MailScreen(modifier: Modifier = Modifier) {
                                     Modifier.weight(1f),
                                     style = MaterialTheme.typography.labelSmall, color = Muted,
                                     textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                                    // ⚠️ Row 先量没有 weight 的子项，剩下的才给 weight —— 剩 0 就是 0。
+                                    //    右边加了倒计时角标之后，大字号窄屏下日期会被挤到换行、把整行撑高。
+                                    //    截断成「2026-09-05…」比撑高好，倒计时优先。
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                )
+                                // 快到期了才说 —— 每封都挂个「还剩 29 天」是噪音，
+                                // 临期才是信息。⚠️ 带**未领的兑换码**的信要早点提醒（那种删了就只剩截图），
+                                //    所以门槛放宽一倍。
+                                val left = daysLeft(m)
+                                if (left != null && left <= (if (hasCode(m)) 14 else 7)) Text(
+                                    // ⚠️ `left == 0` 只可能是**已经过期、cron 还没扫到**（每天北京 03:17 才跑），
+                                    //    不是「今天到期」—— 真的今天到期会因为向上取整显示「还剩 1 天」。
+                                    if (left <= 0) t("随时会清理") else t("还剩 %d 天").format(left),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (left <= 3) MaterialTheme.colorScheme.error else Amber,
+                                    maxLines = 1, softWrap = false,
                                 )
                             }
                             Text(
@@ -195,6 +212,9 @@ fun MailScreen(modifier: Modifier = Modifier) {
                                     // 删除：可见入口 + 确认框（STYLE.md「危险动作永远多一步」）。
                                     // 有东西没领的不给删 —— 服务端也会拒（409），这里只是把话先说在前面
                                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                        // ⚠️ 到期规则**说在附件后面**：说在「领取」按钮上方的话，
+                                        //    「不用担心漏领」正好印在那个按钮头上，自己拆自己的台。
+                                        ExpiryNote(m)
                                         if (m.claimable) Text(
                                             t("先领取再删"), Modifier.padding(12.dp, 6.dp),
                                             style = MaterialTheme.typography.labelSmall, color = Muted,
@@ -292,6 +312,50 @@ private fun Hint(text: String) {
     }
 }
 
+/** 这封信还剩几天被自动清掉。null = 服务端没给到期时间（老版本）。 */
+private fun daysLeft(m: Account.Mail): Int? {
+    val at = m.expiresAt?.takeIf { it.isNotEmpty() } ?: return null
+    val ms = app.yxi.agent.Tz.parse(at)?.toEpochMilli() ?: return null
+    // 向上取整：还差 1 小时也算「还剩 1 天」，不能显示成 0 天让人以为已经没了
+    return kotlin.math.ceil((ms - System.currentTimeMillis()) / 86_400_000.0).toInt().coerceAtLeast(0)
+}
+
+/** 这封信里有没有**兑换码**。码不会自动领，信删了就不再显示。 */
+private fun hasCode(m: Account.Mail): Boolean = m.attachments.any { it.kind == "code" }
+
+/**
+ * 到期会发生什么 —— 三种情况分开说。
+ *
+ * ⚠️ 只写「30 天后删除」是不够的：用户真正要知道的是**自己会不会亏**。
+ *    能领的三种到期自动入账（不亏）；兑换码不会自动领，但**码本身不会失效**，
+ *    只是信删了就不再显示 —— 买来的在钱包 → 订单记录里另有一份，送的只有信这一处。
+ */
+@Composable
+private fun ExpiryNote(m: Account.Mail) {
+    val left = daysLeft(m) ?: return
+    val code = hasCode(m)
+    // ⚠️ 判据是「**有没有**可领的」，不是 `claimable`（那个还看领没领）——
+    //    领过之后落到光秃秃的「N 天后自动清理」，紧接在「已领取」下面，
+    //    会被读成「我领到手的东西也要被清掉」。东西早进账了，信删不删无关。
+    val grantable = m.attachments.any { it.grantable }
+    Text(
+        when {
+            // 后台发信表单是把四种附件拼进同一个数组的，**「码 + 可领」是常态不是边角**。
+            // 只说码那句的话，老板最在意的「会不会亏」那半就被吞了。
+            code && grantable ->
+                t("这封信 %d 天后不再显示。能领的会自动入账；兑换码不会失效，但信删了这儿就看不到了 —— 先抄下来。").format(left)
+            // ⚠️ 别说「只有这儿有一份」：**买来的码在钱包 → 订单记录里还留着**，
+            //    而客户端分不出买来的和送的（两者形状一模一样）。说绝对话就是说谎。
+            code -> t("这封信 %d 天后不再显示。兑换码不会失效，但信删了这儿就看不到了 —— 先抄下来（买来的码在钱包 → 订单记录里还留着）。").format(left)
+            grantable -> t("这封信 %d 天后自动清理。里面能领的东西不会丢 —— 没点也会自动入账。").format(left)
+            else -> t("这封信 %d 天后自动清理。").format(left)
+        },
+        Modifier.padding(top = 6.dp),
+        style = MaterialTheme.typography.labelSmall,
+        color = if (code) Amber else Muted,
+    )
+}
+
 /**
  * 信里的附件 + 「领取」。
  *
@@ -312,7 +376,12 @@ private fun Attachments(m: Account.Mail, onClaimed: (Account.Claim?) -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Box(Modifier.size(6.dp).clip(CircleShape).background(if (a.grantable) Copper else Muted))
-                Text(a.name, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    a.shown,
+                    style = if (a.kind == "code") MaterialTheme.typography.bodySmall.copy(
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    ) else MaterialTheme.typography.bodySmall,
+                )
                 // 兑换码是给人抄走的，长按复制
                 if (a.kind == "code") Text(
                     t("长按复制"), style = MaterialTheme.typography.labelSmall, color = Muted,
@@ -321,7 +390,7 @@ private fun Attachments(m: Account.Mail, onClaimed: (Account.Claim?) -> Unit) {
                         onLongClick = {
                             val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                                 as android.content.ClipboardManager
-                            cm.setPrimaryClip(android.content.ClipData.newPlainText("code", a.name))
+                            cm.setPrimaryClip(android.content.ClipData.newPlainText("code", a.shown))
                             android.widget.Toast.makeText(ctx, t("复制好了"), android.widget.Toast.LENGTH_SHORT).show()
                         },
                     ),

@@ -107,6 +107,13 @@ object Account {
         val body: String,
         val createdAt: String,
         val readAt: String?,
+        /**
+         * 这封信什么时候会被自动清掉（= 发信时间 + 保留期）。空 = 服务端没给（老版本）。
+         * ⚠️ 到期时**能领的三种附件会自动入账**（曦光 / 余额 / 会员天数），用户不点也不亏；
+         *    **兑换码不会** —— 码在后台照旧有效，但信删了就不再显示，
+         *    送的码只有信这一处（买来的在钱包 → 订单记录里另有一份）。
+         */
+        val expiresAt: String? = null,
         /** 发件人显示名（服务端解析的，历史信件跟着一起改） */
         val fromName: String = "",
         val fromAvatar: String = "",
@@ -127,7 +134,15 @@ object Account {
      * ⚠️ [kind] == `code` 的**什么都不发**，只是印一串码面给用户自己去兑 ——
      * 所以它不算 [grantable]，一封只带 code 的信没有「领取」这一步。
      */
-    data class Attach(val kind: String, val amount: Long, val name: String) {
+    data class Attach(val kind: String, val amount: Long, val name: String, val code: String = "") {
+        /**
+         * 给用户看、给用户抄的那一行。
+         * ⚠️ **码在 [code] 字段里，不在 [name] 里** —— `name` 是「兑换码」或「PRO 会员 30 天」这种标签。
+         *    原来界面显示和长按复制的都是 `name`，等于让人抄一个屏幕上没有的东西
+         *    （买来的信更荒唐：复制到的是「PRO 会员 30 天」这七个字）。
+         */
+        val shown: String get() = code.ifEmpty { name }
+
         val grantable: Boolean get() = kind == "tickets" || kind == "balance_cents" || kind == "membership_days"
     }
 
@@ -542,12 +557,13 @@ object Account {
                             id = it.str("id"), kind = it.str("kind"), title = it.str("title"),
                             body = it.str("body"), createdAt = it.str("createdAt"),
                             readAt = it.str("readAt").takeIf { r -> r.isNotEmpty() },
+                            expiresAt = it.str("expiresAt").takeIf { r -> r.isNotEmpty() },
                             fromName = it.optJSONObject("from")?.str("name").orEmpty(),
                             fromAvatar = it.optJSONObject("from")?.str("avatar").orEmpty(),
                             attachments = it.optJSONArray("attachments").let { a ->
                                 (0 until (a?.length() ?: 0)).mapNotNull { j ->
                                     a?.optJSONObject(j)?.let { x ->
-                                        Attach(x.str("kind"), x.optLong("amount"), x.str("name"))
+                                        Attach(x.str("kind"), x.optLong("amount"), x.str("name"), x.str("code"))
                                     }
                                 }
                             },
