@@ -1,6 +1,8 @@
 # TROUBLESHOOTING · Yxi
 
 > 每条 = 症状 → 根因 → 修法。**只增不删**。
+> **写新条目前先跑 `dev/ts-number.sh` 拿号**：四个 agent 同时往这儿追加，
+> 号靠肉眼扫文件尾巴挑必然撞 —— 2026-09-07 一天撞三次，回头一查历史上还躺着四对（见 #317 那条的说法）。
 
 ## 1. `accounts.google.com` 直连超时，但 `dl.google.com` / `play.google.com` 通
 - **症状**：服务器上 `curl https://accounts.google.com/` 卡住返回 000；同时 `dl.google.com` 正常 302。
