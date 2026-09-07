@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -111,8 +112,27 @@ fun SettingsScreen(
     val watchN = store.hosts.collectAsState().value.count { it.watch }
     val watchSummary = if (watchN > 0) t("盯着 %d 台").format(watchN) else t("一台都没开")
 
+    // 下拉刷新（老板 2026-09-07：「会话和主机都能下拉刷新了，配置和我的也要」）。
+    // 这一页的数据就是 /api/me 那份（红点、余额、曦光）+ 装扮归属，所以刷新 = 重拉这两样。
+    // ⚠️ 没登录就不空跑一趟网络，只转一下：手势要有反馈，但别装作在拉什么东西。
+    var refreshing by remember { mutableStateOf(false) }
+    PullToRefreshBox(
+        isRefreshing = refreshing,
+        onRefresh = {
+            if (!refreshing) scope.launch {
+                refreshing = true
+                if (app.yxi.agent.Account.signedIn) {
+                    app.yxi.agent.Account.refresh(ctx)
+                    Cosmetics.refresh(ctx)
+                }
+                kotlinx.coroutines.delay(600)   // 一闪而过的刷新等于没反馈（同 SessionsScreen）
+                refreshing = false
+            }
+        },
+        modifier = modifier.fillMaxSize(),
+    ) {
     Column(
-        modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         // 标题行：左边「我的 / 设置」，右边一个扫一扫（老板 2026-09-06：「以后扫东西就不用用微信扫」）。
@@ -749,6 +769,7 @@ fun SettingsScreen(
         }
         }   // if (mine) … else …
     }
+    }   // PullToRefreshBox
 
     if (showKey) PublicKeySheetPublic(keys) { showKey = false }
 

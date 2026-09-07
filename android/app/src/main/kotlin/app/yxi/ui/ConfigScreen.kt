@@ -6,6 +6,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -53,10 +54,20 @@ fun ConfigScreen(
     var open by remember(host.id) { mutableStateOf<ConfigRemote.Item?>(null) }
     val expanded = remember(host.id) { mutableStateListOf<String>() }
     var panel by rememberSaveable { mutableStateOf("connect") }
+    // 下拉刷新（老板 2026-09-07：「会话和主机都能下拉刷新了，配置和我的也要」）
+    var refreshing by remember { mutableStateOf(false) }
+    var tick by remember(host.id) { mutableIntStateOf(0) }
 
     LaunchedEffect(ssh, host.id) {
         tools = null
         tools = ConfigRemote.load(ssh)
+    }
+    // ⚠️ 刷新这条**不清空 tools** —— 清了整页会闪成转圈，下拉的人只想让它重读一遍，
+    //    不是想把已经看着的东西弄没。读失败也保留旧的（没网就把配置全清掉是最差的反馈）。
+    LaunchedEffect(tick) {
+        if (tick == 0) return@LaunchedEffect
+        runCatching { ConfigRemote.load(ssh) }.getOrNull()?.let { tools = it }
+        refreshing = false
     }
 
     open?.let { item ->
@@ -112,11 +123,21 @@ fun ConfigScreen(
         if (panel == "connect") { ConnectPanel(ssh, host); return@Column }
 
         val ts = tools
+        PullToRefreshBox(
+            isRefreshing = refreshing,
+            onRefresh = { if (!refreshing) { refreshing = true; tick++ } },
+            modifier = Modifier.weight(1f),
+        ) {
         when {
             ts == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(Modifier.size(30.dp), strokeWidth = 2.5.dp)
             }
-            ts.all { it.cats.isEmpty() } -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            // ⚠️ 空状态也要能下拉 —— 「没找到配置」正是最想再拉一次的时候。
+            //    加 verticalScroll 不是为了滚（内容没超屏），是让手势有东西可传给 PullToRefreshBox。
+            ts.all { it.cats.isEmpty() } -> Box(
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                contentAlignment = Alignment.Center,
+            ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(t("这台机器上没找到配置"), style = MaterialTheme.typography.titleMedium)
                     Text(t("装了 Claude Code（~/.claude）或 Codex（~/.codex）才有"),
@@ -145,6 +166,7 @@ fun ConfigScreen(
                 }
             }
         }
+        }   // PullToRefreshBox
     }
 }
 
