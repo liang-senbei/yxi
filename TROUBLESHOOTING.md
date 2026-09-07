@@ -5735,3 +5735,9 @@ for d in $(unzip -l $A | awk '/classes.*dex/{print $4}'); do unzip -p $A $d | gr
 **根因**：rhythm-sync 只写 /opt 上跑的那份；logto 随后拿仓库里旧的 service/rhythm.json 提交 + 部署，deploy.sh 把仓库那份装回 /opt。两份配置、两个写入者，谁后谁赢。
 **修法**（logto 已推）：rhythm-sync **同一步把 /opt 和仓库两份都写掉**，两边内容永远一致，不再依赖「跑完记得提交」。
 **怎么避开**：凡是「脚本改线上、人再改仓库」的双写结构，都要让脚本一次写两份；两份内容用逐字比对核，不只比数量。
+
+## #310 emu.sh claim 的输出丢进 /dev/null，claim 失败没察觉，后面的裸 adb 全在别人的锁里跑（cc-Yxi，2026-09-07）
+
+**症状**：脚本开头 `emu.sh claim cc-Yxi >/dev/null`，其实 pilot 正占着；后面的 `adb install / shell input` 走的是裸 adb（不经 emu.sh 的锁守卫），在别人的 E2E 中间装包、跑局；只有最后经 emu.sh 的 `shot / release` 被拦（退出码 9）。
+**根因**：锁只拦 emu.sh 的子命令，裸 adb 绕过；claim 的返回值没检查。
+**怎么避开**：claim 必须判返回（`grep -q 占用模拟器` 或 exit code），失败就退出或轮询等；所有会动设备的操作一律走 `EMU_WHO=… emu.sh adb …`，不用裸 adb（#292 那条的延伸）。
