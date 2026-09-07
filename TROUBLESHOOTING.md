@@ -5640,3 +5640,17 @@ for d in $(unzip -l $A | awk '/classes.*dex/{print $4}'); do unzip -p $A $d | gr
 - **修法 / 怎么避开**：key 换成**打开那个界面的开关**（`LaunchedEffect(library) { if (library) … }`），
   「要看的时候才拉」。一般规律：**做这类"看结果"的功能时，先问一句「用户会不会做完动作立刻回来看」** ——
   会的话，`LaunchedEffect(Unit)` 就是错的 key。
+
+## #300 给渲染表加元素，配套的常量表没跟着扩 → 跳档时数组越界必崩，截图 E2E 看不出来（cc-Yxi，2026-09-07）
+
+**症状**：给底光加了两团「高潮才浮出来」的光（blobs 4 → 6），琥珀色表 `AMBER` 还是 4 个；`paint({ i -> AMBER[i] })` 遍历六团，连击到档位（warmK > 0）那一下 `ArrayIndexOutOfBoundsException`，整个 App 崩。模拟器上演示模式一跑到 8 连击就死；截图 E2E 只截前几秒看不出来，是 opus 审查按代码路径推出来的，logcat 里 `FATAL EXCEPTION` 一条印证。
+
+**根因**：两张表靠「下标对齐」隐式耦合，改一张不改另一张编译器不报错。
+
+**修法 / 怎么避开**：`AMBER[i % AMBER.size]`；以后凡是 `xs.forEachIndexed { i -> ys[i] }` 这种并行数组，要么合成一个对象数组，要么取模。E2E 前 `logcat -c`，跑完 `grep -c "FATAL EXCEPTION"`，崩没崩用数字说话。
+
+## #301 Kotlin object 里 `val` 按声明顺序初始化：默认参数引用后面声明的 val → ExceptionInInitializerError（cc-Yxi，2026-09-07）
+
+**症状**：进活动页直接崩，`ExceptionInInitializerError at ActivityScreen.kt:207`（第一次碰 `Rhythm` 对象的地方）。
+**根因**：`data class Song(..., val diffs: List<String> = DIFFS)`，`SONGS` 列表在 `DIFFS` **之前**声明；object 初始化到 SONGS 时 DIFFS 还是 null，默认参数求值 NPE，被包成 ExceptionInInitializerError。编译器不报。
+**修法**：被默认参数引用的常量放到使用它的声明**前面**（已加注释钉住）。看到 ExceptionInInitializerError 先查 object 里的声明顺序。
