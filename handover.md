@@ -120,8 +120,6 @@
   · ⚠️ **BPM**：只有煉獄セレナーデ页面标了 BPM（172，librosa 估成 112，已按 172 重出）；其余按 librosa 估的（tempogram 复核过），magical 129 / picopico 117 / rondo 99 有二义（可能是 199 / 123 / 198），真机打着不对拍就报我。
   · 老板要的「有名的二次元名曲」：调研结论只有 **t+pazolite「without Permission」**（条款明写「音楽ゲーム／個人商業問わず無許可無償」）—— 要买 BOOTH Dev Kit ¥1,000 或 Bandcamp $8.99，等老板买。
 
-- **cc-Bug_solverYxi · 看板上「官方登录」那行补出具体模型**（老板 2026-09-07 圈的那句）：`claude · 官方登录 · opus-5`。⚠️ **按会话读转录里最后一条 model，不拿 settings.json 的账号默认糊** ——实测同机各会话不一样（Yxi 在 fable-5-1、别的在 opus-5），糊上去就是个假值。⚠️ 单独一条 **60 秒**慢轮询（`Lines.models`），没并进线路那条 5 秒的：每个 cwd 要 ls+tail+grep 三个进程，三十个会话就是每 5 秒近百个进程。走中转的那行不补（模型由中转定，我们不知道）。（**编译 ✓ · 脚本和解析拿真转录跑过**：Yxi→fable-5-1 / Bug_solverYxi→opus-5 / 读不到的不显示）
-
 ⚠️ **发版前先跑一次全套**（`connectedDebugAndroidTest`），这一步以前不在关卡里 ——
 两条测试从 09-05 起一直红着没人发现（#286）。UploadStress 那 7 条要先配主机，配法见 #286。
 
