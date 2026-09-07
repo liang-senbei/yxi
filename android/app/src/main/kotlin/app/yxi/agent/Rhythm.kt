@@ -2,6 +2,7 @@ package app.yxi.agent
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.util.UUID
@@ -299,6 +300,23 @@ object Rhythm {
         } finally { c.disconnect() }
     }
 
+    private val bg = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+    @Volatile private var refreshing = false
+
+    /**
+     * 进选曲页调一次。**不跟页面的生死绑定**：写成 LaunchedEffect 的话，用户看了几秒就点进曲子，
+     * 协程被取消，17 张谱下到第 2 首就断（模拟器上抓到的：目录里只有 snow）。这里用 object 级的 scope 跑完为止；回调回主线程。
+     */
+    fun refreshInBackground(ctx: Context, onDone: (Boolean) -> Unit) {
+        if (refreshing) return
+        refreshing = true
+        val app = ctx.applicationContext
+        bg.launch {
+            val ok = try { refresh(app) } finally { refreshing = false }
+            withContext(Dispatchers.Main) { onDone(ok) }
+        }
+    }
+
     /** 拉清单 + 补齐清单里各曲子的谱 JSON（小文件）。网络不通返回 false，本地照旧能玩 */
     suspend fun refresh(ctx: Context): Boolean = withContext(Dispatchers.IO) {
         runCatching {
@@ -318,7 +336,7 @@ object Rhythm {
                 verFile.parentFile?.mkdirs(); verFile.writeText(ver.toString())
             }
             list.isNotEmpty()
-        }.getOrDefault(false)
+        }.onFailure { android.util.Log.w("YxiRhythm", "关卡清单刷新失败：$it") }.getOrDefault(false)
     }
 
     /** 下载清单独有曲子的音频（一两 MB）。进度 0..1 */

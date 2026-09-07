@@ -176,7 +176,7 @@ private fun SongList(synced: Int, onPick: (Rhythm.Song, String) -> Unit, onDemo:
     var listTick by remember { mutableIntStateOf(0) }
     val songs = remember(synced, listTick) { Rhythm.songs(ctx) }
     // 关卡联网（老板 09-07）：进来先拉一次公网清单，拉到就刷新列表；拉不到静默用本地
-    LaunchedEffect(Unit) { if (Rhythm.refresh(ctx)) listTick++ }
+    LaunchedEffect(Unit) { Rhythm.refreshInBackground(ctx) { if (it) listTick++ } }   // 不绑页面生死：页面走了也要把谱下完
     val scope = rememberCoroutineScope()
     val downloading = remember { mutableStateMapOf<String, Float>() }
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
