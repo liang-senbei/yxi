@@ -68,6 +68,7 @@ import app.yxi.ui.theme.Copper
 import app.yxi.ui.theme.Muted
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlin.math.sin
 import app.yxi.ui.rhythm.Hit
 import app.yxi.ui.rhythm.HitFx
 import app.yxi.ui.rhythm.HitFxs
@@ -275,7 +276,7 @@ private class Live(val chart: Rhythm.Chart) {
      * 方向相反的两下挨着中，自然互相抵消，不会转飞。
      */
     fun tilt(now: Float, dir: Int) {
-        tiltDeg = (tiltAt(now) * 0.55f + dir * 4.5f).coerceIn(-6f, 6f)
+        tiltDeg = (tiltAt(now) * 0.55f + dir * 6f).coerceIn(-6f, 6f)   // 试验台：6°·摆动(1)
         tiltAt = now
     }
 
@@ -288,8 +289,9 @@ private class Live(val chart: Rhythm.Chart) {
      */
     fun tiltAt(now: Float): Float {
         val dt = now - tiltAt
-        if (dt < 0f || dt > 2f) return 0f
-        return tiltDeg * kotlin.math.exp(-dt / 0.15f)
+        if (dt < 0f || dt > 3f) return 0f
+        // 试验台的弹簧回正（老板 09-06 定的 摆动=1 回正=2.7）：exp(-dt/(0.32/2.7))·cos(9·dt) —— 甩过去、弹两下、回正
+        return tiltDeg * kotlin.math.exp(-dt / (0.32f / 2.7f)) * kotlin.math.cos(dt * 9f)
     }
 
     val byLane: List<List<Rhythm.Note>> = (0..3).map { l -> chart.notes.filter { it.lane == l } }
@@ -500,11 +502,8 @@ private fun GameBoard(
                 // 场地画在线的坐标系里（规格 §5）：手指位置先反变换回线的坐标系再分轨、再算划动方向 ——
                 // 线立着的时候「左右滑」就是屏幕上的上下滑。
                 fun toLocal(pos: Offset): Offset {
-                    val pose = chart.poseAt(now)
-                    val deg = pose.deg * lineScale + live.tiltAt(now)
+                    val (deg, cx, cy) = linePose(chart, live, now, lineScale, size.width.toFloat(), size.height.toFloat())   // ⚠️ 必须和画的那边同一份，不然点的和看的错位
                     val ly = size.height * 0.78f
-                    val cx = size.width / 2f + pose.dx * lineScale * size.width
-                    val cy = ly + pose.dy * lineScale * size.height
                     val rad = -deg * (Math.PI / 180f).toFloat()
                     val ox = pos.x - cx; val oy = pos.y - cy
                     return Offset(
@@ -556,11 +555,8 @@ private fun GameBoard(
             val t = now
             val W = size.width; val H = size.height
             val laneW = W / 4f
-            val pose = chart.poseAt(t)
-            val deg = pose.deg * lineScale + live.tiltAt(t)          // 不限幅：线想怎么转就怎么转（规格 §5）
+            val (deg, lineCx, lineCy) = linePose(chart, live, t, lineScale, W, H)
             val judgeY = H * 0.78f                                    // 线的坐标系里线永远在这儿
-            val lineCx = W / 2f + pose.dx * lineScale * W
-            val lineCy = judgeY + pose.dy * lineScale * H
             val noteH = (H * 0.011f).coerceIn(6f * density, 11f * density)   // 薄片（老板选的），CSS 6~11px
             val noteW = minOf(laneW * 0.55f, W * 0.052f) * 1.2f
             val bench = H / 580f                                      // 网页试验台是 580 CSS px 高：特效里的线宽 / 点半径按它缩放（port-hit 提醒）
@@ -725,8 +721,9 @@ private fun GameBoard(
             Modifier.align(Alignment.TopEnd).padding(14.dp, 10.dp),
             style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Light), color = ink.copy(alpha = .9f),
         )
-        Text(t(chart.zh), Modifier.align(Alignment.BottomStart).padding(14.dp, 10.dp), style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Light), color = ink.copy(alpha = .6f))
-        Text(t(if (difficulty == "hard") "认真" else "轻松"), Modifier.align(Alignment.BottomEnd).padding(14.dp, 10.dp), style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Light), color = ink.copy(alpha = .6f))
+        // 左下角英文名（老板 09-06：「左下角用英文，yxi…dancing」）；曲名挪到右下跟难度一起
+        Text("Yxi Dancing Beat", Modifier.align(Alignment.BottomStart).padding(14.dp, 10.dp), style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Light), color = ink.copy(alpha = .6f))
+        Text(t(chart.zh) + " · " + t(if (difficulty == "hard") "认真" else "轻松"), Modifier.align(Alignment.BottomEnd).padding(14.dp, 10.dp), style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Light), color = ink.copy(alpha = .6f))
         // Miss：红字一闪（每一下都弹字太吵，只弹漏）
         Box(Modifier.align(Alignment.Center).graphicsLayer {
             val age = now - missAt
@@ -803,6 +800,20 @@ private fun mix(a: Color, b: Color, f: Float) = Color(
 )
 
 /** 评价词的生命：1.2 秒，k 用帧时钟推，只重组这一个小组件 */
+/**
+ * 判定线此刻在屏幕上的姿态：(角度, 中心 x, 中心 y)。画的一侧和手指反变换的一侧**必须**共用这一份（规格 §5）。
+ * = 谱面编舞 poseAt + 试验台那两样「活气」（老板 09-06 定：谱面摆动 1.7 —— 慢摆 sin(0.45t)·2.2°、上下呼吸 sin(0.3t)·2% 屏高）+ 玩家甩出来的 tilt。
+ * 角度不限幅：线想怎么转就怎么转。
+ */
+private fun linePose(chart: Rhythm.Chart, live: Live, t: Float, lineScale: Float, w: Float, h: Float): Triple<Float, Float, Float> {
+    val pose = chart.poseAt(t)
+    val sway = 1.7f * lineScale
+    val deg = pose.deg * lineScale + sin(t * 0.45f) * 2.2f * sway + live.tiltAt(t)
+    val cx = w / 2f + pose.dx * lineScale * w
+    val cy = h * 0.78f + pose.dy * lineScale * h + sin(t * 0.3f) * h * 0.02f * sway
+    return Triple(deg, cx, cy)
+}
+
 @Composable
 private fun PraiseOverlay(word: String, at: Long, motion: Boolean, modifier: Modifier = Modifier) {
     var k by remember(at) { mutableFloatStateOf(if (motion) 0f else 0.3f) }
@@ -1122,7 +1133,7 @@ private fun FeelPanel() {
                 }
             }
             Feel(t("音符下落"), when { approach <= 1.2f -> t("快"); approach >= 2.0f -> t("慢"); else -> t("适中") }) {
-                approach = when { approach <= 1.2f -> 1.6f; approach <= 1.7f -> 2.2f; else -> 1.1f }
+                approach = when { approach <= 1.2f -> 1.55f; approach <= 1.7f -> 2.2f; else -> 1.1f }
                 Rhythm.setApproach(ctx, approach)
             }
             Feel(t("打击音"), lvName(vol)) {

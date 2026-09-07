@@ -71,7 +71,7 @@ object Rhythm {
     fun windowMs(kind: Kind): Float = if (kind == Kind.SWIPE) SWIPE_MS else GOOD_MS
 
     /** 音符从冒头到判定线的时间（秒）。越大越"慢"、越好读谱 */
-    const val APPROACH = 1.6f
+    const val APPROACH = 1.55f   // 老板 09-06 在试验台上定的；新谱自带 approach，这只是旧谱和「试一下」的默认
 
     enum class Judge { PERFECT, GOOD, MISS }
 
@@ -412,7 +412,7 @@ object Rhythm {
     fun setHaptic(ctx: Context, v: Int) = p(ctx).edit().putInt("rhythm.haptic.level", v.coerceIn(0, 3)).apply()
 
     /** 命中特效的大小：0 = 不放，1 = 标准 */
-    fun fxScale(ctx: Context): Float = p(ctx).getFloat("rhythm.fx", 1f)
+    fun fxScale(ctx: Context): Float = p(ctx).getFloat("rhythm.fx", 1.1f)   // 老板 09-06 定的爆点默认 1.1
     fun setFxScale(ctx: Context, v: Float) = p(ctx).edit().putFloat("rhythm.fx", v.coerceIn(0f, 1.6f)).apply()
 
     /** 判定线晃动的幅度：0 = 完全不动，1 = 谱面里写的那么大 */
