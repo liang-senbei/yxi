@@ -5728,3 +5728,10 @@ for d in $(unzip -l $A | awk '/classes.*dex/{print $4}'); do unzip -p $A $d | gr
 **症状**：煉獄セレナーデ页面写 ♩=172，librosa `beat_track` 估成 112（≈ 2/3）；按 112 出的谱整首不对拍。
 **根因**：起音自相关的谐波峰，快歌常落到 2/3 或 1/2。
 **修法**：`incoming/<曲>.json` 里写 `bpm`，`make_remote_songs.py` 会锁定；没标的用 `librosa.feature.tempo` 多个 `start_bpm` 先验 + tempogram 峰复核，仍二义的记进 handover 让真机验。
+
+## #309 发布谱面 sync 完，服务端部署把线上配置盖回旧版 → 清单有、服务端不认，交成绩 404（2026-09-07，logto 定位并修）
+
+**症状**：`publish_songs.py` 跑完 rhythm-sync（线上 36 张），几分钟后公网清单 36 张、服务端只有 35 张；用户能下能打，交成绩才 404。
+**根因**：rhythm-sync 只写 /opt 上跑的那份；logto 随后拿仓库里旧的 service/rhythm.json 提交 + 部署，deploy.sh 把仓库那份装回 /opt。两份配置、两个写入者，谁后谁赢。
+**修法**（logto 已推）：rhythm-sync **同一步把 /opt 和仓库两份都写掉**，两边内容永远一致，不再依赖「跑完记得提交」。
+**怎么避开**：凡是「脚本改线上、人再改仓库」的双写结构，都要让脚本一次写两份；两份内容用逐字比对核，不只比数量。
