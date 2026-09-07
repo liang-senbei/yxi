@@ -242,7 +242,7 @@ object Cosmetics {
      */
     suspend fun refresh(ctx: Context): Boolean {
         val s = Wish.collection(ctx) ?: return false
-        p(ctx).edit().putStringSet("cos.owned", s).apply()
+        p(ctx).edit().putStringSet("cos.owned", s.owned).apply()
         rev++
         return true
     }

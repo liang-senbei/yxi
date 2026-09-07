@@ -144,14 +144,17 @@ fun WishScreen(modifier: Modifier = Modifier) {
         }
     }
     // 拥有哪些 —— **服务端说了算**（见 Wish.collection 的注释）。拿不到就当空，界面会说明还没开通。
-    var ownedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
-    LaunchedEffect(Unit) { Wish.collection(ctx)?.let { ownedIds = it } }
+    var coll by remember { mutableStateOf(Wish.Collection(emptySet())) }
+    // ⚠️ key 必须是 [library] 不是 Unit：老板的用法就是「抽出重复 → 立刻点卡牌库看命座」。
+    //    只在进页面拉一次的话，那一刻显示的是抽卡之前的旧数据 —— 结算页刚说完
+    //    「已有 · 命座 +1」、卡牌库里数字没动，比不显示还糟。每次开库对一次。
+    LaunchedEffect(library) { if (library) Wish.collection(ctx)?.let { coll = it } }
     if (library) Dialog(
         onDismissRequest = { library = false },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
-            CardLibrary(owned = ownedIds, live = pool != null)
+            CardLibrary(coll, live = pool != null)
             Text(
                 "✕", Modifier.align(Alignment.TopEnd).padding(18.dp)
                     .clip(RoundedCornerShape(100.dp)).clickable { library = false }.padding(10.dp),

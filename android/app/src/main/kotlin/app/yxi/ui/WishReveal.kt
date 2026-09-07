@@ -175,9 +175,14 @@ fun WipeReveal(
         contentAlignment = Alignment.Center,
     ) {
     Box(
-        // 舞台按短片的真实比例排（608×1000）—— TextureView 是**拉伸填充**的，
+        // 舞台按短片的真实比例排（**608×918**）—— TextureView 是**拉伸填充**的，
         // 比例不对视频就会被压扁。擦拭那张图是同一段视频的第 1 帧，比例天生一致。
-        Modifier.fillMaxWidth(0.92f).aspectRatio(608f / 1000f).pointerInput(rarity) {
+        // ⚠️ 918 不是 1000：老板录屏时**播放器的进度条和它的渐变蒙版**在画面底部
+        //    （「00:00 / 00:15」那条，2026-09-07 他在真机上一眼看到），
+        //    原片底部 82 行是播放器 UI 不是画面，**必须裁掉**。
+        //    裁了**不能用底色补回 1000** —— 片子自己的底色是 #D5DCDE 一类、
+        //    还因为色相旋转各档不同，补的纯色对不上，会多出一条更亮的横带。
+        Modifier.fillMaxWidth(0.92f).aspectRatio(608f / 918f).pointerInput(rarity) {
             awaitEachGesture {
                 val d = awaitFirstDown(requireUnconsumed = false)
                 fun mark(p: Offset) {
@@ -287,8 +292,13 @@ private const val GRID = 12
  */
 private const val FROST = 0.50f
 
-/** 星星在她怀里，大约在画面中偏下 —— 光环和星点都从这儿发 */
-private fun starCenter(size: Size) = Offset(size.width * 0.42f, size.height * 0.52f)
+/**
+ * 星星在她怀里 —— 光环和星点都从这儿发。
+ * ⚠️ **这个分数的分母是短片高度**（520 / 918）。`aspectRatio` 一改，这里必须跟着改：
+ *    裁掉底部进度条那次（1000 → 918）只改了 aspectRatio，没改这儿，
+ *    同一个 0.52 就从"她怀里的星星"飘到了"她的脸上"，偏了超过半个光晕半径。
+ */
+private fun starCenter(size: Size) = Offset(size.width * 0.42f, size.height * 0.566f)
 
 /**
  * 放一段出货短片（`res/raw` 里的 mp4，带声音）。

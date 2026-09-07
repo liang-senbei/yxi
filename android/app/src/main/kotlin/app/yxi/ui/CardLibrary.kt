@@ -44,7 +44,12 @@ import app.yxi.ui.theme.Muted
  * 并且明说「还没开通」——不假装你已经有了一张。
  */
 @Composable
-fun CardLibrary(owned: Set<String> = emptySet(), live: Boolean = false, modifier: Modifier = Modifier) {
+fun CardLibrary(
+    coll: app.yxi.agent.Wish.Collection = app.yxi.agent.Wish.Collection(emptySet()),
+    live: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
+    val owned = coll.owned
     var open by remember { mutableStateOf<Crown?>(null) }
     open?.let { c -> CrownDetail(c, owned.contains(c.id)) { open = null } }
 
@@ -139,7 +144,29 @@ fun CardLibrary(owned: Set<String> = emptySet(), live: Boolean = false, modifier
                                     style = MaterialTheme.typography.labelSmall,
                                     color = Color(0xB3FFFFFF),
                                 )
+
                             }
+                        }
+                        // 命座 —— 老板 2026-09-07 问「重复的角色怎么看命座」，
+                        // 在此之前只有深渊配队页显示，而卡牌库才是他会去找的地方。
+                        // ⚠️ 服务端给的是**封顶值**，满命之后不再涨（见 [Wish.Collection]），
+                        //    所以满了要单独说一句，否则「命座 6」和「命座 5」看着一样重。
+                        // ⚠️ **挂在角上、不进左边那一列**：卡面是 16:9 的固定高度，
+                        //    那一列已经有冠名 / 名字 / 设定三行，再加第四行在窄屏 + 最大字号下
+                        //    会把 SpaceBetween 的间距挤成负数、文字互相重叠（不是干净地裁掉）。
+                        val dup = coll.dup[c.id] ?: 0
+                        if (has && dup > 0) Surface(
+                            color = if (dup >= coll.maxDup) Color(0xE6FFD76A) else Color(0x99000000),
+                            shape = RoundedCornerShape(12.dp, 0.dp, 20.dp, 0.dp),
+                            modifier = Modifier.align(Alignment.BottomEnd),
+                        ) {
+                            Text(
+                                if (dup >= coll.maxDup) t("命座 %d · 满").format(dup)
+                                else t("命座 %d").format(dup),
+                                Modifier.padding(9.dp, 3.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (dup >= coll.maxDup) Color(0xFF3A2E10) else Color.White,
+                            )
                         }
                         // 首期 UP 角标
                         if (c.id == "yunxi") Surface(

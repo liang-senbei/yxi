@@ -168,14 +168,37 @@ object Wish {
      * @return null = 拿不到（没登录 / 接口没上线）。**别把「拿不到」当成「一张都没有」**，
      *   那会让人以为收藏丢了。
      */
-    suspend fun collection(ctx: Context): Set<String>? = withContext(Dispatchers.IO) {
+    data class Collection(
+        val owned: Set<String>,
+        val dup: Map<String, Int> = emptyMap(),
+        val maxDup: Int = 6,
+    )
+
+    /**
+     * 我的收藏。[dup] = 每个角色的**命座**，[maxDup] = 满命是几（服务端给）。
+     *
+     * ⚠️ `dup` 是**封顶后**的值（cc-logto_yxi 2026-09-07 定）：战力用的是 `min(命座, maxDup)`，
+     *    满命之后再抽到重复战力不涨、数字也不该涨，否则会被问「命座 8 了怎么不加战力」；
+     *    那时的痕迹是 **50 微曦返还**，不是白抽。装扮恒 0。
+     * ⚠️ [maxDup] **别写死 6** —— 它跟深渊那份战力封顶是同一个配置，服务端有断言保证两边一致。
+     */
+    suspend fun collection(ctx: Context): Collection? = withContext(Dispatchers.IO) {
         val o = Account.apiGet(ctx, "/api/wish/collection") ?: return@withContext null
         runCatching {
             val a = o.optJSONArray("items") ?: o.optJSONArray("owned")
-            (0 until (a?.length() ?: 0)).mapNotNull { i ->
-                a?.optJSONObject(i)?.optString("id")?.takeIf { it.isNotEmpty() }
-                    ?: a?.optString(i)?.takeIf { it.isNotEmpty() }
-            }.toSet()
+            val ids = mutableSetOf<String>()
+            val dup = mutableMapOf<String, Int>()
+            for (i in 0 until (a?.length() ?: 0)) {
+                val it = a?.optJSONObject(i)
+                val id = it?.optString("id")?.takeIf { s -> s.isNotEmpty() }
+                    ?: a?.optString(i)?.takeIf { s -> s.isNotEmpty() } ?: continue
+                ids += id
+                it?.optInt("dup", 0)?.takeIf { n -> n > 0 }?.let { n -> dup[id] = n }
+            }
+            // ⚠️ `optInt` 的默认值**只在字段缺失时生效**；字段在、值是 0 的话它老实返回 0，
+            //    于是 `dup >= maxDup` 恒真 —— 每个角色都显示金色的「满」。
+            //    这个数是配置驱动的（注释里就写着别写死 6），改错的成本得兜住。
+            Collection(ids, dup, o.optInt("maxDup", 6).coerceAtLeast(1))
         }.getOrNull()
     }
 
