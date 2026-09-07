@@ -189,6 +189,7 @@ Kotlin 里统一成一条规矩：**特效内部照抄字面量当 px；宿主�
 - **输入也按线的坐标系算**：手指位置反变换回线的坐标系再分轨；swipe 的"左右"是线坐标系里的左右——线立着时就是屏幕上的上下滑。
 - 编舞 = 关键帧：`{t, dur, op: rotate | move_x | move_y, from, to, ease}`。转角**不限幅**（原来 ±9°），可以 ±90°（竖线）、180°（翻面，音符从下面来）。
 - **编舞（`design/music/choreo.py`，老板 09-07 重申要看得见）**：以 8 小节为一段（短曲 4 小节），每段一个场景——平 / 倾 ±13° / 升 / 横移 / **立竖 90°（保持整段）** / **翻面 180°（hard）**；场景序列按曲子 id 播种，同一首每次一样。过渡 2 拍 cubicInOut 落在段首强拍；每 2 小节一次小节线轻沉。`rechoreo_all.py` 只重写 16 张谱的 `lines`，不动 notes（服务端按 units 校验，不受影响）。
+- **特效不跟场地压扁**（老板 09-07：「打击特效被压缩比例很难看」）：场地非等比缩放（sLane / sTravel）时，爆点和碎裂在自己的变换里乘 (su/sLane, su/sTravel)，su = √(sLane·sTravel)，任何角度都是圆的；音符本体照旧跟场地走。
 - **立竖时的缩放（App `linePose()`）**：横屏里线立起来，四条轨会伸出屏幕、音符从屏幕中间冒出来。所以按 |sin(角度)| 平滑加两个缩放：轨道方向压到 屏高/屏宽，飞行方向拉到 半屏宽/0.78屏高；0° 和 180° 时都是 1。触摸反变换同样除回去。
 - 玩家造成的甩动叠在编舞上：swipe 打中把线往那个方向带一下（弹簧回正，按时间衰减不按帧）。老板调的：摆动 1、回正 2.7、谱面摆动 1.7。**公式（App 和试验台同一份）**：
   - 甩动 `tiltDeg · exp(-dt / (0.32/2.7)) · cos(9·dt)`，打中时 `tiltDeg = 上次剩余×0.55 + 方向×6°`，限 ±6°；
@@ -240,7 +241,7 @@ Kotlin 里统一成一条规矩：**特效内部照抄字面量当 px；宿主�
 
 - **清单** `https://yxi.keuury.com/rhythm/songs.json`（hk13 `/var/www/yxi/rhythm/`，nginx 已开 `/rhythm/`：JSON no-cache、ogg 缓存一天）。结构见 `design/music/publish_songs.py` 开头。
 - **发布** `python3 design/music/publish_songs.py`：攒 dist → rsync 音频 + 谱 → 清单先传成 `songs.json.new` → 在 hk13 上跑 logto 的 `rhythm-sync.py <本机路径> --apply`（服务端先认识新谱；从 hk13 用 URL 拉自己会 403）→ 改名公开 → 公网真拉一遍。**跑完提醒 logto 把 service/rhythm.json 提进 git**（脚本改的是 /opt 上跑的那份，他下次部署会覆盖）。
-- **客户端**（`Rhythm.songs / refresh / download / ready`）：进选曲页拉一次清单（拉不到静默用本地），清单里的曲子**谱以清单为准**（谱 JSON 按 `version`＝内容哈希补齐到 `filesDir/rhythm/<id>/`，`Rhythm.load` 先读缓存再读 assets）；音频内置的用内置，清单独有的曲子卡片上是「⤓ 下载这首」（带进度），下完才出难度按钮，MediaPlayer 从文件放。
+- **客户端**（`Rhythm.songs / refreshInBackground / download / ready`）：进选曲页拉一次清单（**object 级 scope 跑完为止**，不跟页面生死绑定——绑定的话用户看几秒就点进曲子，协程取消，谱下到第二首就断）（拉不到静默用本地），清单里的曲子**谱以清单为准**（谱 JSON 按 `version`＝内容哈希补齐到 `filesDir/rhythm/<id>/`，`Rhythm.load` 先读缓存再读 assets）；音频内置的用内置，清单独有的曲子卡片上是「⤓ 下载这首」（带进度），下完才出难度按钮，MediaPlayer 从文件放。
 - **加一首新曲不发 App**：音频 ogg + 谱 JSON 放进 `publish_songs.py` 的 `EXTRA`（或先照 §6.3 生成谱），跑发布脚本即可；内置曲子的谱改了也一样走发布，客户端下次进选曲页就换。
 
 ## 7. 手感面板与用户可调项
