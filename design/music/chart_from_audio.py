@@ -126,33 +126,13 @@ def build(a, hard, song_id, zh):
         last_kind = kind
         i += 1
     return dict(song=song_id, zh=zh, bpm=int(round(a['tempo'])), difficulty='hard' if hard else 'easy',
-                offset=0, approach=1.45 if hard else 1.7, notes=out, lines=choreo(a, hard))
+                offset=0, approach=1.45 if hard else 1.7, notes=out, lines=choreo(a, hard, song_id))
 
 
-def choreo(a, hard):
-    """编舞关键帧：小节线轻沉；每 8 小节侧转（左右交替）；副歌前（第 3、5 个段落）hard 立一次竖线 / 翻一次面。"""
-    spb, phase, dur = a['spb'], a['phase'], a['dur']
-    bars = int((dur - phase) / (4 * spb))
-    out = []
-    for bar in range(2, bars - 2, 2):
-        t = phase + bar * 4 * spb
-        out.append(dict(t=round(t, 3), dur=0.06, op='move_y', **{'from': 0.0, 'to': 0.014}, ease='easeOut'))
-        out.append(dict(t=round(t + 0.06, 3), dur=0.34, op='move_y', **{'from': 0.014, 'to': 0.0}, ease='cubicInOut'))
-    side = 1
-    for k, bar in enumerate(range(8, bars - 4, 8)):
-        t = phase + bar * 4 * spb
-        if hard and k in (2, 4):                         # 副歌前：立一次竖线（第 3 段）/ 翻一次面（第 5 段），各持续两小节
-            deg = 90.0 if k == 2 else 180.0
-            out.append(dict(t=round(t, 3), dur=1.4, op='rotate', **{'from': 0.0, 'to': deg}, ease='cubicInOut'))
-            out.append(dict(t=round(t, 3), dur=1.4, op='move_y', **{'from': 0.0, 'to': -0.28}, ease='cubicInOut'))
-            out.append(dict(t=round(t + 8 * spb, 3), dur=1.4, op='rotate', **{'from': deg, 'to': 0.0}, ease='cubicInOut'))
-            out.append(dict(t=round(t + 8 * spb, 3), dur=1.4, op='move_y', **{'from': -0.28, 'to': 0.0}, ease='cubicInOut'))
-        else:
-            amp = (9.0 if hard else 4.0) * side
-            out.append(dict(t=round(t, 3), dur=0.9, op='rotate', **{'from': 0.0, 'to': amp}, ease='cubicInOut'))
-            out.append(dict(t=round(t + 8 * spb, 3), dur=0.9, op='rotate', **{'from': amp, 'to': 0.0}, ease='cubicInOut'))
-            side = -side
-    return sorted(out, key=lambda e: e['t'])
+def choreo(a, hard, song_id='song'):
+    """编舞见 choreo.py（老板 09-07：翻转 / 上下左右移动 / 倾斜 / 持久竖线）。"""
+    from choreo import choreo as _choreo
+    return _choreo(song_id, a['spb'], a['phase'], a['dur'], hard)
 
 
 def main():

@@ -421,8 +421,8 @@ private fun GameBoard(
                 }
                 val tier = Rhythm.tiers.count { live.combo >= it.combo }
                 Rhythm.tierWord(live.combo)?.takeIf { it.isNotBlank() }?.let { praise = it to System.currentTimeMillis(); stage.lastTierAt = at }
-                // 无线时刻：最高档每一下 25% 的机会，一局只一次
-                if (!stage.freeUsed && Rhythm.tiers.size >= 3 && tier >= 3 && r.nextFloat() < 0.25f) {
+                // 无线时刻：最高档每一下 35% 的机会，一局只一次
+                if (!stage.freeUsed && Rhythm.tiers.isNotEmpty() && tier == Rhythm.tiers.size && r.nextFloat() < 0.35f) {   // 最高档才有（档位数以服务端下发为准）
                     stage.freeUsed = true; stage.freeOn = true; stage.freeStart = at; freeShow = true
                     stage.freeUntil = at + StageState.FREE_FLICKER + 10f + r.nextFloat() * 3f
                     praise = "Free" to System.currentTimeMillis()
@@ -502,13 +502,13 @@ private fun GameBoard(
                 // 场地画在线的坐标系里（规格 §5）：手指位置先反变换回线的坐标系再分轨、再算划动方向 ——
                 // 线立着的时候「左右滑」就是屏幕上的上下滑。
                 fun toLocal(pos: Offset): Offset {
-                    val (deg, cx, cy) = linePose(chart, live, now, lineScale, size.width.toFloat(), size.height.toFloat())   // ⚠️ 必须和画的那边同一份，不然点的和看的错位
+                    val lp = linePose(chart, live, now, lineScale, size.width.toFloat(), size.height.toFloat())   // ⚠️ 必须和画的那边同一份，不然点的和看的错位
                     val ly = size.height * 0.78f
-                    val rad = -deg * (Math.PI / 180f).toFloat()
-                    val ox = pos.x - cx; val oy = pos.y - cy
+                    val rad = -lp.deg * (Math.PI / 180f).toFloat()
+                    val ox = pos.x - lp.cx; val oy = pos.y - lp.cy
                     return Offset(
-                        ox * kotlin.math.cos(rad) - oy * kotlin.math.sin(rad) + size.width / 2f,
-                        ox * kotlin.math.sin(rad) + oy * kotlin.math.cos(rad) + ly,
+                        (ox * kotlin.math.cos(rad) - oy * kotlin.math.sin(rad)) / lp.sLane + size.width / 2f,
+                        (ox * kotlin.math.sin(rad) + oy * kotlin.math.cos(rad)) / lp.sTravel + ly,
                     )
                 }
                 fun laneOf(pos: Offset): Int = ((toLocal(pos).x / size.width) * 4).toInt().coerceIn(0, 3)
@@ -555,7 +555,8 @@ private fun GameBoard(
             val t = now
             val W = size.width; val H = size.height
             val laneW = W / 4f
-            val (deg, lineCx, lineCy) = linePose(chart, live, t, lineScale, W, H)
+            val lp = linePose(chart, live, t, lineScale, W, H)
+            val deg = lp.deg; val lineCx = lp.cx; val lineCy = lp.cy
             val judgeY = H * 0.78f                                    // 线的坐标系里线永远在这儿
             val noteH = (H * 0.011f).coerceIn(6f * density, 11f * density)   // 薄片（老板选的），CSS 6~11px
             val noteW = minOf(laneW * 0.55f, W * 0.052f) * 1.2f
@@ -572,6 +573,7 @@ private fun GameBoard(
             withTransform({
                 translate(lineCx, lineCy)
                 rotate(deg, Offset.Zero)
+                scale(lp.sLane, lp.sTravel, Offset.Zero)                 // 立竖时压轨道 / 拉飞行距离（见 linePose）
                 translate(-W / 2f, -judgeY)
             }) {
                 val over = maxOf(W, H) * 0.6f                         // 场地画得比屏幕大得多：转到任何角度都不露边
@@ -663,14 +665,16 @@ private fun GameBoard(
 
                 // ── 竖向校准线：垂直判定线、±10° 偏转、白、0.28 秒淡出（按档位概率出现）──
                 if (motion) {
-                    stage.vlines.removeAll { t - it.at > 0.3f }
+                    stage.vlines.removeAll { t - it.at > 0.45f }
                     for (v in stage.vlines) {
-                        val k = (t - v.at) / 0.28f
+                        val k = (t - v.at) / 0.42f
                         if (k < 0f || k > 1f) continue
-                        val cx = laneW * v.lane + laneW / 2f
-                        val len = noteH * (3.2f + 2.4f * k) * 1.6f
+                        val cx = laneW * v.lane + laneW / 2f              // 被点中的那块的中心
+                        val up = H * (0.22f + 0.10f * k); val down = H * 0.05f   // 往上抽长再淡掉
+                        val a = (1f - k) * (1f - k * 0.5f)
                         rotate(v.jitter, Offset(cx, judgeY)) {
-                            drawLine(Color.White.copy(alpha = .85f * (1f - k)), Offset(cx, judgeY - len), Offset(cx, judgeY + len * .35f), 3f * bench, cap = StrokeCap.Round)
+                            drawLine(Color.White.copy(alpha = .28f * a), Offset(cx, judgeY - up), Offset(cx, judgeY + down), 7f * bench, cap = StrokeCap.Round)   // 柔光
+                            drawLine(Color.White.copy(alpha = .95f * a), Offset(cx, judgeY - up), Offset(cx, judgeY + down), 2.4f * bench, cap = StrokeCap.Round)
                         }
                     }
                     // ── 碎裂：音符本体散掉（老板挑的八款随机）──
@@ -805,13 +809,20 @@ private fun mix(a: Color, b: Color, f: Float) = Color(
  * = 谱面编舞 poseAt + 试验台那两样「活气」（老板 09-06 定：谱面摆动 1.7 —— 慢摆 sin(0.45t)·2.2°、上下呼吸 sin(0.3t)·2% 屏高）+ 玩家甩出来的 tilt。
  * 角度不限幅：线想怎么转就怎么转。
  */
-private fun linePose(chart: Rhythm.Chart, live: Live, t: Float, lineScale: Float, w: Float, h: Float): Triple<Float, Float, Float> {
+private class LinePose(val deg: Float, val cx: Float, val cy: Float, val sLane: Float, val sTravel: Float)
+
+private fun linePose(chart: Rhythm.Chart, live: Live, t: Float, lineScale: Float, w: Float, h: Float): LinePose {
     val pose = chart.poseAt(t)
     val sway = 1.7f * lineScale
     val deg = pose.deg * lineScale + sin(t * 0.45f) * 2.2f * sway + live.tiltAt(t)
     val cx = w / 2f + pose.dx * lineScale * w
     val cy = h * 0.78f + pose.dy * lineScale * h + sin(t * 0.3f) * h * 0.02f * sway
-    return Triple(deg, cx, cy)
+    // 线立起来（±90°）时：四条轨要压进屏高（不然外侧两轨在屏幕外够不着），飞行距离拉到半屏宽（不然音符从屏幕中间凭空冒出来）。
+    // 按 |sin| 平滑过渡，0° / 180° 时正好是 1。横屏 w>h 才需要。
+    val k = abs(sin(deg * (Math.PI / 180f).toFloat()))
+    val sLane = if (w > h) 1f + (h / w - 1f) * k else 1f
+    val sTravel = if (w > h) 1f + (w / 2f / (h * 0.78f) - 1f) * k else 1f
+    return LinePose(deg, cx, cy, sLane, sTravel)
 }
 
 @Composable
