@@ -29,9 +29,16 @@ print("共 %d 条 · 最大 #%d" % (len(nums), top))
 if dup:
     print("\n✗ 撞号 %d 个：" % len(dup))
     for d in sorted(dup):
-        for n, i, t in nums:
-            if n == d:
-                print("   %s:%d  %s" % (p.rsplit('/', 1)[-1], i, t))
+        rows = [(i, t) for n, i, t in nums if n == d]
+        for k, (i, t) in enumerate(rows):
+            print("   %s%s:%d  %s" % ("后写→ " if k == len(rows) - 1 else "      ",
+                                      p.rsplit('/', 1)[-1], i, t))
+    # ⚠️ **撞了就自己改，别发消息。** 2026-09-07 那次真正贵的不是撞号（脚本一跑就看见、改一个数字），
+    #    是四个 agent 拿消息来回协商谁改哪个 —— 岔了三轮，比 bug 本身贵得多。
+    #    规矩定死、写在报错旁边，就不用商量：这份文件只增不删，所以**行号大的就是后写的**。
+    print("\n  规矩：**改行号大的那条**（后写的；别处引用多半指先写的那个号）。")
+    print("  那条是你写的 → 直接改成下面那个空号，提交，不用问谁。")
+    print("  不是你写的 → 一个字都别动，告诉作者。")
 if gaps:
     print("\n· 断号（可能是谁改号时留下的洞，不一定是错）：%s" % ", ".join("#%d" % g for g in gaps))
 # ⚠️ 这个号是按**你本地这份文件**算的。四个 agent 各有各的检出，别人刚写的条目
