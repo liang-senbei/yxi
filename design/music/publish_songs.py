@@ -83,7 +83,7 @@ def publish():
     subprocess.run(['scp', '-q', os.path.join(dist, 'songs.json'), f'{HK}:{REMOTE_DIR}/songs.json.new'], check=True)
     print('文件已上传（清单暂为 songs.json.new）')
     # 服务端先认识新谱
-    r = subprocess.run(['ssh', HK, f'{SYNC} {URL}songs.json.new --apply'], capture_output=True, text=True)
+    r = subprocess.run(['ssh', HK, f'{SYNC} {REMOTE_DIR}/songs.json.new --apply'], capture_output=True, text=True)   # 本机路径：从 hk13 用 urllib 拉自己的公网 URL 会被 403（UA 拦截）
     print(r.stdout[-1500:]); print(r.stderr[-800:])
     if r.returncode != 0:
         print('✗ 服务端同步失败，清单没公开（songs.json.new 留在服务器上供排查）'); sys.exit(1)
