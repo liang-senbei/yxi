@@ -139,6 +139,7 @@ object Rhythm {
             val e = when (ease) {
                 // 缓入缓出（三次）：位移的每帧增量是个钟形，起步和收尾都软 —— 线性看着像机器在推
                 "cubicInOut" -> if (k < 0.5f) 4f * k * k * k else 1f - ((-2f * k + 2f).let { it * it * it }) / 2f
+                "linear" -> k                                     // 匀速：狂热谱整段 360° 旋转用
                 // 只缓出：一下子过去、慢慢回来（踩点那种"沉一下"）
                 else -> 1f - (1f - k) * (1f - k) * (1f - k)
             }
@@ -151,6 +152,8 @@ object Rhythm {
         val difficulty: String, val offset: Float, val notes: List<Note>,
         /** 判定线的动作，按时间排好 */
         val lines: List<LineEvent> = emptyList(),
+        /** 曲子能量包络（design/music/energy_all.py，每秒 [energyHz] 个 0..1）：进高潮底光更亮、色彩层次更足（老板 09-07） */
+        val energy: FloatArray = FloatArray(0), val energyHz: Float = 4f,
         /**
          * 下落时长（秒）。**谱面 / 难度的参数**（老板 2026-09-06：「根据关卡和难度来定义更好，比较容易随时改动」），
          * 谱面里没写的老谱用手感面板那个值。
@@ -161,6 +164,13 @@ object Rhythm {
          * [now] 时刻的线姿态：转了多少度（**不限幅**，老板 2026-09-06 定的编舞：可以 ±90° 立成竖线、180° 翻面）、
          * 横向挪多少（屏宽比例）、往下挪多少（屏高比例）。
          */
+        /** [now] 秒时的能量 0..1（线性插值；没有包络就 0.6） */
+        fun energyAt(now: Float): Float {
+            if (energy.isEmpty()) return 0.6f
+            val x = (now * energyHz).coerceIn(0f, (energy.size - 1).toFloat())
+            val i = x.toInt(); val f = x - i
+            return if (i + 1 < energy.size) energy[i] * (1f - f) + energy[i + 1] * f else energy[i]
+        }
         fun poseAt(now: Float): Pose {
             var deg = 0f; var dx = 0f; var dy = 0f
             for (e in lines) {
@@ -185,7 +195,12 @@ object Rhythm {
      */
     data class Pose(val deg: Float, val dx: Float, val dy: Float)
 
-    data class Song(val id: String, val zh: String, val raw: Int, val bpm: Int, val seconds: Int, val credit: String = "")
+    data class Song(
+        val id: String, val zh: String, val raw: Int, val bpm: Int, val seconds: Int, val credit: String = "",
+        /** 这首有哪几张谱，按由易到难；「演示」放最难的那张 */
+        val diffs: List<String> = DIFFS,
+    )
+    fun diffName(d: String) = when (d) { "hard" -> "认真"; "frenzy" -> "狂热"; else -> "轻松" }
 
     /** 曲子列表。加曲子的完整步骤见 design/rhythm-spec.md §6.3（谱面 + 服务端 charts-meta 都要跟上） */
     val SONGS = listOf(
@@ -195,7 +210,7 @@ object Rhythm {
         // 老板 2026-09-06：从免费商用池挑五首做关卡。全部来自魔王魂（短版），带人声
         Song("shining", "シャイニングスター", app.yxi.R.raw.yx_shining, 158, 94, "音楽：魔王魂"),
         Song("burning", "Burning Heart", app.yxi.R.raw.yx_burning, 142, 118, "音楽：魔王魂"),
-        Song("count", "12345", app.yxi.R.raw.yx_count, 195, 93, "音楽：魔王魂"),
+        Song("count", "12345", app.yxi.R.raw.yx_count, 195, 93, "音楽：魔王魂", diffs = listOf("easy", "hard", "frenzy")),   // 狂热谱：老板 09-07 要的「非常非常难且有观赏性」
         Song("hikari", "ヒカリトリガー", app.yxi.R.raw.yx_hikari, 108, 99, "音楽：魔王魂"),
         Song("piece", "Piece Maker", app.yxi.R.raw.yx_piece, 117, 101, "音楽：魔王魂"),
     )
@@ -235,6 +250,8 @@ object Rhythm {
         }
         return Chart(j.getString("song"), j.getString("zh"), j.getInt("bpm"),
             j.getString("difficulty"), j.optDouble("offset", 0.0).toFloat(), notes, lines.sortedBy { it.t },
+            energy = j.optJSONObject("energy")?.optJSONArray("v")?.let { v -> FloatArray(v.length()) { v.getDouble(it).toFloat() } } ?: FloatArray(0),
+            energyHz = j.optJSONObject("energy")?.optDouble("hz", 4.0)?.toFloat() ?: 4f,
             approach = if (j.has("approach")) j.getDouble("approach").toFloat() else null)
     }
 

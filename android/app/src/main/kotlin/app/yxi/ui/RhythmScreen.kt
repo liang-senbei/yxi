@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -172,10 +173,23 @@ private fun SongList(synced: Int, onPick: (Rhythm.Song, String) -> Unit, onDemo:
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
         Text(t("云曦节拍"), Modifier.padding(20.dp, 18.dp, 20.dp, 4.dp), style = MaterialTheme.typography.headlineMedium)
         Text(
-            t("跟着拍子点四条轨。曲子有我们自己写的，也有魔王魂的免费曲（署名在曲名下）。"),
+            t("跟着拍子打音块。曲子有我们自己写的，也有魔王魂的免费曲（署名在曲名下）。"),
             Modifier.padding(20.dp, 0.dp, 20.dp, 14.dp),
             style = MaterialTheme.typography.bodyMedium, color = Muted,
         )
+        // 音块说明（老板 09-07：「有哪几种方块，最好在云曦节拍里标注一下」）
+        Row(Modifier.padding(20.dp, 6.dp, 20.dp, 0.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            listOf(
+                Triple(Rhythm.Kind.TICK, "点", "到线点一下"), Triple(Rhythm.Kind.SLIDE, "长按", "按住到尾巴"),
+                Triple(Rhythm.Kind.TRACE, "拖", "到线时按着就算"), Triple(Rhythm.Kind.SWIPE, "划", "到线时往箭头方向划"),
+            ).forEach { (k, name, how) ->
+                Column(Modifier.weight(1f)) {
+                    Box(Modifier.width(34.dp).height(7.dp).clip(RoundedCornerShape(4.dp)).background(noteColor(k)))
+                    Text(t(name), style = MaterialTheme.typography.labelMedium)
+                    Text(t(how), style = MaterialTheme.typography.labelSmall, color = Muted)
+                }
+            }
+        }
         Rhythm.SONGS.forEach { s ->
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -191,15 +205,15 @@ private fun SongList(synced: Int, onPick: (Rhythm.Song, String) -> Unit, onDemo:
                     if (s.credit.isNotBlank()) Text(s.credit, style = MaterialTheme.typography.labelSmall, color = Muted)
                     Spacer(Modifier.height(10.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Rhythm.DIFFS.forEach { d ->
+                        s.diffs.forEach { d ->
                             val best = remember(synced) { Rhythm.best(ctx, "${s.id}_$d") }
                             Surface(
-                                color = if (d == "hard") Copper.copy(alpha = .14f) else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                color = when (d) { "hard" -> Copper.copy(alpha = .14f); "frenzy" -> Color(0xFFE0457B).copy(alpha = .18f); else -> MaterialTheme.colorScheme.surfaceContainerHigh },
                                 shape = RoundedCornerShape(14.dp),
                                 modifier = Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).clickable { onPick(s, d) },
                             ) {
                                 Column(Modifier.padding(14.dp, 10.dp)) {
-                                    Text(t(if (d == "hard") "认真" else "轻松"), style = MaterialTheme.typography.titleSmall)
+                                    Text(t(Rhythm.diffName(d)), style = MaterialTheme.typography.titleSmall)
                                     Text(
                                         best?.let { "${it.rank} · ${it.score}" } ?: t("还没打过"),
                                         style = MaterialTheme.typography.labelSmall,
@@ -211,11 +225,11 @@ private fun SongList(synced: Int, onPick: (Rhythm.Song, String) -> Unit, onDemo:
                         // 演示（老板 09-07：「播放一个完美校准所有音符的视频」）：进游戏界面，音符到线自动完美，不计成绩
                         Surface(
                             color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier.clip(RoundedCornerShape(14.dp)).clickable { onDemo(s, "hard") },
+                            modifier = Modifier.clip(RoundedCornerShape(14.dp)).clickable { onDemo(s, s.diffs.last()) },
                         ) {
                             Column(Modifier.padding(14.dp, 10.dp)) {
                                 Text("▶ " + t("演示"), style = MaterialTheme.typography.titleSmall)
-                                Text(t("认真 · 全完美"), style = MaterialTheme.typography.labelSmall, color = Muted)
+                                Text(t(Rhythm.diffName(s.diffs.last())) + " · " + t("全完美"), style = MaterialTheme.typography.labelSmall, color = Muted)
                             }
                         }
                     }
@@ -261,6 +275,14 @@ private fun Toggle(label: String, on: Boolean, onClick: () -> Unit) {
 }
 
 // ── 打谱面 ──────────────────────────────────────────────────────────────────
+/** 四种音块的颜色（游戏里、图例里同一份） */
+private fun noteColor(k: Rhythm.Kind): Color = when (k) {
+    Rhythm.Kind.TICK -> Color(0xFFFFC08A)
+    Rhythm.Kind.SLIDE -> Color(0xFF8AD4F5)
+    Rhythm.Kind.TRACE -> Color(0xFFF5A8C8)
+    Rhythm.Kind.SWIPE -> Color(0xFF9EE6A8)
+}
+
 private class Live(val chart: Rhythm.Chart) {
     var perfect = 0; var good = 0; var miss = 0
     var combo = 0; var maxCombo = 0
@@ -346,9 +368,11 @@ private class Live(val chart: Rhythm.Chart) {
  * 写在判定回调、读在 Canvas 的绘制 lambda，两边都在 UI 线程。
  */
 private class StageState {
-    class Burst(val at: Float, val lane: Int, val kind: Rhythm.Kind, val perfect: Boolean, val seed: Float, val fx: Named<HitFx>, val scale: Float)
-    class Shat(val at: Float, val lane: Int, val kind: Rhythm.Kind, val seed: Float, val fx: ShatterFx)
-    class VLine(val at: Float, val lane: Int, val jitter: Float)
+    class Burst(val at: Float, val lane: Int, val kind: Rhythm.Kind, val perfect: Boolean, val seed: Float, val fx: Named<HitFx>, val scale: Float, val yk: Float = 1f)
+    class Shat(val at: Float, val lane: Int, val kind: Rhythm.Kind, val seed: Float, val fx: ShatterFx, val yk: Float = 1f)
+    class VLine(val at: Float, val lane: Int, val jitter: Float, val yk: Float = 1f)
+    /** 下一次判定的特效画在 judgeY × 这个系数处（1 = 线上）。狂热演示提前爆：音符还在半空就炸（老板 09-07） */
+    var judgeYk = 1f
     val bursts = ArrayList<Burst>(); val shatters = ArrayList<Shat>(); val vlines = ArrayList<VLine>()
     var lastHitAt = -9f; var lastTierAt = -9f
     // 无线时刻（老板：只在最高档可能出现；线闪烁后消失、全屏皆可校准；10~13 秒；一局最多一次）
@@ -379,6 +403,7 @@ private fun GameBoard(
     val ctx = LocalContext.current
     val chart = remember(song, difficulty) { Rhythm.load(ctx, song.id, difficulty) }
     val live = remember(chart) { Live(chart).also { it.autoHold = auto } }
+    val frenzy = chart.difficulty == "frenzy"
     val stage = remember(chart) { StageState() }
     val offset = remember { Rhythm.offsetMs(ctx).toFloat() }
     var now by remember { mutableFloatStateOf(-3f) }        // 秒；负数 = 倒计时
@@ -392,14 +417,7 @@ private fun GameBoard(
     // ⚠️ 舞台**固定深色**，不跟浅色/深色主题走；颜色全部写死常量（#14：Copper 是槽位名不是颜色名）。
     //    四种音块的颜色 = 老板定的淡橙 / 浅蓝 / 樱粉 / 浅绿（规格 §1.1）。
     val ink = Color(0xFFE8EDF5)
-    val kindColor = { k: Rhythm.Kind ->
-        when (k) {
-            Rhythm.Kind.TICK -> Color(0xFFFFC08A)
-            Rhythm.Kind.SLIDE -> Color(0xFF8AD4F5)
-            Rhythm.Kind.TRACE -> Color(0xFFF5A8C8)
-            Rhythm.Kind.SWIPE -> Color(0xFF9EE6A8)
-        }
-    }
+    val kindColor = { k: Rhythm.Kind -> noteColor(k) }
     val hitPerfect = Color(0xFFF3E3B8); val hitGood = Color(0xFF9FCBF0)
     val missColor = Color(0xFFE5484D)
     val motion = remember {
@@ -431,9 +449,9 @@ private fun GameBoard(
                 val r = stage.rnd
                 stage.lastHitAt = at
                 if (lane in 0 until Rhythm.LANES) {
-                    stage.bursts += StageState.Burst(at, lane, kind, j == Rhythm.Judge.PERFECT, r.nextFloat(), stage.pickHit(), 1f)
+                    stage.bursts += StageState.Burst(at, lane, kind, j == Rhythm.Judge.PERFECT, r.nextFloat(), stage.pickHit(), 1f, stage.judgeYk)
                     if (stage.bursts.size > 40) stage.bursts.removeAt(0)
-                    stage.shatters += StageState.Shat(at, lane, kind, r.nextFloat(), stage.pickShatter())
+                    stage.shatters += StageState.Shat(at, lane, kind, r.nextFloat(), stage.pickShatter(), stage.judgeYk)
                     if (stage.shatters.size > 30) stage.shatters.removeAt(0)
                 }
                 val tier = Rhythm.tiers.count { live.combo >= it.combo }
@@ -446,7 +464,7 @@ private fun GameBoard(
                 }
                 // 竖向校准线：概率按档位走 30 → 50 → 70 → 90%
                 if (lane in 0 until Rhythm.LANES && r.nextFloat() < StageState.VLINE_P[minOf(3, tier)]) {
-                    stage.vlines += StageState.VLine(at, lane, r.nextFloat() * 20f - 10f)
+                    stage.vlines += StageState.VLine(at, lane, r.nextFloat() * 20f - 10f, stage.judgeYk)
                     if (stage.vlines.size > 20) stage.vlines.removeAt(0)
                 }
             }
@@ -504,8 +522,19 @@ private fun GameBoard(
                 for (l in 0 until Rhythm.LANES) {
                     val lanes = live.byLane[l]; var i = live.next[l]
                     while (i < lanes.size && lanes[i].judged != null) i++
-                    if (i < lanes.size && head >= lanes[i].t) {
-                        val n = lanes[i]
+                    if (i >= lanes.size) continue
+                    val n = lanes[i]
+                    if (frenzy) {
+                        // 狂热演示（老板 09-07：「不要等到线上，提前让它们爆掉，更有观赏性」）：每个音符在半空某处炸，位置按种子散开
+                        val lead = (0.15f + 0.45f * n.seed) * approach
+                        if (head >= n.t - lead) {
+                            stage.judgeYk = (1f - (n.t - head) / approach).coerceIn(0.05f, 1f)
+                            n.judged = Rhythm.Judge.PERFECT; live.errs += 0f; live.hit(Rhythm.Judge.PERFECT, now, l, n.kind)
+                            stage.judgeYk = 1f
+                            if (n.kind == Rhythm.Kind.SWIPE || n.kind == Rhythm.Kind.TRACE) live.tilt(now, if (n.dir < 0) -1 else 1)
+                            combo = live.combo; score = live.currentScore()
+                        }
+                    } else if (head >= n.t) {
                         if (hitLane(live, l, now, offset, false) { true }) {
                             if (n.kind == Rhythm.Kind.SWIPE || n.kind == Rhythm.Kind.TRACE) live.tilt(now, if (n.dir < 0) -1 else 1)
                             combo = live.combo; score = live.currentScore()
@@ -610,10 +639,11 @@ private fun GameBoard(
             // ── 底光：连击越高越亮；每下小闪；跳档猛闪 + 琥珀 + 台阶（规格 §3）──
             val tierLevel = Rhythm.tiers.count { live.combo >= it.combo }
             val heatK = (live.combo / 30f).coerceAtMost(1f)
-            val hitPulse = (1f - (t - stage.lastHitAt) / 0.15f).coerceIn(0f, 1f)
+            val hitPulse = (1f - (t - stage.lastHitAt) / 0.20f).coerceIn(0f, 1f)   // 命中那一下底光闪：老板 09-07「之前说过的，不明显」→ 0.15→0.45、0.15s→0.20s
             val tierPulse = (1f - (t - stage.lastTierAt) / 0.6f).coerceIn(0f, 1f).let { it * it }
-            val amount = 0.55f + 0.45f * heatK + 0.20f * tierLevel + 0.15f * hitPulse + 0.90f * tierPulse
-            with(StageGlow) { drawStageGlow(t, if (motion) amount else 0.55f, if (motion) tierPulse else 0f, 1.75f) }
+            val energy = chart.energyAt(t)
+            val amount = 0.55f + 0.45f * heatK + 0.20f * tierLevel + 0.45f * hitPulse + 0.90f * tierPulse + 0.35f * energy
+            with(StageGlow) { drawStageGlow(t, if (motion) amount else 0.55f, if (motion) tierPulse else 0f, 1.75f, if (motion) energy else 0f) }
 
             withTransform({
                 translate(lineCx, lineCy)
@@ -660,6 +690,7 @@ private fun GameBoard(
                         val k = (t - b.at) / 0.6f
                         if (k < 0f || k > 1f) continue
                         val cx = laneW * b.lane + laneW / 2f
+                        val judgeY = judgeY * b.yk                          // 狂热演示：半空就爆
                         val col = if (b.perfect) hitPerfect else hitGood
                         val tint = mix(col, kindColor(b.kind), 0.35f)      // 爆点带一点音符自己的颜色
                         val u = maxOf(noteH * 2.6f, H * 0.03f) * fxScale * b.scale
@@ -715,6 +746,7 @@ private fun GameBoard(
                         val k = (t - v.at) / 0.42f
                         if (k < 0f || k > 1f) continue
                         val cx = laneW * v.lane + laneW / 2f              // 被点中的那块的中心
+                        val judgeY = judgeY * v.yk
                         val up = H * (0.22f + 0.10f * k); val down = H * 0.05f   // 往上抽长再淡掉
                         val a = (1f - k) * (1f - k * 0.5f)
                         rotate(v.jitter, Offset(cx, judgeY)) {
@@ -729,7 +761,7 @@ private fun GameBoard(
                         if (k < 0f || k > 1f) continue
                         val cx = laneW * sh.lane + laneW / 2f
                         withTransform({ scale(bench, bench, Offset.Zero) }) {
-                            with(sh.fx) { draw(Tile((cx - noteW / 2) / bench, (judgeY - noteH / 2) / bench, noteW / bench, noteH / bench, kindColor(sh.kind), sh.seed), k, Rng(sh.seed)) }
+                            with(sh.fx) { draw(Tile((cx - noteW / 2) / bench, (judgeY * sh.yk - noteH / 2) / bench, noteW / bench, noteH / bench, kindColor(sh.kind), sh.seed), k, Rng(sh.seed)) }
                         }
                     }
                 }
@@ -772,7 +804,7 @@ private fun GameBoard(
         )
         // 左下角英文名（老板 09-06：「左下角用英文，yxi…dancing」）；曲名挪到右下跟难度一起
         Text("Yxi Dancing Beat", Modifier.align(Alignment.BottomStart).padding(14.dp, 10.dp), style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Light), color = ink.copy(alpha = .6f))
-        Text(t(chart.zh) + " · " + t(if (difficulty == "hard") "认真" else "轻松"), Modifier.align(Alignment.BottomEnd).padding(14.dp, 10.dp), style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Light), color = ink.copy(alpha = .6f))
+        Text(t(chart.zh) + " · " + t(Rhythm.diffName(difficulty)), Modifier.align(Alignment.BottomEnd).padding(14.dp, 10.dp), style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Light), color = ink.copy(alpha = .6f))
         // Miss：红字一闪（每一下都弹字太吵，只弹漏）
         Box(Modifier.align(Alignment.Center).graphicsLayer {
             val age = now - missAt
@@ -864,10 +896,19 @@ private fun linePose(chart: Rhythm.Chart, live: Live, t: Float, lineScale: Float
     val cy = h * 0.78f + pose.dy * lineScale * h + sin(t * 0.3f) * h * 0.02f * sway
     // 线立起来（±90°）时：四条轨要压进屏高（不然外侧两轨在屏幕外够不着），飞行距离拉到半屏宽（不然音符从屏幕中间凭空冒出来）。
     // 按 |sin| 平滑过渡，0° / 180° 时正好是 1。横屏 w>h 才需要。
-    val k = abs(sin(deg * (Math.PI / 180f).toFloat()))
-    val sLane = if (w > h) 1f + (h / w - 1f) * k else 1f
+    val rad = deg * (Math.PI / 180f).toFloat()
+    val k = abs(sin(rad)); val kc = abs(kotlin.math.cos(rad))
+    var sLane = if (w > h) 1f + (h / w - 1f) * k else 1f
     val sTravel = if (w > h) 1f + (w / 2f / (h * 0.78f) - 1f) * k else 1f
-    return LinePose(deg, cx, cy, sLane, sTravel)
+    // ⚠️ 整条线（12 条轨的判定点）必须留在屏幕里，不然那几块根本点不到（老板 09-07 报的：翻转 / 大角度时方块在屏幕外）。
+    //    ① 线太长放不下就整体缩（sLane）；② 端点出界就把线心推回来。都是 deg 的连续函数，线动起来不会跳。
+    val mW = w * 0.05f; val mH = h * 0.08f
+    sLane = minOf(sLane, (h - 2f * mH) / (w * k + 1e-3f), (w - 2f * mW) / (w * kc + 1e-3f))
+    val hx = abs(w / 2f * sLane * kotlin.math.cos(rad)); val hy = abs(w / 2f * sLane * sin(rad))
+    var cxx = cx; var cyy = cy
+    if (cxx - hx < mW) cxx += mW - (cxx - hx) else if (cxx + hx > w - mW) cxx -= (cxx + hx) - (w - mW)
+    if (cyy - hy < mH) cyy += mH - (cyy - hy) else if (cyy + hy > h - mH) cyy -= (cyy + hy) - (h - mH)
+    return LinePose(deg, cxx, cyy, sLane, sTravel)
 }
 
 @Composable
@@ -1030,7 +1071,7 @@ private fun ResultCard(
             )
             Text(
                 t(chartId.substringBefore('_').let { id -> Rhythm.SONGS.first { it.id == id }.zh }) +
-                    " · " + t(if (chartId.endsWith("hard")) "认真" else "轻松"),
+                    " · " + t(Rhythm.diffName(chartId.substringAfterLast('_'))),
                 style = MaterialTheme.typography.labelMedium, color = ink.copy(alpha = .6f),
             )
         }
