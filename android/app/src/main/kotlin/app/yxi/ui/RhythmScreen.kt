@@ -529,7 +529,7 @@ private fun GameBoard(
                     val l1 = toLocal(ch.position)
                     val dx = l1.x - l0.x; val dy = l1.y - l0.y
                     // swipe 手势放宽（老板）：划过 3% 屏宽、落下 0.45 秒内都算；判定窗 ±360
-                    if (!swiped && kotlin.math.abs(dx) > size.width * 0.03f && now - downAt < 0.45f) {
+                    if (!swiped && kotlin.math.abs(dx) > size.width * 0.03f / linePose(chart, live, now, lineScale, size.width.toFloat(), size.height.toFloat()).sLane && now - downAt < 0.45f) {   // 立竖时局部 dx 被 1/sLane 放大，门槛也乘回去：屏幕上的手指距离不变（审查）
                         swiped = true
                         val dir = if (dx > 0) 1 else -1
                         val freeNow = stage.freeLive(now)
