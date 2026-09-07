@@ -126,7 +126,28 @@ fun ChatScreen(
     val ctx = androidx.compose.ui.platform.LocalContext.current
     // ⚠️ **草稿从盘上读回来，不是空串。** 切模式 / 退出去 / App 被杀，打的字都还在。
     // 这行原来是 `remember { mutableStateOf("") }` —— 切一次终端字就没了（[Drafts] 的注释）。
-    var draft by remember(sessionName) { mutableStateOf(Drafts.get(ctx, hostId, sessionName)) }
+    // ⚠️ 存的是 [TextFieldValue] 而不是 String —— **String 里没有光标**，而有两件事指望光标：
+    //   ① 语音要插在**光标那儿**（老板 2026-09-07：「光标挪到中间再说话，还是从尾巴上追加」）；
+    //   ② 输入框最多 7 行、超了在框里滚，**滚到哪是跟着光标走的** —— 光标不动，新识别出来的字
+    //      就落在看不见的下面（同一条：「那几行满了以后我再说话，就看不到最新的字了，
+    //      要全部说完才能拉下去看」）。
+    // ⚠️ **整个 TextFieldValue 原样存回去**，不要拆成 text + selection 再拼一个新的：
+    //    拼的那种写法会把 `composition` 丢掉，中文输入法正拼一半的那段会被打断 ——
+    //    #224「输了文字删不掉了」就是这一类。
+    var draftV by remember(sessionName) {
+        mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(Drafts.get(ctx, hostId, sessionName)))
+    }
+    val draft = draftV.text
+    /** 整段换掉（常用语、回填、清空）：光标放到末尾。 */
+    fun setDraft(s: String) {
+        draftV = androidx.compose.ui.text.input.TextFieldValue(s, androidx.compose.ui.text.TextRange(s.length))
+    }
+    /**
+     * 识别出来的话**插到光标那儿**，插完光标停在插入内容之后（框也就跟着滚到那儿）。
+     * ⚠️ 三条语音路（系统识别 / 按住说话 / 录音条停止）都走这一个 —— 原来是三份各自
+     *    `draft = (draft.trimEnd() + " " + said).trim()`，各自都只会往尾巴上接。
+     */
+    fun speakInto(said: String) { draftV = insertSpoken(draftV, said) }
     var staged by remember(sessionName) { mutableStateOf<List<app.yxi.agent.Attachments.Staged>>(emptyList()) }
 
     // ⚠️ **两处都要存**：
@@ -313,7 +334,7 @@ fun ChatScreen(
         val said = r.data?.getStringArrayListExtra(
             android.speech.RecognizerIntent.EXTRA_RESULTS
         )?.firstOrNull().orEmpty()
-        if (said.isNotBlank()) draft = (draft.trimEnd() + " " + said).trim()
+        if (said.isNotBlank()) speakInto(said)
     }
     var items by remember { mutableStateOf<List<ChatItem>>(emptyList()) }
     /**
@@ -428,7 +449,7 @@ fun ChatScreen(
     LaunchedEffect(openSentTick) { if (openSentTick > 0) { sentOpen = true; onSentShown() } }
     if (sentOpen) SentHistory(
         items = items,
-        onPick = { draft = it },
+        onPick = { setDraft(it) },
         onCopy = { copy(ctx, it) },
         onClose = { sentOpen = false },
     )
@@ -938,7 +959,7 @@ fun ChatScreen(
                                 app.yxi.ssh.catching { app.yxi.agent.SessionProbe.popQueue(s, sessionName) }
                                     .onSuccess {
                                         // 收回来的接在草稿后面，不覆盖用户可能已经打了一半的东西
-                                        draft = (draft.trimEnd() + "\n" + all.joinToString("\n")).trim()
+                                        setDraft((draftV.text.trimEnd() + "\n" + all.joinToString("\n")).trim())
                                     }
                                     .onFailure {
                                         android.widget.Toast.makeText(ctx, t("收不回来：") + it.message, android.widget.Toast.LENGTH_LONG).show()
@@ -1085,7 +1106,7 @@ fun ChatScreen(
         }
         // 常用语 chip：没打字时才露出来，点一下填进草稿，省掉手机打字
         if (draft.isBlank()) {
-            SnippetChips(onPick = { draft = it },
+            SnippetChips(onPick = { setDraft(it) },
                 modifier = Modifier.fillMaxWidth().padding(14.dp, 0.dp, 14.dp, 8.dp))
         }
 
@@ -1171,7 +1192,7 @@ fun ChatScreen(
                             }
                             // ⚠️ **只填进输入框，绝不直接发** —— 识别错一个字，
                             //    在服务器上就是另一条命令。三条路都守这一条。
-                            if (!said.isNullOrBlank()) draft = (draft.trimEnd() + " " + said).trim()
+                            if (!said.isNullOrBlank()) speakInto(said)
                             asrBusy = false
                         }
                     },
@@ -1239,13 +1260,13 @@ fun ChatScreen(
                         // ⚠️ **先把本地那份种进缩略图缓存，再清 staged。** 图就在这台手机上，
                         // 发出去的气泡第一帧就该是图 —— 不是先一条路径、等 SFTP 拉回来再变。
                         Thumbs.seed(ctx, staged)
-                        draft = ""; staged = emptyList()
+                        setDraft(""); staged = emptyList()
                         // ⚠️ 立刻清盘上那份 —— 只清内存的话，防抖那 600ms 里退出去，
                         // 下次进来发过的话又冒出来一遍
                         Drafts.set(ctx, hostId, sessionName, "")
                         // ⚠️ **不能用界面的 scope** —— 点完立刻切走会把它取消，那句话就没了（见 [Sender]）
                         Sender.send(ctx, aliveSsh, hostId, sessionName, t) { msg ->
-                            draft = Drafts.get(ctx, hostId, sessionName)   // 话还回来了，回填输入框
+                            setDraft(Drafts.get(ctx, hostId, sessionName))   // 话还回来了，回填输入框
                             android.widget.Toast.makeText(ctx, msg, android.widget.Toast.LENGTH_LONG).show()
                         }
                     },
@@ -1272,8 +1293,8 @@ fun ChatScreen(
             val focus = remember { androidx.compose.ui.focus.FocusRequester() }
             var focused by remember { mutableStateOf(false) }
             val field = remember {
-                movableContentOf<String> { d ->
-                    BasicTextFieldRow(d, focus, onFocus = { focused = it }, onLines = { lines = it }) { draft = it }
+                movableContentOf<androidx.compose.ui.text.input.TextFieldValue> { d ->
+                    BasicTextFieldRow(d, focus, onFocus = { focused = it }, onLines = { lines = it }) { draftV = it }
                 }
             }
             LaunchedEffect(lines, draft) { multi = if (draft.isBlank()) false else (multi || lines > 1) }
@@ -1305,16 +1326,16 @@ fun ChatScreen(
                             runCatching { f.delete() }; r
                         }
                     }
-                    if (!said.isNullOrBlank()) draft = (draft.trimEnd() + " " + said).trim()
+                    if (!said.isNullOrBlank()) speakInto(said)
                     asrBusy = false
                 }
                 recording = false
             } else if (!multi) Row(Modifier.padding(6.dp, 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 plusBtn()
-                Box(Modifier.weight(1f)) { field(draft) }
+                Box(Modifier.weight(1f)) { field(draftV) }
                 micBtn(); sendBtn()
             } else Column(Modifier.padding(6.dp, 6.dp, 6.dp, 4.dp)) {
-                Box(Modifier.fillMaxWidth()) { field(draft) }
+                Box(Modifier.fillMaxWidth()) { field(draftV) }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     plusBtn(); Spacer(Modifier.weight(1f)); micBtn(); sendBtn()
                 }
@@ -1721,13 +1742,36 @@ private fun FlatIcon(path: String, label: String, onTap: () -> Unit) {
     }
 }
 
+/**
+ * 把识别出来的一句话插进草稿的**光标处**，返回插完的新值（光标停在插入内容之后）。
+ *
+ * ⚠️ 光标之前那半要 `trimEnd` 再补一个空格：不然「你好 」后面再插会变成两个空格，
+ *    而句子开头（光标在 0）不能凭空多个前导空格。
+ * ⚠️ 选区是**范围**时按 `start` 插（不删选中的字）—— 语音是补话，不是替换，
+ *    误删用户已经打好的字是不可逆的那种损失。
+ */
+internal fun insertSpoken(
+    cur: androidx.compose.ui.text.input.TextFieldValue,
+    said: String,
+): androidx.compose.ui.text.input.TextFieldValue {
+    val at = cur.selection.start.coerceIn(0, cur.text.length)
+    val head = cur.text.take(at).trimEnd()
+    val piece = if (head.isEmpty()) said.trim() else " " + said.trim()
+    return androidx.compose.ui.text.input.TextFieldValue(
+        head + piece + cur.text.substring(at),
+        androidx.compose.ui.text.TextRange(head.length + piece.length),
+    )
+}
+
 @Composable
 private fun BasicTextFieldRow(
-    value: String,
+    // ⚠️ 收 [TextFieldValue] 不是 String：**光标要由外面拿着**（语音插字、插完滚过去都靠它，
+    //    见 ChatScreen 里 draftV 的注释）。String 那个重载把选区藏在框内部，外面改不着。
+    value: androidx.compose.ui.text.input.TextFieldValue,
     focus: androidx.compose.ui.focus.FocusRequester,
     onFocus: (Boolean) -> Unit = {},
     onLines: (Int) -> Unit = {},
-    onValue: (String) -> Unit,
+    onValue: (androidx.compose.ui.text.input.TextFieldValue) -> Unit,
 ) {
     // 草稿超过 7 行 = 框里滚得动、但看不出「下面还有」。⚠️ maxLines 只限**视口高度**，
     // onTextLayout 给的 lineCount 是**全文行数**（不是截断后的），所以这个判断是准的。
@@ -1738,7 +1782,7 @@ private fun BasicTextFieldRow(
             .focusRequester(focus)
             .onFocusChanged { onFocus(it.isFocused) },
         onTextLayout = {
-            val n = if (value.isEmpty()) 1 else it.lineCount
+            val n = if (value.text.isEmpty()) 1 else it.lineCount
             over = n > 7
             onLines(n)
         },
@@ -1768,7 +1812,7 @@ private fun BasicTextFieldRow(
                         )
                     },
             ) {
-                if (value.isEmpty()) {
+                if (value.text.isEmpty()) {
                     Text(t("说一句…"), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.outline)
                 }
                 inner()
