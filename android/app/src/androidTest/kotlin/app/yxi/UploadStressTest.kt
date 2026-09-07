@@ -35,6 +35,15 @@ class UploadStressTest {
     private val ctx get() = InstrumentationRegistry.getInstrumentation().targetContext
 
     private fun connect(): SshSession {
+        // ⚠️ **跳过的判据是「有没有显式传参数」,不是「App 里有没有主机」。**
+        //    模拟器是三个人共用的,别人为自己的功能种一台主机(cc-Yxi_pilot 2026-09-07 种了台 macOS 的),
+        //    这几条就会**真跑起来**,然后红在「上传目标路径在那台机器上不存在」——
+        //    等于把别人的测试环境算成了我的运行信号。显式传 stressKey/stressHost 才是「我要跑压测」。
+        val args0 = InstrumentationRegistry.getArguments()
+        assumeTrue("上传压测要显式指定目标机才跑,跳过。跑法:" +
+            "-Pandroid.testInstrumentationRunnerArguments.stressKey=<base64url 私钥> " +
+            "stressHost=<目标机> [stressPort=22 stressUser=root]",
+            args0.getString("stressKey") != null || args0.getString("stressHost") != null)
         // ⚠️ 每次 connectedAndroidTest 都会重装 App，KeyManager 的密钥跟着换 —— 所以测试用一把
         //    **固定的**密钥：宿主机上 `ssh-keygen -t ed25519 -f ~/.ssh/yxi-stress`，公钥进 authorized_keys，
         //    私钥 `adb push` 到 /sdcard/yxi-stress-key。没有这个文件才退回 App 自己的密钥（要手工加公钥）。
@@ -61,17 +70,9 @@ class UploadStressTest {
         //    现在:没给密钥直接失败并说清怎么跑,不碰 HostStore。
         val store = HostStore(ctx); val keys = KeyManager(ctx)
         android.util.Log.i("UploadStress", "PUBKEY " + keys.publicKeyLine())
-        // ⚠️ 没有可用主机时**跳过**,不是失败。
-        //    这几条要一台真 SSH 目标机才跑得动,而全套里没人会带 stressKey ——
-        //    以前直接 error() 的话,全套永远红 7 条,红得有理由但会**稀释信号**:
-        //    看惯了红的人也就不看红的了(cc-Yxi_pilot 2026-09-07 跑全套 306/红 7 全是这几条)。
-        //    assumeTrue 出来的是「跳过 + 原因」,和「通过」仍然分得清 —— 项目那条
-        //    「没跑和跑过了必须分得清」照旧成立,只是不再冒充失败。
+        // 走到这儿说明**显式要求跑**了,但只给了 stressHost 没给 key —— 那就得 App 里有配好的主机
         val h = store.hosts.value.firstOrNull()
-        assumeTrue("上传压测需要一台 SSH 目标机,跳过。跑法:" +
-            "-Pandroid.testInstrumentationRunnerArguments.stressKey=<base64url 私钥> " +
-            "stressHost=<目标机> [stressPort=22 stressUser=root]", h != null)
-        h!!
+            ?: error("传了 stressHost 但没传 stressKey,而 App 里也没有配好的主机")
         val cfg = store.configFor(h, keys)
         assumeTrue("主机 ${h.alias} 没有可用的认证方式,跳过", cfg != null)
         cfg!!
