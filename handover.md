@@ -119,7 +119,7 @@
 
 > **试验台 2026-09-06 晚封版**（老板：「现在试玩台没问题了」），tag `bench-final-20260906`。两个没单独拍的默认值就此定下：音符用薄片（高度 1）、无线时刻最高档每一下 25% 触发。**下一步：按试验台重写 App 的音游画面**（cc-Yxi 做，判定 / 算分 / 上报不动；谱面参数和编舞关键帧的契约找 logto）。
 > 试验台：`design/rhythm-bench.src.html` → `bench-assemble.py` → 线上 https://yxi.keuury.com/lab/rhythm.html
-> 画廊：碎裂 `/lab/shatter.html`（20 款）· swipe 标记 `/lab/swipe.html`（20 款）· 点击特效 `/lab/hit.html`（30 款，做着）
+> 画廊：碎裂 `/lab/shatter.html`（20 款）· swipe 标记 `/lab/swipe.html`（20 款）· 点击特效 `/lab/hit.html`（30 款）· **碎裂音效 `/lab/shatter-sfx.html`（20 款，09-07 老板要的，待挑；源 `design/sfx/shatter/`，四个家族 gen_*.py 可重跑，`assemble_page.py` 拼页）**
 > 模块在 `design/shatter/`、`design/swipe/`、`design/hit/`，统一契约 `draw(ctx, …, t, rng)`：无状态、确定性随机、t=1 全透明。
 
 - **背景**：对话页 `ThinkingGlow` 的移植（四团光独立相位、色相 6 秒一圈蓝→青→绿→黄→橙→粉）；连击越高从「待机 .55」升到「思考 1.0」；跳档闪「等你拍板」的琥珀。半径 / 明度按深底横屏改过（原数会糊成一块灰）。
