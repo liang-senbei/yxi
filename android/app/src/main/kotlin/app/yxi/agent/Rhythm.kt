@@ -256,6 +256,7 @@ object Rhythm {
         for (i in 0 until arr.length()) {
             val o = arr.getJSONObject(i)
             val id = o.getString("id")
+            if (!id.matches(Regex("[A-Za-z0-9_-]+"))) continue                  // id 会拼进本地路径：`../` 之类一律不要（审查）
             val bundled = SONGS.firstOrNull { it.id == id }
             val charts = o.optJSONObject("charts")
             val diffs = ArrayList<String>()
@@ -322,7 +323,8 @@ object Rhythm {
 
     /** 下载清单独有曲子的音频（一两 MB）。进度 0..1 */
     suspend fun download(ctx: Context, s: Song, onProgress: (Float) -> Unit): Boolean = withContext(Dispatchers.IO) {
-        runCatching { fetch(REMOTE_BASE + s.audio, audioFile(ctx, s), onProgress); true }.getOrDefault(false)
+        // 先补一次谱：上次 refresh 半途断了的话谱会缺，只下音频 ready() 还是 false，按钮点了等于白点（审查抓的死局）
+        runCatching { refresh(ctx); fetch(REMOTE_BASE + s.audio, audioFile(ctx, s), onProgress); true }.getOrDefault(false)
     }
     fun diffName(d: String) = when (d) { "hard" -> "认真"; "frenzy" -> "狂热"; else -> "轻松" }
 
