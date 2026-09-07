@@ -51,7 +51,7 @@ object WildBgB {
                     val fade = 1f - phase
                     val thick = h * (0.004f + 0.014f * b) * (0.3f + 0.7f * fade)
                     val alpha = fade * (0.25f + 0.4f * e)
-                    val ci = i + (t * 1.5f + e * 3f).toInt()
+                    val ci = i + (t * (if (calm) 0.3f else 1.5f) + e * 3f).toInt()   // calm：色号变化 ≤0.5Hz（审查）
                     if (i % 2 == 0) {                   // 圆环 + 柔光层
                         drawCircle(rb(ci, alpha * 0.25f), r, Offset(cx, cy), style = Stroke(thick * 5f))
                         drawCircle(rb(ci, alpha), r, Offset(cx, cy), style = Stroke(thick))
@@ -65,7 +65,7 @@ object WildBgB {
                         }
                     }
                 }
-                drawCircle(rb((t * 2f).toInt(), 0.3f + 0.25f * b), h * 0.012f, Offset(cx, cy))
+                drawCircle(rb((t * (if (calm) 0.4f else 2f)).toInt(), 0.3f + 0.25f * b), h * 0.012f, Offset(cx, cy))   // calm ≤0.5Hz（审查）
             }
 
             7 -> {                                      // ── 星海跃迁：星点从中心飞出拉成线 ──
