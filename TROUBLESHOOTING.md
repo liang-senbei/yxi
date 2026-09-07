@@ -5798,7 +5798,7 @@ adb install -r app-debug.apk && adb install -r -t app-debug-androidTest.apk
 ```
 结果可疑时先确认装的是不是自己那份：`adb shell dumpsys package app.yxi | grep lastUpdateTime`（见 #279）。
 
-## #311 同一个名字的两个后台任务都能 claim 到模拟器 → 自己撞自己，全套「Process crashed」（cc-Yxi，2026-09-07）
+## #315 同一个名字的两个后台任务都能 claim 到模拟器 → 自己撞自己，全套「Process crashed」（cc-Yxi，2026-09-07）
 
 **症状**：截图任务和全套任务都用 `emu.sh claim cc-Yxi` 排队；锁按名字认，同名再 claim 直接成功，两个任务同时上机，截图任务中途 `adb install` 重装了包，全套里 UploadStressTest 报 `Process crashed`（#292 那种）。
 **根因**：锁是「按人」不是「按任务」；一个人开两个后台任务就没有互斥。
