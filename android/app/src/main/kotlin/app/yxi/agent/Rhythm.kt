@@ -163,6 +163,27 @@ object Rhythm {
         }
     }
 
+    /**
+     * 舞台特效关键帧（「癫狂」难度，老板 2026-09-07 傍晚的 I Wanna 视频：视角突然拉伸、忽大忽小、一直闪屏、背景硬切）。
+     * op：zoom（整体缩放，1 = 原样）/ sx / sy（拉伸）/ spin（整体转，度）/ shake（抖动幅度，屏高比例）/ flash（白闪 0..1）
+     *     / bg（背景样式号：0 底光 / 1 黑白网点 / 2 彩虹射线轮 / 3 螺旋点阵 / 4 纯色硬切，dur 0 硬切）/ notes（音符缩放）/ hue（底光色相偏移，度）。
+     * 判定完全不受影响：镜头是画完场地再套的一层变换，手指坐标会先反变换回来。减弱动效（系统动画关掉）时不闪、不抖。
+     */
+    data class FxEvent(val t: Float, val dur: Float, val op: String, val from: Float, val to: Float, val ease: String) {
+        fun valueAt(now: Float): Float {
+            if (now <= t) return from
+            if (now >= t + dur || dur <= 0f) return to
+            val k = (now - t) / dur
+            val e = when (ease) {
+                "cubicInOut" -> if (k < 0.5f) 4f * k * k * k else 1f - ((-2f * k + 2f).let { it * it * it }) / 2f
+                "linear" -> k
+                else -> 1f - (1f - k) * (1f - k) * (1f - k)
+            }
+            return from + (to - from) * e
+        }
+    }
+    class StageFx(val zoom: Float, val sx: Float, val sy: Float, val spin: Float, val shake: Float, val flash: Float, val bg: Int, val notes: Float, val hue: Float)
+
     data class Chart(
         val song: String, val zh: String, val bpm: Int,
         val difficulty: String, val offset: Float, val notes: List<Note>,
@@ -170,6 +191,8 @@ object Rhythm {
         val lines: List<LineEvent> = emptyList(),
         /** 全部判定线；为空就只有 [lines] 那一条 */
         val judges: List<JudgeLine> = emptyList(),
+        /** 舞台特效关键帧（癫狂难度），按时间排好；空 = 没有 */
+        val stage: List<FxEvent> = emptyList(),
         /** 曲子能量包络（design/music/energy_all.py，每秒 [energyHz] 个 0..1）：进高潮底光更亮、色彩层次更足（老板 09-07） */
         val energy: FloatArray = FloatArray(0), val energyHz: Float = 4f,
         /**
@@ -203,6 +226,16 @@ object Rhythm {
                 }
             }
             return Pose(deg, dx, dy)
+        }
+        /** [now] 时刻的舞台特效（每个 op 取最近开始的关键帧） */
+        fun stageAt(now: Float): StageFx {
+            var zoom = 1f; var sx = 1f; var sy = 1f; var spin = 0f; var shake = 0f; var flash = 0f; var bg = 0f; var notes = 1f; var hue = 0f
+            for (e in stage) {
+                if (e.t > now) break
+                val v = e.valueAt(now)
+                when (e.op) { "zoom" -> zoom = v; "sx" -> sx = v; "sy" -> sy = v; "spin" -> spin = v; "shake" -> shake = v; "flash" -> flash = v; "bg" -> bg = v; "notes" -> notes = v; "hue" -> hue = v }
+            }
+            return StageFx(zoom, sx, sy, spin, shake, flash.coerceIn(0f, 1f), bg.toInt(), notes, hue)
         }
         /** 这条线此刻的亮度：出现窗口的淡入淡出 × 关键帧 alpha（没写 alpha 关键帧就是 1） */
         fun lineAlphaAt(now: Float, line: Int): Float {
@@ -270,7 +303,7 @@ object Rhythm {
             val bundled = SONGS.firstOrNull { it.id == id }
             val charts = o.optJSONObject("charts")
             val diffs = ArrayList<String>()
-            for (d in listOf("easy", "hard", "frenzy")) if (charts?.has(d) == true) diffs += d
+            for (d in listOf("easy", "hard", "frenzy", "wild")) if (charts?.has(d) == true) diffs += d
             out += Song(id, o.optString("zh", bundled?.zh ?: id), bundled?.raw ?: 0, o.optInt("bpm", bundled?.bpm ?: 120),
                 o.optInt("seconds", bundled?.seconds ?: 60), o.optString("credit", bundled?.credit ?: ""),
                 if (diffs.isEmpty()) (bundled?.diffs ?: DIFFS) else diffs,
@@ -353,7 +386,7 @@ object Rhythm {
         // 先补一次谱：上次 refresh 半途断了的话谱会缺，只下音频 ready() 还是 false，按钮点了等于白点（审查抓的死局）
         runCatching { refresh(ctx); fetch(REMOTE_BASE + s.audio, audioFile(ctx, s), onProgress); true }.getOrDefault(false)
     }
-    fun diffName(d: String) = when (d) { "hard" -> "认真"; "frenzy" -> "狂热"; else -> "轻松" }
+    fun diffName(d: String) = when (d) { "hard" -> "认真"; "frenzy" -> "狂热"; "wild" -> "癫狂"; else -> "轻松" }
 
     /** 曲子列表。加曲子的完整步骤见 design/rhythm-spec.md §6.3（谱面 + 服务端 charts-meta 都要跟上） */
     val SONGS = listOf(
@@ -408,6 +441,14 @@ object Rhythm {
             return lines.sortedBy { it.t }
         }
         val lines = parseLines(j.optJSONArray("lines"))
+        val stage = ArrayList<FxEvent>()
+        j.optJSONArray("stage")?.let { sa ->
+            for (i in 0 until sa.length()) {
+                val o = sa.getJSONObject(i)
+                stage += FxEvent(o.getDouble("t").toFloat(), o.optDouble("dur", 0.0).toFloat(), o.getString("op"),
+                    o.optDouble("from", 0.0).toFloat(), o.optDouble("to", 0.0).toFloat(), o.optString("ease", "cubicInOut"))
+            }
+        }
         val judges = ArrayList<JudgeLine>()
         j.optJSONArray("judges")?.let { ja ->
             for (i in 0 until ja.length()) {
@@ -418,7 +459,7 @@ object Rhythm {
             }
         }
         return Chart(j.getString("song"), j.getString("zh"), j.getInt("bpm"),
-            j.getString("difficulty"), j.optDouble("offset", 0.0).toFloat(), notes, lines, judges = judges,
+            j.getString("difficulty"), j.optDouble("offset", 0.0).toFloat(), notes, lines, judges = judges, stage = stage.sortedBy { it.t },
             energy = j.optJSONObject("energy")?.optJSONArray("v")?.let { v -> FloatArray(v.length()) { v.getDouble(it).toFloat() } } ?: FloatArray(0),
             energyHz = j.optJSONObject("energy")?.optDouble("hz", 4.0)?.toFloat() ?: 4f,
             approach = if (j.has("approach")) j.getDouble("approach").toFloat() else null)

@@ -31,6 +31,11 @@
 - **units = 音符数 + slide 数**，服务端按它校验判定序列；改了音符就要重新 publish（§6）。
 - 关键帧：`{"t", "dur", "op", "from", "to", "ease"}`，`op` ∈ `rotate`（度，顺时针为正）/ `move_x` / `move_y`（屏宽 / 屏高比例，负 y 往上）/ `alpha`（0..1，闪烁 / 渐隐）；`ease` ∈ `cubicInOut` / `easeOut` / `linear`。**同一 op 的关键帧必须首尾相接**（下一条的 from == 上一条的 to），`dur: 0` = 瞬间到位。
 
+### 1.1 舞台特效关键帧 `stage`（「癫狂」难度，老板 09-07 傍晚的 I Wanna 视频）
+
+谱面顶层 `"stage": [{"t","dur","op","from","to","ease"}]`，op：`zoom`（整体缩放）/ `sx` `sy`（视角拉伸）/ `spin`（整体转，度）/ `shake`（抖动幅度，屏高比例）/ `flash`（白闪 0..1）/ `bg`（背景样式：0 底光 / 1 黑白网点 / 2 彩虹射线轮 / 3 螺旋点阵 / 4 纯色硬切，`dur: 0` 硬切）/ `notes`（音符缩放）/ `hue`（底光色相偏移）。
+**判定不受影响**：镜头是画完整个场地后再套的一层变换（`RhythmScreen` 的 withTransform），手指坐标先 `unCamera` 反变换；系统动画关掉（减弱动效）时不闪、不抖。`wild_chart.py <hard 谱>` 拿 hard 谱叠一层特效生成 `chart_<id>_wild.json`（音符不变，units 同 hard）。
+
 ## 2. 线的动作词汇（每一种在 App 里怎么实现）
 
 App 侧：场地画在**线的坐标系**里（`RhythmScreen.kt` 的 `withTransform { translate(cx,cy); rotate(deg); scale(sLane, sTravel); translate(-W/2, -judgeY) }`），所以线怎么动，音符永远垂直于线、沿法线飞来，判定完全不受影响。姿态由 `linePose()` 算（画和触摸共用一份），= 谱面关键帧 + 慢摆 / 呼吸 + 玩家甩动 + 整条线留屏内的夹紧。
@@ -84,6 +89,7 @@ App 侧：场地画在**线的坐标系**里（`RhythmScreen.kt` 的 `withTransf
 | `design/music/lanes.py` | 4 轨 → 12 轨铺开（同时的音符 ≥2 轨间距、连续 ≤6 轨跳） |
 | `design/music/energy_all.py` | 能量包络写进谱面 |
 | `design/music/levelkit.py` | **自定义关卡接口**（放线 / 放块 / 动作 / 分裂 / 阵型 / 自检） |
+| `design/music/wild_chart.py` | 「癫狂」难度：hard 谱 + 舞台特效关键帧（背景硬切 / 拉伸 / 踩拍 zoom / 闪屏 / 抖动 / 音符忽大忽小 / 色相） |
 | `design/music/showpiece.py` | 表演关生成器：主线节奏模板 + 能量最高两段进阵型（菱形放大缩小闪烁 / 六边形旋转）+ 分裂段 + 正方形收束；`python3 showpiece.py <id> <曲名> <音频> --bpm N --out remote/<id>` |
 | `design/music/make_remote_songs.py` | 把 `incoming/*.json` 描述的新曲子批量出谱（easy + hard）到 `remote/<id>/` |
 | `design/music/publish_songs.py` | 发布：攒 dist → 上传 hk13 → 先跑 logto 的 rhythm-sync 再公开清单 |

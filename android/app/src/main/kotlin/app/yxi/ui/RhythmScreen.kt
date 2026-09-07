@@ -81,6 +81,7 @@ import app.yxi.ui.rhythm.Rng
 import app.yxi.ui.rhythm.ShatterFx
 import app.yxi.ui.rhythm.Shatters
 import app.yxi.ui.rhythm.StageGlow
+import app.yxi.ui.rhythm.WildBg
 import app.yxi.ui.rhythm.SwipeMarks
 import app.yxi.ui.rhythm.SwipeNote
 import app.yxi.ui.rhythm.Tile
@@ -236,7 +237,7 @@ private fun SongList(synced: Int, onPick: (Rhythm.Song, String) -> Unit, onDemo:
                         s.diffs.forEach { d ->
                             val best = remember(synced) { Rhythm.best(ctx, "${s.id}_$d") }
                             Surface(
-                                color = when (d) { "hard" -> Copper.copy(alpha = .14f); "frenzy" -> Color(0xFFE0457B).copy(alpha = .18f); else -> MaterialTheme.colorScheme.surfaceContainerHigh },
+                                color = when (d) { "hard" -> Copper.copy(alpha = .14f); "frenzy" -> Color(0xFFE0457B).copy(alpha = .18f); "wild" -> Color(0xFF7B61FF).copy(alpha = .20f); else -> MaterialTheme.colorScheme.surfaceContainerHigh },
                                 shape = RoundedCornerShape(14.dp),
                                 modifier = Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).clickable { onPick(s, d) },
                             ) {
@@ -598,20 +599,33 @@ private fun GameBoard(
                 // 场地画在线的坐标系里（规格 §5）：手指位置先反变换回线的坐标系再分轨、再算划动方向 ——
                 // 线立着的时候「左右滑」就是屏幕上的上下滑。
                 // 多线：这根手指归离它最近的那条**在场的**判定线（屏幕上点到线段的距离），整个手势都跟着这条线
+                // 癫狂难度的镜头（zoom / 拉伸 / 转 / 抖）套在整个场地外面：手指坐标先反变换出镜头，再归线、再分轨
+                fun unCamera(p: Offset): Offset {
+                    val fx = chart.stageAt(now)
+                    if (chart.stage.isEmpty()) return p
+                    val w = size.width.toFloat(); val h = size.height.toFloat()
+                    val (shx, shy) = shakeAt(now, fx.shake, h, motion)
+                    val ox = p.x - (w / 2f + shx); val oy = p.y - (h / 2f + shy)
+                    val rad = -fx.spin * (Math.PI / 180f).toFloat()
+                    val rx = ox * kotlin.math.cos(rad) - oy * kotlin.math.sin(rad); val ry = ox * kotlin.math.sin(rad) + oy * kotlin.math.cos(rad)
+                    return Offset(rx / (fx.zoom * fx.sx) + w / 2f, ry / (fx.zoom * fx.sy) + h / 2f)
+                }
+                val downPos = unCamera(down.position)
                 val lineIdx = run {
                     var best = 0; var bestD = Float.MAX_VALUE
                     for (k in 0 until chart.lineCount) {
                         if (chart.lineAlphaAt(now, k) <= 0f) continue
                         val lp = linePose(chart, k, live, now, lineScale, size.width.toFloat(), size.height.toFloat())
                         val rad = -lp.deg * (Math.PI / 180f).toFloat()
-                        val ox = down.position.x - lp.cx; val oy = down.position.y - lp.cy
+                        val ox = downPos.x - lp.cx; val oy = downPos.y - lp.cy
                         val d = kotlin.math.abs(ox * kotlin.math.sin(rad) + oy * kotlin.math.cos(rad)) / lp.sTravel   // 手指到线的法向距离（线坐标系里）
                         if (d < bestD) { bestD = d; best = k }
                     }
                     best
                 }
                 val laneBase = lineIdx * Rhythm.LANES
-                fun toLocal(pos: Offset): Offset {
+                fun toLocal(pos0: Offset): Offset {
+                    val pos = unCamera(pos0)
                     val lp = linePose(chart, lineIdx, live, now, lineScale, size.width.toFloat(), size.height.toFloat())   // ⚠️ 必须和画的那边同一份，不然点的和看的错位
                     val ly = size.height * 0.78f
                     val rad = -lp.deg * (Math.PI / 180f).toFloat()
@@ -679,8 +693,9 @@ private fun GameBoard(
             val W = size.width; val H = size.height
             val laneW = W / Rhythm.LANES
             val judgeY = H * 0.78f                                    // 线的坐标系里线永远在这儿
-            val noteH = (H * 0.011f).coerceIn(6f * density, 11f * density)   // 薄片（老板选的），CSS 6~11px
-            val noteW = W * 0.0811f                                   // 原 0.052×1.2=0.0624，老板 09-07：沿线方向加长 30%；12 条轨每条 0.0833
+            val fx = chart.stageAt(t)                                 // 癫狂难度的舞台特效（别的难度全是默认值）
+            val noteH = (H * 0.011f).coerceIn(6f * density, 11f * density) * fx.notes   // 薄片（老板选的），CSS 6~11px
+            val noteW = W * 0.0811f * fx.notes                        // 原 0.052×1.2=0.0624，老板 09-07：沿线方向加长 30%；12 条轨每条 0.0833
             val bench = H / 580f                                      // 网页试验台是 580 CSS px 高：特效里的线宽 / 点半径按它缩放（port-hit 提醒）
 
             // ── 底光：连击越高越亮；每下小闪；跳档猛闪 + 琥珀 + 台阶（规格 §3）──
@@ -690,7 +705,15 @@ private fun GameBoard(
             val tierPulse = (1f - (t - stage.lastTierAt) / 0.6f).coerceIn(0f, 1f).let { it * it }
             val energy = chart.energyAt(t)
             val amount = 0.55f + 0.45f * heatK + 0.20f * tierLevel + 0.45f * hitPulse + 0.90f * tierPulse + 0.35f * energy
-            with(StageGlow) { drawStageGlow(t, if (motion) amount else 0.55f, if (motion) tierPulse else 0f, 1.75f, if (motion) energy else 0f) }
+            if (fx.bg == 0 || !motion) with(StageGlow) { drawStageGlow(t, if (motion) amount else 0.55f, if (motion) tierPulse else 0f, 1.75f, if (motion) energy else 0f) }
+            else with(WildBg) { drawWildBg(fx.bg, t, ((t * chart.bpm / 60f) % 1f + 1f) % 1f, energy) }
+            val (shakeX, shakeY) = shakeAt(t, fx.shake, H, motion)
+            withTransform({                                           // 镜头：整个场地一起缩放 / 拉伸 / 转 / 抖（触摸那边 unCamera 反变换）
+                translate(W / 2f + shakeX, H / 2f + shakeY)
+                rotate(fx.spin, Offset.Zero)
+                scale(fx.zoom * fx.sx, fx.zoom * fx.sy, Offset.Zero)
+                translate(-W / 2f, -H / 2f)
+            }) {
 
             for (lineK in 0 until chart.lineCount) {
             val lineAlpha = chart.lineAlphaAt(t, lineK)                // 出现窗口 × alpha 关键帧（闪烁）
@@ -827,6 +850,9 @@ private fun GameBoard(
             }
 
             }   // for lineK
+            }   // 镜头
+            // 闪屏（癫狂难度）：减弱动效时不闪
+            if (motion && fx.flash > 0f) drawRect(Color.White.copy(alpha = fx.flash * 0.85f), Offset.Zero, Size(W, H))
             // 无线时刻：四边一圈呼吸柔光（不转）
             if (stage.freeLive(t)) {
                 val br = .10f + .06f * kotlin.math.sin(t * 6f)
@@ -946,6 +972,13 @@ private fun mix(a: Color, b: Color, f: Float) = Color(
  * 角度不限幅：线想怎么转就怎么转。
  */
 private class LinePose(val deg: Float, val cx: Float, val cy: Float, val sLane: Float, val sTravel: Float)
+
+/** 抖动位移（像素）：两个不成整数倍的正弦相乘当噪声，按时间算；减弱动效时为 0 */
+private fun shakeAt(t: Float, amp: Float, h: Float, motion: Boolean): Pair<Float, Float> {
+    if (amp <= 0f || !motion) return 0f to 0f
+    val a = amp * h
+    return (sin(t * 37f) * kotlin.math.cos(t * 53f) * a) to (sin(t * 41f + 1.3f) * kotlin.math.cos(t * 59f) * a)
+}
 
 private fun linePose(chart: Rhythm.Chart, line: Int, live: Live, t: Float, lineScale: Float, w: Float, h: Float): LinePose {
     val pose = chart.poseAt(t, line)
