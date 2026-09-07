@@ -556,8 +556,10 @@ private fun GameBoard(
                 // swipe 判定（老板 09-07：「左滑右滑没有真正被触发」）——原来只认「落下 0.45 秒内划过 3% 屏宽、一次触摸只认一回」，
                 // 按住等音符再划、或者手指不抬连着左右扫，都不算。改成看**最近 0.18 秒的位移**：什么时候划都行，
                 // 换方向立刻可以再触发，同方向 0.30 秒后可以再触发（一个动作只算一次）。
-                val trail = ArrayDeque<Pair<Float, Float>>()          // (时刻, 线坐标系里的 x)
-                trail.addLast(now to l0.x)
+                // ⚠️ 轨迹存**屏幕坐标**，算位移时把最老那点用**当前**姿态重投影：线在转的时候手指不动、局部 x 也会漂
+                //    （90° 过渡 0.18 秒能漂 90px > 门槛），存局部 x 会凭空触发 swipe（审查）。两端同一坐标系，漂移抵消。
+                val trail = ArrayDeque<Pair<Float, Offset>>()         // (时刻, 屏幕坐标)
+                trail.addLast(now to down.position)
                 var lastSwipeAt = -9f; var lastSwipeDir = 0
                 while (true) {
                     val ev = awaitPointerEvent()
@@ -565,20 +567,19 @@ private fun GameBoard(
                     if (!ch.pressed) break
                     val l1 = toLocal(ch.position)
                     val dx = l1.x - l0.x; val dy = l1.y - l0.y
-                    trail.addLast(now to l1.x)
+                    trail.addLast(now to ch.position)
                     while (trail.size > 1 && now - trail.first().first > 0.18f) trail.removeFirst()
-                    val dxWin = l1.x - trail.first().second
+                    val dxWin = l1.x - toLocal(trail.first().second).x
                     // 门槛 3% 屏宽（老板：放宽点）；立竖时局部 dx 被 1/sLane 放大，门槛也乘回去，屏幕上的手指距离不变（审查）
                     val thr = size.width * 0.03f / linePose(chart, live, now, lineScale, size.width.toFloat(), size.height.toFloat()).sLane
                     if (kotlin.math.abs(dxWin) > thr) {
                         val dir = if (dxWin > 0) 1 else -1
                         if (dir != lastSwipeDir || now - lastSwipeAt > 0.30f) {
-                            lastSwipeAt = now; lastSwipeDir = dir
                             val freeNow = stage.freeLive(now)
                             val ok = hitNear(live, lane, now, offset, freeNow) { it.kind == Rhythm.Kind.SWIPE && (freeNow || it.dir == 0 || it.dir == dir) }
                             android.util.Log.d("YxiRhythm", "swipe lane=$lane dx=${dxWin.toInt()} dir=$dir now=$now hit=$ok")
-                            if (ok) { combo = live.combo; score = live.currentScore(); live.tilt(now, dir) }
-                            trail.clear(); trail.addLast(now to l1.x)   // 从头量：一个动作别触发两次
+                            if (ok) { lastSwipeAt = now; lastSwipeDir = dir; combo = live.combo; score = live.currentScore(); live.tilt(now, dir) }   // 没中不占冷却（审查）
+                            trail.clear(); trail.addLast(now to ch.position)   // 从头量：一个动作别触发两次
                         }
                     }
                     val moved = kotlin.math.abs(dx) > size.width * 0.02f || kotlin.math.abs(dy) > size.height * 0.04f
