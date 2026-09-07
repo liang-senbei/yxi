@@ -105,6 +105,8 @@ object Rhythm {
         val dur: Float,        // 秒，SLIDE 的长度；其余为 0
         /** TRACE 要拖到哪条轨、SWIPE 要往哪边滑：-1 左 / +1 右；其余 0 */
         val dir: Int = 0,
+        /** 落到第几条判定线（多线，老板 09-07 发的 Phigros 视频）；老谱都是 0 */
+        val line: Int = 0,
     ) {
         val hold get() = kind == Kind.SLIDE
         var judged: Judge? = null
@@ -147,11 +149,26 @@ object Rhythm {
         }
     }
 
+    /**
+     * 一条判定线：自己的动作关键帧 + 出现 / 消失的时刻（老板 09-07：「可以多根，随机出现，每根上都能校准」）。
+     * 第 0 条永远在；后面的只在 [from, to] 里出现，进出各淡 0.4 秒。音符自带 line，落到对应的线上。
+     */
+    data class JudgeLine(val lines: List<LineEvent>, val from: Float = Float.NEGATIVE_INFINITY, val to: Float = Float.POSITIVE_INFINITY) {
+        fun alphaAt(t: Float): Float = when {
+            t < from || t > to -> 0f
+            t < from + 0.4f -> (t - from) / 0.4f
+            t > to - 0.4f -> (to - t) / 0.4f
+            else -> 1f
+        }
+    }
+
     data class Chart(
         val song: String, val zh: String, val bpm: Int,
         val difficulty: String, val offset: Float, val notes: List<Note>,
-        /** 判定线的动作，按时间排好 */
+        /** 第 0 条判定线的动作，按时间排好（兼容老谱；多线看 [judges]） */
         val lines: List<LineEvent> = emptyList(),
+        /** 全部判定线；为空就只有 [lines] 那一条 */
+        val judges: List<JudgeLine> = emptyList(),
         /** 曲子能量包络（design/music/energy_all.py，每秒 [energyHz] 个 0..1）：进高潮底光更亮、色彩层次更足（老板 09-07） */
         val energy: FloatArray = FloatArray(0), val energyHz: Float = 4f,
         /**
@@ -170,6 +187,20 @@ object Rhythm {
             val x = (now * energyHz).coerceIn(0f, (energy.size - 1).toFloat())
             val i = x.toInt(); val f = x - i
             return if (i + 1 < energy.size) energy[i] * (1f - f) + energy[i + 1] * f else energy[i]
+        }
+        val judgeLines: List<JudgeLine> get() = if (judges.isEmpty()) listOf(JudgeLine(lines)) else judges
+        val lineCount get() = judgeLines.size
+        fun poseAt(now: Float, line: Int): Pose {
+            var deg = 0f; var dx = 0f; var dy = 0f
+            for (e in judgeLines[line].lines) {
+                if (e.t > now) break
+                when (e.op) {
+                    LineOp.ROTATE -> deg = e.valueAt(now)
+                    LineOp.MOVE_Y -> dy = e.valueAt(now)
+                    LineOp.MOVE_X -> dx = e.valueAt(now)
+                }
+            }
+            return Pose(deg, dx, dy)
         }
         fun poseAt(now: Float): Pose {
             var deg = 0f; var dx = 0f; var dy = 0f
@@ -233,13 +264,14 @@ object Rhythm {
                 "swipe" -> Kind.SWIPE
                 else -> Kind.TICK
             }
-            notes += Note(o.getDouble("t").toFloat(), o.getInt("lane"), kind, dur, o.optInt("dir", 0)).also { n ->
+            notes += Note(o.getDouble("t").toFloat(), o.getInt("lane"), kind, dur, line = o.optInt("line", 0), dir = o.optInt("dir", 0)).also { n ->
                 n.markIdx = (i * 7919) % 2                      // swipe 两款标记随机（按下标定死，同一张谱每次一样）
                 n.seed = ((i * 2654435761L) % 100000L) / 100000f
             }
         }
-        val lines = ArrayList<LineEvent>()
-        j.optJSONArray("lines")?.let { la ->
+        fun parseLines(arr: org.json.JSONArray?): List<LineEvent> {
+            val lines = ArrayList<LineEvent>()
+            arr?.let { la ->
             for (i in 0 until la.length()) {
                 val o = la.getJSONObject(i)
                 val op = when (o.getString("op")) { "rotate" -> LineOp.ROTATE; "move_x" -> LineOp.MOVE_X; else -> LineOp.MOVE_Y }
@@ -249,9 +281,21 @@ object Rhythm {
                     o.optString("ease", "cubicInOut"),
                 )
             }
+            }
+            return lines.sortedBy { it.t }
+        }
+        val lines = parseLines(j.optJSONArray("lines"))
+        val judges = ArrayList<JudgeLine>()
+        j.optJSONArray("judges")?.let { ja ->
+            for (i in 0 until ja.length()) {
+                val o = ja.getJSONObject(i)
+                judges += JudgeLine(parseLines(o.optJSONArray("lines")),
+                    if (o.has("from")) o.getDouble("from").toFloat() else Float.NEGATIVE_INFINITY,
+                    if (o.has("to")) o.getDouble("to").toFloat() else Float.POSITIVE_INFINITY)
+            }
         }
         return Chart(j.getString("song"), j.getString("zh"), j.getInt("bpm"),
-            j.getString("difficulty"), j.optDouble("offset", 0.0).toFloat(), notes, lines.sortedBy { it.t },
+            j.getString("difficulty"), j.optDouble("offset", 0.0).toFloat(), notes, lines, judges = judges,
             energy = j.optJSONObject("energy")?.optJSONArray("v")?.let { v -> FloatArray(v.length()) { v.getDouble(it).toFloat() } } ?: FloatArray(0),
             energyHz = j.optJSONObject("energy")?.optDouble("hz", 4.0)?.toFloat() ?: 4f,
             approach = if (j.has("approach")) j.getDouble("approach").toFloat() else null)

@@ -292,10 +292,12 @@ private class Live(val chart: Rhythm.Chart) {
     var live = 0.0
     val errs = ArrayList<Float>()
     /** 每条轨下一个还没判的音符下标，省得每帧从头扫 */
-    val next = IntArray(Rhythm.LANES)
-    val heldCount = IntArray(Rhythm.LANES)          // 同一条轨可能不止一根手指；抬起一根不能把长按判死
-    val flash = FloatArray(Rhythm.LANES) { -9f }  // 每条轨最后一次判定的时刻（秒）
-    val flashJudge = arrayOfNulls<Rhythm.Judge>(Rhythm.LANES)
+    /** 轨用「全局轨号」g = 判定线 × LANES + 轨：多条判定线（老板 09-07）就是把轨的编号空间拉长，判定 / 按住 / 闪光的代码一行不用改 */
+    val laneCount = chart.lineCount * Rhythm.LANES
+    val next = IntArray(laneCount)
+    val heldCount = IntArray(laneCount)          // 同一条轨可能不止一根手指；抬起一根不能把长按判死
+    val flash = FloatArray(laneCount) { -9f }  // 每条轨最后一次判定的时刻（秒）
+    val flashJudge = arrayOfNulls<Rhythm.Judge>(laneCount)
     var lastJudge: Rhythm.Judge? = null
     var lastJudgeAt = 0f
     /** 判定发生时喊一声：音效 + 震动挂在这儿，绘制不管这些 */
@@ -328,14 +330,14 @@ private class Live(val chart: Rhythm.Chart) {
         return tiltDeg * kotlin.math.exp(-dt / (0.32f / 2.7f)) * kotlin.math.cos(dt * 9f)
     }
 
-    val byLane: List<List<Rhythm.Note>> = (0 until Rhythm.LANES).map { l -> chart.notes.filter { it.lane == l } }
+    val byLane: List<List<Rhythm.Note>> = (0 until laneCount).map { g -> chart.notes.filter { it.line * Rhythm.LANES + it.lane == g } }
     /** 演示模式（老板 09-07 的「播放」）：长按当作一直按着 */
     var autoHold = false
     /** 这条轨或相邻一条上有手指（轨窄了，判定放宽到 ±1） */
-    fun heldNear(lane: Int) = (maxOf(0, lane - 1)..minOf(Rhythm.LANES - 1, lane + 1)).any { heldCount[it] > 0 }
+    fun heldNear(lane: Int): Boolean { val b = lane / Rhythm.LANES * Rhythm.LANES; return (maxOf(b, lane - 1)..minOf(b + Rhythm.LANES - 1, lane + 1)).any { heldCount[it] > 0 } }   // 不跨线
 
     fun hit(j: Rhythm.Judge, at: Float, lane: Int = -1, kind: Rhythm.Kind = Rhythm.Kind.TICK) {
-        if (lane in 0 until Rhythm.LANES) { flash[lane] = at; flashJudge[lane] = j }
+        if (lane in 0 until laneCount) { flash[lane] = at; flashJudge[lane] = j }
         seq.append(when (j) { Rhythm.Judge.PERFECT -> 'P'; Rhythm.Judge.GOOD -> 'G'; else -> 'M' })
         onJudge?.invoke(j, lane, kind, at)
         val per = Rhythm.rules.base / chart.units.coerceAtLeast(1)
@@ -427,7 +429,7 @@ private fun GameBoard(
             ) != 0f
         }.getOrDefault(true)
     }
-    val press = remember { FloatArray(Rhythm.LANES) { -9f } }
+    val press = remember { FloatArray(live.laneCount) { -9f } }
     val view = LocalView.current
     val sfx = remember { RhythmSfx(ctx) }
     DisposableEffect(sfx) { onDispose { sfx.release() } }
@@ -448,7 +450,7 @@ private fun GameBoard(
                 view.hapticTick(hapticLv, j == Rhythm.Judge.PERFECT)
                 val r = stage.rnd
                 stage.lastHitAt = at
-                if (lane in 0 until Rhythm.LANES) {
+                if (lane in 0 until live.laneCount) {
                     stage.bursts += StageState.Burst(at, lane, kind, j == Rhythm.Judge.PERFECT, r.nextFloat(), stage.pickHit(), 1f, stage.judgeYk)
                     if (stage.bursts.size > 40) stage.bursts.removeAt(0)
                     stage.shatters += StageState.Shat(at, lane, kind, r.nextFloat(), stage.pickShatter(), stage.judgeYk)
@@ -463,7 +465,7 @@ private fun GameBoard(
                     praise = "Free" to System.currentTimeMillis()
                 }
                 // 竖向校准线：概率按档位走 30 → 50 → 70 → 90%
-                if (lane in 0 until Rhythm.LANES && r.nextFloat() < StageState.VLINE_P[minOf(3, tier)]) {
+                if (lane in 0 until live.laneCount && r.nextFloat() < StageState.VLINE_P[minOf(3, tier)]) {
                     stage.vlines += StageState.VLine(at, lane, r.nextFloat() * 20f - 10f, stage.judgeYk)
                     if (stage.vlines.size > 20) stage.vlines.removeAt(0)
                 }
@@ -514,12 +516,12 @@ private fun GameBoard(
             now = if (abs(pred - now) > .25f) pred else maxOf(now, pred)
             // trace：这条轨上有手指按着（或无线时刻里有任何手指）就吃掉窗口里的 trace
             val free = stage.freeLive(now)
-            for (l in 0 until Rhythm.LANES) if (live.heldNear(l) || (free && anyPointer[0] > 0)) {
+            for (l in 0 until live.laneCount) if (live.heldNear(l) || (free && anyPointer[0] > 0)) {
                 if (hitLane(live, l, now, offset, free) { it.kind == Rhythm.Kind.TRACE }) { combo = live.combo; score = live.currentScore() }
             }
             if (auto) {                                      // 演示（老板 09-07：「掉到校准线就自动校准」）：到点即完美，不看手指
                 val head = now + offset / 1000f
-                for (l in 0 until Rhythm.LANES) {
+                for (l in 0 until live.laneCount) {
                     val lanes = live.byLane[l]; var i = live.next[l]
                     while (i < lanes.size && lanes[i].judged != null) i++
                     if (i >= lanes.size) continue
@@ -562,8 +564,22 @@ private fun GameBoard(
                 if (auto) return@awaitEachGesture      // 演示：只看，不吃手指
                 // 场地画在线的坐标系里（规格 §5）：手指位置先反变换回线的坐标系再分轨、再算划动方向 ——
                 // 线立着的时候「左右滑」就是屏幕上的上下滑。
+                // 多线：这根手指归离它最近的那条**在场的**判定线（屏幕上点到线段的距离），整个手势都跟着这条线
+                val lineIdx = run {
+                    var best = 0; var bestD = Float.MAX_VALUE
+                    for (k in 0 until chart.lineCount) {
+                        if (chart.judgeLines[k].alphaAt(now) <= 0f) continue
+                        val lp = linePose(chart, k, live, now, lineScale, size.width.toFloat(), size.height.toFloat())
+                        val rad = -lp.deg * (Math.PI / 180f).toFloat()
+                        val ox = down.position.x - lp.cx; val oy = down.position.y - lp.cy
+                        val d = kotlin.math.abs(ox * kotlin.math.sin(rad) + oy * kotlin.math.cos(rad)) / lp.sTravel   // 手指到线的法向距离（线坐标系里）
+                        if (d < bestD) { bestD = d; best = k }
+                    }
+                    best
+                }
+                val laneBase = lineIdx * Rhythm.LANES
                 fun toLocal(pos: Offset): Offset {
-                    val lp = linePose(chart, live, now, lineScale, size.width.toFloat(), size.height.toFloat())   // ⚠️ 必须和画的那边同一份，不然点的和看的错位
+                    val lp = linePose(chart, lineIdx, live, now, lineScale, size.width.toFloat(), size.height.toFloat())   // ⚠️ 必须和画的那边同一份，不然点的和看的错位
                     val ly = size.height * 0.78f
                     val rad = -lp.deg * (Math.PI / 180f).toFloat()
                     val ox = pos.x - lp.cx; val oy = pos.y - lp.cy
@@ -572,7 +588,7 @@ private fun GameBoard(
                         (ox * kotlin.math.sin(rad) + oy * kotlin.math.cos(rad)) / lp.sTravel + ly,
                     )
                 }
-                fun laneOf(pos: Offset): Int = ((toLocal(pos).x / size.width) * Rhythm.LANES).toInt().coerceIn(0, Rhythm.LANES - 1)
+                fun laneOf(pos: Offset): Int = laneBase + ((toLocal(pos).x / size.width) * Rhythm.LANES).toInt().coerceIn(0, Rhythm.LANES - 1)
                 var lane = laneOf(down.position)
                 android.util.Log.d("YxiRhythm", "down lane=$lane now=$now pos=${down.position}")
                 live.heldCount[lane]++; anyPointer[0]++
@@ -600,7 +616,7 @@ private fun GameBoard(
                     while (trail.size > 1 && now - trail.first().first > 0.18f) trail.removeFirst()
                     val dxWin = l1.x - toLocal(trail.first().second).x
                     // 门槛 3% 屏宽（老板：放宽点）；立竖时局部 dx 被 1/sLane 放大，门槛也乘回去，屏幕上的手指距离不变（审查）
-                    val thr = size.width * 0.03f / linePose(chart, live, now, lineScale, size.width.toFloat(), size.height.toFloat()).sLane
+                    val thr = size.width * 0.03f / linePose(chart, lineIdx, live, now, lineScale, size.width.toFloat(), size.height.toFloat()).sLane
                     if (kotlin.math.abs(dxWin) > thr) {
                         val dir = if (dxWin > 0) 1 else -1
                         if (dir != lastSwipeDir || now - lastSwipeAt > 0.30f) {
@@ -629,8 +645,6 @@ private fun GameBoard(
             val t = now
             val W = size.width; val H = size.height
             val laneW = W / Rhythm.LANES
-            val lp = linePose(chart, live, t, lineScale, W, H)
-            val deg = lp.deg; val lineCx = lp.cx; val lineCy = lp.cy
             val judgeY = H * 0.78f                                    // 线的坐标系里线永远在这儿
             val noteH = (H * 0.011f).coerceIn(6f * density, 11f * density)   // 薄片（老板选的），CSS 6~11px
             val noteW = W * 0.0811f                                   // 原 0.052×1.2=0.0624，老板 09-07：沿线方向加长 30%；12 条轨每条 0.0833
@@ -645,6 +659,12 @@ private fun GameBoard(
             val amount = 0.55f + 0.45f * heatK + 0.20f * tierLevel + 0.45f * hitPulse + 0.90f * tierPulse + 0.35f * energy
             with(StageGlow) { drawStageGlow(t, if (motion) amount else 0.55f, if (motion) tierPulse else 0f, 1.75f, if (motion) energy else 0f) }
 
+            for (lineK in 0 until chart.lineCount) {
+            val lineAlpha = chart.judgeLines[lineK].alphaAt(t)
+            if (lineAlpha <= 0f) continue
+            val lp = linePose(chart, lineK, live, t, lineScale, W, H)
+            val deg = lp.deg; val lineCx = lp.cx; val lineCy = lp.cy
+            val gBase = lineK * Rhythm.LANES                           // 这条线的全局轨号起点
             withTransform({
                 translate(lineCx, lineCy)
                 rotate(deg, Offset.Zero)
@@ -656,7 +676,7 @@ private fun GameBoard(
 
                 // 按下反馈：极淡，只说「你按了」
                 if (motion) for (l in 0 until Rhythm.LANES) {
-                    val age = t - press[l]
+                    val age = t - press[gBase + l]
                     if (age in 0f..0.12f) drawRect(
                         Brush.verticalGradient(listOf(Color.Transparent, Color.White.copy(alpha = .06f * (1 - age / 0.12f))), startY = judgeY * 0.5f, endY = judgeY),
                         Offset(laneW * l, judgeY * 0.5f), Size(laneW, judgeY * 0.5f),
@@ -664,20 +684,20 @@ private fun GameBoard(
                 }
                 // 漏：那段线短暂变暗红
                 for (l in 0 until Rhythm.LANES) {
-                    val age = t - live.flash[l]
-                    if (live.flashJudge[l] == Rhythm.Judge.MISS && age in 0f..0.35f) drawLine(
+                    val age = t - live.flash[gBase + l]
+                    if (live.flashJudge[gBase + l] == Rhythm.Judge.MISS && age in 0f..0.35f) drawLine(
                         missColor.copy(alpha = .9f * (1 - age / 0.35f)), Offset(laneW * l + 8f, judgeY), Offset(laneW * (l + 1) - 8f, judgeY), 2.5f * bench,
                     )
                 }
 
                 // ── 判定线：纯白发丝 + 极窄柔光；命中那一瞬亮一下；无线时刻闪烁 → 消失 → 闪回 ──
-                var lineA = 1f
+                var lineA = lineAlpha
                 if (stage.freeOn) {
                     lineA = if (!motion) 0.15f                                    // 减弱动效：不闪（12Hz 全亮全灭是光敏最忌讳的），固定暗一档
                     else if (t < stage.freeStart + StageState.FREE_FLICKER || t >= stage.freeUntil) (if (((t * 12f).toInt() % 2) == 1) 1f else 0.15f) else 0f
                 }
                 var glow = 0f
-                for (l in 0 until Rhythm.LANES) { val a = t - live.flash[l]; if (a in 0f..0.14f && live.flashJudge[l] != Rhythm.Judge.MISS) glow = maxOf(glow, 1f - a / 0.14f) }
+                for (l in 0 until Rhythm.LANES) { val a = t - live.flash[gBase + l]; if (a in 0f..0.14f && live.flashJudge[gBase + l] != Rhythm.Judge.MISS) glow = maxOf(glow, 1f - a / 0.14f) }
                 if (lineA > 0f) {
                     drawLine(Color.White.copy(alpha = (.10f + .12f * glow) * lineA), Offset(-over, judgeY), Offset(W + over, judgeY), (8f + 10f * glow) * bench)
                     drawLine(Color.White.copy(alpha = .92f * lineA), Offset(-over, judgeY), Offset(W + over, judgeY), (2.2f + 0.8f * glow) * bench)
@@ -688,8 +708,8 @@ private fun GameBoard(
                     stage.bursts.removeAll { t - it.at > 0.65f }
                     for (b in stage.bursts) {
                         val k = (t - b.at) / 0.6f
-                        if (k < 0f || k > 1f) continue
-                        val cx = laneW * b.lane + laneW / 2f
+                        if (k < 0f || k > 1f || b.lane / Rhythm.LANES != lineK) continue
+                        val cx = laneW * (b.lane % Rhythm.LANES) + laneW / 2f
                         val judgeY = judgeY * b.yk                          // 狂热演示：半空就爆
                         val col = if (b.perfect) hitPerfect else hitGood
                         val tint = mix(col, kindColor(b.kind), 0.35f)      // 爆点带一点音符自己的颜色
@@ -711,6 +731,7 @@ private fun GameBoard(
                 val head = t + offset / 1000f
                 val free = stage.freeLive(t)
                 chart.notes.forEach { n ->
+                    if (n.line != lineK) return@forEach
                     val dt = n.t - head
                     if (dt > approach || (n.judged != null && !n.hold)) return@forEach
                     if (n.judged != null && n.tailDone) return@forEach
@@ -722,7 +743,7 @@ private fun GameBoard(
                         val tailY = (judgeY * (1f - (n.t + n.dur - head) / approach)).coerceAtLeast(0f)
                         val bottom = minOf(y, judgeY)
                         if (bottom > tailY) {
-                            val holding = n.judged != null && n.judged != Rhythm.Judge.MISS && (live.heldNear(n.lane) || live.autoHold || (free && anyPointer[0] > 0)) && head <= n.t + n.dur
+                            val holding = n.judged != null && n.judged != Rhythm.Judge.MISS && (live.heldNear(gBase + n.lane) || live.autoHold || (free && anyPointer[0] > 0)) && head <= n.t + n.dur
                             val bw = noteW * 0.9f
                             drawRect(c.copy(alpha = if (n.judged == Rhythm.Judge.MISS) .10f else if (holding) .34f else .22f), Offset(cx - bw / 2, tailY), Size(bw, bottom - tailY))
                             drawRect(Color.White.copy(alpha = if (holding) .75f else .45f), Offset(cx - bw / 2 + .5f, tailY + .5f), Size(bw - 1f, bottom - tailY - 1f), style = Stroke(1.2f * bench))
@@ -744,8 +765,8 @@ private fun GameBoard(
                     stage.vlines.removeAll { t - it.at > 0.45f }
                     for (v in stage.vlines) {
                         val k = (t - v.at) / 0.42f
-                        if (k < 0f || k > 1f) continue
-                        val cx = laneW * v.lane + laneW / 2f              // 被点中的那块的中心
+                        if (k < 0f || k > 1f || v.lane / Rhythm.LANES != lineK) continue
+                        val cx = laneW * (v.lane % Rhythm.LANES) + laneW / 2f              // 被点中的那块的中心
                         val judgeY = judgeY * v.yk
                         val up = H * (0.22f + 0.10f * k); val down = H * 0.05f   // 往上抽长再淡掉
                         val a = (1f - k) * (1f - k * 0.5f)
@@ -758,8 +779,8 @@ private fun GameBoard(
                     stage.shatters.removeAll { t - it.at > 0.65f }
                     for (sh in stage.shatters) {
                         val k = (t - sh.at) / 0.6f
-                        if (k < 0f || k > 1f) continue
-                        val cx = laneW * sh.lane + laneW / 2f
+                        if (k < 0f || k > 1f || sh.lane / Rhythm.LANES != lineK) continue
+                        val cx = laneW * (sh.lane % Rhythm.LANES) + laneW / 2f
                         withTransform({ scale(bench, bench, Offset.Zero) }) {
                             with(sh.fx) { draw(Tile((cx - noteW / 2) / bench, (judgeY * sh.yk - noteH / 2) / bench, noteW / bench, noteH / bench, kindColor(sh.kind), sh.seed), k, Rng(sh.seed)) }
                         }
@@ -767,6 +788,7 @@ private fun GameBoard(
                 }
             }
 
+            }   // for lineK
             // 无线时刻：四边一圈呼吸柔光（不转）
             if (stage.freeLive(t)) {
                 val br = .10f + .06f * kotlin.math.sin(t * 6f)
@@ -888,8 +910,8 @@ private fun mix(a: Color, b: Color, f: Float) = Color(
  */
 private class LinePose(val deg: Float, val cx: Float, val cy: Float, val sLane: Float, val sTravel: Float)
 
-private fun linePose(chart: Rhythm.Chart, live: Live, t: Float, lineScale: Float, w: Float, h: Float): LinePose {
-    val pose = chart.poseAt(t)
+private fun linePose(chart: Rhythm.Chart, line: Int, live: Live, t: Float, lineScale: Float, w: Float, h: Float): LinePose {
+    val pose = chart.poseAt(t, line)
     val sway = 1.7f * lineScale
     val deg = pose.deg * lineScale + sin(t * 0.45f) * 2.2f * sway + live.tiltAt(t)
     val cx = w / 2f + pose.dx * lineScale * w
@@ -934,7 +956,7 @@ private fun PraiseOverlay(word: String, at: Long, motion: Boolean, modifier: Mod
 private fun hitLane(live: Live, lane: Int, now: Float, offset: Float, anyLane: Boolean = false, want: (Rhythm.Note) -> Boolean): Boolean {
     if (now < 0f) return false
     // 无线时刻（规格 §1.6）：点哪都算 —— 四条轨都扫，吃最早那个
-    if (anyLane) { for (l in 0 until Rhythm.LANES) if (hitLane(live, l, now, offset, false, want)) return true; return false }
+    if (anyLane) { for (l in 0 until live.laneCount) if (hitLane(live, l, now, offset, false, want)) return true; return false }
     val lanes = live.byLane[lane]
     val head = now + offset / 1000f
     // ⚠️ 从游标往后扫，但**不写回 next[lane]**：slide 的头判过了、尾巴还没判，
@@ -968,7 +990,8 @@ private fun hitNear(live: Live, lane: Int, now: Float, offset: Float, anyLane: B
     if (anyLane) return hitLane(live, lane, now, offset, true, want)
     val head = now + offset / 1000f
     var bestLane = -1; var bestErr = Float.MAX_VALUE
-    for (l in maxOf(0, lane - 1)..minOf(Rhythm.LANES - 1, lane + 1)) {
+    val b = lane / Rhythm.LANES * Rhythm.LANES                                  // 邻轨不跨判定线
+    for (l in maxOf(b, lane - 1)..minOf(b + Rhythm.LANES - 1, lane + 1)) {
         val lanes = live.byLane[l]; var i = live.next[l]
         while (i < lanes.size) {
             val n = lanes[i]; val err = (head - n.t) * 1000f

@@ -117,7 +117,44 @@ def build_frenzy(a, song_id, zh):
     # slide 期间清场（花样可能落在里面）
     holds = [(n['t'], n['t'] + n['dur'] + 0.15) for n in notes if n['type'] == 'slide']
     notes = [n for n in notes if n['type'] == 'slide' or not any(h0 < n['t'] < h1 for h0, h1 in holds)]
+    for n in notes:
+        n['line'] = 0
     return notes
+
+
+def assign_lines(notes, energy, spb, phase, dur, rnd):
+    """多判定线（老板 09-07 发的 Phigros 视频：线可以多根、随机出现、每根上都能校准）。
+    第 1 条：在能量最高的两段（各 8 小节）出现，接走和弦的伴音和一半的花样；
+    第 2 条：斜着的，在另两段（各 4 小节）出现，接走阶梯 / 之字花样。
+    返回 judges 的 [from, to] 窗口列表：[(line, from, to)]。"""
+    bar = 4 * spb
+    n_bars = int((dur - phase) / bar)
+    def e_at(t):
+        i = int(t * 4); return energy[min(len(energy) - 1, max(0, i))]
+    seg8 = [(phase + b * bar, phase + (b + 8) * bar) for b in range(4, n_bars - 8, 8)]
+    seg8.sort(key=lambda w: -sum(e_at(w[0] + k * 0.5) for k in range(int((w[1] - w[0]) / 0.5))))
+    win1 = sorted(seg8[:2])
+    used = set(win1)
+    seg4 = [(phase + b * bar, phase + (b + 4) * bar) for b in range(6, n_bars - 4, 4)]
+    seg4 = [w for w in seg4 if not any(a[0] - 0.1 <= w[0] < a[1] or a[0] < w[1] <= a[1] + 0.1 for a in win1)]
+    rnd.shuffle(seg4)
+    win2 = sorted(seg4[:2])
+    # 分配：窗口里的音符，按时刻分组
+    by_t = {}
+    for n in notes:
+        by_t.setdefault(round(n['t'], 3), []).append(n)
+    for key, grp in by_t.items():
+        t = grp[0]['t']
+        in1 = any(a <= t <= b for a, b in win1)
+        in2 = any(a <= t <= b for a, b in win2)
+        if in1 and len(grp) >= 2:                          # 和弦：伴音去第 1 条线（最靠边的那个）
+            grp.sort(key=lambda n: abs(n['lane'] - 5.5))
+            grp[-1]['line'] = 1
+        elif in1 and rnd.random() < 0.30:
+            grp[0]['line'] = 1
+        elif in2 and rnd.random() < 0.55:
+            grp[0]['line'] = 2
+    return [(1, a, b) for a, b in win1] + [(2, a, b) for a, b in win2]
 
 
 def choreo_frenzy(song_id, spb, phase, dur):
@@ -163,6 +200,23 @@ def choreo_frenzy(song_id, spb, phase, dur):
     return sorted(rot.out + mx.out + my.out + dips, key=lambda e: (e['t'], e['op']))
 
 
+def side_choreo(line, windows, spb, rnd):
+    """副线的动作：第 1 条平行在主线上方（dy -0.42）轻轻摆；第 2 条斜着（±32°）从边上进来。每个窗口自己一套关键帧。"""
+    rot, mx, my = _Track('rotate'), _Track('move_x'), _Track('move_y')
+    out = []
+    for (a, b) in windows:
+        trans = min(1.0, max(0.5, 1.5 * spb))
+        if line == 1:
+            out += [dict(t=round(a, 3), dur=0.0, op='move_y', **{'from': -0.42, 'to': -0.42}, ease='linear'),
+                    dict(t=round(a, 3), dur=round(b - a, 3), op='rotate', **{'from': -6.0, 'to': 6.0}, ease='cubicInOut')]
+        else:
+            deg = rnd.choice([32.0, -32.0])
+            out += [dict(t=round(a, 3), dur=0.0, op='move_y', **{'from': -0.25, 'to': -0.25}, ease='linear'),
+                    dict(t=round(a, 3), dur=0.0, op='move_x', **{'from': -deg / 160.0, 'to': -deg / 160.0}, ease='linear'),
+                    dict(t=round(a, 3), dur=trans, op='rotate', **{'from': deg * 1.4, 'to': deg}, ease='cubicInOut')]
+    return sorted(out, key=lambda e: (e['t'], e['op']))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('song_id'); ap.add_argument('zh'); ap.add_argument('audio')
@@ -170,9 +224,28 @@ def main():
     args = ap.parse_args()
     a = analyze(args.audio, args.bpm)
     notes = build_frenzy(a, args.song_id, args.zh)
+    energy = envelope(args.audio)
+    rnd = random.Random(f'lines-{args.song_id}')
+    wins = assign_lines(notes, energy, a['spb'], a['phase'], a['dur'], rnd)
+    main_lines = choreo_frenzy(args.song_id, a['spb'], a['phase'], a['dur'])
+    judges = [dict(lines=main_lines)]
+    for line in (1, 2):
+        ws = [(f, to) for (l, f, to) in wins if l == line]
+        for (f, to) in ws:                                   # 每个窗口一条 judge（出现 / 消失各自淡入淡出）
+            judges.append(dict(**{'from': round(f - 0.4, 3), 'to': round(to + 0.4, 3)}, lines=side_choreo(line, [(f, to)], a['spb'], rnd)))
+    # 音符的 line 号要对上 judges 的下标：窗口按 (line, from) 顺序追加
+    idx = {}
+    for j_i, j in enumerate(judges[1:], start=1):
+        idx[(j['from'], j['to'])] = j_i
+    for n in notes:
+        if n.get('line', 0) > 0:
+            for (l, f, to) in wins:
+                if l == n['line'] and f <= n['t'] <= to:
+                    n['line'] = idx[(round(f - 0.4, 3), round(to + 0.4, 3))]; break
+            else:
+                n['line'] = 0
     c = dict(song=args.song_id, zh=args.zh, bpm=int(round(a['tempo'])), difficulty='frenzy', offset=0, approach=1.15,
-             lines=choreo_frenzy(args.song_id, a['spb'], a['phase'], a['dur']),
-             energy={'hz': 4, 'v': envelope(args.audio)}, notes=notes)
+             lines=main_lines, judges=judges, energy={'hz': 4, 'v': energy}, notes=notes)
     os.makedirs(args.out, exist_ok=True)
     p = os.path.join(args.out, f'chart_{args.song_id}_frenzy.json')
     json.dump(c, open(p, 'w'), ensure_ascii=False, separators=(',', ':'))
