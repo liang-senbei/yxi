@@ -47,7 +47,8 @@ cd android
 - 服务器：跑不了。装的是 headless 版 OpenJDK（没有 `libawt_xawt.so`），`xvfb-run` 起来也是 `HeadlessException: no headful library support`；要在服务器冒烟得另装带 AWT 的 JDK。
 - Mac mini：`scp desktop/build/compose/jars/Yxi-macos-arm64-1.0.1.jar mac:/tmp/`，然后
   `ssh mac '~/yxi-build/jdk/jdk-17.0.20.1+1/Contents/Home/bin/java -jar /tmp/Yxi-macos-arm64-1.0.1.jar --smoke'`
-  （非交互 shell 的 PATH 里没有 java，要写绝对路径）。不带 `--smoke` 后台跑几秒 + `screencapture -x ~/yxi-build/shots/desktop.png` 可以看窗口长什么样。
+  （非交互 shell 的 PATH 里没有 java，要写绝对路径）。
+  ⚠️ **直接在 SSH 里跑会 `HeadlessException: not running in a desktop session`**（SSH 会话是 `launchctl managername` = Background，不在控制台用户的 Aqua 会话里；`launchctl asuser` 要 root）。办法：写个一次性 LaunchAgent plist（ProgramArguments 跑上面那条，StandardOutPath 落 /tmp），`launchctl bootstrap gui/$(id -u) /tmp/x.plist`，job 就在 GUI 会话里跑，日志里看 `smoke ok`；完了 `launchctl bootout gui/$(id -u)/<Label>`。2026-09-08 这样实测过：`smoke ok`、退出码 0。`screencapture -x` 在这两种上下文里都被 TCC 拦（`could not create image from display`），要截图得有人在 Mac 上给终端开屏幕录制权限。
 - Windows：CI 里跑（下面）。
 
 ## 打包 / 安装 / 更新：Velopack（= Claude Desktop 的路线）
