@@ -43,3 +43,30 @@ class MeAuthTest {
         assertEquals("ok", kv["code"])
     }
 }
+
+/**
+ * 浏览器回调页显示哪句话。⚠️ 这几条是 2026-09-08 在 Xvfb 上**真跑出来的 bug** 转成的测试:
+ * 拿一个 state 不对的回调打进来,页面写「登录成功」而应用红字写「校验失败」—— 两个界面各说各话。
+ * 编译过、逻辑自查、单看代码都发现不了,只有跑起来才看得见;看见之后就该钉成测试。
+ */
+class CallbackPageTest {
+    private fun page(kv: Map<String, String>, want: String = "S") = MeAuth.callbackPage(kv, want)
+
+    @kotlin.test.Test fun `成功`() =
+        kotlin.test.assertTrue(page(mapOf("code" to "c", "state" to "S")).startsWith("登录成功"))
+
+    @kotlin.test.Test fun `state 不对不能说成功`() {
+        val t = page(mapOf("code" to "c", "state" to "别人的"))
+        kotlin.test.assertFalse(t.contains("成功"))
+        kotlin.test.assertTrue(t.contains("不是 Yxi 这次登录发起的"))
+    }
+
+    @kotlin.test.Test fun `没有 state 也不能说成功`() =
+        kotlin.test.assertFalse(page(mapOf("code" to "c")).contains("成功"))
+
+    @kotlin.test.Test fun `用户拒绝授权`() =
+        kotlin.test.assertTrue(page(mapOf("error" to "access_denied", "error_description" to "用户拒绝")).contains("用户拒绝"))
+
+    @kotlin.test.Test fun `state 对但没给码`() =
+        kotlin.test.assertTrue(page(mapOf("state" to "S")).contains("没给授权码"))
+}

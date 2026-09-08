@@ -101,7 +101,7 @@ object MeAuth {
         }
         waitingBrowser = true
         try {
-            val (code, backState, err) = server.use { awaitCallback(it) }
+            val (code, backState, err) = server.use { awaitCallback(it, state) }
             when {
                 err.isNotEmpty() -> return@withContext "授权没通过:$err"
                 // state 对不上 = 这个回调不是我们发起的那一次(PKCE 已经挡住登录 CSRF,这是第二道)
@@ -194,15 +194,18 @@ object MeAuth {
         }.toMap()
     }
 
-    /** 收一次回调。返回 (code, state, error)。 */
-    private fun awaitCallback(server: ServerSocket): Triple<String, String, String> {
+    /**
+     * 收一次回调。返回 (code, state, error)。
+     * @param expectState 发起这次登录时用的 state。**浏览器那页显示成功与否要用它判** ——
+     *   不然会出现「浏览器说登录成功、应用说校验失败」这种自相矛盾(2026-09-08 在 Xvfb 上跑出来的:
+     *   拿一个 state 不对的回调打进来,页面照样写「登录成功」)。只看 code 在不在是不够的。
+     */
+    private fun awaitCallback(server: ServerSocket, expectState: String): Triple<String, String, String> {
         server.accept().use { sock ->
             val line = sock.getInputStream().bufferedReader().readLine().orEmpty()   // "GET /callback?... HTTP/1.1"
             val kv = parseCallback(line)
             // 浏览器那边要看到一句人话,不然停在空白页会以为没成功
-            val ok = kv["error"].isNullOrEmpty() && !kv["code"].isNullOrEmpty()
-            val page = if (ok) "登录成功,回到 Yxi 继续吧。这个页面可以关掉了。"
-                       else "登录没有完成:${kv["error_description"] ?: kv["error"] ?: "浏览器没给授权码"}"
+            val page = callbackPage(kv, expectState)
             val html = "<!doctype html><meta charset=utf-8><title>Yxi</title>" +
                 "<body style=\"font:16px/1.7 system-ui;padding:3rem;color:#222\">$page</body>"
             sock.getOutputStream().apply {
@@ -211,6 +214,23 @@ object MeAuth {
                 write(html.toByteArray()); flush()
             }
             return Triple(kv["code"].orEmpty(), kv["state"].orEmpty(), kv["error"].orEmpty())
+        }
+    }
+
+    /**
+     * 浏览器那一页该显示哪句话。**抽成纯函数是为了测得到** ——
+     * 2026-09-08 在 Xvfb 上真跑了一遍才发现:拿一个 state 不对的回调打进来,
+     * 页面照样写「登录成功」,而应用那边红字写着「校验失败」—— **两边说的话相反**。
+     * 只看 code 在不在是不够的,state 也得判;而这种「两个界面各说各话」编译和单看代码都发现不了。
+     */
+    internal fun callbackPage(kv: Map<String, String>, expectState: String): String {
+        val stateOk = kv["state"] == expectState
+        val hasCode = !kv["code"].isNullOrEmpty()
+        val err = kv["error"].orEmpty()
+        return when {
+            err.isEmpty() && hasCode && stateOk -> "登录成功,回到 Yxi 继续吧。这个页面可以关掉了。"
+            err.isEmpty() && !stateOk -> "这个回调不是 Yxi 这次登录发起的,已经忽略。回到 Yxi 重新点一次登录。"
+            else -> "登录没有完成:" + (kv["error_description"] ?: err.ifEmpty { "浏览器没给授权码" })
         }
     }
 
