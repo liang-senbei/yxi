@@ -26,6 +26,20 @@ class ChatRowKeyTest {
     )
 
     private fun say(k: String) = ChatItem.UserText(key = k, text = "说了句话 $k")
+    private fun bad(k: String) = ChatItem.ToolCall(key = k, name = "Bash", input = org.json.JSONObject(), result = "exit 1", isError = true)
+
+    /** 老板 2026-09-08 截图：一串 Bash 夹着两条 exit 1 就整串散开 —— 现在要合成一张，失败数在卡上标出来（这里只验分组）。 */
+    @Test fun 夹着失败的一串也合成一组() {
+        val list = listOf(say("u0"), bash("b1"), bad("b2"), bash("b3"), bad("b4"), bash("b5"), bash("b6"), say("u1"))
+        val rows = groupToolRuns(list)
+        val groups = rows.filterIsInstance<ChatRow.Group>()
+        assertTrue("应合成一组，实际 ${rows.size} 行 / ${groups.size} 组", groups.size == 1 && groups[0].calls.size == 6)
+        assertTrue("组里失败数应是 2", groups[0].calls.count { it.isError } == 2)
+        // 还在跑的最后一条（result == null）不合进去
+        val running = ChatItem.ToolCall(key = "b7", input = org.json.JSONObject(), name = "Bash", result = null, isError = false)
+        val rows2 = groupToolRuns(list.dropLast(1) + running)
+        assertTrue("跑着的那条要单独留着", rows2.last() is ChatRow.One)
+    }
 
     /** 往前灌历史：同名工具的连续段会往前长，组的第一条会变，最后一条不会。 */
     @Test fun 历史往前灌之后老的key必须还在() {
