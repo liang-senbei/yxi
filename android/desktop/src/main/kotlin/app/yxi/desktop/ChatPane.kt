@@ -267,7 +267,7 @@ fun ChatPane(conn: Conn, session: Session) {
 
     Column(Modifier.fillMaxSize().background(t.surface2)) {
         // 会话头：名字 + 主机 + 连接徽标常驻（报告 §3.8）。重连本身归侧栏，这里只读状态 + 给个按钮
-        SessionHeader(conn, session) { scope.launch(NonCancellable) { conn.connect() } }   // 切走面板也别把连接连一半
+        SessionHeader(conn, session) { conn.start() }   // 重连循环在 Conn 自己的 scope 里跑，切走面板不会断
         Box(Modifier.weight(1f).fillMaxWidth()) {
             LazyColumn(
                 Modifier.fillMaxSize().nestedScroll(scrollWatch), state = listState,
