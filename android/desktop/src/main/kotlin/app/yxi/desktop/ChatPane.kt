@@ -144,7 +144,7 @@ fun ChatPane(conn: Conn, session: Session) {
         }
         catching { SessionProbe.watchScreen(ssh, session.name).collect { (p, l) -> apply(p, l) } }
         while (true) {
-            runCatching { SessionProbe.snapshot(ssh, session.name) }.onSuccess { (p, l) -> apply(p, l) }
+            catching { SessionProbe.snapshot(ssh, session.name) }.onSuccess { (p, l) -> apply(p, l) }
             delay(if (live.busy || pending != null) 700 else 2_500)
         }
     }
