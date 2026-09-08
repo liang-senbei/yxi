@@ -26,9 +26,34 @@
 ```bash
 cd android
 ./gradlew :desktop:run                          # 本机有显示器时直接跑（服务器没有；去 Mac mini 跑：~/yxi-build/jdk/… 装了 JDK 17）
-./gradlew :desktop:packageUberJarForCurrentOS   # 一个 jar，java -jar 能跑（Linux/macOS 上打的是当前平台的 Skia）
+./gradlew :desktop:compileKotlin                # 只编桌面（别跑 :app 的任务，机器是共用的）
+./gradlew :desktop:packageUberJarForCurrentOS   # 一个 jar，java -jar 能跑 → desktop/build/compose/jars/Yxi-linux-x64-1.0.0.jar
+./gradlew :desktop:packageUberJarForCurrentOS -Pyxi.os=mac   # 在 Linux 上给 Mac 打（Skia 原生库换成 macos）→ Yxi-macos-arm64-1.0.0.jar
+./gradlew :desktop:packageUberJarForCurrentOS -Pyxi.os=win   # 同上给 Windows → Yxi-windows-x64-1.0.0.jar
 ./gradlew :desktop:packageMsi                   # ⚠️ 只能在 Windows 上跑（jpackage 不能跨平台）—— 用 GitHub Actions 的 windows 跑（.github/workflows/desktop.yml）
 ```
+
+- `-Pyxi.os` 只换 `compose.desktop.<平台>` 这一个依赖（差别就是 Skia 的 .so/.dylib/.dll），jar 名跟着目标平台走。
+- ⚠️ uber jar 里要剔掉 `META-INF/*.SF|RSA`：BouncyCastle 是签过名的 jar，摊平后 `java -jar` 报 `Invalid signature file digest`（build.gradle.kts 里已做）。
+
+## 冒烟
+
+`java -jar <jar> --smoke`：开窗口 3 秒自动退出、打印 `smoke ok`、退出码 0 —— 证明 Compose + Skia 在那个平台起得来。
+
+- 服务器：跑不了。装的是 headless 版 OpenJDK（没有 `libawt_xawt.so`），`xvfb-run` 起来也是 `HeadlessException: no headful library support`；要在服务器冒烟得另装带 AWT 的 JDK。
+- Mac mini：`scp desktop/build/compose/jars/Yxi-macos-arm64-1.0.0.jar mac:/tmp/`，然后
+  `ssh mac '~/yxi-build/jdk/jdk-17.0.20.1+1/Contents/Home/bin/java -jar /tmp/Yxi-macos-arm64-1.0.0.jar --smoke'`
+  （非交互 shell 的 PATH 里没有 java，要写绝对路径）。不带 `--smoke` 后台跑几秒 + `screencapture -x ~/yxi-build/shots/desktop.png` 可以看窗口长什么样。
+- Windows：CI 里跑（下面）。
+
+## CI（Windows MSI）
+
+`.github/workflows/desktop.yml`：手动触发或推 tag `desktop-v*`，windows-latest + JDK 17 跑 `packageMsi` + uber jar + `--smoke`，
+产物 artifact `Yxi-windows`（`Yxi-1.0.0.msi` + jar）。
+
+**Android SDK 的问题**：settings 里带着 `:app`，Gradle 默认会把它也配置一遍。实测（AGP 9.3.1，无 `local.properties`、`ANDROID_HOME` 未设）
+只跑 `:desktop` 的任务**配置阶段不要 SDK** —— AGP 把 SDK 检查推迟到了 `:app` 自己的任务执行时。所以 workflow 里没装 setup-android
+（windows-latest 本身也预装了 SDK）。哪天 AGP 升级后又要了，两条路都实测过能过：`--configure-on-demand`（只配置 :desktop + :core），或 `android-actions/setup-android`。
 
 ## 计划（MVP → 完整）
 
