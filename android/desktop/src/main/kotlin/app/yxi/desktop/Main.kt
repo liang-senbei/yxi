@@ -56,6 +56,9 @@ fun main(args: Array<String>) {
             onPreviewKeyEvent = { shortcut(it, state, scope) },
         ) {
             DisposableEffect(Unit) {
+                // AWT 默认把 Ctrl+Tab / Ctrl+Shift+Tab 当焦点遍历键，在 Compose 的 onPreviewKeyEvent 之前就吃掉了（审查 P1）
+                window.setFocusTraversalKeys(java.awt.KeyboardFocusManager.FORWARD_TRAVERSAL_KEYS, emptySet())
+                window.setFocusTraversalKeys(java.awt.KeyboardFocusManager.BACKWARD_TRAVERSAL_KEYS, emptySet())
                 window.minimumSize = Dimension(720, 560)
                 Shell.frame = window
                 val focus = object : WindowAdapter() {

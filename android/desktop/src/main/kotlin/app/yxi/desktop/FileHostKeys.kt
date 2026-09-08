@@ -74,11 +74,11 @@ class FileHostKeys : HostKeys {
             if (changedDetected) return false
             val (host, key) = unknown ?: return false
             val p = Prompt(host, HostKey(host, key).type, fingerprint(key), CompletableDeferred())
-            pending = p
+            java.awt.EventQueue.invokeLater { pending = p }        // jsch 的 IO 线程上，Compose 状态只在 EDT 写（审查 P1）
             // jsch 在 IO 线程上同步等答案；超时按拒绝算 —— 悬着比错连安全
             // ⚠️ finally 只清自己的 prompt：快速切主机时新主机的 promptYesNo 可能已经把 pending 换成它的了，
             //    无条件 `pending = null` 会把新弹窗灭掉 → 新连接默默超时拒绝。
-            return try { runBlocking { withTimeoutOrNull(120_000) { p.answer.await() } ?: false } } finally { if (pending === p) pending = null }
+            return try { runBlocking { withTimeoutOrNull(120_000) { p.answer.await() } ?: false } } finally { java.awt.EventQueue.invokeLater { if (pending === p) pending = null } }
         }
     }
 
