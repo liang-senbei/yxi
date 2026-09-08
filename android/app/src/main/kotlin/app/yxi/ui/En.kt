@@ -1544,6 +1544,7 @@ internal object En {
         "演示" to "Demo",
         "狂热" to "Frenzy",
         "癫狂" to "Wild",
+        "%d 失败" to "%d failed",
         "闪屏 / 抖动" to "Flash / shake",
         "开" to "On",
         "娱乐中心" to "Games",

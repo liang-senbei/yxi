@@ -462,7 +462,7 @@ fun PendingCard(
  * （用户原话：「能不能合成一个总的 bash，点击总的会展开小的」）。
  *
  * 规则在 [groupToolRuns]：连续 ≥ 3 条同名工具卡才合；**最后一条还在跑的不合进去**
- * （进行中的那条要看得见）；出错的一串不合（失败才是要看的）。
+ * （进行中的那条要看得见）；出错的也合进去，但卡上标「N 失败」（老板 09-08：夹着失败的一串也要合）。
  * 合起来那张只有一行：工具名 × 条数 · 第一条到最后一条的摘要 · 状态。点一下展开成原来的小卡片。
  */
 @Composable
@@ -475,6 +475,8 @@ fun ToolGroupCard(calls: List<ChatItem.ToolCall>, open: Boolean, onToggle: () ->
             ) {
                 Text(calls.first().name, style = MaterialTheme.typography.labelLarge, color = accent(calls.first().name))
                 Chip("× ${calls.size}", accent(calls.first().name))
+                val bad = calls.count { it.isError }
+                if (bad > 0) Chip(t("%d 失败").format(bad), MaterialTheme.colorScheme.error)   // 失败才是要看的：合了也得标出来
                 Text(
                     if (open) "" else summary(calls.first()),
                     style = MaterialTheme.typography.labelSmall.copy(fontFamily = Mono),
@@ -527,7 +529,8 @@ sealed interface ChatRow {
 }
 
 /**
- * 把连续 ≥ [min] 条**同名、已完成、没出错**的工具卡合成一组。
+ * 把连续 ≥ [min] 条**同名、已完成**的工具卡合成一组。出错的也合（老板 2026-09-08：「为什么这些 bash 没合并成一个」——
+ * 一串里夹两条 exit 1 就整串散开，满屏还是 Bash），合起来那张用红色小标注「N 失败」，展开能看到是哪几条。
  * ⚠️ 纯函数，别在这里碰任何状态；展开与否由界面按 [ChatRow.key] 记。
  */
 fun groupToolRuns(items: List<ChatItem>, min: Int = 3): List<ChatRow> {
@@ -535,11 +538,11 @@ fun groupToolRuns(items: List<ChatItem>, min: Int = 3): List<ChatRow> {
     var i = 0
     while (i < items.size) {
         val it0 = items[i]
-        if (it0 is ChatItem.ToolCall && it0.result != null && !it0.isError && it0.name !in NEVER_GROUP) {
+        if (it0 is ChatItem.ToolCall && it0.result != null && it0.name !in NEVER_GROUP) {
             var j = i
             while (j < items.size) {
                 val c = items[j] as? ChatItem.ToolCall ?: break
-                if (c.name != it0.name || c.result == null || c.isError) break
+                if (c.name != it0.name || c.result == null) break
                 j++
             }
             if (j - i >= min) {
