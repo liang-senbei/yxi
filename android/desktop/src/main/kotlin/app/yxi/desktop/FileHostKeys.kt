@@ -55,8 +55,11 @@ class FileHostKeys : HostKeys {
     override fun getHostKey(): Array<HostKey> = emptyArray()
     override fun getHostKey(host: String?, type: String?): Array<HostKey> = emptyArray()
 
+    /** jsch 眼里这台主机叫什么（非 22 端口是 `[host]:port`）；known_hosts 的行和 [Prompt.host] 都用它 */
+    fun jschHost(h: Host) = if (h.port == 22) h.hostname else "[${h.hostname}]:${h.port}"
+
     /** 删掉一台主机记过的指纹（服务器真重装了 / 删主机时一起清） */
-    fun forget(h: Host) = remove(if (h.port == 22) h.hostname else "[${h.hostname}]:${h.port}", null)
+    fun forget(h: Host) = remove(jschHost(h), null)
 
     override fun userInfo(): UserInfo = object : UserInfo {
         override fun getPassphrase(): String? = null
