@@ -49,6 +49,14 @@ object Store {
         runCatching { hostsFile.setReadable(false, false); hostsFile.setReadable(true, true) }
     }
 
+    /** 简单偏好（主题 / 通知档 / 关窗行为…），prefs.json；Compose 里读要能重组，所以放在 state 里。 */
+    private val prefsFile = File(dir, "prefs.json")
+    private val prefs = androidx.compose.runtime.mutableStateMapOf<String, String>().apply {
+        runCatching { JSONObject(prefsFile.readText()).let { j -> j.keys().forEach { put(it, j.getString(it)) } } }
+    }
+    fun pref(key: String, default: String): String = prefs[key] ?: default
+    fun setPref(key: String, value: String) { prefs[key] = value; runCatching { prefsFile.writeText(JSONObject(prefs.toMap()).toString()) } }
+
     /** 窗口大小 / 位置：关窗时存，下次开窗恢复（Claude Desktop 那样记住上次的样子）。 */
     private val windowFile = File(dir, "window.json")
     fun loadWindow(st: androidx.compose.ui.window.WindowState) = runCatching {

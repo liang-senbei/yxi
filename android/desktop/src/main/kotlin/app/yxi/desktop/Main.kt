@@ -1,9 +1,5 @@
 package app.yxi.desktop
 
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.res.painterResource
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.unit.dp
@@ -23,7 +19,7 @@ fun main(args: Array<String>) = application {
         title = "Yxi", state = state, icon = painterResource("icon.png"),
     ) {
         window.minimumSize = java.awt.Dimension(800, 520)
-        MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
+        YxiTheme {
             App()
         }
     }
