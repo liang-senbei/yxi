@@ -1,5 +1,7 @@
 // Yxi 桌面版（Windows；老板 2026-09-08：「像 Claude Desktop / ChatGPT Windows 版那样」）。
 // Compose Multiplatform（JVM），SSH 还是 jsch；跟手机端共用 :core。
+// 发布包走 Velopack（createDistributable 的 app-image → `vpk pack` → 一键 Setup.exe + 自动更新，见 README / desktop.yml）；
+// jpackage 的 Msi/Exe 目标留着只是给老地址应急用。
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.compose)
@@ -19,7 +21,9 @@ dependencies {
     implementation(libs.jsch)
     implementation(libs.org.json)
     implementation(libs.kotlinx.coroutines.swing)
+    testImplementation(kotlin("test"))
 }
+tasks.test { useJUnitPlatform() }
 // 插件按本机 OS 起名（跨平台打出来也叫 linux-x64），文件名改成跟着目标平台走。
 // ⚠️ 要设 archiveFileName 不能设 archiveAppendix：插件在 afterEvaluate 里才设 appendix，会盖掉这儿的；显式 fileName 不受约定影响。
 tasks.withType<org.gradle.jvm.tasks.Jar>().matching { it.name == "packageUberJarForCurrentOS" }.configureEach {
@@ -35,7 +39,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi, org.jetbrains.compose.desktop.application.dsl.TargetFormat.Exe)
             packageName = "Yxi"
-            packageVersion = "1.0.0"
+            packageVersion = "1.0.1"   // 也是 Velopack 的 packVersion（CI 从 app-image 的 Yxi.cfg 读）和运行时的 jpackage.app-version
             vendor = "Yxi"
             windows { menu = true; shortcut = true; iconFile.set(project.file("icon.ico")); upgradeUuid = "3f6a9d2c-7b1e-4c0a-9a3d-8e2f5b1c4d7a" }
         }
