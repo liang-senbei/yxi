@@ -5907,3 +5907,16 @@ cc-Yxi_Entertainment 那会儿正在同一个工作树里改这个文件（拆 `
 ⚠️ 这条跟 **#296**（`git add -A` 把队友工作树里的改动卷进自己的提交）是**同一族、方向相反**：
 一个把别人的活儿卷走了，一个把别人的活儿抹掉了。共用工作树里，**任何按「文件」为单位的批量 git 操作都要先想一句「这个文件现在是不是只有我在动」**。
 按 hunk 挑（`hunks.py`）之所以是组规，就是因为它天然只碰你认得的那几行。
+
+## #322 拆出 `:core` 后主代码全绿、androidTest 却编不过：Kotlin `internal` 是**模块级**（cc-Yxi 拆 · cc-logto_yxi 发现，2026-09-08）
+
+**症状**：把 30 多个纯逻辑文件从 `:app` 搬进 `:core`，`:app:assembleDebug` 零错误、`:desktop` 也过，于是宣布「三个模块都编过」；
+logto 跑全套时 `:app:compileDebugAndroidTestKotlin` 报 31 条 `Cannot access 'fun parse(...)': it is internal in 'app.yxi.agent.Slave'`。
+
+**根因**：`internal` 的可见范围是**编译模块**。以前测试和被测代码同在 `:app`，`internal` 形同 public；
+搬进 `:core` 之后，`:app` 的 androidTest 是另一个模块，看不见了。主代码没碰这些成员所以不报。
+「编过」只验了 main 源集 —— **测试源集是单独一步编的**（`compileDebugAndroidTestKotlin`），不跑到就不知道。
+
+**修法**：core 里的 `internal` 全部改 public（core 是给两个客户端用的库，`internal` 在这儿本来就没有意义）。
+以后搬模块的验收命令至少四个：`:core:compileKotlin :app:compileDebugKotlin :app:compileDebugAndroidTestKotlin :desktop:compileKotlin`，
+然后再跑全套（不是「编过」就完）。
