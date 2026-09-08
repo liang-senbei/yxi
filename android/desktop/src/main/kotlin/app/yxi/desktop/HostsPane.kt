@@ -53,7 +53,7 @@ fun HostsPane(state: AppState) {
     val scope = rememberCoroutineScope()
 
     fun save(list: List<Host>) { hosts = list; Store.save(list) }
-    fun drop() { state.conn?.close(); state.conn = null; state.session = null }
+    fun drop() { keys.pending?.answer?.complete(false); state.conn?.close(); state.conn = null; state.session = null }
     fun connect(h: Host) {
         drop(); note = ""
         // 私钥文件没了会在 Conn 构造时就炸（toConfig 读文件），不算连接错误

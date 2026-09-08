@@ -8,6 +8,7 @@ import app.yxi.agent.SessionProbe
 import app.yxi.ssh.HostConfig
 import app.yxi.ssh.HostKeys
 import app.yxi.ssh.SshSession
+import app.yxi.ssh.catching
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -75,7 +76,7 @@ class Conn(val host: Host, hostKeys: HostKeys) {
 
     suspend fun refresh() {
         if (!ssh.isConnected) return
-        runCatching { sessions = SessionProbe.snapshot(ssh) }
+        catching { sessions = SessionProbe.snapshot(ssh) }
     }
 
     fun close() { ssh.disconnect(); status = Status.Idle }
