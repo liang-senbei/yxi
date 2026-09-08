@@ -35,15 +35,28 @@ fun App(state: AppState) {
         Row(Modifier.fillMaxSize()) {
             if (state.sidebarOpen) { Sidebar(state, Modifier.width(288.dp).fillMaxHeight()); VerticalDivider() }
             Column(Modifier.fillMaxSize()) {
-                val conn = state.conn; val sess = state.session
-                if (conn == null || sess == null) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("左边选一台主机，连上后选一个会话") }
-                } else {
-                    TabRow(selectedTabIndex = state.tab) {
-                        Tab(selected = state.tab == 0, onClick = { state.tab = 0 }, text = { Text("对话") })
-                        Tab(selected = state.tab == 1, onClick = { state.tab = 1 }, text = { Text("终端") })
+                // 整页入口（左栏底部的「配置」「我的」）盖住工作区；再点一次那个入口就回来
+                when (state.page) {
+                    Page.Config -> ConfigPane(state)
+                    Page.Me -> MePane(state)
+                    Page.Workspace -> {
+                        val conn = state.conn; val sess = state.session
+                        if (conn == null || sess == null) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("左边选一台主机，连上后选一个会话") }
+                        } else {
+                            // 对齐手机的 终端 / 对话 / 文件（实验室是手机上的调试入口，桌面不做）
+                            TabRow(selectedTabIndex = state.tab) {
+                                Tab(selected = state.tab == 0, onClick = { state.tab = 0 }, text = { Text("对话") })
+                                Tab(selected = state.tab == 1, onClick = { state.tab = 1 }, text = { Text("终端") })
+                                Tab(selected = state.tab == 2, onClick = { state.tab = 2 }, text = { Text("文件") })
+                            }
+                            when (state.tab) {
+                                0 -> ChatPane(conn, sess)
+                                1 -> TermPane(conn, sess)
+                                else -> FilesPane(conn, sess)
+                            }
+                        }
                     }
-                    if (state.tab == 0) ChatPane(conn, sess) else TermPane(conn, sess)
                 }
             }
         }

@@ -25,6 +25,13 @@ import androidx.compose.foundation.onClick
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.MoreHoriz
@@ -108,7 +115,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
         }
         if (note.isNotBlank()) Text(note, Modifier.padding(14.dp, 2.dp), color = t.danger, style = MaterialTheme.typography.bodySmall)
         if (hosts.isEmpty()) Text("尚未添加设备，点 + 加一台", Modifier.padding(14.dp, 8.dp), style = MaterialTheme.typography.bodySmall, color = t.textMuted)
-        Column(Modifier.verticalScroll(rememberScrollState())) {
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             hosts.forEachIndexed { i, h ->
                 val c = connOf(h)
                 Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
@@ -136,6 +143,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
                 }
             }
         }
+        BottomNav(state)
     }
 
     editing?.let { h ->
@@ -218,4 +226,43 @@ private fun StatusDot(st: Conn.Status) {
         rememberInfiniteTransition().animateFloat(1f, 0.15f, infiniteRepeatable(tween(600), RepeatMode.Reverse)).value
     else 1f
     Box(Modifier.size(8.dp).background(color.copy(alpha = color.alpha * alpha), CircleShape))
+}
+
+/**
+ * 左栏底部的整页入口 —— 对齐手机底部四栏里剩下的那两个（老板 09-08：手机导航栏的功能桌面版都要有）。
+ *
+ * ⚠️ 「会话」和「主机」不在这儿：桌面上它们**就是上面那片侧栏本身**（主机分组 → 会话行），
+ * 再放两个按钮进来等于让人点一下才看见本来就摆在眼前的东西。
+ * 所以这里只有「配置」「我的」——它们在手机上是整屏，在这儿也该是整页（[Page]）。
+ */
+@Composable
+private fun BottomNav(state: AppState) {
+    val t = Tokens.current
+    HorizontalDivider(color = t.border)
+    Row(Modifier.fillMaxWidth().padding(6.dp, 4.dp)) {
+        NavItem(Icons.Default.Tune, "配置", state.page == Page.Config, Modifier.weight(1f)) {
+            // 再点一次回工作区 —— 整页入口没有「返回」按钮，点亮的那个自己就是开关
+            state.page = if (state.page == Page.Config) Page.Workspace else Page.Config
+        }
+        NavItem(Icons.Default.Person, "我的", state.page == Page.Me, Modifier.weight(1f)) {
+            state.page = if (state.page == Page.Me) Page.Workspace else Page.Me
+        }
+    }
+}
+
+@Composable
+private fun NavItem(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, on: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val t = Tokens.current
+    val fg = if (on) t.accent else t.textSecondary
+    Row(
+        modifier.clip(RoundedCornerShape(8.dp))
+            .background(if (on) t.surface2 else androidx.compose.ui.graphics.Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(10.dp, 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, label, Modifier.size(18.dp), tint = fg)
+        Spacer(Modifier.width(8.dp))
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = fg)
+    }
 }

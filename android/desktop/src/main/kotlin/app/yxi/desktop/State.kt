@@ -12,11 +12,21 @@ import app.yxi.agent.SessionState
  * 左栏 = 主机分组 → cc-* 会话行（Codex 的「项目 → 线程」），所以可以同时连着多台主机（[conns]）；
  * [conn] / [session] 是右边正在看的那一个。
  */
+/**
+ * 右边整页显示哪一块 —— 对齐手机底部四栏。
+ *
+ * ⚠️ 手机那四栏里「会话」和「主机」在桌面上**合成了左栏**（Claude Desktop 的形态：
+ * 主机分组 → 会话行都在侧栏里），所以这里只剩另外两个整页入口。
+ * 它跟 [AppState.tab] 是两层：`page` 决定右边整块是什么，`tab` 只在工作区里选 对话/终端/文件。
+ */
+enum class Page { Workspace, Config, Me }
+
 class AppState {
     val conns = mutableStateListOf<Conn>()                 // 连着的主机（顺序 = 侧栏分组顺序）
     var conn by mutableStateOf<Conn?>(null)                // 当前会话所在的主机
     var session by mutableStateOf<Session?>(null)          // 当前会话
-    var tab by mutableStateOf(0)                           // 0 对话 1 终端
+    var tab by mutableStateOf(0)                           // 0 对话 1 终端 2 文件
+    var page by mutableStateOf(Page.Workspace)             // 左栏底部的「配置」「我的」切这个
     var sidebarOpen by mutableStateOf(true)                // Ctrl+B；窗口 < 700 时自动收起
     var newSessionRequest by mutableStateOf(0)             // Ctrl+N：+1 一次，侧栏看到就弹「新建会话」
     /** 侧栏上一次处理过的 [newSessionRequest] 值。放 AppState 里而不是 Sidebar 的 remember：
@@ -26,7 +36,8 @@ class AppState {
     var showSettings by mutableStateOf(false)              // Ctrl+,
     var showShortcuts by mutableStateOf(false)             // Ctrl+/
 
-    fun select(c: Conn, s: Session?) { conn = c; session = s }
+    /** ⚠️ 选会话顺带回工作区：人在「配置」页点了侧栏的会话，意思显然是「我要去看那个会话」。 */
+    fun select(c: Conn, s: Session?) { conn = c; session = s; page = Page.Workspace }
 
     /** 所有主机的会话按侧栏顺序摊平（Ctrl+Tab / Ctrl+1…9 用）。 */
     fun allSessions(): List<Pair<Conn, Session>> = conns.flatMap { c -> c.sessions.map { c to it } }
