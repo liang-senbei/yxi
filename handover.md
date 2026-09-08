@@ -118,6 +118,7 @@
 
 **1.1.26 之后攒的**：
 - **cc-Yxi · 连接不稳定的对策**（老板 09-08 截图「连接断了，正在重连」）：新 `agent/NetWatch.kt` 盯系统默认网络（5G↔Wi-Fi、换网、丢网），一变就通知；`SshConnect` 守连接时看到网络换了**立刻断掉重连**（不等 15s×2 心跳），退避 0.5s 起最长 5s（原 1s~15s），等退避时网络一换立刻重试；后台盯梢 `EventService` 退避最长 20s（原 60s）且同样换网即重试。编译过；**要真机验**（切 Wi-Fi / 飞行模式来回）。
+- **cc-Yxi · 拆出 `:core` 模块（为 Windows 桌面版）**：`android/core/` 纯 Kotlin（SSH / SFTP / 转录 / 提示 / 会话探测 / 模型 / 用量…），`:app` 依赖它；三个缝 `Plat.log`、`Tr.fn`、`HostKeys`（MainActivity 里接上）。core 里 `internal` 全改 public（模块级，app 的 androidTest 跨模块看不到）。四个模块编译过（含 androidTest）；**发版前必须跑全套**——搬了 30 多个文件。文件路径变了：`app.yxi.ui.t` 在 core 里是 `Tr.t`；`dev/i18n-check.sh` 已由 Entertainment 改成双模块扫。
 - **cc-Yxi · 同名工具卡合并规则**：夹着失败的一串也合成一张，卡上红字标「N 失败」（老板 09-08 截图问「为什么没合并成一个 bash ×N」；原规则是出错就整串散开）。ToolCards.kt，编译过；待模拟器看一眼 + 全套。
 
 **不用发版就上线的（09-07 下午，走网络清单）**：9 首新曲（魔王魂 ×4：煉獄セレナーデ / ときめき☆ラビリンス / ハニーベイビー！マジカルガール / 宵闇の輪舞曲；甘茶 ×2：ピコピコディスコ / レトロパーティー；OtoLogic ×3（CC BY 4.0）：Candy Crush / ドタバタレース / 前線へ突撃せよ），每首 easy + hard，`design/music/remote/<id>/`（gitignore，源在 incoming/）。清单 17 首 35 张，服务端已同步。
@@ -139,6 +140,12 @@
 **不发版的两条**：
 - 待办：看板头部主机名太长会折成两行挤按钮（截图 Thor-h/e）。
 - **待老板拍板**：抽卡界面改 activetheory.net 风格。结论没变 —— 他们那根脊椎是 Blender 雕的美术资产（`spine.bin` + KTX2 贴图），程序化到不了那个精细度，要做得我们自己出一根。素材和商标不能拿。提案和对照图在实验室，源码 `design/wish-activetheory-cards.src.html`。
+
+## Windows 桌面版（`android/desktop/`，2026-09-08 起）
+
+老板 09-08：「构建一个 Windows 版本，像 Claude Desktop / ChatGPT 的 Windows 版那样」。Compose Multiplatform（JVM）+ 共用 `:core`，
+计划 / 模块 / 构建命令见 `android/desktop/README.md`。进度：骨架（窗口 + 左栏主机·会话 / 右栏对话·终端的布局、`Model.kt` 的 Host / Store / Conn）已起，
+四个面板（HostsPane / SessionsPane / ChatPane / TermPane）分头做中；打包走 GitHub Actions windows（jpackage 不能跨平台）；先在 Mac mini 上跑 uber jar 冒烟。
 
 ## 音游（云曦节拍）设计拍板 —— 2026-09-06，老板在网页试验台上选的
 
