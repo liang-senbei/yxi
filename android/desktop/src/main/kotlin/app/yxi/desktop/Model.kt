@@ -3,12 +3,22 @@ package app.yxi.desktop
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
 import app.yxi.agent.Session
 import app.yxi.agent.SessionProbe
+import app.yxi.agent.SessionState
 import app.yxi.ssh.HostConfig
 import app.yxi.ssh.HostKeys
 import app.yxi.ssh.SshSession
 import app.yxi.ssh.catching
+import com.jcraft.jsch.JSchChangedHostKeyException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.swing.Swing
 import org.json.JSONArray
 import org.json.JSONObject
 import androidx.compose.ui.unit.dp
@@ -23,12 +33,22 @@ data class Host(
     val username: String = "root",
     val keyPath: String = "",
     val password: String = "",
+    /** 连接颜色（Codex 的「连接颜色…」）：`#RRGGBB`；空 = 按侧栏顺序从 [HostColors] 里轮着分 */
+    val color: String = "",
 ) {
+    val label get() = alias.ifBlank { hostname }
     fun toConfig(): HostConfig = HostConfig(
         alias = alias, hostname = hostname, port = port, username = username,
         auth = if (keyPath.isNotBlank()) HostConfig.Auth.PrivateKey(File(keyPath).readText()) else HostConfig.Auth.Password(password),
     )
 }
+
+/** 6 个柔和色，浅深主题都看得清 */
+val HostColors = listOf(Color(0xFF7C9CBF), Color(0xFF8FBF9F), Color(0xFFD9A066), Color(0xFFC48FB8), Color(0xFFBFB07C), Color(0xFF7FB8C4))
+
+/** 这台主机的颜色：自己选过的优先，没选按它在侧栏的序号轮着用 */
+fun Host.tint(index: Int): Color =
+    color.removePrefix("#").toLongOrNull(16)?.let { Color(0xFF000000L or it) } ?: HostColors[index % HostColors.size]
 
 /** 本地存储：Windows `%APPDATA%\Yxi`，其它 `~/.config/yxi`。hosts.json + known_hosts。 */
 object Store {
@@ -73,34 +93,79 @@ object Store {
 
     private fun JSONObject.toHost() = Host(
         id = getString("id"), alias = optString("alias"), hostname = getString("hostname"), port = optInt("port", 22),
-        username = optString("username", "root"), keyPath = optString("keyPath"), password = optString("password"),
+        username = optString("username", "root"), keyPath = optString("keyPath"), password = optString("password"), color = optString("color"),
     )
     private fun Host.toJson() = JSONObject().put("id", id).put("alias", alias).put("hostname", hostname).put("port", port)
-        .put("username", username).put("keyPath", keyPath).put("password", password)
+        .put("username", username).put("keyPath", keyPath).put("password", password).put("color", color)
 }
 
 /**
- * 一台主机的活连接：一条 [SshSession] + 上面的会话列表。
+ * 一台主机的活连接：一条 [SshSession] + 上面的会话列表 + 常驻的刷新/重连循环。
  * 对话 / 终端面板都从这里拿 `ssh`，别自己再开连接（jsch 一条连接多通道，开通道已经在 SshSession 里排队）。
+ * [start] 之后它自己每 5 秒刷一次会话；掉线就退避重连（1s→2s→4s→…≤10s），直到 [close]。
  */
 class Conn(val host: Host, hostKeys: HostKeys) {
-    enum class Status { Idle, Connecting, Connected, Failed }
+    enum class Status(val label: String) { Idle(""), Connecting("正在连接"), Connected("已连接"), Reconnecting("正在重新连接…"), Failed("连接失败") }
     val ssh = SshSession(host.toConfig(), hostKeys, aliveIntervalMs = 10_000)
     var status by mutableStateOf(Status.Idle)
     var error by mutableStateOf("")
+    /** 指纹变了：不重连，等用户在侧栏点「我确认过了，删除旧指纹」 */
+    var keyChanged by mutableStateOf(false)
     var sessions by mutableStateOf<List<Session>>(emptyList())
+    // 自己一个 scope，不挂在 Composable 的 LaunchedEffect 上：侧栏收起（Ctrl+B）时 Sidebar 整个不在组合里，
+    // 挂那儿的循环会跟着停 —— 收着侧栏就既不刷新也不重连。Swing 线程上写状态，跟界面同一条线。
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
 
-    suspend fun connect() {
-        status = Status.Connecting
-        runCatching { ssh.connect() }
-            .onSuccess { status = Status.Connected; refresh() }
-            .onFailure { status = Status.Failed; error = it.message ?: it.toString() }
+    // finally 里再断一次：close() 撞上正在握手的 connect() 时，jsch 会在 IO 线程上把握手做完再把 session 装上，
+    // 那条连接就没人管了（心跳线程一直活到进程退出）。协程被取消后从这里补一刀。
+    fun start() { status = Status.Connecting; scope.launch { try { loop() } finally { ssh.disconnect() } } }
+
+    private suspend fun loop() {
+        var backoff = 1_000L
+        while (true) {
+            if (!ssh.isConnected) {
+                if (status == Status.Connected) status = Status.Reconnecting
+                ssh.disconnect()   // 清掉死掉的 jsch session；connect() 每次都新建一条
+                val e = catching { ssh.connect() }.exceptionOrNull()
+                if (e != null) {
+                    keyChanged = e is JSchChangedHostKeyException
+                    error = explain(e, keyChanged)
+                    // 首次就连不上 / 指纹变了 / 认证被拒：重试没意义（反复认证失败还会被 fail2ban 封 IP），停下来等人处理
+                    if (status != Status.Reconnecting || keyChanged || "Auth" in e.message.orEmpty()) { status = Status.Failed; return }
+                    delay(backoff); backoff = minOf(backoff * 2, 10_000); continue
+                }
+                backoff = 1_000; error = ""; status = Status.Connected
+            }
+            refresh()
+            // 每秒看一眼还活着没（jsch 心跳判死后 isConnected 立刻变 false），断了马上进重连，不用等满 5 秒
+            for (i in 1..5) { delay(1_000); if (!ssh.isConnected) break }
+        }
     }
 
+    /** 抓一次会话列表。抓不全 = 连接八成半死（exec 在 core 里不抛只返回空），掐掉让 [loop] 走重连。 */
     suspend fun refresh() {
         if (!ssh.isConnected) return
-        catching { sessions = SessionProbe.snapshot(ssh) }
+        val fresh = catching { SessionProbe.snapshot(ssh) }.getOrElse { ssh.disconnect(); return }
+        // 刚变成「等你」的会话发一条桌面通知，只在变化那一刻发一次。看的是「之前不是等你」而不是「之前在运行」：
+        // 5 秒一轮询，发完话它 3 秒内就来问权限的话，中间那个「运行中」根本抓不到。
+        val was = sessions.associateBy { it.name }
+        for (s in fresh) {
+            if (s.state == SessionState.NeedsYou && was[s.name]?.let { it.state != SessionState.NeedsYou } == true)
+                Notify.notify("${s.short} ${s.badge().label}", host.label)
+        }
+        sessions = fresh
     }
 
-    fun close() { ssh.disconnect(); status = Status.Idle }
+    fun close() { scope.cancel(); ssh.disconnect(); status = Status.Idle }
+}
+
+/** 把 jsch 的报错翻成人话。指纹那条照 Claude Desktop 的措辞（design/desktop-reference.md §4「必须有」6）。 */
+private fun explain(e: Throwable, keyChanged: Boolean): String {
+    val m = e.message.orEmpty()
+    return when {
+        keyChanged -> "主机的 SSH 密钥变了，已拒绝连接。如果这台机器没有重装或换过密钥，不要信任新密钥。"
+        "reject HostKey" in m -> "你取消了指纹确认，所以没连。"
+        "Auth" in m -> "认证被拒：密码不对，或服务器的 authorized_keys 里没有这把公钥。"
+        else -> "连不上：${m.ifBlank { e.toString() }}"
+    }
 }

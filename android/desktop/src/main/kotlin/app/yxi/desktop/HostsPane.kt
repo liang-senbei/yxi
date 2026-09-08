@@ -1,6 +1,7 @@
 package app.yxi.desktop
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -8,19 +9,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -30,111 +22,25 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
 import java.io.File
-import java.util.UUID
 
-/** 左栏顶部：主机列表 + 新增 / 编辑表单 + 首次连接的指纹确认框。点一台就连（一次只连一台，先关上一台）。 */
+/*
+ * 主机相关的弹窗：新增 / 编辑表单、首次连接的指纹确认、连接颜色。
+ * 列表本身在 Sidebar.kt（主机是分组头，会话挂在下面）。
+ */
+
+/** 新增 / 编辑表单（字段照手机端 HostsScreen 精简）。删除在分组头菜单里，不在这儿。 */
 @Composable
-fun HostsPane(state: AppState) {
-    var hosts by remember { mutableStateOf(Store.hosts()) }
-    var editing by remember { mutableStateOf<Host?>(null) }
-    var note by remember { mutableStateOf("") }       // 不属于某条连接的错（Conn 都没建出来）
-    val keys = remember { FileHostKeys() }
-    val scope = rememberCoroutineScope()
-
-    fun save(list: List<Host>) { hosts = list; Store.save(list) }
-    fun drop() { keys.pending?.answer?.complete(false); state.conn?.close(); state.conn = null; state.session = null }
-    fun connect(h: Host) {
-        drop(); note = ""
-        // 私钥文件没了会在 Conn 构造时就炸（toConfig 读文件），不算连接错误
-        val c = runCatching { Conn(h, keys) }.getOrElse { note = "连不了：${it.message}"; return }
-        state.conn = c
-        scope.launch {
-            c.connect()
-            if (c.status == Conn.Status.Failed) c.error = explain(keys.changedDetected, c.error)
-        }
-    }
-
-    Column(Modifier.fillMaxWidth().padding(8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("主机", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            IconButton({ editing = Host(id = UUID.randomUUID().toString(), alias = "", hostname = "", keyPath = defaultKey()) }) { Icon(Icons.Default.Add, "加主机") }
-        }
-        if (note.isNotBlank()) Text(note, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-        if (hosts.isEmpty()) Text("还没有主机，点 + 加一台", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Column(Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState())) {
-            hosts.forEach { h ->
-                val conn = state.conn?.takeIf { it.host.id == h.id }
-                HostRow(h, conn?.status, onClick = { connect(h) }, onEdit = { editing = h })
-                if (conn?.status == Conn.Status.Failed) {
-                    Text(conn.error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(start = 18.dp))
-                    if (keys.changedDetected) TextButton({ keys.forget(h); conn.error = ""; conn.status = Conn.Status.Idle }) { Text("确认过了，删除旧指纹") }
-                }
-            }
-        }
-    }
-
-    editing?.let { h ->
-        HostForm(
-            h, isNew = hosts.none { it.id == h.id },
-            onSave = { n ->
-                save(if (hosts.any { it.id == n.id }) hosts.map { if (it.id == n.id) n else it } else hosts + n)
-                if (state.conn?.host?.id == n.id) drop()   // 改了地址 / 认证，旧连接作废，再点一次重连
-                editing = null
-            },
-            onDelete = { if (state.conn?.host?.id == h.id) drop(); keys.forget(h); save(hosts.filter { it.id != h.id }); editing = null },
-            onClose = { editing = null },
-        )
-    }
-
-    keys.pending?.let { p ->
-        AlertDialog(
-            onDismissRequest = { p.answer.complete(false) },
-            title = { Text("第一次连这台主机") },
-            text = { Text("${p.host}（${p.keyType}）\n\n指纹\n${p.fingerprint}\n\n请核对它跟服务器上 ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub 的输出一致。不一致就别连。") },
-            confirmButton = { TextButton({ p.answer.complete(true) }) { Text("指纹对得上，连") } },
-            dismissButton = { TextButton({ p.answer.complete(false) }) { Text("取消") } },
-        )
-    }
-}
-
-/** 一行主机：状态点（灰未连 / 黄连接中 / 绿已连 / 红失败）+ 别名 + user@host:port + 编辑。 */
-@Composable
-private fun HostRow(h: Host, status: Conn.Status?, onClick: () -> Unit, onEdit: () -> Unit) {
-    val dot = when (status) {
-        Conn.Status.Connected -> Color(0xFF2E7D32)
-        Conn.Status.Connecting -> Color(0xFFF9A825)
-        Conn.Status.Failed -> MaterialTheme.colorScheme.error
-        else -> MaterialTheme.colorScheme.outlineVariant
-    }
-    Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick)
-            .background(if (status != null) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent, MaterialTheme.shapes.small)
-            .padding(start = 6.dp, top = 2.dp, bottom = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.size(8.dp).background(dot, CircleShape))
-        Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
-            Text(h.alias.ifBlank { h.hostname }, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("${h.username}@${h.hostname}:${h.port}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        IconButton(onEdit, Modifier.size(28.dp)) { Icon(Icons.Default.Edit, "编辑", Modifier.size(16.dp)) }
-    }
-}
-
-/** 新增 / 编辑表单（字段照手机端 HostsScreen 精简）。 */
-@Composable
-private fun HostForm(h: Host, isNew: Boolean, onSave: (Host) -> Unit, onDelete: () -> Unit, onClose: () -> Unit) {
+fun HostForm(h: Host, isNew: Boolean, onSave: (Host) -> Unit, onClose: () -> Unit) {
     var alias by remember { mutableStateOf(h.alias) }
     var hostname by remember { mutableStateOf(h.hostname) }
     var port by remember { mutableStateOf(h.port.toString()) }
@@ -143,7 +49,6 @@ private fun HostForm(h: Host, isNew: Boolean, onSave: (Host) -> Unit, onDelete: 
     var keyPath by remember { mutableStateOf(h.keyPath) }
     var password by remember { mutableStateOf(h.password) }
     var err by remember { mutableStateOf("") }
-    var confirmDelete by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onClose,
@@ -184,14 +89,7 @@ private fun HostForm(h: Host, isNew: Boolean, onSave: (Host) -> Unit, onDelete: 
                 ))
             }) { Text("保存") }
         },
-        dismissButton = {
-            Row {
-                if (!isNew) TextButton({ if (confirmDelete) onDelete() else confirmDelete = true }) {
-                    Text(if (confirmDelete) "真的删？再点一次" else "删除", color = MaterialTheme.colorScheme.error)
-                }
-                TextButton(onClose) { Text("取消") }
-            }
-        },
+        dismissButton = { TextButton(onClose) { Text("取消") } },
     )
 }
 
@@ -203,15 +101,51 @@ private fun Field(value: String, onChange: (String) -> Unit, label: String, pass
     )
 
 /** 用户自己的密钥：有 id_ed25519 用它，没有再看 id_rsa；都没有留空（表单会默认成密码） */
-private fun defaultKey(): String =
+fun defaultKey(): String =
     listOf("id_ed25519", "id_rsa").map { File(System.getProperty("user.home"), ".ssh/$it") }.firstOrNull { it.isFile }?.path ?: ""
 
 private fun expandHome(p: String) = if (p.startsWith("~")) System.getProperty("user.home") + p.drop(1) else p
 
-/** 把 jsch 的报错翻成人话（照手机端 SshConnect.explain 精简） */
-private fun explain(changed: Boolean, m: String) = when {
-    changed -> "主机指纹变了，可能是中间人，已拒绝连接。确认服务器确实重装过，再删除旧记录。"
-    "reject HostKey" in m -> "你取消了指纹确认，所以没连。"
-    "Auth fail" in m || "Auth cancel" in m -> "认证被拒：密码不对，或服务器的 authorized_keys 里没有这把公钥。"
-    else -> "连不上：$m"
+/** 首次连接的指纹确认（措辞照 Claude Desktop）。答案往 [FileHostKeys.Prompt.answer] 里填，jsch 在 IO 线程上等着。 */
+@Composable
+fun FingerprintDialog(p: FileHostKeys.Prompt, alias: String) {
+    val t = Tokens.current
+    // 提示用户去查哪个文件：跟对方给的密钥类型对上，指错文件指纹必然对不上、用户就不敢连
+    val keyFile = when { "rsa" in p.keyType -> "rsa"; "ecdsa" in p.keyType -> "ecdsa"; else -> "ed25519" }
+    AlertDialog(
+        onDismissRequest = { p.answer.complete(false) },
+        title = { Text("确认这是 $alias 吗？") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("这是 Yxi 第一次连接这台机器，核对指纹后再继续。")
+                Text("${p.host}（${p.keyType}）", style = MaterialTheme.typography.bodySmall, color = t.textSecondary)
+                Text(p.fingerprint, fontFamily = Mono)
+                Text("在服务器上运行 ssh-keygen -lf /etc/ssh/ssh_host_${keyFile}_key.pub 可以看到它的指纹。对不上就别连。", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+            }
+        },
+        confirmButton = { TextButton({ p.answer.complete(true) }) { Text("指纹一致，连接") } },
+        dismissButton = { TextButton({ p.answer.complete(false) }) { Text("取消") } },
+    )
+}
+
+/** 连接颜色：6 个柔和色里点一个。 */
+@Composable
+fun ColorDialog(current: Color, onPick: (String) -> Unit, onClose: () -> Unit) {
+    val t = Tokens.current
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("连接颜色") },
+        text = {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                HostColors.forEach { c ->
+                    Box(
+                        Modifier.size(28.dp).clip(CircleShape).background(c)
+                            .border(if (c == current) 2.dp else 0.dp, if (c == current) t.textPrimary else Color.Transparent, CircleShape)
+                            .clickable { onPick("#%06X".format(c.toArgb() and 0xFFFFFF)) },
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClose) { Text("取消") } },
+    )
 }

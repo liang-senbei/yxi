@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import app.yxi.agent.Session
+import app.yxi.agent.SessionState
 
 /**
  * 全局状态（一份，`App()` 里 remember）。
@@ -46,5 +47,5 @@ class AppState {
     }
 }
 
-/** 等人处理 = 在等审批或等输入（`SessionState` 的判法在 core 的 SessionProbe 里；这里只看名字，侧栏可以覆盖得更细）。 */
-fun Session.needsAttention(): Boolean = state.name.let { it.contains("WAIT", true) || it.contains("PENDING", true) || it.contains("INPUT", true) }
+/** 等人处理 = 在等审批或等输入。core 的 SessionProbe 把 Claude Code 的 `waiting` 解成 NeedsYou，批准还是输入都在里面（细分见 SessionsPane 的 badge）。 */
+fun Session.needsAttention(): Boolean = state == SessionState.NeedsYou
