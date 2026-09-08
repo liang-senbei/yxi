@@ -21,7 +21,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
@@ -75,12 +74,12 @@ fun TermPane(conn: Conn, session: Session) {
 
     Column(Modifier.fillMaxSize()) {
         SelectionContainer(
-            Modifier.weight(1f).fillMaxWidth().background(Color(0xFF1E1E1E))
+            Modifier.weight(1f).fillMaxWidth().background(Tokens.current.surface1)
                 .verticalScroll(scroll).horizontalScroll(rememberScrollState()).padding(8.dp),
         ) {
             Text(
                 screen.ifEmpty { if (conn.ssh.isAlive) "（没抓到屏幕：会话可能已经结束）" else "（连接断了）" },
-                fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = Color(0xFFD4D4D4), softWrap = false,
+                fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = Tokens.current.textPrimary, softWrap = false,
             )
         }
         OutlinedTextField(
