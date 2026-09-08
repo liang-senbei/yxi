@@ -37,7 +37,7 @@ compose.desktop {
             packageName = "Yxi"
             packageVersion = "1.0.0"
             vendor = "Yxi"
-            windows { menu = true; shortcut = true; upgradeUuid = "3f6a9d2c-7b1e-4c0a-9a3d-8e2f5b1c4d7a" }
+            windows { menu = true; shortcut = true; iconFile.set(project.file("icon.ico")); upgradeUuid = "3f6a9d2c-7b1e-4c0a-9a3d-8e2f5b1c4d7a" }
         }
     }
 }

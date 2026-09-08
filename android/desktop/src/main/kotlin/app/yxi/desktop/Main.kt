@@ -1,6 +1,10 @@
 package app.yxi.desktop
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.ui.res.painterResource
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
@@ -12,8 +16,14 @@ import kotlinx.coroutines.delay
 fun main(args: Array<String>) = application {
     // --smoke：开窗口 3 秒就退并打印 smoke ok —— CI / Mac 上证明 Compose + Skia 在那个平台起得来（application 退出时 exitProcess(0)）
     if ("--smoke" in args) LaunchedEffect(Unit) { delay(3000); println("smoke ok"); exitApplication() }
-    Window(onCloseRequest = ::exitApplication, title = "Yxi", state = rememberWindowState(width = 1200.dp, height = 800.dp)) {
-        MaterialTheme {
+    // 记住上次的窗口大小 / 位置（Store.dir/window.json）；主题跟系统（Claude Desktop 也是跟系统）
+    val state = rememberWindowState(width = 1200.dp, height = 800.dp).also { Store.loadWindow(it) }
+    Window(
+        onCloseRequest = { Store.saveWindow(state); exitApplication() },
+        title = "Yxi", state = state, icon = painterResource("icon.png"),
+    ) {
+        window.minimumSize = java.awt.Dimension(800, 520)
+        MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
             App()
         }
     }
