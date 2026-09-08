@@ -9,7 +9,7 @@ package app.yxi.ui
  * ⚠️ 带占位符的条目，占位符**个数和顺序必须跟中文那条一致** ——
  *   调用方是 `t("…").format(x)`，对不上会抛 MissingFormatArgumentException。
  */
-internal object En {
+object En {
     val map: Map<String, String> = mapOf(
         "语言" to "Language",
         "跟着拍子点四条轨。%d 首曲子，%d 张谱。" to "Tap the four lanes to the beat. %d songs, %d charts.",

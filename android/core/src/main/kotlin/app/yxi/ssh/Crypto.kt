@@ -57,7 +57,7 @@ object Crypto {
         done = true
         // 出事的时候这一行是唯一的线索：provider 顺序 + 默认 SSLContext 还能不能建
         if (runCatching { javax.net.ssl.SSLContext.getInstance("Default") }.isFailure) {
-            android.util.Log.e(
+            app.yxi.agent.Plat.logw(
                 "YxiCrypto",
                 "默认 SSLContext 建不起来了 —— 这个进程的 HTTPS 会全废。provider 顺序：" +
                     Security.getProviders().joinToString(",") { it.name },

@@ -117,6 +117,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        app.yxi.agent.Plat.debug = app.yxi.BuildConfig.DEBUG; app.yxi.agent.Tr.fn = { zh -> app.yxi.ui.t(zh) }; app.yxi.agent.Plat.log = { l, tag, msg -> if (l == 'W') android.util.Log.w(tag, msg) else android.util.Log.i(tag, msg) }   // core 的翻译 / 日志缝
         app.yxi.agent.NetWatch.start(this)                       // 网络一换就通知 SSH 重连（老板 09-08：连接不稳定）
         enableEdgeToEdge()
         val store = HostStore(applicationContext)

@@ -1,6 +1,5 @@
 package app.yxi.ssh
 
-import android.util.Log
 import com.jcraft.jsch.ChannelShell
 import com.jcraft.jsch.JSch
 import com.jcraft.jsch.Session
@@ -22,7 +21,7 @@ import java.io.OutputStream
  */
 class SshSession(
     private val cfg: HostConfig,
-    private val knownHosts: KnownHosts? = null,
+    private val knownHosts: HostKeys? = null,
     /**
      * 心跳间隔。默认 2 秒（× 2 次 = 4 秒判死）是给**终端**用的：
      * 用户正盯着屏幕，掉线要立刻发现、立刻重连。
@@ -92,8 +91,8 @@ class SshSession(
                 // ⚠️ release 里不打：jsch 会把主机名、端口、服务器 OpenSSH 版本、认证方式协商
                 //    全写进 logcat，而用户发 bugreport 会把整个 logcat 一起带出去 ——
                 //    那是一份现成的攻击面清单（密码和私钥 jsch 本来就不打）。
-                override fun isEnabled(level: Int) = app.yxi.BuildConfig.DEBUG
-            override fun log(level: Int, message: String) { Log.i("YxiSSH", "[$level] $message") }
+                override fun isEnabled(level: Int) = app.yxi.agent.Plat.debug
+            override fun log(level: Int, message: String) { app.yxi.agent.Plat.logi("YxiSSH", "[$level] $message") }
         })
     }
 
@@ -143,7 +142,7 @@ class SshSession(
                 for (o in outbox) {
                     val ok = ioLock.withLock {
                         runCatching { input.write(o.bytes); input.flush() }
-                            .onFailure { Log.w("YxiSSH", "写入失败（通道多半已关）: ${it.message}") }
+                            .onFailure { app.yxi.agent.Plat.logw("YxiSSH", "写入失败（通道多半已关）: ${it.message}") }
                             .isSuccess
                     }
                     o.done.complete(ok)
@@ -170,10 +169,10 @@ class SshSession(
                 // ⚠️ 非法尺寸会让远端的 tmux 直接退出（实测：控件首次测量可能给出 0）。
                 // 宁可不发也不能发 0 —— 断开一个 attach 比少一次 resize 贵得多。
                 if (cols <= 0 || rows <= 0) {
-                    Log.w("YxiSSH", "跳过非法 resize: ${cols}x${rows}")
+                    app.yxi.agent.Plat.logw("YxiSSH", "跳过非法 resize: ${cols}x${rows}")
                     return@withContext false
                 }
-                Log.i("YxiSSH", "resize -> ${cols}x${rows}")
+                app.yxi.agent.Plat.logi("YxiSSH", "resize -> ${cols}x${rows}")
                 ioLock.withLock {
                   runCatching {
                     when (val c = channel) {
@@ -280,7 +279,7 @@ class SshSession(
                     val b = ByteArray(4096)
                     while (true) {
                         val n = err.read(b); if (n < 0) break
-                        Log.w("YxiSSH", "远端 stderr: " + String(b, 0, n).trim())
+                        app.yxi.agent.Plat.logw("YxiSSH", "远端 stderr: " + String(b, 0, n).trim())
                     }
                 }
             }.apply { isDaemon = true }.start()
@@ -306,7 +305,7 @@ class SshSession(
             runCatching {
                 val b = ByteArray(2048)
                 while (true) { val n = err.read(b); if (n < 0) break
-                    Log.w("YxiSSH", "远端 stderr: " + String(b, 0, n).trim()) }
+                    app.yxi.agent.Plat.logw("YxiSSH", "远端 stderr: " + String(b, 0, n).trim()) }
             }
         }.apply { isDaemon = true }.start()
         Shell(ch, out, inp)
@@ -365,7 +364,7 @@ class SshSession(
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Throwable) {
-            Log.w("YxiSSH", "exec 挂了（多半连接断了）：${e.message}")
+            app.yxi.agent.Plat.logw("YxiSSH", "exec 挂了（多半连接断了）：${e.message}")
             ""
         }
     } }

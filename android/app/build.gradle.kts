@@ -77,6 +77,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     // LifecycleResumeEffect（扫一扫回到前台重查相机权限）。⚠️ 显式声明：它本来是 camerax 传递带进来的，
     //    直接用传递依赖，哪天 camerax 换个版本不带了就悄悄编不过。
+    implementation(project(":core"))                     // 手机 / 桌面共用的纯 Kotlin（Live / HostConfig / Shell…）
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))

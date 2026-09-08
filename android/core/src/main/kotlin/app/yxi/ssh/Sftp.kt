@@ -1,6 +1,6 @@
 package app.yxi.ssh
 
-import app.yxi.ui.t
+import app.yxi.agent.Tr.t
 import com.jcraft.jsch.ChannelSftp
 import com.jcraft.jsch.SftpException
 import kotlinx.coroutines.Dispatchers

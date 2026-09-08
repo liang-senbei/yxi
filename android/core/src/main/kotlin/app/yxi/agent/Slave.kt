@@ -1,7 +1,7 @@
 package app.yxi.agent
 
 import app.yxi.ssh.SshSession
-import app.yxi.ui.t
+import app.yxi.agent.Tr.t
 
 /**
  * **从机** —— 从「主机」跳一层看另一台机器（老板 2026-09-07：

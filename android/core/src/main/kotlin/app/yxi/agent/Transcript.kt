@@ -1,6 +1,6 @@
 package app.yxi.agent
 
-import app.yxi.ui.t
+import app.yxi.agent.Tr.t
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -445,7 +445,7 @@ object Transcript {
     private val ANSI = Regex("""\u001B?\[[0-9;]*[A-Za-z]""")
 
     /** 去掉 ANSI 控制序列。⚠️ 只在**展示**前用，别改动原文用于比对的地方（去重靠原文）。 */
-    internal fun clean(s: String): String = ANSI.replace(s, "")
+    fun clean(s: String): String = ANSI.replace(s, "")
 
     private val FROM = Regex("""(?:from|teammate_id|agent_id)="([^"]+)"""")
 

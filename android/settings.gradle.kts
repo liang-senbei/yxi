@@ -10,4 +10,4 @@ dependencyResolutionManagement {
     repositories { google(); mavenCentral() }
 }
 rootProject.name = "Yxi"
-include(":app")
+include(":app", ":core", ":desktop")   // core = 手机 / 桌面共用的纯 Kotlin；desktop = Windows 桌面版（Compose Multiplatform）

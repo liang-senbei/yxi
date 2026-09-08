@@ -67,6 +67,7 @@ class EventService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        app.yxi.agent.Plat.debug = app.yxi.BuildConfig.DEBUG; app.yxi.agent.Tr.fn = { zh -> app.yxi.ui.t(zh) }; app.yxi.agent.Plat.log = { l, tag, msg -> if (l == 'W') android.util.Log.w(tag, msg) else android.util.Log.i(tag, msg) }   // 服务可能先于 Activity 起
         instance = this
         // ⚠️ 服务可能比界面先起来（开机自启、被系统拉起）。不在这儿读一次的话，
         // 通知会**先弹几条中文**再跟上 —— 那种不一致比全中文更让人困惑。

@@ -1,6 +1,5 @@
 package app.yxi.ssh
 
-import android.util.Base64
 import com.jcraft.jsch.HostKey
 import com.jcraft.jsch.HostKeyRepository
 import com.jcraft.jsch.UserInfo
@@ -31,14 +30,14 @@ class KnownHosts(
     private val store: HostStore,
     private val hostId: String,
     private val prompt: TrustPrompt?,
-) : HostKeyRepository {
+) : HostKeyRepository, HostKeys {
 
     /** 变更时置位，供上层给出准确的错误文案。 */
-    @Volatile var changedDetected: Boolean = false
+    @Volatile override var changedDetected: Boolean = false
         private set
 
     override fun check(host: String, key: ByteArray): Int {
-        val incoming = Base64.encodeToString(key, Base64.NO_WRAP)
+        val incoming = java.util.Base64.getEncoder().encodeToString(key)
         val known = store.get(hostId)?.hostKey
         return when {
             known == null -> HostKeyRepository.NOT_INCLUDED
@@ -71,7 +70,7 @@ class KnownHosts(
      * jsch 用它来问「没见过这台主机，连不连」。
      * jsch 在自己的线程上同步调用，所以这里用闩阻塞等 UI 的答复。
      */
-    fun userInfo(): UserInfo = object : UserInfo {
+    override fun userInfo(): UserInfo = object : UserInfo {
         override fun getPassphrase(): String? = null
         override fun getPassword(): String? = null
         override fun promptPassword(message: String?) = false
@@ -107,9 +106,6 @@ class KnownHosts(
     companion object {
         /** 把公钥 blob 算成 `SHA256:…` 形式，跟 `ssh-keygen -lf` 的输出一致。 */
         fun fingerprint(keyBlob: ByteArray): String =
-            "SHA256:" + Base64.encodeToString(
-                MessageDigest.getInstance("SHA-256").digest(keyBlob),
-                Base64.NO_WRAP or Base64.NO_PADDING,
-            )
+            "SHA256:" + java.util.Base64.getEncoder().withoutPadding().encodeToString(MessageDigest.getInstance("SHA-256").digest(keyBlob))
     }
 }
