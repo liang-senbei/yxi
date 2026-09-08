@@ -44,6 +44,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.yxi.agent.Account
+import app.yxi.agent.AccountApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -131,7 +132,7 @@ fun MeAvatar(size: Dp = 56.dp, modifier: Modifier = Modifier) {
     }
     // 档位光环（规格由 cc-logto_yxi 给：service/admin/halo-spec.html）。
     // ⚠️ 档位读服务端的 tier，**不自己算**；免费档没有光环。
-    val tier = if (Account.signedIn) Account.me?.tier ?: Account.Tier.Free else Account.Tier.Free
+    val tier = if (Account.signedIn) Account.me?.tier ?: AccountApi.Tier.Free else AccountApi.Tier.Free
     // 头像框（装扮槽位 Skins.FRAME）：读它就订阅了 Cosmetics 的版本号，换框当场重画
     val frame = Skins.frame(ctx)
     val motion = remember {
@@ -142,15 +143,15 @@ fun MeAvatar(size: Dp = 56.dp, modifier: Modifier = Modifier) {
         }.getOrDefault(true)
     }
     val ring = when (tier) {
-        Account.Tier.Pro -> listOf(Color(0xFF346BF0), Color(0xFF8AB4F8), Color(0xFF346BF0))
-        Account.Tier.Ultra -> listOf(Color(0xFFFDBE5A), Color(0xFFF59E8C), Color(0xFFFFE1A8), Color(0xFFFDBE5A))
+        AccountApi.Tier.Pro -> listOf(Color(0xFF346BF0), Color(0xFF8AB4F8), Color(0xFF346BF0))
+        AccountApi.Tier.Ultra -> listOf(Color(0xFFFDBE5A), Color(0xFFF59E8C), Color(0xFFFFE1A8), Color(0xFFFDBE5A))
         else -> emptyList()
     }
     val spin = rememberInfiniteTransition(label = "halo")
     // 转一圈：pro 12 秒、ultra 6 秒。⚠️ 系统开了「减弱动效」必须停转（规格里明写的）
     val angle by spin.animateFloat(
         0f, 360f,
-        InfiniteRepeatableSpec(tween(if (tier == Account.Tier.Ultra) 6000 else 12000, easing = LinearEasing), RepeatMode.Restart),
+        InfiniteRepeatableSpec(tween(if (tier == AccountApi.Tier.Ultra) 6000 else 12000, easing = LinearEasing), RepeatMode.Restart),
         label = "spin",
     )
     val breath by spin.animateFloat(
@@ -159,7 +160,7 @@ fun MeAvatar(size: Dp = 56.dp, modifier: Modifier = Modifier) {
     val a = if (motion) angle else 0f
     val br = if (motion) breath else 0.5f
     val gap = 2.5.dp
-    val stroke = if (tier == Account.Tier.Ultra) 3.5.dp else 2.5.dp
+    val stroke = if (tier == AccountApi.Tier.Ultra) 3.5.dp else 2.5.dp
     Box(
         modifier.size(size + (gap + stroke) * 2).drawBehind {
             val c = androidx.compose.ui.geometry.Offset(size.toPx() / 2 + (gap + stroke).toPx(), size.toPx() / 2 + (gap + stroke).toPx())
@@ -169,7 +170,7 @@ fun MeAvatar(size: Dp = 56.dp, modifier: Modifier = Modifier) {
             }
             if (ring.isEmpty()) return@drawBehind
             val rr = size.toPx() / 2 + gap.toPx() + stroke.toPx() / 2
-            val ultra = tier == Account.Tier.Ultra
+            val ultra = tier == AccountApi.Tier.Ultra
             // 外圈薄雾（只有 ultra）：1.34× 头像，呼吸
             if (ultra) drawCircle(
                 Brush.radialGradient(

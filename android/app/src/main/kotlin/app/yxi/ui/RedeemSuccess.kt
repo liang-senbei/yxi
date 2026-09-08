@@ -45,6 +45,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.yxi.agent.Account
+import app.yxi.agent.AccountApi
 import kotlin.math.PI
 import kotlin.math.exp
 import kotlin.math.min
@@ -69,13 +70,13 @@ import kotlinx.coroutines.delay
  * ⚠️ **重兑（replay）不放动效**：同一张码再兑一次没有加任何东西，庆祝它是在骗人。
  */
 @Composable
-fun RedeemSuccess(r: Account.Redeemed, onDone: () -> Unit) {
+fun RedeemSuccess(r: AccountApi.Redeemed, onDone: () -> Unit) {
     val ctx = LocalContext.current
     val density = LocalDensity.current
     val motion = remember { motionOn(ctx) }
 
     // 档位色。余额券跟**当前档位**走，不另起一套（cc-logto_yxi 的建议）。
-    val ultra = r.tier == Account.Tier.Ultra
+    val ultra = r.tier == AccountApi.Tier.Ultra
     val flow = if (ultra) {
         listOf(Color(0xFFFDBE5A), Color(0xFFF59E8C), Color(0xFFFFE1A8), Color(0xFFFDBE5A))
     } else {
@@ -90,13 +91,13 @@ fun RedeemSuccess(r: Account.Redeemed, onDone: () -> Unit) {
 
     val head = if (r.kind == "balance") t("余额到账") else t("Welcome to")
     val name = when {
-        r.kind == "balance" -> app.yxi.agent.Account.yuan(r.amountCents)
+        r.kind == "balance" -> app.yxi.agent.AccountApi.yuan(r.amountCents)
         ultra -> "Yunxi Ultra"
         else -> "Yunxi Pro"
     }
     val sub = when {
         // 负数是**该显示**的（刚兑的券被撤销就会这样），只是负号要在 ¥ 前面 —— 见 [yuan]
-        r.kind == "balance" -> t("当前余额 %s").format(app.yxi.agent.Account.yuan(r.balanceCents))
+        r.kind == "balance" -> t("当前余额 %s").format(app.yxi.agent.AccountApi.yuan(r.balanceCents))
         r.expiresAt.isNotBlank() -> t("会员有效期至 %s").format(r.expiresAt)
         else -> ""
     }

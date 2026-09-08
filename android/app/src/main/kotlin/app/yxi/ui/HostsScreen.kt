@@ -1,5 +1,6 @@
 package app.yxi.ui
 
+import app.yxi.agent.AccountApi
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
@@ -80,7 +81,7 @@ fun HostsScreen(
                 //    （隐私政策白纸黑字写着配置只存本地）。所以改 APK 能绕过，这是已知且接受的。
                 //    绝不为了堵它把主机列表传服务端。
                 val tier = if (app.yxi.agent.Account.signedIn) app.yxi.agent.Account.me?.tier else null
-                if (tier == null || tier == app.yxi.agent.Account.Tier.Free) {
+                if (tier == null || tier == app.yxi.agent.AccountApi.Tier.Free) {
                     if (hosts.size >= 2) { overLimit = true; return@IconTextButton }
                 }
                 adding = true

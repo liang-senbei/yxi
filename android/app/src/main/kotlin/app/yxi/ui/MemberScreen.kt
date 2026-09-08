@@ -37,6 +37,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import app.yxi.agent.Account
+import app.yxi.agent.AccountApi
 import kotlinx.coroutines.launch
 
 /**
@@ -52,7 +53,7 @@ fun MemberScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     val me = Account.me
-    val tier = me?.tier ?: Account.Tier.Free
+    val tier = me?.tier ?: AccountApi.Tier.Free
     var loading by remember { mutableStateOf(false) }
     // ⚠️ 拉资料失败要**说出来**：以前这个返回值直接丢了，于是「登录着但整页是空的」查不出原因
     var loadErr by remember { mutableStateOf<String?>(null) }
@@ -79,7 +80,7 @@ fun MemberScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
                 )
                 val line = when {
                     !Account.signedIn -> t("登录后才能看会员状态")
-                    tier == Account.Tier.Free -> t("当前：免费版")
+                    tier == AccountApi.Tier.Free -> t("当前：免费版")
                     me?.neverExpires == true -> t("当前：%s · 永久").format(tier.name)
                     me?.expiresAt != null -> t("当前：%s · %s 到期").format(tier.name, app.yxi.agent.Tz.date(me.expiresAt))
                     else -> t("当前：%s").format(tier.name)
@@ -140,21 +141,21 @@ fun MemberScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
         Spacer(Modifier.height(18.dp))
         Plan(
             name = t("免费版"), tagline = t("一台机器，够用"),
-            accent = MaterialTheme.colorScheme.outline, own = tier == Account.Tier.Free,
+            accent = MaterialTheme.colorScheme.outline, own = tier == AccountApi.Tier.Free,
             lines = listOf(t("1 台主机"), t("会话看板 + 对话 + 终端"), t("本机语音转写"), t("资料每月能改 1 次")),
         )
         Spacer(Modifier.height(12.dp))
         Plan(
             name = "Pro", tagline = t("多机器盯梢，随手就批"),
             price = Account.purchase?.plans?.firstOrNull { it.tier == "pro" },
-            accent = Color(0xFF4C8DF6), own = tier == Account.Tier.Pro,
+            accent = Color(0xFF4C8DF6), own = tier == AccountApi.Tier.Pro,
             lines = listOf(t("主机不限台"), t("后台盯梢 + 通知里直接批"), t("实验室：让 agent 画图"), t("资料每月能改 2 次")),
         )
         Spacer(Modifier.height(12.dp))
         Plan(
             name = "Ultra", tagline = t("整队 agent 一起带"),
             price = Account.purchase?.plans?.firstOrNull { it.tier == "ultra" },
-            accent = Color(0xFFB07CFF), own = tier == Account.Tier.Ultra,
+            accent = Color(0xFFB07CFF), own = tier == AccountApi.Tier.Ultra,
             lines = listOf(t("Pro 的全部"), t("多设备同步"), t("实验室额度更高"), t("资料改多少次都行")),
         )
         Spacer(Modifier.height(16.dp))
@@ -179,7 +180,7 @@ fun RedeemBox(modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
     var code by remember { mutableStateOf("") }
     // 兑成功了放一遍动效（[RedeemSuccess]）。⚠️ **重兑不放** —— 那一次什么都没加，庆祝它是骗人。
-    var celebrate by remember { mutableStateOf<Account.Redeemed?>(null) }
+    var celebrate by remember { mutableStateOf<AccountApi.Redeemed?>(null) }
     celebrate?.let { RedeemSuccess(it) { celebrate = null } }
     var busy by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf<String?>(null) }
@@ -244,7 +245,7 @@ fun RedeemBox(modifier: Modifier = Modifier) {
 @Composable
 private fun Plan(
     name: String, tagline: String, accent: Color, own: Boolean, lines: List<String>,
-    price: Account.Plan? = null,
+    price: AccountApi.Plan? = null,
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerLow,

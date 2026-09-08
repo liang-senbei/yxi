@@ -29,6 +29,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import app.yxi.agent.Account
+import app.yxi.agent.AccountApi
 import app.yxi.agent.Shop
 import app.yxi.ui.theme.Muted
 import kotlinx.coroutines.launch
@@ -56,7 +57,7 @@ fun ShopScreen(onRedeem: () -> Unit, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(t("商城"), style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(18.dp, 14.dp, 18.dp, 4.dp))
         Text(
-            t("余额 %s · 买到的是一张不记名兑换码，自己兑或送人都行；同档叠加、时间往后累加。").format(Account.yuan(balance)),
+            t("余额 %s · 买到的是一张不记名兑换码，自己兑或送人都行；同档叠加、时间往后累加。").format(AccountApi.yuan(balance)),
             style = MaterialTheme.typography.bodySmall, color = Muted, modifier = Modifier.padding(18.dp, 0.dp),
         )
         when {
@@ -69,7 +70,7 @@ fun ShopScreen(onRedeem: () -> Unit, modifier: Modifier = Modifier) {
                         Column(Modifier.weight(1f)) {
                             Text(it.name.ifBlank { it.id.uppercase() }, style = MaterialTheme.typography.titleMedium)
                             Text(t("%d 天 · %s 的兑换码").format(it.days, it.tier.uppercase()), style = MaterialTheme.typography.bodySmall, color = Muted)
-                            if (short) Text(t("还差 %s").format(Account.yuan(it.priceCents - balance)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                            if (short) Text(t("还差 %s").format(AccountApi.yuan(it.priceCents - balance)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                         }
                         Surface(
                             color = if (short) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.primary,
@@ -80,7 +81,7 @@ fun ShopScreen(onRedeem: () -> Unit, modifier: Modifier = Modifier) {
                             },
                         ) {
                             Text(
-                                Account.yuan(it.priceCents), Modifier.padding(18.dp, 9.dp),
+                                AccountApi.yuan(it.priceCents), Modifier.padding(18.dp, 9.dp),
                                 style = MaterialTheme.typography.labelLarge.copy(fontFamily = FontFamily.Monospace),
                                 color = if (short) Muted else MaterialTheme.colorScheme.onPrimary,
                             )
@@ -96,7 +97,7 @@ fun ShopScreen(onRedeem: () -> Unit, modifier: Modifier = Modifier) {
         AlertDialog(
             onDismissRequest = { if (!busy) confirm = null },
             title = { Text(t("买 %s？").format(item.name.ifBlank { item.id.uppercase() })) },
-            text = { Text(t("从余额扣 %s，得到一张 %d 天的 %s 兑换码。").format(Account.yuan(item.priceCents), item.days, item.tier.uppercase())) },
+            text = { Text(t("从余额扣 %s，得到一张 %d 天的 %s 兑换码。").format(AccountApi.yuan(item.priceCents), item.days, item.tier.uppercase())) },
             confirmButton = {
                 TextButton(enabled = !busy, onClick = {
                     busy = true; err = null
@@ -107,7 +108,7 @@ fun ShopScreen(onRedeem: () -> Unit, modifier: Modifier = Modifier) {
                         r.onFailure { e ->
                             val be = (e as? Shop.BuyException)?.err
                             err = when (be) {
-                                is Shop.BuyError.Insufficient -> t("余额不够：还差 %s（余额 %s）").format(Account.yuan(be.needCents - be.balanceCents), Account.yuan(be.balanceCents))
+                                is Shop.BuyError.Insufficient -> t("余额不够：还差 %s（余额 %s）").format(AccountApi.yuan(be.needCents - be.balanceCents), AccountApi.yuan(be.balanceCents))
                                 is Shop.BuyError.Other -> t("没买成：%s").format(be.msg)
                                 null -> t("没买成：%s").format(e.message ?: "")
                             }
@@ -136,7 +137,7 @@ fun ShopScreen(onRedeem: () -> Unit, modifier: Modifier = Modifier) {
                             android.widget.Toast.makeText(ctx, t("复制好了"), android.widget.Toast.LENGTH_SHORT).show()
                         },
                     )
-                    Text(t("%d 天 %s · 已扣 %s · 余额 %s\n码也发到了你的邮件里。去会员中心兑，同档会叠加。").format(b.days, b.tier.uppercase(), Account.yuan(b.priceCents), Account.yuan(b.balanceCents)), style = MaterialTheme.typography.bodySmall, color = Muted)
+                    Text(t("%d 天 %s · 已扣 %s · 余额 %s\n码也发到了你的邮件里。去会员中心兑，同档会叠加。").format(b.days, b.tier.uppercase(), AccountApi.yuan(b.priceCents), AccountApi.yuan(b.balanceCents)), style = MaterialTheme.typography.bodySmall, color = Muted)
                 }
             },
             confirmButton = { TextButton({ bought = null; onRedeem() }) { Text(t("去兑换")) } },

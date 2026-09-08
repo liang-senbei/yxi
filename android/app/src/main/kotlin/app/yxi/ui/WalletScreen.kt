@@ -30,6 +30,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import app.yxi.agent.Account
+import app.yxi.agent.AccountApi
 import app.yxi.agent.Shop
 import app.yxi.agent.Tz
 import app.yxi.ui.theme.Muted
@@ -59,7 +60,7 @@ fun WalletScreen(onShop: () -> Unit, onRedeem: () -> Unit, modifier: Modifier = 
             Text(t("余额"), style = MaterialTheme.typography.labelMedium, color = Muted)
             val cents = me?.balanceCents ?: 0L
             Text(
-                Account.yuan(cents),
+                AccountApi.yuan(cents),
                 style = MaterialTheme.typography.headlineLarge.copy(fontFamily = FontFamily.Monospace),
                 color = if (cents < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
             )
@@ -80,7 +81,7 @@ fun WalletScreen(onShop: () -> Unit, onRedeem: () -> Unit, modifier: Modifier = 
                         when {
                             me == null -> t("读取中")
                             price == null -> t("免费版没有东西可续 —— 兑一张会员码之后这里就能开")
-                            else -> t("到期那天从余额扣 %s 续一期 %s；余额不够就正常到期，不会扣成负数").format(Account.yuan(price), me.tier.name.lowercase())
+                            else -> t("到期那天从余额扣 %s 续一期 %s；余额不够就正常到期，不会扣成负数").format(AccountApi.yuan(price), me.tier.name.lowercase())
                         },
                         style = MaterialTheme.typography.bodySmall, color = Muted,
                     )
@@ -124,7 +125,7 @@ fun WalletScreen(onShop: () -> Unit, onRedeem: () -> Unit, modifier: Modifier = 
                 Card {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text(od.itemId.uppercase() + " · " + Account.yuan(od.priceCents), style = MaterialTheme.typography.titleSmall)
+                            Text(od.itemId.uppercase() + " · " + AccountApi.yuan(od.priceCents), style = MaterialTheme.typography.titleSmall)
                             Text(Tz.dateTime(od.at), style = MaterialTheme.typography.labelSmall, color = Muted)
                         }
                         // 码：点一下复制。⚠️ 这是不记名码，谁拿到谁能兑 —— 所以只在你自己的订单里露出来

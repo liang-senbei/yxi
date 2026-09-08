@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import app.yxi.agent.Account
+import app.yxi.agent.AccountApi
 import app.yxi.ui.theme.Amber
 import app.yxi.ui.theme.Copper
 import app.yxi.ui.theme.Muted
@@ -70,7 +71,7 @@ import kotlinx.coroutines.launch
 fun MailScreen(modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    val items = remember { mutableStateListOf<Account.Mail>() }
+    val items = remember { mutableStateListOf<AccountApi.Mail>() }
     var cursor by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
     var failed by remember { mutableStateOf(false) }
@@ -313,7 +314,7 @@ private fun Hint(text: String) {
 }
 
 /** 这封信还剩几天被自动清掉。null = 服务端没给到期时间（老版本）。 */
-private fun daysLeft(m: Account.Mail): Int? {
+private fun daysLeft(m: AccountApi.Mail): Int? {
     val at = m.expiresAt?.takeIf { it.isNotEmpty() } ?: return null
     val ms = app.yxi.agent.Tz.parse(at)?.toEpochMilli() ?: return null
     // 向上取整：还差 1 小时也算「还剩 1 天」，不能显示成 0 天让人以为已经没了
@@ -321,7 +322,7 @@ private fun daysLeft(m: Account.Mail): Int? {
 }
 
 /** 这封信里有没有**兑换码**。码不会自动领，信删了就不再显示。 */
-private fun hasCode(m: Account.Mail): Boolean = m.attachments.any { it.kind == "code" }
+private fun hasCode(m: AccountApi.Mail): Boolean = m.attachments.any { it.kind == "code" }
 
 /**
  * 到期会发生什么 —— 三种情况分开说。
@@ -331,7 +332,7 @@ private fun hasCode(m: Account.Mail): Boolean = m.attachments.any { it.kind == "
  *    只是信删了就不再显示 —— 买来的在钱包 → 订单记录里另有一份，送的只有信这一处。
  */
 @Composable
-private fun ExpiryNote(m: Account.Mail) {
+private fun ExpiryNote(m: AccountApi.Mail) {
     val left = daysLeft(m) ?: return
     val code = hasCode(m)
     // ⚠️ 判据是「**有没有**可领的」，不是 `claimable`（那个还看领没领）——
@@ -365,7 +366,7 @@ private fun ExpiryNote(m: Account.Mail) {
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun Attachments(m: Account.Mail, onClaimed: (Account.Claim?) -> Unit) {
+private fun Attachments(m: AccountApi.Mail, onClaimed: (AccountApi.Claim?) -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var busy by remember(m.id) { mutableStateOf(false) }

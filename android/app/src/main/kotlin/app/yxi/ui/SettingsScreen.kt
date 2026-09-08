@@ -1,5 +1,6 @@
 package app.yxi.ui
 
+import app.yxi.agent.AccountApi
 import android.content.Context
 import android.content.Intent
 import android.os.Build
@@ -317,7 +318,7 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline,
                     )
                     else -> Text(
-                        app.yxi.agent.Account.yuan(acc.balanceCents),
+                        app.yxi.agent.AccountApi.yuan(acc.balanceCents),
                         style = MaterialTheme.typography.titleSmall.copy(
                             fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                         ),
