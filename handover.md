@@ -144,8 +144,15 @@
 ## Windows 桌面版（`android/desktop/`，2026-09-08 起）
 
 老板 09-08：「构建一个 Windows 版本，像 Claude Desktop / ChatGPT 的 Windows 版那样」。Compose Multiplatform（JVM）+ 共用 `:core`，
-计划 / 模块 / 构建命令见 `android/desktop/README.md`。进度：骨架（窗口 + 左栏主机·会话 / 右栏对话·终端的布局、`Model.kt` 的 Host / Store / Conn）已起，
-四个面板（HostsPane / SessionsPane / ChatPane / TermPane）分头做中；打包走 GitHub Actions windows（jpackage 不能跨平台）；先在 Mac mini 上跑 uber jar 冒烟。
+计划 / 模块 / 构建命令见 `android/desktop/README.md`。
+
+**做到哪（09-08）**：布局 = 左栏主机 + 会话、右栏对话 / 终端两个 tab（`App.kt`）；`Model.kt`（Host / Store（`%APPDATA%\Yxi` 或 `~/.config/yxi`：hosts.json + known_hosts）/ Conn）。
+- `HostsPane.kt` + `FileHostKeys.kt`：主机增删改、私钥文件或密码、首次指纹确认框、指纹变了拒连 + 「确认过了删旧指纹」。指纹回调层用 jshell 自查过，没连过真主机。
+- `SessionsPane.kt`：列 cc-*（状态 / cwd / 相对时间），5 秒刷新，新建会话走 `Dirs.createCommand`。
+- `ChatPane.kt`：转录尾随（`latestFor` → `tailStart` → `streamFrom` → `Transcript.Incremental`）、最简 markdown、工具卡（连续同名合并、失败标红）、审批条（`watchScreen` 拿 Pending，`sendKey` 按编号；多选走 Right → Submit）、Enter 发 / Shift+Enter 换行、粘底只认用户滚动。
+- `TermPane.kt`：做中（PTY `tmux attach` 或 capture-pane 轮询二选一）；`--smoke` 参数、按 `-Pyxi.os=mac|win` 打别的平台 uber jar、GitHub Actions windows 打 MSI（jpackage 不能跨平台）。
+- ⚠️ **全部只编译过，没在有显示器的机器上跑过**：下一步 Mac mini 上 `java -jar … --smoke`，然后连真主机走一遍主机 → 会话 → 对话。
+- 没做：带口令的私钥、`user@host:port` 整串粘贴拆分、账号（Logto）/ 会员 / 额度、通知托盘、深色主题。
 
 ## 音游（云曦节拍）设计拍板 —— 2026-09-06，老板在网页试验台上选的
 
