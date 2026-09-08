@@ -61,13 +61,32 @@ fun main(args: Array<String>) {
                 window.setFocusTraversalKeys(java.awt.KeyboardFocusManager.FORWARD_TRAVERSAL_KEYS, emptySet())
                 window.setFocusTraversalKeys(java.awt.KeyboardFocusManager.BACKWARD_TRAVERSAL_KEYS, emptySet())
                 window.minimumSize = Dimension(720, 560)
+                // ⚠️ **无边框窗口最大化会盖住任务栏**（审查 P2）。AWT 对 undecorated 的 MAXIMIZED_BOTH
+                //    取的是整块屏幕，不是「可用区」—— 表现是最大化之后任务栏被压在窗口下面，
+                //    而我们的标题栏是自绘的，用户连「还原」都够不着（系统边框那三颗不存在）。
+                //    setMaximizedBounds 明确给出可用区（屏幕矩形减掉 screenInsets）就没这问题。
+                // ⚠️ 换显示器要重算：两块屏的分辨率和任务栏位置都可能不同，所以移动时再来一次。
+                fun fitMaximized() = runCatching {
+                    val gc = window.graphicsConfiguration ?: return@runCatching
+                    val b = gc.bounds
+                    val ins = java.awt.Toolkit.getDefaultToolkit().getScreenInsets(gc)
+                    window.maximizedBounds = java.awt.Rectangle(
+                        b.x + ins.left, b.y + ins.top,
+                        b.width - ins.left - ins.right, b.height - ins.top - ins.bottom,
+                    )
+                }
+                fitMaximized()
+                val moved = object : java.awt.event.ComponentAdapter() {
+                    override fun componentMoved(e: java.awt.event.ComponentEvent) = Unit.also { fitMaximized() }
+                }
+                window.addComponentListener(moved)
                 Shell.frame = window
                 val focus = object : WindowAdapter() {
                     override fun windowGainedFocus(e: WindowEvent) { Notify.focused = true }
                     override fun windowLostFocus(e: WindowEvent) { Notify.focused = false }
                 }
                 window.addWindowFocusListener(focus)
-                onDispose { window.removeWindowFocusListener(focus); Shell.frame = null }
+                onDispose { window.removeWindowFocusListener(focus); window.removeComponentListener(moved); Shell.frame = null }
             }
             Zoomed {
                 YxiTheme {

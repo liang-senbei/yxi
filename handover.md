@@ -162,6 +162,12 @@
 - **Windows 包已经能出**：GitHub Actions `desktop.yml`（手动触发或推 tag `desktop-v*`，windows-latest 打 MSI + uber jar，`--smoke` 在 Windows 上打印了 smoke ok）。
   发布：`gh run download <run-id> -R liang-senbei/yxi -n Yxi-windows -D <目录>` → `scp` 到 `hk13:/var/www/yxi/desktop/`（chmod 644，#318）→ 公网 **https://yxi.keuury.com/desktop/Yxi-1.0.0.msi**。
   nginx 白名单在 hk13 `/etc/nginx/snippets/yxi-dl.conf` 的 `location /desktop/`（根目录 `location /` 是 404 白名单，新路径都得单列）。
+- **✅ 1.0.1 已发到公网（cc-Bug_solverYxi，09-08 晚）**：
+  · **装机地址 https://yxi.keuury.com/desktop/Yxi-win-Setup.exe** —— Velopack 一键装（无向导、无 UAC，装进 `%LOCALAPPDATA%\Yxi`）
+  · 更新源是同目录的 `releases.win.json`（客户端每 6 小时查一次，比版本高就静默下 nupkg）；**旧的 `Yxi-1.0.0.msi` 原样留着**，老板手上那份不受影响
+  · 出处：CI run `34250917867`（main `57c65ff`）；发布命令就是 `android/desktop/publish.sh <run-id>`（rsync 无 --delete，只增不删）
+  · 核过两件：公网真取 `Setup.exe` / `releases.win.json` 都是 200；`releases.win.json` 里写的 SHA256 跟 hk13 上 nupkg 真算出来的**逐字相等**（对不上客户端会静默不更新，是那种没人报错的坏法）
+  · ⚠️ **还没有人在真 Windows 上装过它**：客户那台 `han` 当前 offline；老板电脑只能传文件、不能装（隧道那头是 cmd，装机让老板自己来）。**「装得上」和「应用内自动更新真的能跳版本」这两条都还欠着**，等老板反馈或 han 上线。
 - ⚠️ **除了 Windows 冒烟（开窗 3 秒），没在有显示器的机器上真用过**：下一步 Mac mini 上 `java -jar … --smoke` + 连真主机走一遍主机 → 会话 → 对话；opus 审查过一轮（3 处已修）。
 - 没做：带口令的私钥、`user@host:port` 整串粘贴拆分、账号（Logto）/ 会员 / 额度、通知托盘、深色主题。
 

@@ -77,8 +77,34 @@ private fun reg(vararg args: String): Int = runCatching { ProcessBuilder("reg", 
 /** 开机自启 = HKCU\…\Run 下有没有 Yxi 这条（reg query 退出码 0），不另存偏好——用户在任务管理器里关掉了也能如实显示。非 Windows 一律关且灰掉。 */
 private fun autostartEnabled() = isWindows && reg("query", RUN, "/v", "Yxi") == 0
 
-/** 值 = 当前可执行文件：jpackage 装的就是 %LOCALAPPDATA%\Yxi\Yxi.exe（java -jar 开发时是 java.exe，无所谓）。带引号，路径有空格也能起。 */
+/**
+ * 开机自启那条注册表值的 `.reg` 正文。**单独抽出来是为了能在 Linux 上测** —— 不然验一次要装 Windows。
+ *
+ * ⚠️ 为什么不直接 `reg add … /d "<路径>"`（原来的写法，审查 P2 点的就是它）：
+ *    · 值里**必须带引号** —— `C:\Users\Li Ming\AppData\Local\Yxi\Yxi.exe` 不带引号的话，
+ *      Windows 起动时会先去试 `C:\Users\Li.exe`，用户名带空格的机器上开机自启直接不工作。
+ *    · 而这对引号要穿过 **Java 的 ProcessBuilder**：它在 Windows 上自己有一套加引号 / 转义的规则，
+ *      「参数本身已经带引号」时到底原样传还是再转义一层，没有明确保证 —— 落进注册表的可能是
+ *      没引号、也可能是 `\"…\"`，两种都是坏的，而且**只有在真 Windows 上才看得出来**。
+ *    `.reg` 文件的转义是有定义的（`\` → `\\`、`"` → `\"`），我们逐字写出来再 `reg import`，不经过任何猜测。
+ * ⚠️ 文件要写 **UTF-16LE + BOM**：用户名是中文的机器很常见，ANSI 存进去会变成乱码路径。
+ */
+internal fun autostartReg(exe: String): String {
+    val esc = exe.replace("\\", "\\\\").replace("\"", "\\\"")
+    return "Windows Registry Editor Version 5.00\r\n\r\n" +
+        "[HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run]\r\n" +
+        "\"Yxi\"=\"\\\"" + esc + "\\\"\"\r\n"
+}
+
+/** 值 = 当前可执行文件：jpackage 装的就是 %LOCALAPPDATA%\Yxi\Yxi.exe（java -jar 开发时是 java.exe，无所谓）。 */
 private fun setAutostart(on: Boolean) {
-    if (on) reg("add", RUN, "/v", "Yxi", "/t", "REG_SZ", "/d", "\"${ProcessHandle.current().info().command().orElse("")}\"", "/f")
-    else reg("delete", RUN, "/v", "Yxi", "/f")
+    if (!on) { reg("delete", RUN, "/v", "Yxi", "/f"); return }
+    val exe = ProcessHandle.current().info().command().orElse("")
+    if (exe.isBlank()) return
+    runCatching {
+        val f = java.io.File.createTempFile("yxi-autostart", ".reg")
+        f.writeBytes(byteArrayOf(0xFF.toByte(), 0xFE.toByte()) + autostartReg(exe).toByteArray(Charsets.UTF_16LE))
+        reg("import", f.absolutePath)
+        f.delete()
+    }
 }

@@ -50,12 +50,37 @@ val HostColors = listOf(Color(0xFF7C9CBF), Color(0xFF8FBF9F), Color(0xFFD9A066),
 fun Host.tint(index: Int): Color =
     color.removePrefix("#").toLongOrNull(16)?.let { Color(0xFF000000L or it) } ?: HostColors[index % HostColors.size]
 
-/** 本地存储：Windows `%APPDATA%\Yxi`，其它 `~/.config/yxi`。hosts.json + known_hosts。 */
+/** 本地存储：Windows `%LOCALAPPDATA%\Yxi`，其它 `~/.config/yxi`。hosts.json + known_hosts。 */
 object Store {
     val dir: File = run {
-        val appData = System.getenv("APPDATA")
-        val base = if (appData != null && System.getProperty("os.name").startsWith("Windows")) File(appData, "Yxi") else File(System.getProperty("user.home"), ".config/yxi")
+        val win = System.getProperty("os.name").startsWith("Windows")
+        // ⚠️⚠️ **不能放 %APPDATA%**（审查 P2）：那是**漫游**目录 —— 域账户登录别的机器、
+        //    或者 OneDrive 的「已知文件夹」备份开着的时候，它会被**同步到别处去**。
+        //    而 hosts.json 里存着服务器的**明文密码**，等于把密码抄送到公司文件服务器 / 云盘。
+        //    %LOCALAPPDATA% 不漫游；单实例锁（Shell.kt）本来用的就是它，顺带统一到一个目录。
+        val local = System.getenv("LOCALAPPDATA")?.takeIf { win }?.let { File(it, "Yxi") }
+        val base = local ?: File(System.getProperty("user.home"), ".config/yxi")
         base.apply { mkdirs() }
+        // 1.0.0 的 MSI 装的那版写在 %APPDATA%\Yxi —— 搬过来一次，别让人重新加一遍主机。
+        if (local != null) migrateRoaming(File(System.getenv("APPDATA").orEmpty(), "Yxi"), local)
+        base
+    }
+
+    /**
+     * 把老版本留在漫游目录里的几份搬到本地目录，**搬完删掉源文件**。
+     * ⚠️ 删源不是洁癖：留着的那份 hosts.json 里有明文密码，还在继续跟着漫游同步 —— 不删等于没修。
+     * ⚠️ 目标已存在就不覆盖（新目录里的是更近的），只删源。
+     */
+    private fun migrateRoaming(from: File, to: File) = runCatching {
+        if (!from.isDirectory || from.canonicalFile == to.canonicalFile) return@runCatching
+        listOf("hosts.json", "known_hosts", "prefs.json", "window.json").forEach { name ->
+            val src = File(from, name)
+            if (!src.isFile) return@forEach
+            val dst = File(to, name)
+            if (!dst.exists()) runCatching { src.copyTo(dst) }
+            runCatching { src.delete() }
+        }
+        runCatching { from.delete() }   // 空了才删得掉，没空就留着，无所谓
     }
     private val hostsFile = File(dir, "hosts.json")
     val knownHostsFile = File(dir, "known_hosts")
