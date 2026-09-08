@@ -5983,7 +5983,30 @@ JVM 照样报 `No X11 DISPLAY variable was set, or no headful library support wa
 ⚠️ Skia 会先试 GL、失败后回落到软件渲染（日志里 `Cannot create Linux GL context` + `Fallback to next API`）——
 **这是正常的**，Xvfb 没有 GL；界面照画不误。
 
-**顺带**：这一跑就抓到一个单看代码不会发现的 bug —— 见 #328。
+**顺带**：这一跑就抓到两个单看代码不会发现的 bug —— 见 #328（预览排到了屏幕外）和 05af4c0（回调页 state 没校验，
+浏览器那页写「登录成功」而应用里写「校验失败」，两边各说各话 —— cc-logto_yxi 照这套跑出来的）。
+
+**这套环境验不了什么**（省得下一个人白试）：
+- **窗口状态类的一概验不了**。cc-Yxi_Entertainment 那边先量到：无边框窗口 `setExtendedState(MAXIMIZED_BOTH)`
+  之后 `getExtendedState()` 回 **0**，设不设 `setMaximizedBounds` 都一样。
+  我接着把两种可能都排掉了：① 起 `xfwm4`（`xprop -root _NET_SUPPORTING_WM_CHECK` 有值、`_NET_SUPPORTED`
+  里也确实有 `_NET_WM_STATE_MAXIMIZED_HORZ/VERT`）—— **照样是 0**；② 换成**带边框**的对照窗口 —— **还是 0**。
+  所以既不是「没有窗口管理器」，也不是「无边框特有」，就是这套环境不认。
+  → **「最大化 / 会不会盖住任务栏」只有真 Windows 能验**，在这儿看到「点最大化没反应」不要当成 App 的 bug。
+- 托盘、开机自启、单实例回环唤醒、系统通知：同理，都要真桌面。
+- 能验的是：**画出来的东西**（布局 / 文案 / 主题 / 真数据）、点击流程、以及任何跟 SSH 后端打交道的逻辑。
+
+⚠️ **三个人同一天都栽在同一个地方：`pkill -f <模式>`**（我一天踩了三次，logto 和 Bug_solver 各一次）。
+`pkill -f` 比对的是**完整命令行**，而你这条命令行里就写着那个模式 —— 于是它把自己也杀了：
+shell 退出码 **144**、没有任何输出，看起来像「GUI 起不来」。见 #275，写法：
+```bash
+pkill -f 'Yxi-linux-x64[.]jar'          # 方括号让模式匹配不到自己
+pgrep -f '[Y]xi-linux' | xargs -r kill  # 或者这个
+```
+⚠️ **GUI 进程跨命令存活不稳**（logto 实测：每次回来 PID 都变），所以
+「启动 → 等窗口 → 点击 → 截图」**放进同一条命令里一次做完**，别分几步。
+⚠️ **`:99` 是全组共用的一块屏**：两个人同时 `xdotool` 点鼠标会互相串
+（Bug_solver 第一次就把「点最大化」串成了「点我的」）。要么约一下，要么各起各的 `DISPLAY`（`:98` / `:97`…）。
 
 ## #328 Compose 里「弹层」跟内容平级发射 = 被父布局排到屏幕外，看起来像「点了没反应」（cc-Yxi_pilot，2026-09-08）
 
