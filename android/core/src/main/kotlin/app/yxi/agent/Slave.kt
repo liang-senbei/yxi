@@ -78,7 +78,7 @@ object Slave {
      *   所以：端口通不通**不另外探**，直接从 ssh 自己的报错里读（见 [parse]）——少一次往返，还天然可移植；
      *   ping 用 `tailscale` 自带的 `--timeout`，不借 `timeout`；PATH 主机侧和从机侧各补一次。
      */
-    internal fun probeCommand(quotedTarget: String, quotedIp: String): String =
+    fun probeCommand(quotedTarget: String, quotedIp: String): String =
         "export PATH=\"\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH\"; " +
             "echo __SSH__; " +
             "ssh -o ConnectTimeout=6 -o ServerAliveInterval=3 -o ServerAliveCountMax=2 " +
@@ -97,7 +97,7 @@ object Slave {
         "timed out", "Connection refused", "No route to host", "Network is unreachable", "Host is down",
     )
 
-    internal fun parse(out: String, target: String, ip: String): Result {
+    fun parse(out: String, target: String, ip: String): Result {
         val sshPart = out.substringAfter("__SSH__", "").substringBefore("__TSPING__")
         val pingPart = out.substringAfter("__TSPING__", "").substringBefore("__END__")
 
@@ -190,7 +190,7 @@ object Slave {
      * ⚠️ **信任边界**：名字会被拼进 `tmux -t …`。虽然 [attachCommand] 已经整条引用过一次，
      *   这里仍按 [app.yxi.ssh.Shell.safeName] 再拦一道 —— 跟 [SessionProbe] 那个边界同样的两道防线。
      */
-    internal fun parseSessions(text: String): List<Sess> =
+    fun parseSessions(text: String): List<Sess> =
         text.lines().mapNotNull { line ->
             val p = line.trim().split('|', limit = 6)
             if (p.size < 6) return@mapNotNull null

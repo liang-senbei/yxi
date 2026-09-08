@@ -44,7 +44,7 @@ object Quota {
     private val SUBTYPE = Regex(""""subscriptionType"\s*:\s*"([^"]*)"""")
     private val MAXN = Regex("""max_?(\d+)x""")
 
-    internal fun planOf(credsJson: String): String {
+    fun planOf(credsJson: String): String {
         val tier = TIER.find(credsJson)?.groupValues?.get(1).orEmpty()
         MAXN.find(tier)?.let { return "Max ${it.groupValues[1]}x" }
         if ("pro" in tier) return "Pro"

@@ -37,7 +37,7 @@ data class Live(
          *   · 这里 `boxTop` 落回 -1 → 状态行改在**整屏**里找，正文里的字可能被当成状态。
          * 判据改成「横线占大头」：至少 8 根、且占整行 60% 以上 —— 带名字的上边框是 72%，正文过不了。
          */
-        internal fun isDivider(l: String): Boolean {
+        fun isDivider(l: String): Boolean {
             val t = l.trim()
             if (t.length < 8) return false
             val dashes = t.count { it == '─' }

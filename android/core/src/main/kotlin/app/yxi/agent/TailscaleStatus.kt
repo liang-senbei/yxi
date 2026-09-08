@@ -20,7 +20,7 @@ object TailscaleStatus {
      * 实测 Mac mini 当主机时就是这样。所以先补 PATH，再退回去试 app 包里的那个。
      * （同一个坑 [Slave.probeCommand] 也踩过。）
      */
-    internal const val CMD =
+    const val CMD =
         "export PATH=\"\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH\"; " +
             "for t in tailscale /Applications/Tailscale.app/Contents/MacOS/Tailscale; do " +
             "\"\$t\" status --json 2>/dev/null && break; done"

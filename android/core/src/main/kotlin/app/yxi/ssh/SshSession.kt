@@ -334,7 +334,7 @@ class SshSession(
      * jsch 每次读超时都重新读 serverAliveCountMax,运行时改立刻生效(mwiede 2.28)。
      * ⚠️ 只放宽**判死**,不放宽心跳间隔:连接真断了,40 秒后照样发现、照样重连。
      */
-    internal fun bulk(on: Boolean) {
+    fun bulk(on: Boolean) {
         val n = if (on) bulkCount.incrementAndGet() else bulkCount.decrementAndGet()
         runCatching { session?.serverAliveCountMax = if (n > 0) BULK_ALIVE_COUNT else 2 }
     }
