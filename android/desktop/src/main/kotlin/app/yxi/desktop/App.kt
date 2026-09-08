@@ -29,6 +29,8 @@ fun App(state: AppState) {
         // 窗口 < 700dp 自动收起侧栏（Claude 的 narrowViewportMaxWidth）；变宽只把自动收起的还回去，用户自己 Ctrl+B 关掉的不动
         val narrow = maxWidth < 700.dp
         val wasOpen = remember { mutableStateOf(true) }
+        // Ctrl+N / 托盘「新建会话」时侧栏若收着，先展开——「新建会话」弹窗住在 Sidebar 里，收起时它根本没组合出来
+        LaunchedEffect(state.newSessionRequest) { if (state.newSessionRequest > 0 && !state.sidebarOpen) state.sidebarOpen = true }
         LaunchedEffect(narrow) { if (narrow) { wasOpen.value = state.sidebarOpen; state.sidebarOpen = false } else if (wasOpen.value) state.sidebarOpen = true }
         Row(Modifier.fillMaxSize()) {
             if (state.sidebarOpen) { Sidebar(state, Modifier.width(288.dp).fillMaxHeight()); VerticalDivider() }
