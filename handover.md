@@ -143,7 +143,7 @@
 
 ## Windows 桌面版（`android/desktop/`，2026-09-08 起）
 
-老板 09-08：「构建一个 Windows 版本，像 Claude Desktop / ChatGPT 的 Windows 版那样」。Compose Multiplatform（JVM）+ 共用 `:core`，
+老板 09-08：「构建一个 Windows 版本，像 Claude Desktop / ChatGPT 的 Windows 版那样」；09-08 晚追加：「参考 codex 和 Claude desktop 的 exe，可以下载下来逆向看看」→ 拆安装包出的对照报告在 `design/desktop-reference.md`，桌面版形态（打包 / 布局 / 视觉 / 快捷键）按它对齐。Compose Multiplatform（JVM）+ 共用 `:core`，
 计划 / 模块 / 构建命令见 `android/desktop/README.md`。
 
 **做到哪（09-08）**：布局 = 左栏主机 + 会话、右栏对话 / 终端两个 tab（`App.kt`）；`Model.kt`（Host / Store（`%APPDATA%\Yxi` 或 `~/.config/yxi`：hosts.json + known_hosts）/ Conn）。
