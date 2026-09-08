@@ -1,6 +1,6 @@
 package app.yxi.agent
 
-import app.yxi.ui.t
+import app.yxi.agent.Tr.t
 import app.yxi.ssh.SshSession
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.isActive
@@ -251,7 +251,7 @@ object SessionProbe {
     }
 
     /** `<项目目录名>\t<unix秒>` 一行一条 → map。解析不了的行忽略。 */
-    internal fun parseTranscriptTimes(raw: String): Map<String, Long> {
+    fun parseTranscriptTimes(raw: String): Map<String, Long> {
         val m = HashMap<String, Long>()
         raw.lineSequence().forEach { ln ->
             val i = ln.indexOf('\t')
@@ -273,7 +273,7 @@ object SessionProbe {
      * **转录文件的 mtime 才是权威**：Claude Code 每说一句都在写它。取两者较大的，
      * 转录读不到（不是 Claude 会话 / 目录对不上）就退回 tmux 那个。
      */
-    internal fun lastActivityOf(tmuxTs: Long, cwd: String, transcripts: Map<String, Long>): Long {
+    fun lastActivityOf(tmuxTs: Long, cwd: String, transcripts: Map<String, Long>): Long {
         val tr = transcripts[Transcript.projectDirOf(cwd)] ?: 0L
         return maxOf(tmuxTs, tr)
     }
