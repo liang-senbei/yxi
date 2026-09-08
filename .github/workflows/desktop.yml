@@ -1,5 +1,7 @@
-# Windows 桌面版打包。jpackage 跨不了平台，MSI 只能在 Windows 上打，所以这一步放 GitHub 的 windows runner。
-# 触发：手动，或推 tag `desktop-v*`。产物在 Actions 页的 artifact 里：Yxi-1.0.0.msi + uber jar（`java -jar … ` 就能跑）。
+# Windows 桌面版打包：jpackage app-image → Velopack（一键 Setup.exe + 静默自动更新 = Claude Desktop 的 Squirrel.Windows 同一路线）。
+# jpackage 跨不了平台，所以放 GitHub 的 windows runner。触发：手动（gh workflow run desktop.yml --ref <分支>），或推 tag `desktop-v*`。
+# 产物 artifact `Yxi-windows`：Releases/（Yxi-win-Setup.exe、Yxi-<v>-full.nupkg、releases.win.json、RELEASES）+ uber jar（`java -jar …` 就能跑）。
+# 发布到 yxi.keuury.com/desktop/：android/desktop/publish.sh <run id>。
 #
 # ⚠️ settings.gradle 里带着 :app（Android）。实测（AGP 9.3.1，Linux 上无 local.properties、ANDROID_HOME 未设）：
 #    只跑 :desktop 的任务时配置阶段**不要** Android SDK —— AGP 把 SDK 检查推迟到了执行阶段。
@@ -14,7 +16,7 @@ on:
 
 jobs:
   windows:
-    name: Windows MSI + jar
+    name: Windows Setup.exe + jar
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,13 +26,33 @@ jobs:
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: 打包（MSI + uber jar）
+      - name: 打包（jpackage app-image + uber jar）
         working-directory: android
         shell: bash
-        run: ./gradlew :desktop:packageMsi :desktop:packageUberJarForCurrentOS --no-daemon
+        run: ./gradlew :desktop:createDistributable :desktop:packageUberJarForCurrentOS --no-daemon
+
+      # vpk = Velopack 的打包器（dotnet 全局工具，windows runner 自带 dotnet）。输入就是 jpackage 的 app-image 目录。
+      # 版本号从 app-image 里的 Yxi.cfg 读（= build.gradle.kts 的 packageVersion = 运行时 System.getProperty("jpackage.app-version")），三处同源。
+      # --skipVeloAppCheck：vpk 默认静态扫主 exe 找 .NET 的 VelopackApp.Run()（不运行 exe；非 .NET 的 exe 其实会被静默跳过）。
+      #   我们是 jpackage 启动器 + JVM，没有也不需要 SDK（--veloapp-* 钩子由 Update.kt 处理），加上只是明确点。
+      # --noPortable：便携 zip 不要，uber jar 已经是"免安装"版。
+      # 差量包（delta）要先把线上已发的拉下来做基线：`vpk download http --url https://yxi.keuury.com/desktop/ --outputDir Releases`；
+      # Update.kt 目前只下 full 包，先不做。
+      - name: Velopack（Setup.exe + nupkg + releases.win.json）
+        working-directory: android/desktop
+        shell: bash
+        run: |
+          dotnet tool install -g vpk --version 1.2.0
+          app=build/compose/binaries/main/app/Yxi
+          v=$(sed -n 's/^java-options=-Djpackage.app-version=//p' "$app/app/Yxi.cfg" | tr -d '\r')
+          echo "version=$v"
+          vpk pack --packId Yxi --packVersion "$v" --packDir "$app" --mainExe Yxi.exe --packTitle Yxi --packAuthors Yxi \
+            --icon icon.ico --noPortable --skipVeloAppCheck --outputDir Releases
+          ls -la Releases
+          cat Releases/releases.win.json
 
       # 开窗口 3 秒退出、打印 smoke ok —— 证明 Compose + Skia 在 Windows 上起得来。
-      # runner 桌面开不了窗口的话只算警告（MSI 照样上传，真机再验）。
+      # runner 桌面开不了窗口的话只算警告（Setup.exe 照样上传，真机再验）。
       - name: 冒烟
         working-directory: android
         shell: bash
@@ -42,5 +64,5 @@ jobs:
         with:
           name: Yxi-windows
           path: |
-            android/desktop/build/compose/binaries/main/msi/*.msi
+            android/desktop/Releases
             android/desktop/build/compose/jars/*.jar
