@@ -5931,3 +5931,9 @@ logto 跑全套时 `:app:compileDebugAndroidTestKotlin` 报 31 条 `Cannot acces
 
 **修法**：凡是拿屏幕文本做状态机（通知边沿、发话确认、审批消失判定）的地方，抓屏前先看 `ssh.isConnected`，断线期间**不抓、不推进状态**；
 桌面版 ChatPane 已这样做。手机端 ChatScreen 的通知 / 发话路径要不要补，pilot 看一眼。
+
+## #324 JDK 的 `Runtime.Version.parse` 不认末尾带 0 的版本号（cc-Yxi 打包代理撞到，2026-09-08）
+
+**症状**：桌面版自动更新比版本号，`Runtime.Version.parse("1.1.0")` / `"2.0.0"` 抛 `Invalid version string`，测试才撞出来。
+**根因**：那是 JDK **自己的**版本号语法（`$VNUM` 段不许以 0 结尾：`1.1.0` 非法、`1.1` 合法），不是通用 semver。
+**修法**：`Update.kt` 自写 `cmpVer` 按数字段比较。别拿 `Runtime.Version` 当 semver 解析器。

@@ -99,6 +99,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
     }
 
     Column(modifier.background(t.surface1)) {
+        UpdateBanner()   // 有新版时才画（Codex 把更新横幅放侧栏顶部）
         Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("主机", style = MaterialTheme.typography.titleMedium, color = t.textPrimary, modifier = Modifier.weight(1f))
             IconButton({ editing = Host(id = UUID.randomUUID().toString(), alias = "", hostname = "", keyPath = defaultKey()) }, Modifier.size(28.dp)) {

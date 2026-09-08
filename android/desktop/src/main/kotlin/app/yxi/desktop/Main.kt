@@ -29,6 +29,7 @@ import kotlin.system.exitProcess
 /** Yxi 桌面版入口：单实例 → 窗口（自绘标题栏、关窗留托盘、全局快捷键、缩放）→ 托盘。壳的实现在 Shell.kt，布局在 App.kt。 */
 @OptIn(ExperimentalComposeUiApi::class)   // WindowDecoration（自绘标题栏 + 边缘改大小）在 1.12 还是实验 API
 fun main(args: Array<String>) {
+    Updater.boot(args)   // Velopack 钩子参数（--veloapp-*）直接退；否则 10 秒后 + 每 6 小时查更新。要在单实例之前：钩子别去唤醒已开的实例
     if (!Shell.claimSingleInstance()) exitProcess(0)     // 已经有一个在跑：它会把窗口拉出来，这个直接退
     application {
         // --smoke：开窗口 3 秒就退并打印 smoke ok —— CI / Mac 上证明 Compose + Skia 在那个平台起得来（application 退出时 exitProcess(0)）
