@@ -5950,3 +5950,58 @@ logto 跑全套时 `:app:compileDebugAndroidTestKotlin` 报 31 条 `Cannot acces
 **根因**：SSH 登录的 `launchctl managername` 是 Background，没有 WindowServer 会话。
 **修法**：写一个一次性 LaunchAgent plist 塞进 `gui/$(id -u)` 域（`launchctl bootstrap gui/$(id -u) x.plist`）在桌面会话里跑，跑完 `bootout`；`--smoke` 输出 `smoke ok` 就算过。
 **截图拿不到**：`screencapture -x` 在 SSH 里 `could not create image from display`（TCC 屏幕录制没授权，SSH 里给不了）；改看 `lsappinfo list` 里进程 `type="Foreground"` 当「有窗口」的证据。
+
+## #327 桌面版终于被人看见了：服务器上用 Xvfb 跑；macOS 那条路（ssh → 图形会话）走不通（cc-Yxi_pilot，2026-09-08）
+
+**背景**：桌面版写了两轮，`handover` 里一直挂着「**全部只编译过 + jshell 逻辑自查，没在有显示器的机器上跑过**」。
+分工里「Mac mini 上第一遍真机」是我的活。结论：**Mac 那条路从 ssh 走不通，服务器本机用 Xvfb 反而通**。
+
+**macOS 侧三堵墙**（都试过，别再试一遍）：
+- 直接 `ssh mac java -jar …` → `java.awt.HeadlessException: The application is not running in a desktop session`。
+  ssh 进去的 shell 不在 Aqua 会话里。
+- `launchctl asuser $(id -u) …` → `Could not switch to audit session: Operation not permitted`。**这个子命令要 root**，而我们没有那台机器的 sudo 密码。
+- `open -n Foo.app`（从 ssh、以及从 `launchctl bootstrap gui/$UID` 起的进程里都试了）→ `_LSOpenURLsWithCompletionHandler() failed with error -10669`。
+- 唯一半通的：`launchctl bootstrap gui/$(id -u) <plist>` 能把进程**放进图形会话**（java 不再抛 HeadlessException、进程活着），
+  但直接 exec 脚本的进程**没有 bundle 身份**，窗口不参与正常合成 —— 截屏里只有壁纸。
+  `screencapture` 从 ssh 也拿不到画面（`could not create image from display`）；
+  同一个会话里用 **Java 的 `Robot.createScreenCapture`** 能截（返回真图不是黑图，说明录屏权限是给了的），但截到的仍是没有那个窗口的桌面。
+→ **要在 Mac 上看桌面版，得有人在键盘前，或者拿到那台机器的 sudo。**
+
+**服务器上怎么看**（这条是能用的，全组都能用）：
+```bash
+apt-get install -y --no-install-recommends openjdk-17-jre   # ⚠️ 关键：默认装的是 headless JDK
+Xvfb :99 -screen 0 1400x900x24 &
+cd android && ./gradlew -q :desktop:packageUberJarForCurrentOS
+DISPLAY=:99 java -jar desktop/build/compose/jars/Yxi-linux-x64-*.jar &
+DISPLAY=:99 xdotool mousemove <x> <y> click 1     # 点界面
+DISPLAY=:99 import -window root /tmp/shot.png     # 截图
+```
+⚠️ **坑在「没有 headful 支持」这句话上**：本机 `java` 是 Ubuntu 的 headless 包，
+`lib/libawt_xawt.so` 根本不存在 —— 于是即使 `DISPLAY` 设好了、Xvfb 也在跑，
+JVM 照样报 `No X11 DISPLAY variable was set, or no headful library support was found`。
+那句话的**后半句**才是真原因，而人总是盯着前半句去查 DISPLAY。装 `openjdk-17-jre` 就好。
+⚠️ Skia 会先试 GL、失败后回落到软件渲染（日志里 `Cannot create Linux GL context` + `Fallback to next API`）——
+**这是正常的**，Xvfb 没有 GL；界面照画不误。
+
+**顺带**：这一跑就抓到一个单看代码不会发现的 bug —— 见 #328。
+
+## #328 Compose 里「弹层」跟内容平级发射 = 被父布局排到屏幕外，看起来像「点了没反应」（cc-Yxi_pilot，2026-09-08）
+
+**症状**：桌面版「文件」页点一个文件，行高亮了一下，**预览没出来**。代码看着完全对：
+点击把 `preview` 设成路径，下面有 `preview?.let { FilePreview(...) }`，状态也确实变了（加日志验过）。
+
+**根因**：那句 `preview?.let { … }` 跟列表的 `Column` **是平级的两个发射**，而
+「一个 Composable 发射两个孩子」时**排版权在父布局手里** —— 这里的父是 `App.kt` 那个
+`Column(Modifier.fillMaxSize())`。列表已经 `fillMaxSize` 吃满了高度，预览被排在它**下面**，
+高度 0、在可视区外。**它一直在组合树里、状态也对，只是没有像素**。
+
+**修法**：弹层要盖在内容上，就得有个会重叠的父：把整块包进 `Box(Modifier.fillMaxSize())`，
+列表和预览都放里面（后发射的在上）。`Dialog` / `Popup` 不受这条限制（它们另起窗口），
+但**普通 Composable 当浮层用就要自己找 Box**。
+
+**怎么避开**：Compose 里「没显示」有两类，先分清再查 —— **①没进组合**（状态没变、条件没成立）
+和 **②进了组合但没有位置**（父布局给了 0 尺寸 / 排到了可视区外）。
+第一类加日志就能看出来，第二类**日志全是对的**，最省事的判据是：
+把可疑的东西套一个 `Modifier.background(Color.Red)` 看红色出现在哪儿 —— 没有红色就是没进组合，
+红色出现在奇怪的地方就是排版问题。
+⚠️ 这个 bug **单看代码和单测都发现不了**，是第一次把界面真跑起来（#327）当场看出来的。
