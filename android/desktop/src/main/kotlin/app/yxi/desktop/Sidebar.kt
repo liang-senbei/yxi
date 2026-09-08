@@ -89,11 +89,11 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
         if (state.conn == null) state.conn = c
     }
 
-    // Ctrl+N：对当前主机弹「新建会话」。记住处理到哪个号，侧栏收起再展开时不会把旧的那次再弹一遍
-    var seen by remember { mutableStateOf(state.newSessionRequest) }
+    // Ctrl+N：对当前主机弹「新建会话」。seen 放 AppState 而不是 remember：
+    // Sidebar 收起时 remember 会丢，重新展开时初始化成当前值 == newSessionRequest → 弹窗不弹
     LaunchedEffect(state.newSessionRequest) {
-        if (state.newSessionRequest == seen) return@LaunchedEffect
-        seen = state.newSessionRequest
+        if (state.newSessionRequest == state.newSessionSeen) return@LaunchedEffect
+        state.newSessionSeen = state.newSessionRequest
         creatingOn = state.conn?.takeIf { it.status == Conn.Status.Connected } ?: state.conns.firstOrNull { it.status == Conn.Status.Connected }
         if (creatingOn == null) note = "先连上一台主机，再新建会话"
     }

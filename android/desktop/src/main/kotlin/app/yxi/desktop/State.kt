@@ -19,6 +19,10 @@ class AppState {
     var tab by mutableStateOf(0)                           // 0 对话 1 终端
     var sidebarOpen by mutableStateOf(true)                // Ctrl+B；窗口 < 700 时自动收起
     var newSessionRequest by mutableStateOf(0)             // Ctrl+N：+1 一次，侧栏看到就弹「新建会话」
+    /** 侧栏上一次处理过的 [newSessionRequest] 值。放 AppState 里而不是 Sidebar 的 remember：
+     * Sidebar 收起时整个不在组合里，remember 跟着丢——重新展开时 remember 重新初始化成当前值，
+     * 恰好等于刚才 Ctrl+N 加到的那个值，`== seen` 成立，弹窗就不弹了。 */
+    internal var newSessionSeen by mutableStateOf(0)
     var showSettings by mutableStateOf(false)              // Ctrl+,
     var showShortcuts by mutableStateOf(false)             // Ctrl+/
 
