@@ -64,3 +64,13 @@ cd android
 5. **账号**：登录（Logto）、会员、额度 —— 手机端 `Account.kt` 的 HTTP 部分抽进 core
 6. **打包**：GitHub Actions windows-latest 跑 `packageMsi`；托管在 `yxi.keuury.com/desktop/`；App 内「桌面版」入口
 7. 之后：通知（托盘）、多窗口、快捷键、深色主题、音游（Compose Canvas 代码可直接复用）
+
+## 发布（给老板 / 用户下载）
+
+```bash
+gh run download <run-id> -R liang-senbei/yxi -n Yxi-windows -D /tmp/ci     # Actions 的产物：binaries/main/msi/Yxi-1.0.0.msi + jars/*.jar
+scp /tmp/ci/binaries/main/msi/Yxi-1.0.0.msi hk13:/tmp/ && ssh hk13 'mv /tmp/Yxi-1.0.0.msi /var/www/yxi/desktop/ && chmod 644 /var/www/yxi/desktop/Yxi-1.0.0.msi'
+curl -sI https://yxi.keuury.com/desktop/Yxi-1.0.0.msi | head -1               # 要 200；404 = nginx 白名单没这条（hk13 /etc/nginx/snippets/yxi-dl.conf 的 location /desktop/）
+```
+MSI 没签名：Windows SmartScreen 会拦一下（「更多信息 → 仍要运行」）。代码签名证书以后再说。
+

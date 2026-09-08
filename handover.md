@@ -151,7 +151,10 @@
 - `SessionsPane.kt`：列 cc-*（状态 / cwd / 相对时间），5 秒刷新，新建会话走 `Dirs.createCommand`。
 - `ChatPane.kt`：转录尾随（`latestFor` → `tailStart` → `streamFrom` → `Transcript.Incremental`）、最简 markdown、工具卡（连续同名合并、失败标红）、审批条（`watchScreen` 拿 Pending，`sendKey` 按编号；多选走 Right → Submit）、Enter 发 / Shift+Enter 换行、粘底只认用户滚动。
 - `TermPane.kt`：做中（PTY `tmux attach` 或 capture-pane 轮询二选一）；`--smoke` 参数、按 `-Pyxi.os=mac|win` 打别的平台 uber jar、GitHub Actions windows 打 MSI（jpackage 不能跨平台）。
-- ⚠️ **全部只编译过，没在有显示器的机器上跑过**：下一步 Mac mini 上 `java -jar … --smoke`，然后连真主机走一遍主机 → 会话 → 对话。
+- **Windows 包已经能出**：GitHub Actions `desktop.yml`（手动触发或推 tag `desktop-v*`，windows-latest 打 MSI + uber jar，`--smoke` 在 Windows 上打印了 smoke ok）。
+  发布：`gh run download <run-id> -R liang-senbei/yxi -n Yxi-windows -D <目录>` → `scp` 到 `hk13:/var/www/yxi/desktop/`（chmod 644，#318）→ 公网 **https://yxi.keuury.com/desktop/Yxi-1.0.0.msi**。
+  nginx 白名单在 hk13 `/etc/nginx/snippets/yxi-dl.conf` 的 `location /desktop/`（根目录 `location /` 是 404 白名单，新路径都得单列）。
+- ⚠️ **除了 Windows 冒烟（开窗 3 秒），没在有显示器的机器上真用过**：下一步 Mac mini 上 `java -jar … --smoke` + 连真主机走一遍主机 → 会话 → 对话；opus 审查过一轮（3 处已修）。
 - 没做：带口令的私钥、`user@host:port` 整串粘贴拆分、账号（Logto）/ 会员 / 额度、通知托盘、深色主题。
 
 ## 音游（云曦节拍）设计拍板 —— 2026-09-06，老板在网页试验台上选的
