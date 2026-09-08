@@ -119,7 +119,11 @@ class EventService : Service() {
             live.remove(host.id)
             runCatching { ssh?.disconnect() }
             if (!currentCoroutineContext().isActive) return
-            delay(wait); wait = (wait * 2).coerceAtMost(60_000)
+            // 退避最长 20s（原 60s）；等的时候网络一换就立刻重试（老板 09-08：连接不稳定）
+            val g0 = app.yxi.agent.NetWatch.generation.value
+            var slept = 0L
+            while (slept < wait && app.yxi.agent.NetWatch.generation.value == g0 && currentCoroutineContext().isActive) { delay(250); slept += 250 }
+            wait = if (app.yxi.agent.NetWatch.generation.value != g0) 1_000L else (wait * 2).coerceAtMost(20_000)
         }
     }
 

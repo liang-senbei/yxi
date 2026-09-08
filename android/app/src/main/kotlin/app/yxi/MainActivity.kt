@@ -117,6 +117,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        app.yxi.agent.NetWatch.start(this)                       // 网络一换就通知 SSH 重连（老板 09-08：连接不稳定）
         enableEdgeToEdge()
         val store = HostStore(applicationContext)
         val keys = KeyManager(applicationContext)

@@ -174,7 +174,7 @@ fun rememberHostSession(store: HostStore, keys: KeyManager, host: Host?): HostSe
     var generation by remember(host.connKey) { mutableIntStateOf(0) }
 
     LaunchedEffect(host.connKey, generation) {
-        var wait = 1_000L
+        var wait = 500L
         // ⚠️ 自己建的那条要自己收。原来靠 DisposableEffect 收，但两处都读同一个 state：换 connKey 时 state 已经换成新的（null），
         //    旧连接谁也不断 —— 改一次凭据漏一条 TCP（审查查出）。改成 effect 自己记着 owned，取消 / 换代 / 离开时 finally 里断。
         //    也顺带堵住「retry 刚断、旧 effect 还没被取消就又 connect 了一条」的竞态：那条会记进 owned，一样被收。
@@ -198,16 +198,21 @@ fun rememberHostSession(store: HostStore, keys: KeyManager, host: Host?): HostSe
                 if (c == null) { error = t("这台主机还没有可用的认证方式"); return@LaunchedEffect }
                 val err = runCatching { c.session.connect() }.exceptionOrNull()
                 if (err == null) {
-                    session = c.session; error = null; wait = 1_000L
+                    session = c.session; error = null; wait = 500L
                 owned = c.session
                     // ⚠️ **连上不是终点。** 原来这里直接 return —— 之后连接掉了
                     // 就再也没人管：看板一直显示「刷新失败」，而 ssh 还非 null，
                     // 连重连按钮都不出现，用户只能杀掉 App 重开。
                     // 现在守着它，断了就回到上面重连。
-                    while (c.session.isAlive) kotlinx.coroutines.delay(3_000)
+                    // 守着它：心跳死了 → 重连；**网络换了**（5G↔Wi-Fi、换基站换 IP）也立刻当它死了重连，不等 30 秒心跳超时（老板 09-08）
+                    val netGen = app.yxi.agent.NetWatch.generation.value
+                    while (c.session.isAlive && app.yxi.agent.NetWatch.generation.value == netGen) kotlinx.coroutines.delay(1_000)
+                    val netChanged = app.yxi.agent.NetWatch.generation.value != netGen
+                    if (netChanged) runCatching { c.session.disconnect() }
                     session = null
                     error = t("连接断了，正在重连…")
-                    app.yxi.ui.DevMode.log("host", t("连接掉了，自动重连"))
+                    app.yxi.ui.DevMode.log("host", if (netChanged) "网络换了，立刻重连" else t("连接掉了，自动重连"))
+                    wait = 500L
                     continue
                 }
 
@@ -224,8 +229,11 @@ fun rememberHostSession(store: HostStore, keys: KeyManager, host: Host?): HostSe
                 if (c.known.changedDetected) { error = c.explain(err); return@LaunchedEffect }
                 error = c.explain(err)
                 app.yxi.ui.DevMode.log("host", "连接失败，${wait}ms 后重试")
-                kotlinx.coroutines.delay(wait)
-                wait = (wait * 2).coerceAtMost(15_000)
+                // 退避：0.5s 起、最长 5s（原来 1s 起、最长 15s —— 手机切个网要等十几秒才试）；等的时候网络一换就立刻重试
+                val g0 = app.yxi.agent.NetWatch.generation.value
+                var slept = 0L
+                while (slept < wait && app.yxi.agent.NetWatch.generation.value == g0) { kotlinx.coroutines.delay(250); slept += 250 }
+                wait = if (app.yxi.agent.NetWatch.generation.value != g0) 500L else (wait * 2).coerceAtMost(5_000)
             }
         } finally {
             owned?.let { s -> if (s !== app.yxi.watch.EventService.liveConn(host.id)) runCatching { s.disconnect() } }
