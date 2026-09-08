@@ -1,0 +1,46 @@
+# Windows 桌面版打包。jpackage 跨不了平台，MSI 只能在 Windows 上打，所以这一步放 GitHub 的 windows runner。
+# 触发：手动，或推 tag `desktop-v*`。产物在 Actions 页的 artifact 里：Yxi-1.0.0.msi + uber jar（`java -jar … ` 就能跑）。
+#
+# ⚠️ settings.gradle 里带着 :app（Android）。实测（AGP 9.3.1，Linux 上无 local.properties、ANDROID_HOME 未设）：
+#    只跑 :desktop 的任务时配置阶段**不要** Android SDK —— AGP 把 SDK 检查推迟到了执行阶段。
+#    所以这里不装 setup-android（windows-latest 本身也预装了 SDK，ANDROID_HOME 是设好的，双保险）。
+#    哪天 AGP 升级后配置阶段开始要 SDK 了，加 `--configure-on-demand`（也实测过能过）或 android-actions/setup-android。
+name: Desktop
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['desktop-v*']
+
+jobs:
+  windows:
+    name: Windows MSI + jar
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: 打包（MSI + uber jar）
+        working-directory: android
+        shell: bash
+        run: ./gradlew :desktop:packageMsi :desktop:packageUberJarForCurrentOS --no-daemon
+
+      # 开窗口 3 秒退出、打印 smoke ok —— 证明 Compose + Skia 在 Windows 上起得来。
+      # runner 桌面开不了窗口的话只算警告（MSI 照样上传，真机再验）。
+      - name: 冒烟
+        working-directory: android
+        shell: bash
+        timeout-minutes: 3
+        continue-on-error: true
+        run: java -jar desktop/build/compose/jars/*.jar --smoke
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Yxi-windows
+          path: |
+            android/desktop/build/compose/binaries/main/msi/*.msi
+            android/desktop/build/compose/jars/*.jar
