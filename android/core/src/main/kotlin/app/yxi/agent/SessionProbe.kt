@@ -328,7 +328,7 @@ object SessionProbe {
             val pane = runCatching { session.exec("tmux capture-pane -p -t $t") }.getOrNull().orEmpty()
             when (app.yxi.agent.Live.inputEmpty(pane)) {
                 true -> return@withContext true          // 空了 = 真的提交了
-                null -> return@withContext true          // 判断不了，别乱补，也别谎报失败
+                null -> return@withContext sent(null, session.isAlive)   // 读不到屏：连接还在才算「判断不了」
                 false -> session.exec("tmux send-keys -t $t Enter")   // 还卡着 → 再按一次回车
             }
         }
@@ -337,9 +337,32 @@ object SessionProbe {
         //    最后一次不等的话，第三个回车其实已经提交了、但屏还没画出来 → 判成失败 →
         //    上面把话还回输入框 → 用户再发一遍 → **重复消息**（审查指出来的）。
         kotlinx.coroutines.delay(1200)
-        app.yxi.agent.Live.inputEmpty(
-            app.yxi.ssh.catching { session.exec("tmux capture-pane -p -t $t") }.getOrNull().orEmpty()
-        ) != false
+        sent(
+            app.yxi.agent.Live.inputEmpty(
+                app.yxi.ssh.catching { session.exec("tmux capture-pane -p -t $t") }.getOrNull().orEmpty()
+            ),
+            session.isAlive,
+        )
+    }
+
+    /**
+     * 「到底发出去了没」的最终判断。抽出来是因为**它错一次就是一条话凭空消失**，得单独测。
+     *
+     * ⚠️⚠️ **连接断了的时候，「屏是空的」不是「看不清」，是「没送到」**（#323）。
+     * `exec` 在死连接上不抛异常、**返回空串**，而 `Live.inputEmpty("")` 是 null ——
+     * 原来 null 一律当成「判断不了 → 别谎报失败 → 返回 true」，于是**断线时发话必报成功**：
+     * 草稿已经清了、气泡也画了，话却哪儿都不在。这正是 [app.yxi.ui.Sender] 存在的理由要防的那件事。
+     *
+     * ⚠️ 代价说清楚：连接是在**提交成功之后**才断的话，这里会判成失败、把话还回输入框，
+     * 用户可能再发一遍 → 重复消息。两害相权取轻：**话还在输入框里是看得见的**（对话里有没有那条，一眼就知道），
+     * 而静默丢失看不见、也救不回来。#276 那条「空 ≠ 没发出去」仍然成立 —— 它说的是**连接还活着**时的空屏。
+     */
+    // ⚠️ 不加 internal：拆 :core 之后测试在 :app 模块里，internal 跨模块看不见
+    //    （同 [Slave.probeCommand] 那几个测试缝，883e542 之后都是这么处理的）。
+    fun sent(inputEmpty: Boolean?, alive: Boolean): Boolean = when (inputEmpty) {
+        true -> true            // 输入框空了 = 确实提交了
+        false -> false          // 还卡在框里 = 没提交
+        null -> alive           // 读不到屏：连接还在才敢说「判断不了、当它成了」
     }
 
     /**
