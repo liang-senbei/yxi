@@ -151,6 +151,7 @@
 - `SessionsPane.kt`：列 cc-*（状态 / cwd / 相对时间），5 秒刷新，新建会话走 `Dirs.createCommand`。
 - `ChatPane.kt`：转录尾随（`latestFor` → `tailStart` → `streamFrom` → `Transcript.Incremental`）、最简 markdown、工具卡（连续同名合并、失败标红）、审批条（`watchScreen` 拿 Pending，`sendKey` 按编号；多选走 Right → Submit）、Enter 发 / Shift+Enter 换行、粘底只认用户滚动。
 - `TermPane.kt`：做中（PTY `tmux attach` 或 capture-pane 轮询二选一）；`--smoke` 参数、按 `-Pyxi.os=mac|win` 打别的平台 uber jar、GitHub Actions windows 打 MSI（jpackage 不能跨平台）。
+- **老板 09-08 晚：「现在这种 exe 的构建方式是 codex / Claude desktop 同款吗，我希望现代点的构建方式」** → 事实：两家都是 Electron；Claude 用 Squirrel 一键 Setup.exe + 后台差量更新（per-user、无向导无 UAC），Codex 走微软商店 MSIX。我们是 Compose（共用 core）+ jpackage MSI（向导式、无自动更新）。**决定：技术栈不换，打包换成 Velopack（Squirrel 的现代继任者）一键 Setup.exe + 应用内自动更新**，做不通退回 per-user MSI + latest.json 静默升级；商店 MSIX 以后再说。代码签名（SmartScreen）要老板拍板买哪种，见 desktop/README。
 - **Windows 包已经能出**：GitHub Actions `desktop.yml`（手动触发或推 tag `desktop-v*`，windows-latest 打 MSI + uber jar，`--smoke` 在 Windows 上打印了 smoke ok）。
   发布：`gh run download <run-id> -R liang-senbei/yxi -n Yxi-windows -D <目录>` → `scp` 到 `hk13:/var/www/yxi/desktop/`（chmod 644，#318）→ 公网 **https://yxi.keuury.com/desktop/Yxi-1.0.0.msi**。
   nginx 白名单在 hk13 `/etc/nginx/snippets/yxi-dl.conf` 的 `location /desktop/`（根目录 `location /` 是 404 白名单，新路径都得单列）。
