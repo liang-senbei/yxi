@@ -146,11 +146,12 @@
 老板 09-08：「构建一个 Windows 版本，像 Claude Desktop / ChatGPT 的 Windows 版那样」；09-08 晚追加：「参考 codex 和 Claude desktop 的 exe，可以下载下来逆向看看」→ 拆安装包出的对照报告在 `design/desktop-reference.md`，桌面版形态（打包 / 布局 / 视觉 / 快捷键）按它对齐。Compose Multiplatform（JVM）+ 共用 `:core`，
 计划 / 模块 / 构建命令见 `android/desktop/README.md`。
 
-**做到哪（09-08）**：布局 = 左栏主机 + 会话、右栏对话 / 终端两个 tab（`App.kt`）；`Model.kt`（Host / Store（`%APPDATA%\Yxi` 或 `~/.config/yxi`：hosts.json + known_hosts）/ Conn）。
-- `HostsPane.kt` + `FileHostKeys.kt`：主机增删改、私钥文件或密码、首次指纹确认框、指纹变了拒连 + 「确认过了删旧指纹」。指纹回调层用 jshell 自查过，没连过真主机。
-- `SessionsPane.kt`：列 cc-*（状态 / cwd / 相对时间），5 秒刷新，新建会话走 `Dirs.createCommand`。
-- `ChatPane.kt`：转录尾随（`latestFor` → `tailStart` → `streamFrom` → `Transcript.Incremental`）、最简 markdown、工具卡（连续同名合并、失败标红）、审批条（`watchScreen` 拿 Pending，`sendKey` 按编号；多选走 Right → Submit）、Enter 发 / Shift+Enter 换行、粘底只认用户滚动。
-- `TermPane.kt`：做中（PTY `tmux attach` 或 capture-pane 轮询二选一）；`--smoke` 参数、按 `-Pyxi.os=mac|win` 打别的平台 uber jar、GitHub Actions windows 打 MSI（jpackage 不能跨平台）。
+**做到哪（09-08 晚，第二轮按拆包报告对齐，四个代理并行做完已合并）**：
+- 窗口壳（`Main.kt` / `Shell.kt`）：自绘标题栏（`WindowDecoration.Undecorated`，40dp 拖拽区，三键自绘）、托盘（AWT `TrayIcon`，单击唤回）+ 关窗留托盘、单实例（`%LOCALAPPDATA%\Yxi\lock` + 回环端口唤醒）、快捷键（Ctrl+N/B/J/Tab/1…9/Alt+A/,//、F5、缩放）、设置（`Settings.kt`：托盘 / 开机自启 reg / 主题 / 通知三档）、快捷键表（`Shortcuts.kt`）、< 700dp 自动收侧栏。
+- 左栏（`Sidebar.kt`）：主机分组（状态点 / 颜色条 / 右键菜单）→ cc-* 会话行（`SessionState` → 等待批准 / 需要用户输入 / 正在运行 / 已完成 / 空闲 徽标）；`Conn`（`Model.kt`）自动重连（1→2→4→8→10s 退避，指纹变了 / 认证失败不重连，Claude 文案 + 「我确认过了，删除旧指纹」）；会话变成需要处理时托盘通知。
+- 对话（`ChatPane.kt` / `Approval.kt` / `Markdown.kt`）：审批卡（工具名 + 命令原文 + 真实选项映射「允许一次 / 不再询问 / 本会话允许 / 拒绝」，Enter 第 1 项 / Esc 拒绝）、会话头连接徽标 + 重新连接、断线不清屏且续尾随、轮次完成 / 等待批准通知、主题 token 落地、悬停复制。
+- 主题（`Theme.kt`）：Claude 暖灰浅 / 深两套 token，跟系统或手选。
+- ⚠️ **全部只编译过 + jshell 逻辑自查，没在有显示器的机器上跑过**（Mac 隧道 09-08 晚一直丢包）。第二轮 opus 审查进行中。真机最先要验：Enter/Esc 焦点、Ctrl+Tab 是否被 AWT 吃掉、undecorated 最大化、托盘。
 - **老板 09-08 晚：「现在这种 exe 的构建方式是 codex / Claude desktop 同款吗，我希望现代点的构建方式」** → 事实：两家都是 Electron；Claude 用 Squirrel 一键 Setup.exe + 后台差量更新（per-user、无向导无 UAC），Codex 走微软商店 MSIX。我们是 Compose（共用 core）+ jpackage MSI（向导式、无自动更新）。**决定：技术栈不换，打包换成 Velopack（Squirrel 的现代继任者）一键 Setup.exe + 应用内自动更新**，做不通退回 per-user MSI + latest.json 静默升级；商店 MSIX 以后再说。代码签名（SmartScreen）要老板拍板买哪种，见 desktop/README。
 - **Windows 包已经能出**：GitHub Actions `desktop.yml`（手动触发或推 tag `desktop-v*`，windows-latest 打 MSI + uber jar，`--smoke` 在 Windows 上打印了 smoke ok）。
   发布：`gh run download <run-id> -R liang-senbei/yxi -n Yxi-windows -D <目录>` → `scp` 到 `hk13:/var/www/yxi/desktop/`（chmod 644，#318）→ 公网 **https://yxi.keuury.com/desktop/Yxi-1.0.0.msi**。
