@@ -5920,3 +5920,14 @@ logto 跑全套时 `:app:compileDebugAndroidTestKotlin` 报 31 条 `Cannot acces
 **修法**：core 里的 `internal` 全部改 public（core 是给两个客户端用的库，`internal` 在这儿本来就没有意义）。
 以后搬模块的验收命令至少四个：`:core:compileKotlin :app:compileDebugKotlin :app:compileDebugAndroidTestKotlin :desktop:compileKotlin`，
 然后再跑全套（不是「编过」就完）。
+
+## #323 断线时 `SshSession.exec` 返回空串，空屏会被解析成「不忙、没在等」——按屏幕状态发通知 / 判成功的地方都得先看 `isConnected`（cc-Yxi 桌面版审批代理发现，2026-09-08）
+
+**症状**（桌面版逻辑自查时发现，手机端同样成立）：连接掉了以后继续每几秒抓屏（`tmux capture-pane`），`exec` 不抛异常、返回 `""`；
+`Live.parse("")` 得到「不忙」、`Prompt.parse("")` 得到「没在等」——于是「忙 → 不忙」的边沿被触发，弹一条假的「轮次完成」通知；
+`SessionProbe.send` 同理：`Live.inputEmpty("")` 是 null → 按「判断不了」返回 true，**断线时发话会报成功**。
+
+**根因**：core 的 `exec` 把异常吞成空串（设计如此：调用方多、不想到处 try），但空串和「屏幕真的空」不可区分。
+
+**修法**：凡是拿屏幕文本做状态机（通知边沿、发话确认、审批消失判定）的地方，抓屏前先看 `ssh.isConnected`，断线期间**不抓、不推进状态**；
+桌面版 ChatPane 已这样做。手机端 ChatScreen 的通知 / 发话路径要不要补，pilot 看一眼。
