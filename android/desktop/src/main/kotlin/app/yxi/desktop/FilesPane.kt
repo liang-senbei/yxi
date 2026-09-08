@@ -96,6 +96,10 @@ fun FilesPane(conn: Conn, sess: Session) {
 
     LaunchedEffect(conn, sess.name) { load(path) }
 
+    // ⚠️ **预览要盖在列表上，得有个 Box 收着。** 原来 `preview?.let { … }` 跟 Column 平级发射，
+    //    父布局（App 里那个 fillMaxSize 的 Column）把它排到了已经占满高度的列表**下面** ——
+    //    点文件只看见行高亮了一下，预览在屏幕外，看起来像「点了没反应」。
+    Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().background(t.surface0)) {
         // 面包屑 + 上一级 + 刷新 + 上传
         Row(
@@ -172,6 +176,7 @@ fun FilesPane(conn: Conn, sess: Session) {
     }
 
     preview?.let { p -> FilePreview(conn, p, sftp) { preview = null } }
+    }
 }
 
 @Composable
