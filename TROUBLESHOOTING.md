@@ -5937,3 +5937,16 @@ logto 跑全套时 `:app:compileDebugAndroidTestKotlin` 报 31 条 `Cannot acces
 **症状**：桌面版自动更新比版本号，`Runtime.Version.parse("1.1.0")` / `"2.0.0"` 抛 `Invalid version string`，测试才撞出来。
 **根因**：那是 JDK **自己的**版本号语法（`$VNUM` 段不许以 0 结尾：`1.1.0` 非法、`1.1` 合法），不是通用 semver。
 **修法**：`Update.kt` 自写 `cmpVer` 按数字段比较。别拿 `Runtime.Version` 当 semver 解析器。
+
+## #325 桌面版 uber jar `java -jar` 直接死：`Invalid signature file digest`（cc-Yxi 终端代理，2026-09-08）
+
+**症状**：`packageUberJarForCurrentOS` 打出来的 jar，`java -jar` 起不来，报 `SecurityException: Invalid signature file digest for Manifest main attributes`。
+**根因**：BouncyCastle 是**签过名的 jar**，摊平进 uber jar 后 `META-INF/*.SF|*.RSA` 还在，签名对不上整个 jar。
+**修法**：`build.gradle.kts` 打 uber jar 时 `exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA")`（已做）。
+
+## #326 Mac mini 上 `ssh mac java -jar …` 报 `HeadlessException: not running in a desktop session`——SSH 会话不算桌面会话（cc-Yxi 终端代理，2026-09-08）
+
+**症状**：Compose 桌面 jar 在 Mac 上经 SSH 跑，AWT 直接 HeadlessException；`launchctl asuser` 要 sudo。
+**根因**：SSH 登录的 `launchctl managername` 是 Background，没有 WindowServer 会话。
+**修法**：写一个一次性 LaunchAgent plist 塞进 `gui/$(id -u)` 域（`launchctl bootstrap gui/$(id -u) x.plist`）在桌面会话里跑，跑完 `bootout`；`--smoke` 输出 `smoke ok` 就算过。
+**截图拿不到**：`screencapture -x` 在 SSH 里 `could not create image from display`（TCC 屏幕录制没授权，SSH 里给不了）；改看 `lsappinfo list` 里进程 `type="Foreground"` 当「有窗口」的证据。
