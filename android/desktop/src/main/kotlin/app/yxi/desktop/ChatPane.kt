@@ -322,6 +322,12 @@ fun ChatPane(conn: Conn, session: Session) {
         // 会话头（ZCode 顶栏的形态）：任务名 + 主机 pill + 连接状态。重连按钮只在断开时出现
         SessionHeader(conn, session) { conn.start() }   // 重连循环在 Conn 自己的 scope 里跑，切走面板不会断
         Box(Modifier.weight(1f).fillMaxWidth()) {
+            // 手机端搬来的背景光：待机=底部蓝色聚光，思考=铺满顶部色相流动，等你拍板=琥珀（ThinkingGlow.kt）
+            ThinkingGlow(
+                busy = live.busy, waiting = pending != null,
+                streaming = live.busy && items.lastOrNull() is ChatItem.AssistantText,
+                Modifier.matchParentSize(),
+            )
             LazyColumn(
                 Modifier.fillMaxSize().nestedScroll(scrollWatch), state = listState,
                 contentPadding = PaddingValues(16.dp, 12.dp),
@@ -374,6 +380,7 @@ fun ChatPane(conn: Conn, session: Session) {
         Composer(
             draft, { draft = it }, focus,
             ctx = ctx,
+            busy = live.busy, waiting = pending != null,
             hint = when {
                 pending != null -> "想说别的直接打字"
                 else -> "跟它说点什么… Enter 发送，Shift+Enter 换行；截图直接 Ctrl+V"
@@ -397,16 +404,19 @@ fun ChatPane(conn: Conn, session: Session) {
 @Composable
 private fun Composer(
     draft: TextFieldValue, onDraft: (TextFieldValue) -> Unit, focus: FocusRequester,
-    ctx: Transcript.Ctx?, hint: String,
+    ctx: Transcript.Ctx?, busy: Boolean, waiting: Boolean, hint: String,
     hasPending: Boolean, canSend: Boolean, canAct: Boolean,
     onAttach: () -> Unit, onPaste: () -> Unit, onApprove: () -> Unit, onReject: () -> Unit, onSend: () -> Unit,
 ) {
     val t = Tokens.current
     var focused by remember { mutableStateOf(false) }
+    // 手机端 glowBrush 同源：输入卡的底也是同一套色相在流（淡），等你拍板时定在琥珀
+    val glow = glowBrush(busy, waiting)
     Column(
         Modifier.fillMaxWidth().padding(12.dp, 6.dp, 12.dp, 12.dp)
             .clip(RoundedCornerShape(RadiusComposer))
             .background(t.surface1)
+            .background(glow)
             .border(if (focused) 1.5.dp else 1.dp, if (focused) t.accent.copy(alpha = 0.6f) else t.border, RoundedCornerShape(RadiusComposer)),
     ) {
         BasicTextField(

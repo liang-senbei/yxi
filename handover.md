@@ -199,6 +199,8 @@
 
 - **桌面版换皮：跟手机版同款（2026-09-12，老板：「windows 的 app 的 ui 也还是用手机版同款的」）**。桌面 `Theme.kt` 的 token 取值整体搬自手机端 `ui/theme/Palette.kt`，桌面组件只认 Tokens，所以换的只是值：accent = 手机 Copper（深 #FFB787 暖铜 / 浅 #0B57D0 Google 蓝）、success = Teal、warning = Amber（「需要你动手」独占色相的规矩照旧）、danger = DiffDelFg；用户气泡 = CopperContainer（深 #6D3A10+FFDCC4 字 / 浅 #D3E3FD+041E49 字，手机端「你的消息」同源），新增 `userBubbleText` / `onAccent` 两个 token。圆角照手机 YxiShapes 调大（基础 8→14、composer 14→22）。正文照手机 AiryType 的「呼吸感」提到 15/24（Markdown.kt BodyStyle——手机原话：光换色不改行距，看着还是「另一个 app」）。发送圆钮点亮时用 Copper 底 + OnCopper。结构不动：上一轮学的 ZCode 版式（composer 底部功能行 / ctx chips / 轻工具行 / 会话头 pill / 搜索框）全保留。**深浅两套都在 Xvfb 真连截图验过**（prefs.json theme=dark/light 各跑一遍：暖铜描边、tab 铜下划线、青色已连接点、浅色蓝灰侧栏+Google 蓝 tab 全对）。
 
+- **ThinkingGlow 搬上桌面（2026-09-12，老板：「手机版对话界面思考时有渐变色流动，直接 copy 那份小巧思」）**：新 `desktop/ThinkingGlow.kt`，从手机端 `ui/ThinkingGlow.kt` 原样移植（桌面没有系统动画缩放，motion 恒 true）：待机 = 底部一团蓝色聚光（0.55）；思考 = 650ms 铺满顶部 + **色相 6 秒一圈蓝→青→绿→黄→橙→粉**（四团光各自独立相位 7.3/9.1/11.7/13.9s，互不成整数倍——手机端 #186 的教训一起搬了）；等你拍板 = 不循环、定在琥珀；回答到达 = 退到 0.35 让位正文。`glowBrush`（composer 同色相流动底，透明度压在 0.10/0.16）也一起接上。手机端的 `GlassPill` 玻璃壳（呼吸光晕/斜向光带）**没搬**，想要的底下那份代码还在。挂在 ChatPane 对话画布 Box 的最底层（matchParentSize，不参与布局）。**验证**：单测/e2e 全绿；Xvfb 真连截图 + 相隔 4 秒两帧像素 diff（64% 采样点在变）证明光是活的；「思考满色相」那档要等真有个会话在跑才能看到，逻辑逐行照抄手机端，风险低。
+
 ## 音游（云曦节拍）设计拍板 —— 2026-09-06，老板在网页试验台上选的
 
 > **试验台 2026-09-06 晚封版**（老板：「现在试玩台没问题了」），tag `bench-final-20260906`。两个没单独拍的默认值就此定下：音符用薄片（高度 1）、无线时刻最高档每一下 25% 触发。**下一步：按试验台重写 App 的音游画面**（cc-Yxi 做，判定 / 算分 / 上报不动；谱面参数和编舞关键帧的契约找 logto）。
