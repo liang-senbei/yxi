@@ -57,19 +57,22 @@ object UsageCache {
     fun state(hostId: String): MutableState<UsageSnap?> =
         synchronized(byHost) { byHost.getOrPut(hostId) { mutableStateOf(null) } }
 
-    /** 拉一轮（probe + today + daily 各自容错）。 */
+    /** 拉一轮（probe + today + daily 各自容错）。⚠️ 取消要重抛：吞了它会把好端端的缓存覆盖成全 null。 */
     suspend fun refresh(c: Conn) {
         synchronized(busy) { if (!busy.add(c.host.id)) return }
         try {
             if (!c.ssh.isConnected) return
-            val blocks = runCatching { Usage.probe(c.ssh) }.getOrNull()
-            val today = runCatching { Usage.today(c.ssh) }.getOrNull()
-            val week = runCatching { Usage.daily(c.ssh, 7) }.getOrNull()
+            val blocks = forgiving { Usage.probe(c.ssh) }
+            val today = forgiving { Usage.today(c.ssh) }
+            val week = forgiving { Usage.daily(c.ssh, 7) }
             state(c.host.id).value = UsageSnap(System.currentTimeMillis(), blocks, today, week)
         } finally {
             synchronized(busy) { busy.remove(c.host.id) }
         }
     }
+
+    private suspend fun <T> forgiving(block: suspend () -> T): T? =
+        runCatching { block() }.getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it; null }
 }
 
 private const val REFRESH_MS = 5 * 60 * 1000L
@@ -95,10 +98,11 @@ fun UsageStrip(c: Conn) {
     if (!snap.hasData) return
     val t = Tokens.current
     var open by remember { mutableStateOf(false) }
-    // 5h 窗口没有 active block（刚开新窗口 / 这会儿没在跑）时 blocks 是 null —— 今日有数据照样显示这条
+    // 5h 窗口没有 active block（刚开新窗口 / 这会儿没在跑）时 blocks 是 null —— 今日/本周有数据照样显示这条
     val texts = listOfNotNull(
         snap.blocks?.let { "5h 剩 " + it.remainText },
         snap.today?.let { "今日 " + it.costText },
+        snap.week?.takeIf { it.isNotEmpty() }?.let { "本周 " + cost(it.sumOf { d -> d.costUSD }) },
     )
     if (texts.isEmpty()) return
     Column(

@@ -71,6 +71,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
@@ -109,23 +110,23 @@ fun ChatPane(conn: Conn, session: Session) {
     val t = Tokens.current
     val scope = rememberCoroutineScope()
     // ⚠️ 全部按 session.name 记，不按 Session 对象：看板每 5 秒换一份新对象（lastActivity 变了），按对象记会全部重置
-    var items by remember(session.name) { mutableStateOf<List<ChatItem>>(emptyList()) }
-    var ctx by remember(session.name) { mutableStateOf<Transcript.Ctx?>(null) }
-    var status by remember(session.name) { mutableStateOf<String?>(null) }
-    var pending by remember(session.name) { mutableStateOf<Pending?>(null) }
-    var approval by remember(session.name) { mutableStateOf<Pair<String, Approval>?>(null) }   // 指纹 → 抓屏认出的工具名 / 命令
-    var live by remember(session.name) { mutableStateOf(Live.IDLE) }
-    var keyBusy by remember(session.name) { mutableStateOf(false) }          // 送了键、等屏幕换掉
-    var awaitFp by remember(session.name) { mutableStateOf<String?>(null) }  // 等着被换掉的那块提示的指纹
-    var draft by remember(session.name) { mutableStateOf(TextFieldValue()) }
-    var sendErr by remember(session.name) { mutableStateOf<String?>(null) }
-    var sending by remember(session.name) { mutableStateOf(false) }
-    var stick by remember(session.name) { mutableStateOf(true) }              // 粘在底部：用户往上翻就停，点 ↓ 再粘上
-    val openGroups = remember(session.name) { mutableStateListOf<String>() }
-    val listState = remember(session.name) { LazyListState() }
-    val seen = remember(session.name) { Seen() }
+    var items by remember(conn.host.id, session.name) { mutableStateOf<List<ChatItem>>(emptyList()) }
+    var ctx by remember(conn.host.id, session.name) { mutableStateOf<Transcript.Ctx?>(null) }
+    var status by remember(conn.host.id, session.name) { mutableStateOf<String?>(null) }
+    var pending by remember(conn.host.id, session.name) { mutableStateOf<Pending?>(null) }
+    var approval by remember(conn.host.id, session.name) { mutableStateOf<Pair<String, Approval>?>(null) }   // 指纹 → 抓屏认出的工具名 / 命令
+    var live by remember(conn.host.id, session.name) { mutableStateOf(Live.IDLE) }
+    var keyBusy by remember(conn.host.id, session.name) { mutableStateOf(false) }          // 送了键、等屏幕换掉
+    var awaitFp by remember(conn.host.id, session.name) { mutableStateOf<String?>(null) }  // 等着被换掉的那块提示的指纹
+    var draft by remember(conn.host.id, session.name) { mutableStateOf(TextFieldValue()) }
+    var sendErr by remember(conn.host.id, session.name) { mutableStateOf<String?>(null) }
+    var sending by remember(conn.host.id, session.name) { mutableStateOf(false) }
+    var stick by remember(conn.host.id, session.name) { mutableStateOf(true) }              // 粘在底部：用户往上翻就停，点 ↓ 再粘上
+    val openGroups = remember(conn.host.id, session.name) { mutableStateListOf<String>() }
+    val listState = remember(conn.host.id, session.name) { LazyListState() }
+    val seen = remember(conn.host.id, session.name) { Seen() }
     val focus = remember { FocusRequester() }
-    val staged = remember(session.name) { mutableStateListOf<DraftAttach>() }
+    val staged = remember(conn.host.id, session.name) { mutableStateListOf<DraftAttach>() }
 
     // 接上会话顺手清一次 3 天前的暂存（core 的 sweep，命令写死不接外部输入）
     LaunchedEffect(session.name, ssh) { delay(2_000); Attach.sweep(conn) }
@@ -140,13 +141,18 @@ fun ChatPane(conn: Conn, session: Session) {
 
     /** 剪贴板里的图 → PNG → 暂存（Codex / Claude Desktop 的 Ctrl+V 贴图）。编码几十毫秒，挪出输入线程。 */
     fun stagePasted() {
-        val img = Attach.clipboardImage() ?: return
+        if (!Attach.pasteBusy.compareAndSet(false, true)) return   // 按键重复/连点：同一张图只贴一次
         scope.launch {
-            val bytes = withContext(Dispatchers.Default) { Attach.pngBytes(img) }
-            if (staged.size >= 10) { sendErr = "一次最多带 10 个附件"; return@launch }
-            val a = Attach.fromPastedImage(bytes)
-            staged.add(a)
-            Attach.launchUpload(conn, session.name, a, scope)
+            try {
+                val img = Attach.clipboardImage() ?: return@launch
+                val bytes = withContext(Dispatchers.Default) { Attach.pngBytes(img) }
+                if (staged.size >= 10) { sendErr = "一次最多带 10 个附件"; return@launch }
+                val a = Attach.fromPastedImage(bytes)
+                staged.add(a)
+                Attach.launchUpload(conn, session.name, a, scope)
+            } finally {
+                Attach.pasteBusy.set(false)
+            }
         }
     }
 
@@ -283,7 +289,9 @@ fun ChatPane(conn: Conn, session: Session) {
 
     fun send() {
         val text = draft.text.trim()
-        // 发送 = 暂存头（[图片1] 路径 的映射）+ 正文。传着的附件不让发（映射不全 Claude 读不到）
+        // 发送 = 暂存头（[图片1] 路径 的映射）+ 正文。
+        // ⚠️ 附件还在传就不发——映射只含 Done 的，发出去 Claude 读到的路径不全（键盘 Enter 也要过这道门）。
+        if (staged.any { it.state is DraftState.Waiting || it.state is DraftState.Uploading }) return
         val body = Attach.headerOf(staged) + text
         if (body.isBlank() || sending) return
         draft = TextFieldValue(); sendErr = null; sending = true
@@ -292,8 +300,9 @@ fun ChatPane(conn: Conn, session: Session) {
             val ok = ssh.isConnected && catching { SessionProbe.send(ssh, session.name, body) }.getOrDefault(false)
             if (!ok) {
                 sendErr = "没发出去，话给你留在输入框了"
-                // 正文还原，附件原样留在 chips 上（传完的那些不用重传，再点一次发送就行）
-                draft = TextFieldValue(text + draft.text.let { if (it.isBlank()) "" else "\n$it" })
+                // 正文还原（光标带到末尾），附件原样留在 chips 上（传完的那些不用重传，再点一次发送就行）
+                val restored = text + draft.text.let { if (it.isBlank()) "" else "\n$it" }
+                draft = TextFieldValue(restored, TextRange(restored.length))
             } else {
                 Attach.removeDone(staged)
             }
@@ -305,7 +314,7 @@ fun ChatPane(conn: Conn, session: Session) {
     LaunchedEffect(rows, stick) { if (stick && rows.isNotEmpty()) listState.requestScrollToItem(Int.MAX_VALUE / 2, 100_000) }
     LaunchedEffect(session.name) { focus.requestFocus() }   // 焦点先落输入框，Enter / Esc 一开始就能批
     // 只认用户的滚动（程序滚到底那一下也会走这里，不过滤会把 stick 关掉）；往上翻 = 停跟随，翻回底 = 再粘上
-    val scrollWatch = remember(session.name) {
+    val scrollWatch = remember(conn.host.id, session.name) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 if (source == NestedScrollSource.UserInput && available.y > 0f) stick = false
@@ -430,8 +439,8 @@ private fun Composer(
                     val enter = e.key == Key.Enter || e.key == Key.NumPadEnter
                     when {
                         e.type != KeyEventType.KeyDown || draft.composition != null -> false   // 中文输入法正在组词时 Enter / Esc 归输入法
-                        // 剪贴板里有图 = 粘贴图片；没有图就把 Ctrl+V 还给输入框贴文本
-                        e.isCtrlPressed && e.key == Key.V && Attach.clipboardImage() != null -> { onPaste(); true }
+                        // 剪贴板里有图 = 粘贴图片（预检是便宜的 isDataFlavorAvailable，不解码）；贴着的时候按键重复不重入
+                        e.isCtrlPressed && e.key == Key.V && Attach.hasClipboardImage() && !Attach.pasteBusy.get() -> { onPaste(); true }
                         // 有字就是发消息；空着时 Enter 归审批卡（Codex：Enter 批准）
                         enter && !e.isShiftPressed -> { if (draft.text.isNotBlank()) onSend() else if (hasPending && canAct) onApprove(); true }
                         e.key == Key.Escape && hasPending && canAct -> { onReject(); true }   // 没在等审批时 Esc 留给窗口壳
@@ -465,11 +474,6 @@ private fun Composer(
 
 /** 通知去重用的两个「上次看到的」：审批指纹、忙不忙。不进 Compose 状态，改了不用重组。 */
 private class Seen(var fp: String? = null, var busy: Boolean = false)
-
-/** 「轮次完成」通知正文：最后一条助手文本前 60 字。 */
-private fun lastAssistant(items: List<ChatItem>): String =
-    items.lastOrNull { it is ChatItem.AssistantText }?.let { (it as ChatItem.AssistantText).markdown }
-        ?.replace('\n', ' ')?.trim()?.take(60).orEmpty()
 
 // ── 会话头 ──
 

@@ -19,20 +19,24 @@ object Notify {
 
     /** 点通知跳会话：Main 接线（按 hostId+会话名 select，再把窗口拉回前台）。 */
     var open: ((hostId: String, session: String) -> Unit)? = null
-    private var click: (() -> Unit)? = null   // 最新一条通知的跳转目标，点了就执行
+    private var click: (() -> Unit)? = null   // 最新一条【真的弹出去过】的通知的跳转目标
+    private var clickAt = 0L                  // AWT 区分不了「点气泡」和「双击托盘图标」，靠时效门槛防过期劫持
 
     fun notify(title: String, text: String, hostId: String? = null, session: String? = null) {
-        click = if (hostId != null && session != null) { { open?.invoke(hostId, session) } } else null
         when (Store.pref("notify", "unfocused")) {
             "never" -> return
             "unfocused" -> if (focused) return
         }
+        // ⚠️ 先过三档守卫再武装 click：被拦掉的通知没有气泡可点，不能留下跳转目标
+        click = if (hostId != null && session != null) { { open?.invoke(hostId, session) } } else null
+        clickAt = System.currentTimeMillis()
         tray?.sendNotification(Notification(title, text, Notification.Type.Info))
     }
 
-    /** 气泡被点（AWT ActionListener 在 EDT 上）：叫回窗口 + 跳到对应会话。 */
+    /** 气泡被点（AWT ActionListener 在 EDT 上）：叫回窗口 + 10 秒内才跳对应会话（过期/双击托盘只叫窗口）。 */
     fun clicked() {
         runCatching { Shell.show() }
-        runCatching { click?.invoke() }
+        val c = click
+        if (c != null && System.currentTimeMillis() - clickAt < 10_000) runCatching { c() }
     }
 }

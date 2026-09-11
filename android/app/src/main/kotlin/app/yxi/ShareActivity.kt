@@ -43,6 +43,7 @@ class ShareActivity : ComponentActivity() {
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         I18n.load(this)
+        app.yxi.agent.Tr.fn = { zh -> app.yxi.ui.t(zh) }   // 分享可从全新进程冷启动进来（SEND 入口），不接 Tr 的话 core 里 Attachments/Uploader 的文案不翻
         val text = intent?.getStringExtra(Intent.EXTRA_TEXT)
         // ⚠️ 相册里一次分享多张走的是 SEND_MULTIPLE，EXTRA_STREAM 是个列表 —— 原来只认单个，多选进不来
         val uris: List<Uri> = if (intent?.action == Intent.ACTION_SEND_MULTIPLE) {

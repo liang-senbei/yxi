@@ -151,7 +151,7 @@ fun CopyIdDialog(h: Host, keys: FileHostKeys, onSaved: (Host) -> Unit, onClose: 
                 }
             }) { Text(if (busy) "安装中…" else if (done) "装好了" else "连接并安装") }
         },
-        dismissButton = { TextButton({ onClose() }) { Text(if (done) "完成" else "取消") } },
+        dismissButton = { TextButton(enabled = !busy, onClick = { onClose() }) { Text(if (done) "完成" else "取消") } },
     )
 }
 

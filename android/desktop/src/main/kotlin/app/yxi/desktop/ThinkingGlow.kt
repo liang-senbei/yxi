@@ -138,8 +138,11 @@ fun glowBrush(busy: Boolean, waiting: Boolean): Brush {
         else -> listOf(Color(0xFF9EC8F0), Color(0xFFC9E0F7), Color(0xFFA8D8E8))
     }
     val d = drift
+    // ⚠️ 端点是手机年代的绝对像素（-400…1400+漂移），桌面 composer 卡能比这宽——超出的部分 Clamp 会冻住最后一个
+    //    色相，出现一条「冻结线」。Mirror 平铺让宽卡上也接着流。
     return Brush.horizontalGradient(
         hues.map { it.copy(alpha = a) },
         startX = -400f * d, endX = 1400f + 400f * d,
+        tileMode = androidx.compose.ui.graphics.TileMode.Mirror,
     )
 }

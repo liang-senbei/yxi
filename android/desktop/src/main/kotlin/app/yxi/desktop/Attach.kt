@@ -67,6 +67,14 @@ object Attach {
         contents.getTransferData(java.awt.datatransfer.DataFlavor.imageFlavor) as java.awt.image.BufferedImage
     }.getOrNull()
 
+    /** 便宜的预检：剪贴板里**有没有**图（不解码——完整解码很贵，别放在按键线程上做）。 */
+    fun hasClipboardImage(): Boolean = runCatching {
+        java.awt.Toolkit.getDefaultToolkit().systemClipboard.isDataFlavorAvailable(java.awt.datatransfer.DataFlavor.imageFlavor)
+    }.getOrDefault(false)
+
+    /** 贴图进行中：挡住按键重复把同一张截图贴成好几张。 */
+    val pasteBusy = java.util.concurrent.atomic.AtomicBoolean(false)
+
     fun pngBytes(img: java.awt.image.BufferedImage): ByteArray {
         val out = java.io.ByteArrayOutputStream()
         javax.imageio.ImageIO.write(img, "png", out)

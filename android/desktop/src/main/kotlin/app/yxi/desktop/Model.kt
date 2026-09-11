@@ -176,8 +176,10 @@ class Conn(val host: Host, hostKeys: HostKeys) {
         val was = sessions.associateBy { it.name }
         for (s in fresh) {
             if (s.state == SessionState.NeedsYou && was[s.name]?.let { it.state != SessionState.NeedsYou } == true)
-                // 措辞照 ZCode（老板 09-12 截图）：标题=徽标文案（等待批准/需要用户输入），正文带任务名，可点跳会话
-                Notify.notify(s.badge().label, "任务: ${s.short}" + s.detail.take(60).let { d -> if (d.isBlank()) "" else " · $d" }, host.id, s.name)
+                // 措辞照 ZCode（老板 09-12 截图）：标题=徽标文案（等待批准/需要用户输入），正文带任务名，可点跳会话。
+                // detail 可能带换行/emoji，压成一行再截（take 别把代理对截一半成乱码）
+                Notify.notify(s.badge().label, "任务: ${s.short}" +
+                    s.detail.replace(Regex("\\s+"), " ").trim().take(60).let { d -> if (d.isBlank()) "" else " · $d" }, host.id, s.name)
         }
         sessions = fresh
     }
