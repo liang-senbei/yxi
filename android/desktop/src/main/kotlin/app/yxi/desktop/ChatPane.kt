@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -24,19 +25,19 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Image
-import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -53,9 +54,11 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -68,6 +71,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
@@ -92,8 +96,12 @@ import org.jetbrains.skia.Image as SkiaImage
 /**
  * 右栏「对话」。历史读转录（权威），「此刻在等你选 / 在忙」读屏幕（唯一来源）—— 分工同手机端 ChatScreen。
  * 所有远端操作走 core 的 SessionProbe / TranscriptStream，这里不拼 tmux 命令。
- * 颜色一律 [Tokens]，文案照 design/desktop-reference.md §2.6。
- * 附件（PRD P0-10）走 core 的 Attachments / Uploader，暂存和上传状态在 [Attach]。
+ *
+ * 视觉（老板 09-11：学 ZCode / Codex 的桌面 UI，保留 Yxi 暖灰自己的底子，规范见 design/desktop-reference.md §2.3）：
+ * · 用户消息 = 右侧气泡；助手内容直接铺在画布上（两家都这么做，不搞对话式左右气泡）；
+ * · 工具调用 = 一行轻量行（状态点 + 工具名 + mono 命令 pill），不再是重卡片；展开才出详情；
+ * · 忙时一条「工作中 Ns」计时行（ZCode 同款，计时是本地的，转录里没有这数据）；
+ * · composer = 一张圆角卡片：无边框输入区 + 底部功能行（+ 附件 / 审批态 / 模型·强度·模式·上下文 chips / 圆形发送）。
  */
 @Composable
 fun ChatPane(conn: Conn, session: Session) {
@@ -102,6 +110,7 @@ fun ChatPane(conn: Conn, session: Session) {
     val scope = rememberCoroutineScope()
     // ⚠️ 全部按 session.name 记，不按 Session 对象：看板每 5 秒换一份新对象（lastActivity 变了），按对象记会全部重置
     var items by remember(session.name) { mutableStateOf<List<ChatItem>>(emptyList()) }
+    var ctx by remember(session.name) { mutableStateOf<Transcript.Ctx?>(null) }
     var status by remember(session.name) { mutableStateOf<String?>(null) }
     var pending by remember(session.name) { mutableStateOf<Pending?>(null) }
     var approval by remember(session.name) { mutableStateOf<Pair<String, Approval>?>(null) }   // 指纹 → 抓屏认出的工具名 / 命令
@@ -165,10 +174,10 @@ fun ChatPane(conn: Conn, session: Session) {
                     val snap = withContext(Dispatchers.Default) { inc.add(batch.asSequence()); inc.snapshot() }
                     eaten += bytes
                     if (eaten >= expect) caughtUp = true
-                    if (caughtUp) { items = snap; status = null }
+                    if (caughtUp) { items = snap; ctx = inc.ctx; status = null }
                 } else if (!caughtUp && expect == 0L && ++idle >= 10) {
                     // 不知道要灌多少时才按「3 秒没动静」放行
-                    caughtUp = true; items = withContext(Dispatchers.Default) { inc.snapshot() }; status = null
+                    caughtUp = true; items = withContext(Dispatchers.Default) { inc.snapshot() }; ctx = inc.ctx; status = null
                 }
             }
         }
@@ -310,7 +319,7 @@ fun ChatPane(conn: Conn, session: Session) {
     }
 
     Column(Modifier.fillMaxSize().background(t.surface2)) {
-        // 会话头：名字 + 主机 + 连接徽标常驻（报告 §3.8）。重连本身归侧栏，这里只读状态 + 给个按钮
+        // 会话头（ZCode 顶栏的形态）：任务名 + 主机 pill + 连接状态。重连按钮只在断开时出现
         SessionHeader(conn, session) { conn.start() }   // 重连循环在 Conn 自己的 scope 里跑，切走面板不会断
         Box(Modifier.weight(1f).fillMaxWidth()) {
             LazyColumn(
@@ -334,26 +343,21 @@ fun ChatPane(conn: Conn, session: Session) {
             ) { Text("↓ 回到底部", color = t.textPrimary) }
         }
         if (items.isNotEmpty()) status?.let { Note(it, t.textMuted) }
-        if (live.busy) Note("✽ " + (live.status ?: "在想…"), t.accent)
+        if (live.busy) BusyLine(live.status)
         val p = pending
         val a = approval?.takeIf { it.first == p?.fingerprint }?.second ?: Approval(null, "")   // 抓屏还没回来就先只有标题
         if (p != null) ApprovalCard(p, a, busy = !canAct, onKey = { sendKey(it, p.fingerprint) }, onSubmit = { submit(p) })
-        val hint = when {
-            p == null -> "跟它说点什么… Enter 发送，Shift+Enter 换行；截图直接 Ctrl+V"
-            p.isPermission(a) -> "Enter 允许 · Esc 拒绝 · 想说别的直接打字"
-            else -> "Enter 选第 1 项 · Esc 取消 · 想说别的直接打字"
-        }
         sendErr?.let { Note(it, t.danger) }
         // 暂存 chips：传着的看进度，失败的看原因；✕ 移除（传着的会顺手取消）
         if (staged.isNotEmpty()) Column(Modifier.fillMaxWidth().padding(12.dp, 4.dp, 12.dp, 0.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            staged.forEach { a ->
-                val st = a.state
+            staged.forEach { a2 ->
+                val st = a2.state
                 Row(
                     Modifier.fillMaxWidth().background(t.surface1, RoundedCornerShape(Radius)).padding(8.dp, 5.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    Icon(if (a.isImage) Icons.Outlined.Image else Icons.Outlined.AttachFile, null, Modifier.size(14.dp), tint = t.textMuted)
-                    Text(a.display, style = CodeStyle, color = t.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Icon(if (a2.isImage) Icons.Outlined.Image else Icons.Outlined.AttachFile, null, Modifier.size(14.dp), tint = t.textMuted)
+                    Text(a2.display, style = CodeStyle, color = t.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     when (st) {
                         is DraftState.Waiting -> Text("排队中", fontSize = 11.sp, color = t.textMuted)
                         is DraftState.Uploading -> Text("${st.percent}%", fontSize = 11.sp, color = t.accent)
@@ -361,43 +365,90 @@ fun ChatPane(conn: Conn, session: Session) {
                         is DraftState.Failed -> Text(st.msg, fontSize = 11.sp, color = t.danger, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     IconButton(
-                        { a.cancelled.set(true); staged.remove(a) },
+                        { a2.cancelled.set(true); staged.remove(a2) },
                         Modifier.size(20.dp),
                     ) { Icon(Icons.Default.Close, "移除", Modifier.size(12.dp), tint = t.textMuted) }
                 }
             }
         }
-        Row(Modifier.fillMaxWidth().padding(12.dp, 6.dp, 12.dp, 12.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            IconButton(
-                // AWT 的模态文件对话框自己泵事件，卡在点击回调里是它的正常姿势
-                { Attach.pickFiles().forEach { stage(it) } },
-                Modifier.padding(bottom = 2.dp),
-                enabled = !sending,
-            ) { Icon(Icons.Outlined.AttachFile, "添加附件", Modifier.size(18.dp), tint = t.textSecondary) }
-            OutlinedTextField(
-                draft, { draft = it }, maxLines = 8, textStyle = BodyStyle, shape = RoundedCornerShape(RadiusComposer),
-                placeholder = { Text(hint, color = t.textMuted) },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = t.surface2, unfocusedContainerColor = t.surface2,
-                    focusedBorderColor = t.accent, unfocusedBorderColor = t.border, cursorColor = t.accent,
-                    focusedTextColor = t.textPrimary, unfocusedTextColor = t.textPrimary,
-                ),
-                modifier = Modifier.weight(1f).focusRequester(focus).onPreviewKeyEvent { e ->
+        Composer(
+            draft, { draft = it }, focus,
+            ctx = ctx,
+            hint = when {
+                pending != null -> "想说别的直接打字"
+                else -> "跟它说点什么… Enter 发送，Shift+Enter 换行；截图直接 Ctrl+V"
+            },
+            hasPending = pending != null,
+            canSend = (draft.text.isNotBlank() || hasDone) && !sending && !uploading,
+            canAct = canAct,
+            onAttach = { Attach.pickFiles().forEach { stage(it) } },
+            onPaste = ::stagePasted,
+            onApprove = ::approve, onReject = ::reject,
+            onSend = ::send,
+        )
+    }
+}
+
+/**
+ * 输入区（ZCode / Codex 同款的一张卡）：无边框输入 + 底部功能行。
+ * 左：+ 附件；右：模型 · 强度 · 模式 · 上下文 chips（转录顺带解析的，零开销）+ 圆形发送。
+ * Enter / Esc 的审批语义照旧：空输入 + 在等审批 = Enter 批准 / Esc 拒绝（Codex）。
+ */
+@Composable
+private fun Composer(
+    draft: TextFieldValue, onDraft: (TextFieldValue) -> Unit, focus: FocusRequester,
+    ctx: Transcript.Ctx?, hint: String,
+    hasPending: Boolean, canSend: Boolean, canAct: Boolean,
+    onAttach: () -> Unit, onPaste: () -> Unit, onApprove: () -> Unit, onReject: () -> Unit, onSend: () -> Unit,
+) {
+    val t = Tokens.current
+    var focused by remember { mutableStateOf(false) }
+    Column(
+        Modifier.fillMaxWidth().padding(12.dp, 6.dp, 12.dp, 12.dp)
+            .clip(RoundedCornerShape(RadiusComposer))
+            .background(t.surface1)
+            .border(if (focused) 1.5.dp else 1.dp, if (focused) t.accent.copy(alpha = 0.6f) else t.border, RoundedCornerShape(RadiusComposer)),
+    ) {
+        BasicTextField(
+            value = draft, onValueChange = onDraft,
+            textStyle = BodyStyle.copy(color = t.textPrimary), cursorBrush = SolidColor(t.accent),
+            maxLines = 8,
+            modifier = Modifier.fillMaxWidth().padding(14.dp, 10.dp, 14.dp, 4.dp)
+                .focusRequester(focus)
+                .onFocusChanged { focused = it.isFocused }
+                .onPreviewKeyEvent { e ->
                     val enter = e.key == Key.Enter || e.key == Key.NumPadEnter
                     when {
                         e.type != KeyEventType.KeyDown || draft.composition != null -> false   // 中文输入法正在组词时 Enter / Esc 归输入法
                         // 剪贴板里有图 = 粘贴图片；没有图就把 Ctrl+V 还给输入框贴文本
-                        e.isCtrlPressed && e.key == Key.V && Attach.clipboardImage() != null -> { stagePasted(); true }
-                        // 输入框空着时 Enter 归审批卡（Codex：Enter 批准）；有字就是发消息
-                        enter && !e.isShiftPressed -> { if (draft.text.isBlank()) approve() else send(); true }
-                        e.key == Key.Escape && pending != null -> { reject(); true }   // 没在等审批时 Esc 留给窗口壳
+                        e.isCtrlPressed && e.key == Key.V && Attach.clipboardImage() != null -> { onPaste(); true }
+                        // 有字就是发消息；空着时 Enter 归审批卡（Codex：Enter 批准）
+                        enter && !e.isShiftPressed -> { if (draft.text.isNotBlank()) onSend() else if (hasPending && canAct) onApprove(); true }
+                        e.key == Key.Escape && hasPending && canAct -> { onReject(); true }   // 没在等审批时 Esc 留给窗口壳
                         else -> false
                     }
                 },
-            )
-            Button(onClick = ::send, enabled = (draft.text.isNotBlank() || hasDone) && !sending && !uploading, colors = primaryButton()) {
-                Text(when { uploading -> "附件传中…"; sending -> "发送中…"; else -> "发送" })
+            decorationBox = { inner ->
+                Box { if (draft.text.isEmpty()) Text(hint, style = BodyStyle, color = t.textMuted); inner() }
+            },
+        )
+        Row(Modifier.fillMaxWidth().padding(6.dp, 2.dp, 8.dp, 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            IconButton(onAttach, Modifier.size(30.dp)) { Icon(Icons.Outlined.AttachFile, "添加附件（截图可直接 Ctrl+V）", Modifier.size(16.dp), tint = t.textSecondary) }
+            if (!canAct) Text("重新连接后可操作", fontSize = 11.sp, color = t.textMuted)
+            Spacer(Modifier.weight(1f))
+            ctx?.let { c ->
+                Chip(modelShort(c.model))
+                effortLabel(c.effort)?.let { Chip(it, color = t.accent) }
+                if (c.mode == "plan") Chip("计划模式", color = t.warning)
+                if (c.tokens > 0) Chip("上下文 " + kShort(c.tokens))
             }
+            // 圆形发送（Codex 的 ↑）：能发时点亮；附件在传时灰着不亮
+            Box(
+                Modifier.size(30.dp).clip(CircleShape)
+                    .background(if (canSend) t.textPrimary else t.border)
+                    .clickable(enabled = canSend, onClick = onSend),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Default.ArrowUpward, "发送", Modifier.size(17.dp), tint = if (canSend) t.surface2 else t.textMuted) }
         }
     }
 }
@@ -409,6 +460,8 @@ private class Seen(var fp: String? = null, var busy: Boolean = false)
 private fun lastAssistant(items: List<ChatItem>): String =
     items.lastOrNull { it is ChatItem.AssistantText }?.let { (it as ChatItem.AssistantText).markdown }
         ?.replace('\n', ' ')?.trim()?.take(60).orEmpty()
+
+// ── 会话头 ──
 
 @Composable
 private fun SessionHeader(conn: Conn, session: Session, onReconnect: () -> Unit) {
@@ -423,15 +476,53 @@ private fun SessionHeader(conn: Conn, session: Session, onReconnect: () -> Unit)
         everConnected -> t.warning to "正在重新连接…"
         else -> t.warning to "正在连接"
     }
-    Row(Modifier.fillMaxWidth().background(t.surface1).padding(16.dp, 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(Modifier.fillMaxWidth().background(t.surface1).padding(14.dp, 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(session.short, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = t.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(conn.host.alias.ifBlank { conn.host.hostname }, fontSize = 12.sp, color = t.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        // 主机 pill（ZCode 顶栏的「default」项目 pill 同款）
+        Box(Modifier.clip(RoundedCornerShape(50)).background(t.border).padding(horizontal = 8.dp, vertical = 2.dp)) {
+            Text(conn.host.alias.ifBlank { conn.host.hostname }, fontSize = 11.sp, color = t.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
         Spacer(Modifier.weight(1f))
         Dot(color)
         Text(label, fontSize = 12.sp, color = t.textSecondary)
         if (down) TextButton(onClick = onReconnect) { Text("重新连接", fontSize = 12.sp, color = t.accent) }
     }
     HorizontalDivider(color = t.border)
+}
+
+/** 忙时的一条计时行（ZCode 的「工作中 48秒」；计时在本地跑，转录里没有这个数据）。 */
+@Composable
+private fun BusyLine(status: String?) {
+    val t = Tokens.current
+    var sec by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit) { while (true) { delay(1_000); sec++ } }
+    Row(Modifier.padding(16.dp, 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(Modifier.size(7.dp).background(t.accent, CircleShape))
+        Text("工作中 ${sec}s", fontSize = 12.sp, color = t.textSecondary)
+        if (!status.isNullOrBlank()) Text(status, fontSize = 12.sp, color = t.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** composer 右下的小 chips（模型 / 强度 / 模式 / 上下文）。 */
+@Composable
+private fun Chip(text: String, color: Color? = null) {
+    val t = Tokens.current
+    Box(Modifier.clip(RoundedCornerShape(50)).background(t.border).padding(horizontal = 8.dp, vertical = 3.dp)) {
+        Text(text, fontSize = 11.sp, color = color ?: t.textSecondary, maxLines = 1)
+    }
+}
+
+private fun modelShort(model: String): String = model.removePrefix("claude-")
+
+/** 强度文案照手机端：max=最大思考 / high=高强度 / mid=中等；空 = 转录没记就不显示（宁缺勿假）。 */
+private fun effortLabel(effort: String): String? = when (effort) {
+    "max" -> "最大思考"; "high" -> "高强度"; "mid" -> "中等"; else -> null
+}
+
+private fun kShort(tokens: Long): String = when {
+    tokens >= 1_000_000 -> "%.1fM".format(tokens / 1e6)
+    tokens >= 1_000 -> "%.0fK".format(tokens / 1e3)
+    else -> tokens.toString()
 }
 
 @Composable
@@ -458,7 +549,7 @@ private fun ItemView(conn: Conn, item: ChatItem) = when (item) {
     is ChatItem.UserText -> UserBubble(conn, item.text, queued = false)
     is ChatItem.Queued -> UserBubble(conn, item.text, queued = true)
     is ChatItem.AssistantText -> MessageRow(item.markdown, user = false) { AssistantBody(item.markdown) }
-    is ChatItem.Thinking -> Fold("思考过程", item.text)
+    is ChatItem.Thinking -> Fold("✳ 思考过程", item.text)
     is ChatItem.ToolCall -> ToolCard(item)
     is ChatItem.Injected -> Fold(listOfNotNull(item.kind, item.from).joinToString(" · "), Transcript.clean(item.text))
     is ChatItem.ApiError -> Note("⚠ " + item.text, Tokens.current.danger)
@@ -559,41 +650,48 @@ private fun Fold(title: String, body: String) {
     val t = Tokens.current
     var open by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().clickable { open = !open }) {
-        Text((if (open) "▾ " else "▸ ") + title, fontSize = 11.sp, color = t.textMuted)
-        Text(body, fontSize = 12.sp, lineHeight = 16.sp, color = t.textSecondary, maxLines = if (open) Int.MAX_VALUE else 2, overflow = TextOverflow.Ellipsis)
+        Text((if (open) "▾ " else "▸ ") + title, fontSize = 12.sp, color = t.textMuted)
+        if (open) Text(body, fontSize = 12.sp, lineHeight = 16.sp, color = t.textSecondary, maxLines = Int.MAX_VALUE, overflow = TextOverflow.Ellipsis)
     }
 }
 
+/**
+ * 工具调用 = ZCode 式的一行轻量行：状态点 + 工具名 + mono 摘要 pill，点开展开详情（不再是常驻的重卡片）。
+ * 「完成」两个字删了 —— 点本来就是绿的，字是噪音；只留「失败 / 进行中」这两个要看的。
+ */
 @Composable
 private fun ToolCard(c: ChatItem.ToolCall) {
     val t = Tokens.current
     var open by remember(c.key) { mutableStateOf(c.isError) }   // 失败的默认展开，那才是要看的
-    val dot = when { c.isError -> t.danger; c.result == null -> t.accent; else -> t.textMuted }
-    Column(Modifier.fillMaxWidth().card().clickable { open = !open }.padding(12.dp, 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    val dot = when { c.isError -> t.danger; c.result == null -> t.accent; else -> t.success }
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius)).clickable { open = !open }.padding(2.dp, 4.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             Dot(dot)
             Text(c.name, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = t.textPrimary)
-            Text(summary(c), style = CodeStyle, color = t.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            Text(when { c.isError -> "失败"; c.result == null -> "进行中…"; else -> "完成" }, fontSize = 11.sp, color = dot)
+            val s = summary(c)
+            if (s.isNotBlank()) Text(
+                s, style = CodeStyle, color = t.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false).clip(RoundedCornerShape(6.dp)).background(t.surface1).padding(horizontal = 8.dp, vertical = 3.dp),
+            ) else Spacer(Modifier.weight(1f))
+            if (c.isError) Text("失败", fontSize = 11.sp, color = t.danger)
+            if (c.result == null) Text("进行中…", fontSize = 11.sp, color = t.accent)
         }
-        if (open) {
+        if (open) Column(Modifier.padding(start = 16.dp, top = 2.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Mono(c.input.toString(2).take(3000))
             c.result?.let { Mono(it.take(4000)) }
         }
     }
 }
 
-/** 卡片底：surface1 + 描边 + 圆角（工具卡 / 合并卡共用）。 */
-@Composable
-private fun Modifier.card(): Modifier {
-    val t = Tokens.current
-    val shape = RoundedCornerShape(Radius)
-    return clip(shape).background(t.surface1, shape).border(1.dp, t.border, shape)   // clip 让点击的水波纹也跟着圆角
-}
-
 @Composable
 private fun Mono(text: String) = SelectionContainer {
-    Text(text, Modifier.fillMaxWidth(), style = CodeStyle, color = Tokens.current.textPrimary)
+    Text(
+        text, Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius)).background(Tokens.current.surface1).padding(10.dp, 8.dp),
+        style = CodeStyle, color = Tokens.current.textPrimary,
+    )
 }
 
 /** 一串同名工具卡合成一张：`Bash × 7 · 2 失败`，点开铺成原来的小卡片。 */
@@ -601,16 +699,25 @@ private fun Mono(text: String) = SelectionContainer {
 private fun GroupCard(calls: List<ChatItem.ToolCall>, open: Boolean, onToggle: () -> Unit) {
     val t = Tokens.current
     val bad = calls.count { it.isError }
-    Column(Modifier.fillMaxWidth().card()) {
-        Row(Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(12.dp, 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Dot(if (bad > 0) t.danger else t.textMuted)
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius)).clickable(onClick = onToggle).padding(2.dp, 4.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Dot(if (bad > 0) t.danger else t.success)
             Text(calls.first().name, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = t.textPrimary)
             Text("× ${calls.size}", fontSize = 11.sp, color = t.textSecondary)
             if (bad > 0) Text("$bad 失败", fontSize = 11.sp, color = t.danger)
-            Text(if (open) "" else summary(calls.first()), style = CodeStyle, color = t.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            if (!open) {
+                val s = summary(calls.first())
+                if (s.isNotBlank()) Text(
+                    s, style = CodeStyle, color = t.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false).clip(RoundedCornerShape(6.dp)).background(t.surface1).padding(horizontal = 8.dp, vertical = 3.dp),
+                )
+            }
             Text(if (open) "收起" else "展开", fontSize = 11.sp, color = t.textMuted)
         }
-        if (open) Column(Modifier.padding(8.dp, 0.dp, 8.dp, 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { calls.forEach { ToolCard(it) } }
+        if (open) Column(Modifier.padding(start = 16.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { calls.forEach { ToolCard(it) } }
     }
 }
 

@@ -187,6 +187,14 @@
   · **环境（09-09 迁移后丢了构建链，已按 desktop-e2e.sh 的文档装回）**：`openjdk-17-jdk-headless` + `openjdk-17-jre`（⚠️ 只装 headless 会 `HeadlessException: no headful library support`，缺 `libawt_xawt.so` —— 必须再装非 headless 的 jre）+ `xvfb xdotool xfwm4 imagemagick xclip`。gradle 用 `JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64`。
   · 没做（下轮候选）：diff 查看器（PRD P2，手机端 GitDiff 已有可搬）、Snippets 常用语、TempSessions、从机（Slave）、文件页 md 渲染/源码切换对齐手机 FileViewer、装公钥后深色模式下的成功态文案、`%APPDATA%` 密码接 DPAPI（Bug_solver 的 P2 遗留）。
 
+- **桌面版第三轮：对话界面学 ZCode / Codex（2026-09-11，老板发来两张截图：「看看 ChatGPT 和 zcode 的 ui……逆向学习一下，也要有我们 yxi 自己的风格」）**。09-08 的拆包报告（§2.3 Codex 视觉规范：灰阶 / 字号 / 圆角 / composer 投影）直接当规格用，没重新拆包；对照截图把 ZCode 的版式学到手，配色仍用 Yxi 的 Claude 暖灰 token（自己的底子）：
+  · **composer 卡片化**（两家最大的共性）：OutlinedTextField 换成一张圆角卡（surface1 底 + 描边，聚焦描边变 accent），无边框输入区 + 底部功能行 —— 左「+ 附件」，右侧 **模型 / 强度 / 模式 / 上下文 chips + 圆形 ↑ 发送**（Codex 的 ↑）。chips 数据来自 `Transcript.Incremental.ctx`（解析转录顺带就有的：模型名、max/high/mid→最大思考/高强度/中等、plan→计划模式、上下文 tokens），零额外请求；空值不显示（宁缺勿假）。Enter/Esc 的审批语义不变。
+  · **工具调用行变轻**（ZCode 式）：原来是常驻描边卡片，现在一行轻量行（状态点 + 工具名 + mono 摘要 pill，「完成」字删了 —— 绿点本身就是信息），点开才出详情；同名合并组同款。思考过程折叠行加 ✳ 前缀、摘要行也收掉。
+  · **忙时计时行**（ZCode 的「工作中 48秒」）：`BusyLine` 本地计时（转录里没有这个数据，计时器就是唯一来源），带 live 状态文字。
+  · **会话头**（ZCode 顶栏形态）：任务名 + 主机 pill（圆角 50 的小胶囊）+ 连接徽标；窗口标题（Shell）本来就会带会话名。
+  · **侧栏搜索框**（ZCode 搜索 / Codex 过滤）：主机列表上方一个小 pill 输入框，按会话名 / 目录 / 主机名滤，主机组滤空整组藏掉。Ctrl+K 聚焦搜索还没绑（快捷键表要一起改，下轮）。
+  · **验证**：compileKotlin / 25 个单测 / desktop-e2e 门禁全绿；真连 hk13 截图验收 —— 会话头 pill、composer 聚焦态、glm-5.3-flash · 最大思考 · 上下文 38K chips、用量条「5h 剩 0h00m 今日 $1.68」全部按设计渲染（这轮 5h 窗口真烧满了，条和文字都对）。
+
 ## 音游（云曦节拍）设计拍板 —— 2026-09-06，老板在网页试验台上选的
 
 > **试验台 2026-09-06 晚封版**（老板：「现在试玩台没问题了」），tag `bench-final-20260906`。两个没单独拍的默认值就此定下：音符用薄片（高度 1）、无线时刻最高档每一下 25% 触发。**下一步：按试验台重写 App 的音游画面**（cc-Yxi 做，判定 / 算分 / 上报不动；谱面参数和编舞关键帧的契约找 logto）。

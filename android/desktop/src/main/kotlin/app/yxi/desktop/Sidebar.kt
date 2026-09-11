@@ -25,8 +25,10 @@ import androidx.compose.foundation.onClick
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Spacer
@@ -115,10 +117,29 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
             }
         }
         if (note.isNotBlank()) Text(note, Modifier.padding(14.dp, 2.dp), color = t.danger, style = MaterialTheme.typography.bodySmall)
+        // 会话过滤（ZCode 的搜索框 / Codex 的过滤）：按会话名 / 主机名滤，主机全不匹配就整组藏掉
+        var filter by remember { mutableStateOf("") }
+        if (hosts.isNotEmpty()) Row(
+            Modifier.fillMaxWidth().padding(10.dp, 2.dp, 10.dp, 6.dp).clip(RoundedCornerShape(8.dp)).background(t.border),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Outlined.Search, "搜索", Modifier.padding(start = 8.dp).size(13.dp), tint = t.textMuted)
+            BasicTextField(
+                filter, { filter = it }, singleLine = true,
+                textStyle = MaterialTheme.typography.bodySmall.copy(color = t.textPrimary),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(t.accent),
+                modifier = Modifier.fillMaxWidth().padding(8.dp, 6.dp),
+                decorationBox = { inner -> Box { if (filter.isEmpty()) Text("搜索会话", style = MaterialTheme.typography.bodySmall, color = t.textMuted); inner() } },
+            )
+        }
         if (hosts.isEmpty()) Text("尚未添加设备，点 + 加一台", Modifier.padding(14.dp, 8.dp), style = MaterialTheme.typography.bodySmall, color = t.textMuted)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+            val f = filter.trim()
             hosts.forEachIndexed { i, h ->
                 val c = connOf(h)
+                val sessions = c?.sessions?.filter { f.isEmpty() || it.short.contains(f, ignoreCase = true) || it.name.contains(f, ignoreCase = true) } ?: emptyList()
+                val hostMatch = f.isEmpty() || h.label.contains(f, ignoreCase = true)
+                if (!hostMatch && sessions.isEmpty()) return@forEachIndexed   // 滤空的整组不画，省得滚动列表里全是空组
                 Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
                     Box(Modifier.width(3.dp).fillMaxHeight().background(h.tint(i)))   // 连接颜色条，整组都带着
                     Column(Modifier.weight(1f)) {
@@ -137,12 +158,14 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
                         }
                         // 用量紧凑条（PRD P0-13）：连着才有数据，ccusage 探不到就整块不画
                         if (c?.status == Conn.Status.Connected) UsageStrip(c)
-                        // 断线重连中列表照旧摆着（服务器上的会话还在），不清
-                        c?.sessions?.forEach { s ->
-                            SessionRow(s, selected = state.conn === c && state.session?.name == s.name) { state.select(c, s) }
+                        // 断线重连中列表照旧摆着（服务器上的会话还在），不清；搜索时只画滤剩下的
+                        if (c != null) {
+                            sessions.forEach { s ->
+                                SessionRow(s, selected = state.conn === c && state.session?.name == s.name) { state.select(c, s) }
+                            }
+                            if (f.isEmpty() && c.status == Conn.Status.Connected && c.sessions.isEmpty())
+                                Text("这台机器上还没有会话", Modifier.padding(start = 24.dp, bottom = 6.dp), style = MaterialTheme.typography.bodySmall, color = t.textMuted)
                         }
-                        if (c?.status == Conn.Status.Connected && c.sessions.isEmpty())
-                            Text("这台机器上还没有会话", Modifier.padding(start = 24.dp, bottom = 6.dp), style = MaterialTheme.typography.bodySmall, color = t.textMuted)
                     }
                 }
             }
