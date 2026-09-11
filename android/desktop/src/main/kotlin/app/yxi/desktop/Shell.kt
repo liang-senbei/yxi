@@ -175,6 +175,8 @@ fun YxiTray(state: AppState, tray: TrayState, onQuit: () -> Unit) {
             item("退出 Yxi", onQuit)
         }
         icon.addMouseListener(object : MouseAdapter() { override fun mouseClicked(e: MouseEvent) { if (e.button == MouseEvent.BUTTON1) Shell.show() } })
+        // 点气泡/Toast（Windows 上就是系统通知）= 叫回窗口 + 跳到通知说的那个会话（ZCode 同款，目标在 Notify.clicked 里）
+        icon.addActionListener { Notify.clicked() }
         runCatching { SystemTray.getSystemTray().add(icon) }     // 没托盘（Linux 某些桌面）就没托盘，别把整个界面搞崩
         onDispose { SystemTray.getSystemTray().remove(icon) }
     }

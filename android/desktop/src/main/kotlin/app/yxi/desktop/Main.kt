@@ -37,6 +37,14 @@ fun main(args: Array<String>) {
         val state = remember { AppState() }
         val tray = remember { TrayState().also { Notify.tray = it } }
         val scope = rememberCoroutineScope()
+        // 点通知跳会话（ZCode 同款）：按 hostId + 会话名选中，select 会把页面拉回工作区；叫回窗口归 Notify.clicked
+        LaunchedEffect(Unit) {
+            Notify.open = { hostId, name ->
+                val c = state.conns.firstOrNull { it.host.id == hostId }
+                val s = c?.sessions?.firstOrNull { it.name == name } ?: c?.sessions?.firstOrNull()
+                if (c != null) state.select(c, s)
+            }
+        }
         // 记住上次的窗口大小 / 位置（Store.dir/window.json）。只在第一次组合时读：Shell.visible 一变这里会重组，不能每次都重置
         val win = rememberWindowState(width = 1200.dp, height = 800.dp)
         remember { Store.loadWindow(win); if (Store.pref("maximized", "0") == "1") win.placement = WindowPlacement.Maximized }

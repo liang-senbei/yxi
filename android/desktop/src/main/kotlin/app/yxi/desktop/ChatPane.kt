@@ -208,8 +208,8 @@ fun ChatPane(conn: Conn, session: Session) {
     // 「等你选 / 在忙」只有屏幕知道（tool_use 要等工具跑完才落转录）：推流优先，断了退回轮询，连接回来再试推流
     LaunchedEffect(session.name, ssh) {
         fun apply(p: Pending?, l: Live) {
-            // 一轮结束 = 从忙变成等输入、且没有在等审批；只在这一下发，状态不变不重发
-            if (seen.busy && !l.busy && p == null) Notify.notify("${session.short} 轮次完成", lastAssistant(items))
+            // 一轮结束 = 从忙变成等输入、且没有在等审批；只在这一下发，状态不变不重发。措辞照 ZCode：任务已完成 / 任务: 名字
+            if (seen.busy && !l.busy && p == null) Notify.notify("任务已完成", "任务: ${session.short}", conn.host.id, session.name)
             seen.busy = l.busy
             pending = p; live = l
             if (awaitFp != null && p?.fingerprint != awaitFp) { awaitFp = null; keyBusy = false }   // 动作生效了就解锁
@@ -232,7 +232,7 @@ fun ChatPane(conn: Conn, session: Session) {
         if (seen.fp != p.fingerprint) {
             seen.fp = p.fingerprint
             val what = a.body.lineSequence().firstOrNull { it.isNotBlank() } ?: p.title.ifBlank { p.options.joinToString(" / ") { it.label } }
-            Notify.notify("${session.short} 等待批准", (a.tool?.let { "$it：" } ?: "") + what.take(80))
+            Notify.notify("等待批准", "任务: ${session.short} · " + (a.tool?.let { "$it：" } ?: "") + what.take(70), conn.host.id, session.name)
         }
     }
 
