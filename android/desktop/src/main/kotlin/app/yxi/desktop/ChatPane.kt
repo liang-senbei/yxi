@@ -1,5 +1,6 @@
 package app.yxi.desktop
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -24,8 +26,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -50,8 +55,11 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -59,11 +67,13 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.yxi.agent.Attachments
 import app.yxi.agent.ChatItem
 import app.yxi.agent.Live
 import app.yxi.agent.Pending
@@ -77,11 +87,13 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.jetbrains.skia.Image as SkiaImage
 
 /**
  * 右栏「对话」。历史读转录（权威），「此刻在等你选 / 在忙」读屏幕（唯一来源）—— 分工同手机端 ChatScreen。
  * 所有远端操作走 core 的 SessionProbe / TranscriptStream，这里不拼 tmux 命令。
  * 颜色一律 [Tokens]，文案照 design/desktop-reference.md §2.6。
+ * 附件（PRD P0-10）走 core 的 Attachments / Uploader，暂存和上传状态在 [Attach]。
  */
 @Composable
 fun ChatPane(conn: Conn, session: Session) {
@@ -104,6 +116,30 @@ fun ChatPane(conn: Conn, session: Session) {
     val listState = remember(session.name) { LazyListState() }
     val seen = remember(session.name) { Seen() }
     val focus = remember { FocusRequester() }
+    val staged = remember(session.name) { mutableStateListOf<DraftAttach>() }
+
+    // 接上会话顺手清一次 3 天前的暂存（core 的 sweep，命令写死不接外部输入）
+    LaunchedEffect(session.name, ssh) { delay(2_000); Attach.sweep(conn) }
+
+    /** 选的文件进暂存；上限 10 个防手滑整个目录拖进来。 */
+    fun stage(f: java.io.File) {
+        if (staged.size >= 10) { sendErr = "一次最多带 10 个附件"; return }
+        val a = Attach.fromFile(f)
+        staged.add(a)
+        Attach.launchUpload(conn, session.name, a, scope)
+    }
+
+    /** 剪贴板里的图 → PNG → 暂存（Codex / Claude Desktop 的 Ctrl+V 贴图）。编码几十毫秒，挪出输入线程。 */
+    fun stagePasted() {
+        val img = Attach.clipboardImage() ?: return
+        scope.launch {
+            val bytes = withContext(Dispatchers.Default) { Attach.pngBytes(img) }
+            if (staged.size >= 10) { sendErr = "一次最多带 10 个附件"; return@launch }
+            val a = Attach.fromPastedImage(bytes)
+            staged.add(a)
+            Attach.launchUpload(conn, session.name, a, scope)
+        }
+    }
 
     // 转录：找到这个会话的 jsonl，从最后 400 行的字节起点 tail -f，攒 300ms 一批增量解析。
     // 历史灌完（字节数够了）之前不上屏，免得看它从旧滚到新（手机端 #261 的教训）。
@@ -233,16 +269,24 @@ fun ChatPane(conn: Conn, session: Session) {
         sendKey(p.options.firstOrNull { isReject(it.label) }?.number?.toString() ?: "Escape", p.fingerprint)
     }
 
+    val uploading = staged.any { it.state is DraftState.Waiting || it.state is DraftState.Uploading }
+    val hasDone = staged.any { it.state is DraftState.Done }
+
     fun send() {
         val text = draft.text.trim()
-        if (text.isEmpty() || sending) return
+        // 发送 = 暂存头（[图片1] 路径 的映射）+ 正文。传着的附件不让发（映射不全 Claude 读不到）
+        val body = Attach.headerOf(staged) + text
+        if (body.isBlank() || sending) return
         draft = TextFieldValue(); sendErr = null; sending = true
         scope.launch {
             // ⚠️ exec 在连接断了时返回空串不抛，SessionProbe.send 会把「读不到屏」当成功 —— 先看连接活没活
-            val ok = ssh.isConnected && catching { SessionProbe.send(ssh, session.name, text) }.getOrDefault(false)
+            val ok = ssh.isConnected && catching { SessionProbe.send(ssh, session.name, body) }.getOrDefault(false)
             if (!ok) {
                 sendErr = "没发出去，话给你留在输入框了"
+                // 正文还原，附件原样留在 chips 上（传完的那些不用重传，再点一次发送就行）
                 draft = TextFieldValue(text + draft.text.let { if (it.isBlank()) "" else "\n$it" })
+            } else {
+                Attach.removeDone(staged)
             }
             sending = false
         }
@@ -279,7 +323,7 @@ fun ChatPane(conn: Conn, session: Session) {
                         is ChatRow.Group -> GroupCard(row.calls, open = row.key in openGroups) {
                             if (row.key in openGroups) openGroups.remove(row.key) else openGroups.add(row.key)
                         }
-                        is ChatRow.One -> ItemView(row.item)
+                        is ChatRow.One -> ItemView(conn, row.item)
                     }
                 }
             }
@@ -295,12 +339,41 @@ fun ChatPane(conn: Conn, session: Session) {
         val a = approval?.takeIf { it.first == p?.fingerprint }?.second ?: Approval(null, "")   // 抓屏还没回来就先只有标题
         if (p != null) ApprovalCard(p, a, busy = !canAct, onKey = { sendKey(it, p.fingerprint) }, onSubmit = { submit(p) })
         val hint = when {
-            p == null -> "跟它说点什么… Enter 发送，Shift+Enter 换行"
+            p == null -> "跟它说点什么… Enter 发送，Shift+Enter 换行；截图直接 Ctrl+V"
             p.isPermission(a) -> "Enter 允许 · Esc 拒绝 · 想说别的直接打字"
             else -> "Enter 选第 1 项 · Esc 取消 · 想说别的直接打字"
         }
         sendErr?.let { Note(it, t.danger) }
+        // 暂存 chips：传着的看进度，失败的看原因；✕ 移除（传着的会顺手取消）
+        if (staged.isNotEmpty()) Column(Modifier.fillMaxWidth().padding(12.dp, 4.dp, 12.dp, 0.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            staged.forEach { a ->
+                val st = a.state
+                Row(
+                    Modifier.fillMaxWidth().background(t.surface1, RoundedCornerShape(Radius)).padding(8.dp, 5.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Icon(if (a.isImage) Icons.Outlined.Image else Icons.Outlined.AttachFile, null, Modifier.size(14.dp), tint = t.textMuted)
+                    Text(a.display, style = CodeStyle, color = t.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    when (st) {
+                        is DraftState.Waiting -> Text("排队中", fontSize = 11.sp, color = t.textMuted)
+                        is DraftState.Uploading -> Text("${st.percent}%", fontSize = 11.sp, color = t.accent)
+                        is DraftState.Done -> Text("好了", fontSize = 11.sp, color = t.success)
+                        is DraftState.Failed -> Text(st.msg, fontSize = 11.sp, color = t.danger, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    IconButton(
+                        { a.cancelled.set(true); staged.remove(a) },
+                        Modifier.size(20.dp),
+                    ) { Icon(Icons.Default.Close, "移除", Modifier.size(12.dp), tint = t.textMuted) }
+                }
+            }
+        }
         Row(Modifier.fillMaxWidth().padding(12.dp, 6.dp, 12.dp, 12.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            IconButton(
+                // AWT 的模态文件对话框自己泵事件，卡在点击回调里是它的正常姿势
+                { Attach.pickFiles().forEach { stage(it) } },
+                Modifier.padding(bottom = 2.dp),
+                enabled = !sending,
+            ) { Icon(Icons.Outlined.AttachFile, "添加附件", Modifier.size(18.dp), tint = t.textSecondary) }
             OutlinedTextField(
                 draft, { draft = it }, maxLines = 8, textStyle = BodyStyle, shape = RoundedCornerShape(RadiusComposer),
                 placeholder = { Text(hint, color = t.textMuted) },
@@ -313,6 +386,8 @@ fun ChatPane(conn: Conn, session: Session) {
                     val enter = e.key == Key.Enter || e.key == Key.NumPadEnter
                     when {
                         e.type != KeyEventType.KeyDown || draft.composition != null -> false   // 中文输入法正在组词时 Enter / Esc 归输入法
+                        // 剪贴板里有图 = 粘贴图片；没有图就把 Ctrl+V 还给输入框贴文本
+                        e.isCtrlPressed && e.key == Key.V && Attach.clipboardImage() != null -> { stagePasted(); true }
                         // 输入框空着时 Enter 归审批卡（Codex：Enter 批准）；有字就是发消息
                         enter && !e.isShiftPressed -> { if (draft.text.isBlank()) approve() else send(); true }
                         e.key == Key.Escape && pending != null -> { reject(); true }   // 没在等审批时 Esc 留给窗口壳
@@ -320,7 +395,9 @@ fun ChatPane(conn: Conn, session: Session) {
                     }
                 },
             )
-            Button(onClick = ::send, enabled = draft.text.isNotBlank() && !sending, colors = primaryButton()) { Text(if (sending) "发送中…" else "发送") }
+            Button(onClick = ::send, enabled = (draft.text.isNotBlank() || hasDone) && !sending && !uploading, colors = primaryButton()) {
+                Text(when { uploading -> "附件传中…"; sending -> "发送中…"; else -> "发送" })
+            }
         }
     }
 }
@@ -377,9 +454,9 @@ private suspend fun waitChange(before: String, timeoutMs: Long = 4_000, get: () 
 // ── 条目渲染 ──
 
 @Composable
-private fun ItemView(item: ChatItem) = when (item) {
-    is ChatItem.UserText -> UserBubble(item.text, queued = false)
-    is ChatItem.Queued -> UserBubble(item.text, queued = true)
+private fun ItemView(conn: Conn, item: ChatItem) = when (item) {
+    is ChatItem.UserText -> UserBubble(conn, item.text, queued = false)
+    is ChatItem.Queued -> UserBubble(conn, item.text, queued = true)
     is ChatItem.AssistantText -> MessageRow(item.markdown, user = false) { AssistantBody(item.markdown) }
     is ChatItem.Thinking -> Fold("思考过程", item.text)
     is ChatItem.ToolCall -> ToolCard(item)
@@ -410,14 +487,69 @@ private fun CopyButton(text: String, modifier: Modifier = Modifier) {
     ) { Icon(if (done) Icons.Outlined.Check else Icons.Outlined.ContentCopy, "复制", Modifier.size(15.dp), tint = if (done) Tokens.current.success else Tokens.current.textMuted) }
 }
 
+/**
+ * 用户气泡。正文前面如果有附件映射头（core 的 [Attachments.parseRefs]），把那几行摘出来渲染成图 / 附件片 ——
+ * 跟手机端同一套协议：图片拉回来真显示，附件显示名字、点一下复制路径。
+ */
 @Composable
-private fun UserBubble(text: String, queued: Boolean) {
+private fun UserBubble(conn: Conn, text: String, queued: Boolean) {
     val t = Tokens.current
+    val (refs, body) = remember(text) { Attachments.parseRefs(text) }
     MessageRow(text, user = true) {
-        Column(Modifier.widthIn(max = 640.dp).background(if (queued) t.surface1 else t.userBubble, RoundedCornerShape(Radius)).padding(14.dp, 9.dp)) {
+        Column(
+            Modifier.widthIn(max = 640.dp).background(if (queued) t.surface1 else t.userBubble, RoundedCornerShape(Radius)).padding(14.dp, 9.dp),
+            verticalArrangement = if (refs.isEmpty()) Arrangement.spacedBy(0.dp) else Arrangement.spacedBy(6.dp),
+        ) {
             if (queued) Text("排队中", fontSize = 11.sp, color = t.textMuted)
-            SelectionContainer { Text(text, style = BodyStyle, color = t.textPrimary) }
+            if (body.isNotBlank()) SelectionContainer { Text(body, style = BodyStyle, color = t.textPrimary) }
+            refs.forEach { r -> if (r.isImage) RefImage(conn, r) else RefFile(r) }
         }
+    }
+}
+
+/** 历史消息里的附件引用：文件名 chip，点一下复制路径（路径还是得给 Claude，给它看路子）。 */
+@Composable
+private fun RefFile(r: Attachments.Ref) {
+    val t = Tokens.current
+    var done by remember { mutableStateOf(false) }
+    LaunchedEffect(done) { if (done) { delay(1_200); done = false } }
+    Text(
+        "[${r.label}] ${r.name}" + if (done) "  已复制路径" else "",
+        style = CodeStyle,
+        color = if (done) t.success else t.accent,
+        modifier = Modifier.clip(RoundedCornerShape(4.dp)).clickable {
+            java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(java.awt.datatransfer.StringSelection(r.path), null)
+            done = true
+        },
+    )
+}
+
+/** 历史消息里的图片引用：SFTP 拉回来真显示（进程级缓存，同一张图整个会话只拉一次）。 */
+@Composable
+private fun RefImage(conn: Conn, r: Attachments.Ref) {
+    val t = Tokens.current
+    var img by remember(r.path) { mutableStateOf<ImageBitmap?>(RefImages.get(r.path)) }
+    var failed by remember(r.path) { mutableStateOf(false) }
+    LaunchedEffect(r.path, conn) {
+        if (img != null) return@LaunchedEffect
+        val bytes = catching {
+            val s = conn.ssh.openSftp()
+            try { s.read(r.path, 12 shl 20) } finally { s.close() }
+        }.getOrNull()
+        val bmp = bytes?.let { b -> runCatching { SkiaImage.makeFromEncoded(b).toComposeImageBitmap() }.getOrNull() }
+        if (bmp != null) { RefImages.put(r.path, bmp); img = bmp } else failed = true
+    }
+    when {
+        img != null -> Image(
+            img!!, null,
+            Modifier.widthIn(max = 320.dp).heightIn(max = 240.dp).clip(RoundedCornerShape(Radius)),
+            contentScale = ContentScale.Fit,
+        )
+        failed -> Text("[${r.label}] ${r.name}", style = CodeStyle, color = t.accent)
+        else -> Box(
+            Modifier.size(160.dp, 90.dp).background(t.surface3, RoundedCornerShape(Radius)),
+            contentAlignment = Alignment.Center,
+        ) { Text("图片加载中…", fontSize = 11.sp, color = t.textMuted) }
     }
 }
 

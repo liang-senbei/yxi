@@ -1,6 +1,5 @@
 package app.yxi.agent
 
-import app.yxi.ui.t
 
 import app.yxi.ssh.Sftp
 import app.yxi.ssh.SshSession
@@ -80,7 +79,7 @@ object Attachments {
         val path = remotePath(session, name, stamp)
         sftp.write(path, input, total, progress, resume)
         return Staged(
-            if (isImage) t("图片%d").format(index) else t("附件%d").format(index),
+            if (isImage) Tr.t("图片%d").format(index) else Tr.t("附件%d").format(index),
             path, isImage, ext = extOf(name),
         )
     }
@@ -107,8 +106,8 @@ object Attachments {
         var file = 0
         return list.map {
             // ⚠️ 只重排编号，扩展名原样带过去
-            if (it.isImage) it.copy(label = t("图片%d").format(++img))
-            else it.copy(label = t("附件%d").format(++file))
+            if (it.isImage) it.copy(label = Tr.t("图片%d").format(++img))
+            else it.copy(label = Tr.t("附件%d").format(++file))
         }
     }
 

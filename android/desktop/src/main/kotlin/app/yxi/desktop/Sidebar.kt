@@ -72,6 +72,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
     var coloring by remember { mutableStateOf<Host?>(null) }
     var deleting by remember { mutableStateOf<Host?>(null) }
     var creatingOn by remember { mutableStateOf<Conn?>(null) }
+    var installingKey by remember { mutableStateOf<Host?>(null) }
     var note by remember { mutableStateOf("") }       // 不属于某条连接的错（Conn 都没建出来）
     val keys = remember { FileHostKeys() }
 
@@ -127,12 +128,15 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
                             onClick = { if (c == null || c.status == Conn.Status.Failed) connect(h) },
                             onConnect = { connect(h) }, onDisconnect = { disconnect(h) }, onNew = { creatingOn = c },
                             onEdit = { editing = h }, onColor = { coloring = h }, onDelete = { deleting = h },
+                            onInstallKey = { installingKey = h },
                         )
                         if (c?.status == Conn.Status.Failed) {
                             Text(c.error, Modifier.padding(start = 24.dp, end = 10.dp, bottom = 4.dp), color = t.danger, style = MaterialTheme.typography.bodySmall)
                             // 删旧指纹是单独一步；删完立刻重连，新指纹会再弹一次「确认这是 X 吗」让用户核对
                             if (c.keyChanged) TextButton({ keys.forget(h); connect(h) }, Modifier.padding(start = 12.dp)) { Text("我确认过了，删除旧指纹") }
                         }
+                        // 用量紧凑条（PRD P0-13）：连着才有数据，ccusage 探不到就整块不画
+                        if (c?.status == Conn.Status.Connected) UsageStrip(c)
                         // 断线重连中列表照旧摆着（服务器上的会话还在），不清
                         c?.sessions?.forEach { s ->
                             SessionRow(s, selected = state.conn === c && state.session?.name == s.name) { state.select(c, s) }
@@ -167,6 +171,12 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
         )
     }
     creatingOn?.let { c -> NewSessionDialog(c, onDismiss = { creatingOn = null }) { s -> creatingOn = null; state.select(c, s) } }
+    installingKey?.let { h ->
+        CopyIdDialog(h, keys, onSaved = { n ->
+            save(hosts.map { if (it.id == n.id) n else it })
+            if (connOf(h) != null) connect(n)   // 装成了就切到密钥重连（密码还留着当后备）
+        }, onClose = { installingKey = null })
+    }
     keys.pending?.let { p -> FingerprintDialog(p, alias = hosts.firstOrNull { keys.jschHost(it) == p.host }?.label ?: p.host) }
 }
 
@@ -176,6 +186,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
 private fun HostHeader(
     h: Host, c: Conn?, current: Boolean, onClick: () -> Unit,
     onConnect: () -> Unit, onDisconnect: () -> Unit, onNew: () -> Unit, onEdit: () -> Unit, onColor: () -> Unit, onDelete: () -> Unit,
+    onInstallKey: () -> Unit,
 ) {
     val t = Tokens.current
     var menu by remember { mutableStateOf(false) }
@@ -204,6 +215,7 @@ private fun HostHeader(
                     DropdownMenuItem(text = { Text(label) }, onClick = { menu = false; act() }, enabled = enabled)
                 if (c == null || st == Conn.Status.Failed) item("连接", act = onConnect) else item("断开", act = onDisconnect)
                 item("新建会话", enabled = st == Conn.Status.Connected, act = onNew)
+                item("装公钥免密…", act = onInstallKey)
                 item("编辑", act = onEdit)
                 item("连接颜色…", act = onColor)
                 item("删除", act = onDelete)

@@ -177,6 +177,16 @@
 - ⚠️ **除了 Windows 冒烟（开窗 3 秒），没在有显示器的机器上真用过**：下一步 Mac mini 上 `java -jar … --smoke` + 连真主机走一遍主机 → 会话 → 对话；opus 审查过一轮（3 处已修）。
 - 没做：带口令的私钥、`user@host:port` 整串粘贴拆分、账号（Logto）/ 会员 / 额度、通知托盘、深色主题。
 
+- **桌面版第二轮：P0 三个缺口（2026-09-11，老板：「安卓版很完善了，按手机版 PRD 继续推进 Windows 版」）**。对照 PRD §5.1 逐条盘过，桌面版缺的是 **用量显示（P0-13）、附件与图片（P0-10）、一键装公钥（P0-14）**，这轮全补上：
+  · **用量显示**（新 `UsageUi.kt`）：主机分组头下面一条紧凑条（5h 窗口进度 + 剩余 + 今日花费），点开详情弹窗（5h 窗口 / 今天 / 近 7 天比例条 + 合计），数据走 core 的 `Usage.probe/today/daily`（ccusage 读那台机自己的 `~/.claude`）。**探不到 ccusage 就整块不画**；5h 窗口没有 active block 时只显示今日（`blocks` 为 null 不再挡住整条）。刷新循环挂侧栏组合（30s 一查、5 分钟一刷），侧栏收起就停。
+  · **附件与图片**（新 `Attach.kt` + ChatPane 输入区）：输入框左边回形针选文件（AWT FileDialog 多选）、**剪贴板有图时 Ctrl+V 直接贴图**（截图直进对话，Codex 手感）；chips 显示进度 / 失败原因，✕ 取消；发送时走 core 的 `Attachments.header`（`[图片1.png] 路径` 映射贴正文前），传着的不让发。历史消息里的引用照手机端 `parseRefs` 渲染：图片 SFTP 拉回来真显示（进程级 LRU 缓存 `RefImages`），附件显示名字、点一下复制路径。
+  · **协议层搬进 core**：`Attachments.kt` / `Uploader.kt` 从 app 模块 `git mv` 到 core（唯一改动 `app.yxi.ui.t` → `Tr.t`，Android 启动时 `Tr.fn` 已接到同一个翻译），手机桌面同一条上传管线（重试 / 断点续传 / 卡死看门狗全保留），FQCN 没变，Android 侧零改动。桌面新增 `AttachmentsTest` 把线上的协议钉死（头格式 / parseRefs 连发合并 / renumber / dirFor 白名单 / remotePath 清洗）——`safeName` **允许空格**（只禁 shell 元字符和 `/`），别再猜错。
+  · **一键装公钥**（新 `InstallKey.kt` + HostsPane `CopyIdDialog` + 主机菜单「装公钥免密…」）：用密码连一次，把 Yxi 的公钥 append 进目标机 `authorized_keys`（core 的 `installPublicKey`），装成自动把主机切到桌面版自己的私钥 `Store.dir/id_ed25519`（jsch `KeyPair.genKeyPair` 生成 ed25519，失败退 RSA 4096；跟用户 `~/.ssh` 的主密钥分开）。指纹核对复用侧栏那套 `FileHostKeys` 弹窗 —— 没核对过指纹的机器绝不写公钥。HostForm 密码模式下加了一句指引。
+  · **验证**（迁移后第一次在这台机上跑全套）：`:desktop:compileKotlin` 绿、`:desktop:test` 绿（25 个，含新协议 6 个）、`dev/desktop-e2e.sh` 过门禁；另外**真连了一次**：hosts.json 塞 hk13 自己 → 指纹弹窗 → 连上列出全部 cc-* 会话 → 用量条「今日 $1.67」→ 弹窗三条数据对 → 贴图上传 → 发进 tmux 靶会话，pane 里收到的正是 `[图片1.png] /root/src/tmp/e2e-scratch/….png` + 正文（文件真在服务器上，发送时编号 0→1 重排也对）。⚠️ 桌面 tofu 方块是**这台 Xvfb 环境缺 CJK 字体**，Windows 真机没这回事（「配置」「我的」一直渲染正常）。
+  · **抓到一个真 bug（#328 的教训再现）**：`UsageStrip` 原来把「快照为空就 return」放在 `LaunchedEffect` **前面** —— 刷新循环根本不进组合，永远没有第一轮数据。**「还没数据时也要先跑起来的循环」必须在 early return 之前组合**。只有真跑才看得见，编过 + 逻辑自查又一次漏掉。
+  · **环境（09-09 迁移后丢了构建链，已按 desktop-e2e.sh 的文档装回）**：`openjdk-17-jdk-headless` + `openjdk-17-jre`（⚠️ 只装 headless 会 `HeadlessException: no headful library support`，缺 `libawt_xawt.so` —— 必须再装非 headless 的 jre）+ `xvfb xdotool xfwm4 imagemagick xclip`。gradle 用 `JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64`。
+  · 没做（下轮候选）：diff 查看器（PRD P2，手机端 GitDiff 已有可搬）、Snippets 常用语、TempSessions、从机（Slave）、文件页 md 渲染/源码切换对齐手机 FileViewer、装公钥后深色模式下的成功态文案、`%APPDATA%` 密码接 DPAPI（Bug_solver 的 P2 遗留）。
+
 ## 音游（云曦节拍）设计拍板 —— 2026-09-06，老板在网页试验台上选的
 
 > **试验台 2026-09-06 晚封版**（老板：「现在试玩台没问题了」），tag `bench-final-20260906`。两个没单独拍的默认值就此定下：音符用薄片（高度 1）、无线时刻最高档每一下 25% 触发。**下一步：按试验台重写 App 的音游画面**（cc-Yxi 做，判定 / 算分 / 上报不动；谱面参数和编舞关键帧的契约找 logto）。

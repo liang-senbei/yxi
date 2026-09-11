@@ -2,7 +2,6 @@ package app.yxi.agent
 
 import app.yxi.ssh.Sftp
 import app.yxi.ssh.SshSession
-import app.yxi.ui.t
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -76,9 +75,9 @@ object Uploader {
             if (cancelled()) return@coroutineScope Result.failure(CancelledException)
             if (attempt > 0) pause(minOf(1000L shl (attempt - 1), 8000L))
             val ssh = aliveSsh(if (attempt == 0) 0L else WAIT_RECONNECT_MS)
-            if (ssh == null) { last = IllegalStateException(t("连接断了,等了 30 秒没接上")); continue }
+            if (ssh == null) { last = IllegalStateException(Tr.t("连接断了,等了 30 秒没接上")); continue }
             val sftp = app.yxi.ssh.catching { ssh.openSftp() }.getOrNull()
-            if (sftp == null) { last = IllegalStateException(t("开不了 SFTP 通道")); continue }
+            if (sftp == null) { last = IllegalStateException(Tr.t("开不了 SFTP 通道")); continue }
             // 卡死看门狗:字节一停就掐(见 [STALL_MS])。jsch 那边是无超时的阻塞读,只能从外面弄醒
             val lastMove = java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis())
             val watchdog = launch {
@@ -117,7 +116,7 @@ object Uploader {
         }
         // 都没成:半个文件别留在服务器上。连接不活就删不掉,交给暂存区 3 天的自动清理
         runCatching { aliveSsh(0L)?.openSftp()?.let { f -> try { f.rm(path) } finally { f.close() } } }
-        Result.failure(last ?: RuntimeException(t("传输中断了")))
+        Result.failure(last ?: RuntimeException(Tr.t("传输中断了")))
     }
 
     /** 扔到独立守护线程去做,做不完也不拖住任何人。收拾僵死连接专用。 */

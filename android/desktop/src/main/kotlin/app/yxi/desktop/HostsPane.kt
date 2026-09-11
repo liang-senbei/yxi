@@ -22,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,9 +33,10 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import java.io.File
+import kotlinx.coroutines.launch
 
 /*
- * 主机相关的弹窗：新增 / 编辑表单、首次连接的指纹确认、连接颜色。
+ * 主机相关的弹窗：新增 / 编辑表单、首次连接的指纹确认、连接颜色、一键装公钥。
  * 列表本身在 Sidebar.kt（主机是分组头，会话挂在下面）。
  */
 
@@ -68,6 +70,10 @@ fun HostForm(h: Host, isNew: Boolean, onSave: (Host) -> Unit, onClose: () -> Uni
                 }
                 if (usePassword) Field(password, { password = it }, "密码", password = true)
                 else Field(keyPath, { keyPath = it }, "私钥文件路径")
+                if (usePassword) Text(
+                    "不想每次输密码：保存后走主机菜单的「装公钥免密…」，装完自动改用私钥。",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 if (err.isNotBlank()) Text(err, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }
         },
@@ -105,6 +111,49 @@ fun defaultKey(): String =
     listOf("id_ed25519", "id_rsa").map { File(System.getProperty("user.home"), ".ssh/$it") }.firstOrNull { it.isFile }?.path ?: ""
 
 private fun expandHome(p: String) = if (p.startsWith("~")) System.getProperty("user.home") + p.drop(1) else p
+
+/**
+ * 一键装公钥（PRD P0-14，手机端 HostsScreen 同款）：用密码连一次，把 Yxi 的公钥写进目标机的
+ * authorized_keys，装成就把主机切到桌面版自己的私钥（[DesktopKey]）。指纹核对走侧栏那套弹窗。
+ */
+@Composable
+fun CopyIdDialog(h: Host, keys: FileHostKeys, onSaved: (Host) -> Unit, onClose: () -> Unit) {
+    var password by remember { mutableStateOf(h.password) }
+    var busy by remember { mutableStateOf(false) }
+    var msg by remember { mutableStateOf<String?>(null) }
+    var done by remember { mutableStateOf(false) }
+    val t = Tokens.current
+    val scope = rememberCoroutineScope()
+    AlertDialog(
+        onDismissRequest = { if (!busy) onClose() },
+        title = { Text("给 ${h.label} 装公钥") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "用密码连一次，把 Yxi 的公钥写进这台机器的 ~/.ssh/authorized_keys，之后免密登录。",
+                    style = MaterialTheme.typography.bodySmall, color = t.textSecondary,
+                )
+                if (!done) Field(password, { password = it }, "密码", password = true)
+                msg?.let { Text(it, color = if (done) t.success else t.danger, style = MaterialTheme.typography.bodySmall) }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = password.isNotEmpty() && !busy && !done, onClick = {
+                busy = true; msg = null
+                scope.launch {
+                    val err = installPublicKey(h, password, keys)
+                    busy = false
+                    if (err == null) {
+                        done = true
+                        msg = "装好了，已切到密钥登录（${DesktopKey.privFile.path}）"
+                        onSaved(h.copy(keyPath = DesktopKey.privFile.path))
+                    } else msg = err
+                }
+            }) { Text(if (busy) "安装中…" else if (done) "装好了" else "连接并安装") }
+        },
+        dismissButton = { TextButton({ onClose() }) { Text(if (done) "完成" else "取消") } },
+    )
+}
 
 /** 首次连接的指纹确认（措辞照 Claude Desktop）。答案往 [FileHostKeys.Prompt.answer] 里填，jsch 在 IO 线程上等着。 */
 @Composable
