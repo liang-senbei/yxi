@@ -39,7 +39,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi, org.jetbrains.compose.desktop.application.dsl.TargetFormat.Exe)
             packageName = "Yxi"
-            packageVersion = "1.0.1"   // 也是 Velopack 的 packVersion（CI 从 app-image 的 Yxi.cfg 读）和运行时的 jpackage.app-version
+            packageVersion = "1.1.0"   // 也是 Velopack 的 packVersion（CI 从 app-image 的 Yxi.cfg 读）和运行时的 jpackage.app-version
             vendor = "Yxi"
             windows { menu = true; shortcut = true; iconFile.set(project.file("icon.ico")); upgradeUuid = "3f6a9d2c-7b1e-4c0a-9a3d-8e2f5b1c4d7a" }
         }
