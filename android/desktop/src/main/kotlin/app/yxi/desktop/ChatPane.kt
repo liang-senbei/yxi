@@ -442,13 +442,13 @@ private fun Composer(
                 if (c.mode == "plan") Chip("计划模式", color = t.warning)
                 if (c.tokens > 0) Chip("上下文 " + kShort(c.tokens))
             }
-            // 圆形发送（Codex 的 ↑）：能发时点亮；附件在传时灰着不亮
+            // 圆形发送（Codex 的 ↑）：能发时点亮（Copper 主操作，手机端同款）；附件在传时灰着不亮
             Box(
                 Modifier.size(30.dp).clip(CircleShape)
-                    .background(if (canSend) t.textPrimary else t.border)
+                    .background(if (canSend) t.accent else t.border)
                     .clickable(enabled = canSend, onClick = onSend),
                 contentAlignment = Alignment.Center,
-            ) { Icon(Icons.Default.ArrowUpward, "发送", Modifier.size(17.dp), tint = if (canSend) t.surface2 else t.textMuted) }
+            ) { Icon(Icons.Default.ArrowUpward, "发送", Modifier.size(17.dp), tint = if (canSend) t.onAccent else t.textMuted) }
         }
     }
 }
@@ -591,8 +591,8 @@ private fun UserBubble(conn: Conn, text: String, queued: Boolean) {
             Modifier.widthIn(max = 640.dp).background(if (queued) t.surface1 else t.userBubble, RoundedCornerShape(Radius)).padding(14.dp, 9.dp),
             verticalArrangement = if (refs.isEmpty()) Arrangement.spacedBy(0.dp) else Arrangement.spacedBy(6.dp),
         ) {
-            if (queued) Text("排队中", fontSize = 11.sp, color = t.textMuted)
-            if (body.isNotBlank()) SelectionContainer { Text(body, style = BodyStyle, color = t.textPrimary) }
+            if (queued) Text("排队中", fontSize = 11.sp, color = t.userBubbleText)
+            if (body.isNotBlank()) SelectionContainer { Text(body, style = BodyStyle, color = t.userBubbleText) }
             refs.forEach { r -> if (r.isImage) RefImage(conn, r) else RefFile(r) }
         }
     }

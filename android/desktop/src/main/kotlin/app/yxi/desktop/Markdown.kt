@@ -21,9 +21,9 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/** 正文 14/20、代码 13（design/desktop-reference.md §4.9）。 */
-val BodyStyle = TextStyle(fontSize = 14.sp, lineHeight = 20.sp)
-val CodeStyle = TextStyle(fontFamily = Mono, fontSize = 13.sp, lineHeight = 18.sp)
+// 手机端的呼吸感（手机 Theme.kt AiryType 的注释）：字号大一点、行距松一点——光换色不改行距，看着还是「另一个 app」
+val BodyStyle = TextStyle(fontSize = 15.sp, lineHeight = 24.sp)
+val CodeStyle = TextStyle(fontFamily = Mono, fontSize = 13.sp, lineHeight = 19.sp)
 
 /** 最简 markdown 渲染：围栏代码块 + 行内粗体 / 代码 / 标题 / 圆点。 */
 @Composable
