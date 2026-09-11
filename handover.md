@@ -201,6 +201,16 @@
 
 - **ThinkingGlow 搬上桌面（2026-09-12，老板：「手机版对话界面思考时有渐变色流动，直接 copy 那份小巧思」）**：新 `desktop/ThinkingGlow.kt`，从手机端 `ui/ThinkingGlow.kt` 原样移植（桌面没有系统动画缩放，motion 恒 true）：待机 = 底部一团蓝色聚光（0.55）；思考 = 650ms 铺满顶部 + **色相 6 秒一圈蓝→青→绿→黄→橙→粉**（四团光各自独立相位 7.3/9.1/11.7/13.9s，互不成整数倍——手机端 #186 的教训一起搬了）；等你拍板 = 不循环、定在琥珀；回答到达 = 退到 0.35 让位正文。`glowBrush`（composer 同色相流动底，透明度压在 0.10/0.16）也一起接上。手机端的 `GlassPill` 玻璃壳（呼吸光晕/斜向光带）**没搬**，想要的底下那份代码还在。挂在 ChatPane 对话画布 Box 的最底层（matchParentSize，不参与布局）。**验证**：单测/e2e 全绿；Xvfb 真连截图 + 相隔 4 秒两帧像素 diff（64% 采样点在变）证明光是活的；「思考满色相」那档要等真有个会话在跑才能看到，逻辑逐行照抄手机端，风险低。
 
+- **五代理交叉审查 + 发版 1.1.0（2026-09-12，老板：「五个子代理交叉验证没问题后就直接发新版」）**。五个只读审查代理并行（①core 移动对安卓的影响 ②附件/装公钥/用量逻辑 ③对话 UI+Glow 移植忠实度 ④通知/窗口壳 ⑤发版流水线），无 P0，**7 处 P1 全修**（d7cd992）：
+  · **装公钥假成功（最重）**：core 的 `exec` 把连接类异常吞成空串、`installPublicKey` 从不抛——append 根本没执行也报「装好了」，还会把主机切到坏密钥。修：写完**回读验证**（`grep -qxF` + echo 哨兵，line 是 base64 无单引号可安全内插）；`ensure()`/`toConfig()` 的文件 IO 圈进失败路径（原来裸奔在 try 外，异常直接带崩进程）；`@Synchronized` 防并发生成钥匙；早退路径也补私钥权限。
+  · **ChatPane 会话状态键**：`remember(session.name)` 全部改 `remember(conn.host.id, session.name)`——两台主机同名会话（tmux 名=cc-<目录名>，同名太容易）会串 draft/暂存附件，**把 A 机的附件路径发给 B 机的 Claude**。
+  · **Enter 绕过上传门**：圆形按钮的 canSend 有 `!uploading`，键盘 Enter 没有——附件传着按 Enter 会发出映射不全的消息。send() 开头补同样的门。
+  · **Ctrl+V**：keydown 里的 `clipboardImage()` 会完整解码图片（大图卡 UI、按键重复贴好几张）。改成便宜的 `isDataFlavorAvailable` 预检 + `pasteBusy` AtomicBoolean 防重入，真正的取图+编码一次性在协程里做。
+  · **通知 click 劫持**：click 载荷在三档守卫**之前**赋值且永不过期——「从不」档下从没弹过通知，双击托盘图标却会跳到一个不相干的会话。修：先过守卫再武装 + 10 秒时效（AWT 区分不了点气泡和双击图标）。
+  · 小修：UsageCache 容错改「重抛 CancellationException」（不然侧栏收起会把好缓存覆盖成全 null）；glowBrush 端点是手机年代的绝对像素，宽 composer 卡会出现「冻结线」，改 Mirror 平铺；通知 detail 先压一行再截（防 emoji 代理对截半）；装公钥弹窗 busy 中禁用取消；删死代码 lastAssistant。审查还确认了：ThinkingGlow 移植逐参数忠实（桌面还顺手修了手机端负 hue 的 bug，可反向移植）；installPublicKey 的指纹弹窗链路真实有效；升级链 1.0.1→1.1.0 无断点。
+  · **安卓侧回归一处**：core 移动后 ShareActivity 冷启动没接 Tr.fn（SEND 入口可从全新进程进），EN 用户的分享文案回退中文——一行补上（审查①抓的，只有 EN 用户+分享冷启动能撞到）。
+- **发版 1.1.0（0bee8a3）**：`packageVersion` 1.0.1→1.1.0（三处同源：cfg→vpk→运行时）。走 `workflow_dispatch`（tag 触发从未实测过，首发不冒险）；publish.sh 在哪台机都跑不起来（hk13 缺 gh、本地 Git Bash 缺 rsync——以后要么 hk13 装 gh 要么本地补 rsync），这次用本地 `gh run download` + `scp` 手工替代（rsync 无 --delete，scp 等价）；发布后核 releases.win.json 版本字段与 nupkg SHA256。
+
 ## 音游（云曦节拍）设计拍板 —— 2026-09-06，老板在网页试验台上选的
 
 > **试验台 2026-09-06 晚封版**（老板：「现在试玩台没问题了」），tag `bench-final-20260906`。两个没单独拍的默认值就此定下：音符用薄片（高度 1）、无线时刻最高档每一下 25% 触发。**下一步：按试验台重写 App 的音游画面**（cc-Yxi 做，判定 / 算分 / 上报不动；谱面参数和编舞关键帧的契约找 logto）。
