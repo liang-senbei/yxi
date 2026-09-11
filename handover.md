@@ -209,7 +209,7 @@
   · **通知 click 劫持**：click 载荷在三档守卫**之前**赋值且永不过期——「从不」档下从没弹过通知，双击托盘图标却会跳到一个不相干的会话。修：先过守卫再武装 + 10 秒时效（AWT 区分不了点气泡和双击图标）。
   · 小修：UsageCache 容错改「重抛 CancellationException」（不然侧栏收起会把好缓存覆盖成全 null）；glowBrush 端点是手机年代的绝对像素，宽 composer 卡会出现「冻结线」，改 Mirror 平铺；通知 detail 先压一行再截（防 emoji 代理对截半）；装公钥弹窗 busy 中禁用取消；删死代码 lastAssistant。审查还确认了：ThinkingGlow 移植逐参数忠实（桌面还顺手修了手机端负 hue 的 bug，可反向移植）；installPublicKey 的指纹弹窗链路真实有效；升级链 1.0.1→1.1.0 无断点。
   · **安卓侧回归一处**：core 移动后 ShareActivity 冷启动没接 Tr.fn（SEND 入口可从全新进程进），EN 用户的分享文案回退中文——一行补上（审查①抓的，只有 EN 用户+分享冷启动能撞到）。
-- **发版 1.1.0（0bee8a3）**：`packageVersion` 1.0.1→1.1.0（三处同源：cfg→vpk→运行时）。走 `workflow_dispatch`（tag 触发从未实测过，首发不冒险）；publish.sh 在哪台机都跑不起来（hk13 缺 gh、本地 Git Bash 缺 rsync——以后要么 hk13 装 gh 要么本地补 rsync），这次用本地 `gh run download` + `scp` 手工替代（rsync 无 --delete，scp 等价）；发布后核 releases.win.json 版本字段与 nupkg SHA256。
+- **发版 1.1.0（0bee8a3）**：`packageVersion` 1.0.1→1.1.0（三处同源：cfg→vpk→运行时）。走 `workflow_dispatch`（tag 触发从未实测过，首发不冒险）；publish.sh 在哪台机都跑不起来（hk13 缺 gh、本地 Git Bash 缺 rsync——以后要么 hk13 装 gh 要么本地补 rsync），这次用本地 `gh run download` + `scp` 手工替代（rsync 无 --delete，scp 等价）；发布后核 releases.win.json 版本字段与 nupkg SHA256。**已发（run 34635459274，head 0bee8a3 绿）**：公网 releases.win.json = 1.1.0，nupkg SHA256 与 feed 逐字相等（8EBE0D54…C01A），Setup.exe 200（114587572 字节，比 1.0.1 变化）；旧 Yxi-1.0.0.msi 原样保留。真机验收清单：装 Setup.exe / 1.0.1 自更新跳 1.1.0 / 系统通知措辞与点击跳转 / 真批一次权限 / 思考满色相背景光。
 
 ## 音游（云曦节拍）设计拍板 —— 2026-09-06，老板在网页试验台上选的
 
