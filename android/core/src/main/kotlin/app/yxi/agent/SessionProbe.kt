@@ -41,6 +41,8 @@ data class Session(
     val stateTs: Double,
     /** 窗格里正在跑的命令（tmux `pane_current_command`）：claude / codex / bash … */
     val cmd: String = "",
+    /** tmux server pid + session id + creation time; changes when a same-named session is recreated. */
+    val runtimeId: String = "",
 ) {
     /** 去掉 `cc-` / `cx-` 前缀的短名，界面上用 */
     val short get() = shortOf(name)
@@ -79,7 +81,7 @@ object SessionProbe {
         m=$MARKER
         s(){ printf '%s\t%s\n' "${'$'}m" "${'$'}1"; }
         s tmux_begin
-        tmux list-sessions -F '#{session_name}|#{session_windows}|#{session_activity}|#{session_attached}|#{pane_current_path}|#{pane_current_command}' 2>/dev/null || true
+        tmux list-sessions -F '#{session_name}|#{session_windows}|#{session_activity}|#{session_attached}|#{pane_current_path}|#{pane_current_command}|#{pid}:#{session_id}:#{session_created}' 2>/dev/null || true
         s tmux_end
         s ev_begin
         tail -n 200 ${'$'}HOME/.yxi/events.jsonl 2>/dev/null || true
@@ -242,6 +244,7 @@ object SessionProbe {
                 detail = st?.second?.takeIf { it.isNotBlank() } ?: evPreview[name].orEmpty(),
                 stateTs = st?.third ?: 0.0,
                 cmd = p.getOrNull(5).orEmpty(),
+                runtimeId = p.getOrNull(6)?.takeIf { Regex("""\d+:\${'$'}\d+:\d+""").matches(it) }.orEmpty(),
             )
         }.toList(),
             Groups.parse(extract(out, "gp")),

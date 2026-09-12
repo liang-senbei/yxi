@@ -118,7 +118,7 @@ fun FrameWindowScope.TitleBar(state: AppState, win: WindowState, onClose: () -> 
     val t = Tokens.current
     val maximized = win.placement == WindowPlacement.Maximized
     val toggleMax = { win.placement = if (win.placement == WindowPlacement.Maximized) WindowPlacement.Floating else WindowPlacement.Maximized }
-    val title = state.conn?.let { c -> c.host.alias.ifBlank { c.host.hostname } + (state.session?.let { " · ${it.name}" } ?: "") } ?: "Yxi"
+    val title = state.conn?.let { c -> c.host.alias.ifBlank { c.host.hostname } + (state.session?.let { " · " + (state.navigation.title(taskNavigationKey(c.host, it)) ?: it.short) } ?: "") } ?: "Yxi"
     WindowDraggableArea(Modifier.fillMaxWidth().height(40.dp).background(t.surface1).pointerInput(Unit) { detectTapGestures(onDoubleTap = { toggleMax() }) }) {
         Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
             CaptionButton({ state.sidebarOpen = !state.sidebarOpen }) { sidebarGlyph(it) }

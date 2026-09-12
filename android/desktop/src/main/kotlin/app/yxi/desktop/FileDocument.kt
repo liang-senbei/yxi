@@ -30,7 +30,8 @@ data class DocumentEndpoint(val hostname: String, val port: Int, val username: S
     companion object { fun of(host: Host) = DocumentEndpoint(host.hostname.trim().lowercase(), host.port, host.username) }
 }
 
-class FileDocument(val hostId: String, val task: String, val path: String, val endpoint: DocumentEndpoint? = null) {
+class FileDocument(val hostId: String, val task: String, val path: String, val endpoint: DocumentEndpoint? = null, val runtimeId: String = "") {
+    fun matchesTask(session: app.yxi.agent.Session) = if (session.runtimeId.isNotEmpty()) runtimeId == session.runtimeId else runtimeId.isEmpty() && task == session.name
     internal fun checkEndpoint(host: Host) {
         check(host.id == hostId && endpoint == DocumentEndpoint.of(host)) {
             "主机地址或登录用户已变化。旧文档已冻结，编辑仍保留；请另存草稿并重新打开文件。"

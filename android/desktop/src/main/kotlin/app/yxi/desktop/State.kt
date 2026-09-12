@@ -22,11 +22,12 @@ import app.yxi.agent.SessionState
 enum class Page { Workspace, Config, Me, Routes }
 
 class AppState {
+    val navigation = WorkspaceNavigation(java.io.File(Store.dir, "workspace.json"))
     val documents = mutableStateListOf<FileDocument>()
     val documentSelection = androidx.compose.runtime.mutableStateMapOf<String, String>()
     val chatDrafts = mutableMapOf<String, androidx.compose.runtime.MutableState<androidx.compose.ui.text.input.TextFieldValue>>()
-    fun appendDocumentQuote(hostId: String, task: String, quote: String) {
-        val holder = chatDrafts.getOrPut(hostId + "\u0000" + task) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue()) }
+    fun appendDocumentQuote(host: Host, task: Session, quote: String) {
+        val holder = chatDrafts.getOrPut(taskNavigationKey(host, task)) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue()) }
         val old = holder.value.text
         val text = old + (if (old.isBlank()) "" else "\n\n") + quote + "\n"
         holder.value = androidx.compose.ui.text.input.TextFieldValue(text, androidx.compose.ui.text.TextRange(text.length))
@@ -38,13 +39,14 @@ class AppState {
     suspend fun openDocument(c: Conn, task: Session, path: String) {
         val sftp = c.ssh.openSftp()
         val canonical = try { sftp.realpath(if (path.startsWith('/')) path else task.cwd.trimEnd('/') + "/" + path) } finally { sftp.close() }
-        if (documents.none { it.hostId == c.host.id && it.task == task.name && it.path == canonical }) documents += FileDocument(c.host.id, task.name, canonical, DocumentEndpoint.of(c.host))
-        documentSelection[c.host.id + "\u0000" + task.name] = canonical
+        if (documents.none { it.hostId == c.host.id && it.matchesTask(task) && it.path == canonical }) documents += FileDocument(c.host.id, task.name, canonical, DocumentEndpoint.of(c.host), task.runtimeId)
+        documentSelection[taskNavigationKey(c.host, task)] = canonical
         if (conn === c && session?.name == task.name) { filePanelOpen = true; tab = 0 }
     }
     var hostScope by mutableStateOf(Store.pref("hostScope", ""))
     internal var startupRestored = false
     internal var restoreSession by mutableStateOf<String?>(null)
+    internal var restoreRuntime by mutableStateOf<String?>(null)
     val conns = mutableStateListOf<Conn>()                 // 连着的主机（顺序 = 侧栏分组顺序）
     var conn by mutableStateOf<Conn?>(null)                // 当前会话所在的主机
     var session by mutableStateOf<Session?>(null)          // 当前会话
@@ -61,16 +63,22 @@ class AppState {
 
     /** ⚠️ 选会话顺带回工作区：人在「配置」页点了侧栏的会话，意思显然是「我要去看那个会话」。 */
     fun select(c: Conn, s: Session?) {
-        conn = c; session = s; page = Page.Workspace; restoreSession = null
+        conn = c; session = s; page = Page.Workspace; restoreSession = null; restoreRuntime = null
+        if (s != null) {
+            if (navigation.archived(taskNavigationKey(c.host, s))) navigation.setMode("归档")
+            else if (navigation.mode == "归档") navigation.setMode("全部")
+            navigation.setCollapsed(projectKey(c.host, s.cwd), false)
+        }
         Store.setPref("lastHost", c.host.id)
         Store.setPref("lastSession", s?.name.orEmpty())
+        Store.setPref("lastRuntime", s?.runtimeId.orEmpty())
         if (hostScope.isNotEmpty()) scopeHost(c.host.id)
     }
 
     fun scopeHost(id: String) { hostScope = id; Store.setPref("hostScope", id) }
 
     /** 所有主机的会话按侧栏顺序摊平（Ctrl+Tab / Ctrl+1…9 用）。 */
-    fun allSessions(): List<Pair<Conn, Session>> = conns.flatMap { c -> c.sessions.map { c to it } }
+    fun allSessions(): List<Pair<Conn, Session>> = conns.flatMap { c -> c.sessions.filter { navigation.visible(taskNavigationKey(c.host, it), it.state) }.map { c to it } }
 
     fun selectByOffset(delta: Int) {
         val all = allSessions(); if (all.isEmpty()) return

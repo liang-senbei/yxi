@@ -26,11 +26,13 @@ import java.text.SimpleDateFormat
 import java.util.Date
 
 @Composable
-fun DocumentPane(state: AppState, conn: Conn, task: String) {
+fun DocumentPane(state: AppState, conn: Conn, session: app.yxi.agent.Session) {
+    val task = session.name
+    val selectionKey = taskNavigationKey(conn.host, session)
     val t = Tokens.current
     val scope = rememberCoroutineScope()
-    val docs = state.documents.filter { it.hostId == conn.host.id && it.task == task }
-    val selected = docs.firstOrNull { it.path == state.documentSelection[conn.host.id + "\u0000" + task] } ?: docs.lastOrNull()
+    val docs = state.documents.filter { it.hostId == conn.host.id && it.matchesTask(session) }
+    val selected = docs.firstOrNull { it.path == state.documentSelection[selectionKey] } ?: docs.lastOrNull()
     var closing by remember { mutableStateOf<FileDocument?>(null) }
     fun close(doc: FileDocument) { state.documents.remove(doc) }
     Column(Modifier.fillMaxSize().background(t.surface0)) {
@@ -41,7 +43,7 @@ fun DocumentPane(state: AppState, conn: Conn, task: String) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
             docs.forEach { doc ->
                 Row(Modifier.background(if (doc === selected) t.selected else t.surface1), verticalAlignment = Alignment.CenterVertically) {
-                    TextButton({ state.documentSelection[conn.host.id + "\u0000" + task] = doc.path }) {
+                    TextButton({ state.documentSelection[selectionKey] = doc.path }) {
                         Text(doc.path.substringAfterLast('/') + if (doc.dirty) " •" else "", maxLines = 1)
                     }
                     TextButton({ if (doc.dirty) closing = doc else close(doc) }) { Text("×") }
@@ -59,8 +61,9 @@ fun DocumentPane(state: AppState, conn: Conn, task: String) {
                         val path = if (parsed.path.startsWith('/')) parsed.path else selected.path.substringBeforeLast('/') + "/" + parsed.path
                         scope.launch {
                             try {
-                                val session = conn.sessions.firstOrNull { it.name == task } ?: error("任务已不在服务器上")
-                                state.openDocument(conn, session, path)
+                                selected.checkEndpoint(conn.host)
+                                val current = conn.sessions.firstOrNull { selected.matchesTask(it) } ?: error("任务已不在服务器上")
+                                state.openDocument(conn, current, path)
                             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
                             catch (e: Exception) { selected.error = "链接无法打开：${e.message}" }
                         }
@@ -68,7 +71,7 @@ fun DocumentPane(state: AppState, conn: Conn, task: String) {
                 }
             }
             CompositionLocalProvider(LocalUriHandler provides handler) {
-                DocumentBody(conn, selected) { quote -> state.appendDocumentQuote(conn.host.id, task, quote) }
+                DocumentBody(conn, selected) { quote -> state.appendDocumentQuote(conn.host, session, quote) }
             }
         }
     }

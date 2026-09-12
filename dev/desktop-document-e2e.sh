@@ -77,5 +77,46 @@ tap 840 824
 shot 07-quoted
 tap 1180 110
 shot 08-routes
+if [ "${YXI_TEST_NAVIGATION:-0}" = 1 ]; then
+  tap 322 714
+  shot 09-task-menu
+  DISPLAY=$D xdotool key Down Return
+  sleep 2
+  shot 10-pinned
+  python3 - "$TEST_HOME" <<'PY'
+import pathlib,json,hashlib,re,sys
+p=pathlib.Path(sys.argv[1])/'.config/yxi'
+runtime=json.loads((p/'prefs.json').read_text())['lastRuntime']
+assert re.fullmatch(r'\d+:\$\d+:\d+',runtime),runtime
+key=hashlib.sha256('\0'.join(['doc-test','127.0.0.1','22','root',runtime]).encode()).hexdigest()
+assert json.loads((p/'workspace.json').read_text())['tasks'][key]['pin']>0
+PY
+  tap 322 400
+  DISPLAY=$D xdotool key Down Down Down Return
+  sleep 2
+  tap 216 252
+  shot 11-archived
+  python3 - "$TEST_HOME" <<'PY'
+import pathlib,json,hashlib,sys
+p=pathlib.Path(sys.argv[1])/'.config/yxi'
+runtime=json.loads((p/'prefs.json').read_text())['lastRuntime']
+key=hashlib.sha256('\0'.join(['doc-test','127.0.0.1','22','root',runtime]).encode()).hexdigest()
+assert json.loads((p/'workspace.json').read_text())['tasks'][key]['archived'] is True
+PY
+  tap 322 434
+  DISPLAY=$D xdotool key Down Down Down Return
+  sleep 2
+  tap 86 252
+  shot 12-restored-pin
+  python3 - "$TEST_HOME" <<'PY'
+import pathlib,json,hashlib,sys
+p=pathlib.Path(sys.argv[1])/'.config/yxi'
+runtime=json.loads((p/'prefs.json').read_text())['lastRuntime']
+key=hashlib.sha256('\0'.join(['doc-test','127.0.0.1','22','root',runtime]).encode()).hexdigest()
+task=json.loads((p/'workspace.json').read_text())['tasks'][key]
+assert task['archived'] is False and task['pin']>0
+PY
+  tmux has-session -t "$SESSION"
+fi
 echo "Evidence: $OUT; fixture: $FIXTURE; test home: $TEST_HOME"
 if grep -iE 'exception|error' "$OUT/run.log" | grep -viE 'Cannot create Linux GL context|Fallback to next API'; then exit 1; fi

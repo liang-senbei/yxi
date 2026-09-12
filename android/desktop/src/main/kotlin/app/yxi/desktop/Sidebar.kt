@@ -115,6 +115,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
                     val previousSession = Store.pref("lastSession", "")
                     connect(h)
                     state.restoreSession = previousSession.takeIf { it.isNotEmpty() }
+                    state.restoreRuntime = Store.pref("lastRuntime", "").takeIf { it.isNotBlank() }
                 }
             }
         }
@@ -122,7 +123,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
     LaunchedEffect(state.conn, state.conn?.sessions, state.restoreSession) {
         val c = state.conn
         val wanted = state.restoreSession
-        if (c != null && wanted != null) c.sessions.firstOrNull { it.name == wanted }?.let { state.select(c, it) }
+        if (c != null && wanted != null) c.sessions.firstOrNull { if (state.restoreRuntime != null) it.runtimeId == state.restoreRuntime else it.name == wanted }?.let { state.select(c, it) }
     }
 
     // Ctrl+N：对当前主机弹「新建会话」。seen 放 AppState 而不是 remember：
@@ -178,12 +179,14 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
             )
         }
         if (hosts.isEmpty()) Text("尚未添加设备，点 + 加一台", Modifier.padding(14.dp, 8.dp), style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+        if (hosts.isNotEmpty()) WorkbenchTabs(listOf("全部", "待处理", "归档"), state.navigation.mode, { state.navigation.setMode(it) }, Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
+        if (state.navigation.error.isNotBlank()) Text(state.navigation.error, Modifier.padding(10.dp), color = t.danger, style = MaterialTheme.typography.bodySmall)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             val f = filter.trim()
             hosts.forEachIndexed { i, h ->
                 if (state.hostScope.isNotEmpty() && state.hostScope != h.id) return@forEachIndexed
                 val c = connOf(h)
-                val sessions = c?.sessions?.filter { f.isEmpty() || it.short.contains(f, ignoreCase = true) || it.name.contains(f, ignoreCase = true) } ?: emptyList()
+                val sessions = c?.sessions?.filter { f.isEmpty() || h.label.contains(f, true) || it.short.contains(f, true) || it.name.contains(f, true) || it.cwd.contains(f, true) || state.navigation.title(taskNavigationKey(h, it))?.contains(f, true) == true } ?: emptyList()
                 val hostMatch = f.isEmpty() || h.label.contains(f, ignoreCase = true)
                 if (!hostMatch && sessions.isEmpty()) return@forEachIndexed   // 滤空的整组不画，省得滚动列表里全是空组
                 Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
@@ -206,9 +209,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
                         if (c?.status == Conn.Status.Connected) UsageStrip(c)
                         // 断线重连中列表照旧摆着（服务器上的会话还在），不清；搜索时只画滤剩下的
                         if (c != null) {
-                            sessions.forEach { s ->
-                                SessionRow(s, selected = state.conn === c && state.session?.name == s.name) { state.select(c, s) }
-                            }
+                            ProjectTree(state, c, sessions, searching = f.isNotEmpty())
                             if (f.isEmpty() && c.status == Conn.Status.Connected && c.sessions.isEmpty())
                                 Text("这台机器上还没有会话", Modifier.padding(start = 24.dp, bottom = 6.dp), style = MaterialTheme.typography.bodySmall, color = t.textMuted)
                         }

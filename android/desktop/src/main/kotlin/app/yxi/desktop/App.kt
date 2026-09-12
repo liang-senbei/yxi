@@ -32,6 +32,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -65,7 +66,8 @@ fun App(state: AppState) {
                         if (conn == null || sess == null) {
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("左边选一台主机，连上后选一个会话") }
                         } else {
-                            val taskKey = conn.host.id + "\u0000" + sess.name
+                            val taskKey = taskNavigationKey(conn.host, sess)
+                            val replaced = sess.runtimeId.isNotEmpty() && conn.sessions.any { it.name == sess.name && it.runtimeId.isNotEmpty() && it.runtimeId != sess.runtimeId }
                             fun openFile(path: String) { scope.launch {
                                 try { state.openDocument(conn, sess, path); state.workspaceError = "" }
                                 catch (e: CancellationException) { throw e }
@@ -91,7 +93,7 @@ fun App(state: AppState) {
                                 TextButton({ state.page = Page.Routes }) { Text("模型与线路") }
                             }
                             if (state.workspaceError.isNotBlank()) Text(state.workspaceError, color = Tokens.current.danger)
-                            if (!state.filePanelOpen && state.documents.any { it.hostId == conn.host.id && it.task == sess.name }) TextButton({ state.filePanelOpen = true }) { Text("打开文件侧栏") }
+                            if (!state.filePanelOpen && state.documents.any { it.hostId == conn.host.id && it.matchesTask(sess) }) TextButton({ state.filePanelOpen = true }) { Text("打开文件侧栏") }
                             CompositionLocalProvider(LocalUriHandler provides links) {
                                 BoxWithConstraints(Modifier.fillMaxSize()) {
                                     val panel = state.filePanelOpen
@@ -99,17 +101,18 @@ fun App(state: AppState) {
                                     val availableWidth = maxWidth.value
                                     Row(Modifier.fillMaxSize()) {
                                         if (!panel || !compact) Column(Modifier.weight(1f).fillMaxHeight()) {
-                                            when (state.tab) {
-                                                0 -> ChatPane(conn, sess, savedDraft = state.chatDrafts.getOrPut(taskKey) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue()) })
+                                            if (replaced) Text("原会话已结束，同名会话是新任务。请在左侧重新选择；旧草稿已保留。", Modifier.padding(24.dp))
+                                            else key(taskKey) { when (state.tab) {
+                                                0 -> ChatPane(conn, sess, savedDraft = state.chatDrafts.getOrPut(taskKey) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue()) }, displayName = state.navigation.title(taskKey))
                                                 1 -> TermPane(conn, sess)
                                                 else -> FilesPane(conn, sess, ::openFile)
-                                            }
+                                            } }
                                         }
                                         if (panel) {
                                             if (!compact) Box(Modifier.width(6.dp).fillMaxHeight().background(Tokens.current.border).draggable(
                                                 rememberDraggableState { delta -> state.filePanelWidth = (state.filePanelWidth - delta / density).coerceIn(340f, 900f) }, Orientation.Horizontal))
                                             Box(if (compact) Modifier.fillMaxSize() else Modifier.width(state.filePanelWidth.coerceAtMost(availableWidth - 350).dp).fillMaxHeight()) {
-                                                DocumentPane(state, conn, sess.name)
+                                                DocumentPane(state, conn, sess)
                                             }
                                         }
                                     }

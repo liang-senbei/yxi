@@ -105,7 +105,7 @@ import org.jetbrains.skia.Image as SkiaImage
  * · composer = 一张圆角卡片：无边框输入区 + 底部功能行（+ 附件 / 审批态 / 模型·强度·模式·上下文 chips / 圆形发送）。
  */
 @Composable
-fun ChatPane(conn: Conn, session: Session, savedDraft: androidx.compose.runtime.MutableState<TextFieldValue>? = null) {
+fun ChatPane(conn: Conn, session: Session, savedDraft: androidx.compose.runtime.MutableState<TextFieldValue>? = null, displayName: String? = null) {
     val ssh = conn.ssh
     val t = Tokens.current
     val scope = rememberCoroutineScope()
@@ -331,7 +331,7 @@ fun ChatPane(conn: Conn, session: Session, savedDraft: androidx.compose.runtime.
 
     Column(Modifier.fillMaxSize().background(t.surface2)) {
         // 会话头（ZCode 顶栏的形态）：任务名 + 主机 pill + 连接状态。重连按钮只在断开时出现
-        SessionHeader(conn, session) { conn.start() }   // 重连循环在 Conn 自己的 scope 里跑，切走面板不会断
+        SessionHeader(conn, session, displayName) { conn.start() }   // 重连循环在 Conn 自己的 scope 里跑，切走面板不会断
         Box(Modifier.weight(1f).fillMaxWidth()) {
             // 手机端搬来的背景光：待机=底部蓝色聚光，思考=铺满顶部色相流动，等你拍板=琥珀（ThinkingGlow.kt）
             ThinkingGlow(
@@ -480,7 +480,7 @@ private class Seen(var fp: String? = null, var busy: Boolean = false)
 // ── 会话头 ──
 
 @Composable
-private fun SessionHeader(conn: Conn, session: Session, onReconnect: () -> Unit) {
+private fun SessionHeader(conn: Conn, session: Session, displayName: String?, onReconnect: () -> Unit) {
     val t = Tokens.current
     // 连过一次之后再见到 Connecting 就是「正在重新连接…」（侧栏以后加的 Reconnecting 也落进 else）
     var everConnected by remember(conn) { mutableStateOf(false) }
@@ -493,7 +493,7 @@ private fun SessionHeader(conn: Conn, session: Session, onReconnect: () -> Unit)
         else -> t.warning to "正在连接"
     }
     Row(Modifier.fillMaxWidth().background(t.surface1).padding(14.dp, 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(session.short, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = t.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(displayName ?: session.short, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = t.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         // 主机 pill（ZCode 顶栏的「default」项目 pill 同款）
         Box(Modifier.clip(RoundedCornerShape(50)).background(t.border).padding(horizontal = 8.dp, vertical = 2.dp)) {
             Text(conn.host.alias.ifBlank { conn.host.hostname }, fontSize = 11.sp, color = t.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)

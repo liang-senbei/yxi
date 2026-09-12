@@ -55,7 +55,7 @@ fun Session.badge(): Badge = when (state) {
 
 /** 一行会话：短名 + 相对时间 / cwd 末段 + 徽标。选中底色 selected、悬停 hover。 */
 @Composable
-fun SessionRow(s: Session, selected: Boolean, onClick: () -> Unit) {
+fun SessionRow(s: Session, selected: Boolean, displayName: String? = null, onClick: () -> Unit) {
     val t = Tokens.current
     val b = s.badge()
     val src = remember { MutableInteractionSource() }
@@ -71,7 +71,7 @@ fun SessionRow(s: Session, selected: Boolean, onClick: () -> Unit) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             if (s.isCodex) Text("Codex", style = MaterialTheme.typography.labelSmall, color = t.accent)
             Text(
-                s.short, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = t.textPrimary,
+                displayName ?: s.short, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = t.textPrimary,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
             )
             Text(ago(s.lastActivity), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
