@@ -1,7 +1,8 @@
 # Yxi Windows 工作台 PRD
 
-版本：v0.2 · 评审稿（沿用原文件路径，方便已打开的侧栏继续查看）  
-日期：2026-09-13  
+版本：v0.2 · 评审稿
+
+日期：2026-09-13
 基线：hk13 `/root/src/workspace/yunxi/yxi`，HEAD `df9e04b`；Windows 已发布 1.2.0，Android 1.1.27 / 183。
 
 ## 1. 产品结论
