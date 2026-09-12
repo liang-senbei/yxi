@@ -241,7 +241,12 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
             dismissButton = { TextButton({ deleting = null }) { Text("取消") } },
         )
     }
-    creatingOn?.let { c -> NewSessionDialog(c, onDismiss = { creatingOn = null }) { s -> creatingOn = null; state.select(c, s) } }
+    creatingOn?.let { c -> NewSessionDialog(c, onDismiss = { creatingOn = null }) { s ->
+        val key = taskNavigationKey(c.host, s)
+        if (state.navigation.title(key) == null) state.navigation.rename(key, "新对话 · " + if (s.isCodex) "Codex" else "Claude Code")
+        creatingOn = null
+        state.select(c, s)
+    } }
     installingKey?.let { h ->
         CopyIdDialog(h, keys, onSaved = { n ->
             save(hosts.map { if (it.id == n.id) n else it })

@@ -47,6 +47,22 @@ class RemoteRoutesTest {
         try {
             ssh.connect()
             assertEquals(home, ssh.exec("printf %s \"\$HOME\"").trim())
+            // Disposable runtimes and a private tmux socket: never start real agents.
+            suspend fun launch(plan: DesktopLaunchPlan) = ssh.exec(plan.command()).lineSequence().last { it.startsWith(app.yxi.agent.Dirs.TAG + ":") }.substringAfter(':')
+            val launchA = DesktopLaunchPlan("$home/one/项目 ' \$(touch INJECTED)/same", "claude", DesktopLaunchPlan.newRequestId())
+            val launchB = DesktopLaunchPlan("$home/two/same", "codex", DesktopLaunchPlan.newRequestId())
+            assertEquals("ok", launch(launchA))
+            assertEquals("exists", launch(launchA))
+            assertEquals("ok", launch(launchB))
+            assertEquals("2", ssh.exec("tmux list-sessions -F '#{session_name}' | wc -l").trim())
+            assertFalse(root.resolve("home/INJECTED").exists())
+            assertEquals("conflict", launch(launchA.copy(directory = "$home/elsewhere/same")))
+            root.resolve("home/.local/bin/codex").delete()
+            val missing = DesktopLaunchPlan("$home/must-not-create", "codex", DesktopLaunchPlan.newRequestId())
+            assertEquals("missing-runtime", launch(missing))
+            assertFalse(File(missing.directory).exists())
+            root.resolve("home/.local/bin/codex").apply { writeText("#!/bin/sh\nexit 1\n"); setExecutable(true) }
+            assertEquals("exited", launch(missing))
             val remotePort = root.resolve("http-port").readText().trim().toInt()
             val first = ssh.forwardPreview(remotePort)
             val second = ssh.forwardPreview(remotePort)

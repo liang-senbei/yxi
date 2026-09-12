@@ -5,7 +5,7 @@ CACHE="$HOME/.cache/yxi-route-tests"
 mkdir -p "$CACHE"
 chmod 700 "$CACHE"
 FIXTURE=$(mktemp -d "$CACHE/fixture.XXXXXX")
-mkdir -p "$FIXTURE/home/.claude" "$FIXTURE/home/.codex" "$FIXTURE/home/project"
+mkdir -p "$FIXTURE/home/.claude" "$FIXTURE/home/.codex" "$FIXTURE/home/project" "$FIXTURE/home/.local/bin" "$FIXTURE/tmux"
 ssh-keygen -q -t ed25519 -N '' -f "$FIXTURE/host"
 ssh-keygen -q -t ed25519 -N '' -f "$FIXTURE/client"
 python3 - "$FIXTURE" <<'PY'
@@ -15,7 +15,11 @@ with socket.socket() as s:
     s.bind(('127.0.0.1',0)); (p/'port').write_text(str(s.getsockname()[1]))
 (p/'home/.claude/settings.json').write_text('{"permissions":{"allow":["Read"]}}')
 (p/'home/.codex/config.toml').write_text('model = "original-model"\n')
-(p/'command').write_text('#!/bin/sh\nexport HOME="'+str(p/'home')+'"\ncd "$HOME" || exit 1\nexec /bin/sh -c "$SSH_ORIGINAL_COMMAND"\n')
+(p/'command').write_text('#!/bin/sh\nexport HOME="'+str(p/'home')+'"\nexport TMUX_TMPDIR="'+str(p/'tmux')+'"\nexport PATH=/usr/bin:/bin\ncd "$HOME" || exit 1\nexec /bin/sh -c "$SSH_ORIGINAL_COMMAND"\n')
+for name in ('claude','codex'):
+    runtime=p/'home/.local/bin'/name
+    runtime.write_text('#!/bin/sh\nexec sleep 600\n')
+    runtime.chmod(0o700)
 PY
 chmod 700 "$FIXTURE/command"
 cat > "$FIXTURE/sshd_config" <<EOF
@@ -34,7 +38,7 @@ ForceCommand $FIXTURE/command
 EOF
 /usr/sbin/sshd -D -e -f "$FIXTURE/sshd_config" > "$FIXTURE/sshd.log" 2>&1 & server=$!
 http_server=
-trap 'kill "$server" ${http_server:+"$http_server"} 2>/dev/null || true; wait "$server" 2>/dev/null || true' EXIT
+trap 'TMUX_TMPDIR="$FIXTURE/tmux" tmux kill-server 2>/dev/null || true; kill "$server" ${http_server:+"$http_server"} 2>/dev/null || true; wait "$server" 2>/dev/null || true' EXIT
 sleep 1
 kill -0 "$server"
 python3 - "$FIXTURE" > "$FIXTURE/http.log" 2>&1 <<'PY' &

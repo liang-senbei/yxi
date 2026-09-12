@@ -33,7 +33,6 @@ import androidx.compose.ui.unit.dp
 import app.yxi.agent.Dirs
 import app.yxi.agent.Session
 import app.yxi.agent.SessionState
-import app.yxi.ssh.catching
 import kotlinx.coroutines.launch
 
 /** 会话行尾的徽标（措辞照 design/desktop-reference.md §2.6）。 */
@@ -89,7 +88,7 @@ fun SessionRow(s: Session, selected: Boolean, displayName: String? = null, onCli
 }
 
 /**
- * 「新建会话」弹窗：目录不存在会建出来，然后在那儿起 tmux 会话跑 claude（命令由 Dirs.createCommand 拼好并转义）。
+ * 新建独立运行器会话；同一弹窗请求重试复用其标识，避免网络重试产生重复任务。
  * 出错留在弹窗里显示，成了才关；成了把新会话交给 [onCreated]。
  */
 @Composable
@@ -99,45 +98,56 @@ fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, onCreated: (Session) -> 
     var path by remember { mutableStateOf(Dirs.parentsOf(conn.sessions.map { it.cwd }).firstOrNull()?.let { "$it/" }.orEmpty()) }
     var err by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var agent by remember { mutableStateOf("claude") }
+    val requestId = remember(path, agent) { DesktopLaunchPlan.newRequestId() }
     WorkbenchDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!busy) onDismiss() },
         title = { Text("在 ${conn.host.label} 上新建会话") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("目录不存在会建出来，然后在那儿起一个 tmux 会话并跑 claude。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
-                OutlinedTextField(path, { path = it }, singleLine = true, placeholder = { Text("/opt/workspace/…") }, modifier = Modifier.fillMaxWidth())
+                WorkbenchTabs(listOf("Claude Code", "Codex"), if (agent == "codex") "Codex" else "Claude Code", { if (!busy) agent = if (it == "Codex") "codex" else "claude" })
+                Text("先检查运行器，再创建独立会话。目录不存在会创建；已有任务继续运行。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                OutlinedTextField(path, { path = it }, enabled = !busy, singleLine = true, label = { Text("服务器工作目录") }, placeholder = { Text("/opt/workspace/…") }, modifier = Modifier.fillMaxWidth())
+                Text("运行器沿用服务器的登录与权限设置。创建会话不代表模型请求已经成功。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 if (err.isNotBlank()) Text(err, style = MaterialTheme.typography.bodySmall, color = Tokens.current.danger)
             }
         },
         confirmButton = {
             TextButton(enabled = path.isNotBlank() && !busy, onClick = {
                 busy = true
-                scope.launch { createSession(conn, path.trim()).fold(onCreated) { err = it.message.orEmpty() }; busy = false }
+                scope.launch {
+                    try { createSession(conn, DesktopLaunchPlan(path.trim(), agent, requestId)).fold(onCreated) { err = it.message.orEmpty() } }
+                    catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                    catch (e: Exception) { err = e.message.orEmpty() }
+                    finally { busy = false }
+                }
             }) { Text(if (busy) "正在开…" else "开起来") }
         },
-        dismissButton = { TextButton(onDismiss) { Text("取消") } },
+        dismissButton = { TextButton(onDismiss, enabled = !busy) { Text("取消") } },
     )
 }
 
-/** 会话名 = 目录末段，跟手机端 SessionsScreen 同一套规则。失败的原因放在 Result 的异常消息里。 */
-private suspend fun createSession(conn: Conn, dir: String): Result<Session> {
-    val base = dir.trimEnd('/').substringAfterLast('/').filter { it.isLetterOrDigit() || it in "._-" }.ifBlank { "work" }
-    val name = "cc-$base"
-    val made = catching { conn.ssh.exec(Dirs.createCommand(dir, name, "claude")) }
-        .map { Dirs.madeFrom(it) }.getOrElse { Dirs.Made.Failed("unknown", it.message.orEmpty()) }
-    if (made is Dirs.Made.Failed) {
-        // 只认脚本自己回报的那行（tmux 对不存在的目录也返回 0，见 Dirs.createCommand）
-        return Result.failure(IllegalStateException("没开成：" + when (made.code) {
-            "nodir" -> "建不了这个目录 —— 没权限，或者上级路径不对"
-            "failed" -> "tmux 起不来这个会话"
-            "wrongdir" -> "tmux 没开在你指定的目录（跑到 ${made.detail.ifBlank { "别处" }} 去了），已经撤销"
-            "noresult" -> "没拿到结果 —— 连接可能断了"
-            else -> made.detail.ifBlank { "说不上来" }
-        }))
+/** 只有刷新取得真实会话后才进入任务，启动回执不能替代运行状态。 */
+private suspend fun createSession(conn: Conn, plan: DesktopLaunchPlan): Result<Session> {
+    val name = plan.sessionName
+    val raw = conn.ssh.exec(plan.command())
+    val failure = raw.lineSequence().lastOrNull { it.startsWith(Dirs.TAG + ":") }?.substringAfter(':')
+    if (failure !in listOf("ok", "exists")) return Result.failure(IllegalStateException(when (failure) {
+        "missing-tmux" -> "这台服务器未安装 tmux"
+        "missing-runtime" -> "未找到可执行的 ${plan.agent}，请先在该服务器安装并完成登录"
+        "nodir" -> "无法创建或进入目录，请检查路径与访问权限"
+        "failed" -> "tmux 未能创建会话，请刷新核对后重试"
+        "exited" -> "运行器已提前退出，请在服务器终端检查其登录与配置"
+        "conflict" -> "同一启动请求对应的目录不一致，未复用已有会话"
+        "changed-directory" -> "启动后的目录发生变化，请检查左侧新会话；未删除可能仍在运行的任务"
+        else -> "未能确认启动结果，请刷新核对后重试。请求会话：$name"
+    }))
+    repeat(5) {
+        conn.refresh()
+        conn.sessions.firstOrNull { it.name == name }?.let { return Result.success(it) }
+        kotlinx.coroutines.delay(200)
     }
-    conn.refresh()
-    return Result.success(conn.sessions.firstOrNull { it.name == name }
-        ?: Session(name, 1, false, dir, System.currentTimeMillis() / 1000, SessionState.Idle, "", 0.0))
+    return Result.failure(IllegalStateException("会话创建已返回，但尚未读到状态。请刷新核对：$name；在此窗口重试会复用同一请求。"))
 }
 
 /** 相对时间（抄手机端 TimeFmt.ago）。0 或未来 → 空串。 */
