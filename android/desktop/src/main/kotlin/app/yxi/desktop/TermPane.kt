@@ -1,109 +1,128 @@
 package app.yxi.desktop
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.isCtrlPressed
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.awt.SwingPanel
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import app.yxi.agent.Session
-import app.yxi.agent.SessionProbe
-import kotlinx.coroutines.delay
+import app.yxi.ssh.SshSession
+import com.jediterm.terminal.Questioner
+import com.jediterm.terminal.TerminalColor
+import com.jediterm.terminal.TextStyle
+import com.jediterm.terminal.TtyConnector
+import com.jediterm.core.util.TermSize
+import com.jediterm.terminal.ui.JediTermWidget
+import com.jediterm.terminal.ui.settings.DefaultSettingsProvider
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import java.awt.Font
 
 /*
- * 终端面板 —— 选的是「每秒抓屏」方案，不是 PTY 直连。
+ * 终端面板 = **真终端**（老板 09-12：「切换为终端模式就不要有下面的输入框，像服务器本地的终端，
+ * 或者像 VSCode 的 remote」）：PTY 直连 `tmux attach`，全色彩、全键盘直通、窗口随拖随变，没有输入框。
  *
- * 实测（用 pty 挂 `tmux attach` 3.5 秒抓了 7KB）：tmux 对客户端是整屏重绘 + 光标定位的增量刷新，
- * 去掉 ANSI 之后同一屏文字反复出现三遍、增量更新的碎片全糊在一行里 —— 没有终端仿真器根本没法看。
- * 手机端能用是因为接了 ConnectBot 的 termlib 仿真器；桌面这边没有现成的。
- * 所以：每秒 `tmux capture-pane -p`（[SessionProbe.peek]）拿 tmux 自己排好版的整屏，按键走 `tmux send-keys`。
- * 不开 PTY 通道，切 tab / 换会话就没东西要关（每次 exec 自己开关通道，effect 取消即停）。
+ * 组成：JetBrains 的 JediTerm（IntelliJ 终端同源的仿真器 + Swing 控件，core/ui 两个 jar 都在
+ * JetBrains 的 intellij-dependencies 仓库，settings.gradle.kts 里加了那个仓）用 SwingPanel 嵌进 Compose；
+ * 字节桥接是 [TmuxTtyConnector]，底层走 core 的 [SshSession.openPtyCommand]——手机端踩平的坑
+ * （写入顺序、ioLock、resize 合法值、stderr 泵、xterm-256color）全都在 Shell 里。
  *
- * ponytail：没颜色、没鼠标、不改 tmux 窗口尺寸（resize-window 会把 window-size 钉成 manual，
- * 手机 `attach -d` 就缩不回去了）—— 屏幕宽度是上一个 attach 的客户端留下的。要完整终端就换 JediTerm。
+ * 旧实现是「每秒 tmux capture-pane 抓屏 + 输入框 send-keys」——tmux 对客户端是整屏重绘+光标增量刷新，
+ * 没有仿真器排不出那个版面（截屏里碎掉的横线就是它），整个被本文件替换。
+ *
+ * ⚠️ 1.1.x 的教训在这里也适用：Xvfb / uber-jar 的冒烟验不出真终端（精简 runtime、显示层都不同），
+ * 改了这里必须真机装一遍点进终端看。
  */
 @Composable
 fun TermPane(conn: Conn, session: Session) {
-    var screen by remember(session.name) { mutableStateOf("") }
-    var tick by remember { mutableStateOf(0) }   // 按键送达后 +1：马上抓一次屏，不等下一秒
-    var input by remember { mutableStateOf("") }
-    val scope = rememberCoroutineScope()
-    val scroll = rememberScrollState()
-    val focus = remember { FocusRequester() }
+    val t = Tokens.current
+    var widget by remember(conn.host.id, session.name) { mutableStateOf<JediTermWidget?>(null) }
+    var err by remember(conn.host.id, session.name) { mutableStateOf("") }
 
-    LaunchedEffect(conn, session.name, tick) {
-        while (true) {
-            screen = if (conn.ssh.isAlive) SessionProbe.peek(conn.ssh, session.name, 200).trimEnd() else ""
-            delay(1000)
+    // 开 PTY → 建 JediTerm 会话。会话/主机切换时 LaunchedEffect 重启，widget 换新的
+    LaunchedEffect(conn.host.id, session.name) {
+        if (!conn.ssh.isAlive) { err = "连接断了 —— 接上后重进终端"; return@LaunchedEffect }
+        runCatching {
+            // attach 不带 -d：和手机/别的客户端共享同一屏；会话没了 -A 兜底新建（在 ~ 里）
+            val cmd = "tmux attach -t ${app.yxi.ssh.Shell.q(session.name)} 2>/dev/null || tmux new -A -s ${app.yxi.ssh.Shell.q(session.name)}"
+            val shell = conn.ssh.openPtyCommand(cmd, 120, 30)
+            val w = JediTermWidget(120, 30, TermSettings())
+            w.setTtyConnector(TmuxTtyConnector(shell, session.name))
+            w.start()
+            widget = w
+        }.onFailure {
+            err = it.message?.ifBlank { null } ?: "终端起不来"
         }
     }
-    LaunchedEffect(screen) { scroll.scrollTo(scroll.maxValue) }   // 输入框在屏幕底部，抓到新屏就跟到底
-    LaunchedEffect(Unit) { focus.requestFocus() }
-
-    // C-c 不在 SessionProbe.sendKey 的白名单里（那是给选项按键用的），自己拼一条；会话名来自 snapshot，照样 q() 一遍
-    fun key(k: String) = scope.launch {
-        if (k == "C-c") conn.ssh.exec("tmux send-keys -t ${app.yxi.ssh.Shell.q(session.name)} C-c")
-        else SessionProbe.sendKey(conn.ssh, session.name, k)
-        tick++
+    // 离开组合（切 tab / 换会话 / 关窗）= 关掉 attach；tmux 里的会话照活，回来重新 attach 就是
+    DisposableEffect(conn.host.id, session.name) {
+        onDispose { runCatching { widget?.close() } }
     }
 
-    Column(Modifier.fillMaxSize()) {
-        SelectionContainer(
-            Modifier.weight(1f).fillMaxWidth().background(Tokens.current.surface1)
-                .verticalScroll(scroll).horizontalScroll(rememberScrollState()).padding(8.dp),
-        ) {
-            Text(
-                screen.ifEmpty { if (conn.ssh.isAlive) "（没抓到屏幕：会话可能已经结束）" else "（连接断了）" },
-                fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = Tokens.current.textPrimary, softWrap = false,
-            )
+    Box(Modifier.fillMaxSize().background(t.surface2)) {
+        val w = widget
+        when {
+            w != null -> SwingPanel(factory = { w }, modifier = Modifier.fillMaxSize(), update = {})
+            err.isNotBlank() -> Text(err, Modifier.align(Alignment.Center).padding(16.dp), color = t.danger)
+            else -> Text("正在打开终端…", Modifier.align(Alignment.Center), color = t.textMuted)
         }
-        OutlinedTextField(
-            value = input, onValueChange = { input = it }, singleLine = true,
-            placeholder = { Text("Enter 发送 · Esc / Ctrl+C / ↑ ↓ 直通到会话") },
-            modifier = Modifier.fillMaxWidth().padding(8.dp).focusRequester(focus).onPreviewKeyEvent { e ->
-                if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                when {
-                    e.key == Key.Enter -> {
-                        val t = input; input = ""
-                        // 空着按 Enter = 单送回车（确认提示用）；有字走 send（文本和回车隔 0.4 秒，多行才发得出去）
-                        scope.launch {
-                            if (t.isEmpty()) SessionProbe.sendKey(conn.ssh, session.name, "Enter") else SessionProbe.send(conn.ssh, session.name, t)
-                            tick++
-                        }
-                        true
-                    }
-                    e.key == Key.Escape -> { key("Escape"); true }
-                    e.isCtrlPressed && e.key == Key.C -> { key("C-c"); true }
-                    e.key == Key.DirectionUp -> { key("Up"); true }
-                    e.key == Key.DirectionDown -> { key("Down"); true }
-                    else -> false
-                }
-            },
-        )
     }
+}
+
+/** JediTerm 外观：终端永远深底（手机端同一条规矩：ANSI 彩色是按深底配的），等宽字体要带 CJK。 */
+private class TermSettings : DefaultSettingsProvider() {
+    private val win = System.getProperty("os.name").startsWith("Windows")
+
+    override fun getTerminalFont(): Font = Font(if (win) "NSimSun" else "Monospaced", Font.PLAIN, 14)
+    override fun getTerminalFontSize(): Float = 14f
+    // ⚠️ TerminalColor(int) 是「调色板索引」不是 RGB——塞 0xEBE1D9 会在渲染时越界断言炸掉整个 EDT（踩过）。
+    //    RGB 要用 (r, g, b) 三参构造。
+    override fun getDefaultStyle(): TextStyle = TextStyle(TerminalColor(0xEB, 0xE1, 0xD9), TerminalColor(0x10, 0x0E, 0x0B))
+}
+
+/**
+ * JediTerm ↔ core [SshSession.Shell] 的字节桥。
+ * ⚠️ read 必须**用 UTF-8 把字节解成字符**再交给 JediTerm（照官方 ProcessTtyConnector 的做法：
+ * InputStreamReader 挂在流上，跨 read 边界的多字节序列它自己缓冲拼装）。
+ * 之前按 latin1 逐字节塞过——中文全成乱码（UTF-8 字节没被组装），就是这条的教训。
+ * read 在 JediTerm 自己的读线程上阻塞着被调，Shell.output 阻塞读正好对口。
+ */
+private class TmuxTtyConnector(
+    private val shell: SshSession.Shell,
+    private val sessionName: String,
+) : TtyConnector {
+    // resize 回调来自 JediTerm 的线程；Shell.resize 是 suspend，甩到 IO
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val reader = java.io.InputStreamReader(shell.output, Charsets.UTF_8)
+
+    override fun init(questioner: Questioner): Boolean = true
+    override fun resize(termSize: TermSize) {
+        scope.launch { shell.resize(termSize.columns, termSize.rows) }
+    }
+
+    override fun read(buf: CharArray, offset: Int, length: Int): Int {
+        val n = reader.read(buf, offset, length)   // 阻塞读：没数据就停在这，JediTerm 不介意
+        return if (n < 0) -1 else n
+    }
+
+    override fun write(bytes: ByteArray) { scope.launch { shell.write(bytes) } }
+    override fun write(string: String) { scope.launch { shell.write(string) } }
+    override fun isConnected(): Boolean = shell.isConnected
+    override fun close() { shell.close() }   // PTY 断了 tmux 里的会话照活，attach 回去就在
+    override fun getName(): String = "tmux:$sessionName"
+    override fun waitFor(): Int = 0
+    override fun ready(): Boolean = true
 }
