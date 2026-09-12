@@ -11,6 +11,11 @@ import kotlin.test.assertTrue
 class MeAuthTest {
     private fun p(line: String) = MeAuth.parseCallback(line)
 
+    @Test fun `unrelated path or method cannot become an authorization`() {
+        assertTrue(p("GET /other?code=c&state=S HTTP/1.1").isEmpty())
+        assertTrue(p("POST /callback?code=c&state=S HTTP/1.1").isEmpty())
+    }
+
     @Test fun `正常回调`() {
         val kv = p("GET /callback?code=abc123&state=xyz HTTP/1.1")
         assertEquals("abc123", kv["code"]); assertEquals("xyz", kv["state"])
@@ -52,8 +57,17 @@ class MeAuthTest {
 class CallbackPageTest {
     private fun page(kv: Map<String, String>, want: String = "S") = MeAuth.callbackPage(kv, want)
 
-    @kotlin.test.Test fun `成功`() =
-        kotlin.test.assertTrue(page(mapOf("code" to "c", "state" to "S")).startsWith("登录成功"))
+    @kotlin.test.Test fun `callback does not claim token exchange succeeded`() {
+        val text = page(mapOf("code" to "c", "state" to "S"))
+        kotlin.test.assertTrue(text.startsWith("授权已收到"))
+        kotlin.test.assertFalse(text.contains("登录成功"))
+    }
+
+    @kotlin.test.Test fun `provider error cannot inject markup`() {
+        val text = page(mapOf("error" to "denied", "error_description" to "<script>alert(1)</script>"))
+        kotlin.test.assertFalse(text.contains("<script>"))
+        kotlin.test.assertTrue(text.contains("&lt;script&gt;"))
+    }
 
     @kotlin.test.Test fun `state 不对不能说成功`() {
         val t = page(mapOf("code" to "c", "state" to "别人的"))

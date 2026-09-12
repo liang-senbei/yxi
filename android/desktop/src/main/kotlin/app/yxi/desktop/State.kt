@@ -22,6 +22,9 @@ import app.yxi.agent.SessionState
 enum class Page { Workspace, Config, Me }
 
 class AppState {
+    var hostScope by mutableStateOf(Store.pref("hostScope", ""))
+    internal var startupRestored = false
+    internal var restoreSession by mutableStateOf<String?>(null)
     val conns = mutableStateListOf<Conn>()                 // 连着的主机（顺序 = 侧栏分组顺序）
     var conn by mutableStateOf<Conn?>(null)                // 当前会话所在的主机
     var session by mutableStateOf<Session?>(null)          // 当前会话
@@ -37,7 +40,14 @@ class AppState {
     var showShortcuts by mutableStateOf(false)             // Ctrl+/
 
     /** ⚠️ 选会话顺带回工作区：人在「配置」页点了侧栏的会话，意思显然是「我要去看那个会话」。 */
-    fun select(c: Conn, s: Session?) { conn = c; session = s; page = Page.Workspace }
+    fun select(c: Conn, s: Session?) {
+        conn = c; session = s; page = Page.Workspace; restoreSession = null
+        Store.setPref("lastHost", c.host.id)
+        Store.setPref("lastSession", s?.name.orEmpty())
+        if (hostScope.isNotEmpty()) scopeHost(c.host.id)
+    }
+
+    fun scopeHost(id: String) { hostScope = id; Store.setPref("hostScope", id) }
 
     /** 所有主机的会话按侧栏顺序摊平（Ctrl+Tab / Ctrl+1…9 用）。 */
     fun allSessions(): List<Pair<Conn, Session>> = conns.flatMap { c -> c.sessions.map { c to it } }

@@ -1,5 +1,13 @@
 # handover · Yxi
 
+## Windows 工作台 PRD 实施中（2026-09-13，独立分支）
+
+用户已授权按 `design/windows-workbench-prd.md` v0.2 构建完整工作台。当前实施分支 `codex/windows-workbench`，未发布新包，未修改正在运行的 Agent。逐项剩余工作见 `design/windows-workbench-progress.md`，不能把这次基础修复视为整个 PRD 完成。
+
+本轮：主机原子保存/备份恢复/迁移保源/保存错误提示；主机选择器与新对话入口、启动重连及会话恢复；登录回调不提前声称成功及错误内容转义；CI 安装后 exe 冒烟和发布门禁；隔离桌面 E2E 的 home/display/PID。34 个桌面测试通过，Linux jar 打包及 Xvfb 冒烟通过；Windows安装、完整登录和两主机恢复仍待实机验证。
+
+修复依据：旧迁移嵌套 runCatching 即使 copyTo 失败仍会删源；读取异常被当作空列表；备份恢复前不能保存空列表覆盖原数据。Windows/Linux传输脚本的换行通过 `.gitattributes` 固定LF。
+
 ## 基础信息
 > 🔑 **一句话讲清这个项目**：什么都不装，SSH 本来就能「你去看」——看会话、进去问 Claude、
 > 渲染成对话界面、翻文件、传附件，**整个 App 几乎都能用**。

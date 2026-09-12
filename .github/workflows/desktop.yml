@@ -52,13 +52,35 @@ jobs:
           cat Releases/releases.win.json
 
       # 开窗口 3 秒退出、打印 smoke ok —— 证明 Compose + Skia 在 Windows 上起得来。
-      # runner 桌面开不了窗口的话只算警告（Setup.exe 照样上传，真机再验）。
+      # jar 与打包后的启动器均必须通过，才允许发布。
       - name: 冒烟
         working-directory: android
         shell: bash
         timeout-minutes: 3
-        continue-on-error: true
         run: java -jar desktop/build/compose/jars/*.jar --smoke
+
+      # 真装真启动（老板真机 2026-09-12 报「Failed to launch JVM」后加的）：上面的 --smoke 跑的是 uber jar，
+      # 没碰过 jpackage 的启动器。这里在干净的 Windows runner 上：静默装 Setup.exe → 运行装好的 Yxi.exe --smoke。
+      # 成功 = 3 秒退出码 0；「Failed to launch JVM」会弹一个框卡住直到超时 —— 两种结局一眼可分。
+      # 验证通过后才上传发布产物；失败日志另行保留。
+      - name: 真装真启动（Setup 静默装 → Yxi.exe --smoke）
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $setup = Get-ChildItem "android/desktop/Releases" -Filter "*Setup.exe" | Select-Object -First 1
+          if (-not $setup) { throw "Releases 里没找到 Setup.exe" }
+          Write-Host "静默安装 $($setup.FullName)"
+          $p = Start-Process -FilePath $setup.FullName -ArgumentList "--silent" -WindowStyle Hidden -Wait -PassThru
+          Write-Host "Setup 退出码 $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) { throw "Setup 安装失败" }
+          $exe = "$env:LOCALAPPDATA\Yxi\current\Yxi.exe"
+          if (-not (Test-Path $exe)) { throw "装完没找到 $exe" }
+          Write-Host "运行 $exe --smoke"
+          $p2 = Start-Process -FilePath $exe -ArgumentList "--smoke" -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput smoke-out.txt -RedirectStandardError smoke-err.txt
+          Write-Host "Yxi.exe 退出码 $($p2.ExitCode)"
+          Get-Content smoke-out.txt, smoke-err.txt -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  | $_" }
+          if ($p2.ExitCode -ne 0) { throw "装好的 Yxi.exe --smoke 失败（退出码 $($p2.ExitCode)）—— launcher 级问题在这现形" }
+          if (-not (Select-String -Path smoke-out.txt,smoke-err.txt -Pattern "smoke ok" -Quiet)) { throw "缺少 smoke ok，不能仅凭退出码判断启动成功" }
 
       - uses: actions/upload-artifact@v4
         with:
@@ -66,3 +88,10 @@ jobs:
           path: |
             android/desktop/Releases
             android/desktop/build/compose/jars/*.jar
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Yxi-windows-smoke-logs
+          path: smoke-*.txt
+          if-no-files-found: ignore

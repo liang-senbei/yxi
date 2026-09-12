@@ -52,6 +52,8 @@ fun Host.tint(index: Int): Color =
 
 /** 本地存储：Windows `%LOCALAPPDATA%\Yxi`，其它 `~/.config/yxi`。hosts.json + known_hosts。 */
 object Store {
+    var warning by mutableStateOf("")
+        private set
     val dir: File = run {
         val win = System.getProperty("os.name").startsWith("Windows")
         // ⚠️⚠️ **不能放 %APPDATA%**（审查 P2）：那是**漫游**目录 —— 域账户登录别的机器、
@@ -77,30 +79,50 @@ object Store {
             val src = File(from, name)
             if (!src.isFile) return@forEach
             val dst = File(to, name)
-            if (!dst.exists()) runCatching { src.copyTo(dst) }
-            runCatching { src.delete() }
+            DurableFile.migrate(src, dst) { text ->
+                when (name) {
+                    "hosts.json" -> JSONArray(text)
+                    "prefs.json", "window.json" -> JSONObject(text)
+                }
+            }
         }
         runCatching { from.delete() }   // 空了才删得掉，没空就留着，无所谓
-    }
+    }.onFailure { warning = "旧配置迁移未完成：${it.message}" }
     private val hostsFile = File(dir, "hosts.json")
+    private val hostData = DurableFile(hostsFile) { text ->
+        val a = JSONArray(text)
+        val ids = mutableSetOf<String>()
+        for (i in 0 until a.length()) {
+            val host = a.getJSONObject(i).toHost()
+            require(host.id.isNotBlank() && ids.add(host.id)) { "服务器 ID 为空或重复" }
+            require(host.hostname.isNotBlank() && host.port in 1..65535) { "服务器地址或端口无效" }
+        }
+    }
     val knownHostsFile = File(dir, "known_hosts")
 
     fun hosts(): List<Host> = runCatching {
-        JSONArray(hostsFile.readText()).let { a -> (0 until a.length()).map { a.getJSONObject(it).toHost() } }
-    }.getOrDefault(emptyList())
+        val text = hostData.read() ?: return@runCatching emptyList()
+        if (hostData.recovered) warning = "服务器配置已从备份恢复；损坏的原文件已保留。"
+        JSONArray(text).let { a -> (0 until a.length()).map { a.getJSONObject(it).toHost() } }
+    }.onFailure { warning = "无法读取服务器配置，原文件已保留：${it.message}" }.getOrDefault(emptyList())
 
     fun save(hosts: List<Host>) {
-        hostsFile.writeText(JSONArray(hosts.map { it.toJson() }).toString(2))
+        hostData.write(JSONArray(hosts.map { it.toJson() }).toString(2))
         runCatching { hostsFile.setReadable(false, false); hostsFile.setReadable(true, true) }
     }
 
     /** 简单偏好（主题 / 通知档 / 关窗行为…），prefs.json；Compose 里读要能重组，所以放在 state 里。 */
     private val prefsFile = File(dir, "prefs.json")
+    private val prefData = DurableFile(prefsFile) { JSONObject(it) }
     private val prefs = androidx.compose.runtime.mutableStateMapOf<String, String>().apply {
-        runCatching { JSONObject(prefsFile.readText()).let { j -> j.keys().forEach { put(it, j.getString(it)) } } }
+        runCatching { JSONObject(prefData.read() ?: "{}").let { j -> j.keys().forEach { put(it, j.getString(it)) } } }
+            .onFailure { warning = "无法读取桌面偏好：${it.message}" }
     }
     fun pref(key: String, default: String): String = prefs[key] ?: default
-    fun setPref(key: String, value: String) { prefs[key] = value; runCatching { prefsFile.writeText(JSONObject(prefs.toMap()).toString()) } }
+    fun setPref(key: String, value: String) {
+        runCatching { prefData.write(JSONObject(prefs.toMap() + (key to value)).toString()); prefs[key] = value }
+            .onFailure { warning = "偏好未保存：${it.message}" }
+    }
 
     /** 窗口大小 / 位置：关窗时存，下次开窗恢复（Claude Desktop 那样记住上次的样子）。 */
     private val windowFile = File(dir, "window.json")

@@ -188,6 +188,8 @@ object MeAuth {
      * @param line 形如 `GET /callback?code=x&state=y HTTP/1.1`
      */
     internal fun parseCallback(line: String): Map<String, String> {
+        val parts = line.split(' ')
+        if (parts.size != 3 || parts[0] != "GET" || parts[1].substringBefore('?') != "/callback") return emptyMap()
         val q = line.substringAfter('?', "").substringBefore(' ')
         if (q.isEmpty()) return emptyMap()
         return q.split('&').mapNotNull {
@@ -232,11 +234,13 @@ object MeAuth {
         val hasCode = !kv["code"].isNullOrEmpty()
         val err = kv["error"].orEmpty()
         return when {
-            err.isEmpty() && hasCode && stateOk -> "登录成功,回到 Yxi 继续吧。这个页面可以关掉了。"
+            err.isEmpty() && hasCode && stateOk -> "授权已收到，正在由 Yxi 验证账号。请回到应用查看登录结果。"
             err.isEmpty() && !stateOk -> "这个回调不是 Yxi 这次登录发起的,已经忽略。回到 Yxi 重新点一次登录。"
-            else -> "登录没有完成:" + (kv["error_description"] ?: err.ifEmpty { "浏览器没给授权码" })
+            else -> "登录没有完成:" + htmlEscape(kv["error_description"] ?: err.ifEmpty { "浏览器没给授权码" })
         }
     }
+
+    private fun htmlEscape(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&#39;")
 
     /** 用系统默认浏览器打开。Desktop.browse 在部分 Linux 上不可用,退回 xdg-open / start / open。 */
     private fun openBrowser(url: String): Boolean {

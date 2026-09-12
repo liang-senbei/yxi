@@ -34,6 +34,7 @@ fun SettingsDialog(state: AppState) {
                 Section("常规")
                 SwitchRow("关闭窗口时留在托盘", Store.pref("closeToTray", "1") == "1") { Store.setPref("closeToTray", if (it) "1" else "0") }
                 SwitchRow("开机自启", autostart, enabled = isWindows) { autostart = it; setAutostart(it) }
+                SwitchRow("启动时重连上次主机", Store.pref("reconnectOnStart", "1") == "1") { Store.setPref("reconnectOnStart", if (it) "1" else "0") }
                 Section("外观")
                 Choice("主题", listOf("system" to "跟随系统", "light" to "浅色", "dark" to "深色"), Store.pref("theme", "system")) { Store.setPref("theme", it) }
                 Section("通知")

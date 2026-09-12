@@ -5,6 +5,13 @@
 # ⚠️ 旧的 Yxi-1.0.0.msi 还在同一目录（老板还在用那个地址），这里只增不删。
 set -euo pipefail
 run=${1:?用法: publish.sh <gh run id>}
+# A downloadable artifact alone is not release evidence (older CI uploaded before installation checks).
+verified=$(gh run view "$run" -R liang-senbei/yxi --json status,conclusion,jobs --jq \
+  '.status == "completed" and .conclusion == "success" and any(.jobs[].steps[]; (.name | startswith("真装真启动")) and .conclusion == "success")')
+if [ "$verified" != true ]; then
+  echo "拒绝发布：构建未成功完成，或缺少通过的安装后启动检查。" >&2
+  exit 1
+fi
 tmp=$(mktemp -d)
 gh run download "$run" -R liang-senbei/yxi -n Yxi-windows -D "$tmp"
 ls -la "$tmp/Releases"

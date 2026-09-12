@@ -79,12 +79,14 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
     var creatingOn by remember { mutableStateOf<Conn?>(null) }
     var installingKey by remember { mutableStateOf<Host?>(null) }
     var note by remember { mutableStateOf("") }       // 不属于某条连接的错（Conn 都没建出来）
+    var hostMenu by remember { mutableStateOf(false) }
     val keys = remember { FileHostKeys() }
     // 账号行的资料：进来就拉一次（幂等；Me 页里还会再拉）。侧栏收起再展开会重跑，无害
     LaunchedEffect(Unit) { MeAuth.load() }
 
     fun connOf(h: Host) = state.conns.firstOrNull { it.host.id == h.id }
-    fun save(list: List<Host>) { hosts = list; Store.save(list) }
+    fun save(list: List<Host>) { Store.save(list); hosts = list }
+    fun safely(action: () -> Unit) { runCatching(action).onFailure { note = "操作未保存：${it.message}" } }
     fun disconnect(h: Host) {
         // 这台的指纹弹窗还挂着就按「取消」答掉，不然 jsch 的 connect 线程会一直等到超时
         keys.pending?.takeIf { it.host == keys.jschHost(h) }?.answer?.complete(false)
@@ -104,6 +106,25 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
         if (state.conn == null) state.conn = c
     }
 
+    LaunchedEffect(Unit) {
+        if (!state.startupRestored) {
+            state.startupRestored = true
+            if (hosts.none { it.id == state.hostScope }) state.scopeHost("")
+            if (Store.pref("reconnectOnStart", "1") == "1") {
+                hosts.firstOrNull { it.id == Store.pref("lastHost", "") }?.let { h ->
+                    val previousSession = Store.pref("lastSession", "")
+                    connect(h)
+                    state.restoreSession = previousSession.takeIf { it.isNotEmpty() }
+                }
+            }
+        }
+    }
+    LaunchedEffect(state.conn, state.conn?.sessions, state.restoreSession) {
+        val c = state.conn
+        val wanted = state.restoreSession
+        if (c != null && wanted != null) c.sessions.firstOrNull { it.name == wanted }?.let { state.select(c, it) }
+    }
+
     // Ctrl+N：对当前主机弹「新建会话」。seen 放 AppState 而不是 remember：
     // Sidebar 收起时 remember 会丢，重新展开时初始化成当前值 == newSessionRequest → 弹窗不弹
     LaunchedEffect(state.newSessionRequest) {
@@ -116,12 +137,31 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
     Column(modifier.background(t.surface1)) {
         UpdateBanner()   // 有新版时才画（Codex 把更新横幅放侧栏顶部）
         Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("主机", style = MaterialTheme.typography.titleMedium, color = t.textPrimary, modifier = Modifier.weight(1f))
+            Box(Modifier.weight(1f)) {
+                TextButton({ hostMenu = true }) {
+                    Text((hosts.firstOrNull { it.id == state.hostScope }?.label ?: "所有主机") + " ▾", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                DropdownMenu(hostMenu, { hostMenu = false }) {
+                    DropdownMenuItem(text = { Text("所有主机") }, onClick = { state.scopeHost(""); hostMenu = false })
+                    hosts.forEach { h ->
+                        DropdownMenuItem(text = { Text(h.label + " · " + (connOf(h)?.status?.label?.ifBlank { "未连接" } ?: "未连接")) }, onClick = {
+                            hostMenu = false; state.scopeHost(h.id)
+                            if (connOf(h) == null || connOf(h)?.status == Conn.Status.Failed) connect(h)
+                            connOf(h)?.let { c -> if (state.conn !== c) state.select(c, null) }
+                        })
+                    }
+                }
+            }
             IconButton({ editing = Host(id = UUID.randomUUID().toString(), alias = "", hostname = "", keyPath = defaultKey()) }, Modifier.size(28.dp)) {
                 Icon(Icons.Default.Add, "加主机", Modifier.size(18.dp), tint = t.textSecondary)
             }
         }
         if (note.isNotBlank()) Text(note, Modifier.padding(14.dp, 2.dp), color = t.danger, style = MaterialTheme.typography.bodySmall)
+        if (Store.warning.isNotBlank()) Text(Store.warning, Modifier.padding(14.dp, 2.dp), color = t.danger, style = MaterialTheme.typography.bodySmall)
+        TextButton({
+            val c = if (state.hostScope.isEmpty()) state.conn else state.conns.firstOrNull { it.host.id == state.hostScope }
+            if (c?.status == Conn.Status.Connected) creatingOn = c else note = "先选择并连接要运行 Agent 的主机"
+        }, Modifier.fillMaxWidth()) { Text("＋ 新对话") }
         // 会话过滤（ZCode 的搜索框 / Codex 的过滤）：按会话名 / 主机名滤，主机全不匹配就整组藏掉
         var filter by remember { mutableStateOf("") }
         if (hosts.isNotEmpty()) Row(
@@ -141,6 +181,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             val f = filter.trim()
             hosts.forEachIndexed { i, h ->
+                if (state.hostScope.isNotEmpty() && state.hostScope != h.id) return@forEachIndexed
                 val c = connOf(h)
                 val sessions = c?.sessions?.filter { f.isEmpty() || it.short.contains(f, ignoreCase = true) || it.name.contains(f, ignoreCase = true) } ?: emptyList()
                 val hostMatch = f.isEmpty() || h.label.contains(f, ignoreCase = true)
@@ -187,14 +228,14 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
         }, onClose = { editing = null })
     }
     coloring?.let { h ->
-        ColorDialog(h.tint(hosts.indexOf(h)), onPick = { col -> save(hosts.map { if (it.id == h.id) it.copy(color = col) else it }); coloring = null }, onClose = { coloring = null })
+        ColorDialog(h.tint(hosts.indexOf(h)), onPick = { col -> safely { save(hosts.map { if (it.id == h.id) it.copy(color = col) else it }); coloring = null } }, onClose = { coloring = null })
     }
     deleting?.let { h ->
         AlertDialog(
             onDismissRequest = { deleting = null },
             title = { Text("删除 ${h.label}？") },
             text = { Text("只删这里的记录和指纹，服务器上的会话不受影响。") },
-            confirmButton = { TextButton({ disconnect(h); keys.forget(h); save(hosts.filter { it.id != h.id }); deleting = null }) { Text("删除", color = t.danger) } },
+            confirmButton = { TextButton({ safely { save(hosts.filter { it.id != h.id }); disconnect(h); keys.forget(h); if (state.hostScope == h.id) state.scopeHost(""); deleting = null } }) { Text("删除", color = t.danger) } },
             dismissButton = { TextButton({ deleting = null }) { Text("取消") } },
         )
     }

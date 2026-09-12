@@ -89,10 +89,10 @@ fun HostForm(h: Host, isNew: Boolean, onSave: (Host) -> Unit, onClose: () -> Uni
                     usePassword && password.isEmpty() -> "密码不能为空"
                     else -> ""
                 }
-                if (err.isEmpty() && p != null) onSave(h.copy(
+                if (err.isEmpty() && p != null) runCatching { onSave(h.copy(
                     alias = alias.trim(), hostname = hostname, port = p, username = username,
                     keyPath = if (usePassword) "" else kp, password = if (usePassword) password else "",
-                ))
+                )) }.onFailure { err = "保存失败，输入已保留：${it.message}" }
             }) { Text("保存") }
         },
         dismissButton = { TextButton(onClose) { Text("取消") } },
@@ -144,9 +144,9 @@ fun CopyIdDialog(h: Host, keys: FileHostKeys, onSaved: (Host) -> Unit, onClose: 
                     val err = installPublicKey(h, password, keys)
                     busy = false
                     if (err == null) {
-                        done = true
-                        msg = "装好了，已切到密钥登录（${DesktopKey.privFile.path}）"
-                        onSaved(h.copy(keyPath = DesktopKey.privFile.path))
+                        runCatching { onSaved(h.copy(keyPath = DesktopKey.privFile.path)) }
+                            .onSuccess { done = true; msg = "装好了，已切到密钥登录（${DesktopKey.privFile.path}）" }
+                            .onFailure { msg = "公钥已装到服务器，但本地主机记录未保存：${it.message}" }
                     } else msg = err
                 }
             }) { Text(if (busy) "安装中…" else if (done) "装好了" else "连接并安装") }
