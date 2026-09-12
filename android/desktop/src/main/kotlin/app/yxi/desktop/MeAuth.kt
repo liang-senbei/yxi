@@ -79,9 +79,13 @@ object MeAuth {
     suspend fun signIn(): String? = withContext(Dispatchers.IO) {
         val verifier = AccountApi.randomUrlSafe(32)
         val state = AccountApi.randomUrlSafe(8)
-        // 0 = 让系统分配临时端口;先绑上再拼 redirect_uri,不然拼的和实际监听的可能不是一个
-        val server = runCatching { ServerSocket(0, 1, InetAddress.getLoopbackAddress()) }
-            .getOrElse { return@withContext "开不了本机回调端口:${it.message}" }
+        // 固定 1455（照 Codex 的做法）：Logto 的 redirect_uri 必须精确匹配，随机端口永远注册不上
+        // （1.1.1 真机报 invalid_redirect_uri 就是随机端口害的；Logto 侧已注册 http://127.0.0.1:1455/callback）。
+        // 先绑上再拼 redirect_uri，绑不上（别的程序占了口/上一个实例没退干净）就明说，别让浏览器白跑一趟。
+        val server = runCatching { ServerSocket(1455, 1, InetAddress.getLoopbackAddress()) }
+            .getOrElse {
+                return@withContext "回调端口 1455 被占用（可能上一次登录还没退干净）。稍后再试，或重启电脑后重试。:${it.message}"
+            }
         server.soTimeout = 5 * 60 * 1000            // 五分钟没人回来就收摊,别把线程和端口永远占着
         val redirect = "http://127.0.0.1:${server.localPort}/callback"
         val url = "${AccountApi.AUTH}/oidc/auth?" + mapOf(
