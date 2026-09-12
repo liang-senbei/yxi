@@ -104,7 +104,7 @@ fun App(state: AppState) {
                                         if (!panel || !compact) Column(Modifier.weight(1f).fillMaxHeight()) {
                                             if (replaced) Text("原会话已结束，同名会话是新任务。请在左侧重新选择；旧草稿已保留。", Modifier.padding(24.dp))
                                             else key(taskKey) { when (state.tab) {
-                                                0 -> ChatPane(conn, sess, savedDraft = state.chatDrafts.getOrPut(taskKey) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue()) }, displayName = state.navigation.title(taskKey))
+                                                0 -> ChatPane(conn, sess, state.instructions, savedDraft = state.chatDrafts.getOrPut(taskKey) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue()) }, displayName = state.navigation.title(taskKey))
                                                 1 -> TermPane(conn, sess)
                                                 else -> FilesPane(conn, sess, ::openFile)
                                             } }

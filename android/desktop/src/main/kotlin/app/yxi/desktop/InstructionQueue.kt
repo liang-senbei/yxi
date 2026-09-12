@@ -8,7 +8,7 @@ import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 
-internal enum class InstructionStatus { Local, Delivering, Unknown, Accepted, Cancelled }
+internal enum class InstructionStatus { Local, Delivering, Unknown, Accepted, Cancelled, Resolved }
 internal data class InstructionAttachment(val name: String, val remotePath: String)
 internal data class QueuedInstruction(
     val id: String, val taskKey: String, val text: String,
@@ -66,10 +66,12 @@ internal class InstructionQueue(file: File) {
     fun edit(id: String, revision: Long, text: String) = change(id, revision, setOf(InstructionStatus.Local)) { it.copy(text = text) }
     fun cancel(id: String, revision: Long) = change(id, revision, setOf(InstructionStatus.Local)) { it.copy(status = InstructionStatus.Cancelled) }
     fun beginDelivery(id: String, revision: Long) = change(id, revision, setOf(InstructionStatus.Local)) { current ->
-        check(entries.firstOrNull { it.taskKey == current.taskKey && it.status !in setOf(InstructionStatus.Cancelled, InstructionStatus.Accepted) }?.id == id) { "请先处理前面的指令" }
+        check(entries.firstOrNull { it.taskKey == current.taskKey && it.status !in setOf(InstructionStatus.Cancelled, InstructionStatus.Accepted, InstructionStatus.Resolved) }?.id == id) { "请先处理前面的指令" }
         current.copy(status = InstructionStatus.Delivering)
     }
     fun markUnknown(id: String, revision: Long, detail: String) = change(id, revision, setOf(InstructionStatus.Delivering)) { it.copy(status = InstructionStatus.Unknown, detail = detail) }
+    fun notDelivered(id: String, revision: Long, reason: String) = change(id, revision, setOf(InstructionStatus.Delivering)) { it.copy(status = InstructionStatus.Local, detail = reason) }
+    fun resolveManually(id: String, revision: Long) = change(id, revision, setOf(InstructionStatus.Unknown)) { it.copy(status = InstructionStatus.Resolved, detail = "用户已人工核对；未自动确认运行器接收") }
     fun confirmAccepted(id: String, revision: Long, receipt: String) = change(id, revision, setOf(InstructionStatus.Delivering, InstructionStatus.Unknown)) {
         require(receipt.isNotBlank()) { "缺少运行器接收凭据" }
         it.copy(status = InstructionStatus.Accepted, detail = receipt)

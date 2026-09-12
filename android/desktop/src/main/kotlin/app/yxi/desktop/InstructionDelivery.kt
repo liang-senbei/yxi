@@ -1,0 +1,51 @@
+package app.yxi.desktop
+
+import app.yxi.agent.Session
+import app.yxi.ssh.Shell
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+
+/** A terminal transport, deliberately not advertised as runtime steering or an
+ * accepted-message receipt. Exactly one literal text write and one Enter. */
+internal suspend fun deliverInstruction(conn: Conn, session: Session, queue: InstructionQueue, item: QueuedInstruction) {
+    check(conn.ssh.isConnected) { "服务器未连接，指令保留在本地" }
+    check(item.taskKey == taskNavigationKey(conn.host, session)) { "任务身份已变化" }
+    check(Regex("[0-9]+:\\$[0-9]+:[0-9]+").matches(session.runtimeId)) { "尚未确认任务实例，请刷新后重试" }
+    val screen = conn.ssh.exec("tmux capture-pane -p -t ${Shell.q("=" + session.name + ":")} 2>/dev/null")
+    check(app.yxi.agent.Model.borrowable(screen)) { "终端正忙、等待选择或输入状态无法确认，指令继续保留在本地" }
+    val started = queue.beginDelivery(item.id, item.revision)
+    withContext(NonCancellable) {
+        try {
+            val raw = conn.ssh.exec(instructionDeliveryCommand(session, item, screen))
+            when (raw.lineSequence().lastOrNull { it.startsWith("__YXI_DELIVERY__:") }) {
+                "__YXI_DELIVERY__:blocked" -> queue.notDelivered(started.id, started.revision, "任务或画面已变化，未投递；请核对后重试")
+                "__YXI_DELIVERY__:attachment" -> queue.notDelivered(started.id, started.revision, "附件不存在或无法读取，请重新上传")
+                "__YXI_DELIVERY__:terminal" -> queue.markUnknown(started.id, started.revision, "文本与回车已投递到终端，运行器接收尚待确认。请查看对话或终端后核对。")
+                else -> queue.markUnknown(started.id, started.revision, "投递结果无法确认，请核对任务；不会自动重发")
+            }
+        } catch (e: Exception) {
+            // Persisting Unknown can itself fail. Delivering then remains on disk
+            // and is converted to Unknown on restart, never back to Local.
+            if (queue.entries.firstOrNull { it.id == started.id }?.status == InstructionStatus.Delivering)
+                queue.markUnknown(started.id, started.revision, "连接或投递中断，请核对任务：${e.message}")
+        }
+    }
+}
+
+internal fun instructionDeliveryCommand(session: Session, item: QueuedInstruction, screen: String): String {
+    val body = item.attachments.joinToString("") { "[${it.name}] ${it.remotePath}\n" } + item.text
+    val checks = item.attachments.joinToString("\n") { "[ -r ${Shell.q(it.remotePath)} ] || { echo '__YXI_DELIVERY__:attachment'; exit 0; }" }
+    return """
+t=${Shell.q("=" + session.name + ":")}
+identity=${'$'}(tmux display-message -p -t "${'$'}t" '#{pid}:#{session_id}:#{session_created}' 2>/dev/null)
+[ "${'$'}identity" = ${Shell.q(session.runtimeId)} ] || { echo '__YXI_DELIVERY__:blocked'; exit 0; }
+p=${'$'}(tmux display-message -p -t "${'$'}t" '#{pane_id}' 2>/dev/null)
+before=${'$'}(tmux capture-pane -p -t "${'$'}p" 2>/dev/null)
+[ "${'$'}before" = ${Shell.q(screen.trimEnd('\n'))} ] || { echo '__YXI_DELIVERY__:blocked'; exit 0; }
+$checks
+tmux send-keys -t "${'$'}p" -l ${Shell.q(body)} || exit 1
+sleep 0.4
+tmux send-keys -t "${'$'}p" Enter || exit 1
+echo '__YXI_DELIVERY__:terminal'
+""".trimIndent()
+}

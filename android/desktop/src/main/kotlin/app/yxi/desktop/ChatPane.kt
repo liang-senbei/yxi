@@ -96,7 +96,7 @@ import org.jetbrains.skia.Image as SkiaImage
 
 /**
  * 右栏「对话」。历史读转录（权威），「此刻在等你选 / 在忙」读屏幕（唯一来源）—— 分工同手机端 ChatScreen。
- * 所有远端操作走 core 的 SessionProbe / TranscriptStream，这里不拼 tmux 命令。
+ * 转录与审批走 core；指令通过桌面持久队列和单次终端投递适配器处理。
  *
  * 视觉（老板 09-11：学 ZCode / Codex 的桌面 UI，保留 Yxi 暖灰自己的底子，规范见 design/desktop-reference.md §2.3）：
  * · 用户消息 = 右侧气泡；助手内容直接铺在画布上（两家都这么做，不搞对话式左右气泡）；
@@ -105,33 +105,34 @@ import org.jetbrains.skia.Image as SkiaImage
  * · composer = 一张圆角卡片：无边框输入区 + 底部功能行（+ 附件 / 审批态 / 模型·强度·模式·上下文 chips / 圆形发送）。
  */
 @Composable
-fun ChatPane(conn: Conn, session: Session, savedDraft: androidx.compose.runtime.MutableState<TextFieldValue>? = null, displayName: String? = null) {
+internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQueue, savedDraft: androidx.compose.runtime.MutableState<TextFieldValue>? = null, displayName: String? = null) {
+    val taskKey = taskNavigationKey(conn.host, session)
     val ssh = conn.ssh
     val t = Tokens.current
     val scope = rememberCoroutineScope()
-    // ⚠️ 全部按 session.name 记，不按 Session 对象：看板每 5 秒换一份新对象（lastActivity 变了），按对象记会全部重置
-    var items by remember(conn.host.id, session.name) { mutableStateOf<List<ChatItem>>(emptyList()) }
-    var ctx by remember(conn.host.id, session.name) { mutableStateOf<Transcript.Ctx?>(null) }
-    var status by remember(conn.host.id, session.name) { mutableStateOf<String?>(null) }
-    var pending by remember(conn.host.id, session.name) { mutableStateOf<Pending?>(null) }
-    var approval by remember(conn.host.id, session.name) { mutableStateOf<Pair<String, Approval>?>(null) }   // 指纹 → 抓屏认出的工具名 / 命令
-    var live by remember(conn.host.id, session.name) { mutableStateOf(Live.IDLE) }
-    var keyBusy by remember(conn.host.id, session.name) { mutableStateOf(false) }          // 送了键、等屏幕换掉
-    var awaitFp by remember(conn.host.id, session.name) { mutableStateOf<String?>(null) }  // 等着被换掉的那块提示的指纹
-    val fallbackDraft = remember(conn.host.id, session.name) { mutableStateOf(TextFieldValue()) }
+    // 按端点和运行实例记忆；看板刷新不重置，同名会话重建不能继承旧状态。
+    var items by remember(taskKey) { mutableStateOf<List<ChatItem>>(emptyList()) }
+    var ctx by remember(taskKey) { mutableStateOf<Transcript.Ctx?>(null) }
+    var status by remember(taskKey) { mutableStateOf<String?>(null) }
+    var pending by remember(taskKey) { mutableStateOf<Pending?>(null) }
+    var approval by remember(taskKey) { mutableStateOf<Pair<String, Approval>?>(null) }   // 指纹 → 抓屏认出的工具名 / 命令
+    var live by remember(taskKey) { mutableStateOf(Live.IDLE) }
+    var keyBusy by remember(taskKey) { mutableStateOf(false) }          // 送了键、等屏幕换掉
+    var awaitFp by remember(taskKey) { mutableStateOf<String?>(null) }  // 等着被换掉的那块提示的指纹
+    val fallbackDraft = remember(taskKey) { mutableStateOf(TextFieldValue()) }
     val draftHolder: androidx.compose.runtime.MutableState<TextFieldValue> = savedDraft ?: fallbackDraft
     var draft by draftHolder
-    var sendErr by remember(conn.host.id, session.name) { mutableStateOf<String?>(null) }
-    var sending by remember(conn.host.id, session.name) { mutableStateOf(false) }
-    var stick by remember(conn.host.id, session.name) { mutableStateOf(true) }              // 粘在底部：用户往上翻就停，点 ↓ 再粘上
-    val openGroups = remember(conn.host.id, session.name) { mutableStateListOf<String>() }
-    val listState = remember(conn.host.id, session.name) { LazyListState() }
-    val seen = remember(conn.host.id, session.name) { Seen() }
+    var sendErr by remember(taskKey) { mutableStateOf<String?>(null) }
+    var sending by remember(taskKey) { mutableStateOf(false) }
+    var stick by remember(taskKey) { mutableStateOf(true) }              // 粘在底部：用户往上翻就停，点 ↓ 再粘上
+    val openGroups = remember(taskKey) { mutableStateListOf<String>() }
+    val listState = remember(taskKey) { LazyListState() }
+    val seen = remember(taskKey) { Seen() }
     val focus = remember { FocusRequester() }
-    val staged = remember(conn.host.id, session.name) { mutableStateListOf<DraftAttach>() }
+    val staged = remember(taskKey) { mutableStateListOf<DraftAttach>() }
 
-    // 接上会话顺手清一次 3 天前的暂存（core 的 sweep，命令写死不接外部输入）
-    LaunchedEffect(session.name, ssh) { delay(2_000); Attach.sweep(conn) }
+    // Durable queued attachments may outlive the old three-day staging sweep.
+    // Do not run that destructive sweep from desktop until queue-aware leases exist.
 
     /** 选的文件进暂存；上限 10 个防手滑整个目录拖进来。 */
     fun stage(f: java.io.File) {
@@ -161,7 +162,7 @@ fun ChatPane(conn: Conn, session: Session, savedDraft: androidx.compose.runtime.
     // 转录：找到这个会话的 jsonl，从最后 400 行的字节起点 tail -f，攒 300ms 一批增量解析。
     // 历史灌完（字节数够了）之前不上屏，免得看它从旧滚到新（手机端 #261 的教训）。
     // 断线：流断了不清屏，等连接回来从记下的字节位置接着尾随；转录文件换了（重开 / --resume）才整个重灌。
-    LaunchedEffect(session.name, ssh) {
+    LaunchedEffect(taskKey, ssh) {
         status = "正在载入对话…"
         var file: String? = null
         var inc = Transcript.Incremental()
@@ -214,7 +215,7 @@ fun ChatPane(conn: Conn, session: Session, savedDraft: androidx.compose.runtime.
     }
 
     // 「等你选 / 在忙」只有屏幕知道（tool_use 要等工具跑完才落转录）：推流优先，断了退回轮询，连接回来再试推流
-    LaunchedEffect(session.name, ssh) {
+    LaunchedEffect(taskKey, ssh) {
         fun apply(p: Pending?, l: Live) {
             // 一轮结束 = 从忙变成等输入、且没有在等审批；只在这一下发，状态不变不重发。措辞照 ZCode：任务已完成 / 任务: 名字
             if (seen.busy && !l.busy && p == null) Notify.notify("任务已完成", "任务: ${session.short}", conn.host.id, session.name)
@@ -289,34 +290,36 @@ fun ChatPane(conn: Conn, session: Session, savedDraft: androidx.compose.runtime.
     val uploading = staged.any { it.state is DraftState.Waiting || it.state is DraftState.Uploading }
     val hasDone = staged.any { it.state is DraftState.Done }
 
+    fun deliver(item: QueuedInstruction) {
+        if (sending) return
+        sending = true; sendErr = null
+        scope.launch {
+            try { deliverInstruction(conn, session, instructions, item) }
+            catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { sendErr = e.message.orEmpty() }
+            finally { sending = false }
+        }
+    }
     fun send() {
         val text = draft.text.trim()
         // 发送 = 暂存头（[图片1] 路径 的映射）+ 正文。
         // ⚠️ 附件还在传就不发——映射只含 Done 的，发出去 Claude 读到的路径不全（键盘 Enter 也要过这道门）。
         if (staged.any { it.state is DraftState.Waiting || it.state is DraftState.Uploading }) return
-        val body = Attach.headerOf(staged) + text
-        if (body.isBlank() || sending) return
-        draft = TextFieldValue(); sendErr = null; sending = true
-        scope.launch {
-            // ⚠️ exec 在连接断了时返回空串不抛，SessionProbe.send 会把「读不到屏」当成功 —— 先看连接活没活
-            val ok = ssh.isConnected && catching { SessionProbe.send(ssh, session.name, body) }.getOrDefault(false)
-            if (!ok) {
-                sendErr = "没发出去，话给你留在输入框了"
-                // 正文还原（光标带到末尾），附件原样留在 chips 上（传完的那些不用重传，再点一次发送就行）
-                val restored = text + draft.text.let { if (it.isBlank()) "" else "\n$it" }
-                draft = TextFieldValue(restored, TextRange(restored.length))
-            } else {
-                Attach.removeDone(staged)
-            }
-            sending = false
-        }
+        val attachments = Attachments.renumber(staged.mapNotNull { (it.state as? DraftState.Done)?.staged }).map { InstructionAttachment(it.display, it.remotePath) }
+        if ((text.isBlank() && attachments.isEmpty()) || sending) return
+        try {
+            val item = instructions.enqueue(taskNavigationKey(conn.host, session), text, attachments)
+            draft = TextFieldValue(); Attach.removeDone(staged); sendErr = null
+            val first = instructions.entries.firstOrNull { it.taskKey == item.taskKey && it.status !in setOf(InstructionStatus.Accepted, InstructionStatus.Cancelled, InstructionStatus.Resolved) }
+            if (!live.busy && pending == null && ssh.isConnected && first?.id == item.id) deliver(item)
+        } catch (e: Exception) { sendErr = "指令未保存，输入已保留：${e.message}" }
     }
 
     val rows = remember(items) { groupToolRuns(items) }
     LaunchedEffect(rows, stick) { if (stick && rows.isNotEmpty()) listState.requestScrollToItem(Int.MAX_VALUE / 2, 100_000) }
-    LaunchedEffect(session.name) { focus.requestFocus() }   // 焦点先落输入框，Enter / Esc 一开始就能批
+    LaunchedEffect(taskKey) { focus.requestFocus() }   // 焦点先落输入框，Enter / Esc 一开始就能批
     // 只认用户的滚动（程序滚到底那一下也会走这里，不过滤会把 stick 关掉）；往上翻 = 停跟随，翻回底 = 再粘上
-    val scrollWatch = remember(conn.host.id, session.name) {
+    val scrollWatch = remember(taskKey) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 if (source == NestedScrollSource.UserInput && available.y > 0f) stick = false
@@ -376,7 +379,7 @@ fun ChatPane(conn: Conn, session: Session, savedDraft: androidx.compose.runtime.
                     Icon(if (a2.isImage) Icons.Outlined.Image else Icons.Outlined.AttachFile, null, Modifier.size(14.dp), tint = t.textMuted)
                     Text(a2.display, style = CodeStyle, color = t.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     when (st) {
-                        is DraftState.Waiting -> Text("排队中", fontSize = 11.sp, color = t.textMuted)
+                        is DraftState.Waiting -> Text("等待上传", fontSize = 11.sp, color = t.textMuted)
                         is DraftState.Uploading -> Text("${st.percent}%", fontSize = 11.sp, color = t.accent)
                         is DraftState.Done -> Text("好了", fontSize = 11.sp, color = t.success)
                         is DraftState.Failed -> Text(st.msg, fontSize = 11.sp, color = t.danger, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -388,12 +391,13 @@ fun ChatPane(conn: Conn, session: Session, savedDraft: androidx.compose.runtime.
                 }
             }
         }
+        InstructionStrip(instructions, taskNavigationKey(conn.host, session), !sending && !live.busy && pending == null && ssh.isConnected, ::deliver)
         Composer(
             draft, { draft = it }, focus,
             ctx = ctx,
             busy = live.busy, waiting = pending != null,
             hint = when {
-                pending != null -> "想说别的直接打字"
+                pending != null || live.busy -> "输入下一条指令，Enter 保存为本地待发送"
                 else -> "跟它说点什么… Enter 发送，Shift+Enter 换行；截图直接 Ctrl+V"
             },
             hasPending = pending != null,

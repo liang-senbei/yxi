@@ -20,7 +20,9 @@ internal fun pendingWorkOf(documents: List<FileDocument>, drafts: List<String>, 
     browsers.count { it.hasUnsubmittedFeedback },
     documents.count { it.busy } + browsers.count { it.preparing || it.stylePending != null },
 )
-fun AppState.pendingWork() = pendingWorkOf(documents, chatDrafts.values.map { it.value.text }, browsers.values)
+fun AppState.pendingWork() = pendingWorkOf(documents, chatDrafts.values.map { it.value.text }, browsers.values).let {
+    it.copy(operations = it.operations + instructions.entries.count { item -> item.status == InstructionStatus.Delivering })
+}
 
 @Composable
 fun ExitReviewDialog(work: PendingWork, onCancel: () -> Unit, onDiscard: () -> Unit) {

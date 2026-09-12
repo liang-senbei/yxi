@@ -28,6 +28,16 @@ p=pathlib.Path(home)/'.config/yxi'
 (pathlib.Path(fixture)/'PRD.md').write_text('# Live document preview\n\n| Feature | Status |\n| --- | --- |\n| Remote files | Ready |\n| Markdown tables | Ready |\n\nEdit this document beside the conversation.\n')
 PY
 tmux new-session -d -s "$SESSION" -c "$FIXTURE" 'sleep 600'
+if [ "${YXI_TEST_QUEUE:-0}" = 1 ]; then
+  runtime=$(tmux display-message -p -t "=$SESSION:" '#{pid}:#{session_id}:#{session_created}')
+  python3 - "$TEST_HOME" "$runtime" <<'PY'
+import pathlib,json,hashlib,sys
+home,runtime=sys.argv[1:]
+key=hashlib.sha256('\0'.join(['doc-test','127.0.0.1','22','root',runtime]).encode()).hexdigest()
+items=[dict(id=str(i),taskKey=key,text=text,attachments=[],status='Local',revision=0,detail='') for i,text in enumerate(['让右侧预览更宽一些，保留对话空间','统一标题、按钮和正文的间距','服务器切换器增加连接状态','检查浅色主题的对比度'])]
+(pathlib.Path(home)/'.config/yxi/instructions.json').write_text(json.dumps(dict(version=1,items=items),ensure_ascii=False))
+PY
+fi
 browser_args=()
 if [ "${YXI_TEST_BROWSER:-0}" = 1 ]; then
   WEB_FIXTURE=$(mktemp -d /tmp/yxi-browser-page.XXXXXX)
@@ -51,6 +61,48 @@ sleep 12
 tap() { DISPLAY=$D xdotool mousemove "$1" "$2" click 1; sleep 3; }
 shot() { DISPLAY=$D import -window root "$OUT/$1.png"; }
 shot 01-restored
+if [ "${YXI_TEST_QUEUE:-0}" = 1 ]; then
+  tap 700 784
+  DISPLAY=$D xdotool type --clearmodifiers 'KEEP_EXISTING_DRAFT'
+  tap 1203 679
+  shot 02-queue-edit
+  tap 600 400
+  DISPLAY=$D xdotool key ctrl+a
+  sleep 1
+  shot 02-queue-selected
+  DISPLAY=$D xdotool type --clearmodifiers 'EDITED_QUEUE_INSTRUCTION'
+  tap 875 558
+  python3 - "$TEST_HOME/.config/yxi/instructions.json" <<'PY'
+import json,sys
+items=json.load(open(sys.argv[1]))['items']
+assert next(i for i in items if i['id']=='1')['text']=='EDITED_QUEUE_INSTRUCTION'
+PY
+  tap 700 784
+  DISPLAY=$D xdotool key ctrl+a
+  sleep 1
+  DISPLAY=$D xdotool key ctrl+c
+  sleep 1
+  DISPLAY=$D timeout 3 xclip -selection clipboard -o > "$OUT/queue-draft.txt"
+  test "$(cat "$OUT/queue-draft.txt")" = 'KEEP_EXISTING_DRAFT'
+  tap 1203 679
+  tap 479 486
+  python3 - "$TEST_HOME/.config/yxi/instructions.json" <<'PY'
+import json,sys
+assert json.load(open(sys.argv[1]))['items'][0]['id']=='1'
+PY
+  shot 03-queue-reordered
+  tap 1203 626
+  tap 420 486
+  python3 - "$TEST_HOME/.config/yxi/instructions.json" <<'PY'
+import json,sys
+items=json.load(open(sys.argv[1]))['items']
+assert next(i for i in items if i['id']=='1')['status']=='Cancelled'
+assert sum(i['status']=='Local' for i in items)==3
+PY
+  shot 04-queue-cancelled
+  echo "Queue UI evidence: $OUT; home: $TEST_HOME"
+  exit 0
+fi
 tap 500 110
 shot 02-files
 tap 480 182
