@@ -213,8 +213,10 @@ object Lines {
     private fun parseLines(raw: String): List<Line>? =
         if (raw.isBlank()) emptyList() else runCatching {
             val a = JSONArray(raw)
-            (0 until a.length()).mapNotNull { i ->
-                a.optJSONObject(i)?.let {
+            val ids = mutableSetOf<String>()
+            (0 until a.length()).map { i ->
+                a.getJSONObject(i).let {
+                    require(it.optString("id").isNotBlank() && ids.add(it.getString("id"))) { "线路 ID 缺失或重复" }
                     val base = Line(
                         id = it.optString("id"), name = it.optString("name"),
                         baseUrl = it.optString("baseUrl"), token = it.optString("token"),
@@ -229,10 +231,7 @@ object Lines {
             }
         }.getOrNull()
 
-    /** @return 出错原因；null = 成功。 */
-    suspend fun saveList(ssh: SshSession?, lines: List<Line>): String? = withContext(Dispatchers.IO) {
-        val s = ssh ?: return@withContext "没连上"
-        val h = home(s) ?: return@withContext "取不到家目录"
+    private fun encodeLines(lines: List<Line>): JSONArray {
         val a = JSONArray()
         lines.forEach {
             a.put(
@@ -243,13 +242,28 @@ object Lines {
                     .put("settings", if (it.isCodex) it.extra else it.settingsJson()),
             )
         }
-        // ⚠️ 里面装的是钥匙：目录 700、文件 600。**先建目录再写**，SFTP 不会替你建。
-        s.exec("mkdir -p \"\$HOME/.yxi\" && chmod 700 \"\$HOME/.yxi\"")
-        runCatching {
-            val sftp = s.openSftp()
-            try { sftp.write(listPath(h), a.toString(2).toByteArray()) } finally { runCatching { sftp.close() } }
-        }.onFailure { return@withContext "写失败：${it.message?.take(60)}" }
-        s.exec("chmod 600 \"\$HOME/.yxi/lines.json\"")
+        return a
+    }
+
+    private fun canonical(value: Any?): String = when (value) {
+        is JSONObject -> value.keys().asSequence().sorted().joinToString(",", "{", "}") { JSONObject.quote(it) + ":" + canonical(value.get(it)) }
+        is JSONArray -> (0 until value.length()).joinToString(",", "[", "]") { canonical(value.get(it)) }
+        is String -> JSONObject.quote(value)
+        null, JSONObject.NULL -> "null"
+        else -> value.toString()
+    }
+
+    /** A supplied expected catalog protects edits made since the UI loaded it; legacy callers still get atomic writes. */
+    suspend fun saveList(ssh: SshSession?, lines: List<Line>, expected: List<Line>? = null): String? = withContext(Dispatchers.IO) {
+        val s = ssh ?: return@withContext "没连上"
+        val h = home(s) ?: return@withContext "取不到家目录"
+        val snapshot = try { RemoteAtomicJson.read(s, listPath(h)) }
+        catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { return@withContext "原配置无法读取，未覆盖：${e.message}" }
+        val current = parseLines(snapshot.text ?: "[]") ?: return@withContext "原配置已损坏，未覆盖"
+        if (expected != null && canonical(encodeLines(expected)) != canonical(encodeLines(current))) return@withContext "线路清单已变化，本次未覆盖，请刷新"
+        if (s.exec("mkdir -p \"\$HOME/.yxi\" && chmod 700 \"\$HOME/.yxi\" && printf YXI_READY").trim() != "YXI_READY") return@withContext "无法准备线路目录"
+        RemoteAtomicJson.write(s, listPath(h), encodeLines(lines).toString(2), snapshot.revision)?.let { return@withContext it }
         growOwned(s, h, lines)          // 删线路之前它的键已经在历史集合里了，删了照样能清
         null
     }

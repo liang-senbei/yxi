@@ -35,6 +35,7 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
     var editor by remember { mutableStateOf<Lines.Line?>(null) }
     var applying by remember { mutableStateOf<Lines.Line?>(null) }
     var resetting by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf<Lines.Line?>(null) }
     var projectScope by remember { mutableStateOf(false) }
     val cwd = state.session?.cwd?.takeIf { it.startsWith('/') }
     val chosenScope = if (engine == Lines.CLAUDE && projectScope) cwd else null
@@ -119,29 +120,47 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
                         Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             TextButton({ editor = line }, enabled = !busy) { Text("编辑") }
                             TextButton({ act { note = Lines.probe(conn.ssh, line.baseUrl) + "；此测试不验证密钥或模型可用性。" } }, enabled = !busy) { Text("测连通性") }
-                            TextButton({ applying = line }, enabled = !busy) { Text("应用配置") }
+                            TextButton({ note = ""; applying = line }, enabled = !busy) { Text("应用配置") }
+                            TextButton({ note = ""; deleting = line }, enabled = !busy) { Text("移除记录") }
                         }
                     }
                 }
             }
         }
-        TextButton({ resetting = true }, enabled = !busy && lines != null) { Text("恢复运行器默认线路…") }
+        TextButton({ note = ""; resetting = true }, enabled = !busy && lines != null) { Text("恢复运行器默认线路…") }
     }
     editor?.let { original -> RouteForm(original, onClose = { editor = null }) { edited ->
         val before = lines ?: error("清单未读取，不能覆盖")
         val latest = Lines.list(conn.ssh) ?: error("无法确认服务器最新清单")
         check(routeCatalogEqual(before, latest)) { "线路清单已被其他人修改，请关闭编辑后刷新" }
         val updated = if (before.any { it.id == edited.id }) before.map { if (it.id == edited.id) edited else it } else before + edited
-        Lines.saveList(conn.ssh, updated)?.let { error(it) }
+        Lines.saveList(conn.ssh, updated, expected = before)?.let { error(it) }
         val checked = Lines.list(conn.ssh) ?: error("保存结果未确认，请刷新核对")
         check(routeCatalogEqual(updated, checked)) { "保存后的线路清单不匹配" }
         lines = checked; editor = null; note = "线路已保存。点击应用配置后才会修改运行器设置。"
     } }
     if (applying != null || resetting) AlertDialog(onDismissRequest = { if (!busy) { applying = null; resetting = false } },
         title = { Text(if (resetting) "恢复默认线路？" else "应用 ${applying!!.name}？") },
-        text = { Text("目标：${conn.host.label}\n范围：${chosenScope ?: "服务器用户级"}\n" + if (chosenScope == null) "可能影响同一用户下的其他 Agent。正在执行的请求不会被当作已完成切换；需要重开的会话会明确提示。" else "该项目下的其他 Agent 也可能受影响。") },
+        text = { Column {
+            Text("目标：${conn.host.label}\n范围：${chosenScope ?: "服务器用户级"}\n" + if (chosenScope == null) "可能影响同一用户下的其他 Agent。正在执行的请求不会被当作已完成切换；需要重开的会话会明确提示。" else "该项目下的其他 Agent 也可能受影响。")
+            if (note.isNotBlank()) Text(note, Modifier.padding(top = 12.dp), color = t.danger)
+        } },
         confirmButton = { TextButton({ applyRoute(applying) }, enabled = !busy) { Text("确认应用") } },
         dismissButton = { TextButton({ applying = null; resetting = false }, enabled = !busy) { Text("取消") } })
+    deleting?.let { line -> AlertDialog(onDismissRequest = { if (!busy) deleting = null }, title = { Text("移除 ${line.name}？") },
+        text = { Column {
+            Text("只从 ${conn.host.label} 的线路清单移除这条记录。已应用到运行器的配置仍保留，此操作不会撤销提供方密钥。")
+            if (note.isNotBlank()) Text(note, Modifier.padding(top = 12.dp), color = t.danger)
+        } },
+        confirmButton = { TextButton({ act {
+            val before = lines ?: error("清单未读取")
+            val updated = before.filterNot { it.id == line.id }
+            Lines.saveList(conn.ssh, updated, expected = before)?.let { error(it) }
+            val checked = Lines.list(conn.ssh) ?: error("删除结果尚未确认，请刷新核对")
+            check(routeCatalogEqual(updated, checked)) { "线路清单回读不匹配" }
+            lines = checked; deleting = null; note = "记录已移除，运行器配置未改动。"
+        } }, enabled = !busy) { Text("移除记录", color = t.danger) } },
+        dismissButton = { TextButton({ deleting = null }, enabled = !busy) { Text("取消") } }) }
 }
 
 @Composable
