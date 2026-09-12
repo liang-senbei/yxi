@@ -215,6 +215,11 @@
 
 - **桌面终端换真终端（2026-09-12，老板发截图：「终端显示有点奇怪，终端模式不要输入框，要像服务器本地终端/VSCode remote」）**：TermPane 整个重写（d810525）——JediTerm（JetBrains intellij-dependencies 仓，`org.jetbrains.jediterm:jediterm-core+ui:3.3`，Swing 控件用 `androidx.compose.ui.awt.SwingPanel` 嵌进 Compose）+ core 的 `openPtyCommand("tmux attach …")` PTY 直连。全色彩、全键盘直通、拖窗即 resize（Shell.resize）、**输入框删除**；切走即断 attach（tmux 会话照活）。踩的坑，个个记牢：① jediterm 的 POM 是残缺的——**core 不声明、slf4j 也不声明**，必须显式引 `jediterm-core:3.3` + `jediterm-ui:3.3` + `slf4j-api`（+`slf4j-nop` 静音），漏了就是运行时 NoClassDefFoundError（org/slf4j/LoggerFactory 那种）；② 仓库的 jar 下载偶发 0 字节，curl 要 `-L` + 重试；③ `TerminalColor(int)` 是**调色板索引**不是 RGB——把 0xEBE1D9 塞进去会在渲染时越界断言炸掉整个 EDT（表现：终端面板空白），RGB 用 (r,g,b) 三参；④ **TtyConnector.read 必须 UTF-8 解码**（InputStreamReader 挂流上，官方 ProcessTtyConnector 同款）——latin1 逐字节塞会让中文全乱码；⑤ SwingPanel 在 `androidx.compose.ui.awt`（1.12 里不在 desktop 包）。**验收**：Xvfb 真连 cc-boomassets_logto → 终端 tab 显示彩色 Claude Code TUI → xdotool 敲 JEDITERM-中文-OK-4471 正常回显执行；桌面输入法中文进 tmux 的体验等真机（NSimSun 首选字体，缺字形的符号可能显示方框）。手机端反向可借鉴：JediTerm 不用动 tmux 的 window-size，attach 断开自动回弹。⚠️ CI「真装真启动」步骤仍压在 hk13 工作区未提交（.github/workflows/desktop.yml，workflow scope 阻着），谁先补了 scope 谁推。
 
+
+- **桌面登录 invalid_redirect_uri 修复（2026-09-12，老板真机报 Logto 错误）**：桌面登录的回调端口是**随机**的（`ServerSocket(0)`），而 Logto 的 redirect_uri 必须与注册的精确匹配——「Yxi App」里只注册了手机的 `io.yxi.app://callback`，桌面的 `http://127.0.0.1:<随机端口>/callback` 永远对不上。修两头：
+  ① Logto 侧给「Yxi App」（Native，g6ydpvvn833z0ua19n6hz）**补注册 `http://127.0.0.1:1455/callback`**。⚠️ 这版 Logto 的 PATCH /api/applications/{id} 要把 redirectUris 放 **`oidcClientMetadata`** 里，放顶层会被静默忽略（管理台/文档说的顶层字段在这版不好使）。M2M 凭据在 `/etc/yxi-member.env`（LOGTO_M2M_ID/SECRET，换 token 走 127.0.0.1:3201/oidc/token）。
+  ② 桌面 MeAuth 回调端口改**固定 1455**（照原定 Codex 的做法），绑定失败给人话报错。
+  核验：授权端点对 redirect_uri=http://127.0.0.1:1455/callback 从 400 报错变 **303 进登录页**。⚠️ 这个 redirect 注册**没进任何仓库**——Logto 是运行态配置，重装/换实例要重新注册（logto_yxi 仓的文档也该补一行）。
 - **下载页挂上 Windows 版（2026-09-12，老板：「把 windows 的下载挂载到 yxi.keuury.com」）**：首页下载区在 Android 卡和 iPhone 灰卡之间加了 **Windows 卡**（同款样式：徽标/「现在可用」badge/chips/一键安装说明），按钮直链 /desktop/Yxi-win-Setup.exe；首屏幽灵按钮加「用 Windows？装桌面版」；区块小标题改成「Android 和 Windows 现在就能装」。版本号 chip 现取 /desktop/releases.win.json、大小 chip HEAD Setup.exe（和安卓侧 latest.json 的取法同款，发新版不用动页面）。注意：这个 landing 页**只在 hk13 /var/www/yxi/index.html**，不在仓库里（site/ 只有 privacy/terms）——改前备份 index.html.bak-win-20260912。
 
 
