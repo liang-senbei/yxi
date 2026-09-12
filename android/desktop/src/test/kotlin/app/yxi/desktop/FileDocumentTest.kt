@@ -3,6 +3,15 @@ package app.yxi.desktop
 import kotlin.test.*
 
 class FileDocumentTest {
+    @Test fun `editing a host cannot redirect an open document to another endpoint`() {
+        val host = Host("a", "Hong Kong", "hk.example")
+        val doc = FileDocument(host.id, "task", "/work/readme.md", DocumentEndpoint.of(host))
+        doc.checkEndpoint(host.copy(alias = "Renamed"))
+        assertFails { doc.checkEndpoint(host.copy(hostname = "other.example")) }
+        assertFails { doc.checkEndpoint(host.copy(port = 2222)) }
+        assertFails { doc.checkEndpoint(host.copy(username = "other")) }
+        assertFails { doc.checkEndpoint(host.copy(id = "b")) }
+    }
     private fun snapshot(s: String) = FileSnapshot(s.toByteArray())
     @Test fun `remote change does not replace unsaved edits`() {
         val doc = FileDocument("host-a", "same-task", "/work/PRD.md")

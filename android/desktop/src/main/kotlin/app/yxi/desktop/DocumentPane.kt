@@ -111,7 +111,7 @@ private fun DocumentBody(conn: Conn, doc: FileDocument, onQuote: (String) -> Uni
             SelectionContainer { Text(conn.host.label + " · " + doc.path, Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis) }
         }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
-            if (!doc.image) listOf("预览", "源码", "分栏").forEach { mode -> TextButton({ doc.mode = mode }) { Text(if (doc.mode == mode) "● $mode" else mode) } }
+            if (!doc.image) WorkbenchTabs(listOf("预览", "源码", "分栏"), doc.mode, { doc.mode = it })
             TextButton({ save() }, enabled = doc.dirty && !doc.busy && !doc.conflict) { Text(if (doc.busy) "保存中" else "保存") }
             TextButton({ Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(doc.path), null); pathCopied = true }) { Text(if (pathCopied) "已复制" else "复制路径") }
             TextButton({

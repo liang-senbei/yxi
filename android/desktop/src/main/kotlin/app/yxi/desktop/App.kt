@@ -18,6 +18,10 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.material3.MaterialTheme
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import androidx.compose.material3.Tab
@@ -78,10 +82,11 @@ fun App(state: AppState) {
                                 }
                             }
                             // 对齐手机的 终端 / 对话 / 文件（实验室是手机上的调试入口，桌面不做）
-                            TabRow(selectedTabIndex = state.tab) {
-                                Tab(selected = state.tab == 0, onClick = { state.tab = 0 }, text = { Text("对话") })
-                                Tab(selected = state.tab == 1, onClick = { state.tab = 1 }, text = { Text("终端") })
-                                Tab(selected = state.tab == 2, onClick = { state.tab = 2 }, text = { Text("文件") })
+                            Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                val views = listOf("对话", "终端", "文件")
+                                WorkbenchTabs(views, views[state.tab], { state.tab = views.indexOf(it) })
+                                Text(sess.cwd, Modifier.weight(1f).padding(start = 18.dp), color = Tokens.current.textMuted,
+                                    style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                             if (state.workspaceError.isNotBlank()) Text(state.workspaceError, color = Tokens.current.danger)
                             if (!state.filePanelOpen && state.documents.any { it.hostId == conn.host.id && it.task == sess.name }) TextButton({ state.filePanelOpen = true }) { Text("打开文件侧栏") }

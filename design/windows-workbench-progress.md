@@ -29,7 +29,16 @@
 - 桌面Markdown运行库需要Java21，实际打开页面时在旧Java17抓到UnsupportedClassVersionError；现已统一desktop工具链/CI为21，并在安装冒烟中渲染Markdown。hk13测试使用独立缓存JDK，不改变服务器默认Java。
 - 40个桌面测试通过；5个真实Python保存脚本集成测试通过；真实SSH/SFTP界面验收通过：打开Markdown表格、外部改动自动更新、全选替换后Ctrl+S（核对整个远端文件）、未保存内容遇远端修改保留双方、选段引用确实进入对应任务草稿。最后一张截图已人工检查。证据：`/tmp/yxi-doc-e2e.log` 与 `/tmp/yxi-doc-evidence/`；没有发送到测试会话。
 - 仍未完整覆盖W08：本机文件提供器、相对图片加载、语法高亮/搜索/跳行、应用退出时未保存编辑保护、跨任务双主机实机矩阵仍需补齐。Windows字体/DPI与安装尚待实机验收；Linux测试环境中文字体不全。
-- 下一轮先补文档的主机地址/用户名绑定：同一个hostId被编辑为不同服务器后，应冻结旧文档写入并保留草稿，不能只靠hostId复用。随后接共享线路逻辑和桌面线路/模型面板。此开发分支未发布，不能据现有单机验收宣称跨主机场景全部完成。
+- 文档主机地址/用户名绑定已在第三轮补齐；完整双主机矩阵尚待验收。此开发分支未发布，不能据现有单机验收宣称跨主机场景全部完成。
+
+## 第三轮：视觉导航与 Windows 启动（2026-09-13）
+
+- 新增统一 WorkbenchTabs：工作区和文档视图使用紧凑、中性色的分段导航，去掉满宽蓝色下划线和圆点选中标记；工作区顶部显示项目路径。
+- FileDocument记录打开时的地址/端口/用户名。主机ID不变但地址或用户被修改时，旧文档拒绝读取/写入，保留已有内容供另存；别名修改不影响继续使用。已加回归测试。
+- 41项桌面测试通过，Linux打包和真实SSH文件预览/修改/冲突/引用E2E通过。截图使用隔离FONTCONFIG_FILE加载Noto CJK，中文已完整显示；字体包仅解包到测试缓存，没有替换服务器默认字体配置。
+- 本机Gradle首次下载发行版超时，改用hk13 `-Pyxi.os=win` 生成Windows专用uber jar，再用本机Microsoft JDK21的jpackage生成app-image，带ALL-MODULE-PATH运行时。该构建是开发验证产物，不是已经发布的Setup。
+- 本机原生 `YxiWorkbench.exe --smoke` 在独立LOCALAPPDATA/APPDATA下退出0并输出smoke ok（含Markdown渲染），未替换已安装的Yxi。证据在本地 `tmp/windows-smoke-cd05e85a635b4a749e4014f2ac302b8a/`；app-image在 `tmp/workbench-native-build/YxiWorkbench/`。
+- Windows完整安装/升级、视觉截图与125%/150%/200%缩放尚未完成。后续继续线路/模型、项目树、队列、浏览器与插件等完整PRD；这轮不视为最终视觉定稿。
 
 ## 剩余验收（保持PRD完整范围）
 

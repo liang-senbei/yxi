@@ -26,7 +26,16 @@ internal data class FileSnapshot(val bytes: ByteArray) {
 }
 
 /** Per-host, per-task state lives outside composition so switching tasks never discards unsaved edits. */
-class FileDocument(val hostId: String, val task: String, val path: String) {
+data class DocumentEndpoint(val hostname: String, val port: Int, val username: String) {
+    companion object { fun of(host: Host) = DocumentEndpoint(host.hostname.trim().lowercase(), host.port, host.username) }
+}
+
+class FileDocument(val hostId: String, val task: String, val path: String, val endpoint: DocumentEndpoint? = null) {
+    internal fun checkEndpoint(host: Host) {
+        check(host.id == hostId && endpoint == DocumentEndpoint.of(host)) {
+            "主机地址或登录用户已变化。旧文档已冻结，编辑仍保留；请另存草稿并重新打开文件。"
+        }
+    }
     internal val io = Mutex()
     internal var base by mutableStateOf<FileSnapshot?>(null)
     internal var incoming by mutableStateOf<FileSnapshot?>(null)
@@ -72,7 +81,7 @@ internal object RemoteDocuments {
     }
 
     suspend fun refresh(conn: Conn, doc: FileDocument) = doc.io.withLock {
-        try { doc.receive(read(conn, doc.path, doc.image)) }
+        try { doc.checkEndpoint(conn.host); doc.receive(read(conn, doc.path, doc.image)) }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { doc.error = e.message ?: "读取失败"; doc.status = if (doc.base == null) "未载入" else "显示缓存，尚未同步" }
     }
@@ -85,6 +94,7 @@ internal object RemoteDocuments {
         val bytes = text.toByteArray()
         var temporary: String? = null
         try {
+            doc.checkEndpoint(conn.host)
             require(bytes.size <= TEXT_LIMIT) { "文本超过 1 MB，不能保存" }
             val s = conn.ssh.openSftp()
             try {

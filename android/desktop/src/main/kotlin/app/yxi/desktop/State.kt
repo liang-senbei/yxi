@@ -38,7 +38,7 @@ class AppState {
     suspend fun openDocument(c: Conn, task: Session, path: String) {
         val sftp = c.ssh.openSftp()
         val canonical = try { sftp.realpath(if (path.startsWith('/')) path else task.cwd.trimEnd('/') + "/" + path) } finally { sftp.close() }
-        if (documents.none { it.hostId == c.host.id && it.task == task.name && it.path == canonical }) documents += FileDocument(c.host.id, task.name, canonical)
+        if (documents.none { it.hostId == c.host.id && it.task == task.name && it.path == canonical }) documents += FileDocument(c.host.id, task.name, canonical, DocumentEndpoint.of(c.host))
         documentSelection[c.host.id + "\u0000" + task.name] = canonical
         if (conn === c && session?.name == task.name) { filePanelOpen = true; tab = 0 }
     }

@@ -42,7 +42,7 @@ sleep 12
 tap() { DISPLAY=$D xdotool mousemove "$1" "$2" click 1; sleep 3; }
 shot() { DISPLAY=$D import -window root "$OUT/$1.png"; }
 shot 01-restored
-tap 1095 110
+tap 500 110
 shot 02-files
 tap 480 182
 shot 03-preview

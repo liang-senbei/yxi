@@ -7,12 +7,12 @@
 # 为什么要有这个：桌面版「编过 + 逻辑自查」漏得掉整类问题（#328：弹层被父布局排到屏幕外，
 # 进了组合、状态也对，就是没有像素）。改了界面，合并前跑一次这个，至少证明它还起得来、还画得出。
 #
-# ⚠️ 环境前提见 TROUBLESHOOTING #327：**必须装带 AWT 的 JRE**（`apt-get install -y --no-install-recommends openjdk-17-jre`）——
+# ⚠️ 环境前提见 TROUBLESHOOTING #327：必须使用带 AWT 的 JDK 21，并通过 JAVA_HOME 指向它。
 #    默认那个是 headless 包，报的是「No X11 DISPLAY variable was set, or no headful library support」，**后半句才是真原因**。
 # ⚠️ 这套环境**验不了最大化**（setExtendedState 之后 getExtendedState 回 0，带不带边框都一样，见 #327），
 #    「最大化会不会盖住任务栏」只能真 Windows 上看。
 # ⚠️ **各人用各人的 DISPLAY**（默认 :97）：:99 是全组共用的，两个人同时点鼠标会互相串。
-# ⚠️ pkill 的模式**会匹配到你自己这条命令行**，所以下面一律锚成 `^java -jar`（#327 里那条，一天绊倒三个人）。
+# 只终止此脚本持有的PID，不使用全局pkill，不触碰其它Yxi实例。
 set -u
 D=${YXI_DISPLAY:-:97}
 OUT=${YXI_E2E_OUT:-$(mktemp -d /tmp/yxi-e2e.XXXXXX)}; mkdir -p "$OUT"
