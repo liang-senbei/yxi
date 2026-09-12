@@ -27,7 +27,7 @@ private val shortcuts = listOf(
 
 @Composable
 fun ShortcutsDialog(state: AppState) {
-    AlertDialog(
+    WorkbenchDialog(
         onDismissRequest = { state.showShortcuts = false },
         confirmButton = { TextButton({ state.showShortcuts = false }) { Text("关闭") } },
         title = { Text("键盘快捷键") },

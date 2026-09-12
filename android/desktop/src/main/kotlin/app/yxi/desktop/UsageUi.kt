@@ -128,7 +128,7 @@ fun UsageDialog(c: Conn, snapState: MutableState<UsageSnap?>, onClose: () -> Uni
     val snap = snapState.value
     val t = Tokens.current
     var refreshing by remember { mutableStateOf(false) }
-    AlertDialog(
+    WorkbenchDialog(
         onDismissRequest = onClose,
         title = { Text("用量 · " + c.host.label) },
         text = {

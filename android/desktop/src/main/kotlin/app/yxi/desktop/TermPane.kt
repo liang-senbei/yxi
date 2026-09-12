@@ -75,6 +75,7 @@ fun TermPane(conn: Conn, session: Session) {
     Box(Modifier.fillMaxSize().background(t.surface2)) {
         val w = widget
         when {
+            NativeOverlays.active -> Unit
             w != null -> SwingPanel(factory = { w }, modifier = Modifier.fillMaxSize(), update = {})
             err.isNotBlank() -> Text(err, Modifier.align(Alignment.Center).padding(16.dp), color = t.danger)
             else -> Text("正在打开终端…", Modifier.align(Alignment.Center), color = t.textMuted)

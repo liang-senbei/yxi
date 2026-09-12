@@ -29,6 +29,7 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
     @Composable fun task(s: Session) {
         val key = taskNavigationKey(conn.host, s)
         var menu by remember(key) { mutableStateOf(false) }
+        NativeOverlay(menu)
         var renaming by remember(key) { mutableStateOf(false) }
         var title by remember(key, renaming) { mutableStateOf(nav.title(key) ?: s.short) }
         val stable = s.runtimeId.isNotBlank()
@@ -59,7 +60,7 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
                 }
             }
         }
-        if (renaming) AlertDialog(onDismissRequest = { renaming = false }, title = { Text("修改任务显示名称") },
+        if (renaming) WorkbenchDialog(onDismissRequest = { renaming = false }, title = { Text("修改任务显示名称") },
             text = { Column {
                 OutlinedTextField(title, { title = it }, singleLine = true, label = { Text("名称") })
                 Text("仅修改本机显示，不重命名服务器会话。", style = MaterialTheme.typography.bodySmall)

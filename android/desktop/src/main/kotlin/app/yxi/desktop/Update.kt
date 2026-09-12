@@ -174,7 +174,7 @@ fun UpdateBanner() {
             else -> Spacer(Modifier)
         }
     }
-    if (confirm) AlertDialog(
+    if (confirm) WorkbenchDialog(
         onDismissRequest = { confirm = false },
         title = { Text("现在更新 Yxi？") },
         text = { Text("Yxi 将退出以安装更新，这会断开当前连接；服务器上的会话不受影响") },

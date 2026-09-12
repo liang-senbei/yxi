@@ -80,6 +80,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
     var installingKey by remember { mutableStateOf<Host?>(null) }
     var note by remember { mutableStateOf("") }       // 不属于某条连接的错（Conn 都没建出来）
     var hostMenu by remember { mutableStateOf(false) }
+    NativeOverlay(hostMenu)
     val keys = remember { FileHostKeys() }
     // 账号行的资料：进来就拉一次（幂等；Me 页里还会再拉）。侧栏收起再展开会重跑，无害
     LaunchedEffect(Unit) { MeAuth.load() }
@@ -232,7 +233,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
         ColorDialog(h.tint(hosts.indexOf(h)), onPick = { col -> safely { save(hosts.map { if (it.id == h.id) it.copy(color = col) else it }); coloring = null } }, onClose = { coloring = null })
     }
     deleting?.let { h ->
-        AlertDialog(
+        WorkbenchDialog(
             onDismissRequest = { deleting = null },
             title = { Text("删除 ${h.label}？") },
             text = { Text("只删这里的记录和指纹，服务器上的会话不受影响。") },
@@ -260,6 +261,7 @@ private fun HostHeader(
 ) {
     val t = Tokens.current
     var menu by remember { mutableStateOf(false) }
+    NativeOverlay(menu)
     val src = remember { MutableInteractionSource() }
     val hovered by src.collectIsHoveredAsState()
     val st = c?.status ?: Conn.Status.Idle
@@ -341,6 +343,7 @@ private fun BottomNav(state: AppState) {
 private fun AccountRow(state: AppState) {
     val t = Tokens.current
     var menu by remember { mutableStateOf(false) }
+    NativeOverlay(menu)
     val me = MeAuth.me
     val signedIn = MeAuth.signedIn
     val name = if (signedIn) me?.nickname?.ifBlank { null } ?: "Yxi 用户" else "未登录"

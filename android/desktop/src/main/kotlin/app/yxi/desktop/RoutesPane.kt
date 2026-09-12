@@ -139,7 +139,7 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
         check(routeCatalogEqual(updated, checked)) { "保存后的线路清单不匹配" }
         lines = checked; editor = null; note = "线路已保存。点击应用配置后才会修改运行器设置。"
     } }
-    if (applying != null || resetting) AlertDialog(onDismissRequest = { if (!busy) { applying = null; resetting = false } },
+    if (applying != null || resetting) WorkbenchDialog(onDismissRequest = { if (!busy) { applying = null; resetting = false } },
         title = { Text(if (resetting) "恢复默认线路？" else "应用 ${applying!!.name}？") },
         text = { Column {
             Text("目标：${conn.host.label}\n范围：${chosenScope ?: "服务器用户级"}\n" + if (chosenScope == null) "可能影响同一用户下的其他 Agent。正在执行的请求不会被当作已完成切换；需要重开的会话会明确提示。" else "该项目下的其他 Agent 也可能受影响。")
@@ -147,7 +147,7 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
         } },
         confirmButton = { TextButton({ applyRoute(applying) }, enabled = !busy) { Text("确认应用") } },
         dismissButton = { TextButton({ applying = null; resetting = false }, enabled = !busy) { Text("取消") } })
-    deleting?.let { line -> AlertDialog(onDismissRequest = { if (!busy) deleting = null }, title = { Text("移除 ${line.name}？") },
+    deleting?.let { line -> WorkbenchDialog(onDismissRequest = { if (!busy) deleting = null }, title = { Text("移除 ${line.name}？") },
         text = { Column {
             Text("只从 ${conn.host.label} 的线路清单移除这条记录。已应用到运行器的配置仍保留，此操作不会撤销提供方密钥。")
             if (note.isNotBlank()) Text(note, Modifier.padding(top = 12.dp), color = t.danger)
@@ -173,7 +173,7 @@ private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend
     var model by remember { mutableStateOf(routeModel(original)) }
     var error by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    AlertDialog(onDismissRequest = { if (!busy) onClose() }, title = { Text("${if (original.isCodex) "Codex" else "Claude Code"} 线路") },
+    WorkbenchDialog(onDismissRequest = { if (!busy) onClose() }, title = { Text("${if (original.isCodex) "Codex" else "Claude Code"} 线路") },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedTextField(name, { name = it }, label = { Text("线路名称") }, singleLine = true)
             OutlinedTextField(url, { url = it }, label = { Text("服务端点 Base URL") }, singleLine = true)

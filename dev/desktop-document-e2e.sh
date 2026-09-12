@@ -115,6 +115,10 @@ if [ "${YXI_TEST_BROWSER:-0}" = 1 ]; then
   fi
   tap 950 760
   DISPLAY=$D xdotool type --clearmodifiers 'Make this heading more prominent.'
+  tap 1210 159
+  shot 10-web-close-review
+  DISPLAY=$D xdotool key Escape
+  sleep 1
   tap 835 812
   shot 11-browser-feedback
   tap 1152 159
@@ -132,6 +136,15 @@ if [ "${YXI_TEST_BROWSER:-0}" = 1 ]; then
   shot 13-browser-closed
   kill -0 "$app_pid"
   tap 1225 68
+  shot 14-exit-review
+  DISPLAY=$D xdotool key Escape
+  sleep 1
+  shot 14-exit-cancelled
+  kill -0 "$app_pid"
+  tap 1225 68
+  shot 15-exit-second-review
+  tap 668 538
+  shot 16-exit-confirmed
   for attempt in $(seq 1 30); do kill -0 "$app_pid" 2>/dev/null || break; sleep 1; done
   if kill -0 "$app_pid" 2>/dev/null; then echo 'Application did not finish browser shutdown' >&2; exit 1; fi
   wait "$app_pid"

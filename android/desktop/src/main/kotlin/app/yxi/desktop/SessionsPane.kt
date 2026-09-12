@@ -99,7 +99,7 @@ fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, onCreated: (Session) -> 
     var path by remember { mutableStateOf(Dirs.parentsOf(conn.sessions.map { it.cwd }).firstOrNull()?.let { "$it/" }.orEmpty()) }
     var err by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    AlertDialog(
+    WorkbenchDialog(
         onDismissRequest = onDismiss,
         title = { Text("在 ${conn.host.label} 上新建会话") },
         text = {

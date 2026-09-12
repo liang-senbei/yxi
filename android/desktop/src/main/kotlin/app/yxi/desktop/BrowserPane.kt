@@ -25,6 +25,8 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
     val preview = remember(key) { state.browsers.getOrPut(key) { BrowserPreview(conn.host, key) } }
     var input by remember(preview) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(preview.address)) }
     var addressDirty by remember(preview) { mutableStateOf(false) }
+    var reviewingClose by remember(preview) { mutableStateOf(false) }
+    fun closePreview() { preview.close(); state.browsers.remove(key); state.browserPanelOpen = false }
     LaunchedEffect(preview.address) { if (!addressDirty) input = androidx.compose.ui.text.input.TextFieldValue(preview.address) }
     fun open() { if (preview.preparing) return; val requested = input.text; addressDirty = false; scope.launch {
         try { preview.open(conn, requested) }
@@ -42,7 +44,10 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
         Row(Modifier.fillMaxWidth().height(46.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(preview.title.ifBlank { "网页预览" }, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             TextButton({ state.browserPanelOpen = false }) { Text("收起") }
-            TextButton({ preview.close(); state.browsers.remove(key); state.browserPanelOpen = false }) { Text("关闭") }
+            TextButton({
+                if (preview.hasUnsubmittedFeedback || preview.preparing || preview.stylePending != null) reviewingClose = true
+                else closePreview()
+            }) { Text("关闭") }
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(input, { input = it; addressDirty = true }, Modifier.weight(1f).onPreviewKeyEvent {
@@ -73,7 +78,7 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
             if (browser == null) Column(Modifier.align(Alignment.Center).padding(24.dp)) {
                 Text("边看页面，边指导修改", style = MaterialTheme.typography.titleMedium)
                 Text("输入服务器开发端口，或粘贴网页地址。开发服务器支持热更新时，代码变化会直接呈现在这里。", Modifier.padding(top = 10.dp), style = MaterialTheme.typography.bodyMedium, color = t.textMuted)
-            } else SwingPanel(factory = { browser.uiComponent }, modifier = Modifier.fillMaxSize())
+            } else if (!NativeOverlays.active) SwingPanel(factory = { browser.uiComponent }, modifier = Modifier.fillMaxSize())
         }
         preview.selection?.let { selected ->
             HorizontalDivider()
@@ -107,4 +112,8 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
             }
         }
     }
+    if (reviewingClose) WorkbenchDialog(onDismissRequest = { reviewingClose = false }, title = { Text("保留这份网页反馈？") },
+        text = { Text(if (preview.preparing || preview.stylePending != null) "网页操作尚未完成，请稍后再关闭。" else "这份意见或试调还没有加入对话。可以收起预览继续保留，或丢弃后关闭。") },
+        confirmButton = { TextButton({ reviewingClose = false; state.browserPanelOpen = false }) { Text("收起并保留") } },
+        dismissButton = { TextButton({ reviewingClose = false; closePreview() }, enabled = !preview.preparing && preview.stylePending == null) { Text("丢弃并关闭") } })
 }

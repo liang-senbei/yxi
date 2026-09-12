@@ -22,6 +22,7 @@ fun StyleTrialControls(preview: BrowserPreview, selection: PageSelection) {
     var property by remember(preview) { mutableStateOf("font-size") }
     var value by remember(selection, property) { mutableStateOf(TextFieldValue(preview.styleChanges[property]?.removeSuffix("px") ?: StyleTrial.initial(property, selection.computed[property].orEmpty()))) }
     var menu by remember { mutableStateOf(false) }
+    NativeOverlay(menu)
     var gesture by remember(property) { mutableStateOf<String?>(null) }
     Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
         Text(if (preview.stylePending != null) "正在试调…" else "临时预览 · 尚未修改源文件", style = MaterialTheme.typography.labelSmall, color = t.warning)

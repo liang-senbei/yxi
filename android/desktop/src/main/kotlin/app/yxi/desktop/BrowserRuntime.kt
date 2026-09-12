@@ -90,6 +90,7 @@ class BrowserPreview(val owner: Host, val taskId: String) {
         private set
     var comment by mutableStateOf("")
     var commentAdded by mutableStateOf(false)
+    val hasUnsubmittedFeedback get() = !commentAdded && (comment.isNotBlank() || styleChanges.isNotEmpty())
     var selectionStale by mutableStateOf(false)
     var stylePanelOpen by mutableStateOf(false)
     var styleChanges by mutableStateOf<Map<String, String>>(emptyMap())

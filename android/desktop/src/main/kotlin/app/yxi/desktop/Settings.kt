@@ -25,7 +25,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun SettingsDialog(state: AppState) {
     var autostart by remember { mutableStateOf(autostartEnabled()) }
-    AlertDialog(
+    WorkbenchDialog(
         onDismissRequest = { state.showSettings = false },
         confirmButton = { TextButton({ state.showSettings = false }) { Text("完成") } },
         title = { Text("设置") },

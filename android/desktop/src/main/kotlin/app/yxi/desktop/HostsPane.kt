@@ -52,7 +52,7 @@ fun HostForm(h: Host, isNew: Boolean, onSave: (Host) -> Unit, onClose: () -> Uni
     var password by remember { mutableStateOf(h.password) }
     var err by remember { mutableStateOf("") }
 
-    AlertDialog(
+    WorkbenchDialog(
         onDismissRequest = onClose,
         title = { Text(if (isNew) "加新主机" else "改主机") },
         text = {
@@ -124,7 +124,7 @@ fun CopyIdDialog(h: Host, keys: FileHostKeys, onSaved: (Host) -> Unit, onClose: 
     var done by remember { mutableStateOf(false) }
     val t = Tokens.current
     val scope = rememberCoroutineScope()
-    AlertDialog(
+    WorkbenchDialog(
         onDismissRequest = { if (!busy) onClose() },
         title = { Text("给 ${h.label} 装公钥") },
         text = {
@@ -161,7 +161,7 @@ fun FingerprintDialog(p: FileHostKeys.Prompt, alias: String) {
     val t = Tokens.current
     // 提示用户去查哪个文件：跟对方给的密钥类型对上，指错文件指纹必然对不上、用户就不敢连
     val keyFile = when { "rsa" in p.keyType -> "rsa"; "ecdsa" in p.keyType -> "ecdsa"; else -> "ed25519" }
-    AlertDialog(
+    WorkbenchDialog(
         onDismissRequest = { p.answer.complete(false) },
         title = { Text("确认这是 $alias 吗？") },
         text = {
@@ -181,7 +181,7 @@ fun FingerprintDialog(p: FileHostKeys.Prompt, alias: String) {
 @Composable
 fun ColorDialog(current: Color, onPick: (String) -> Unit, onClose: () -> Unit) {
     val t = Tokens.current
-    AlertDialog(
+    WorkbenchDialog(
         onDismissRequest = onClose,
         title = { Text("连接颜色") },
         text = {

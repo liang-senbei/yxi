@@ -49,8 +49,9 @@ fun main(args: Array<String>) {
         // 记住上次的窗口大小 / 位置（Store.dir/window.json）。只在第一次组合时读：Shell.visible 一变这里会重组，不能每次都重置
         val win = rememberWindowState(width = 1200.dp, height = 800.dp)
         val quitting = remember { androidx.compose.runtime.mutableStateOf(false) }
+        val reviewingExit = remember { androidx.compose.runtime.mutableStateOf(false) }
         remember { Store.loadWindow(win); if (Store.pref("maximized", "0") == "1") win.placement = WindowPlacement.Maximized }
-        fun quit() {
+        fun finishQuit() {
             if (quitting.value) return
             quitting.value = true
             state.browsers.values.forEach { it.close() }
@@ -61,6 +62,16 @@ fun main(args: Array<String>) {
                 if (!BrowserRuntime.shutdown()) System.err.println("Browser cleanup did not finish before shutdown")
                 exitApplication()
             }
+        }
+        fun quit() {
+            if (quitting.value || reviewingExit.value) return
+            if (state.pendingWork().needsReview) {
+                if (!Shell.visible || Shell.frame?.isFocused != true) {
+                    Shell.show()
+                    scope.launch { delay(150); if (!quitting.value) reviewingExit.value = true }
+                } else reviewingExit.value = true
+            }
+            else finishQuit()
         }
         fun close() {
             if (Store.pref("closeToTray", "1") != "1" || !SystemTray.isSupported()) return quit()
@@ -111,6 +122,11 @@ fun main(args: Array<String>) {
                         if ("--smoke" in args) AssistantBody("# Document renderer\n\n| Runtime | Status |\n| --- | --- |\n| Markdown | loaded |")
                         App(state)
                     }
+                    if (reviewingExit.value) ExitReviewDialog(state.pendingWork(),
+                        onCancel = { reviewingExit.value = false },
+                        onDiscard = {
+                            if (state.pendingWork().canDiscard) { reviewingExit.value = false; finishQuit() }
+                        })
                 }
             }
         }

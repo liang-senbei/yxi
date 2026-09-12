@@ -76,7 +76,7 @@ fun DocumentPane(state: AppState, conn: Conn, session: app.yxi.agent.Session) {
         }
     }
     closing?.let { doc ->
-        AlertDialog(onDismissRequest = { closing = null }, title = { Text("有尚未保存的编辑") },
+        WorkbenchDialog(onDismissRequest = { closing = null }, title = { Text("有尚未保存的编辑") },
             text = { Text(doc.path + "\n关闭会丢弃这份编辑。也可以收起面板保留草稿。") },
             confirmButton = { TextButton({ close(doc); closing = null }) { Text("丢弃并关闭") } },
             dismissButton = { TextButton({ closing = null }) { Text("继续编辑") } })
@@ -174,7 +174,7 @@ private fun DocumentBody(conn: Conn, doc: FileDocument, onQuote: (String) -> Uni
             }, enabled = !quoteRange.collapsed && quoteRange.max - quoteRange.min <= 16000) { Text(if (quoteAdded) "已加入对话草稿" else "引用选中内容到对话") }
         }
     }
-    if (discard) AlertDialog(onDismissRequest = { discard = false }, title = { Text("丢弃本地编辑？") },
+    if (discard) WorkbenchDialog(onDismissRequest = { discard = false }, title = { Text("丢弃本地编辑？") },
         text = { Text("将用当前服务器版本替换编辑内容。") },
         confirmButton = { TextButton({ doc.useIncoming(); discard = false }) { Text("载入远端版本") } },
         dismissButton = { TextButton({ discard = false }) { Text("取消") } })
