@@ -25,17 +25,21 @@ import androidx.compose.ui.unit.sp
 val BodyStyle = TextStyle(fontSize = 15.sp, lineHeight = 24.sp)
 val CodeStyle = TextStyle(fontFamily = Mono, fontSize = 13.sp, lineHeight = 19.sp)
 
-/** 最简 markdown 渲染：围栏代码块 + 行内粗体 / 代码 / 标题 / 圆点。 */
+@Composable
+internal fun workbenchMarkdownTypography() = com.mikepenz.markdown.m3.markdownTypography(
+    h1 = BodyStyle.copy(fontSize = 24.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold),
+    h2 = BodyStyle.copy(fontSize = 20.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold),
+    h3 = BodyStyle.copy(fontSize = 18.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold),
+    h4 = BodyStyle.copy(fontWeight = FontWeight.SemiBold),
+    h5 = BodyStyle.copy(fontWeight = FontWeight.SemiBold),
+    h6 = BodyStyle.copy(fontWeight = FontWeight.SemiBold),
+)
+
+/** Shared native Markdown renderer for messages, including tables and clickable file links. */
 @Composable
 fun AssistantBody(md: String) {
-    val blocks = remember(md) { mdBlocks(md) }
-    val t = Tokens.current
     SelectionContainer {
-        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            blocks.forEach { (code, text) ->
-                if (code) CodeBlock(text) else Text(inlineMd(text), style = BodyStyle, color = t.textPrimary)
-            }
-        }
+        com.mikepenz.markdown.m3.Markdown(md, typography = workbenchMarkdownTypography())
     }
 }
 

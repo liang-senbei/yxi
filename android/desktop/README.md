@@ -1,5 +1,15 @@
 # Yxi Desktop（Windows 桌面版）
 
+## 工作台开发分支（2026-09-13）
+
+桌面构建、打包与独立 jar 运行统一使用 **JDK 21**；Markdown 0.44.0 的 JVM 模块字节码为 Java 21，Java 17 虽可完成部分编译检查，打开文档会报 UnsupportedClassVersionError。Android/core 的目标保持原状。Windows Setup 会自带匹配运行时，用户不需自行安装 Java。
+
+文件预览支持 Markdown 表格、源码/分栏、文本保存与远端更新检测。文本限 1 MB，图片限 8 MB；远端编辑保存需要 Python 3，使用内容版本校验与原子替换。变更源文件有冲突时保留本地编辑并让用户选择合并，未承诺与任意第三方编辑器之间的文件系统级原子 CAS。
+
+验证：`JAVA_HOME=<JDK21> ./gradlew :desktop:test :desktop:packageUberJarForCurrentOS`；`python3 dev/test-document-save.py` 验证真实保存脚本；`JAVA_HOME=<JDK21> YXI_TEST_SSH_KEY=<本机已授权私钥> bash dev/desktop-document-e2e.sh` 在独立 home/display、临时文档和惰性 tmux 测试会话上验证 SSH/SFTP 预览，不触碰运行中的 Agent。
+
+本节为当前工作台分支要求；下文保留的早期发版记录不代表最新运行时与功能状态。
+
 > 老板 2026-09-08：「构建一个 Windows 版本，像 Claude Desktop / ChatGPT 的 Windows 版那样。」
 
 ## 是什么

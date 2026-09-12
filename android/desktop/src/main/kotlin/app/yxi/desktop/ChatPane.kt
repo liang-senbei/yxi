@@ -105,7 +105,7 @@ import org.jetbrains.skia.Image as SkiaImage
  * · composer = 一张圆角卡片：无边框输入区 + 底部功能行（+ 附件 / 审批态 / 模型·强度·模式·上下文 chips / 圆形发送）。
  */
 @Composable
-fun ChatPane(conn: Conn, session: Session) {
+fun ChatPane(conn: Conn, session: Session, savedDraft: androidx.compose.runtime.MutableState<TextFieldValue>? = null) {
     val ssh = conn.ssh
     val t = Tokens.current
     val scope = rememberCoroutineScope()
@@ -118,7 +118,9 @@ fun ChatPane(conn: Conn, session: Session) {
     var live by remember(conn.host.id, session.name) { mutableStateOf(Live.IDLE) }
     var keyBusy by remember(conn.host.id, session.name) { mutableStateOf(false) }          // 送了键、等屏幕换掉
     var awaitFp by remember(conn.host.id, session.name) { mutableStateOf<String?>(null) }  // 等着被换掉的那块提示的指纹
-    var draft by remember(conn.host.id, session.name) { mutableStateOf(TextFieldValue()) }
+    val fallbackDraft = remember(conn.host.id, session.name) { mutableStateOf(TextFieldValue()) }
+    val draftHolder: androidx.compose.runtime.MutableState<TextFieldValue> = savedDraft ?: fallbackDraft
+    var draft by draftHolder
     var sendErr by remember(conn.host.id, session.name) { mutableStateOf<String?>(null) }
     var sending by remember(conn.host.id, session.name) { mutableStateOf(false) }
     var stick by remember(conn.host.id, session.name) { mutableStateOf(true) }              // 粘在底部：用户往上翻就停，点 ↓ 再粘上

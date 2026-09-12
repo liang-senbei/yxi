@@ -7,8 +7,9 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.compose.multiplatform)
 }
-java { toolchain { languageVersion.set(JavaLanguageVersion.of(17)) } }
-kotlin { jvmToolchain(17) }
+// Markdown JVM artifacts require Java 21. The packaged runtime and CI must use the same baseline.
+java { toolchain { languageVersion.set(JavaLanguageVersion.of(21)) } }
+kotlin { jvmToolchain(21) }
 
 // 在 Linux 服务器上给别的平台打 uber jar（差别只是 Skia 的原生库）：-Pyxi.os=mac / win，不传 = 本机。
 // jpackage（Msi/Exe）跨不了平台，那个只能在 Windows 上打（.github/workflows/desktop.yml）。
@@ -26,6 +27,7 @@ dependencies {
     implementation("org.slf4j:slf4j-api:2.0.16")                 // ⚠️ jediterm 内部打日志用，POM 同样没声明（真机/运行时才炸）
     runtimeOnly("org.slf4j:slf4j-nop:2.0.16")                    // 终端库的日志静默掉
     implementation(libs.org.json)
+    implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.44.0")
     implementation(libs.kotlinx.coroutines.swing)
     testImplementation(kotlin("test"))
 }

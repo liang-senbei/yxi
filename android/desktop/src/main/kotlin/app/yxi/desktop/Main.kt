@@ -100,6 +100,7 @@ fun main(args: Array<String>) {
                 YxiTheme {
                     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
                         TitleBar(state, win, ::close)
+                        if ("--smoke" in args) AssistantBody("# Document renderer\n\n| Runtime | Status |\n| --- | --- |\n| Markdown | loaded |")
                         App(state)
                     }
                 }

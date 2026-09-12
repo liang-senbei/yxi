@@ -22,6 +22,26 @@ import app.yxi.agent.SessionState
 enum class Page { Workspace, Config, Me }
 
 class AppState {
+    val documents = mutableStateListOf<FileDocument>()
+    val documentSelection = androidx.compose.runtime.mutableStateMapOf<String, String>()
+    val chatDrafts = mutableMapOf<String, androidx.compose.runtime.MutableState<androidx.compose.ui.text.input.TextFieldValue>>()
+    fun appendDocumentQuote(hostId: String, task: String, quote: String) {
+        val holder = chatDrafts.getOrPut(hostId + "\u0000" + task) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue()) }
+        val old = holder.value.text
+        val text = old + (if (old.isBlank()) "" else "\n\n") + quote + "\n"
+        holder.value = androidx.compose.ui.text.input.TextFieldValue(text, androidx.compose.ui.text.TextRange(text.length))
+    }
+    var filePanelOpen by mutableStateOf(false)
+    var filePanelWidth by mutableStateOf(480f)
+    var workspaceError by mutableStateOf("")
+
+    suspend fun openDocument(c: Conn, task: Session, path: String) {
+        val sftp = c.ssh.openSftp()
+        val canonical = try { sftp.realpath(if (path.startsWith('/')) path else task.cwd.trimEnd('/') + "/" + path) } finally { sftp.close() }
+        if (documents.none { it.hostId == c.host.id && it.task == task.name && it.path == canonical }) documents += FileDocument(c.host.id, task.name, canonical)
+        documentSelection[c.host.id + "\u0000" + task.name] = canonical
+        if (conn === c && session?.name == task.name) { filePanelOpen = true; tab = 0 }
+    }
     var hostScope by mutableStateOf(Store.pref("hostScope", ""))
     internal var startupRestored = false
     internal var restoreSession by mutableStateOf<String?>(null)

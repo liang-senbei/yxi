@@ -36,7 +36,7 @@ if [ -e "/tmp/.X11-unix/X${D#:}" ]; then echo "显示 $D 已占用，请设置�
 Xvfb "$D" -screen 0 1400x900x24 >"$OUT/display.log" 2>&1 & display_pid=$!
 sleep 2 2>/dev/null || DISPLAY=$D xdotool sleep 2
 DISPLAY=$D xfwm4 >"$OUT/wm.log" 2>&1 & wm_pid=$!
-DISPLAY=$D java -Duser.home="$TEST_HOME" -jar "$jar" > "$OUT/run.log" 2>&1 & app_pid=$!
+DISPLAY=$D "${JAVA_HOME:+$JAVA_HOME/bin/}java" -Duser.home="$TEST_HOME" -jar "$jar" > "$OUT/run.log" 2>&1 & app_pid=$!
 ok=0
 for i in $(seq 1 30); do
   DISPLAY=$D xdotool sleep 1

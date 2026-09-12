@@ -2,6 +2,8 @@
 
 ## Windows 工作台 PRD 实施中（2026-09-13，独立分支）
 
+第二轮接入文件右栏：Markdown表格/源码/分栏、远端自动更新、版本冲突、原子保存、源码选段引用和任务间草稿保留。运行时实测发现Markdown桌面库需要Java21，desktop/CI已同步升级，Android/core不变。40个单测和5个保存脚本集成用例通过；SSH预览截图已确认渲染与自动更新。更多实现/验收及未完成项见下述进度文档。网页浏览器、线路和插件等仍未完成，不得直接作为完整工作台发布。
+
 用户已授权按 `design/windows-workbench-prd.md` v0.2 构建完整工作台。当前实施分支 `codex/windows-workbench`，未发布新包，未修改正在运行的 Agent。逐项剩余工作见 `design/windows-workbench-progress.md`，不能把这次基础修复视为整个 PRD 完成。
 
 本轮：主机原子保存/备份恢复/迁移保源/保存错误提示；主机选择器与新对话入口、启动重连及会话恢复；登录回调不提前声称成功及错误内容转义；CI 安装后 exe 冒烟和发布门禁；隔离桌面 E2E 的 home/display/PID。34 个桌面测试通过，Linux jar 打包及 Xvfb 冒烟通过；Windows安装、完整登录和两主机恢复仍待实机验证。

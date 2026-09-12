@@ -7,6 +7,19 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.background
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.UriHandler
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.height
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -25,6 +38,9 @@ import androidx.compose.ui.unit.dp
  */
 @Composable
 fun App(state: AppState) {
+    val scope = rememberCoroutineScope()
+    val defaultUris = LocalUriHandler.current
+    val density = LocalDensity.current.density
     BoxWithConstraints(Modifier.fillMaxSize()) {
         // 窗口 < 700dp 自动收起侧栏（Claude 的 narrowViewportMaxWidth）；变宽只把自动收起的还回去，用户自己 Ctrl+B 关掉的不动
         val narrow = maxWidth < 700.dp
@@ -44,16 +60,53 @@ fun App(state: AppState) {
                         if (conn == null || sess == null) {
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("左边选一台主机，连上后选一个会话") }
                         } else {
+                            val taskKey = conn.host.id + "\u0000" + sess.name
+                            fun openFile(path: String) { scope.launch {
+                                try { state.openDocument(conn, sess, path); state.workspaceError = "" }
+                                catch (e: CancellationException) { throw e }
+                                catch (e: Exception) { state.workspaceError = "文件无法打开：${e.message}" }
+                            } }
+                            val links = object : UriHandler {
+                                override fun openUri(uri: String) {
+                                    val parsed = runCatching { java.net.URI(uri) }.getOrNull()
+                                    when {
+                                        parsed == null -> state.workspaceError = "无法识别链接"
+                                        parsed.scheme in listOf("https", "http", "mailto") -> runCatching { defaultUris.openUri(uri) }.onFailure { state.workspaceError = it.message.orEmpty() }
+                                        parsed.scheme == null && !parsed.path.isNullOrBlank() -> openFile(parsed.path)
+                                        else -> state.workspaceError = "暂不支持该链接，请从文件列表打开"
+                                    }
+                                }
+                            }
                             // 对齐手机的 终端 / 对话 / 文件（实验室是手机上的调试入口，桌面不做）
                             TabRow(selectedTabIndex = state.tab) {
                                 Tab(selected = state.tab == 0, onClick = { state.tab = 0 }, text = { Text("对话") })
                                 Tab(selected = state.tab == 1, onClick = { state.tab = 1 }, text = { Text("终端") })
                                 Tab(selected = state.tab == 2, onClick = { state.tab = 2 }, text = { Text("文件") })
                             }
-                            when (state.tab) {
-                                0 -> ChatPane(conn, sess)
-                                1 -> TermPane(conn, sess)
-                                else -> FilesPane(conn, sess)
+                            if (state.workspaceError.isNotBlank()) Text(state.workspaceError, color = Tokens.current.danger)
+                            if (!state.filePanelOpen && state.documents.any { it.hostId == conn.host.id && it.task == sess.name }) TextButton({ state.filePanelOpen = true }) { Text("打开文件侧栏") }
+                            CompositionLocalProvider(LocalUriHandler provides links) {
+                                BoxWithConstraints(Modifier.fillMaxSize()) {
+                                    val panel = state.filePanelOpen
+                                    val compact = maxWidth < 850.dp
+                                    val availableWidth = maxWidth.value
+                                    Row(Modifier.fillMaxSize()) {
+                                        if (!panel || !compact) Column(Modifier.weight(1f).fillMaxHeight()) {
+                                            when (state.tab) {
+                                                0 -> ChatPane(conn, sess, savedDraft = state.chatDrafts.getOrPut(taskKey) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue()) })
+                                                1 -> TermPane(conn, sess)
+                                                else -> FilesPane(conn, sess, ::openFile)
+                                            }
+                                        }
+                                        if (panel) {
+                                            if (!compact) Box(Modifier.width(6.dp).fillMaxHeight().background(Tokens.current.border).draggable(
+                                                rememberDraggableState { delta -> state.filePanelWidth = (state.filePanelWidth - delta / density).coerceIn(340f, 900f) }, Orientation.Horizontal))
+                                            Box(if (compact) Modifier.fillMaxSize() else Modifier.width(state.filePanelWidth.coerceAtMost(availableWidth - 350).dp).fillMaxHeight()) {
+                                                DocumentPane(state, conn, sess.name)
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

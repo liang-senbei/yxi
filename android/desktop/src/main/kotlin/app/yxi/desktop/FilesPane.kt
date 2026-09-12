@@ -63,7 +63,7 @@ import java.util.Locale
  * ⚠️ **起点是会话自己的 cwd**，不是家目录：人点进「文件」十有八九是想看 agent 正在改的那些东西。
  */
 @Composable
-fun FilesPane(conn: Conn, sess: Session) {
+fun FilesPane(conn: Conn, sess: Session, onOpen: ((String) -> Unit)? = null) {
     val t = Tokens.current
     val scope = rememberCoroutineScope()
 
@@ -166,7 +166,7 @@ fun FilesPane(conn: Conn, sess: Session) {
                                 val full = if (path.endsWith("/")) path + e.name else "$path/${e.name}"
                                 // ⚠️ 链接没解引用过（大目录只解前几个，见 Sftp.list），点的时候才判
                                 val isDir = e.isDir || (e.isLink && runCatching { sftp?.isDir(full) == true }.getOrDefault(false))
-                                if (isDir) load(full) else preview = full
+                                if (isDir) load(full) else if (onOpen != null) onOpen(full) else preview = full
                             }
                         }
                     }
