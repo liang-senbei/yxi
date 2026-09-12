@@ -12,6 +12,7 @@ import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
@@ -58,6 +59,8 @@ import androidx.compose.ui.input.pointer.PointerButton
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import app.yxi.agent.AccountApi
 import java.util.UUID
 
 /**
@@ -77,6 +80,8 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
     var installingKey by remember { mutableStateOf<Host?>(null) }
     var note by remember { mutableStateOf("") }       // 不属于某条连接的错（Conn 都没建出来）
     val keys = remember { FileHostKeys() }
+    // 账号行的资料：进来就拉一次（幂等；Me 页里还会再拉）。侧栏收起再展开会重跑，无害
+    LaunchedEffect(Unit) { MeAuth.load() }
 
     fun connOf(h: Host) = state.conns.firstOrNull { it.host.id == h.id }
     fun save(list: List<Host>) { hosts = list; Store.save(list) }
@@ -282,6 +287,43 @@ private fun BottomNav(state: AppState) {
         NavItem(Icons.Default.Person, "我的", state.page == Page.Me, Modifier.weight(1f)) {
             state.page = if (state.page == Page.Me) Page.Workspace else Page.Me
         }
+    }
+    AccountRow(state)
+}
+
+/**
+ * 左下角的账号行（Codex 同款，老板 09-12 截图）：字母头像 + 名字 + 会员档 + 版本号。
+ * 点开菜单：版本（信息行）/ 使用情况 / 配置 / 设置 / 退出登录。头像用首字母，不异步拉网络图（完整资料在「我的」页）。
+ */
+@Composable
+private fun AccountRow(state: AppState) {
+    val t = Tokens.current
+    var menu by remember { mutableStateOf(false) }
+    val me = MeAuth.me
+    val signedIn = MeAuth.signedIn
+    val name = if (signedIn) me?.nickname?.ifBlank { null } ?: "Yxi 用户" else "未登录"
+    val tier = me?.let {
+        when (it.tier) { AccountApi.Tier.Ultra -> "Ultra"; AccountApi.Tier.Pro -> "Pro"; else -> "免费" }
+    }
+    val ver = Updater.version.takeIf { it != "dev" }?.let { "v$it" } ?: "开发版"
+    Row(Modifier.fillMaxWidth().clickable { menu = true }.padding(10.dp, 7.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(Modifier.size(26.dp).clip(CircleShape).background(if (signedIn) t.userBubble else t.border), contentAlignment = Alignment.Center) {
+            Text(name.take(1).uppercase(), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = if (signedIn) t.userBubbleText else t.textMuted)
+        }
+        Column(Modifier.weight(1f)) {
+            Text(name, style = MaterialTheme.typography.labelLarge, color = t.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(tier ?: "点一下登录", fontSize = 10.sp, color = t.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Text(ver, fontSize = 10.sp, color = t.textMuted)
+    }
+    DropdownMenu(menu, { menu = false }) {
+        DropdownMenuItem(text = { Text("Yxi $ver", style = MaterialTheme.typography.labelSmall, color = t.textMuted) }, onClick = {}, enabled = false)
+        HorizontalDivider(color = t.border)
+        DropdownMenuItem(text = { Text("使用情况") }, onClick = { menu = false; state.page = Page.Me })
+        DropdownMenuItem(text = { Text("配置") }, onClick = { menu = false; state.page = Page.Config })
+        DropdownMenuItem(text = { Text("设置…  Ctrl+,") }, onClick = { menu = false; state.showSettings = true })
+        if (signedIn) DropdownMenuItem(text = { Text("退出登录", color = t.danger) }, onClick = { menu = false; MeAuth.signOut() })
+        else DropdownMenuItem(text = { Text("登录") }, onClick = { menu = false; state.page = Page.Me })
     }
 }
 
