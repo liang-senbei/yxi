@@ -220,6 +220,9 @@
   ① Logto 侧给「Yxi App」（Native，g6ydpvvn833z0ua19n6hz）**补注册 `http://127.0.0.1:1455/callback`**。⚠️ 这版 Logto 的 PATCH /api/applications/{id} 要把 redirectUris 放 **`oidcClientMetadata`** 里，放顶层会被静默忽略（管理台/文档说的顶层字段在这版不好使）。M2M 凭据在 `/etc/yxi-member.env`（LOGTO_M2M_ID/SECRET，换 token 走 127.0.0.1:3201/oidc/token）。
   ② 桌面 MeAuth 回调端口改**固定 1455**（照原定 Codex 的做法），绑定失败给人话报错。
   核验：授权端点对 redirect_uri=http://127.0.0.1:1455/callback 从 400 报错变 **303 进登录页**。⚠️ 这个 redirect 注册**没进任何仓库**——Logto 是运行态配置，重装/换实例要重新注册（logto_yxi 仓的文档也该补一行）。
+
+- **发版 1.2.0（2026-09-12，run 34683867397，head 517cfd6 绿）**：1.1.1 之后的全部——真终端（JediTerm PTY）、左下角账号行+版本号（设置弹窗也有版本）、登录固定 1455、ZCode/Codex 版式、手机同款皮肤（暖铜/参考款浅色）、ThinkingGlow、通知跳转。发布链路：bump → workflow_dispatch → 本机（老板 Windows）gh run download → Setup.exe --silent 真装 → current/Yxi.exe --smoke 打出 smoke ok → scp Releases/ 到 /var/www/yxi/desktop/ → 公网 feed=1.2.0、nupkg SHA256 逐字核过（9BAEAF32…1EB）、官网下载页的版本 chip 现取 feed 自动跟上。用户升级路径：1.1.1 的应用每 6 小时/启动 10 秒查 feed，弹横幅重启即升；1.1.0 及更早的受损安装直接重跑 Setup.exe。
+
 - **下载页挂上 Windows 版（2026-09-12，老板：「把 windows 的下载挂载到 yxi.keuury.com」）**：首页下载区在 Android 卡和 iPhone 灰卡之间加了 **Windows 卡**（同款样式：徽标/「现在可用」badge/chips/一键安装说明），按钮直链 /desktop/Yxi-win-Setup.exe；首屏幽灵按钮加「用 Windows？装桌面版」；区块小标题改成「Android 和 Windows 现在就能装」。版本号 chip 现取 /desktop/releases.win.json、大小 chip HEAD Setup.exe（和安卓侧 latest.json 的取法同款，发新版不用动页面）。注意：这个 landing 页**只在 hk13 /var/www/yxi/index.html**，不在仓库里（site/ 只有 privacy/terms）——改前备份 index.html.bak-win-20260912。
 
 
