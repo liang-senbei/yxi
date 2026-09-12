@@ -78,7 +78,7 @@ object BrowserRuntime {
     }
 }
 
-data class PageSelection(val url: String, val selector: String, val text: String, val tag: String, val capturedAt: Long = System.currentTimeMillis())
+data class PageSelection(val url: String, val selector: String, val text: String, val tag: String, val capturedAt: Long = System.currentTimeMillis(), val computed: Map<String, String> = emptyMap())
 
 class BrowserPreview(val owner: Host, val taskId: String) {
     var address by mutableStateOf("http://localhost:3000/")
@@ -91,6 +91,14 @@ class BrowserPreview(val owner: Host, val taskId: String) {
     var comment by mutableStateOf("")
     var commentAdded by mutableStateOf(false)
     var selectionStale by mutableStateOf(false)
+    var stylePanelOpen by mutableStateOf(false)
+    var styleChanges by mutableStateOf<Map<String, String>>(emptyMap())
+        private set
+    var styleUndoAvailable by mutableStateOf(false)
+        private set
+    var stylePending by mutableStateOf<String?>(null)
+        private set
+    private var selectionToken = ""
     var canBack by mutableStateOf(false)
     var canForward by mutableStateOf(false)
     var selection by mutableStateOf<PageSelection?>(null)
@@ -168,7 +176,7 @@ class BrowserPreview(val owner: Host, val taskId: String) {
         })
         c.addLoadHandler(object : CefLoadHandlerAdapter() {
             override fun onLoadingStateChange(browser: CefBrowser, busy: Boolean, back: Boolean, next: Boolean) { ui { loading = busy; canBack = back; canForward = next; if (!busy && error.isBlank()) status = "页面已载入" } }
-            override fun onLoadStart(browser: CefBrowser, frame: CefFrame, transition: CefRequest.TransitionType) { if (frame.isMain) ui { selectionStale = selection != null; picking = false; error = ""; status = "正在加载…" } }
+            override fun onLoadStart(browser: CefBrowser, frame: CefFrame, transition: CefRequest.TransitionType) { if (frame.isMain) ui { selectionStale = selection != null; stylePending = null; picking = false; error = ""; status = "正在加载…" } }
             override fun onLoadError(browser: CefBrowser, frame: CefFrame, code: CefLoadHandler.ErrorCode, text: String, url: String) { if (frame.isMain && code != CefLoadHandler.ErrorCode.ERR_ABORTED) ui { error = "加载失败：$text"; loading = false } }
         })
         val router = CefMessageRouter.create()
@@ -176,11 +184,29 @@ class BrowserPreview(val owner: Host, val taskId: String) {
             override fun onQuery(browser: CefBrowser, frame: CefFrame, id: Long, request: String, persistent: Boolean, callback: CefQueryCallback): Boolean {
                 if (!frame.isMain || request.length > 16000) { callback.failure(400, "Invalid selection"); return true }
                 val obj = runCatching { JSONObject(request) }.getOrNull()
-                if (obj == null || obj.optString("type") != "selection") { callback.failure(400, "Unknown message"); return true }
+                if (obj == null) { callback.failure(400, "Invalid message"); return true }
+                if (obj.optString("type") == "style-result") {
+                    ui {
+                        if (obj.optString("token") == selectionToken && obj.optString("operation") == stylePending) {
+                            stylePending = null
+                            if (obj.optString("status") == "ok") {
+                                val changes = obj.optJSONObject("changes") ?: JSONObject()
+                                val validated = runCatching { changes.keys().asSequence().associateWith { StyleTrial.normalize(it, changes.getString(it)) } }.getOrNull()
+                                if (validated == null) { selectionStale = true; error = "浏览器返回了无效的试调结果，请重新选择。" }
+                                else { styleChanges = validated; styleUndoAvailable = obj.optBoolean("undo"); commentAdded = false; error = "" }
+                            } else { selectionStale = true; error = "选中元素已变化或试调未确认，请重新选择。" }
+                        }
+                    }
+                    callback.success("received"); return true
+                }
+                if (obj.optString("type") != "selection") { callback.failure(400, "Unknown message"); return true }
                 ui {
-                    if (picking) {
-                        selection = PageSelection(address, obj.optString("selector").replace('\n', ' ').replace('\r', ' ').take(1000), obj.optString("text").take(4000), obj.optString("tag").replace('\n', ' ').replace('\r', ' ').take(30))
+                    if (picking && obj.optString("token") == selectionToken) {
+                        val computed = obj.optJSONObject("computed") ?: JSONObject()
+                        selection = PageSelection(address, obj.optString("selector").replace('\n', ' ').replace('\r', ' ').take(1000), obj.optString("text").take(4000), obj.optString("tag").replace('\n', ' ').replace('\r', ' ').take(30),
+                            computed = computed.keys().asSequence().filter { it in StyleTrial.properties }.associateWith { computed.optString(it).take(64) })
                         selectionStale = false; commentAdded = false
+                        styleChanges = emptyMap(); styleUndoAvailable = false; stylePending = null
                         picking = false
                     }
                 }
@@ -196,8 +222,23 @@ class BrowserPreview(val owner: Host, val taskId: String) {
             handle?.executeJavaScript("window.__yxiPickCancel?.()", handle?.url.orEmpty(), 0)
             return
         }
-        picking = true; selection = null; selectionStale = false
-        handle?.executeJavaScript(PICK_SCRIPT, handle?.url.orEmpty(), 0)
+        if (stylePending != null || (styleChanges.isNotEmpty() && !commentAdded && !selectionStale)) { error = "先将试调加入对话或重置，再选择其它元素。"; return }
+        picking = true; selection = null; selectionStale = false; error = ""
+        selectionToken = java.util.UUID.randomUUID().toString()
+        handle?.executeJavaScript(PICK_SCRIPT.replace("__YXI_SELECTION_TOKEN__", JSONObject.quote(selectionToken)), handle?.url.orEmpty(), 0)
+    }
+    fun trialStyle(property: String, value: String, group: String? = null) = styleCommand("apply", property, value, group)
+    fun undoStyle() = styleCommand("undo")
+    fun resetStyle() = styleCommand("reset")
+    private fun styleCommand(action: String, property: String = "", value: String = "", group: String? = null) {
+        if (selection == null || selectionStale || picking) { error = "请先选择当前页面上的元素"; return }
+        val operation = java.util.UUID.randomUUID().toString()
+        val script = runCatching { StyleTrial.script(selectionToken, operation, action, property, value, group ?: operation) }.getOrElse { error = it.message.orEmpty(); return }
+        stylePending = operation
+        handle?.executeJavaScript(script, handle?.url.orEmpty(), 0)
+        javax.swing.Timer(5000) {
+            if (stylePending == operation) { stylePending = null; error = "试调结果未确认，请刷新或重新选择元素。"; selectionStale = true }
+        }.apply { isRepeats = false; start() }
     }
     fun close() {
         forwards.values.forEach { it.lease.close() }; forwards.clear()
@@ -216,6 +257,8 @@ class BrowserPreview(val owner: Host, val taskId: String) {
     companion object {
         private val PICK_SCRIPT = """
 (()=>{
+const selectionToken=__YXI_SELECTION_TOKEN__;
+window.__yxiResetStyle?.();
 window.__yxiPickCancel?.();
 const overlay=document.createElement('div');Object.assign(overlay.style,{position:'fixed',pointerEvents:'none',zIndex:'2147483647',border:'2px solid #2563eb',background:'rgba(37,99,235,.05)',boxSizing:'border-box'});document.documentElement.appendChild(overlay);
 let selectedNode=null;
@@ -235,7 +278,36 @@ let n=el,parts=[];while(n&&n!==document.documentElement&&parts.length<6){
  let index=1,s=n;while((s=s.previousElementSibling))if(s.tagName===n.tagName)index++;
  parts.unshift(n.tagName.toLowerCase()+':nth-of-type('+index+')');n=n.parentElement;
 }
-window.cefQuery({request:JSON.stringify({type:'selection',selector:parts.join(' > '),text:sensitive?'':(clone.textContent||'').trim().slice(0,4000),tag:el.tagName.toLowerCase()})});
+const originals={},changes={},owned={};let history=[],lastGroup=null,lastProperty=null;
+const expanded={padding:['padding-top','padding-right','padding-bottom','padding-left'],margin:['margin-top','margin-right','margin-bottom','margin-left'],gap:['row-gap','column-gap'],'border-radius':['border-top-left-radius','border-top-right-radius','border-bottom-right-radius','border-bottom-left-radius']};
+const read=(p)=>({value:el.style.getPropertyValue(p),priority:el.style.getPropertyPriority(p)});
+const matches=(keys)=>keys.every(p=>!owned[p]||(read(p).value===owned[p].value&&read(p).priority===owned[p].priority));
+const restore=(property,previous)=>{if(previous.value)el.style.setProperty(property,previous.value,previous.priority);else el.style.removeProperty(property);};
+window.__yxiResetStyle=()=>{if(el.isConnected)Object.entries(originals).forEach(([p,v])=>{if(owned[p]&&matches([p]))restore(p,v);});};
+window.__yxiStyleTrial=(request)=>{
+ const reply=(status)=>window.cefQuery({request:JSON.stringify({type:'style-result',token:selectionToken,operation:request.operation,status,changes,undo:history.length>0})});
+ if(request.token!==selectionToken){reply('stale');return;}
+ if(!el.isConnected){window.__yxiPickCancel?.();reply('stale');return;}
+ try {
+  if(request.action==='apply'){
+   const p=request.property,v=request.value;
+   if(!['font-size','color','background-color','padding','margin','gap','border-radius'].includes(p)||!CSS.supports(p,v)){reply('invalid');return;}
+   const keys=expanded[p]||[p];if(!matches(keys)){reply('stale');return;}
+   const previous=Object.fromEntries(keys.map(k=>[k,read(k)]));
+   keys.forEach(k=>{if(!(k in originals))originals[k]=previous[k];});
+   if(lastGroup!==request.group||lastProperty!==p){history.push({previous,changes:{...changes}});if(history.length>50)history.shift();}
+   lastGroup=request.group;lastProperty=p;el.style.setProperty(p,v,'important');changes[p]=v;keys.forEach(k=>owned[k]=read(k));
+  }else if(request.action==='undo'){
+   const entry=history[history.length-1];if(entry){const keys=Object.keys(entry.previous);if(!matches(keys)){reply('stale');return;}history.pop();keys.forEach(k=>{restore(k,entry.previous[k]);owned[k]=read(k);});Object.keys(changes).forEach(p=>delete changes[p]);Object.assign(changes,entry.changes);}lastGroup=null;lastProperty=null;
+  }else if(request.action==='reset'){
+   if(!matches(Object.keys(originals))){reply('stale');return;}
+   window.__yxiResetStyle();Object.keys(changes).forEach(p=>delete changes[p]);Object.keys(owned).forEach(p=>delete owned[p]);Object.keys(originals).forEach(p=>delete originals[p]);history=[];lastGroup=null;lastProperty=null;
+  }
+  refresh();reply('ok');
+ }catch(e){reply('stale');}
+};
+const computed=Object.fromEntries(['font-size','color','background-color','padding','margin','gap','border-radius'].map(p=>[p,getComputedStyle(el).getPropertyValue(p)]));
+window.cefQuery({request:JSON.stringify({type:'selection',token:selectionToken,selector:parts.join(' > '),text:sensitive?'':(clone.textContent||'').trim().slice(0,4000),tag:el.tagName.toLowerCase(),computed})});
 window.__yxiPickCancel(true);window.__yxiPick=null;
 };document.addEventListener('click',window.__yxiPick,true);
 })();

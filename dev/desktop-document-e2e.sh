@@ -99,6 +99,20 @@ if [ "${YXI_TEST_BROWSER:-0}" = 1 ]; then
   tap 984 262
   tap 950 392
   shot 10-browser-selected
+  if [ "${YXI_TEST_STYLES:-0}" = 1 ]; then
+    original_page_hash=$(sha256sum "$WEB_FIXTURE/index.html" | cut -d ' ' -f 1)
+    tap 1190 824
+    shot 10-style-controls
+    tap 1020 695
+    DISPLAY=$D xdotool key ctrl+a
+    sleep 1
+    DISPLAY=$D xdotool type --clearmodifiers '36'
+    DISPLAY=$D xdotool key Return
+    sleep 2
+    shot 10-style-trial
+    test "$(sha256sum "$WEB_FIXTURE/index.html" | cut -d ' ' -f 1)" = "$original_page_hash"
+    tap 1190 824
+  fi
   tap 950 760
   DISPLAY=$D xdotool type --clearmodifiers 'Make this heading more prominent.'
   tap 835 812

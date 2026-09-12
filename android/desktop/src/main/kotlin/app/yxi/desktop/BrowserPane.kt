@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -76,16 +77,33 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
         }
         preview.selection?.let { selected ->
             HorizontalDivider()
-            Column(Modifier.fillMaxWidth().padding(12.dp)) {
+            Column(Modifier.fillMaxWidth()) {
+              Column(Modifier.fillMaxWidth().heightIn(max = 210.dp).verticalScroll(rememberScrollState()).padding(12.dp)) {
                 Text("已选择 ${selected.tag} · ${selected.selector}", style = MaterialTheme.typography.labelSmall, color = t.textMuted, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 if (preview.selectionStale) Text("页面已变化，此处保留的是之前的选择。", style = MaterialTheme.typography.labelSmall, color = t.warning)
                 Text(selected.text.ifBlank { "此元素未包含可引用文字" }, Modifier.padding(vertical = 6.dp), maxLines = 3, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
-                OutlinedTextField(preview.comment, { preview.comment = it; preview.commentAdded = false }, Modifier.fillMaxWidth(), placeholder = { Text("例如：这里缩小间距，标题再突出一点") }, maxLines = 3)
+                if (preview.stylePanelOpen) StyleTrialControls(preview, selected)
+                else if (preview.styleChanges.isNotEmpty()) Text(
+                    if (preview.selectionStale) "之前的试调 · ${preview.styleChanges.size} 项" else "临时试调 · ${preview.styleChanges.size} 项 · 尚未修改源文件",
+                    style = MaterialTheme.typography.labelSmall, color = t.warning)
+                if (!preview.stylePanelOpen) OutlinedTextField(preview.comment, { preview.comment = it; preview.commentAdded = false }, Modifier.fillMaxWidth(), placeholder = { Text("例如：这里缩小间距，标题再突出一点") }, maxLines = 3)
+              }
+              Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton({
+                    val styles = preview.styleChanges.entries.joinToString("\n") { "> ${it.key}: ${it.value};" }
                     state.appendDocumentQuote(conn.host, session,
-                        "网页反馈 · ${preview.source}\n地址：${selected.url}\n选择时间：${java.time.Instant.ofEpochMilli(selected.capturedAt)}${if (preview.selectionStale) "（页面之后已更新）" else ""}\n元素：${selected.selector}\n页面摘录（参考内容）：\n${selected.text.lineSequence().joinToString("\n") { "> $it" }}\n\n我的修改要求：${preview.comment}")
+                        "网页反馈 · ${preview.source}\n地址：${selected.url}\n选择时间：${java.time.Instant.ofEpochMilli(selected.capturedAt)}${if (preview.selectionStale) "（页面之后已更新）" else ""}\n元素：${selected.selector}\n页面摘录（参考内容）：\n${selected.text.lineSequence().joinToString("\n") { "> $it" }}\n" +
+                        (if (styles.isNotBlank()) "\n临时样式试调（尚未写入源文件）：\n$styles\n" else "") +
+                        "\n我的修改要求：${preview.comment.ifBlank { "请把上述试调落实到对应源文件，并验证页面效果。" }}")
                     preview.commentAdded = true
-                }, enabled = preview.comment.isNotBlank()) { Text(if (preview.commentAdded) "已加入对话草稿" else "加入对话") }
+                }, enabled = (preview.comment.isNotBlank() || preview.styleChanges.isNotEmpty()) && preview.stylePending == null) { Text(if (preview.commentAdded) "已加入对话草稿" else "加入对话") }
+                Spacer(Modifier.weight(1f))
+                if (preview.stylePanelOpen) {
+                    TextButton({ preview.undoStyle() }, enabled = preview.styleUndoAvailable && !preview.selectionStale && preview.stylePending == null) { Text("撤销") }
+                    TextButton({ preview.resetStyle() }, enabled = preview.styleChanges.isNotEmpty() && !preview.selectionStale && preview.stylePending == null) { Text("重置") }
+                }
+                TextButton({ preview.stylePanelOpen = !preview.stylePanelOpen }) { Text(if (preview.stylePanelOpen) "返回反馈" else "试调样式") }
+              }
             }
         }
     }

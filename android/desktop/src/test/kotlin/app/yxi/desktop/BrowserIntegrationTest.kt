@@ -82,11 +82,39 @@ class BrowserIntegrationTest {
             js(b, "document.body.innerText=document.cookie||'COOKIE_ISOLATED';")
             eventually { text(b).contains("COOKIE_ISOLATED") }
             println("browser-fixture: cookie isolation")
-            js(a, "document.body.innerHTML='<button id=target>Selected component</button><input id=secret type=password value=DO_NOT_CAPTURE>';")
+            js(a, """document.body.innerHTML='<button id=target style="font-size:16px!important;padding-top:3px!important;padding-right:9px">Selected component</button><input id=secret type=password value=DO_NOT_CAPTURE><span id=probe></span>';""")
             withContext(Dispatchers.Swing) { a.pick() }
             js(a, "document.getElementById('target').click();")
             eventually { a.selection != null }
             assertEquals("Selected component", a.selection!!.text)
+            withContext(Dispatchers.Swing) { a.trialStyle("font-size", "36", "drag-1") }
+            eventually { a.stylePending == null && a.styleChanges["font-size"] == "36px" }
+            js(a, "document.getElementById('probe').textContent='FONT='+getComputedStyle(document.getElementById('target')).fontSize;")
+            eventually { text(a).contains("FONT=36px") }
+            withContext(Dispatchers.Swing) { a.trialStyle("font-size", "48", "drag-1") }
+            eventually { a.stylePending == null && a.styleChanges["font-size"] == "48px" }
+            withContext(Dispatchers.Swing) { a.undoStyle() }
+            eventually { a.stylePending == null && a.styleChanges.isEmpty() }
+            js(a, "document.getElementById('probe').textContent='RESTORED='+document.getElementById('target').style.fontSize+'/'+document.getElementById('target').style.getPropertyPriority('font-size');")
+            eventually { text(a).contains("RESTORED=16px/important") }
+            withContext(Dispatchers.Swing) { a.trialStyle("padding", "20") }
+            eventually { a.stylePending == null && a.styleChanges["padding"] == "20px" }
+            js(a, "document.getElementById('target').style.outline='2px solid red';")
+            withContext(Dispatchers.Swing) { a.resetStyle() }
+            eventually { a.stylePending == null && a.styleChanges.isEmpty() }
+            js(a, "const st=document.getElementById('target').style;document.getElementById('probe').textContent='TOP='+st.paddingTop+'/'+st.getPropertyPriority('padding-top')+' RIGHT='+st.paddingRight+' OUTLINE='+st.outlineWidth;")
+            eventually { text(a).contains("TOP=3px/important RIGHT=9px OUTLINE=2px") }
+            js(a, "document.getElementById('target').style.fontSize='21px';")
+            withContext(Dispatchers.Swing) { a.pick() }
+            js(a, "document.getElementById('target').click();")
+            eventually { a.selection != null }
+            assertEquals("21px", a.selection!!.computed["font-size"])
+            js(a, "document.getElementById('target').outerHTML='<button id=target>Replacement</button>';")
+            withContext(Dispatchers.Swing) { a.trialStyle("font-size", "30") }
+            eventually { a.stylePending == null && a.selectionStale }
+            js(a, "document.getElementById('probe').textContent='NEW_FONT='+document.getElementById('target').style.fontSize+';';")
+            eventually { text(a).contains("NEW_FONT=;") }
+            println("browser-fixture: style trials and restoration")
             withContext(Dispatchers.Swing) { a.pick() }
             js(a, "document.getElementById('secret').click();")
             eventually { a.selection != null }

@@ -82,10 +82,13 @@ fun YxiTheme(content: @Composable () -> Unit) {
     val scheme = (if (dark) darkColorScheme() else lightColorScheme()).copy(
         background = t.surface0, surface = t.surface2, surfaceVariant = t.surface3, surfaceContainer = t.surface1,
         surfaceContainerHigh = t.surface3, onBackground = t.textPrimary, onSurface = t.textPrimary, onSurfaceVariant = t.textSecondary,
+        surfaceContainerHighest = t.surface3, surfaceContainerLow = t.surface1, surfaceContainerLowest = t.surface2,
         primary = t.accent, onPrimary = t.onAccent,
         primaryContainer = t.userBubble, onPrimaryContainer = t.userBubbleText,
         secondary = t.success, tertiary = t.warning,
-        error = t.danger, outline = t.textMuted, outlineVariant = t.border,
+        secondaryContainer = t.surface3, onSecondaryContainer = t.textPrimary,
+        tertiaryContainer = t.surface1, onTertiaryContainer = t.textPrimary,
+        error = t.danger, outline = t.textMuted.copy(alpha = 0.7f), outlineVariant = t.border,
     )
     val body = TextStyle(fontSize = 14.sp, lineHeight = 22.sp)
     val type = Typography(
