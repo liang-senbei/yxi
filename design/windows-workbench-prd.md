@@ -2,6 +2,8 @@
 
 版本：v0.3 · 实施基线
 
+实施说明：第2、3节保留 `df9e04b` 时的审计快照，不能作为当前开发分支状态。最新功能、验证证据和未完成项见 [Windows工作台实施记录](windows-workbench-progress.md)；需求和验收范围继续按本文执行。
+
 日期：2026-09-13
 基线：hk13 `/root/src/workspace/yunxi/yxi`，HEAD `df9e04b`；Windows 已发布 1.2.0，Android 1.1.27 / 183。
 

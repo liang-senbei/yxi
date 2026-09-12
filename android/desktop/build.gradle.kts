@@ -44,6 +44,7 @@ dependencies {
 }
 tasks.test {
     useJUnitPlatform()
+    System.getenv("YXI_MAIL_UI_FIXTURE")?.let { systemProperty("user.home", "$it/profile") }
     System.getenv("YXI_BROWSER_FIXTURE")?.let { fixture ->
         systemProperty("user.home", "$fixture/client-home")
         systemProperty("yxi.browser.localFixture", "true")

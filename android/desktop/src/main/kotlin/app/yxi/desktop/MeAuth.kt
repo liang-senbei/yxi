@@ -134,6 +134,26 @@ object MeAuth {
     }
 
     /** 拉一次 `/api/me`。@return 出错原因,成功 null。 */
+    internal suspend fun accountRequest(owner: String, path: String, method: String, body: String?): Pair<Int, String> = withContext(Dispatchers.IO) {
+        check(signedIn && me?.userId == owner) { "登录账号已变化，请重新进入信箱" }
+        require(path.startsWith("/api/mail"))
+        val access = token() ?: error("登录已失效，请重新登录")
+        check(signedIn && me?.userId == owner) { "登录账号已变化" }
+        val result = AccountApi.req(AccountApi.API + path, method, access, body)
+        check(signedIn && me?.userId == owner) { "登录账号已变化，已忽略旧账号的回复" }
+        result
+    }
+
+    internal fun mailCounters(owner: String, result: JSONObject) {
+        val current = me?.takeIf { signedIn && it.userId == owner } ?: return
+        me = current.copy(
+            unreadMail = result.optInt("unread", -1).takeIf { it >= 0 } ?: current.unreadMail,
+            unclaimedMail = result.optInt("unclaimed", -1).takeIf { it >= 0 } ?: current.unclaimedMail,
+            tickets = result.optInt("tickets", -1).takeIf { it >= 0 } ?: current.tickets,
+            balanceCents = result.optLong("balanceCents", -1).takeIf { it >= 0 } ?: current.balanceCents,
+        )
+    }
+
     suspend fun refresh(): String? = withContext(Dispatchers.IO) {
         val tk = token() ?: return@withContext "没登录"
         val (c, body) = AccountApi.req("${AccountApi.API}/api/me", "GET", tk, null)

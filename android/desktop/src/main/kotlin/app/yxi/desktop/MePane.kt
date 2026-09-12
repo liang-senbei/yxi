@@ -54,9 +54,16 @@ fun MePane(state: AppState) {
     val scope = rememberCoroutineScope()
     var err by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var mailOpen by remember { mutableStateOf(false) }
 
     // 进页面拉一次:有令牌就顺手刷资料,没令牌就停在登录按钮上
     LaunchedEffect(Unit) { MeAuth.load() }
+    val owner = MeAuth.me?.userId
+    if (mailOpen && MeAuth.signedIn && owner != null) {
+        val api = remember(owner) { app.yxi.agent.MailApi { path, method, body -> MeAuth.accountRequest(owner, path, method, body) } }
+        MailPane(owner, api, onBack = { mailOpen = false; scope.launch { err = MeAuth.refresh().orEmpty() } }, onCounters = { MeAuth.mailCounters(owner, it) })
+        return
+    }
 
     Box(Modifier.fillMaxSize().background(t.surface0)) {
         Column(
@@ -90,7 +97,7 @@ fun MePane(state: AppState) {
                             color = if (err.isEmpty()) t.textMuted else t.danger,
                         )
                     }
-                    else -> SignedIn(me, busy, err,
+                    else -> SignedIn(me, busy, err, onMail = { mailOpen = true },
                         onRefresh = {
                             scope.launch { busy = true; err = MeAuth.refresh().orEmpty(); busy = false }
                         },
@@ -135,10 +142,12 @@ private fun SignedIn(
     me: AccountApi.Me,
     busy: Boolean,
     err: String,
+    onMail: () -> Unit,
     onRefresh: () -> Unit,
     onSignOut: () -> Unit,
 ) {
     val t = Tokens.current
+    TextButton(onMail) { Text("打开信箱 · 未读 ${me.unreadMail} · 待领取 ${me.unclaimedMail}") }
     Card {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -224,7 +233,7 @@ private fun SignedIn(
                 if (me.unreadTickets > 0) Text("${me.unreadTickets} 张工单有新回复", color = t.textMuted, style = MaterialTheme.typography.bodyMedium)
             }
             Text(
-                "信箱和工单的完整界面还在做,先在手机上处理。",
+                "信箱可在本机打开；工单完整操作仍在补齐，可先在手机上处理。",
                 Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall, color = t.textMuted,
             )
         }
