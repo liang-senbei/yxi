@@ -73,7 +73,8 @@ object BrowserRuntime {
         }
         // Runtime natives are bundled by Gradle; do not silently download executables on the user's first preview.
         builder.setMirrors(emptyList())
-        if (linuxRoot && fixtureMode) builder.addJcefArgs("--no-sandbox", "--disable-background-networking", "--disable-component-update")
+        if (fixtureMode) builder.addJcefArgs("--disable-background-networking", "--disable-component-update")
+        if (linuxRoot && fixtureMode) builder.addJcefArgs("--no-sandbox")
         return builder.build().also { app = it }
     }
 }

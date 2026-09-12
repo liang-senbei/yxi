@@ -134,3 +134,13 @@
 - 原生1400×900显示中的实际应用窗口已截图检查，待处理4条显示前3条并支持展开，未遮住输入区。初始证据 /tmp/yxi-queue-ui-evidence/01-restored.png；编辑/撤回交互验收继续中。
 - 仍未完成：自动下一轮调度、运行器权威回执和引导协议、远端队列编辑/撤回、目标状态条、已结束任务的队列找回入口、附件租约、Codex各版本输入识别、发送前画面校验后的TUI状态竞争，以及Windows DPI/IME专项。不得将此轮等同完整W10或完整PRD完成。
 - 原生交互最终通过：编辑完整替换后核对instructions.json、主草稿通过剪贴板核对未变、上移核对ID顺序、撤回核对仅一条Cancelled且其余三条保留。截图已人工检查，证据hk13 /tmp/yxi-queue-actions-final/；首次脚本全选后缺少等待导致追加而非替换，已补等待与选区截图后重跑通过。没有向生产Agent发送测试指令。
+
+## 第十三轮：Windows 本机原生验证（2026-09-13）
+
+- 用Windows目标依赖构建最新工作台jar，在本机JDK21 jpackage生成独立YxiWorkbench app-image，包含全部Java模块。测试通过exe启动，配置、缓存与用户目录隔离，未覆盖已安装Yxi或连接配置中的服务器。
+- 新增显式 --browser-smoke 测试入口，使用本机HTTP测试页验证JCEF原生库加载、页面实际加载、动态字号40px、Chromium非空PNG及内核退出。测试失败以非零退出码返回，避免jpackage把测试异常变成阻塞的JVM错误框。
+- 首轮在浏览器创建/页面加载前发起getText导致超时；改为等待加载回调。随后DOM验证成功，但AWT桌面截图是全黑，不能作为视觉证据；改用Page.captureScreenshot捕获Chromium合成表面，并校验PNG尺寸与非空像素。
+- 最终Windows exe检查全部通过：smoke ok、browser native page loaded、browser native pixels ok、browser native render and live style ok、browser native shutdown ok。已人工查看实际PNG，中文标题完整，LIVE_STYLE=40px与画面一致。
+- 证据目录（本机）：../tmp/windows-native-20260913-pixels/，含app-image、isolated-profile、smoke-out/err.txt、browser-smoke-out/err.txt、browser-native.png、artifact-sha256.txt。测试jar SHA256：8A38489E98A2F95440F9A315231D868E6194BE45F4718E1D8907E95EDCB57373。远端构建日志：hk13 /tmp/yxi-windows-pixels-build.log。
+- 新增dev/windows-native-verify.ps1，可用新输出目录重复生成测试包和验证。CI安装后也要求浏览器内容、像素、退出标记，并保留PNG/日志；脚本和CI PowerShell语法已检查。GitHub CI本轮未执行，不能把本机app-image验证当成Setup安装升级验证。
+- 范围限制：本轮浏览器是原生内核测试窗，不等同整个Windows右侧预览交互验收。完整工作台的多主机SSH网页、IME、DPI125/150/200%、多屏、对话框层级、Setup安装升级及所有其它未完成PRD项继续保留；未发布新版本。

@@ -81,6 +81,17 @@ jobs:
           Get-Content smoke-out.txt, smoke-err.txt -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  | $_" }
           if ($p2.ExitCode -ne 0) { throw "装好的 Yxi.exe --smoke 失败（退出码 $($p2.ExitCode)）—— launcher 级问题在这现形" }
           if (-not (Select-String -Path smoke-out.txt,smoke-err.txt -Pattern "smoke ok" -Quiet)) { throw "缺少 smoke ok，不能仅凭退出码判断启动成功" }
+          $browserOptions = $env:JAVA_TOOL_OPTIONS
+          try {
+            $env:JAVA_TOOL_OPTIONS = '-Dyxi.browser.localFixture=true -Dyxi.browser.smokeImage="' + "$env:GITHUB_WORKSPACE\smoke-browser.png" + '"'
+            $browserTest = Start-Process -FilePath $exe -ArgumentList "--browser-smoke" -WindowStyle Hidden -PassThru -RedirectStandardOutput smoke-browser-out.txt -RedirectStandardError smoke-browser-err.txt
+            if (-not $browserTest.WaitForExit(180000)) { $browserTest.Kill($true); throw "浏览器原生验证超时" }
+            if ($browserTest.ExitCode -ne 0) { throw "浏览器原生验证失败：$($browserTest.ExitCode)" }
+            $browserLog = Get-Content smoke-browser-out.txt -Raw
+            foreach ($marker in @('browser native render and live style ok','browser native pixels ok','browser native shutdown ok')) {
+              if (-not $browserLog.Contains($marker)) { throw "缺少浏览器验证标记：$marker" }
+            }
+          } finally { $env:JAVA_TOOL_OPTIONS = $browserOptions }
 
       - uses: actions/upload-artifact@v4
         with:
@@ -93,5 +104,7 @@ jobs:
         if: always()
         with:
           name: Yxi-windows-smoke-logs
-          path: smoke-*.txt
+          path: |
+            smoke-*.txt
+            smoke-browser.png
           if-no-files-found: ignore
