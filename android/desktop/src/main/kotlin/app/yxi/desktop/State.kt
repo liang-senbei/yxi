@@ -26,6 +26,7 @@ class AppState {
     var browserPanelOpen by mutableStateOf(false)
     val navigation = WorkspaceNavigation(java.io.File(Store.dir, "workspace.json"))
     internal val instructions = InstructionQueue(java.io.File(Store.dir, "instructions.json"))
+    internal val support = SupportWorkspace(java.io.File(Store.dir, "support-drafts.json"))
     val documents = mutableStateListOf<FileDocument>()
     val documentSelection = androidx.compose.runtime.mutableStateMapOf<String, String>()
     val chatDrafts = mutableMapOf<String, androidx.compose.runtime.MutableState<androidx.compose.ui.text.input.TextFieldValue>>()

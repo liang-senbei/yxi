@@ -21,7 +21,8 @@ internal fun pendingWorkOf(documents: List<FileDocument>, drafts: List<String>, 
     documents.count { it.busy } + browsers.count { it.preparing || it.stylePending != null },
 )
 fun AppState.pendingWork() = pendingWorkOf(documents, chatDrafts.values.map { it.value.text }, browsers.values).let {
-    it.copy(operations = it.operations + instructions.entries.count { item -> item.status == InstructionStatus.Delivering })
+    it.copy(operations = it.operations + instructions.entries.count { item -> item.status == InstructionStatus.Delivering } + support.running.size,
+        drafts = it.drafts + support.editors.values.count { edit -> edit.dirty })
 }
 
 @Composable
@@ -34,7 +35,7 @@ fun ExitReviewDialog(work: PendingWork, onCancel: () -> Unit, onDiscard: () -> U
                 work.files.take(4).forEach { Text(it, Modifier.padding(top = 4.dp), style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted) }
                 if (work.files.size > 4) Text("以及另外 ${work.files.size - 4} 个文件", style = MaterialTheme.typography.bodySmall)
             }
-            if (work.drafts > 0) Text("${work.drafts} 个对话仍有未发送草稿", Modifier.padding(top = 8.dp))
+            if (work.drafts > 0) Text("${work.drafts} 处仍有未保存或未发送的输入", Modifier.padding(top = 8.dp))
             if (work.feedback > 0) Text("${work.feedback} 个网页预览有尚未加入对话的反馈", Modifier.padding(top = 8.dp))
             if (work.operations > 0) Text("正在保存文件或确认网页操作，请等待完成后再退出。", Modifier.padding(top = 12.dp), color = Tokens.current.warning)
             else Text(if (work.needsReview) "退出会丢弃这些本机编辑和草稿；服务器会话不会被停止。" else "当前没有待保存内容，可以退出。", Modifier.padding(top = 12.dp), style = MaterialTheme.typography.bodySmall)

@@ -136,7 +136,7 @@ object MeAuth {
     /** 拉一次 `/api/me`。@return 出错原因,成功 null。 */
     internal suspend fun accountRequest(owner: String, path: String, method: String, body: String?): Pair<Int, String> = withContext(Dispatchers.IO) {
         check(signedIn && me?.userId == owner) { "登录账号已变化，请重新进入信箱" }
-        require(path.startsWith("/api/mail"))
+        require(listOf("/api/mail", "/api/support/tickets").any { path == it || path.startsWith("$it/") || path.startsWith("$it?") })
         val access = token() ?: error("登录已失效，请重新登录")
         check(signedIn && me?.userId == owner) { "登录账号已变化" }
         val result = AccountApi.req(AccountApi.API + path, method, access, body)
@@ -152,6 +152,10 @@ object MeAuth {
             tickets = result.optInt("tickets", -1).takeIf { it >= 0 } ?: current.tickets,
             balanceCents = result.optLong("balanceCents", -1).takeIf { it >= 0 } ?: current.balanceCents,
         )
+    }
+
+    internal fun supportUnread(owner: String, count: Int) {
+        me?.takeIf { signedIn && it.userId == owner && count >= 0 }?.let { me = it.copy(unreadTickets = count) }
     }
 
     suspend fun refresh(): String? = withContext(Dispatchers.IO) {
