@@ -47,6 +47,17 @@ class RemoteRoutesTest {
         try {
             ssh.connect()
             assertEquals(home, ssh.exec("printf %s \"\$HOME\"").trim())
+            val remotePort = root.resolve("http-port").readText().trim().toInt()
+            val first = ssh.forwardPreview(remotePort)
+            val second = ssh.forwardPreview(remotePort)
+            fun forwardedText(port: Int): String = java.net.URI("http://127.0.0.1:$port/").toURL().openConnection().apply { connectTimeout = 5000; readTimeout = 5000 }.getInputStream().bufferedReader().use { it.readText() }
+            try {
+                assertNotEquals(first.localPort, second.localPort)
+                assertEquals("preview-forward-fixture", forwardedText(first.localPort))
+                first.close(); first.close()
+                assertFalse(first.active)
+                assertEquals("preview-forward-fixture", forwardedText(second.localPort))
+            } finally { first.close(); second.close() }
             assertEquals(emptyList(), Lines.list(ssh))
             val user = editedRoute(Lines.Line("u", "User"), "User", "https://user.invalid/v1", "dummy-u", "model-u")
             val project = editedRoute(Lines.Line("p", "Project"), "Project", "https://project.invalid/v1", "", "model-p", "dummy-token")

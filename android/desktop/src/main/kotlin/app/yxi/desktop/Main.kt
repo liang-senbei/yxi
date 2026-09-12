@@ -20,6 +20,7 @@ import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.awt.Dimension
 import java.awt.SystemTray
 import java.awt.event.WindowAdapter
@@ -47,12 +48,19 @@ fun main(args: Array<String>) {
         }
         // 记住上次的窗口大小 / 位置（Store.dir/window.json）。只在第一次组合时读：Shell.visible 一变这里会重组，不能每次都重置
         val win = rememberWindowState(width = 1200.dp, height = 800.dp)
+        val quitting = remember { androidx.compose.runtime.mutableStateOf(false) }
         remember { Store.loadWindow(win); if (Store.pref("maximized", "0") == "1") win.placement = WindowPlacement.Maximized }
         fun quit() {
+            if (quitting.value) return
+            quitting.value = true
+            state.browsers.values.forEach { it.close() }
             // 最大化时别把满屏尺寸存成常规尺寸，只记「上次是最大化」，常规尺寸还是上次浮动时那份
             Store.setPref("maximized", if (win.placement == WindowPlacement.Maximized) "1" else "0")
             if (win.placement == WindowPlacement.Floating) Store.saveWindow(win)
-            exitApplication()
+            scope.launch {
+                if (!BrowserRuntime.shutdown()) System.err.println("Browser cleanup did not finish before shutdown")
+                exitApplication()
+            }
         }
         fun close() {
             if (Store.pref("closeToTray", "1") != "1" || !SystemTray.isSupported()) return quit()

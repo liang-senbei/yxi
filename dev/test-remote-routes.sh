@@ -33,9 +33,44 @@ Subsystem sftp /usr/lib/openssh/sftp-server
 ForceCommand $FIXTURE/command
 EOF
 /usr/sbin/sshd -D -e -f "$FIXTURE/sshd_config" > "$FIXTURE/sshd.log" 2>&1 & server=$!
-trap 'kill "$server" 2>/dev/null || true; wait "$server" 2>/dev/null || true' EXIT
+http_server=
+trap 'kill "$server" ${http_server:+"$http_server"} 2>/dev/null || true; wait "$server" 2>/dev/null || true' EXIT
 sleep 1
 kill -0 "$server"
+python3 - "$FIXTURE" > "$FIXTURE/http.log" 2>&1 <<'PY' &
+import http.server,pathlib,sys,time,hashlib,base64,struct
+root=pathlib.Path(sys.argv[1])
+def payload():
+    state=root/'browser-state.txt'
+    return state.read_bytes() if state.exists() else b'preview-forward-fixture'
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.headers.get('Upgrade','').lower()=='websocket':
+            accept=base64.b64encode(hashlib.sha1((self.headers['Sec-WebSocket-Key']+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').encode()).digest()).decode()
+            self.send_response(101); self.send_header('Upgrade','websocket'); self.send_header('Connection','Upgrade'); self.send_header('Sec-WebSocket-Accept',accept); self.end_headers()
+            previous=None
+            try:
+                for _ in range(300):
+                    data=payload()
+                    if data!=previous:
+                        header=bytes([0x81,len(data)]) if len(data)<126 else b'\x81\x7e'+struct.pack('!H',len(data))
+                        self.connection.sendall(header+data); previous=data
+                    time.sleep(.1)
+            except (BrokenPipeError,ConnectionResetError): pass
+            return
+        self.send_response(200); self.send_header('Content-Type','text/html; charset=utf-8'); self.end_headers(); self.wfile.write(payload())
+server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
+(root/'http-port').write_text(str(server.server_port))
+server.serve_forever()
+PY
+http_server=$!
+for attempt in $(seq 1 30); do test -f "$FIXTURE/http-port" && break; sleep 0.1; done
+test -f "$FIXTURE/http-port"
 cd "$ROOT/android"
-YXI_ROUTE_FIXTURE="$FIXTURE" ./gradlew :desktop:test --tests app.yxi.desktop.RemoteRoutesTest --rerun --no-daemon
+echo "Fixture: $FIXTURE"
+if [ "${YXI_TEST_BROWSER:-0}" = 1 ]; then
+  YXI_ROUTE_FIXTURE="$FIXTURE" YXI_BROWSER_FIXTURE="$FIXTURE" ./gradlew :desktop:test --tests app.yxi.desktop.BrowserIntegrationTest --rerun --no-daemon
+else
+  YXI_ROUTE_FIXTURE="$FIXTURE" ./gradlew :desktop:test --tests app.yxi.desktop.RemoteRoutesTest --rerun --no-daemon
+fi
 echo "Isolated SSH route fixture: $FIXTURE"

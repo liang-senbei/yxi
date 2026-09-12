@@ -1,0 +1,92 @@
+package app.yxi.desktop
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.awt.SwingPanel
+import androidx.compose.ui.input.key.*
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextOverflow
+import app.yxi.agent.Session
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+
+@Composable
+fun BrowserPane(state: AppState, conn: Conn, session: Session) {
+    val t = Tokens.current
+    val scope = rememberCoroutineScope()
+    val key = taskNavigationKey(conn.host, session)
+    val preview = remember(key) { state.browsers.getOrPut(key) { BrowserPreview(conn.host, key) } }
+    var input by remember(preview) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(preview.address)) }
+    var addressDirty by remember(preview) { mutableStateOf(false) }
+    LaunchedEffect(preview.address) { if (!addressDirty) input = androidx.compose.ui.text.input.TextFieldValue(preview.address) }
+    fun open() { if (preview.preparing) return; val requested = input.text; addressDirty = false; scope.launch {
+        try { preview.open(conn, requested) }
+        catch (e: CancellationException) { throw e }
+        catch (e: Throwable) { preview.error = "预览未打开：${e.message}" }
+    } }
+    LaunchedEffect(conn.status, preview.remote) {
+        if (conn.status == Conn.Status.Connected && preview.needsReconnect && !preview.preparing) {
+            try { preview.open(conn, preview.address) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { preview.error = "预览重连失败：${e.message}" }
+        }
+    }
+    Column(Modifier.fillMaxSize().background(t.surface0)) {
+        Row(Modifier.fillMaxWidth().height(46.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(preview.title.ifBlank { "网页预览" }, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            TextButton({ state.browserPanelOpen = false }) { Text("收起") }
+            TextButton({ preview.close(); state.browsers.remove(key); state.browserPanelOpen = false }) { Text("关闭") }
+        }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(input, { input = it; addressDirty = true }, Modifier.weight(1f).onPreviewKeyEvent {
+                when {
+                    it.type != KeyEventType.KeyDown -> false
+                    it.key == Key.Enter -> { open(); true }
+                    it.isCtrlPressed && it.key == Key.A -> { input = input.copy(selection = androidx.compose.ui.text.TextRange(0, input.text.length)); true }
+                    else -> false
+                }
+            },
+                singleLine = true, placeholder = { Text("localhost:3000 或网页地址") }, textStyle = MaterialTheme.typography.bodySmall)
+            TextButton({ open() }, enabled = !preview.preparing) { Text("打开") }
+        }
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+            TextButton({ addressDirty = false; preview.handle?.goBack() }, enabled = preview.canBack) { Text("后退") }
+            TextButton({ addressDirty = false; preview.handle?.goForward() }, enabled = preview.canForward) { Text("前进") }
+            TextButton({ if (preview.loading) preview.handle?.stopLoad() else { addressDirty = false; preview.handle?.reload() } }, enabled = preview.handle != null) { Text(if (preview.loading) "停止" else "刷新") }
+            TextButton({ preview.pick() }, enabled = preview.handle != null && !preview.loading) { Text(if (preview.picking) "点选页面元素…" else "选择元素") }
+            TextButton({ runCatching { java.awt.Desktop.getDesktop().browse(java.net.URI(preview.handle?.url)) }.onFailure { preview.error = "外部浏览器未打开：${it.message}" } }, enabled = preview.handle != null) { Text("外部打开") }
+        }
+        Text(preview.source, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+        Text(preview.status, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+        if (preview.remote && conn.status != Conn.Status.Connected) Text("SSH 已断开，当前画面可能过期；连接恢复后将重新加载。", Modifier.padding(12.dp), color = t.warning)
+        if (preview.error.isNotBlank()) Text(preview.error, Modifier.padding(12.dp), color = t.danger)
+        if (preview.loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 4.dp))
+        val browser = preview.handle
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            if (browser == null) Column(Modifier.align(Alignment.Center).padding(24.dp)) {
+                Text("边看页面，边指导修改", style = MaterialTheme.typography.titleMedium)
+                Text("输入服务器开发端口，或粘贴网页地址。开发服务器支持热更新时，代码变化会直接呈现在这里。", Modifier.padding(top = 10.dp), style = MaterialTheme.typography.bodyMedium, color = t.textMuted)
+            } else SwingPanel(factory = { browser.uiComponent }, modifier = Modifier.fillMaxSize())
+        }
+        preview.selection?.let { selected ->
+            HorizontalDivider()
+            Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                Text("已选择 ${selected.tag} · ${selected.selector}", style = MaterialTheme.typography.labelSmall, color = t.textMuted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (preview.selectionStale) Text("页面已变化，此处保留的是之前的选择。", style = MaterialTheme.typography.labelSmall, color = t.warning)
+                Text(selected.text.ifBlank { "此元素未包含可引用文字" }, Modifier.padding(vertical = 6.dp), maxLines = 3, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(preview.comment, { preview.comment = it; preview.commentAdded = false }, Modifier.fillMaxWidth(), placeholder = { Text("例如：这里缩小间距，标题再突出一点") }, maxLines = 3)
+                TextButton({
+                    state.appendDocumentQuote(conn.host, session,
+                        "网页反馈 · ${preview.source}\n地址：${selected.url}\n选择时间：${java.time.Instant.ofEpochMilli(selected.capturedAt)}${if (preview.selectionStale) "（页面之后已更新）" else ""}\n元素：${selected.selector}\n页面摘录（参考内容）：\n${selected.text.lineSequence().joinToString("\n") { "> $it" }}\n\n我的修改要求：${preview.comment}")
+                    preview.commentAdded = true
+                }, enabled = preview.comment.isNotBlank()) { Text(if (preview.commentAdded) "已加入对话草稿" else "加入对话") }
+            }
+        }
+    }
+}

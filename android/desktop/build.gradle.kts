@@ -28,10 +28,28 @@ dependencies {
     runtimeOnly("org.slf4j:slf4j-nop:2.0.16")                    // 终端库的日志静默掉
     implementation(libs.org.json)
     implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.44.0")
+    implementation("me.friwi:jcefmaven:146.0.10")
+    val browserPlatform = when (yxiOs) {
+        "win" -> "windows-amd64"
+        "mac" -> "macosx-arm64"
+        else -> when {
+            System.getProperty("os.name").startsWith("Windows") -> "windows-amd64"
+            System.getProperty("os.name").startsWith("Mac") -> "macosx-" + if (System.getProperty("os.arch") == "aarch64") "arm64" else "amd64"
+            else -> "linux-" + if (System.getProperty("os.arch") == "aarch64") "arm64" else "amd64"
+        }
+    }
+    runtimeOnly("me.friwi:jcef-natives-$browserPlatform:jcef-d3de827+cef-146.0.10+g8219561+chromium-146.0.7680.179")
     implementation(libs.kotlinx.coroutines.swing)
     testImplementation(kotlin("test"))
 }
-tasks.test { useJUnitPlatform() }
+tasks.test {
+    useJUnitPlatform()
+    System.getenv("YXI_BROWSER_FIXTURE")?.let { fixture ->
+        systemProperty("user.home", "$fixture/client-home")
+        systemProperty("yxi.browser.localFixture", "true")
+        systemProperty("yxi.browser.runtimeDir", System.getenv("YXI_BROWSER_RUNTIME_DIR") ?: "$fixture/browser-runtime")
+    }
+}
 // 插件按本机 OS 起名（跨平台打出来也叫 linux-x64），文件名改成跟着目标平台走。
 // ⚠️ 要设 archiveFileName 不能设 archiveAppendix：插件在 afterEvaluate 里才设 appendix，会盖掉这儿的；显式 fileName 不受约定影响。
 tasks.withType<org.gradle.jvm.tasks.Jar>().matching { it.name == "packageUberJarForCurrentOS" }.configureEach {

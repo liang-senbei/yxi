@@ -22,6 +22,8 @@ import app.yxi.agent.SessionState
 enum class Page { Workspace, Config, Me, Routes }
 
 class AppState {
+    val browsers = mutableMapOf<String, BrowserPreview>()
+    var browserPanelOpen by mutableStateOf(false)
     val navigation = WorkspaceNavigation(java.io.File(Store.dir, "workspace.json"))
     val documents = mutableStateListOf<FileDocument>()
     val documentSelection = androidx.compose.runtime.mutableStateMapOf<String, String>()
@@ -41,7 +43,7 @@ class AppState {
         val canonical = try { sftp.realpath(if (path.startsWith('/')) path else task.cwd.trimEnd('/') + "/" + path) } finally { sftp.close() }
         if (documents.none { it.hostId == c.host.id && it.matchesTask(task) && it.path == canonical }) documents += FileDocument(c.host.id, task.name, canonical, DocumentEndpoint.of(c.host), task.runtimeId)
         documentSelection[taskNavigationKey(c.host, task)] = canonical
-        if (conn === c && session?.name == task.name) { filePanelOpen = true; tab = 0 }
+        if (conn === c && session?.name == task.name) { filePanelOpen = true; browserPanelOpen = false; tab = 0 }
     }
     var hostScope by mutableStateOf(Store.pref("hostScope", ""))
     internal var startupRestored = false

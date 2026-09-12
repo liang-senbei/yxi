@@ -400,5 +400,22 @@ class SshSession(
         runCatching { session?.setPortForwardingL("127.0.0.1", port, "127.0.0.1", port) != null }.getOrDefault(false)
 
     fun unforwardLocal(port: Int) { runCatching { session?.delPortForwardingL("127.0.0.1", port) } }
+
+    /** Dedicated preview lease with an OS-assigned local port. Closing it cannot remove a later connection's forwarding. */
+    class PreviewForward internal constructor(val localPort: Int, private val alive: () -> Boolean, private val release: () -> Unit) : AutoCloseable {
+        private val closed = java.util.concurrent.atomic.AtomicBoolean(false)
+        val active get() = !closed.get() && alive()
+        override fun close() { if (closed.compareAndSet(false, true)) release() }
+    }
+    fun forwardPreview(remotePort: Int, remoteHost: String = "127.0.0.1", preferredLocalPort: Int = 0): PreviewForward {
+        require(remotePort in 1..65535) { "远端端口必须为1–65535" }
+        require(preferredLocalPort in 0..65535)
+        require(remoteHost in listOf("localhost", "::1") || (remoteHost.startsWith("127.") && remoteHost.split('.').size == 4 && remoteHost.split('.').all { part -> part.toIntOrNull()?.let { it in 0..255 } == true })) { "只支持远端回环地址" }
+        val owner = session ?: error("SSH 尚未连接")
+        check(owner.isConnected) { "SSH 已断开" }
+        val local = try { owner.setPortForwardingL("127.0.0.1", preferredLocalPort, remoteHost, remotePort) }
+        catch (e: Exception) { if (preferredLocalPort == 0) throw e else owner.setPortForwardingL("127.0.0.1", 0, remoteHost, remotePort) }
+        return PreviewForward(local, { owner.isConnected }) { runCatching { owner.delPortForwardingL("127.0.0.1", local) }; Unit }
+    }
     val isConnected: Boolean get() = session?.isConnected == true
 }

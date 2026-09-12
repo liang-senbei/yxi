@@ -9,9 +9,9 @@ FIXTURE=$(mktemp -d /tmp/yxi-doc-fixture.XXXXXX)
 SESSION=cc-yxi-doc-test-$$
 KEY=${YXI_TEST_SSH_KEY:?Set YXI_TEST_SSH_KEY to a key authorized on localhost}
 mkdir -p "$OUT" "$TEST_HOME/.config/yxi"
-app_pid=; wm_pid=; display_pid=
+app_pid=; wm_pid=; display_pid=; web_pid=
 cleanup() {
-  for pid in "$app_pid" "$wm_pid" "$display_pid"; do
+  for pid in "$app_pid" "$wm_pid" "$display_pid" "$web_pid"; do
     [ -z "$pid" ] || { kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; }
   done
   tmux kill-session -t "$SESSION" 2>/dev/null || true
@@ -28,12 +28,21 @@ p=pathlib.Path(home)/'.config/yxi'
 (pathlib.Path(fixture)/'PRD.md').write_text('# Live document preview\n\n| Feature | Status |\n| --- | --- |\n| Remote files | Ready |\n| Markdown tables | Ready |\n\nEdit this document beside the conversation.\n')
 PY
 tmux new-session -d -s "$SESSION" -c "$FIXTURE" 'sleep 600'
+browser_args=()
+if [ "${YXI_TEST_BROWSER:-0}" = 1 ]; then
+  WEB_FIXTURE=$(mktemp -d /tmp/yxi-browser-page.XXXXXX)
+  echo "Web fixture: $WEB_FIXTURE"
+  python3 "$ROOT/dev/browser-ui-fixture.py" "$WEB_FIXTURE" > "$OUT/web.log" 2>&1 & web_pid=$!
+  for attempt in $(seq 1 30); do test -f "$WEB_FIXTURE/browser-port" && break; sleep .1; done
+  test -f "$WEB_FIXTURE/browser-port"
+  browser_args=(-Dyxi.browser.localFixture=true -Dyxi.browser.runtimeDir=/root/.cache/yxi-browser-146)
+fi
 test ! -e "/tmp/.X11-unix/X${D#:}" || { echo "Display busy" >&2; exit 1; }
 Xvfb "$D" -screen 0 1400x900x24 >"$OUT/display.log" 2>&1 & display_pid=$!
 sleep 2
 DISPLAY=$D xfwm4 >"$OUT/wm.log" 2>&1 & wm_pid=$!
 jar="$ROOT/android/desktop/build/compose/jars/Yxi-linux-x64-1.2.0.jar"
-DISPLAY=$D "${JAVA_HOME:+$JAVA_HOME/bin/}java" -Duser.home="$TEST_HOME" -jar "$jar" >"$OUT/run.log" 2>&1 & app_pid=$!
+DISPLAY=$D "${JAVA_HOME:+$JAVA_HOME/bin/}java" "${browser_args[@]}" -Duser.home="$TEST_HOME" -jar "$jar" >"$OUT/run.log" 2>&1 & app_pid=$!
 for _ in $(seq 1 30); do
   DISPLAY=$D xdotool search --name '^Yxi$' >/dev/null 2>&1 && break
   sleep 1
@@ -75,8 +84,49 @@ DISPLAY=$D xdotool key ctrl+a
 sleep 1
 tap 840 824
 shot 07-quoted
-tap 1180 110
-shot 08-routes
+if [ "${YXI_TEST_BROWSER:-0}" = 1 ]; then
+  tap 1180 110
+  tap 940 208
+  DISPLAY=$D xdotool key ctrl+a
+  sleep 1
+  DISPLAY=$D xdotool type --clearmodifiers "$(cat "$WEB_FIXTURE/browser-port")"
+  DISPLAY=$D xdotool key Return
+  sleep 12
+  shot 08-browser
+  printf 'LIVE UPDATE CONFIRMED' > "$WEB_FIXTURE/browser-live.txt"
+  sleep 3
+  shot 09-browser-live
+  tap 984 262
+  tap 950 392
+  shot 10-browser-selected
+  tap 950 760
+  DISPLAY=$D xdotool type --clearmodifiers 'Make this heading more prominent.'
+  tap 835 812
+  shot 11-browser-feedback
+  tap 1152 159
+  tap 1180 110
+  sleep 2
+  shot 12-browser-reopened
+  tap 950 392
+  DISPLAY=$D xdotool key ctrl+a
+  sleep .3
+  DISPLAY=$D xdotool key ctrl+c
+  sleep .3
+  DISPLAY=$D timeout 3 xclip -selection clipboard -o > "$OUT/browser-visible-text.txt"
+  grep -q 'LIVE UPDATE CONFIRMED' "$OUT/browser-visible-text.txt"
+  tap 1210 159
+  shot 13-browser-closed
+  kill -0 "$app_pid"
+  tap 1225 68
+  for attempt in $(seq 1 30); do kill -0 "$app_pid" 2>/dev/null || break; sleep 1; done
+  if kill -0 "$app_pid" 2>/dev/null; then echo 'Application did not finish browser shutdown' >&2; exit 1; fi
+  wait "$app_pid"
+  app_pid=
+  if grep -q 'Browser cleanup did not finish' "$OUT/run.log"; then exit 1; fi
+else
+  tap 1080 110
+  shot 08-routes
+fi
 if [ "${YXI_TEST_NAVIGATION:-0}" = 1 ]; then
   tap 322 714
   shot 09-task-menu
@@ -119,4 +169,4 @@ PY
   tmux has-session -t "$SESSION"
 fi
 echo "Evidence: $OUT; fixture: $FIXTURE; test home: $TEST_HOME"
-if grep -iE 'exception|error' "$OUT/run.log" | grep -viE 'Cannot create Linux GL context|Fallback to next API'; then exit 1; fi
+if grep -iE 'exception|error' "$OUT/run.log" | grep -viE 'Cannot create Linux GL context|Fallback to next API|Failed global descriptor lookup: 7'; then exit 1; fi

@@ -2,6 +2,12 @@
 
 ## 工作台开发分支（2026-09-13）
 
+网页预览接入JCEF Maven 146.0.10，按目标平台打入对应native依赖，首次使用从包内解压到本地版本目录，不从任意镜像下载可执行文件。内核版本及打包坐标见 [JCEF发行记录](https://github.com/jcefmaven/jcefmaven/releases/tag/146.0.10)。浏览器实例使用独立CefRequestContext；远端回环端口通过SSH转发为本机自动分配的端口，地址栏显示逻辑远端地址。
+
+Linux root默认不启动浏览器。仅受控测试可使用 `-Dyxi.browser.localFixture=true`，该模式限制页面及资源为本地来源，并在root测试时使用无沙箱启动参数；不得用于浏览不可信网页。Windows浏览器尚待完整实机验收。本轮Linux验证包含真实WebSocket更新、SSH重连、Cookie上下文隔离、密码字段不进入选择、反馈草稿、收起恢复和退出。
+
+JCEF退出有明确顺序：先dispose各client，借助窄适配器读取库内同步的浏览器列表，确认cleanup完成后才dispose CefApp；不能同时在两个方向持有CefApp和client列表锁。线程转储曾确认相反锁序导致Java级死锁，修复后退出测试必须成功，不能靠强杀当作通过。
+
 桌面构建、打包与独立 jar 运行统一使用 **JDK 21**；Markdown 0.44.0 的 JVM 模块字节码为 Java 21，Java 17 虽可完成部分编译检查，打开文档会报 UnsupportedClassVersionError。Android/core 的目标保持原状。Windows Setup 会自带匹配运行时，用户不需自行安装 Java。
 
 文件预览支持 Markdown 表格、源码/分栏、文本保存与远端更新检测。文本限 1 MB，图片限 8 MB；远端编辑保存需要 Python 3，使用内容版本校验与原子替换。变更源文件有冲突时保留本地编辑并让用户选择合并，未承诺与任意第三方编辑器之间的文件系统级原子 CAS。

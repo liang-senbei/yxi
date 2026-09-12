@@ -91,12 +91,13 @@ fun App(state: AppState) {
                                 Text(sess.cwd, Modifier.weight(1f).padding(start = 18.dp), color = Tokens.current.textMuted,
                                     style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 TextButton({ state.page = Page.Routes }) { Text("模型与线路") }
+                                TextButton({ state.browserPanelOpen = true; state.filePanelOpen = false }) { Text("网页预览") }
                             }
                             if (state.workspaceError.isNotBlank()) Text(state.workspaceError, color = Tokens.current.danger)
-                            if (!state.filePanelOpen && state.documents.any { it.hostId == conn.host.id && it.matchesTask(sess) }) TextButton({ state.filePanelOpen = true }) { Text("打开文件侧栏") }
+                            if (!state.filePanelOpen && !state.browserPanelOpen && state.documents.any { it.hostId == conn.host.id && it.matchesTask(sess) }) TextButton({ state.filePanelOpen = true }) { Text("打开文件侧栏") }
                             CompositionLocalProvider(LocalUriHandler provides links) {
                                 BoxWithConstraints(Modifier.fillMaxSize()) {
-                                    val panel = state.filePanelOpen
+                                    val panel = state.filePanelOpen || state.browserPanelOpen
                                     val compact = maxWidth < 850.dp
                                     val availableWidth = maxWidth.value
                                     Row(Modifier.fillMaxSize()) {
@@ -112,7 +113,7 @@ fun App(state: AppState) {
                                             if (!compact) Box(Modifier.width(6.dp).fillMaxHeight().background(Tokens.current.border).draggable(
                                                 rememberDraggableState { delta -> state.filePanelWidth = (state.filePanelWidth - delta / density).coerceIn(340f, 900f) }, Orientation.Horizontal))
                                             Box(if (compact) Modifier.fillMaxSize() else Modifier.width(state.filePanelWidth.coerceAtMost(availableWidth - 350).dp).fillMaxHeight()) {
-                                                DocumentPane(state, conn, sess)
+                                                if (state.browserPanelOpen) BrowserPane(state, conn, sess) else DocumentPane(state, conn, sess)
                                             }
                                         }
                                     }
