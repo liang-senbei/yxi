@@ -59,6 +59,7 @@ fun App(state: AppState) {
                 when (state.page) {
                     Page.Config -> ConfigPane(state)
                     Page.Me -> MePane(state)
+                    Page.Routes -> RoutesPane(state)
                     Page.Workspace -> {
                         val conn = state.conn; val sess = state.session
                         if (conn == null || sess == null) {
@@ -87,6 +88,7 @@ fun App(state: AppState) {
                                 WorkbenchTabs(views, views[state.tab], { state.tab = views.indexOf(it) })
                                 Text(sess.cwd, Modifier.weight(1f).padding(start = 18.dp), color = Tokens.current.textMuted,
                                     style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                TextButton({ state.page = Page.Routes }) { Text("模型与线路") }
                             }
                             if (state.workspaceError.isNotBlank()) Text(state.workspaceError, color = Tokens.current.danger)
                             if (!state.filePanelOpen && state.documents.any { it.hostId == conn.host.id && it.task == sess.name }) TextButton({ state.filePanelOpen = true }) { Text("打开文件侧栏") }

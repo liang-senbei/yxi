@@ -1,0 +1,175 @@
+package app.yxi.desktop
+
+import androidx.compose.foundation.*
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import app.yxi.agent.Lines
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+
+/** Server-side route settings: configuration confirmation is deliberately separate from request verification. */
+@Composable
+fun RoutesPane(state: AppState) {
+    val conn = state.conn
+    if (conn == null) { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("先连接需要配置的主机") }; return }
+    key(conn) { BoundRoutesPane(state, conn) }
+}
+
+@Composable
+private fun BoundRoutesPane(state: AppState, conn: Conn) {
+    val t = Tokens.current
+    val scope = rememberCoroutineScope()
+    var lines by remember { mutableStateOf<List<Lines.Line>?>(null) }
+    var engine by remember { mutableStateOf(if (state.session?.isCodex == true) Lines.CODEX else Lines.CLAUDE) }
+    var active by remember { mutableStateOf<Lines.Active?>(null) }
+    var codex by remember { mutableStateOf<Lines.CodexNow?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var note by remember { mutableStateOf("") }
+    var editor by remember { mutableStateOf<Lines.Line?>(null) }
+    var applying by remember { mutableStateOf<Lines.Line?>(null) }
+    var resetting by remember { mutableStateOf(false) }
+    var projectScope by remember { mutableStateOf(false) }
+    val cwd = state.session?.cwd?.takeIf { it.startsWith('/') }
+    val chosenScope = if (engine == Lines.CLAUDE && projectScope) cwd else null
+    suspend fun reload(scopePath: String? = chosenScope) {
+        lines = Lines.list(conn.ssh)
+        active = Lines.active(conn.ssh, scopePath)
+        codex = Lines.currentCodex(conn.ssh)
+    }
+    fun act(block: suspend () -> Unit) { scope.launch {
+        busy = true; note = ""
+        try { block() } catch (e: CancellationException) { throw e } catch (e: Exception) { note = e.message ?: "操作未完成" }
+        finally { busy = false }
+    } }
+    LaunchedEffect(conn, chosenScope) {
+        busy = true; active = null; codex = null
+        try { reload(chosenScope) }
+        catch (e: CancellationException) { throw e }
+        catch (e: Exception) { note = e.message ?: "读取失败" }
+        finally { busy = false }
+    }
+    fun applyRoute(line: Lines.Line?) = act {
+        check(conn.status == Conn.Status.Connected) { "主机未连接，未修改配置" }
+        conn.refresh()
+        check(conn.sessions.none { it.state == app.yxi.agent.SessionState.Working && (chosenScope == null || it.cwd == chosenScope) }) { "目标范围内仍有 Agent 正在工作，请等本轮结束后再应用配置。" }
+        val result = if (engine == Lines.CODEX) {
+            Lines.applyCodex(conn.ssh, line)?.let { error(it) }
+            "配置已写入；Codex 需要重开会话后才能生效。尚未验证模型请求。"
+        } else {
+            val changed = Lines.apply(conn.ssh, line, chosenScope, lines.orEmpty())
+            changed.err?.let { error(it) }
+            if (changed.restart.isNotEmpty()) "配置已写入；${changed.restart.joinToString()} 需要重开会话后生效。尚未验证模型请求。"
+            else "配置已写入，后续请求的生效情况仍需验证。"
+        }
+        reload()
+        if (line != null) check(if (line.isCodex) codex?.let { Lines.matchesCodex(line, it) } == true else active?.let { Lines.matches(line, it.env) } == true) { "配置回读不匹配，请检查服务器配置" }
+        note = result; applying = null; resetting = false
+    }
+    Column(Modifier.fillMaxSize().background(t.surface0).verticalScroll(rememberScrollState()).padding(28.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("模型与线路", style = MaterialTheme.typography.titleLarge)
+                Text(conn.host.label + " · " + conn.host.username + "@" + conn.host.hostname, color = t.textMuted, style = MaterialTheme.typography.bodySmall)
+            }
+            TextButton({ state.page = Page.Workspace }) { Text("返回对话") }
+            Button({ editor = Lines.Line(Lines.newId(), "", agent = engine) }, enabled = lines != null && !busy) { Text("新增线路") }
+        }
+        Spacer(Modifier.height(22.dp))
+        WorkbenchTabs(listOf("Claude Code", "Codex"), if (engine == Lines.CODEX) "Codex" else "Claude Code", { engine = if (it == "Codex") Lines.CODEX else Lines.CLAUDE; projectScope = false })
+        if (engine == Lines.CLAUDE && cwd != null) Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(projectScope, { projectScope = it }, enabled = !busy)
+            Text("仅配置当前项目 · $cwd", style = MaterialTheme.typography.bodySmall)
+        }
+        val current = lines?.firstOrNull { line -> line.agent == engine && if (line.isCodex) codex?.let { Lines.matchesCodex(line, it) } == true else active?.let { Lines.matches(line, it.env) } == true }
+        Surface(Modifier.fillMaxWidth().padding(top = 18.dp), shape = RoundedCornerShape(16.dp), color = t.surface1) {
+            Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("配置回读 · 尚未验证请求", style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+                    Text(current?.name ?: "未匹配到已保存的线路", style = MaterialTheme.typography.titleMedium)
+                    Text(if (chosenScope != null) "项目配置可能覆盖服务器默认值" else "服务器用户级配置；可能影响该用户的其他任务", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+                }
+                TextButton({ act { reload() } }, enabled = !busy) { Text("刷新") }
+            }
+        }
+        if (note.isNotBlank()) Text(note, Modifier.padding(vertical = 12.dp), color = t.textSecondary)
+        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 10.dp))
+        Spacer(Modifier.height(18.dp))
+        when {
+            lines == null -> Text("线路清单未能读取。请确认连接、文件权限与内容格式。", color = t.textMuted)
+            lines!!.none { it.agent == engine } -> Text("还没有保存的线路。添加后可配置模型、测试连通性，再应用到服务器。", color = t.textMuted)
+            else -> lines!!.filter { it.agent == engine }.forEach { line ->
+                Surface(Modifier.fillMaxWidth().padding(bottom = 10.dp), shape = RoundedCornerShape(14.dp), color = t.surface2,
+                    border = BorderStroke(0.5.dp, t.border)) {
+                    Column(Modifier.padding(18.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(line.name, style = MaterialTheme.typography.titleMedium)
+                                Text(line.baseUrl, color = t.textMuted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            if (line.id == current?.id) Text("配置匹配", style = MaterialTheme.typography.labelSmall, color = t.success)
+                        }
+                        Text("模型 · " + routeModel(line).ifBlank { "使用运行器默认值" }, Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyMedium)
+                        Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            TextButton({ editor = line }, enabled = !busy) { Text("编辑") }
+                            TextButton({ act { note = Lines.probe(conn.ssh, line.baseUrl) + "；此测试不验证密钥或模型可用性。" } }, enabled = !busy) { Text("测连通性") }
+                            TextButton({ applying = line }, enabled = !busy) { Text("应用配置") }
+                        }
+                    }
+                }
+            }
+        }
+        TextButton({ resetting = true }, enabled = !busy && lines != null) { Text("恢复运行器默认线路…") }
+    }
+    editor?.let { original -> RouteForm(original, onClose = { editor = null }) { edited ->
+        val before = lines ?: error("清单未读取，不能覆盖")
+        val latest = Lines.list(conn.ssh) ?: error("无法确认服务器最新清单")
+        check(routeCatalogEqual(before, latest)) { "线路清单已被其他人修改，请关闭编辑后刷新" }
+        val updated = if (before.any { it.id == edited.id }) before.map { if (it.id == edited.id) edited else it } else before + edited
+        Lines.saveList(conn.ssh, updated)?.let { error(it) }
+        val checked = Lines.list(conn.ssh) ?: error("保存结果未确认，请刷新核对")
+        check(routeCatalogEqual(updated, checked)) { "保存后的线路清单不匹配" }
+        lines = checked; editor = null; note = "线路已保存。点击应用配置后才会修改运行器设置。"
+    } }
+    if (applying != null || resetting) AlertDialog(onDismissRequest = { if (!busy) { applying = null; resetting = false } },
+        title = { Text(if (resetting) "恢复默认线路？" else "应用 ${applying!!.name}？") },
+        text = { Text("目标：${conn.host.label}\n范围：${chosenScope ?: "服务器用户级"}\n" + if (chosenScope == null) "可能影响同一用户下的其他 Agent。正在执行的请求不会被当作已完成切换；需要重开的会话会明确提示。" else "该项目下的其他 Agent 也可能受影响。") },
+        confirmButton = { TextButton({ applyRoute(applying) }, enabled = !busy) { Text("确认应用") } },
+        dismissButton = { TextButton({ applying = null; resetting = false }, enabled = !busy) { Text("取消") } })
+}
+
+@Composable
+private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend (Lines.Line) -> Unit) {
+    val scope = rememberCoroutineScope()
+    var name by remember { mutableStateOf(original.name) }
+    var url by remember { mutableStateOf(original.baseUrl) }
+    var secret by remember { mutableStateOf(original.apiKey) }
+    var authToken by remember { mutableStateOf(original.token) }
+    var model by remember { mutableStateOf(routeModel(original)) }
+    var error by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    AlertDialog(onDismissRequest = { if (!busy) onClose() }, title = { Text("${if (original.isCodex) "Codex" else "Claude Code"} 线路") },
+        text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            OutlinedTextField(name, { name = it }, label = { Text("线路名称") }, singleLine = true)
+            OutlinedTextField(url, { url = it }, label = { Text("服务端点 Base URL") }, singleLine = true)
+            OutlinedTextField(secret, { secret = it }, label = { Text("API 密钥") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+            if (!original.isCodex) OutlinedTextField(authToken, { authToken = it }, label = { Text("Auth token（按提供方要求填写）") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+            OutlinedTextField(model, { model = it }, label = { Text("模型 ID（可留空）") }, singleLine = true)
+            Text("模型 ID 由该线路提供方定义。保存不代表接口、密钥或模型已验证。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+            if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
+        } },
+        confirmButton = { TextButton({ scope.launch {
+            busy = true; error = ""
+            try { onSave(editedRoute(original, name, url, secret, model, authToken)) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { error = e.message ?: "保存失败，输入已保留" }
+            finally { busy = false }
+        } }, enabled = !busy) { Text(if (busy) "保存中…" else "保存线路") } },
+        dismissButton = { TextButton(onClose, enabled = !busy) { Text("取消") } })
+}

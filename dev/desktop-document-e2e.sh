@@ -75,5 +75,7 @@ DISPLAY=$D xdotool key ctrl+a
 sleep 1
 tap 840 824
 shot 07-quoted
+tap 1180 110
+shot 08-routes
 echo "Evidence: $OUT; fixture: $FIXTURE; test home: $TEST_HOME"
 if grep -iE 'exception|error' "$OUT/run.log" | grep -viE 'Cannot create Linux GL context|Fallback to next API'; then exit 1; fi

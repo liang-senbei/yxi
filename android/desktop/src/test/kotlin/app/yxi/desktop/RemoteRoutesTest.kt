@@ -1,0 +1,74 @@
+package app.yxi.desktop
+
+import app.yxi.agent.Lines
+import app.yxi.agent.ConfigRemote
+import app.yxi.ssh.HostConfig
+import app.yxi.ssh.HostKeys
+import app.yxi.ssh.SshSession
+import com.jcraft.jsch.*
+import kotlinx.coroutines.runBlocking
+import org.json.JSONObject
+import org.junit.jupiter.api.Assumptions.assumeTrue
+import java.io.File
+import java.util.Base64
+import kotlin.test.*
+
+/** Only runs against dev/test-remote-routes.sh's disposable localhost SSH server. */
+class RemoteRoutesTest {
+    @Test fun `catalog scopes and provider restoration use the real SSH transport`() = runBlocking {
+        val fixture = System.getenv("YXI_ROUTE_FIXTURE")
+        assumeTrue(fixture != null, "Requires the isolated SSH fixture")
+        val root = File(fixture!!)
+        val hostKey = root.resolve("host.pub").readText().trim().split(' ')[1]
+        val keys = object : HostKeys {
+            override var changedDetected = false
+            override fun check(host: String?, key: ByteArray?): Int {
+                val matches = key != null && Base64.getEncoder().encodeToString(key) == hostKey
+                changedDetected = !matches
+                return if (matches) HostKeyRepository.OK else HostKeyRepository.CHANGED
+            }
+            override fun add(key: HostKey?, ui: UserInfo?) = Unit
+            override fun remove(host: String?, type: String?) = Unit
+            override fun remove(host: String?, type: String?, key: ByteArray?) = Unit
+            override fun getKnownHostsRepositoryID() = "isolated-fixture"
+            override fun getHostKey(): Array<HostKey> = emptyArray()
+            override fun getHostKey(host: String?, type: String?): Array<HostKey> = emptyArray()
+            override fun userInfo() = object : UserInfo {
+                override fun getPassphrase(): String? = null
+                override fun getPassword(): String? = null
+                override fun promptPassword(message: String?) = false
+                override fun promptPassphrase(message: String?) = false
+                override fun promptYesNo(message: String?) = false
+                override fun showMessage(message: String?) = Unit
+            }
+        }
+        val home = root.resolve("home").absolutePath
+        val ssh = SshSession(HostConfig("fixture", "127.0.0.1", root.resolve("port").readText().trim().toInt(), "root", HostConfig.Auth.PrivateKey(root.resolve("client").readText())), keys)
+        try {
+            ssh.connect()
+            assertEquals(home, ssh.exec("printf %s \"\$HOME\"").trim())
+            assertEquals(emptyList(), Lines.list(ssh))
+            val user = editedRoute(Lines.Line("u", "User"), "User", "https://user.invalid/v1", "dummy-u", "model-u")
+            val project = editedRoute(Lines.Line("p", "Project"), "Project", "https://project.invalid/v1", "", "model-p", "dummy-token")
+            val codex = editedRoute(Lines.Line("c", "Codex", agent = Lines.CODEX), "Codex", "https://codex.invalid/v1", "dummy-c", "model-c")
+            val all = listOf(user, project, codex)
+            assertNull(Lines.saveList(ssh, all))
+            assertTrue(routeCatalogEqual(all, Lines.list(ssh)!!))
+            assertNull(Lines.apply(ssh, user, all = all).err)
+            assertTrue(Lines.matches(user, Lines.active(ssh)!!.env))
+            assertNull(Lines.apply(ssh, project, "$home/project", all).err)
+            assertTrue(Lines.active(ssh, "$home/project")!!.fromProject)
+            assertTrue(Lines.matches(project, Lines.active(ssh, "$home/project")!!.env))
+            assertNull(Lines.clearProject(ssh, "$home/project"))
+            assertTrue(Lines.matches(user, Lines.active(ssh, "$home/project")!!.env))
+            assertEquals("Read", JSONObject(ConfigRemote.readFile(ssh, "$home/.claude/settings.json")!!).getJSONObject("permissions").getJSONArray("allow").getString(0))
+            assertNull(Lines.applyCodex(ssh, codex))
+            assertTrue(Lines.matchesCodex(codex, Lines.currentCodex(ssh)!!))
+            assertNull(Lines.applyCodex(ssh, null))
+            assertNull(Lines.currentCodex(ssh))
+            assertTrue(ConfigRemote.readFile(ssh, "$home/.codex/config.toml")!!.contains("original-model"))
+            assertNull(Lines.apply(ssh, null, all = all).err)
+            assertTrue(Lines.active(ssh)!!.env.isDefault)
+        } finally { ssh.disconnect() }
+    }
+}

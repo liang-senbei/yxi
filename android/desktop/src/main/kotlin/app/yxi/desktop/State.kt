@@ -19,7 +19,7 @@ import app.yxi.agent.SessionState
  * 主机分组 → 会话行都在侧栏里），所以这里只剩另外两个整页入口。
  * 它跟 [AppState.tab] 是两层：`page` 决定右边整块是什么，`tab` 只在工作区里选 对话/终端/文件。
  */
-enum class Page { Workspace, Config, Me }
+enum class Page { Workspace, Config, Me, Routes }
 
 class AppState {
     val documents = mutableStateListOf<FileDocument>()
