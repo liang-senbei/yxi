@@ -211,6 +211,9 @@
   · **安卓侧回归一处**：core 移动后 ShareActivity 冷启动没接 Tr.fn（SEND 入口可从全新进程进），EN 用户的分享文案回退中文——一行补上（审查①抓的，只有 EN 用户+分享冷启动能撞到）。
 - **左下角账号行 + 版本号（2026-09-12，老板发 Codex 截图：「点击头像会有设置展开」，且要显示版本号）**：侧栏最底加一行（Codex 同款）——字母头像 + 名字 + 会员档 + 版本号，点开向上弹菜单：版本信息行（不可点）/ 使用情况 / 配置 / 设置… Ctrl+, / 退出登录（未登录则显示「登录」）。头像用首字母，不异步拉网络图（完整资料在「我的」页）；版本取 Updater.version（jpackage.app-version；桌面直接 java -jar 跑时没有这个属性，显示「开发版」）；设置弹窗底部也加了同一行版本。MeAuth.load 挪进侧栏启动时拉一次（原来只在 Me 页拉，账号行首屏才有的看）。Xvfb 截图验收：菜单向上翻转、各项可点。已有 1.1.0 的用户要等下一个版本（1.1.1+）才看得到这行。
 
+
+- **下载页挂上 Windows 版（2026-09-12，老板：「把 windows 的下载挂载到 yxi.keuury.com」）**：首页下载区在 Android 卡和 iPhone 灰卡之间加了 **Windows 卡**（同款样式：徽标/「现在可用」badge/chips/一键安装说明），按钮直链 /desktop/Yxi-win-Setup.exe；首屏幽灵按钮加「用 Windows？装桌面版」；区块小标题改成「Android 和 Windows 现在就能装」。版本号 chip 现取 /desktop/releases.win.json、大小 chip HEAD Setup.exe（和安卓侧 latest.json 的取法同款，发新版不用动页面）。注意：这个 landing 页**只在 hk13 /var/www/yxi/index.html**，不在仓库里（site/ 只有 privacy/terms）——改前备份 index.html.bak-win-20260912。
+
 - **发版 1.1.0（0bee8a3）**：`packageVersion` 1.0.1→1.1.0（三处同源：cfg→vpk→运行时）。走 `workflow_dispatch`（tag 触发从未实测过，首发不冒险）；publish.sh 在哪台机都跑不起来（hk13 缺 gh、本地 Git Bash 缺 rsync——以后要么 hk13 装 gh 要么本地补 rsync），这次用本地 `gh run download` + `scp` 手工替代（rsync 无 --delete，scp 等价）；发布后核 releases.win.json 版本字段与 nupkg SHA256。**已发（run 34635459274，head 0bee8a3 绿）**：公网 releases.win.json = 1.1.0，nupkg SHA256 与 feed 逐字相等（8EBE0D54…C01A），Setup.exe 200（114587572 字节，比 1.0.1 变化）；旧 Yxi-1.0.0.msi 原样保留。真机验收清单：装 Setup.exe / 1.0.1 自更新跳 1.1.0 / 系统通知措辞与点击跳转 / 真批一次权限 / 思考满色相背景光。
 
 ## 音游（云曦节拍）设计拍板 —— 2026-09-06，老板在网页试验台上选的
