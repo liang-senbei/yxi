@@ -16,6 +16,9 @@ internal fun VoiceInputDialog(conn: Conn, close: () -> Unit, useText: (String) -
     var transcribing by remember { mutableStateOf(false) }
     var directory by remember { mutableStateOf("") }
     var text by remember { mutableStateOf("") }
+    var editorShown by remember { mutableStateOf(false) }
+    var copied by remember { mutableStateOf(false) }
+    var clearedText by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
     var level by remember { mutableStateOf(0f) }
     var seconds by remember { mutableStateOf(0) }
@@ -36,6 +39,7 @@ internal fun VoiceInputDialog(conn: Conn, close: () -> Unit, useText: (String) -
         check(conn.ssh.isConnected) { "请重新连接服务器，再重试识别" }
         val result = DesktopAsr.transcribe(conn.ssh, directory, audio.copyOf())
         text = if (text.isBlank()) result else text.trimEnd() + "\n" + result
+        editorShown = true; copied = false; clearedText = ""
         audio.fill(0); pendingAudio = null
     }
     fun retryRecognition() {
@@ -105,7 +109,17 @@ internal fun VoiceInputDialog(conn: Conn, close: () -> Unit, useText: (String) -
                     finally { checking = false }
                 } }) { Text(if (text.isBlank()) "开始录音" else "继续录音并追加") }
             }
-            if (text.isNotBlank()) OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), label = { Text("识别文字，可编辑") }, minLines = 3, maxLines = 8)
+            if (editorShown || text.isNotBlank()) {
+                OutlinedTextField(text, { text = it; copied = false; clearedText = "" }, Modifier.fillMaxWidth(), label = { Text("识别文字，可编辑") }, minLines = 3, maxLines = 8)
+                Row {
+                    TextButton({
+                        runCatching { java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(java.awt.datatransfer.StringSelection(text), null); copied = true }
+                            .onFailure { error = "复制失败：${it.message}" }
+                    }, enabled = text.isNotBlank()) { Text(if (copied) "已复制" else "复制文字") }
+                    TextButton({ clearedText = text; text = ""; copied = false; editorShown = true }, enabled = text.isNotEmpty() && !checking && !recording && !transcribing) { Text("清空") }
+                    if (clearedText.isNotEmpty()) TextButton({ text = clearedText; clearedText = ""; copied = false }, enabled = !checking && !recording && !transcribing) { Text("撤销清空") }
+                }
+            }
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
         }
     }, confirmButton = { TextButton({ useText(text) }, enabled = text.isNotBlank() && !checking && !recording && !transcribing) { Text("加入输入框") } }, dismissButton = { TextButton(close) { Text("取消并关闭") } })
