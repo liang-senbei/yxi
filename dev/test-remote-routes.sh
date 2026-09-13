@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
+unset TMUX TMUX_PANE
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 CACHE="$HOME/.cache/yxi-route-tests"
 mkdir -p "$CACHE"
 chmod 700 "$CACHE"
 FIXTURE=$(mktemp -d "$CACHE/fixture.XXXXXX")
+FIXTURE_TMUX_SOCKET="$FIXTURE/tmux/tmux-$(id -u)/default"
 mkdir -p "$FIXTURE/home/.claude" "$FIXTURE/home/.codex" "$FIXTURE/home/project" "$FIXTURE/home/.local/bin" "$FIXTURE/tmux"
 ssh-keygen -q -t ed25519 -N '' -f "$FIXTURE/host"
 ssh-keygen -q -t ed25519 -N '' -f "$FIXTURE/client"
@@ -38,7 +40,7 @@ ForceCommand $FIXTURE/command
 EOF
 /usr/sbin/sshd -D -e -f "$FIXTURE/sshd_config" > "$FIXTURE/sshd.log" 2>&1 & server=$!
 http_server=
-trap 'tmux -S "$FIXTURE/home/.yxi/preview-runtime/tmux.sock" kill-server 2>/dev/null || true; TMUX_TMPDIR="$FIXTURE/tmux" tmux kill-server 2>/dev/null || true; kill "$server" ${http_server:+"$http_server"} 2>/dev/null || true; wait "$server" 2>/dev/null || true' EXIT
+trap 'env -u TMUX -u TMUX_PANE tmux -S "$FIXTURE/home/.yxi/preview-runtime/tmux.sock" kill-server 2>/dev/null || true; env -u TMUX -u TMUX_PANE tmux -S "$FIXTURE_TMUX_SOCKET" kill-server 2>/dev/null || true; kill "$server" ${http_server:+"$http_server"} 2>/dev/null || true; wait "$server" 2>/dev/null || true' EXIT
 sleep 1
 kill -0 "$server"
 python3 - "$FIXTURE" > "$FIXTURE/http.log" 2>&1 <<'PY' &
