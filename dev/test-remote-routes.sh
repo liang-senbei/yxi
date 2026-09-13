@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Agent 会话本身就跑在 tmux 里，TMUX 环境变量指向**绝对 socket 路径**且优先于 TMUX_TMPDIR——
+# 不 strip 掉的话，下面 trap 里的 `tmux kill-server` 会命中宿主默认服务（本组 Agent 全在上面）。
 unset TMUX TMUX_PANE
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 CACHE="$HOME/.cache/yxi-route-tests"
@@ -17,7 +19,7 @@ with socket.socket() as s:
     s.bind(('127.0.0.1',0)); (p/'port').write_text(str(s.getsockname()[1]))
 (p/'home/.claude/settings.json').write_text('{"permissions":{"allow":["Read"]}}')
 (p/'home/.codex/config.toml').write_text('model = "original-model"\n')
-(p/'command').write_text('#!/bin/sh\nexport HOME="'+str(p/'home')+'"\nexport TMUX_TMPDIR="'+str(p/'tmux')+'"\nexport PATH=/usr/bin:/bin\ncd "$HOME" || exit 1\nexec /bin/sh -c "$SSH_ORIGINAL_COMMAND"\n')
+(p/'command').write_text('#!/bin/sh\nunset TMUX TMUX_PANE\nexport HOME="'+str(p/'home')+'"\nexport TMUX_TMPDIR="'+str(p/'tmux')+'"\nexport PATH=/usr/bin:/bin\ncd "$HOME" || exit 1\nexec /bin/sh -c "$SSH_ORIGINAL_COMMAND"\n')
 for name in ('claude','codex'):
     runtime=p/'home/.local/bin'/name
     runtime.write_text('#!/bin/sh\nexec sleep 600\n')
