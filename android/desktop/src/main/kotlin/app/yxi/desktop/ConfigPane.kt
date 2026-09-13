@@ -57,6 +57,7 @@ fun ConfigPane(state: AppState) {
     var tools by remember(conn) { mutableStateOf<List<ConfigRemote.Tool>>(emptyList()) }
     var busy by remember(conn) { mutableStateOf(true) }
     var picked by remember(conn) { mutableStateOf<ConfigRemote.Item?>(null) }
+    var showPlugins by remember(conn) { mutableStateOf(false) }
 
     LaunchedEffect(conn) {
         busy = true
@@ -80,6 +81,7 @@ fun ConfigPane(state: AppState) {
 
     Row(Modifier.fillMaxSize().background(t.surface0)) {
         Column(Modifier.width(300.dp).fillMaxHeight().verticalScroll(rememberScrollState())) {
+            TextButton({ showPlugins = !showPlugins }) { Text(if (showPlugins) "返回配置浏览" else "主机插件 · 查看状态") }
             Text(
                 conn.host.label,
                 Modifier.padding(14.dp, 10.dp, 14.dp, 4.dp),
@@ -107,7 +109,7 @@ fun ConfigPane(state: AppState) {
                             style = MaterialTheme.typography.labelMedium, color = t.textMuted,
                         )
                         cat.items.forEach { item ->
-                            ItemRow(item, selected = picked === item) { picked = item }
+                            ItemRow(item, selected = picked === item && !showPlugins) { picked = item; showPlugins = false }
                         }
                     }
                 }
@@ -116,7 +118,8 @@ fun ConfigPane(state: AppState) {
         VerticalDivider(color = t.border)
         Box(Modifier.fillMaxSize()) {
             val p = picked
-            if (p == null) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            if (showPlugins) PluginInventoryPane(conn)
+            else if (p == null) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("左边选一项", style = MaterialTheme.typography.bodyMedium, color = t.textMuted)
             } else ItemDetail(conn, p)
         }
