@@ -5,16 +5,17 @@ def emit(state, **fields):
 
 def main():
     cfg = json.loads(base64.b64decode(sys.argv[1]))
-    for key in ('project', 'config', 'expectedConfig'):
+    for key in ('project',) + tuple(key for key in ('config', 'expectedConfig') if key in cfg):
         if not re.fullmatch('[a-f0-9]{64}', cfg[key]):
             raise ValueError('Invalid preview identity')
     action = cfg['action']
     if action not in ('start', 'status', 'stop'):
         raise ValueError('Invalid preview action')
-    if not isinstance(cfg['port'], int) or not 1 <= cfg['port'] <= 65535:
-        raise ValueError('Invalid preview port')
-    if not os.path.isabs(cfg['directory']) or not cfg['command'] or '\0' in cfg['command']:
-        raise ValueError('Invalid preview command or directory')
+    if action == 'start':
+        if not isinstance(cfg['port'], int) or not 1 <= cfg['port'] <= 65535:
+            raise ValueError('Invalid preview port')
+        if not os.path.isabs(cfg['directory']) or not cfg['command'] or '\0' in cfg['command']:
+            raise ValueError('Invalid preview command or directory')
     if action == 'stop' and not re.fullmatch(r'[0-9]+:\$[0-9]+:[0-9]+', cfg['runtime']):
         raise ValueError('Invalid runtime identity')
     tmux = shutil.which('tmux')
@@ -57,7 +58,7 @@ def main():
         fields = run('display-message', '-p', '-t', target + ':', '#{pid}:#{session_id}:#{session_created}\t#{pane_id}\t#{pane_dead}\t#{pane_dead_status}').stdout.strip().split('\t')
         runtime, pane, dead = fields[:3]
         return dict(state='exited' if dead == '1' else ('running' if launched else 'starting'), runtime=runtime, pane=pane, config=signature,
-                    matchesConfig=signature == cfg['config'], exitCode=int(fields[3]) if len(fields)>3 and fields[3].isdigit() else None,
+                    matchesConfig=signature == cfg['config'] if 'config' in cfg else None, exitCode=int(fields[3]) if len(fields)>3 and fields[3].isdigit() else None,
                     log=run('capture-pane', '-p', '-S', '-200', '-t', pane, check=False).stdout[-32000:])
     with (root / 'lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)

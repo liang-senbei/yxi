@@ -47,6 +47,11 @@ tasks.test {
     useJUnitPlatform()
     System.getenv("YXI_MAIL_UI_FIXTURE")?.let { systemProperty("user.home", "$it/profile") }
     System.getenv("YXI_SUPPORT_UI_FIXTURE")?.let { systemProperty("user.home", "$it/profile") }
+    System.getenv("YXI_SERVICE_UI_FIXTURE")?.let {
+        systemProperty("user.home", "$it/client-home")
+        systemProperty("yxi.browser.localFixture", "true")
+        systemProperty("yxi.browser.runtimeDir", System.getenv("YXI_BROWSER_RUNTIME_DIR") ?: "$it/browser-runtime")
+    }
     System.getenv("YXI_BROWSER_FIXTURE")?.let { fixture ->
         systemProperty("user.home", "$fixture/client-home")
         systemProperty("yxi.browser.localFixture", "true")

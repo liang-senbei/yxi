@@ -32,6 +32,7 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
     val savedAddress = if (knownProject) state.projectPreviews.address(project) else null
     val preview = state.browsers.getOrPut(key) { BrowserPreview(conn.host, key).apply { savedAddress?.let { address = it } } }
     var restored by remember(preview) { mutableStateOf(false) }
+    var servicesOpen by remember(preview) { mutableStateOf(false) }
     var settings by remember(preview) { mutableStateOf<PreviewAddressSettings?>(null) }
     var input by remember(preview) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(preview.address)) }
     var addressDirty by remember(preview) { mutableStateOf(false) }
@@ -64,6 +65,7 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
     Column(Modifier.fillMaxSize().background(t.surface0)) {
         Row(Modifier.fillMaxWidth().height(46.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(preview.title.ifBlank { "网页预览" }, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            TextButton({ servicesOpen = true }, enabled = knownProject) { Text("开发服务") }
             TextButton({ settings = PreviewAddressSettings(project, session.cwd, savedAddress, savedAddress ?: input.text) }, enabled = knownProject && !preview.preparing) { Text("项目地址") }
             TextButton({ state.browserPanelOpen = false }) { Text("收起") }
             TextButton({
@@ -98,6 +100,9 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
                 catch (e: Exception) { preview.error = "截图未复制：${e.message}" }
             } }, enabled = preview.handle != null && !preview.loading && !preview.preparing && !preview.capturing && !preview.needsReconnect) { Text(if (preview.capturing) "正在截图…" else "复制截图") }
         }
+        if (knownProject) PreviewServiceControls(state, conn, session, servicesOpen, onConfigured = { servicesOpen = false }, onPreview = { address ->
+            input = androidx.compose.ui.text.input.TextFieldValue(address); open()
+        })
         Text(preview.source, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
         if (state.projectPreviews.error.isNotBlank()) Text(state.projectPreviews.error, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = t.danger)
         Text(preview.status, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)

@@ -72,7 +72,9 @@ for attempt in $(seq 1 30); do test -f "$FIXTURE/http-port" && break; sleep 0.1;
 test -f "$FIXTURE/http-port"
 cd "$ROOT/android"
 echo "Fixture: $FIXTURE"
-if [ "${YXI_TEST_BROWSER:-0}" = 1 ]; then
+if [ "${YXI_TEST_SERVICE_UI:-0}" = 1 ]; then
+  YXI_SERVICE_UI_FIXTURE="$FIXTURE" ./gradlew :desktop:test --tests app.yxi.desktop.ServiceControlsFixtureTest --no-daemon
+elif [ "${YXI_TEST_BROWSER:-0}" = 1 ]; then
   YXI_ROUTE_FIXTURE="$FIXTURE" YXI_BROWSER_FIXTURE="$FIXTURE" ./gradlew :desktop:test --tests app.yxi.desktop.BrowserIntegrationTest --rerun --no-daemon
 else
   YXI_ROUTE_FIXTURE="$FIXTURE" ./gradlew :desktop:test --tests app.yxi.desktop.RemoteRoutesTest --rerun --no-daemon
