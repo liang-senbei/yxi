@@ -21,6 +21,17 @@ public class HostProtectionNativeCheck {
             if (!raw.equals(store(file, purpose).read())) throw new AssertionError("Migration changed data");
             if (!Files.readString(file).equals("[]") || !Files.readString(root.resolve("hosts.json.bak")).equals("[]")) throw new AssertionError("Plaintext not cleared");
             if (!Files.exists(root.resolve("hosts.json.bak.migration-copy.protected"))) throw new AssertionError("Encrypted old backup missing");
+            Path roaming = root.resolve("roaming"); Files.createDirectory(roaming);
+            Files.writeString(roaming.resolve("hosts.json"), raw);
+            Files.writeString(roaming.resolve("hosts.json.bak"), "[{\"password\":\"old-roaming-fixture\"}]");
+            store(file, purpose).importLegacy(roaming.resolve("hosts.json").toFile());
+            try (var paths = Files.list(roaming)) {
+                for (Path path : paths.toList()) if (!Files.readString(path).equals("[]")) throw new AssertionError("Roaming plaintext not cleared");
+            }
+            try (var paths = Files.list(root)) {
+                if (paths.filter(path -> path.getFileName().toString().contains(".import-")).count() != 2) throw new AssertionError("Local encrypted roaming copies missing");
+            }
+            if (!raw.equals(store(file, purpose).read())) throw new AssertionError("Roaming import changed local hosts");
             System.out.println("host DPAPI migration passed");
         } else if (args[0].equals("reopen")) {
             if (!raw.equals(store(file, purpose).read())) throw new AssertionError("Cross-process read failed");

@@ -11,6 +11,40 @@ class HostConfigFileTest {
         override fun unprotect(cipher: ByteArray): ByteArray { require(cipher.first() == 42.toByte()); return cipher.drop(1).toByteArray().reversedArray() }
     }
     private fun store(file: File, protector: CredentialProtector? = codec) = HostConfigFile(file, protector) { JSONArray(it) }
+    @Test fun `roaming import keeps encrypted copies locally and resumes after cleared markers`() {
+        val root = Files.createTempDirectory("host-roaming").toFile()
+        val roaming = File(root, "roaming").apply { mkdirs() }
+        val local = File(root, "local").apply { mkdirs() }
+        val source = File(roaming, "hosts.json")
+        source.writeText("broken fixture")
+        val raw = """[{"id":"a","password":"fixture-password"}]"""
+        File(roaming, "hosts.json.bak").writeText(raw)
+        val target = store(File(local, "hosts.json"))
+        target.importLegacy(source)
+        assertTrue(target.recovered)
+        assertEquals(raw, target.read())
+        assertTrue(roaming.listFiles()!!.all { it.readText() == "[]" })
+        assertEquals(2, local.listFiles()!!.count { it.name.contains(".import-") })
+        store(File(local, "hosts.json")).importLegacy(source)
+        assertEquals(raw, target.read())
+        source.writeText("""[{"id":"other"}]""")
+        assertFails { target.importLegacy(source) }
+        assertTrue(source.readText().contains("other"))
+    }
+    @Test fun `roaming source changed during protection is not cleared`() {
+        val root = Files.createTempDirectory("host-roaming-race").toFile()
+        val source = File(root, "old.json").apply { writeText("""[{"id":"old"}]""") }
+        var changed = false
+        val changing = object : CredentialProtector {
+            override fun protect(plain: ByteArray): ByteArray {
+                if (!changed) { changed = true; source.writeText("""[{"id":"new"}]""") }
+                return codec.protect(plain)
+            }
+            override fun unprotect(cipher: ByteArray) = codec.unprotect(cipher)
+        }
+        assertFails { store(File(root, "local/hosts.json"), changing).importLegacy(source) }
+        assertEquals("""[{"id":"new"}]""", source.readText())
+    }
     @Test fun `migration protects current and old copies before clearing plaintext`() {
         val dir = Files.createTempDirectory("host-protection").toFile()
         val file = File(dir, "hosts.json")

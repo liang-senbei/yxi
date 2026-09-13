@@ -69,19 +69,21 @@ object Store {
     }
 
     /**
-     * 把老版本留在漫游目录里的几份搬到本地目录，**搬完删掉源文件**。
+     * 主机记录先在本地保护并验证，再清空旧明文；其他文件验证后移动。
      * ⚠️ 删源不是洁癖：留着的那份 hosts.json 里有明文密码，还在继续跟着漫游同步 —— 不删等于没修。
      * 目标已存在时仅在内容一致且校验通过后清理源；不同内容保留双方。
      */
     private fun migrateRoaming(from: File, to: File) = runCatching {
         if (!from.isDirectory || from.canonicalFile == to.canonicalFile) return@runCatching
-        listOf("hosts.json", "known_hosts", "prefs.json", "window.json").forEach { name ->
+        val hostImport = HostConfigFile(File(to, "hosts.json"), WindowsCredentialProtector.forPlatform("Yxi/host-credentials/v1"), ::validateHosts)
+        hostImport.importLegacy(File(from, "hosts.json"))
+        if (hostImport.recovered) warning = "旧服务器配置已从备份恢复，请核对服务器列表。"
+        listOf("known_hosts", "prefs.json", "window.json").forEach { name ->
             val src = File(from, name)
             if (!src.isFile) return@forEach
             val dst = File(to, name)
             DurableFile.migrate(src, dst) { text ->
                 when (name) {
-                    "hosts.json" -> JSONArray(text)
                     "prefs.json", "window.json" -> JSONObject(text)
                 }
             }
@@ -89,7 +91,8 @@ object Store {
         runCatching { from.delete() }   // 空了才删得掉，没空就留着，无所谓
     }.onFailure { warning = "旧配置迁移未完成：${it.message}" }
     private val hostsFile = File(dir, "hosts.json")
-    private val hostData = HostConfigFile(hostsFile, WindowsCredentialProtector.forPlatform("Yxi/host-credentials/v1")) { text ->
+    private val hostData = HostConfigFile(hostsFile, WindowsCredentialProtector.forPlatform("Yxi/host-credentials/v1"), ::validateHosts)
+    private fun validateHosts(text: String) {
         val a = JSONArray(text)
         val ids = mutableSetOf<String>()
         for (i in 0 until a.length()) {

@@ -2,6 +2,7 @@ package app.yxi.desktop
 
 import java.io.File
 import java.util.Base64
+import java.security.MessageDigest
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -24,17 +25,47 @@ internal class HostConfigFile(private val file: File, private val protector: Cre
         check(decode(result) == raw) { "服务器凭据保护验证失败" }
         return result
     }
-    private fun clearPlaintext() {
-        listOf(file, File(file.parentFile, file.name + ".bak"), File(file.parentFile, file.name + ".damaged")).forEach { source ->
-            if (!source.exists()) return@forEach
-            val raw = source.readText()
-            check(source.readBytes().contentEquals(raw.toByteArray(Charsets.UTF_8))) { "旧服务器副本不是有效UTF-8，原文件已保留" }
-            if (raw.trim() == "[]") return@forEach
-            val copy = File(source.parentFile, source.name + ".migration-copy.protected")
-            if (copy.exists()) check(decode(copy.readText()) == raw) { "旧服务器副本发生变化，已保留所有文件" }
-            else DurableFile.replace(copy, encode(raw))
-            check(decode(copy.readText()) == raw && source.readText() == raw) { "服务器迁移记录已变化，未清除原文件" }
-            DurableFile.replace(source, "[]")
+    private fun plainFiles(base: File) = listOf(base, File(base.parentFile, base.name + ".bak"), File(base.parentFile, base.name + ".damaged"))
+    private fun readPlain(source: File): String {
+        val bytes = source.readBytes()
+        val raw = bytes.toString(Charsets.UTF_8)
+        check(bytes.contentEquals(raw.toByteArray(Charsets.UTF_8))) { "旧服务器副本不是有效UTF-8，原文件已保留" }
+        return raw
+    }
+    private fun archiveAndClear(source: File, copy: File, expected: String? = null) {
+        if (!source.exists()) return
+        val raw = readPlain(source)
+        check(expected == null || expected == raw) { "旧服务器记录在迁移期间变化，原文件已保留" }
+        if (raw.trim() == "[]") return
+        if (copy.exists()) check(decode(copy.readText()) == raw) { "旧服务器副本发生变化，已保留所有文件" }
+        else DurableFile.replace(copy, encode(raw))
+        check(decode(copy.readText()) == raw && readPlain(source) == raw) { "服务器迁移记录已变化，未清除原文件" }
+        DurableFile.replace(source, "[]")
+    }
+    private fun clearPlaintext(expectedMain: String?) {
+        plainFiles(file).forEach { source -> archiveAndClear(source, File(source.parentFile, source.name + ".migration-copy.protected"), if (source == file) expectedMain else null) }
+    }
+    @Synchronized fun importLegacy(source: File) {
+        require(protector != null) { "旧服务器配置需要Windows系统保护" }
+        if (source.canonicalFile == file.canonicalFile) return
+        val snapshots = plainFiles(source).filter { it.exists() }.associateWith(::readPlain)
+        if (snapshots.isEmpty()) return
+        val primary = snapshots[source]
+        val backup = snapshots[File(source.parentFile, source.name + ".bak")]
+        var fromBackup = primary == null && backup != null
+        val candidate = if (primary != null) runCatching { primary.also(validate) }.getOrElse { problem -> fromBackup = true; backup?.also(validate) ?: throw problem } else backup?.also(validate)
+        val current = read()
+        recovered = recovered || fromBackup
+        if (candidate != null) {
+            check(current == null || JSONArray(candidate).length() == 0 || JSONArray(current).similar(JSONArray(candidate))) { "漫游和本地服务器记录不同，已保留双方" }
+            if (current == null) {
+                encrypted.write(encode(candidate))
+                check(decode(encrypted.read()!!) == candidate) { "服务器迁移保护验证失败" }
+            }
+        }
+        snapshots.forEach { (path, raw) ->
+            val identity = MessageDigest.getInstance("SHA-256").digest(path.canonicalPath.toByteArray()).joinToString("") { "%02x".format(it) }
+            archiveAndClear(path, File(file.parentFile, file.name + ".import-" + identity + ".protected"), raw)
         }
     }
     @Synchronized fun read(): String? {
@@ -47,18 +78,18 @@ internal class HostConfigFile(private val file: File, private val protector: Cre
         recovered = encrypted.recovered
         if (saved != null) {
             val raw = decode(saved)
-            if (file.exists()) {
-                val old = file.readText().also(validate)
+            val old = if (file.exists()) readPlain(file).also(validate) else null
+            if (old != null) {
                 check(JSONArray(old).length() == 0 || JSONArray(old).similar(JSONArray(raw))) { "明文和受保护服务器记录不同，未覆盖任何记录" }
             }
-            clearPlaintext()
+            clearPlaintext(old)
             return raw
         }
         val raw = legacy.read() ?: return null
         recovered = legacy.recovered
         encrypted.write(encode(raw))
         check(decode(encrypted.read()!!) == raw)
-        clearPlaintext()
+        clearPlaintext(raw)
         return raw
     }
     @Synchronized fun write(raw: String) {
