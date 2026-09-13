@@ -451,3 +451,13 @@
 - 已查看确认与结果截图：本机tmp/workbench-evidence/plugin-update-confirm.png和plugin-updated-verified.png；界面结果和卡片版本一致，运行器列表显示识别且启用。
 - 自动化完整执行并正常退出，日志/tmp/yxi-plugin-update-native/test.log，fixture.CjtwDX。本轮仅扩展测试/脚本与进度文档，没有重复无关生产打包，也没有更新生产插件。
 - 仍需精确升级目标版本固定、包回滚、远程来源/项目范围、多主机断线以及Windows更新专项。完整PRD继续推进。
+
+## 第四十六轮：插件包回滚底层（2026-09-13）
+
+- rollback按已确认updated/uninstalled操作定位副本，核对配置/登记after指纹、原配置/登记before指纹与tar SHA256；后续配置变化或副本被改动时拒绝恢复。
+- 恢复文件写入私有restored/操作ID新目录，并把原登记的目标安装路径指向该目录，避免覆盖共享缓存或用户后来编辑的目录；同时恢复原配置和登记，回读两者确认后记录package-restored。
+- 解包限制成员数/总大小/路径前缀，拒绝绝对路径、..、重复规范化路径和链接父目录；先恢复常规文件，再恢复硬链接/符号链接，不让归档链接重定向写入。保留常规文件权限但不恢复setuid等特殊位，链接本身保留但不跟随读取。
+- 临时市场真实测试验证升级1.1.0回到1.0.0，以及卸载后恢复1.0.0，CLI能重新读到登记与文件；重复ID不重复解包、篡改归档拒绝、后续配置改动保留。新增test-plugin-package.py验证普通文件/权限/链接及路径逃逸拒绝，原启停恢复回归通过。
+- 配置与登记是逐文件原子写入，尚非跨文件事务；中断可能留下待确认状态，当前不自动继续恢复。新目录恢复对依赖绝对原安装路径的插件仍需验证。package-restored客户端/UI、崩溃恢复、Windows专项与完整W03仍待推进。
+- 发现本地Python测试在资源目录生成__pycache__，新增资源打包排除规则，防止测试缓存混入应用。最终包检查另记。
+- 桌面测试/打包日志/tmp/yxi-plugin-rollback-build.log；追加回读验证后Python回滚测试和最终打包通过（/tmp/yxi-plugin-rollback-package.log）。逐项检查jar：必要plugin-operation.py存在，__pycache__/pyc为零。

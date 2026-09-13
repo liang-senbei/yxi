@@ -3,7 +3,7 @@ import fcntl
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import stat
 import subprocess
@@ -76,6 +76,123 @@ def package_backup(path, target):
     finally:
         if os.path.exists(temporary): os.unlink(temporary)
 
+def unpack_package(archive_path, destination, expected_hash):
+    fd = os.open(archive_path, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd, 'rb') as stream:
+        if os.fstat(stream.fileno()).st_size > 160 * 1024 * 1024:
+            raise ValueError('large archive')
+        digest = hashlib.sha256()
+        for block in iter(lambda: stream.read(1024 * 1024), b''): digest.update(block)
+        if digest.hexdigest() != expected_hash: raise ValueError('changed archive')
+        stream.seek(0)
+        with tarfile.open(fileobj=stream, mode='r:') as archive:
+            members = archive.getmembers()
+            if len(members) > 20000 or sum(p.size for p in members) > 128 * 1024 * 1024:
+                raise ValueError('large archive')
+            names = set()
+            symbolic = {str(PurePosixPath(m.name)) for m in members if m.issym()}
+            if not any(m.name == 'plugin' and m.isdir() for m in members): raise ValueError('missing root')
+            for member in members:
+                path = PurePosixPath(member.name)
+                if path.is_absolute() or '..' in path.parts or not path.parts or path.parts[0] != 'plugin' or '\\' in member.name or str(path) in names:
+                    raise ValueError('invalid archive path')
+                if not (member.isdir() or member.isfile() or member.issym() or member.islnk()):
+                    raise ValueError('invalid archive member')
+                if any(str(parent) in symbolic for parent in path.parents): raise ValueError('linked archive parent')
+                names.add(str(path))
+            destination.mkdir(mode=0o700) # A fresh location, never an existing cache directory.
+            regular = {m.name for m in members if m.isfile()}
+            # Materialize ordinary files first; archive links can never redirect writes.
+            for member in members:
+                target = destination / member.name
+                if member.isdir(): target.mkdir(mode=0o700, parents=True, exist_ok=True)
+                elif member.isfile():
+                    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                    with archive.extractfile(member) as source, target.open('xb') as output:
+                        for block in iter(lambda: source.read(1024 * 1024), b''): output.write(block)
+                        output.flush(); os.fsync(output.fileno())
+                    target.chmod(member.mode & 0o777)
+            for member in members:
+                if member.islnk():
+                    if member.linkname not in regular: raise ValueError('invalid hard link')
+                    target = destination / member.name
+                    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                    os.link(destination / member.linkname, target)
+            for member in members:
+                if member.issym():
+                    target = destination / member.name
+                    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                    os.symlink(member.linkname, target) # Preserve links without following them.
+            for directory, _, _ in os.walk(destination, followlinks=False):
+                directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+                try: os.fsync(directory_fd)
+                finally: os.close(directory_fd)
+    return destination / 'plugin'
+
+def rollback_package(request, home, store, record, previous):
+    source_id = request.get('restores', '')
+    if not re.fullmatch(r'[a-f0-9]{32}', source_id) or source_id == request['operation']:
+        return {'state': 'invalid'}
+    identity = dict(kind='rollback', restores=source_id)
+    if previous is not None:
+        result = json.loads(previous)
+        if result.get('target') != identity: return {'state': 'operation-conflict'}
+        if result['state'] == 'started': result['state'] = 'unknown'
+        return result
+    source_bytes = read_file(store / (source_id + '.json'))
+    source = json.loads(source_bytes) if source_bytes else {}
+    if source.get('state') not in ('updated', 'uninstalled') or not source.get('packageHash'):
+        return {'state': 'restore-unavailable'}
+    target = source['target']; scope = target['scope']; plugin = target['plugin']
+    if scope not in ('user', 'project', 'local'): return {'state': 'invalid'}
+    cwd = home if scope == 'user' else Path(target['directory'])
+    if not cwd.is_absolute() or not cwd.is_dir() or cwd.resolve() != cwd: return {'state': 'invalid-directory'}
+    config = home / '.claude/settings.json' if scope == 'user' else cwd / '.claude' / ('settings.local.json' if scope == 'local' else 'settings.json')
+    if config.parent.is_symlink(): return {'state': 'unsupported-linked-config'}
+    registry_path = home / '.claude/plugins/installed_plugins.json'
+    if (home / '.claude').is_symlink() or registry_path.parent.is_symlink(): return {'state': 'unsupported-linked-config'}
+    before = read_file(store / (source_id + '.before'))
+    old_registry = read_file(store / (source_id + '.registry-before'))
+    if before is None or old_registry is None or fingerprint(before if source['existed'] else None, old_registry) != source['before']:
+        return {'state': 'restore-unavailable'}
+    current, registry = read_file(config), read_file(registry_path)
+    if fingerprint(current, registry) != source.get('after'): return {'state': 'changed'}
+    original = json.loads(old_registry)
+    matching = [p for p in original['plugins'][plugin] if p.get('scope') == scope and (scope == 'user' or p.get('projectPath') == str(cwd))]
+    if len(matching) != 1: return {'state': 'restore-unavailable'}
+    operation = request['operation']
+    write_file(store / (operation + '.before'), current or b'')
+    write_file(store / (operation + '.registry-before'), registry or b'')
+    result = dict(state='started', operation=operation, target=identity)
+    write_file(record, json.dumps(result).encode())
+    mutated = False
+    try:
+        restored = store / 'restored'; private_directory(restored)
+        location = unpack_package(store / (source_id + '.plugin-before.tar'), restored / operation, source['packageHash'])
+        if not location.is_dir(): raise ValueError('missing plugin root')
+        matching[0]['installPath'] = str(location)
+        if fingerprint(read_file(config), read_file(registry_path)) != source['after']:
+            result['state'] = 'changed'
+        else:
+            mutated = True
+            restored_registry = json.dumps(original).encode()
+            write_file(registry_path, restored_registry)
+            if source['existed']: write_file(config, before)
+            else:
+                try: config.unlink()
+                except FileNotFoundError: pass
+                if config.parent.is_dir():
+                    fd = os.open(config.parent, os.O_RDONLY | os.O_DIRECTORY)
+                    try: os.fsync(fd)
+                    finally: os.close(fd)
+            if read_file(config) != (before if source['existed'] else None): raise ValueError('restore not confirmed')
+            if read_file(registry_path) != restored_registry: raise ValueError('registry restore not confirmed')
+            result.update(state='package-restored', afterVersion=matching[0].get('version', ''), after=fingerprint(read_file(config), read_file(registry_path)))
+    except Exception:
+        result['state'] = 'unknown' if mutated else 'restore-unavailable'
+    write_file(record, json.dumps(result).encode())
+    return result
+
 def install_operation(request, home, config, cwd, store, record, previous, run):
     plugin, scope, operation = request['plugin'], request['scope'], request['operation']
     identity = dict(plugin=plugin, scope=scope, directory=str(cwd), kind='install')
@@ -132,7 +249,7 @@ def execute(request, home=None, run=subprocess.run):
         return {'state': 'unsupported-config-home'}
     action = request.get('action')
     operation = request.get('operation', '')
-    if action not in ('prepare', 'set', 'status', 'restore', 'prepare-install', 'install', 'uninstall', 'update') or not re.fullmatch(r'[a-f0-9]{32}', operation):
+    if action not in ('prepare', 'set', 'status', 'restore', 'prepare-install', 'install', 'uninstall', 'update', 'rollback') or not re.fullmatch(r'[a-f0-9]{32}', operation):
         return {'state': 'invalid'}
     store = home / '.yxi'
     private_directory(store)
@@ -149,6 +266,7 @@ def execute(request, home=None, run=subprocess.run):
             result = json.loads(previous)
             if result['state'] == 'started': result['state'] = 'unknown'
             return result
+        if action == 'rollback': return rollback_package(request, home, store, record, previous)
         source = None
         if action == 'restore':
             source_id = request.get('restores', '')

@@ -60,6 +60,13 @@ with tempfile.TemporaryDirectory(prefix='yxi-plugin-install-') as root:
     with tarfile.open(home / '.yxi/plugin-operations' / ('c'*32 + '.plugin-before.tar')) as backup:
         assert json.load(backup.extractfile('plugin/.claude-plugin/plugin.json'))['version'] == '1.0.0'
     assert json.loads(settings_path.read_text())['enabledPlugins']['other@yxi-fixture'] is True
+    rolled = module.execute(dict(action='rollback', operation='d'*32, restores='c'*32), root)
+    assert rolled['state'] == 'package-restored', rolled
+    assert module.execute(dict(action='rollback', operation='d'*32, restores='c'*32), root)['state'] == 'package-restored'
+    restored = json.loads(subprocess.check_output(['claude', 'plugin', 'list', '--json'], cwd=root))
+    restored_entry = next(p for p in restored if p['id'] == entry['pluginId'])
+    assert restored_entry['version'] == '1.0.0'
+    assert json.loads((Path(restored_entry['installPath']) / '.claude-plugin/plugin.json').read_text())['version'] == '1.0.0'
     remove_target = dict(action='prepare', operation='b'*32, plugin=entry['pluginId'], scope='user', directory=root)
     prep = module.execute(remove_target, root)
     remove = dict(remove_target, action='uninstall', fingerprint=prep['fingerprint'])
@@ -75,6 +82,20 @@ with tempfile.TemporaryDirectory(prefix='yxi-plugin-install-') as root:
         assert json.load(backup.extractfile('plugin/.claude-plugin/plugin.json'))['name'] == 'sample'
     actual = json.loads(subprocess.check_output(['claude', 'plugin', 'list', '--json'], cwd=root))
     assert all(p['id'] != entry['pluginId'] for p in actual)
+    exact_config = settings_path.read_bytes()
+    later = json.loads(exact_config); later['laterEdit'] = True
+    settings_path.write_text(json.dumps(later))
+    assert module.execute(dict(action='rollback', operation='2'*32, restores='b'*32), root)['state'] == 'changed'
+    assert json.loads(settings_path.read_text())['laterEdit'] is True
+    settings_path.write_bytes(exact_config)
+    intact = archive.read_bytes()
+    archive.write_bytes(intact + b'changed')
+    assert module.execute(dict(action='rollback', operation='f'*32, restores='b'*32), root)['state'] == 'restore-unavailable'
+    archive.write_bytes(intact)
+    rollback = module.execute(dict(action='rollback', operation='e'*32, restores='b'*32), root)
+    assert rollback['state'] == 'package-restored', rollback
+    again = json.loads(subprocess.check_output(['claude', 'plugin', 'list', '--json'], cwd=root))
+    assert next(p for p in again if p['id'] == entry['pluginId'])['version'] == '1.0.0'
     project = home / 'project'; project.mkdir()
     # Restore only the fixture registry/settings to a pre-install state to exercise
     # a fresh project-scope attempt without making another marketplace.

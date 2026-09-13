@@ -58,6 +58,10 @@ tasks.test {
         systemProperty("yxi.browser.runtimeDir", System.getenv("YXI_BROWSER_RUNTIME_DIR") ?: "$fixture/browser-runtime")
     }
 }
+// Local Python verification may create caches beside embedded scripts.
+tasks.withType<org.gradle.language.jvm.tasks.ProcessResources>().configureEach {
+    exclude("**/__pycache__/**", "**/*.pyc")
+}
 // 插件按本机 OS 起名（跨平台打出来也叫 linux-x64），文件名改成跟着目标平台走。
 // ⚠️ 要设 archiveFileName 不能设 archiveAppendix：插件在 afterEvaluate 里才设 appendix，会盖掉这儿的；显式 fileName 不受约定影响。
 tasks.withType<org.gradle.jvm.tasks.Jar>().matching { it.name == "packageUberJarForCurrentOS" }.configureEach {
