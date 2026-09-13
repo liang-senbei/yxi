@@ -78,6 +78,7 @@ else echo '__YXI_RECORD__:missing'; fi
     return when {
         result.lineSequence().any { it == "__YXI_RECORD__:terminal" } -> "服务端记录：终端文字与回车已写入。运行器接收和执行仍需查看对话确认。\n" + result.lineSequence().filterNot { it.startsWith("__YXI_RECORD__:") }.joinToString("\n").take(100)
         result.lineSequence().any { it == "__YXI_RECORD__:reserved" } -> "服务端已登记本指令，但没有完整写入记录；可能只写入了部分内容。请查看终端，不要重复发送。"
-        else -> "未找到服务端记录，旧版投递也可能没有记录；不能据此判定未发送。请查看对话或终端。"
+        result.lineSequence().any { it == "__YXI_RECORD__:missing" } -> "未找到服务端记录，旧版投递也可能没有记录；不能据此判定未发送。请查看对话或终端。"
+        else -> error("服务器未返回可识别的投递记录，请稍后重新查询")
     }
 }

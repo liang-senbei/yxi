@@ -15,6 +15,7 @@ internal data class QueuedInstruction(
     val attachments: List<InstructionAttachment> = emptyList(),
     val status: InstructionStatus = InstructionStatus.Local,
     val revision: Long = 0, val detail: String = "",
+    val deliveryObservation: String = "", val deliveryObservedAt: Long = 0,
 )
 
 /** Durable outbox, not a claim about a runner's remote queue. Network adapters must
@@ -75,6 +76,9 @@ internal class InstructionQueue(file: File) {
     fun markUnknown(id: String, revision: Long, detail: String) = change(id, revision, setOf(InstructionStatus.Delivering)) { it.copy(status = InstructionStatus.Unknown, detail = detail) }
     fun notDelivered(id: String, revision: Long, reason: String) = change(id, revision, setOf(InstructionStatus.Delivering)) { it.copy(status = InstructionStatus.Local, detail = reason) }
     fun resolveManually(id: String, revision: Long) = change(id, revision, setOf(InstructionStatus.Unknown)) { it.copy(status = InstructionStatus.Resolved, detail = "用户已人工核对；未自动确认运行器接收") }
+    fun recordDeliveryObservation(id: String, revision: Long, observation: String) = change(id, revision, setOf(InstructionStatus.Unknown)) {
+        it.copy(deliveryObservation = observation, deliveryObservedAt = System.currentTimeMillis())
+    }
     fun confirmAccepted(id: String, revision: Long, receipt: String) = change(id, revision, setOf(InstructionStatus.Delivering, InstructionStatus.Unknown)) {
         require(receipt.isNotBlank()) { "缺少运行器接收凭据" }
         it.copy(status = InstructionStatus.Accepted, detail = receipt)
@@ -100,7 +104,9 @@ internal class InstructionQueue(file: File) {
     companion object {
         private fun encode(items: List<QueuedInstruction>) = JSONObject().put("version", 1).put("items", JSONArray(items.map { item ->
             JSONObject().put("id", item.id).put("taskKey", item.taskKey).put("text", item.text).put("status", item.status.name)
-                .put("revision", item.revision).put("detail", item.detail).put("attachments", JSONArray(item.attachments.map { JSONObject().put("name", it.name).put("remotePath", it.remotePath) }))
+                .put("revision", item.revision).put("detail", item.detail)
+                .put("deliveryObservation", item.deliveryObservation).put("deliveryObservedAt", item.deliveryObservedAt)
+                .put("attachments", JSONArray(item.attachments.map { JSONObject().put("name", it.name).put("remotePath", it.remotePath) }))
         })).toString(2)
         private fun decode(raw: String): List<QueuedInstruction> {
             val root = JSONObject(raw)
@@ -111,7 +117,8 @@ internal class InstructionQueue(file: File) {
                 val attachments = item.getJSONArray("attachments")
                 QueuedInstruction(item.getString("id"), item.getString("taskKey"), item.getString("text"),
                     (0 until attachments.length()).map { attachments.getJSONObject(it).let { a -> InstructionAttachment(a.getString("name"), a.getString("remotePath")) } },
-                    InstructionStatus.valueOf(item.getString("status")), item.getLong("revision"), item.getString("detail"))
+                    InstructionStatus.valueOf(item.getString("status")), item.getLong("revision"), item.getString("detail"),
+                    item.optString("deliveryObservation", ""), item.optLong("deliveryObservedAt", 0))
                     .also { q ->
                         require(q.id.isNotBlank() && q.taskKey.isNotBlank() && q.revision >= 0)
                         require(q.text.isNotBlank() || q.attachments.isNotEmpty())

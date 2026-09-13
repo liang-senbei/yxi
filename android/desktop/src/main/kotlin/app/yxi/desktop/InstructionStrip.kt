@@ -89,6 +89,10 @@ internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliv
                 OutlinedTextField(text, { text = it }, readOnly = !local, modifier = Modifier.fillMaxWidth().heightIn(max = 260.dp), label = { Text("指令正文") })
                 original.attachments.forEach { Text(it.name, color = t.textMuted, style = MaterialTheme.typography.bodySmall) }
                 Text(current?.detail.orEmpty().ifBlank { "此指令尚未投递，可以编辑、调整顺序或撤回。主输入框草稿不受影响。" }, style = MaterialTheme.typography.bodySmall)
+                if (!current?.deliveryObservation.isNullOrBlank()) {
+                    Text("最近查询 · ${java.time.Instant.ofEpochMilli(current!!.deliveryObservedAt)}", style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+                    Text(current.deliveryObservation, style = MaterialTheme.typography.bodySmall)
+                }
                 if (local) Row {
                     TextButton({ act {
                         val cancelled = queue.cancel(original.id, original.revision)
@@ -103,9 +107,13 @@ internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliv
                     TextButton({
                         querying = true
                         scope.launch {
-                            try { queryResult = onQuery(current) }
+                            try {
+                                val observation = onQuery(current)
+                                queue.recordDeliveryObservation(current.id, current.revision, observation)
+                                queryResult = ""
+                            }
                             catch (e: CancellationException) { throw e }
-                            catch (e: Exception) { queryResult = "查询失败：${e.message}" }
+                            catch (e: Exception) { queryResult = "查询或记录保存未完成：${e.message}" }
                             finally { querying = false }
                         }
                     }, enabled = !querying) { Text(if (querying) "查询中…" else "查询投递记录") }
