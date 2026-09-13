@@ -11,6 +11,7 @@
 #   yxi-hub reply <消息ID> "话" [本次消息UUID]  回复原消息并保留关联
 #   yxi-hub all <组名> "话" [批次UUID]  固定批次与成员消息ID，重试复用
 #   yxi-hub pause|resume|status <组名>  控制该组后续消息投递
+#   yxi-hub limit <组名> <消息数> <分钟>  从现在起设定新预算
 #
 # ⚠️ **只能发给同组的。** 这就是「组」和「所有会话」的区别 ——
 #    没有这条约束，分组只是个视觉分类，不是协作边界。
@@ -88,25 +89,27 @@ print("\n".join(g for g,m in d.get("groups",{}).items() if sys.argv[2] in m))' "
 #    ⚠️ 单行消息不会触发（不够长，不当粘贴），所以这个坑只有 agent 之间
 #    发长消息时才露头 —— 手测「你好」是测不出来的。
 record_event() {
-  python3 - "$HOME/.yxi/hub-events.jsonl" "$@" "${sender_instance:-}" "${recipient_instance:-}" <<'PY'
-import datetime, fcntl, json, os, pathlib, sys, uuid
-path, message, sender, recipient, stage, body, reply, sender_instance, recipient_instance = sys.argv[1:]
+  python3 - "$HOME/.yxi/hub-events.jsonl" "$@" "${sender_instance:-}" "${recipient_instance:-}" "$GROUPS_FILE" <<'PY'
+import datetime, fcntl, json, os, pathlib, sys, uuid, time
+path, message, sender, recipient, stage, body, reply, sender_instance, recipient_instance, groups_path = sys.argv[1:]
 if str(uuid.UUID(message)) != message: raise ValueError('消息 ID 必须是标准小写 UUID')
 p = pathlib.Path(path)
 p.parent.mkdir(parents=True, exist_ok=True)
 event = {'version': 1, 'id': message, 'sender': sender, 'recipient': recipient,
          'senderInstance': sender_instance, 'recipientInstance': recipient_instance,
          'stage': stage, 'text': body, 'replyTo': reply, 'time': datetime.datetime.now(datetime.timezone.utc).isoformat()}
+event['createdAt'] = time.time()
 fd = os.open(p, os.O_RDWR | os.O_CREAT | os.O_APPEND, 0o600)
 with os.fdopen(fd, 'a+', encoding='utf-8') as f:
     fcntl.flock(f, fcntl.LOCK_EX)
     if stage == 'attempting':
         f.seek(0)
-        previous = []
+        previous, events = [], []
         for line in f:
             if not line.strip(): continue
             try: stored = json.loads(line)
             except ValueError: raise ValueError('事件记录损坏，无法确认去重状态；请先核对日志')
+            events.append(stored)
             if stored.get('id') == message: previous.append(stored)
         if previous:
             first = next((e for e in previous if e.get('stage') == 'attempting'), None)
@@ -116,6 +119,21 @@ with os.fdopen(fd, 'a+', encoding='utf-8') as f:
                 print('duplicate-terminal')
                 sys.exit(0)
             raise ValueError('该消息已登记但投递未确认，拒绝自动重发；请查看目标终端')
+        with open(groups_path) as source: groups = json.load(source)['groups']
+        shared = [g for g, members in groups.items() if sender in members and recipient in members]
+        if not shared: raise ValueError('双方已不在同组，拒绝投递')
+        control_file = p.parent / 'hub-control.json'
+        control = json.loads(control_file.read_text()) if control_file.exists() else {}
+        for group in shared:
+            settings = control.get(group, {})
+            if settings.get('paused'): raise ValueError('协作组已暂停：' + group)
+            if settings.get('deadline', 0) and time.time() >= settings['deadline']:
+                raise ValueError('协作时间预算已到期：' + group)
+            limit = settings.get('messageLimit', 0)
+            if limit:
+                used = len({e['id'] for e in events if e.get('stage') == 'attempting' and group in e.get('groups', []) and e.get('createdAt', 0) >= settings.get('budgetStartedAt', 0)})
+                if used >= limit: raise ValueError('协作消息预算已用完：' + group)
+        event['groups'] = shared
     f.write(json.dumps(event, ensure_ascii=False) + '\n')
     f.flush(); os.fsync(f.fileno())
     if stage == 'attempting': print('new')
@@ -174,11 +192,11 @@ push() {
 self="$(me)"
 
 case "${1:-who}" in
-  pause|resume|status)
+  pause|resume|status|limit)
     group="${2:?请指定协作组名}"
-    python3 - "$GROUPS_FILE" "$HOME/.yxi/hub-control.json" "$1" "$group" "${self:-user}" <<'PY'
-import datetime, fcntl, json, os, pathlib, sys, tempfile
-groups_path, control_path, action, group, actor = sys.argv[1:]
+    python3 - "$GROUPS_FILE" "$HOME/.yxi/hub-control.json" "$1" "$group" "${self:-user}" "${3:-}" "${4:-}" <<'PY'
+import datetime, fcntl, json, os, pathlib, sys, tempfile, time
+groups_path, control_path, action, group, actor, limit, minutes = sys.argv[1:]
 with open(groups_path) as f: groups = json.load(f)['groups']
 if group not in groups: raise ValueError('协作组不存在')
 p = pathlib.Path(control_path)
@@ -188,8 +206,14 @@ with os.fdopen(fd, 'r+') as lock:
     fcntl.flock(lock, fcntl.LOCK_EX)
     data = json.loads(p.read_text()) if p.exists() else {}
     if action != 'status':
-        data[group] = {'paused': action == 'pause', 'updatedBy': actor,
-                       'updatedAt': datetime.datetime.now(datetime.timezone.utc).isoformat()}
+        settings = data.setdefault(group, {'paused': False})
+        if action == 'limit':
+            count, duration = int(limit), int(minutes)
+            if not 1 <= count <= 10000 or not 1 <= duration <= 10080: raise ValueError('消息数须为 1–10000，分钟须为 1–10080')
+            now = time.time()
+            settings.update(messageLimit=count, budgetStartedAt=now, deadline=now + duration * 60)
+        else: settings['paused'] = action == 'pause'
+        settings.update(updatedBy=actor, updatedAt=datetime.datetime.now(datetime.timezone.utc).isoformat())
         fd, name = tempfile.mkstemp(prefix='hub-control-', dir=p.parent)
         try:
             with os.fdopen(fd, 'w') as f:
