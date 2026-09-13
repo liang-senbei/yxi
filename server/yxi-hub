@@ -222,7 +222,20 @@ with os.fdopen(fd, 'r+') as lock:
             os.replace(name, p)
         finally:
             if os.path.exists(name): os.unlink(name)
-    print(json.dumps({'group': group, **data.get(group, {'paused': False})}, ensure_ascii=False))
+    result = {'group': group, **data.get(group, {'paused': False}), 'budgetSupported': True}
+    if result.get('messageLimit'):
+        events_path = p.parent / 'hub-events.jsonl'
+        used = set()
+        if events_path.exists():
+            with events_path.open() as events:
+                fcntl.flock(events, fcntl.LOCK_SH)
+                for line in events:
+                    if not line.strip(): continue
+                    event = json.loads(line)
+                    if event.get('stage') == 'attempting' and group in event.get('groups', []) and event.get('createdAt', 0) >= result.get('budgetStartedAt', 0): used.add(event['id'])
+        result['messagesUsed'] = len(used)
+        result['budgetExpired'] = time.time() >= result.get('deadline', float('inf'))
+    print(json.dumps(result, ensure_ascii=False))
 PY
     ;;
   # Claude Code 的 SessionStart 钩子调这个，把「你在哪个组、同组有谁」
