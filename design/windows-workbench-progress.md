@@ -410,3 +410,12 @@
 - 实际exe完成smoke、虚构令牌的DPAPI迁移/轮换/篡改拒绝、跨进程重读/退出/重登、原生浏览器载入/非空像素/40px样式/退出检查。已查看浏览器像素截图，未访问真实账号或用户剪贴板。
 - 产物本机tmp/windows-0b9f98e-native/YxiWorkbench/YxiWorkbench.exe；该目录包含所有检查日志、browser-native.png、artifact-sha256.txt与source-manifest.json。没有替换已安装Yxi，没有生成或发布新Setup版本。
 - 本轮证明当前完整源码可构建并通过Windows启动/凭据/浏览器冒烟，不等同插件完整操作、所有UI/DPI/IME、SSH多主机、升级安装或完整PRD验收。上述专项和W03剩余能力仍需继续。
+
+## 第四十一轮：插件卸载执行与文件副本（2026-09-13）
+
+- 核对当前CLI卸载参数，新增明确scope的uninstall动作，固定--keep-data且不传--prune，保留持久数据与未指定依赖。复用prepare指纹、操作ID和查询，不把同范围重复操作重新执行。
+- 执行前保存配置、安装登记和插件目录tar副本，记录SHA256；副本权限600，保存在服务器私有操作目录。限制128MiB/20000项，拒绝特殊文件，不跟随目录/文件符号链接读取外部内容；副本失败不调用卸载。
+- 卸载后核对目标范围的登记已不存在且CLI退出成功，才返回uninstalled；失败或未知保持unknown。当前该终态尚未接入客户端按钮/状态映射。
+- 临时市场实际安装后卸载测试通过：重复原ID返回uninstalled、真实CLI列表目标消失、其他enabledPlugins字段保留、持久数据文件存在；核对副本权限、hash及plugin.json内容。原启停/恢复测试回归通过，未卸载生产插件。
+- 包副本目前仅保留可供后续恢复的数据，尚未实现卸载后恢复/重新安装UI；并发外部文件改动的一致性、所有作用范围、Windows专项和完整W03仍待完成。
+- 桌面测试与Linux打包通过，日志hk13 /tmp/yxi-plugin-uninstall-build.log。

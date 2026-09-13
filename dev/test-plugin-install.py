@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import tarfile
 
 source = Path(__file__).resolve().parents[1] / 'android/desktop/src/main/resources/app/yxi/desktop/plugin-operation.py'
 spec = importlib.util.spec_from_file_location('operation', source)
@@ -37,6 +38,27 @@ with tempfile.TemporaryDirectory(prefix='yxi-plugin-install-') as root:
     fresh = json.loads(subprocess.check_output(['claude', 'plugin', 'list', '--available', '--json'], cwd=root))
     assert all(p['pluginId'] != entry['pluginId'] for p in fresh['available'])
     assert module.execute(dict(request, operation='9'*32), root)['state'] == 'already-installed'
+    settings_path = home / '.claude/settings.json'
+    settings = json.loads(settings_path.read_text())
+    settings['enabledPlugins']['other@yxi-fixture'] = True
+    settings_path.write_text(json.dumps(settings))
+    data = home / '.claude/plugins/data/sample@yxi-fixture'
+    data.mkdir(parents=True); (data / 'keep.txt').write_text('retained data')
+    remove_target = dict(action='prepare', operation='b'*32, plugin=entry['pluginId'], scope='user', directory=root)
+    prep = module.execute(remove_target, root)
+    remove = dict(remove_target, action='uninstall', fingerprint=prep['fingerprint'])
+    removed = module.execute(remove, root)
+    assert removed['state'] == 'uninstalled', removed
+    assert module.execute(remove, root)['state'] == 'uninstalled'
+    assert (data / 'keep.txt').read_text() == 'retained data'
+    assert json.loads(settings_path.read_text())['enabledPlugins']['other@yxi-fixture'] is True
+    archive = home / '.yxi/plugin-operations' / ('b'*32 + '.plugin-before.tar')
+    assert archive.stat().st_mode & 0o077 == 0
+    assert hashlib.sha256(archive.read_bytes()).hexdigest() == removed['packageHash']
+    with tarfile.open(archive) as backup:
+        assert json.load(backup.extractfile('plugin/.claude-plugin/plugin.json'))['name'] == 'sample'
+    actual = json.loads(subprocess.check_output(['claude', 'plugin', 'list', '--json'], cwd=root))
+    assert all(p['id'] != entry['pluginId'] for p in actual)
     project = home / 'project'; project.mkdir()
     # Restore only the fixture registry/settings to a pre-install state to exercise
     # a fresh project-scope attempt without making another marketplace.

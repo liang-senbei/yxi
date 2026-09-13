@@ -9,6 +9,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import tarfile
 
 def private_directory(path):
     path.mkdir(mode=0o700, exist_ok=True)
@@ -42,6 +43,38 @@ def write_file(path, data):
 
 def fingerprint(raw, registry):
     return hashlib.sha256(json.dumps([None if raw is None else base64.b64encode(raw).decode(), None if registry is None else base64.b64encode(registry).decode()]).encode()).hexdigest()
+
+def package_backup(path, target):
+    path = Path(path)
+    if not path.is_absolute() or not path.is_dir() or path.is_symlink():
+        raise ValueError('unavailable plugin directory')
+    total = 0
+    count = 0
+    def checked(info):
+        nonlocal total, count
+        if not (info.isfile() or info.isdir() or info.issym() or info.islnk()):
+            raise ValueError('unsupported plugin file')
+        total += info.size; count += 1
+        if total > 128 * 1024 * 1024 or count > 20000:
+            raise ValueError('plugin backup too large')
+        return info
+    fd, temporary = tempfile.mkstemp(prefix='.package-', dir=target.parent)
+    os.close(fd)
+    try:
+        with tarfile.open(temporary, 'w', dereference=False) as archive:
+            archive.add(path, arcname='plugin', filter=checked)
+        with open(temporary, 'rb') as stream:
+            hasher = hashlib.sha256()
+            for block in iter(lambda: stream.read(1024 * 1024), b''): hasher.update(block)
+            digest = hasher.hexdigest()
+            os.fsync(stream.fileno())
+        os.replace(temporary, target)
+        parent = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try: os.fsync(parent)
+        finally: os.close(parent)
+        return digest
+    finally:
+        if os.path.exists(temporary): os.unlink(temporary)
 
 def install_operation(request, home, config, cwd, store, record, previous, run):
     plugin, scope, operation = request['plugin'], request['scope'], request['operation']
@@ -99,7 +132,7 @@ def execute(request, home=None, run=subprocess.run):
         return {'state': 'unsupported-config-home'}
     action = request.get('action')
     operation = request.get('operation', '')
-    if action not in ('prepare', 'set', 'status', 'restore', 'prepare-install', 'install') or not re.fullmatch(r'[a-f0-9]{32}', operation):
+    if action not in ('prepare', 'set', 'status', 'restore', 'prepare-install', 'install', 'uninstall') or not re.fullmatch(r'[a-f0-9]{32}', operation):
         return {'state': 'invalid'}
     store = home / '.yxi'
     private_directory(store)
@@ -139,7 +172,7 @@ def execute(request, home=None, run=subprocess.run):
             return {'state': 'unsupported-linked-config'}
         if action in ('prepare-install', 'install'):
             return install_operation(request, home, config, cwd, store, record, previous, run)
-        def snapshot():
+        def snapshot(require_installed=True):
             raw = read_file(config)
             registry = read_file(base / 'plugins' / 'installed_plugins.json')
             parsed = json.loads(raw) if raw is not None else {}
@@ -148,13 +181,14 @@ def execute(request, home=None, run=subprocess.run):
                 raise ValueError('invalid settings')
             entries = installed.get('plugins', {}).get(plugin, [])
             matches = [p for p in entries if p.get('scope') == scope and (scope == 'user' or p.get('projectPath') == str(cwd))]
-            if len(matches) != 1: raise ValueError('installation not unique')
+            if len(matches) != (1 if require_installed else 0): raise ValueError('unexpected installation records')
             digest = fingerprint(raw, registry)
             return raw, parsed, digest
         desired = request.get('enabled')
         if action == 'set' and type(desired) is not bool:
             return {'state': 'invalid'}
         identity = dict(plugin=plugin, scope=scope, directory=str(cwd), enabled=desired)
+        if action == 'uninstall': identity['kind'] = 'uninstall'
         if source is not None: identity['restores'] = request['restores']
         if previous is not None:
             old = json.loads(previous)
@@ -176,9 +210,21 @@ def execute(request, home=None, run=subprocess.run):
         backup = store / (operation + '.before')
         write_file(backup, raw if raw is not None else b'')
         result = dict(state='started', operation=operation, target=identity, existed=raw is not None, before=digest)
+        if action == 'uninstall':
+            registry = read_file(base / 'plugins/installed_plugins.json')
+            write_file(store / (operation + '.registry-before'), registry)
+            installed = json.loads(registry)['plugins'][plugin]
+            target = next(p for p in installed if p.get('scope') == scope and (scope == 'user' or p.get('projectPath') == str(cwd)))
+            result['packageHash'] = package_backup(target['installPath'], store / (operation + '.plugin-before.tar'))
+            if snapshot()[2] != digest: return {'state': 'changed'}
         write_file(record, json.dumps(result).encode())
         try:
-            if source is not None:
+            if action == 'uninstall':
+                with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+                    completed = run(['claude', 'plugin', 'uninstall', plugin, '--scope', scope, '--keep-data'], cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=out, stderr=err, timeout=30)
+                _, _, after_digest = snapshot(False)
+                result['state'] = 'uninstalled' if completed.returncode == 0 else 'unknown'
+            elif source is not None:
                 if snapshot()[2] != digest:
                     result['state'] = 'changed'
                     write_file(record, json.dumps(result).encode())
