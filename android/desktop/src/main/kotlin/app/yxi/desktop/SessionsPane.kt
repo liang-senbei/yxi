@@ -100,7 +100,8 @@ fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: Stri
     var busy by remember { mutableStateOf(false) }
     var agent by remember { mutableStateOf("claude") }
     var initialPrompt by remember { mutableStateOf(groupContext) }
-    val requestId = remember(path, agent, initialPrompt, collaborationGroup) { DesktopLaunchPlan.newRequestId() }
+    var isolatedWorktree by remember { mutableStateOf(false) }
+    val requestId = remember(path, agent, initialPrompt, collaborationGroup, isolatedWorktree) { DesktopLaunchPlan.newRequestId() }
     WorkbenchDialog(
         onDismissRequest = { if (!busy) onDismiss() },
         title = { Text("在 ${conn.host.label} 上新建会话") },
@@ -109,6 +110,11 @@ fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: Stri
                 WorkbenchTabs(listOf("Claude Code", "Codex"), if (agent == "codex") "Codex" else "Claude Code", { if (!busy) agent = if (it == "Codex") "codex" else "claude" })
                 Text("先检查运行器，再创建独立会话。目录不存在会创建；已有任务继续运行。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 OutlinedTextField(path, { path = it }, enabled = !busy, singleLine = true, label = { Text("服务器工作目录") }, placeholder = { Text("/opt/workspace/…") }, modifier = Modifier.fillMaxWidth())
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.Checkbox(isolatedWorktree, { isolatedWorktree = it }, enabled = !busy)
+                    Text("使用独立 Git worktree", style = MaterialTheme.typography.bodySmall)
+                }
+                if (isolatedWorktree) Text("上方路径作为源仓库，在仓库旁创建独立目录并从当前 HEAD 开始；不带入未提交改动，不自动合并或清理。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 OutlinedTextField(initialPrompt, { initialPrompt = it }, enabled = !busy, minLines = 2, maxLines = 5,
                     label = { Text("启动提示词（可留空）") }, placeholder = { Text("描述目标、分工及需要遵守的项目约定") }, modifier = Modifier.fillMaxWidth())
                 if (initialPrompt.isNotBlank()) Text("创建后会把这段内容直接交给运行器，可能立即开始工作。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
@@ -121,7 +127,7 @@ fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: Stri
             TextButton(enabled = path.isNotBlank() && !busy, onClick = {
                 busy = true
                 scope.launch {
-                    try { createSession(conn, DesktopLaunchPlan(path.trim(), agent, requestId, initialPrompt, collaborationGroup)).fold(onCreated) { err = it.message.orEmpty() } }
+                    try { createSession(conn, DesktopLaunchPlan(path.trim(), agent, requestId, initialPrompt, collaborationGroup, isolatedWorktree)).fold(onCreated) { err = it.message.orEmpty() } }
                     catch (e: kotlinx.coroutines.CancellationException) { throw e }
                     catch (e: Exception) { err = e.message.orEmpty() }
                     finally { busy = false }
@@ -140,6 +146,7 @@ private suspend fun createSession(conn: Conn, plan: DesktopLaunchPlan): Result<S
     if (failure !in listOf("ok", "exists")) return Result.failure(IllegalStateException(when (failure) {
         "missing-tmux" -> "这台服务器未安装 tmux"
         "group-failed" -> "加入协作组失败，请刷新分组后重试；尚未启动新任务"
+        "worktree-failed" -> "无法准备独立工作树，请确认路径是 Git 仓库、有已提交的 HEAD、父目录可写且 Git/Python3 可用。已有目录不会删除。"
         "missing-runtime" -> "未找到可执行的 ${plan.agent}，请先在该服务器安装并完成登录"
         "nodir" -> "无法创建或进入目录，请检查路径与访问权限"
         "failed" -> "tmux 未能创建会话，请刷新核对后重试"

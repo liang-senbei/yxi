@@ -4,7 +4,7 @@ import app.yxi.agent.Dirs
 import app.yxi.ssh.Shell
 import java.util.UUID
 
-data class DesktopLaunchPlan(val directory: String, val agent: String, val requestId: String, val initialPrompt: String = "", val collaborationGroup: String = "") {
+data class DesktopLaunchPlan(val directory: String, val agent: String, val requestId: String, val initialPrompt: String = "", val collaborationGroup: String = "", val isolatedWorktree: Boolean = false) {
     init {
         require(agent in listOf("claude", "codex")) { "不支持的运行器" }
         require(directory.startsWith('/') && directory.none { it < ' ' || it == '\u007f' }) { "请输入服务器上的绝对路径，不含控制字符" }
@@ -17,6 +17,26 @@ data class DesktopLaunchPlan(val directory: String, val agent: String, val reque
     }
     fun command(): String {
         val tag = Dirs.TAG
+        val prepareDirectory = if (!isolatedWorktree) "mkdir -p -- \"${'$'}d\" 2>/dev/null || { echo '$tag:nodir'; exit 0; }" else {
+            val script = """
+import pathlib, subprocess, sys
+source, request = sys.argv[1:]
+def git(path, *args):
+    return subprocess.check_output(['git', '-C', str(path), *args], text=True).strip()
+root = pathlib.Path(git(source, 'rev-parse', '--show-toplevel')).resolve()
+target = root.parent / (root.name + '-yxi-' + request)
+if target.is_symlink(): raise ValueError('独立工作目录不能是符号链接')
+if target.exists():
+    if not (target / '.git').is_file(): raise ValueError('目标目录已存在且不是独立工作树')
+    original = pathlib.Path(git(root, 'rev-parse', '--path-format=absolute', '--git-common-dir')).resolve()
+    actual = pathlib.Path(git(target, 'rev-parse', '--path-format=absolute', '--git-common-dir')).resolve()
+    if original != actual: raise ValueError('已有工作树属于其他仓库')
+else:
+    subprocess.run(['git', '-C', str(root), 'worktree', 'add', '--detach', str(target), 'HEAD'], check=True, stdout=sys.stderr)
+print(target)
+""".trimIndent()
+            "d=${'$'}(python3 -c ${Shell.q(script)} ${Shell.q(directory)} ${Shell.q(requestId)}) || { echo '$tag:worktree-failed'; exit 0; }"
+        }
         val joinGroup = if (collaborationGroup.isBlank()) "" else {
             val script = """
 import json, os, pathlib, sys, tempfile
@@ -45,7 +65,7 @@ d=${Shell.q(directory)}; n=${Shell.q(sessionName)}; agent=${Shell.q(agent)}; pro
 command -v tmux >/dev/null 2>&1 || { echo '$tag:missing-tmux'; exit 0; }
 bin=${'$'}(command -v "${'$'}agent")
 [ -f "${'$'}bin" ] && [ -x "${'$'}bin" ] || { echo '$tag:missing-runtime'; exit 0; }
-mkdir -p -- "${'$'}d" 2>/dev/null || { echo '$tag:nodir'; exit 0; }
+$prepareDirectory
 want=${'$'}(cd -- "${'$'}d" 2>/dev/null && pwd -P) || { echo '$tag:nodir'; exit 0; }
 if tmux has-session -t "=${'$'}n" 2>/dev/null; then
   got=${'$'}(tmux display-message -p -t "=${'$'}n:" '#{pane_current_path}' 2>/dev/null)
