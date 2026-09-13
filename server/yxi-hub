@@ -85,11 +85,39 @@ print("\n".join(g for g,m in d.get("groups",{}).items() if sys.argv[2] in m))' "
 #    实测：背靠背发 3 行 → 留在框里；中间 `sleep 0.4` → 正常提交。
 #    ⚠️ 单行消息不会触发（不够长，不当粘贴），所以这个坑只有 agent 之间
 #    发长消息时才露头 —— 手测「你好」是测不出来的。
+record_event() {
+  python3 - "$HOME/.yxi/hub-events.jsonl" "$@" <<'PY'
+import datetime, fcntl, json, os, pathlib, sys
+path, message, sender, recipient, stage, body = sys.argv[1:]
+p = pathlib.Path(path)
+p.parent.mkdir(parents=True, exist_ok=True)
+event = {'version': 1, 'id': message, 'sender': sender, 'recipient': recipient,
+         'stage': stage, 'text': body, 'time': datetime.datetime.now(datetime.timezone.utc).isoformat()}
+fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+with os.fdopen(fd, 'a', encoding='utf-8') as f:
+    fcntl.flock(f, fcntl.LOCK_EX)
+    f.write(json.dumps(event, ensure_ascii=False) + '\n')
+    f.flush(); os.fsync(f.fileno())
+PY
+}
+
 push() {
-  local target="$1" text="$2"
-  tmux send-keys -t "$target" -l "$text"
+  local target="$1" text="$2" sender="${3:-?}" message
+  message="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+  record_event "$message" "$sender" "$target" attempting "$text" || return 1
+  if ! tmux send-keys -t "$target" -l "[协作消息 $message] $text"; then
+    record_event "$message" "$sender" "$target" write-unknown "" || true
+    return 1
+  fi
   sleep 0.4
-  tmux send-keys -t "$target" Enter
+  if ! tmux send-keys -t "$target" Enter; then
+    record_event "$message" "$sender" "$target" submit-unknown "" || true
+    return 1
+  fi
+  record_event "$message" "$sender" "$target" terminal-written "" || {
+    echo "消息 $message 已写入终端，但完成记录保存失败；请核对，不要自动重发" >&2
+    return 1
+  }
   printf '%s\t%s -> %s\t%s\n' "$(date -Iseconds)" "${3:-?}" "$target" "$text" >> "$LOG"
 }
 

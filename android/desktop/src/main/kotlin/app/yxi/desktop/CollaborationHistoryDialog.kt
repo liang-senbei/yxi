@@ -20,12 +20,13 @@ internal fun CollaborationHistoryDialog(conn: Conn, close: () -> Unit) {
     var error by remember(conn) { mutableStateOf("") }
     var query by remember(conn) { mutableStateOf("") }
     var revision by remember(conn) { mutableStateOf(0) }
-    LaunchedEffect(conn, revision) {
-        busy = true; error = ""
+    var structured by remember(conn) { mutableStateOf(false) }
+    LaunchedEffect(conn, revision, structured) {
+        busy = true; error = ""; raw = ""; truncated = false
         try {
             val script = """
 import pathlib, json
-p = pathlib.Path.home() / '.yxi' / 'hub.log'
+p = pathlib.Path.home() / '.yxi' / '${if (structured) "hub-events.jsonl" else "hub.log"}'
 text, clipped = '', False
 if p.exists():
     with p.open('rb') as f:
@@ -61,7 +62,12 @@ print('__YXI_HUB_LOG__:' + json.dumps({'text': text, 'clipped': clipped}, ensure
     }
     WorkbenchDialog(onDismissRequest = close, title = { Text("协作记录 · ${conn.host.label}") }, text = {
         Column(Modifier.widthIn(max = 700.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("服务器 hub.log 原始记录；终端投递不代表 Agent 已处理。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+            Row {
+                FilterChip(!structured, { structured = false }, label = { Text("传统消息日志") })
+                Spacer(Modifier.width(8.dp))
+                FilterChip(structured, { structured = true }, label = { Text("带 ID 的投递事件") })
+            }
+            Text(if (structured) "需服务器安装新版 yxi-hub。attempting 为开始投递，terminal-written 为终端写入，unknown 为结果待确认；均不是 Agent 处理回执。" else "服务器 hub.log 原始记录；终端投递不代表 Agent 已处理。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
             OutlinedTextField(query, { query = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("搜索成员、组名或消息文字") })
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
