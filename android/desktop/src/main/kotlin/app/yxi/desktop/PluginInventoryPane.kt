@@ -65,7 +65,7 @@ internal fun PluginInventoryPane(state: AppState, conn: Conn) {
             text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("主机：${conn.host.label}")
                 Text(request.getString("plugin"))
-                Text("范围：${request.getString("scope")}")
+                Text("范围：${when (request.getString("scope")) { "user" -> "用户级"; "project" -> "项目级"; "local" -> "本地项目级"; else -> "未知" }}")
                 Text(request.getString("path"), style = MaterialTheme.typography.bodySmall)
                 Text("变更前保存服务器恢复副本。当前运行中的会话不会被重启。", style = MaterialTheme.typography.bodySmall)
             } }, confirmButton = { TextButton({

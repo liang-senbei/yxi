@@ -338,3 +338,12 @@
 - 新增测试验证重启保留ID、A/B隔离、未知阻止新发送、查询完成解除阻止、损坏恢复以及再重启仍保留待核对状态。首次编译缺少Swing协程扩展导入，修正后测试/打包通过。
 - 本轮是界面与持久化接线，启停弹窗到隔离SSH的完整原生点击流程、恢复按钮、安装升级卸载和Windows专项仍待验证，不能视为W03全功能完成。未修改生产插件。
 - 最终验证：133项中127通过、6环境测试跳过，Linux打包成功；日志hk13 /tmp/yxi-plugin-toggle-verified.log。
+
+## 第三十三轮：插件停用完整原生流程（2026-09-13）
+
+- 新增PluginToggleFixtureTest和独立Xvfb脚本，经现有隔离SSH fixture打开真实PluginInventoryPane，使用测试HOME内插件记录与真实Claude CLI；未连接生产Agent或修改生产插件。
+- 实际点击停用打开目标确认，Escape取消后断言服务器配置逐字不变且客户端无操作记录；再次确认后等待回执落盘，断言configured、目标enabledPlugins=false、其他permissions字段保留。
+- 截图确认完成后安装列表自动刷新，运行器与用户默认均显示停用；确认弹窗改用中文作用范围。已查看本机tmp/workbench-evidence/plugin-toggle-disabled.png及确认界面；最终远端fixture.aGEx18，日志/tmp/yxi-plugin-toggle-ui-final/test.log。
+- 首轮弹窗关闭后点击太快，补焦点等待；第二轮测试错误地把Compose内部弹窗当作AWT独立窗口，改按实际绘制坐标点击后完整通过。这两次是测试定位问题，没有重复生产变更。
+- 本轮验证用户级取消/停用闭环；启用、project/local范围已在前轮CLI测试，尚未完成它们的原生点击、多主机切换、断线后查询/重启恢复界面及Windows专项。恢复、安装、升级、卸载和完整W03仍需推进。
+- 最终全量134项中127通过、7环境测试跳过，Linux打包通过（/tmp/yxi-plugin-toggle-e2e-package.log）。补截图渲染等待后原生测试再次通过，fixture.MAMUmY与/tmp/yxi-plugin-toggle-ui-screens/test.log；已核对最终中文确认弹窗截图。
