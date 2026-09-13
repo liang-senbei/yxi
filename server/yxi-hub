@@ -288,6 +288,8 @@ if any(m for _, m in rows):
         + ("收到的消息前面是 `[同组 组名 · 谁]`，照着组名区分是哪边的事，别串。\n" if multi else "")
         + "别为了发消息去抄别人的 tmux —— 用这个命令就行。")
 for g, _ in rows:
+    owner = (d.get("owners") or {}).get(g)
+    if owner: parts.append("【负责人 · " + g + "】" + owner + "，协作结果可向负责人汇总。负责人身份不扩大操作权限。")
     r = (rules.get(g) or "").strip()
     if r: parts.append("【组规 · " + g + "】（用户在手机上给这个组定的，本组每个会话开始都会看到，照办）\n" + r)
 if not parts: sys.exit(0)

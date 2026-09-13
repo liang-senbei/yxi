@@ -20,6 +20,7 @@ internal fun GroupEditorDialog(conn: Conn, original: String?, table: Groups.Tabl
     var name by remember { mutableStateOf(original.orEmpty()) }
     var rule by remember { mutableStateOf(table.rules[original].orEmpty()) }
     var members by remember { mutableStateOf(table.groups[original].orEmpty().toSet()) }
+    var owner by remember { mutableStateOf(table.owners[original].orEmpty()) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
@@ -32,10 +33,11 @@ internal fun GroupEditorDialog(conn: Conn, original: String?, table: Groups.Tabl
             Text(if (removing) "将移除此分组及组规，成员会话、文件和已有对话继续保留。已在运行的 Agent 可能仍记得旧组规，此操作不会停止它们。" else "选择成员；保存不会自动发消息，组规由服务器现有协作机制读取。", style = MaterialTheme.typography.bodySmall)
             (if (removing) members.sorted() else candidates).forEach { candidate ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(candidate in members, { checked -> members = if (checked) members + candidate else members - candidate }, enabled = !busy && !removing)
+                    Checkbox(candidate in members, { checked -> members = if (checked) members + candidate else members - candidate; if (!checked && owner == candidate) owner = "" }, enabled = !busy && !removing)
                     Column {
                         Text(candidate, style = MaterialTheme.typography.bodyMedium)
                         Text(conn.sessions.firstOrNull { it.name == candidate }?.cwd ?: "当前会话列表未找到", style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
+                        if (candidate in members) TextButton({ owner = if (owner == candidate) "" else candidate }, enabled = !busy && !removing) { Text(if (owner == candidate) "负责人 · 点击取消" else "设为负责人") }
                     }
                 }
             }
@@ -49,6 +51,7 @@ internal fun GroupEditorDialog(conn: Conn, original: String?, table: Groups.Tabl
                 require(group.isNotEmpty() && group.none { it < ' ' }) { "请填写有效组名" }
                 val request = JSONObject().put("name", group).put("new", original == null).put("remove", removing)
                     .put("members", JSONArray(members.sorted())).put("rule", rule.trim())
+                    .put("owner", owner.takeIf { it in members }.orEmpty()).put("previousOwner", table.owners[original].orEmpty())
                     .put("previousMembers", JSONArray(table.groups[original].orEmpty())).put("previousRule", table.rules[original].orEmpty())
                 val script = """
 import json, os, pathlib, sys, tempfile
@@ -57,18 +60,24 @@ r = json.loads(sys.argv[1])
 root = json.loads(p.read_text()) if p.exists() else {'version': 1, 'groups': {}, 'rules': {}}
 groups = root.setdefault('groups', {})
 rules = root.setdefault('rules', {})
+owners = root.setdefault('owners', {})
 n = r['name']
 if r['new']:
     if n in groups: raise ValueError('组名已存在，请刷新后编辑')
-elif groups.get(n) != r['previousMembers'] or rules.get(n, '') != r['previousRule']:
+elif groups.get(n) != r['previousMembers'] or rules.get(n, '') != r['previousRule'] or owners.get(n, '') != r['previousOwner']:
     raise ValueError('此分组已被其他客户端修改，请刷新后再编辑')
 if r['remove']:
     groups.pop(n, None)
     rules.pop(n, None)
+    owners.pop(n, None)
 else:
     groups[n] = r['members']
     if r['rule']: rules[n] = r['rule']
     else: rules.pop(n, None)
+    if r['owner']:
+        if r['owner'] not in r['members']: raise ValueError('负责人必须是组成员')
+        owners[n] = r['owner']
+    else: owners.pop(n, None)
 p.parent.mkdir(parents=True, exist_ok=True)
 fd, temp = tempfile.mkstemp(prefix='groups-', suffix='.tmp', dir=p.parent)
 try:

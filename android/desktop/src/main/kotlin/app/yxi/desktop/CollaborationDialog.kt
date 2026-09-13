@@ -29,7 +29,7 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
     var creatingMember by remember(conn) { mutableStateOf(false) }
     if (creatingMember && table != null) {
         val context = "你将加入协作组「$selected」。\n队友：${table!!.groups[selected].orEmpty().joinToString()}\n组规：\n${table!!.rules[selected].orEmpty()}\n\n" +
-            "使用 yxi-hub who 查询当前身份与队友，yxi-hub say <成员> <内容> 联系同组成员，reply <消息ID> <内容> 回复。先读取当前组规，遵守文件归属；不要修改其他成员负责的文件。这里的名单是创建时快照，以服务器实时分组为准。"
+            "负责人：${table!!.owners[selected].orEmpty().ifBlank { "未指定" }}。使用 yxi-hub who 查询当前身份与队友，yxi-hub say <成员> <内容> 联系同组成员，reply <消息ID> <内容> 回复。先读取当前组规，遵守文件归属；不要修改其他成员负责的文件。这里的名单是创建时快照，以服务器实时分组为准。"
         NewSessionDialog(conn, { creatingMember = false }, collaborationGroup = selected, groupContext = context) { session ->
             state.select(conn, session); creatingMember = false; close()
         }
@@ -82,6 +82,7 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
                 if (selected in data.groups) {
                     HorizontalDivider()
                     Text(selected, style = MaterialTheme.typography.titleMedium)
+                    Text("负责人 · ${data.owners[selected].orEmpty().ifBlank { "未指定" }}", style = MaterialTheme.typography.labelMedium, color = Tokens.current.textMuted)
                     WorkbenchTabs(listOf("成员", "指派", "组规", "投递控制"), section, { section = it })
                     if (section == "成员") TextButton({ creatingMember = true }, enabled = !busy && error.isBlank()) { Text("在组内新建 Agent") }
                     if (section == "投递控制") key(conn, selected) { GroupDeliveryControls(conn, selected) }
@@ -116,6 +117,7 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
                         OutlinedCard(Modifier.fillMaxWidth()) {
                             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text(session?.let { state.navigation.title(taskNavigationKey(conn.host, it)) } ?: name, style = MaterialTheme.typography.titleSmall)
+                                if (data.owners[selected] == name) Text("负责人", style = MaterialTheme.typography.labelSmall, color = Tokens.current.accent)
                                 Text(if (session == null) "当前会话列表未找到 · 可能离线或已结束" else "${session.state.label} · ${if (session.isCodex) "Codex" else "Claude Code"}", style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
                                 if (session != null) {
                                     Text(session.cwd, style = MaterialTheme.typography.bodySmall)

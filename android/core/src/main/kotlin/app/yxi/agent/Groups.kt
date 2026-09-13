@@ -27,6 +27,7 @@ object Groups {
          * 注入给本组每个会话 —— 用户要的「给分组注入指令」，不用建文件、不用改 CLAUDE.md，手机上编辑即生效。
          */
         val rules: Map<String, String> = emptyMap(),
+        val owners: Map<String, String> = emptyMap(),
     ) {
 
         /** 这个会话在哪几个组里。 */
@@ -42,9 +43,9 @@ object Groups {
             copy(groups = groups + (group to ((groups[group] ?: emptyList()) + session).distinct()))
 
         fun withoutMember(group: String, session: String): Table =
-            copy(groups = groups + (group to (groups[group] ?: emptyList()).filter { it != session }))
+            copy(groups = groups + (group to (groups[group] ?: emptyList()).filter { it != session }), owners = if (owners[group] == session) owners - group else owners)
 
-        fun withoutGroup(group: String): Table = copy(groups = groups - group, rules = rules - group)
+        fun withoutGroup(group: String): Table = copy(groups = groups - group, rules = rules - group, owners = owners - group)
 
         /** 建一个空组。已经有了就原样返回。 */
         fun withGroup(group: String): Table =
@@ -77,7 +78,11 @@ object Groups {
             }
             val r = LinkedHashMap<String, String>()
             root.optJSONObject("rules")?.let { ro -> ro.keys().forEach { k -> ro.optString(k).takeIf { it.isNotBlank() }?.let { r[k] = it } } }
-            Table(m, r)
+            val owners = LinkedHashMap<String, String>()
+            root.optJSONObject("owners")?.let { value -> value.keys().forEach { group ->
+                value.optString(group).takeIf { it.isNotBlank() }?.let { owners[group] = it }
+            } }
+            Table(m, r, owners)
         }.getOrDefault(Table())
     }
 
@@ -88,7 +93,7 @@ object Groups {
         ).put(
             "rules",
             JSONObject().also { o -> t.rules.forEach { (k, v) -> o.put(k, v) } },
-        ).toString()
+        ).put("owners", JSONObject(t.owners)).toString()
 
     /**
      * 写回服务器。
