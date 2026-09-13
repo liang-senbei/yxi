@@ -10,8 +10,8 @@ internal interface CredentialProtector {
 }
 
 /** No LOCAL_MACHINE flag: DPAPI uses the signed-in Windows user's protection. */
-internal class WindowsCredentialProtector : CredentialProtector {
-    private val entropy = "Yxi/account-credentials/v1".toByteArray()
+internal class WindowsCredentialProtector(purpose: String = "Yxi/account-credentials/v1") : CredentialProtector {
+    private val entropy = purpose.toByteArray()
     override fun protect(plain: ByteArray): ByteArray = native {
         com.sun.jna.platform.win32.Crypt32Util.cryptProtectData(plain, entropy, com.sun.jna.platform.win32.WinCrypt.CRYPTPROTECT_UI_FORBIDDEN, "Yxi credentials", null)
     }
@@ -22,7 +22,7 @@ internal class WindowsCredentialProtector : CredentialProtector {
         catch (e: Exception) { throw IllegalStateException("Windows凭据保护失败，请使用原Windows账号或重新登录", e) }
         catch (e: LinkageError) { throw IllegalStateException("Windows凭据保护组件无法加载，未回退到明文保存", e) }
     companion object {
-        fun forPlatform(): CredentialProtector? = if (System.getProperty("os.name").startsWith("Windows")) WindowsCredentialProtector() else null
+        fun forPlatform(purpose: String = "Yxi/account-credentials/v1"): CredentialProtector? = if (System.getProperty("os.name").startsWith("Windows")) WindowsCredentialProtector(purpose) else null
     }
 }
 

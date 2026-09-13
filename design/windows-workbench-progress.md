@@ -487,3 +487,12 @@
 - 缓存修正后的默认渲染复核实际走完界面步骤并生成history-closed，但测试进程未在时限内结束；本次不计为通过，也不将此测试环境结果作为正式应用故障结论。终止后仅按精确fixture环境校验清理对应worker。日志/tmp/yxi-history-default-executed/test.log，fixture.zbsxa3。
 - 下一项优先补齐PRD W01-A的服务器秘密系统保护：当前Store仍通过DurableFile保存hosts.json，密码字段尚未接入现有DPAPI能力；本轮仅核对代码，不访问用户密码。
 - 缓存配置修改后普通桌面测试137项中129通过、8环境测试跳过；日志/tmp/yxi-fixture-input-tests.log。未把普通测试结果扩展为默认渲染完整退出验收。
+
+## 第五十轮：Windows主机凭据保护（2026-09-13）
+
+- 新增HostConfigFile并接入Store：Windows完整服务器列表保存为hosts.json.protected，活动备份也为密文；使用独立Yxi/host-credentials/v1 DPAPI用途，与账号令牌用途隔离。非Windows继续原JSON存储，但拒绝把已存在的受保护记录静默读成空列表或覆盖。
+- 首次迁移先保护并回读校验当前列表，再为旧main/bak/damaged保存加密迁移副本，核对原内容未变化后才清成[]。不同有效主记录、保护失败、非UTF-8损坏文件均保留并拒绝覆盖；不把损坏保护文件回退为明文。
+- 保留服务器稳定ID与连接字段，复用原格式校验和受保护备份恢复；迁移副本用于保留旧历史内容，不自动将旧密码恢复成当前值。账号令牌原DPAPI用途默认值不变。
+- 两项新增测试覆盖主/旧备份/损坏副本迁移、受保护备份恢复、无保护器拒绝覆盖、保护失败和明文冲突。全量139项中131通过、8环境跳过，Linux打包通过（/tmp/yxi-host-protection-build.log）。
+- Windows本机通过dev/HostProtectionNativeCheck.java调用本轮编译类，实际DPAPI迁移后main/bak清空，独立Java进程成功重读，错误用途被拒绝，随后受保护保存成功。仅虚构服务器密码，不读取用户真实记录；证据目录tmp/host-native-20260913含测试profile/class及jar SHA256。
+- 本轮是Windows系统加密组件及数据层验证，不等同最新完整exe升级迁移验收。历史漫游目录的额外副本/冲突、真实多主机重启、旧版本降级、外部私钥文件管理与完整W01-A仍待核对；未替换用户安装版。

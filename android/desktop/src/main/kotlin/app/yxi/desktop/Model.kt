@@ -58,7 +58,7 @@ object Store {
         val win = System.getProperty("os.name").startsWith("Windows")
         // ⚠️⚠️ **不能放 %APPDATA%**（审查 P2）：那是**漫游**目录 —— 域账户登录别的机器、
         //    或者 OneDrive 的「已知文件夹」备份开着的时候，它会被**同步到别处去**。
-        //    而 hosts.json 里存着服务器的**明文密码**，等于把密码抄送到公司文件服务器 / 云盘。
+        //    旧版 hosts.json 含明文密码；Windows 当前通过 HostConfigFile 迁移为用户级 DPAPI 保护。
         //    %LOCALAPPDATA% 不漫游；单实例锁（Shell.kt）本来用的就是它，顺带统一到一个目录。
         val local = System.getenv("LOCALAPPDATA")?.takeIf { win }?.let { File(it, "Yxi") }
         val base = local ?: File(System.getProperty("user.home"), ".config/yxi")
@@ -71,7 +71,7 @@ object Store {
     /**
      * 把老版本留在漫游目录里的几份搬到本地目录，**搬完删掉源文件**。
      * ⚠️ 删源不是洁癖：留着的那份 hosts.json 里有明文密码，还在继续跟着漫游同步 —— 不删等于没修。
-     * ⚠️ 目标已存在就不覆盖（新目录里的是更近的），只删源。
+     * 目标已存在时仅在内容一致且校验通过后清理源；不同内容保留双方。
      */
     private fun migrateRoaming(from: File, to: File) = runCatching {
         if (!from.isDirectory || from.canonicalFile == to.canonicalFile) return@runCatching
@@ -89,7 +89,7 @@ object Store {
         runCatching { from.delete() }   // 空了才删得掉，没空就留着，无所谓
     }.onFailure { warning = "旧配置迁移未完成：${it.message}" }
     private val hostsFile = File(dir, "hosts.json")
-    private val hostData = DurableFile(hostsFile) { text ->
+    private val hostData = HostConfigFile(hostsFile, WindowsCredentialProtector.forPlatform("Yxi/host-credentials/v1")) { text ->
         val a = JSONArray(text)
         val ids = mutableSetOf<String>()
         for (i in 0 until a.length()) {
