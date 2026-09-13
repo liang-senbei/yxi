@@ -13,14 +13,23 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import org.json.JSONObject
+import java.util.UUID
 
 @Composable
-internal fun PluginInventoryPane(conn: Conn) {
+internal fun PluginInventoryPane(state: AppState, conn: Conn) {
     val t = Tokens.current
     var revision by remember(conn) { mutableStateOf(0) }
     var snapshot by remember(conn) { mutableStateOf<PluginInventory?>(null) }
     var error by remember(conn) { mutableStateOf("") }
     var busy by remember(conn) { mutableStateOf(true) }
+    val scope = rememberCoroutineScope()
+    val operations = state.pluginOperations
+    val hostKey = projectKey(conn.host, "/")
+    var prepared by remember(conn) { mutableStateOf<JSONObject?>(null) }
+    var preparing by remember(conn) { mutableStateOf(false) }
+    var actionError by remember(conn) { mutableStateOf("") }
     LaunchedEffect(conn, revision) {
         busy = true; snapshot = null; error = ""
         try { snapshot = PluginInventory.parse(conn.ssh.exec(PluginInventory.command())) }
@@ -28,11 +37,45 @@ internal fun PluginInventoryPane(conn: Conn) {
         catch (e: Exception) { error = e.message?.take(180) ?: "读取失败" }
         finally { busy = false }
     }
-    PluginInventoryContent(conn.host.label, snapshot, error, busy) { revision++ }
+    val last = operations.latest(hostKey)
+    LaunchedEffect(last?.status) { if (last?.status == "configured") revision++ }
+    Column(Modifier.fillMaxSize()) {
+        if (last != null) Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(when (last.status) { "configured" -> "插件设置已更新 · 请在新会话验证加载"; "rejected" -> "变更未执行，请刷新后重试"; "sending" -> "插件操作中…"; else -> "插件操作待确认，请查询原操作" }, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+            TextButton({ operations.query(conn, last) }, enabled = last.id !in operations.running) { Text("查询结果") }
+        }
+        if (operations.error.isNotBlank() || actionError.isNotBlank()) Text(operations.error.ifBlank { actionError }, Modifier.padding(horizontal = 24.dp), color = t.danger)
+        Box(Modifier.weight(1f)) {
+            PluginInventoryContent(conn.host.label, snapshot, error, busy, { revision++ },
+                toggle = { plugin, enabled -> scope.launch {
+                    preparing = true; actionError = ""
+                    try {
+                        val request = JSONObject().put("action", "prepare").put("operation", UUID.randomUUID().toString().replace("-", "")).put("plugin", plugin.id).put("scope", plugin.scope).put("directory", plugin.project).put("enabled", enabled)
+                        val result = PluginOperationPlan.result(conn.ssh.exec(PluginOperationPlan.command(request)))
+                        check(result.getString("state") == "prepared") { "无法准备此范围的变更，请刷新安装记录后重试" }
+                        prepared = request.put("action", "set").put("fingerprint", result.getString("fingerprint")).put("path", result.getString("path"))
+                    } catch (e: CancellationException) { throw e }
+                    catch (e: Exception) { actionError = e.message.orEmpty() }
+                    finally { preparing = false }
+                } }, toggleEnabled = !preparing && !operations.unresolved(hostKey) && conn.status == Conn.Status.Connected && operations.error.isBlank())
+        }
+    }
+    prepared?.let { request ->
+        WorkbenchDialog(onDismissRequest = { prepared = null }, title = { Text(if (request.getBoolean("enabled")) "启用插件" else "停用插件") },
+            text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("主机：${conn.host.label}")
+                Text(request.getString("plugin"))
+                Text("范围：${request.getString("scope")}")
+                Text(request.getString("path"), style = MaterialTheme.typography.bodySmall)
+                Text("变更前保存服务器恢复副本。当前运行中的会话不会被重启。", style = MaterialTheme.typography.bodySmall)
+            } }, confirmButton = { TextButton({
+                runCatching { check(state.conn === conn); operations.submit(conn, request); prepared = null }.onFailure { actionError = it.message.orEmpty(); prepared = null }
+            }) { Text("确认变更") } }, dismissButton = { TextButton({ prepared = null }) { Text("取消") } })
+    }
 }
 
 @Composable
-internal fun PluginInventoryContent(host: String, snapshot: PluginInventory?, error: String, busy: Boolean, refresh: () -> Unit) {
+internal fun PluginInventoryContent(host: String, snapshot: PluginInventory?, error: String, busy: Boolean, refresh: () -> Unit, toggle: ((InstalledPlugin, Boolean) -> Unit)? = null, toggleEnabled: Boolean = false) {
     val t = Tokens.current
     var query by remember(host) { mutableStateOf("") }
     Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -73,6 +116,10 @@ internal fun PluginInventoryContent(host: String, snapshot: PluginInventory?, er
                             else -> "运行器状态未确认"
                         }, color = if (plugin.runnerState == "listed") t.textSecondary else t.warning, style = MaterialTheme.typography.bodySmall)
                         Text("用户默认：${when (plugin.userEnabled) { true -> "启用"; false -> "停用"; null -> "未明确设置" }}", style = MaterialTheme.typography.bodySmall)
+                        if (toggle != null) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton({ toggle(plugin, true) }, enabled = toggleEnabled && plugin.scope in setOf("user", "project", "local")) { Text("启用") }
+                            TextButton({ toggle(plugin, false) }, enabled = toggleEnabled && plugin.scope in setOf("user", "project", "local")) { Text("停用") }
+                        }
                         SelectionContainer { Column {
                             if (plugin.project.isNotBlank()) Text("项目：${plugin.project}", style = MaterialTheme.typography.bodySmall)
                             Text(plugin.path.ifBlank { "未记录安装位置" }, style = MaterialTheme.typography.bodySmall, color = t.textMuted)

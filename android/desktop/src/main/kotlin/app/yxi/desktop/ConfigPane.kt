@@ -118,7 +118,7 @@ fun ConfigPane(state: AppState) {
         VerticalDivider(color = t.border)
         Box(Modifier.fillMaxSize()) {
             val p = picked
-            if (showPlugins) PluginInventoryPane(conn)
+            if (showPlugins) PluginInventoryPane(state, conn)
             else if (p == null) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("左边选一项", style = MaterialTheme.typography.bodyMedium, color = t.textMuted)
             } else ItemDetail(conn, p)

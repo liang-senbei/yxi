@@ -28,7 +28,7 @@ class PluginUiFixtureTest {
         for (width in listOf(820, 460)) {
             application(exitProcessOnExit = false) {
                 Window(onCloseRequest = ::exitApplication, title = "Yxi plugin fixture", state = rememberWindowState(width = width.dp, height = 820.dp)) {
-                    YxiTheme { PluginInventoryContent("香港 · hk13 测试主机", data, "", false) { refreshes.incrementAndGet() } }
+                    YxiTheme { PluginInventoryContent("香港 · hk13 测试主机", data, "", false, refresh = { refreshes.incrementAndGet() }) }
                     LaunchedEffect(Unit) {
                         delay(2500)
                         val origin = window.contentPane.locationOnScreen

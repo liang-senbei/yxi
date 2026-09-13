@@ -29,6 +29,7 @@ class AppState {
     internal val projectServices = ProjectServices(java.io.File(Store.dir, "project-services.json"))
     internal val serviceControllers = mutableMapOf<String, PreviewServiceController>()
     internal val serviceEditors = mutableMapOf<String, ServiceEditor>()
+    internal val pluginOperations = PluginOperations(java.io.File(Store.dir, "plugin-operations.json"))
     internal val instructions = InstructionQueue(java.io.File(Store.dir, "instructions.json"))
     internal val support = SupportWorkspace(java.io.File(Store.dir, "support-drafts.json"))
     val documents = mutableStateListOf<FileDocument>()
