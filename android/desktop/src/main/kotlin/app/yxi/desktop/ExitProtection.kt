@@ -21,8 +21,8 @@ internal fun pendingWorkOf(documents: List<FileDocument>, drafts: List<String>, 
     documents.count { it.busy } + browsers.count { it.preparing || it.stylePending != null || it.capturing },
 )
 fun AppState.pendingWork() = pendingWorkOf(documents, chatDrafts.values.map { it.value.text }, browsers.values).let {
-    it.copy(operations = it.operations + instructions.entries.count { item -> item.status == InstructionStatus.Delivering } + support.running.size + pluginOperations.running.size + serviceControllers.values.count { service -> service.mutating },
-        drafts = it.drafts + support.editors.values.count { edit -> edit.dirty } + serviceEditors.values.count { edit -> edit.dirty })
+    it.copy(operations = it.operations + instructions.entries.count { item -> item.status == InstructionStatus.Delivering } + support.running.size + pluginOperations.running.size + serviceControllers.values.count { service -> service.mutating } + if (VoiceActivity.busy) 1 else 0,
+        drafts = it.drafts + support.editors.values.count { edit -> edit.dirty } + serviceEditors.values.count { edit -> edit.dirty } + if (VoiceActivity.hasDraft) 1 else 0)
 }
 
 @Composable

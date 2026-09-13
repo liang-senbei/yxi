@@ -36,6 +36,7 @@ import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -126,6 +127,12 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
     var draft by draftHolder
     var historyOpen by remember(taskKey) { mutableStateOf(false) }
     var searchOpen by remember(taskKey) { mutableStateOf(false) }
+    var voiceOpen by remember(taskKey) { mutableStateOf(false) }
+    if (voiceOpen) VoiceInputDialog(conn, { voiceOpen = false }) { text ->
+        val next = if (draft.text.isBlank()) text else draft.text.trimEnd() + "\n" + text
+        draft = TextFieldValue(next, selection = TextRange(next.length))
+        voiceOpen = false
+    }
     if (historyOpen) PromptHistoryDialog(instructions, taskNavigationKey(conn.host, session), draft.text.isNotBlank(), { historyOpen = false }) { text, replace ->
         val next = if (replace || draft.text.isBlank()) text else draft.text.trimEnd() + "\n\n" + text
         draft = TextFieldValue(next, selection = TextRange(next.length))
@@ -428,6 +435,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
             onSend = ::send,
             onHistory = { historyOpen = true },
             onSearch = { searchOpen = true },
+            onVoice = { voiceOpen = true },
         )
     }
 }
@@ -446,6 +454,7 @@ private fun Composer(
     onAttach: () -> Unit, onPaste: () -> Unit, onApprove: () -> Unit, onReject: () -> Unit, onSend: () -> Unit,
     onHistory: () -> Unit,
     onSearch: () -> Unit,
+    onVoice: () -> Unit,
 ) {
     val t = Tokens.current
     var focused by remember { mutableStateOf(false) }
@@ -493,6 +502,7 @@ private fun Composer(
             IconButton(onAttach, Modifier.size(30.dp)) { Icon(Icons.Outlined.AttachFile, "添加附件（截图可直接 Ctrl+V）", Modifier.size(16.dp), tint = t.textSecondary) }
             IconButton(onHistory, Modifier.size(30.dp)) { Icon(Icons.Outlined.History, "输入历史", Modifier.size(16.dp), tint = t.textSecondary) }
             IconButton(onSearch, Modifier.size(30.dp)) { Icon(Icons.Outlined.Search, "搜索当前对话", Modifier.size(16.dp), tint = t.textSecondary) }
+            IconButton(onVoice, Modifier.size(30.dp)) { Icon(Icons.Outlined.Mic, "语音输入", Modifier.size(16.dp), tint = t.textSecondary) }
             if (!canAct) Text("重新连接后可操作", fontSize = 11.sp, color = t.textMuted)
             Spacer(Modifier.weight(1f))
             // 圆形发送（Codex 的 ↑）：能发时点亮（Copper 主操作，手机端同款）；附件在传时灰着不亮
