@@ -108,7 +108,7 @@ fun App(state: AppState) {
                                                 0 -> ChatPane(conn, sess, state.instructions, savedDraft = state.chatDrafts.getOrPut(taskKey) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue()) }, displayName = state.navigation.title(taskKey))
                                                 1 -> TermPane(conn, sess)
                                                 2 -> FilesPane(conn, sess, ::openFile)
-                                                else -> GitChangesPane(conn, sess.cwd, ::openFile)
+                                                else -> GitChangesPane(conn, sess.cwd, ::openFile) { quote -> state.appendDocumentQuote(conn.host, sess, quote); state.tab = 0 }
                                             } }
                                         }
                                         if (panel) {

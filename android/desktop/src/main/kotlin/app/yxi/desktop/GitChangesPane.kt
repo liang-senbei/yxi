@@ -16,13 +16,15 @@ import kotlinx.coroutines.CancellationException
 import org.json.JSONObject
 
 @Composable
-internal fun GitChangesPane(conn: Conn, directory: String, openFile: (String) -> Unit) {
+internal fun GitChangesPane(conn: Conn, directory: String, openFile: (String) -> Unit, onQuote: (String) -> Unit) {
     var snapshot by remember(conn, directory) { mutableStateOf<JSONObject?>(null) }
     var file by remember(conn, directory) { mutableStateOf("") }
     var staged by remember(conn, directory) { mutableStateOf(false) }
     var revision by remember { mutableStateOf(0) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
+    var feedbackContext by remember(conn, directory) { mutableStateOf<String?>(null) }
+    var feedback by remember(conn, directory) { mutableStateOf("") }
     LaunchedEffect(conn, directory, file, staged, revision) {
         busy = true; error = ""; snapshot = null
         try {
@@ -91,6 +93,12 @@ print('__YXI_GIT__:' + json.dumps({'root': root, 'files': files, 'diff': text, '
                 TextButton({ openFile(data.getString("root").trimEnd('/') + "/" + file) }) { Text("打开文件 · $file") }
                 if (data.optBoolean("clipped")) Text("差异较长，显示前 256 KiB", style = MaterialTheme.typography.labelSmall)
                 val diff = data.getString("diff")
+                TextButton({
+                    val excerpt = diff.take(12000)
+                    feedbackContext = "Git 差异参考\n服务器：${conn.host.label}\n仓库：${data.getString("root")}\n文件：$file\n范围：${if (staged) "已暂存" else "未暂存"}\n读取快照时间：${java.time.Instant.now()}\n" +
+                        excerpt.lineSequence().joinToString("\n") { "> $it" } +
+                        (if (diff.length > excerpt.length || data.optBoolean("clipped")) "\n（差异已截取，完整内容请从仓库读取。）" else "")
+                }, enabled = !busy && diff.isNotBlank()) { Text("针对这份差异提要求") }
                 val colors = Tokens.current
                 val rendered = remember(diff, colors) {
                     buildAnnotatedString {
@@ -115,5 +123,17 @@ print('__YXI_GIT__:' + json.dumps({'root': root, 'files': files, 'diff': text, '
                 }
             } else Text("选择文件查看差异", color = Tokens.current.textMuted)
         }
+    }
+    feedbackContext?.let { context ->
+        WorkbenchDialog(onDismissRequest = { feedbackContext = null }, title = { Text("修改意见") }, text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("文件、暂存范围与当前差异摘录将加入此任务草稿。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                OutlinedTextField(feedback, { feedback = it }, modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp, max = 220.dp), label = { Text("希望怎么修改") })
+            }
+        }, confirmButton = { TextButton({
+            onQuote(context + "\n\n我的修改要求：${feedback.trim()}")
+            feedback = ""; feedbackContext = null
+        }, enabled = feedback.isNotBlank()) { Text("加入对话草稿") } },
+            dismissButton = { TextButton({ feedbackContext = null }) { Text("取消") } })
     }
 }
