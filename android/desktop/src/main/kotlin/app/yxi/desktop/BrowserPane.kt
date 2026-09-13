@@ -103,6 +103,7 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
             Text(preview.title.ifBlank { "网页预览" }, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             TextButton({ servicesOpen = true }, enabled = knownProject) { Text("开发服务") }
             TextButton({ settings = PreviewAddressSettings(project, session.cwd, savedAddress, savedAddress ?: input.text) }, enabled = knownProject && !preview.preparing) { Text("项目地址") }
+            TextButton({ state.previewExpanded = !state.previewExpanded }) { Text(if (state.previewExpanded) "恢复分栏" else "展开") }
             TextButton({ state.browserPanelOpen = false }) { Text("收起") }
             TextButton({
                 if (preview.hasUnsubmittedFeedback || preview.preparing || preview.stylePending != null || preview.capturing) reviewingClose = true

@@ -44,6 +44,7 @@ fun DocumentPane(state: AppState, conn: Conn, session: app.yxi.agent.Session) {
     Column(Modifier.fillMaxSize().background(t.surface0)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("文件预览", Modifier.weight(1f).padding(10.dp), style = MaterialTheme.typography.titleSmall)
+            TextButton({ state.previewExpanded = !state.previewExpanded }) { Text(if (state.previewExpanded) "恢复分栏" else "展开") }
             TextButton({ state.filePanelOpen = false }) { Text("收起") }
         }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {

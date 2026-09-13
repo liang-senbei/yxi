@@ -98,7 +98,7 @@ fun App(state: AppState) {
                             CompositionLocalProvider(LocalUriHandler provides links) {
                                 BoxWithConstraints(Modifier.fillMaxSize()) {
                                     val panel = state.filePanelOpen || state.browserPanelOpen
-                                    val compact = maxWidth < 850.dp
+                                    val compact = maxWidth < 850.dp || state.previewExpanded
                                     val availableWidth = maxWidth.value
                                     Row(Modifier.fillMaxSize()) {
                                         if (!panel || !compact) Column(Modifier.weight(1f).fillMaxHeight()) {
@@ -111,7 +111,8 @@ fun App(state: AppState) {
                                         }
                                         if (panel) {
                                             if (!compact) Box(Modifier.width(6.dp).fillMaxHeight().background(Tokens.current.border).draggable(
-                                                rememberDraggableState { delta -> state.filePanelWidth = (state.filePanelWidth - delta / density).coerceIn(340f, 900f) }, Orientation.Horizontal))
+                                                rememberDraggableState { delta -> state.filePanelWidth = (state.filePanelWidth - delta / density).coerceIn(340f, 900f) }, Orientation.Horizontal,
+                                                onDragStopped = { state.savePreviewWidth() }))
                                             Box(if (compact) Modifier.fillMaxSize() else Modifier.width(state.filePanelWidth.coerceAtMost(availableWidth - 350).dp).fillMaxHeight()) {
                                                 if (state.browserPanelOpen) BrowserPane(state, conn, sess) else DocumentPane(state, conn, sess)
                                             }

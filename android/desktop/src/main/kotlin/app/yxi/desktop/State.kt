@@ -42,7 +42,12 @@ class AppState {
         holder.value = androidx.compose.ui.text.input.TextFieldValue(text, androidx.compose.ui.text.TextRange(text.length))
     }
     var filePanelOpen by mutableStateOf(false)
-    var filePanelWidth by mutableStateOf(480f)
+    var filePanelWidth by mutableStateOf(Store.pref("previewPanelWidth", "480").toFloatOrNull()?.takeIf { it.isFinite() }?.coerceIn(340f, 900f) ?: 480f)
+    var previewExpanded by mutableStateOf(false)
+    fun savePreviewWidth() {
+        runCatching { Store.setPref("previewPanelWidth", filePanelWidth.toInt().toString()) }
+            .onFailure { workspaceError = "预览宽度未保存：${it.message}" }
+    }
     var workspaceError by mutableStateOf("")
 
     suspend fun openDocument(c: Conn, task: Session, path: String) {
