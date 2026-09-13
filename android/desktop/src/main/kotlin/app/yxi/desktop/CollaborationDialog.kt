@@ -23,6 +23,8 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
     var editingName by remember(conn) { mutableStateOf<String?>(null) }
     var removing by remember(conn) { mutableStateOf(false) }
     var history by remember(conn) { mutableStateOf(false) }
+    var setup by remember(conn) { mutableStateOf(false) }
+    if (setup) { HubSetupDialog(conn.host) { setup = false }; return }
     var assignment by remember(conn) { mutableStateOf<Pair<String, app.yxi.agent.Session>?>(null) }
     assignment?.let { (group, target) ->
         MemberAssignmentDialog(state, conn, target, group, { assignment = null }, close)
@@ -51,6 +53,7 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
         Column(Modifier.widthIn(max = 640.dp).heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("服务器上的分组与组规", style = MaterialTheme.typography.labelMedium, color = Tokens.current.textMuted)
             TextButton({ history = true }) { Text("查看协作记录") }
+            TextButton({ setup = true }) { Text("安装或升级协作服务") }
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
             table?.let { data ->
