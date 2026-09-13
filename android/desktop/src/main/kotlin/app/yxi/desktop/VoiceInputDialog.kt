@@ -24,19 +24,37 @@ internal fun VoiceInputDialog(conn: Conn, close: () -> Unit, useText: (String) -
     var deviceMenu by remember { mutableStateOf(false) }
     var devicesRevision by remember { mutableStateOf(0) }
     var setupOpen by remember { mutableStateOf(false) }
+    var pendingAudio by remember { mutableStateOf<ByteArray?>(null) }
     NativeOverlay(deviceMenu)
     LaunchedEffect(devicesRevision) {
         microphones = withContext(Dispatchers.IO) { runCatching { DesktopRecorder.microphones() }.getOrDefault(emptyList()) }
     }
-    SideEffect { VoiceActivity.busy = checking || recording || transcribing; VoiceActivity.hasDraft = text.isNotBlank() }
-    DisposableEffect(Unit) { onDispose { recorder.cancel(); VoiceActivity.busy = false; VoiceActivity.hasDraft = false } }
+    SideEffect { VoiceActivity.busy = checking || recording || transcribing; VoiceActivity.hasDraft = text.isNotBlank() || pendingAudio != null }
+    DisposableEffect(Unit) { onDispose { recorder.cancel(); pendingAudio?.fill(0); VoiceActivity.busy = false; VoiceActivity.hasDraft = false } }
+    suspend fun recognizePending() {
+        val audio = pendingAudio ?: return
+        check(conn.ssh.isConnected) { "请重新连接服务器，再重试识别" }
+        val result = DesktopAsr.transcribe(conn.ssh, directory, audio.copyOf())
+        text = if (text.isBlank()) result else text.trimEnd() + "\n" + result
+        audio.fill(0); pendingAudio = null
+    }
+    fun retryRecognition() {
+        if (transcribing || pendingAudio == null) return
+        transcribing = true; error = ""
+        scope.launch {
+            try { recognizePending() }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { error = e.message ?: "识别失败，录音仍可重试" }
+            finally { transcribing = false }
+        }
+    }
     fun finishRecording() {
         if (!recording || transcribing) return
         recording = false; transcribing = true
         scope.launch {
             try {
-                val wav = withContext(Dispatchers.IO) { recorder.stopWav() }
-                text = DesktopAsr.transcribe(conn.ssh, directory, wav)
+                pendingAudio = withContext(Dispatchers.IO) { recorder.stopWav() }
+                recognizePending()
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { error = e.message ?: "语音识别失败" }
             finally { transcribing = false }
@@ -71,6 +89,10 @@ internal fun VoiceInputDialog(conn: Conn, close: () -> Unit, useText: (String) -
             }
             if (!checking && !transcribing) {
                 if (recording) Button(::finishRecording) { Text("停止并识别") }
+                else if (pendingAudio != null) Row {
+                    TextButton(::retryRecognition) { Text("重试识别") }
+                    TextButton({ pendingAudio?.fill(0); pendingAudio = null; error = "" }) { Text("丢弃此段录音") }
+                }
                 else OutlinedButton({ scope.launch {
                     checking = true; error = ""
                     try {
@@ -81,7 +103,7 @@ internal fun VoiceInputDialog(conn: Conn, close: () -> Unit, useText: (String) -
                     } catch (e: CancellationException) { throw e }
                     catch (e: Exception) { error = e.message ?: "无法开始录音" }
                     finally { checking = false }
-                } }) { Text(if (text.isBlank()) "开始录音" else "重新录音") }
+                } }) { Text(if (text.isBlank()) "开始录音" else "继续录音并追加") }
             }
             if (text.isNotBlank()) OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), label = { Text("识别文字，可编辑") }, minLines = 3, maxLines = 8)
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
