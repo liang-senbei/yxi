@@ -72,7 +72,8 @@ print('__YXI_HUB_LOG__:' + json.dumps({'text': text, 'clipped': clipped}, ensure
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
             if (truncated) Text("显示最近 256 KiB，开头可能是上一条消息的片段。", style = MaterialTheme.typography.labelSmall)
-            SelectionContainer {
+            if (structured) HubEventCards(raw, query) { query = it }
+            else SelectionContainer {
                 Text(shown.ifBlank { if (raw.isBlank()) "暂无协作记录" else "没有匹配内容" },
                     modifier = Modifier.fillMaxWidth().heightIn(max = 380.dp).verticalScroll(rememberScrollState()), style = MaterialTheme.typography.bodySmall)
             }
