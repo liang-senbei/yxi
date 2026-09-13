@@ -71,6 +71,7 @@ tasks.withType<org.gradle.language.jvm.tasks.ProcessResources>().configureEach {
 tasks.named<org.gradle.language.jvm.tasks.ProcessResources>("processResources") {
     from(rootProject.projectDir.parentFile.resolve("server/yxi-asr")) { into("app/yxi/desktop/asr") }
     from(rootProject.projectDir.parentFile.resolve("server/yxi-hub")) { into("app/yxi/desktop/hub") }
+    from(rootProject.projectDir.parentFile.resolve("server/configure-hub.py")) { into("app/yxi/desktop/hub") }
 }
 // 插件按本机 OS 起名（跨平台打出来也叫 linux-x64），文件名改成跟着目标平台走。
 // ⚠️ 要设 archiveFileName 不能设 archiveAppendix：插件在 afterEvaluate 里才设 appendix，会盖掉这儿的；显式 fileName 不受约定影响。
