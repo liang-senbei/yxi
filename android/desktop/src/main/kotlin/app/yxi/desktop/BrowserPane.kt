@@ -35,6 +35,7 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
     val preview = state.browsers.getOrPut(key) { BrowserPreview(conn.host, key).apply { savedAddress?.let { address = it } } }
     var restored by remember(preview) { mutableStateOf(false) }
     var servicesOpen by remember(preview) { mutableStateOf(false) }
+    var appearanceOpen by remember(preview) { mutableStateOf(false) }
     var settings by remember(preview) { mutableStateOf<PreviewAddressSettings?>(null) }
     var input by remember(preview) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(preview.address)) }
     var addressDirty by remember(preview) { mutableStateOf(false) }
@@ -156,6 +157,18 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
         if (knownProject) PreviewServiceControls(state, conn, session, servicesOpen, preview.preparing, addressDirty, onConfigured = { servicesOpen = false }, onPreview = { address ->
             input = androidx.compose.ui.text.input.TextFieldValue(address); open()
         })
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            TextButton({ appearanceOpen = !appearanceOpen }) { Text(if (appearanceOpen) "收起预览设置" else "预览设置") }
+            Text((previewViewports.firstOrNull { it.id == preview.viewportMode }?.label ?: "自适应") + " · " + when(preview.colorScheme) { "dark" -> "暗色"; "light" -> "亮色"; else -> "系统主题" }, style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+            Spacer(Modifier.weight(1f))
+            if (appearanceOpen) TextButton({
+                if (preview.viewportMode != "fit" || preview.colorScheme != "system") {
+                    preview.viewportMode = "fit"; preview.colorScheme = "system"
+                    if (preview.selection != null) preview.selectionStale = true
+                }
+            }) { Text("恢复默认") }
+        }
+        if (appearanceOpen) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             previewViewports.forEach { viewport ->
                 FilterChip(selected = preview.viewportMode == viewport.id, onClick = {
@@ -178,6 +191,7 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
                     }
                 }, label = { Text(label) })
             }
+        }
         }
         Text(preview.source, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
         if (state.projectPreviews.error.isNotBlank()) Text(state.projectPreviews.error, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = t.danger)
