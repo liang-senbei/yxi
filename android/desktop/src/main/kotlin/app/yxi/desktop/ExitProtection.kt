@@ -10,8 +10,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
-data class PendingWork(val files: List<String>, val drafts: Int, val feedback: Int, val operations: Int) {
-    val needsReview get() = files.isNotEmpty() || drafts > 0 || feedback > 0 || operations > 0
+data class PendingWork(val files: List<String>, val drafts: Int, val feedback: Int, val operations: Int, val waitingRoutes: List<String> = emptyList()) {
+    val needsReview get() = files.isNotEmpty() || drafts > 0 || feedback > 0 || operations > 0 || waitingRoutes.isNotEmpty()
     val canDiscard get() = operations == 0
 }
 
@@ -21,8 +21,9 @@ internal fun pendingWorkOf(documents: List<FileDocument>, drafts: List<String>, 
     documents.count { it.busy } + browsers.count { it.preparing || it.stylePending != null || it.capturing },
 )
 fun AppState.pendingWork() = pendingWorkOf(documents, chatDrafts.values.map { it.value.text }, browsers.values).let {
-    it.copy(operations = it.operations + instructions.entries.count { item -> item.status == InstructionStatus.Delivering } + support.running.size + pluginOperations.running.size + serviceControllers.values.count { service -> service.mutating } + if (VoiceActivity.busy) 1 else 0,
-        drafts = it.drafts + support.editors.values.count { edit -> edit.dirty } + serviceEditors.values.count { edit -> edit.dirty } + if (VoiceActivity.hasDraft) 1 else 0)
+    it.copy(operations = it.operations + instructions.entries.count { item -> item.status == InstructionStatus.Delivering } + support.running.size + pluginOperations.running.size + serviceControllers.values.count { service -> service.mutating } + (if (VoiceActivity.busy) 1 else 0) + (if (deferredRoute?.applying == true) 1 else 0),
+        drafts = it.drafts + support.editors.values.count { edit -> edit.dirty } + serviceEditors.values.count { edit -> edit.dirty } + (if (VoiceActivity.hasDraft) 1 else 0),
+        waitingRoutes = deferredRoute?.takeIf { request -> !request.applying }?.let { request -> listOf("${request.conn.host.label} · ${request.line.name}") }.orEmpty())
 }
 
 @Composable
@@ -37,7 +38,8 @@ fun ExitReviewDialog(work: PendingWork, onCancel: () -> Unit, onDiscard: () -> U
             }
             if (work.drafts > 0) Text("${work.drafts} 处仍有未保存或未发送的输入", Modifier.padding(top = 8.dp))
             if (work.feedback > 0) Text("${work.feedback} 个网页预览有尚未加入对话的反馈", Modifier.padding(top = 8.dp))
-            if (work.operations > 0) Text("正在保存文件或确认网页操作，请等待完成后再退出。", Modifier.padding(top = 12.dp), color = Tokens.current.warning)
+            work.waitingRoutes.forEach { route -> Text("等待切换线路：$route；退出后不会继续执行。", Modifier.padding(top = 8.dp), color = Tokens.current.warning) }
+            if (work.operations > 0) Text("仍有保存、投递或配置操作未完成，请等待结果后再退出。", Modifier.padding(top = 12.dp), color = Tokens.current.warning)
             else Text(if (work.needsReview) "退出会丢弃这些本机编辑和草稿；服务器会话不会被停止。" else "当前没有待保存内容，可以退出。", Modifier.padding(top = 12.dp), style = MaterialTheme.typography.bodySmall)
         } },
         confirmButton = { TextButton(onCancel) { Text("继续编辑") } },
