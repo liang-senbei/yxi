@@ -24,6 +24,15 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
     var removing by remember(conn) { mutableStateOf(false) }
     var history by remember(conn) { mutableStateOf(false) }
     var setup by remember(conn) { mutableStateOf(false) }
+    var creatingMember by remember(conn) { mutableStateOf(false) }
+    if (creatingMember && table != null) {
+        val context = "你将加入协作组「$selected」。\n队友：${table!!.groups[selected].orEmpty().joinToString()}\n组规：\n${table!!.rules[selected].orEmpty()}\n\n" +
+            "使用 yxi-hub who 查询当前身份与队友，yxi-hub say <成员> <内容> 联系同组成员，reply <消息ID> <内容> 回复。先读取当前组规，遵守文件归属；不要修改其他成员负责的文件。这里的名单是创建时快照，以服务器实时分组为准。"
+        NewSessionDialog(conn, { creatingMember = false }, collaborationGroup = selected, groupContext = context) { session ->
+            state.select(conn, session); creatingMember = false; close()
+        }
+        return
+    }
     if (setup) { HubSetupDialog(conn.host) { setup = false }; return }
     var assignment by remember(conn) { mutableStateOf<Pair<String, app.yxi.agent.Session>?>(null) }
     assignment?.let { (group, target) ->
@@ -69,6 +78,7 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
                 if (selected in data.groups) {
                     HorizontalDivider()
                     Text(selected, style = MaterialTheme.typography.titleMedium)
+                    TextButton({ creatingMember = true }, enabled = !busy && error.isBlank()) { Text("在组内新建 Agent") }
                     key(conn, selected) { GroupDeliveryControls(conn, selected) }
                     SelectionContainer { Text(data.rules[selected].orEmpty().ifBlank { "尚未设置组规" }, style = MaterialTheme.typography.bodySmall) }
                     val assignments = state.instructions.entries.filter { it.assignmentGroup == selected && it.assignmentHost == projectKey(conn.host, "/") }

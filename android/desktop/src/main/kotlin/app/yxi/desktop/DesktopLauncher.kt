@@ -4,7 +4,7 @@ import app.yxi.agent.Dirs
 import app.yxi.ssh.Shell
 import java.util.UUID
 
-data class DesktopLaunchPlan(val directory: String, val agent: String, val requestId: String, val initialPrompt: String = "") {
+data class DesktopLaunchPlan(val directory: String, val agent: String, val requestId: String, val initialPrompt: String = "", val collaborationGroup: String = "") {
     init {
         require(agent in listOf("claude", "codex")) { "不支持的运行器" }
         require(directory.startsWith('/') && directory.none { it < ' ' || it == '\u007f' }) { "请输入服务器上的绝对路径，不含控制字符" }
@@ -17,6 +17,29 @@ data class DesktopLaunchPlan(val directory: String, val agent: String, val reque
     }
     fun command(): String {
         val tag = Dirs.TAG
+        val joinGroup = if (collaborationGroup.isBlank()) "" else {
+            val script = """
+import json, os, pathlib, sys, tempfile
+group, member = sys.argv[1:]
+p = pathlib.Path.home() / '.yxi' / 'groups.json'
+original = p.read_bytes()
+data = json.loads(original)
+members = data['groups'].get(group)
+if not isinstance(members, list): raise ValueError('协作组已不存在或格式无效')
+if member not in members:
+    members.append(member)
+    fd, name = tempfile.mkstemp(prefix='groups-launch-', dir=p.parent)
+    try:
+        with os.fdopen(fd, 'w') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush(); os.fsync(f.fileno())
+        if p.read_bytes() != original: raise ValueError('分组已变化，请重试')
+        os.replace(name, p)
+    finally:
+        if os.path.exists(name): os.unlink(name)
+""".trimIndent()
+            "python3 -c ${Shell.q(script)} ${Shell.q(collaborationGroup)} ${Shell.q(sessionName)} || { echo '$tag:group-failed'; exit 0; }"
+        }
         return """
 d=${Shell.q(directory)}; n=${Shell.q(sessionName)}; agent=${Shell.q(agent)}; prompt=${Shell.q(initialPrompt)}
 command -v tmux >/dev/null 2>&1 || { echo '$tag:missing-tmux'; exit 0; }
@@ -29,6 +52,7 @@ if tmux has-session -t "=${'$'}n" 2>/dev/null; then
   [ "${'$'}got" = "${'$'}want" ] || { echo '$tag:conflict'; exit 0; }
   echo '$tag:exists'; exit 0
 fi
+$joinGroup
 if [ -n "${'$'}prompt" ]; then
   tmux new-session -d -s "${'$'}n" -c "${'$'}want" /bin/sh -c 'exec "${'$'}1" -- "${'$'}2"' yxi-launch "${'$'}bin" "${'$'}prompt" 2>/dev/null || { echo '$tag:failed'; exit 0; }
 else

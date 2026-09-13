@@ -92,15 +92,15 @@ fun SessionRow(s: Session, selected: Boolean, displayName: String? = null, onCli
  * 出错留在弹窗里显示，成了才关；成了把新会话交给 [onCreated]。
  */
 @Composable
-fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, onCreated: (Session) -> Unit) {
+fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: String = "", groupContext: String = "", onCreated: (Session) -> Unit) {
     val scope = rememberCoroutineScope()
     // 预填现有会话的父目录（工作区），只用补项目名；不写死路径，换台机器就不一样
     var path by remember { mutableStateOf(Dirs.parentsOf(conn.sessions.map { it.cwd }).firstOrNull()?.let { "$it/" }.orEmpty()) }
     var err by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var agent by remember { mutableStateOf("claude") }
-    var initialPrompt by remember { mutableStateOf("") }
-    val requestId = remember(path, agent, initialPrompt) { DesktopLaunchPlan.newRequestId() }
+    var initialPrompt by remember { mutableStateOf(groupContext) }
+    val requestId = remember(path, agent, initialPrompt, collaborationGroup) { DesktopLaunchPlan.newRequestId() }
     WorkbenchDialog(
         onDismissRequest = { if (!busy) onDismiss() },
         title = { Text("在 ${conn.host.label} 上新建会话") },
@@ -113,6 +113,7 @@ fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, onCreated: (Session) -> 
                     label = { Text("启动提示词（可留空）") }, placeholder = { Text("描述目标、分工及需要遵守的项目约定") }, modifier = Modifier.fillMaxWidth())
                 if (initialPrompt.isNotBlank()) Text("创建后会把这段内容直接交给运行器，可能立即开始工作。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 Text("运行器沿用服务器的登录与权限设置。创建会话不代表模型请求已经成功。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                if (collaborationGroup.isNotBlank()) Text("创建前加入「$collaborationGroup」；启动失败可能留下未在线成员，可在组编辑中移除。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 if (err.isNotBlank()) Text(err, style = MaterialTheme.typography.bodySmall, color = Tokens.current.danger)
             }
         },
@@ -120,7 +121,7 @@ fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, onCreated: (Session) -> 
             TextButton(enabled = path.isNotBlank() && !busy, onClick = {
                 busy = true
                 scope.launch {
-                    try { createSession(conn, DesktopLaunchPlan(path.trim(), agent, requestId, initialPrompt)).fold(onCreated) { err = it.message.orEmpty() } }
+                    try { createSession(conn, DesktopLaunchPlan(path.trim(), agent, requestId, initialPrompt, collaborationGroup)).fold(onCreated) { err = it.message.orEmpty() } }
                     catch (e: kotlinx.coroutines.CancellationException) { throw e }
                     catch (e: Exception) { err = e.message.orEmpty() }
                     finally { busy = false }
@@ -138,6 +139,7 @@ private suspend fun createSession(conn: Conn, plan: DesktopLaunchPlan): Result<S
     val failure = raw.lineSequence().lastOrNull { it.startsWith(Dirs.TAG + ":") }?.substringAfter(':')
     if (failure !in listOf("ok", "exists")) return Result.failure(IllegalStateException(when (failure) {
         "missing-tmux" -> "这台服务器未安装 tmux"
+        "group-failed" -> "加入协作组失败，请刷新分组后重试；尚未启动新任务"
         "missing-runtime" -> "未找到可执行的 ${plan.agent}，请先在该服务器安装并完成登录"
         "nodir" -> "无法创建或进入目录，请检查路径与访问权限"
         "failed" -> "tmux 未能创建会话，请刷新核对后重试"
