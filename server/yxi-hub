@@ -89,9 +89,9 @@ print("\n".join(g for g,m in d.get("groups",{}).items() if sys.argv[2] in m))' "
 #    ⚠️ 单行消息不会触发（不够长，不当粘贴），所以这个坑只有 agent 之间
 #    发长消息时才露头 —— 手测「你好」是测不出来的。
 record_event() {
-  python3 - "$HOME/.yxi/hub-events.jsonl" "$@" "${sender_instance:-}" "${recipient_instance:-}" "$GROUPS_FILE" <<'PY'
-import datetime, fcntl, json, os, pathlib, sys, uuid, time
-path, message, sender, recipient, stage, body, reply, sender_instance, recipient_instance, groups_path = sys.argv[1:]
+  python3 - "$HOME/.yxi/hub-events.jsonl" "$@" "${sender_instance:-}" "${recipient_instance:-}" "$GROUPS_FILE" "${raw_content:-}" <<'PY'
+import datetime, fcntl, hashlib, json, os, pathlib, sys, uuid, time
+path, message, sender, recipient, stage, body, reply, sender_instance, recipient_instance, groups_path, raw_content = sys.argv[1:]
 if str(uuid.UUID(message)) != message: raise ValueError('消息 ID 必须是标准小写 UUID')
 p = pathlib.Path(path)
 p.parent.mkdir(parents=True, exist_ok=True)
@@ -99,6 +99,7 @@ event = {'version': 1, 'id': message, 'sender': sender, 'recipient': recipient,
          'senderInstance': sender_instance, 'recipientInstance': recipient_instance,
          'stage': stage, 'text': body, 'replyTo': reply, 'time': datetime.datetime.now(datetime.timezone.utc).isoformat()}
 event['createdAt'] = time.time()
+if stage == 'attempting': event['contentHash'] = hashlib.sha256(raw_content.strip().encode()).hexdigest()
 fd = os.open(p, os.O_RDWR | os.O_CREAT | os.O_APPEND, 0o600)
 with os.fdopen(fd, 'a+', encoding='utf-8') as f:
     fcntl.flock(f, fcntl.LOCK_EX)
@@ -119,6 +120,18 @@ with os.fdopen(fd, 'a+', encoding='utf-8') as f:
                 print('duplicate-terminal')
                 sys.exit(0)
             raise ValueError('该消息已登记但投递未确认，拒绝自动重发；请查看目标终端')
+        if reply:
+            starts = {e['id']: e for e in events if e.get('stage') == 'attempting'}
+            cursor, seen, repeated = reply, set(), 0
+            while cursor:
+                if cursor in seen: raise ValueError('回复记录存在循环，已阻止新投递')
+                seen.add(cursor)
+                if len(seen) >= 16: raise ValueError('回复链达到 16 条上限，请先汇总并由用户决定后续工作')
+                parent = starts.get(cursor)
+                if parent is None: raise ValueError('回复链记录不完整，请人工核对后再继续')
+                if parent.get('contentHash') == event['contentHash']: repeated += 1
+                if repeated >= 2: raise ValueError('同一回复链内容重复，已阻止第三次相同内容，请先检查协作记录')
+                cursor = parent.get('replyTo', '')
         with open(groups_path) as source: groups = json.load(source)['groups']
         shared = [g for g, members in groups.items() if sender in members and recipient in members]
         if not shared: raise ValueError('双方已不在同组，拒绝投递')
@@ -155,7 +168,7 @@ PY
 }
 
 push() {
-  local target="$1" text="$2" sender="${3:-?}" reply="${4:-}" message="${5:-}" reservation
+  local target="$1" text="$2" sender="${3:-?}" reply="${4:-}" message="${5:-}" raw_content="${6:-$2}" reservation
   check_group_delivery "$sender" "$target" || return 1
   local sender_instance recipient_instance pane target_info
   sender_instance="$(tmux display-message -p -t "=$sender:" '#{pid}:#{session_id}:#{session_created}')" || return 1
@@ -302,6 +315,7 @@ for g,m in (d.get("groups") or {}).items():
   say|reply)
     [ -n "$self" ] || { echo "不在 tmux 里，发不了（对方不知道是谁发的）"; exit 1; }
     target="${2:?用法: yxi-hub say <名> 或 reply <消息ID> \"话\"}"; text="${3:?缺内容}"
+    original_text="$text"
     reply_to=""
     if [ "$1" = reply ]; then
       reply_to="$target"
@@ -344,7 +358,7 @@ PY
       echo "「$target」对上好几个:"; echo "$hit" | sed 's/^/  /'; exit 1
     fi
     sg="$(shared_groups "$self" "$hit")"
-    push "$hit" "[同组 ${sg:-?} · $self] $text" "$self" "$reply_to" "${4:-}"
+    push "$hit" "[同组 ${sg:-?} · $self] $text" "$self" "$reply_to" "${4:-}" "$original_text"
     echo "终端投递已完成或已有完成记录：$hit（组：${sg:-?}）；尚无处理回执"
     ;;
   all)
@@ -391,7 +405,7 @@ PY
 )"
     echo "群发批次：$batch（重试请复用此 ID）"
     while IFS=$'\t' read -r one message_id; do
-      [ -n "$one" ] && push "$one" "[同组 $grp · $self] $text" "$self" "" "$message_id"
+      [ -n "$one" ] && push "$one" "[同组 $grp · $self] $text" "$self" "" "$message_id" "$text"
     done <<< "$recipients"
     echo "「$grp」组终端投递完成或已有完成记录；尚无成员处理回执"
     ;;
