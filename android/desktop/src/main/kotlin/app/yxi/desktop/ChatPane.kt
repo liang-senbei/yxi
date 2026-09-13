@@ -35,6 +35,7 @@ import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -124,8 +125,9 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
     val draftHolder: androidx.compose.runtime.MutableState<TextFieldValue> = savedDraft ?: fallbackDraft
     var draft by draftHolder
     var historyOpen by remember(taskKey) { mutableStateOf(false) }
-    if (historyOpen) PromptHistoryDialog(instructions, taskNavigationKey(conn.host, session), { historyOpen = false }) { text ->
-        val next = if (draft.text.isBlank()) text else draft.text.trimEnd() + "\n\n" + text
+    var searchOpen by remember(taskKey) { mutableStateOf(false) }
+    if (historyOpen) PromptHistoryDialog(instructions, taskNavigationKey(conn.host, session), draft.text.isNotBlank(), { historyOpen = false }) { text, replace ->
+        val next = if (replace || draft.text.isBlank()) text else draft.text.trimEnd() + "\n\n" + text
         draft = TextFieldValue(next, selection = TextRange(next.length))
         historyOpen = false
     }
@@ -323,6 +325,16 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
     }
 
     val rows = remember(items) { groupToolRuns(items) }
+    if (searchOpen) ConversationSearchDialog(items, { searchOpen = false }) { key ->
+        val index = rows.indexOfFirst { row -> row.key == key || (row is ChatRow.Group && row.calls.any { it.key == key }) }
+        if (index >= 0) {
+            val row = rows[index]
+            if (row is ChatRow.Group && row.key !in openGroups) openGroups.add(row.key)
+            stick = false
+            listState.requestScrollToItem(index)
+        }
+        searchOpen = false
+    }
     LaunchedEffect(rows, stick) { if (stick && rows.isNotEmpty()) listState.requestScrollToItem(Int.MAX_VALUE / 2, 100_000) }
     LaunchedEffect(taskKey) { focus.requestFocus() }   // 焦点先落输入框，Enter / Esc 一开始就能批
     // 只认用户的滚动（程序滚到底那一下也会走这里，不过滤会把 stick 关掉）；往上翻 = 停跟随，翻回底 = 再粘上
@@ -415,6 +427,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
             onApprove = ::approve, onReject = ::reject,
             onSend = ::send,
             onHistory = { historyOpen = true },
+            onSearch = { searchOpen = true },
         )
     }
 }
@@ -425,12 +438,14 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
  * Enter / Esc 的审批语义照旧：空输入 + 在等审批 = Enter 批准 / Esc 拒绝（Codex）。
  */
 @Composable
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 private fun Composer(
     draft: TextFieldValue, onDraft: (TextFieldValue) -> Unit, focus: FocusRequester,
     ctx: Transcript.Ctx?, busy: Boolean, waiting: Boolean, hint: String,
     hasPending: Boolean, canSend: Boolean, canAct: Boolean,
     onAttach: () -> Unit, onPaste: () -> Unit, onApprove: () -> Unit, onReject: () -> Unit, onSend: () -> Unit,
     onHistory: () -> Unit,
+    onSearch: () -> Unit,
 ) {
     val t = Tokens.current
     var focused by remember { mutableStateOf(false) }
@@ -466,17 +481,20 @@ private fun Composer(
                 Box { if (draft.text.isEmpty()) Text(hint, style = BodyStyle, color = t.textMuted); inner() }
             },
         )
-        Row(Modifier.fillMaxWidth().padding(6.dp, 2.dp, 8.dp, 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            IconButton(onAttach, Modifier.size(30.dp)) { Icon(Icons.Outlined.AttachFile, "添加附件（截图可直接 Ctrl+V）", Modifier.size(16.dp), tint = t.textSecondary) }
-            IconButton(onHistory, Modifier.size(30.dp)) { Icon(Icons.Outlined.History, "输入历史", Modifier.size(16.dp), tint = t.textSecondary) }
-            if (!canAct) Text("重新连接后可操作", fontSize = 11.sp, color = t.textMuted)
-            Spacer(Modifier.weight(1f))
-            ctx?.let { c ->
+        ctx?.let { c ->
+            androidx.compose.foundation.layout.FlowRow(Modifier.fillMaxWidth().padding(14.dp, 2.dp, 14.dp, 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Chip(modelShort(c.model))
                 effortLabel(c.effort)?.let { Chip(it, color = t.accent) }
                 if (c.mode == "plan") Chip("计划模式", color = t.warning)
                 if (c.tokens > 0) Chip("上下文 " + kShort(c.tokens))
             }
+        }
+        Row(Modifier.fillMaxWidth().padding(6.dp, 2.dp, 8.dp, 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            IconButton(onAttach, Modifier.size(30.dp)) { Icon(Icons.Outlined.AttachFile, "添加附件（截图可直接 Ctrl+V）", Modifier.size(16.dp), tint = t.textSecondary) }
+            IconButton(onHistory, Modifier.size(30.dp)) { Icon(Icons.Outlined.History, "输入历史", Modifier.size(16.dp), tint = t.textSecondary) }
+            IconButton(onSearch, Modifier.size(30.dp)) { Icon(Icons.Outlined.Search, "搜索当前对话", Modifier.size(16.dp), tint = t.textSecondary) }
+            if (!canAct) Text("重新连接后可操作", fontSize = 11.sp, color = t.textMuted)
+            Spacer(Modifier.weight(1f))
             // 圆形发送（Codex 的 ↑）：能发时点亮（Copper 主操作，手机端同款）；附件在传时灰着不亮
             Box(
                 Modifier.size(30.dp).clip(CircleShape)
