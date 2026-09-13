@@ -23,6 +23,7 @@ internal fun VoiceInputDialog(conn: Conn, close: () -> Unit, useText: (String) -
     var microphone by remember { mutableStateOf(Store.pref("voiceMicrophone", "")) }
     var deviceMenu by remember { mutableStateOf(false) }
     var devicesRevision by remember { mutableStateOf(0) }
+    var setupOpen by remember { mutableStateOf(false) }
     NativeOverlay(deviceMenu)
     LaunchedEffect(devicesRevision) {
         microphones = withContext(Dispatchers.IO) { runCatching { DesktopRecorder.microphones() }.getOrDefault(emptyList()) }
@@ -52,6 +53,7 @@ internal fun VoiceInputDialog(conn: Conn, close: () -> Unit, useText: (String) -
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("识别服务器：${conn.host.label} · ${conn.host.hostname}", style = MaterialTheme.typography.titleSmall)
             Text("录音通过SSH发送到此服务器的 yxi-asr 识别，文字先供你编辑，不自动发送给Agent。", style = MaterialTheme.typography.bodySmall)
+            TextButton({ setupOpen = true }, enabled = !checking && !recording && !transcribing) { Text("服务器尚未安装？查看安装步骤") }
             Row {
                 Box(Modifier.weight(1f)) {
                     OutlinedButton({ deviceMenu = true }, enabled = !checking && !recording && !transcribing) { Text(microphone.ifBlank { "系统默认麦克风" }, maxLines = 2) }
@@ -85,4 +87,5 @@ internal fun VoiceInputDialog(conn: Conn, close: () -> Unit, useText: (String) -
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
         }
     }, confirmButton = { TextButton({ useText(text) }, enabled = text.isNotBlank() && !checking && !recording && !transcribing) { Text("加入输入框") } }, dismissButton = { TextButton(close) { Text("取消并关闭") } })
+    if (setupOpen) VoiceSetupDialog(conn.host) { setupOpen = false }
 }
