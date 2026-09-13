@@ -310,3 +310,12 @@
 - 使用独立HOME与CLAUDE_CONFIG_DIR构造无执行内容的临时安装记录，真实Claude 2.1.267 list返回enabled=true但errors包含缺少marketplace；采集器正确保留reported-error。未改变生产插件配置。固化dev/test-plugin-cli.py；普通Python测试补齐项目匹配与错误内容不返回断言。
 - UI接入上述状态文字，实际交互/视觉验收仍待完成；后续需安装与变更账本、验证和恢复流程、项目最终配置、Codex插件适配。
 - 验证：131项桌面测试中126通过、5环境测试跳过，Linux打包通过；日志hk13 /tmp/yxi-plugin-runner-build.log。
+
+## 第三十轮：插件面板布局与原生界面验证（2026-09-13）
+
+- 插件页采用固定标题/搜索区和LazyColumn滚动卡片，名称与市场来源分层；圆角卡片、字母标记、版本/范围和异常色使记录更容易比较。项目与安装路径允许选取复制，长内容自动换行。
+- 搜索同时匹配插件ID、来源、项目及路径，显示总记录数与需检查数量，无匹配结果显示空状态。状态采集与展示组件分离，便于用隔离快照验证实际布局。
+- 新增PluginUiFixtureTest及dev/desktop-plugin-e2e.sh，在隔离Xvfb真实Compose窗口测试820/460两种宽度；只使用虚构插件和独立profile，不连接或修改生产插件。两个尺寸的刷新回调点击断言通过。
+- 全量132项测试中126通过、6环境测试跳过，Linux打包成功（/tmp/yxi-plugin-ui-build.log）；另行运行插件UI测试通过。宽窄屏截图均已查看，长名称/来源/路径未截断，状态清楚，证据本机tmp/workbench-evidence/plugins-820.png与plugins-460.png。
+- 这轮仅验证插件展示组件，不代替完整配置页导航/多主机往返、WindowsDPI/键盘/深色验收。安装、启停、升级和恢复等W03流程继续推进，未发布新版。
+- 追加原生搜索检查：两种宽度实际输入zzzz后，截图确认无匹配文案且旧卡片消失；刷新点击仍通过。证据/tmp/yxi-plugin-ui-search/及本机plugins-search-460.png、plugins-search-820.png。
