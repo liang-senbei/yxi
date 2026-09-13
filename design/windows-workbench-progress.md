@@ -522,3 +522,12 @@
 - windows-native-verify.ps1接入host-smoke/host-reopen并保留原启动、凭据、浏览器检查。基于干净Git提交e0ad813的完整源码归档，在hk13新目录构建Windows jar，构建日志/tmp/yxi-windows-e0ad813-build.log。
 - Windows本机实际app-image exe完成六项检查并正常退出；jar SHA256为a320bcf7274bc47fb1b46578b271bbd9fad774402f1dedca9d026f9807740ffb，与服务器一致。证据tmp/windows-e0ad813-native含分项日志、artifact-sha256.txt和source-manifest.json。
 - 这是实际exe入口及Store的跨进程迁移/保存检查，不等同恢复按钮完整点击、真实SSH重连或所有DPI/IME验收；测试程序仅在脚本注入的隔离环境中运行，没有替换用户安装版，完整PRD继续推进。
+
+## 第五十四轮：主机恢复弹窗交互与布局（2026-09-13）
+
+- 恢复弹窗可注入只读副本来源用于隔离验证，正式入口仍读取Store；可验证副本优先展示，保持初始不选中，无法解密/校验的副本不可选。增加滚动条与圆角卡片。
+- 首次截图发现滚动条fillMaxHeight把短内容撑到340dp，改为匹配已测得父容器高度，少量副本不再出现大段留白，超长内容仍有高度上限。
+- 新增HostRecoveryUiTest：使用虚构保护器和临时文件构造一个有效双主机副本及一个无效副本，实际窗口Escape取消后仍待恢复；重新打开、键盘明确选择后恢复，断言文件重读与原记录一致。首次键盘顺序落到取消按钮，修正为正确的Tab顺序后通过。
+- 软件渲染的隔离Xvfb交互正常结束，日志/tmp/yxi-host-recovery-ui-final/test.log；已查看本机tmp/workbench-evidence/host-recovery-verified.png。测试只验证Compose交互和数据层回调，真实DPAPI由前轮Windows验证覆盖，不能将此轮视为Windows恢复按钮验收。
+- 仍需长列表/不同DPI/IME、完整Windows侧栏入口及恢复后应用重启专项；正式用户配置和连接未被操作，完整PRD继续推进。
+- 全量143项中134通过、9环境测试跳过，Linux打包成功，日志/tmp/yxi-host-recovery-ui-package.log。

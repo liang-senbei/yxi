@@ -48,7 +48,7 @@ tasks.test {
     // Fresh isolated fixtures must execute, even when compiled tests are unchanged.
     listOf("YXI_ROUTE_FIXTURE", "YXI_BROWSER_FIXTURE", "YXI_SERVICE_UI_FIXTURE",
         "YXI_MAIL_UI_FIXTURE", "YXI_SUPPORT_UI_FIXTURE", "YXI_PLUGIN_UI_OUT",
-        "YXI_PLUGIN_TOGGLE_FIXTURE", "YXI_PLUGIN_INSTALL_FIXTURE", "SKIKO_RENDER_API").forEach { key ->
+        "YXI_PLUGIN_TOGGLE_FIXTURE", "YXI_PLUGIN_INSTALL_FIXTURE", "YXI_HOST_RECOVERY_UI_OUT", "SKIKO_RENDER_API").forEach { key ->
         inputs.property("fixture.$key", System.getenv(key).orEmpty())
     }
     System.getenv("YXI_MAIL_UI_FIXTURE")?.let { systemProperty("user.home", "$it/profile") }
