@@ -31,7 +31,7 @@ internal fun PluginInventoryPane(conn: Conn) {
             }
             OutlinedButton({ revision++ }, enabled = !busy) { Text("刷新状态") }
         }
-        Text("查看这台服务器的安装记录与用户默认设置。项目覆盖和运行器加载状态尚未验证。", color = t.textMuted, style = MaterialTheme.typography.bodySmall)
+        Text("安装记录与 Claude 插件列表分别核对；查询在主机家目录执行，不代表当前任务已经加载。", color = t.textMuted, style = MaterialTheme.typography.bodySmall)
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (error.isNotBlank()) Text(error, color = t.danger)
         snapshot?.let { data ->
@@ -43,6 +43,12 @@ internal fun PluginInventoryPane(conn: Conn) {
                         Text(plugin.id, style = MaterialTheme.typography.titleMedium)
                         Text("${plugin.version.ifBlank { "版本未知" }} · ${when (plugin.scope) { "user" -> "用户级"; "project" -> "项目级"; "local" -> "本地项目级"; else -> "范围未知" }}", color = t.textMuted)
                         Text(if (plugin.present) "安装目录存在 · 待运行器验证" else "安装目录缺失或不可访问", color = if (plugin.present) t.textSecondary else t.warning)
+                        Text(when (plugin.runnerState) {
+                            "listed" -> "运行器已列出 · ${when (plugin.runnerEnabled) { true -> "启用"; false -> "停用"; null -> "启停未知" }}"
+                            "reported-error" -> "运行器报告插件错误 · 请在服务器检查"
+                            "unrecognized" -> "运行器列表未找到此安装记录"
+                            else -> "运行器状态未确认"
+                        }, color = if (plugin.runnerState == "listed") t.textSecondary else t.warning, style = MaterialTheme.typography.bodySmall)
                         Text("用户默认：${when (plugin.userEnabled) { true -> "启用"; false -> "停用"; null -> "未明确设置" }}", style = MaterialTheme.typography.bodySmall)
                         if (plugin.project.isNotBlank()) Text("项目：${plugin.project}", style = MaterialTheme.typography.bodySmall)
                         Text(plugin.path.ifBlank { "未记录安装位置" }, style = MaterialTheme.typography.bodySmall, color = t.textMuted)

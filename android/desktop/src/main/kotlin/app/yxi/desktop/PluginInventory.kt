@@ -3,7 +3,7 @@ package app.yxi.desktop
 import app.yxi.ssh.Shell
 import org.json.JSONObject
 
-internal data class InstalledPlugin(val id: String, val version: String, val scope: String, val project: String, val path: String, val present: Boolean, val userEnabled: Boolean?)
+internal data class InstalledPlugin(val id: String, val version: String, val scope: String, val project: String, val path: String, val present: Boolean, val userEnabled: Boolean?, val runnerState: String = "unknown", val runnerEnabled: Boolean? = null)
 internal data class PluginInventory(val plugins: List<InstalledPlugin>, val warnings: List<String>) {
     companion object {
         fun command(): String = "python3 -c " + Shell.q(PluginInventory::class.java.getResource("/app/yxi/desktop/plugin-inventory.py")!!.readText())
@@ -15,7 +15,8 @@ internal data class PluginInventory(val plugins: List<InstalledPlugin>, val warn
             val warnings = json.getJSONArray("warnings")
             return PluginInventory((0 until items.length()).map {
                 val p = items.getJSONObject(it)
-                InstalledPlugin(p.getString("id"), p.getString("version"), p.getString("scope"), p.getString("project"), p.getString("path"), p.getBoolean("present"), p.opt("userEnabled") as? Boolean)
+                InstalledPlugin(p.getString("id"), p.getString("version"), p.getString("scope"), p.getString("project"), p.getString("path"), p.getBoolean("present"), p.opt("userEnabled") as? Boolean,
+                    p.optString("runnerState").takeIf { it in setOf("unknown", "unrecognized", "reported-error", "listed") } ?: "unknown", p.opt("runnerEnabled") as? Boolean)
             }, (0 until warnings.length()).map { warnings.getString(it) })
         }
     }
