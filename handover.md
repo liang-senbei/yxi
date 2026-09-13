@@ -2,6 +2,12 @@
 
 ## Windows 工作台 PRD 实施中（2026-09-13，独立分支）
 
+最新用户分工：用户明确授权向 hk13 的 yunxi 组四个 Agent 发消息，并将测试交给他们；中枢继续负责核心功能和前端 UI/UX。此前不由中枢主动跑验证的偏好继续保留，测试现由以下 Agent 执行。
+- 测试固定提交：be45eb32cfaab4ebd8412bc4f7d82ddad71e84c1（codex/windows-workbench-review）。
+- cc-yxi：桌面构建、依赖与打包；cc-yxi_pilot：队列、启动器、hub 协作协议；cc-yxi_entertainment：桌面预览/编辑/交互回归；cc-logto_yxi：登录、账号与模型线路。
+- 已用 SSH/tmux 向四个会话发送任务，随后四个面板均显示正在思考；尚无测试结果，不能视为通过。
+- 各自使用独立测试工作树，不修改生产环境；报告路径 /root/src/workspace/yunxi/windows-test-reports/<会话名>.md。后续按这些报告处理缺陷，不把 Linux 运行结果视为 Windows 真机通过。
+
 工作方式更新：用户明确要求以功能实现为主，不再主动运行测试、交叉验证或专项检查。后续需要验证的内容写入design/windows-manual-verification.md，由用户自行验收、反馈问题；不要继续扩展边界验证。
 
 第一百一十轮：无 HMR 页面可选每 5 秒自动重载，操作/反馈期间暂缓，默认关闭。未验证。
