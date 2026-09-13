@@ -89,7 +89,7 @@ class PluginToggleFixtureTest {
                             assertEquals(2, reopened.entries.size)
                             delay(2000)
                             shot("05-restored.png")
-                            click(origin.x + 205, origin.y + 500)
+                            click(origin.x + 270, origin.y + 500)
                             awaitCondition { NativeOverlays.active }; delay(600)
                             shot("06-uninstall-confirm.png")
                             withContext(Dispatchers.IO) { Robot().apply { keyPress(KeyEvent.VK_ESCAPE); keyRelease(KeyEvent.VK_ESCAPE) } }
@@ -97,7 +97,7 @@ class PluginToggleFixtureTest {
                             assertEquals(2, state.pluginOperations.entries.size)
                             assertEquals(original, config.readText())
                             delay(800)
-                            click(origin.x + 205, origin.y + 500)
+                            click(origin.x + 270, origin.y + 500)
                             awaitCondition { NativeOverlays.active }; delay(600)
                             click(origin.x + 625, origin.y + 512)
                             awaitCondition { state.pluginOperations.entries.size == 3 && state.pluginOperations.running.isEmpty() }

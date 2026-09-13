@@ -7,7 +7,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-internal data class PluginOperationEntry(val host: String, val id: String, val request: String, val status: String)
+internal data class PluginOperationEntry(val host: String, val id: String, val request: String, val status: String, val beforeVersion: String = "", val afterVersion: String = "")
 internal class PluginOperations(file: File) {
     private val disk = DurableFile(file) { decode(it) }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
@@ -30,7 +30,7 @@ internal class PluginOperations(file: File) {
     private fun save(next: List<PluginOperationEntry>) {
         check(readable) { error }
         try {
-            disk.write(JSONObject().put("version", 1).put("entries", JSONArray(next.map { JSONObject().put("host", it.host).put("id", it.id).put("request", it.request).put("status", it.status) })).toString())
+            disk.write(JSONObject().put("version", 1).put("entries", JSONArray(next.map { JSONObject().put("host", it.host).put("id", it.id).put("request", it.request).put("status", it.status).put("beforeVersion", it.beforeVersion).put("afterVersion", it.afterVersion) })).toString())
             entries = next; error = ""
         } catch (e: Exception) { error = "插件操作记录未保存，请保留窗口并查询原操作"; throw e }
     }
@@ -41,9 +41,9 @@ internal class PluginOperations(file: File) {
         save(entries + entry)
         return entry
     }
-    internal fun finish(id: String, state: String) {
-        val status = when (state) { "configured", "restored", "installed", "uninstalled" -> state; "changed", "invalid", "invalid-directory", "unsupported-config-home", "unsupported-linked-config", "restore-unavailable", "catalog-changed", "already-installed" -> "rejected"; else -> "unknown" }
-        save(entries.map { if (it.id == id && !(status == "unknown" && it.status in setOf("configured", "restored", "installed", "uninstalled"))) it.copy(status = status) else it })
+    internal fun finish(id: String, state: String, beforeVersion: String? = null, afterVersion: String? = null) {
+        val status = when (state) { "configured", "restored", "installed", "uninstalled", "updated" -> state; "changed", "invalid", "invalid-directory", "unsupported-config-home", "unsupported-linked-config", "restore-unavailable", "catalog-changed", "already-installed" -> "rejected"; else -> "unknown" }
+        save(entries.map { if (it.id == id && !(status == "unknown" && it.status in setOf("configured", "restored", "installed", "uninstalled", "updated"))) it.copy(status = status, beforeVersion = beforeVersion?.take(200) ?: it.beforeVersion, afterVersion = afterVersion?.take(200) ?: it.afterVersion) else it })
     }
     fun submit(conn: Conn, request: JSONObject) {
         val entry = begin(projectKey(conn.host, "/"), request)
@@ -57,7 +57,7 @@ internal class PluginOperations(file: File) {
     private fun perform(conn: Conn, entry: PluginOperationEntry, request: JSONObject) {
         running.add(entry.id)
         scope.launch {
-            try { finish(entry.id, PluginOperationPlan.result(conn.ssh.exec(PluginOperationPlan.command(request))).getString("state")) }
+            try { val result = PluginOperationPlan.result(conn.ssh.exec(PluginOperationPlan.command(request))); finish(entry.id, result.getString("state"), result.optString("beforeVersion").takeIf { result.has("beforeVersion") }, result.optString("afterVersion").takeIf { result.has("afterVersion") }) }
             catch (_: Exception) { runCatching { finish(entry.id, "unknown") } }
             finally { running.remove(entry.id) }
         }
@@ -68,10 +68,10 @@ internal class PluginOperations(file: File) {
             val array = root.getJSONArray("entries")
             return (0 until array.length()).map {
                 val o = array.getJSONObject(it)
-                PluginOperationEntry(o.getString("host"), o.getString("id"), o.getString("request"), o.getString("status")).also { e ->
+                PluginOperationEntry(o.getString("host"), o.getString("id"), o.getString("request"), o.getString("status"), o.optString("beforeVersion").take(200), o.optString("afterVersion").take(200)).also { e ->
                     require(Regex("[a-f0-9]{32}").matches(e.id))
                     require(JSONObject(e.request).getString("operation") == e.id)
-                    require(e.status in setOf("sending", "unknown", "configured", "restored", "installed", "uninstalled", "rejected"))
+                    require(e.status in setOf("sending", "unknown", "configured", "restored", "installed", "uninstalled", "updated", "rejected"))
                 }
             }.also { require(it.map { e -> e.id }.distinct().size == it.size) }
         }
