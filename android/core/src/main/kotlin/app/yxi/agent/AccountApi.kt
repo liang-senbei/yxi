@@ -48,7 +48,7 @@ object AccountApi {
         val signInWith: String = "",
         val quotaLimit: Int,
         val quotaUsed: Int,
-        /** null = 不限（ultra） */
+        /** null可能是不限或缺失；显示前先检查quotaUnlimited/quotaRemainingKnown。 */
         val quotaRemaining: Int?,
         val nextRefreshAt: String?,
         val quotaRule: String,
@@ -90,6 +90,9 @@ object AccountApi {
         val microPerTicket: Int = 10,
         /** 离保底还差几抽。⚠️ 是「**还差**」不是「已累计」—— 歧义写进字段名里解决（对方定的）。 */
         val pityRemaining: Int = 0,
+        val quotaUnlimited: Boolean = false,
+        val quotaRemainingKnown: Boolean = false,
+        val quotaLimitKnown: Boolean = false,
     )
 
     /** 一封站内信。[kind] 契约里固定四个：`redeem` / `expiry` / `notice` / `system`。 */
@@ -193,6 +196,10 @@ object AccountApi {
         val ms = o.optJSONObject("membership")
         val pr = o.optJSONObject("profile")
         val q = o.optJSONObject("quota")
+        fun quotaNumber(key: String) = (q?.opt(key) as? Number)?.toString()?.toIntOrNull()?.takeIf { it >= 0 }
+        val remaining = quotaNumber("remaining")
+        val limit = quotaNumber("limit")
+        val unlimited = q?.opt("unlimited") == true
         return Me(
             userId = o.str("userId"),
             tier = when (o.optString("tier")) {
@@ -223,17 +230,15 @@ object AccountApi {
             //    文案会变成「折 5 微曦（）」「满 0 点自动换 1 张」。
             microPerTicket = o.optJSONObject("wish")?.optInt("microPerTicket", 10) ?: 10,
             pityRemaining = o.optJSONObject("wish")?.optInt("pityRemaining") ?: 0,
-            quotaLimit = q?.optInt("limit") ?: 0,
-            quotaUsed = q?.optInt("used") ?: 0,
+            quotaLimit = limit ?: 0,
+            quotaUsed = quotaNumber("used") ?: 0,
             // ⚠️ **先读 `unlimited` 这个显式布尔**（服务端 2026-09-04 加的）。
             //    以前只能靠 `remaining: null` 判「不限」—— 而 `optInt` 读 null 会给 0，
             //    那是「用完了」，意思正好反过来：付费的 ultra 会被拦在门外（#229）。
-            quotaRemaining = when {
-                q == null -> null
-                q.optBoolean("unlimited") -> null
-                q.isNull("remaining") -> null
-                else -> q.optInt("remaining")
-            },
+            quotaRemaining = if (unlimited) null else remaining,
+            quotaUnlimited = unlimited,
+            quotaRemainingKnown = remaining != null,
+            quotaLimitKnown = limit != null,
             nextRefreshAt = q.str("nextRefreshAt").takeIf { it.isNotEmpty() },
             quotaRule = q.str("rule"),
             bans = o.optJSONArray("bans")?.let { arr ->

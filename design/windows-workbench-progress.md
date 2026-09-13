@@ -199,3 +199,12 @@
 - Windows本机实际exe验证：虚构旧令牌迁移后明文为空、轮换密文不含新令牌明文、篡改blob被DPAPI拒绝；第二个独立进程读取正确轮换令牌，并完成退出后空状态及再次登录。主界面smoke和Chromium内容/像素/退出也通过。没有读取或修改真实账号凭据。
 - 本机证据：../tmp/windows-dpapi-20260913/（两阶段credential日志、synthetic-credentials、app-image、浏览器PNG、哈希文件）。测试jar SHA256：CCB6BA2454F77F7F75F00C6F8C672021852BE136B8921787757F64B6BD805FF3；远端Windows构建日志 /tmp/yxi-dpapi-windows-build.log。
 - windows-native-verify.ps1与CI安装后检查增加凭据两进程门禁；本机脚本实际通过，CI PowerShell语法通过，GitHub CI尚未执行。未覆盖安装版、未发版；真实Logto授权/撤销、刷新响应丢失恢复、Windows完整UI与其它PRD需求继续推进。
+
+## 第十九轮：额度未知状态（2026-09-13）
+
+- 找到共享解析与桌面显示的错误组合：quota缺失、remaining:null和unlimited:true均变成quotaRemaining:null，界面据此一律显示不限。现在只接受显式布尔unlimited:true作为不限，并记录剩余额度/总额度是否真实已知。
+- 保留原Me字段以兼容调用方，追加quotaUnlimited/quotaRemainingKnown/quotaLimitKnown；非法类型、负数、超Int范围与小数不静默变成零。真实remaining:0仍是耗尽。
+- Windows增加quotaSummary：未知显示“额度暂不可用”，有限但总数未知时不补“共0次”，耗尽明确显示，恢复信息保留完整服务端时间。安卓资料页与会员页同步判断显式不限及未知状态，避免两端继续把未知当权益。
+- 4项新增测试覆盖缺失对象/JSON null、显式不限与字符串伪布尔、真实零额度/未知总数、负数/小数/错误字符串/整数溢出。:desktop:test全量110项，106通过、4环境测试跳过；日志hk13 /tmp/yxi-quota-tests.log。
+- Android构建入口检查`:app:compileDebugKotlin --dry-run`在任务依赖阶段失败：SDK location not found（/tmp/yxi-quota-android-check.log）。安卓两处显示调整尚未编译验证；没有生成或发布新APK，也未改变真实用户权益。
+- 本轮只修复资料额度。钱包、其它计数与时间的统一呈现，以及Windows完整UI/服务集成验收仍需继续核对，不能把这项修复当作全部账户数据已完成验收。

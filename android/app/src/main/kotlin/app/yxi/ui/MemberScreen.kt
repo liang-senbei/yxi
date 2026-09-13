@@ -102,7 +102,8 @@ fun MemberScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
             Spacer(Modifier.height(10.dp))
             Text(
                 when {
-                    me.quotaRemaining == null -> t("资料改多少次都行")
+                    me.quotaUnlimited -> t("资料改多少次都行")
+                    !me.quotaRemainingKnown || me.quotaRemaining == null -> t("额度暂不可用，请刷新后查看")
                     else -> t("这个月还能改 %d 次资料").format(me.quotaRemaining) +
                         (me.nextRefreshAt?.let { " · " + t("%s 恢复").format(app.yxi.agent.Tz.date(it)) } ?: "")
                 },

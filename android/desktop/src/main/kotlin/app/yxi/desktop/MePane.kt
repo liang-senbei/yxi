@@ -224,11 +224,7 @@ private fun SignedIn(
     Card {
         Text("改资料额度", style = MaterialTheme.typography.titleMedium, color = t.textPrimary)
         Text(
-            // ⚠️ **先看 quotaRemaining 是不是 null**:ultra 是「不限」,而不是「用完了」——
-            //    手机端当年就是拿 remaining 判断,把付费用户拦在门外(#229)
-            if (me.quotaRemaining == null) "不限"
-            else "还能改 ${me.quotaRemaining} 次(共 ${me.quotaLimit} 次)" +
-                (me.nextRefreshAt?.take(10)?.let { " · $it 恢复" } ?: ""),
+            quotaSummary(me),
             Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyMedium, color = t.textMuted,
         )
         if (me.quotaRule.isNotEmpty()) {

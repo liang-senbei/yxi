@@ -287,7 +287,8 @@ fun MeDialog(onClose: () -> Unit) {
                 )
                 if (signed && q != null) Text(
                     when {
-                        q.quotaRemaining == null -> t("改多少次都行")
+                        q.quotaUnlimited -> t("改多少次都行")
+                        !q.quotaRemainingKnown || q.quotaRemaining == null -> t("额度暂不可用，请刷新后查看")
                         else -> t("这个月还能改 %d 次").format(q.quotaRemaining) +
                             (q.nextRefreshAt?.let { " · " + t("%s 恢复").format(app.yxi.agent.Tz.date(it)) } ?: "")
                     },
