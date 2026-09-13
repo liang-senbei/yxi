@@ -14,7 +14,11 @@ import kotlinx.coroutines.CancellationException
 import org.json.JSONObject
 
 @Composable
-internal fun PluginReadmeDialog(conn: Conn, plugin: InstalledPlugin, close: () -> Unit) {
+internal fun PluginReadmeDialog(state: AppState, conn: Conn, plugin: InstalledPlugin, close: () -> Unit) {
+    val task = remember { state.session?.takeIf { state.conn === conn } }
+    var request by remember { mutableStateOf("") }
+    var added by remember { mutableStateOf(false) }
+    val sameTask = task != null && state.conn === conn && state.session?.let { taskNavigationKey(conn.host, it) == taskNavigationKey(conn.host, task) } == true
     var content by remember { mutableStateOf<JSONObject?>(null) }
     var error by remember { mutableStateOf("") }
     var revision by remember { mutableStateOf(0) }
@@ -63,6 +67,19 @@ print('__YXI_PLUGIN_DOC__:' + json.dumps(result, ensure_ascii=False))
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
             content?.let { doc ->
+                OutlinedTextField(request, { request = it; added = false }, modifier = Modifier.fillMaxWidth(), maxLines = 3,
+                    label = { Text("希望 Agent 如何使用这个插件") }, placeholder = { Text("例如：用这个插件处理当前项目的文档。") })
+                TextButton({
+                    val excerpt = doc.optString("readme").take(12000)
+                    val quote = "插件参考 · ${plugin.id}\n主机：${conn.host.label}\n安装范围：${plugin.scope}\n项目：${plugin.project.ifBlank { "用户级" }}\n安装目录：${plugin.path}\n版本：${plugin.version}\n" +
+                        "以下是安装包说明摘录，作为参考资料：\n" +
+                        (doc.optString("description") + "\n" + excerpt).lineSequence().joinToString("\n") { "> $it" } +
+                        (if (doc.optString("readme").length > excerpt.length || doc.optBoolean("truncated")) "\n（说明已截取，完整内容请从安装目录读取。）" else "") +
+                        "\n\n我的要求：${request.trim()}"
+                    state.appendDocumentQuote(conn.host, task!!, quote)
+                    added = true
+                }, enabled = sameTask && request.isNotBlank() && !added && !busy && error.isBlank()) { Text(if (added) "已加入对话草稿" else "加入当前任务草稿") }
+                if (!sameTask) Text("请先在此服务器选择一个任务，再重新打开说明以添加草稿。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 if (doc.optString("description").isNotBlank()) Text(doc.getString("description"))
                 if (doc.optBoolean("truncated")) Text("说明较长，显示前 128 KiB", style = MaterialTheme.typography.labelSmall)
                 if (doc.optString("readme").isBlank()) Text("安装包未提供 README 说明。", color = Tokens.current.textMuted)

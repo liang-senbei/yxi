@@ -32,7 +32,7 @@ internal fun PluginInventoryPane(state: AppState, conn: Conn) {
     var actionError by remember(conn) { mutableStateOf("") }
     var historyOpen by remember(conn) { mutableStateOf(false) }
     var reading by remember(conn) { mutableStateOf<InstalledPlugin?>(null) }
-    reading?.let { PluginReadmeDialog(conn, it) { reading = null } }
+    reading?.let { PluginReadmeDialog(state, conn, it) { reading = null } }
     LaunchedEffect(conn, revision) {
         busy = true; snapshot = null; error = ""
         try { snapshot = PluginInventory.parse(conn.ssh.exec(PluginInventory.command())) }
