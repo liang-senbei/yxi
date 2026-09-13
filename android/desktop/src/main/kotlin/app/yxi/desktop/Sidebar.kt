@@ -79,6 +79,14 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
     var creatingOn by remember { mutableStateOf<Conn?>(null) }
     var installingKey by remember { mutableStateOf<Host?>(null) }
     var note by remember { mutableStateOf("") }       // 不属于某条连接的错（Conn 都没建出来）
+    var importing by remember { mutableStateOf<HostImportPlan?>(null) }
+    var pickingTransfer by remember { mutableStateOf(false) }
+    importing?.let { plan -> HostImportDialog(plan, { importing = null }) {
+        val merged = plan.merge(hosts)
+        Store.save(merged)
+        hosts = merged; importing = null
+        note = "已导入 ${plan.additions.size} 台服务器，请编辑认证设置后连接。"
+    } }
     var hostMenu by remember { mutableStateOf(false) }
     var recoveringHosts by remember { mutableStateOf(false) }
     if (recoveringHosts) HostRecoveryDialog({ recoveringHosts = false }) { copy ->
@@ -86,7 +94,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
         hosts = Store.recoverHosts(copy)
         recoveringHosts = false
     }
-    NativeOverlay(hostMenu)
+    NativeOverlay(hostMenu || pickingTransfer)
     val keys = remember { FileHostKeys() }
     // 账号行的资料：进来就拉一次（幂等；Me 页里还会再拉）。侧栏收起再展开会重跑，无害
     LaunchedEffect(Unit) { MeAuth.load() }
@@ -102,6 +110,9 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
         if (state.conn === c) { state.conn = null; state.session = null }
     }
     fun connect(h: Host) {
+        if (h.keyPath.isBlank() && h.password.isBlank()) {
+            editing = h; note = "请先填写这台服务器的认证信息，再连接。"; return
+        }
         disconnect(h); note = ""
         // 私钥文件没了会在 Conn 构造时就炸（toConfig 读文件），不算连接错误
         val c = runCatching { Conn(h, keys) }.getOrElse { note = "连不了 ${h.label}：${it.message}"; return }
@@ -158,6 +169,26 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
                             connOf(h)?.let { c -> if (state.conn !== c) state.select(c, null) }
                         })
                     }
+                    HorizontalDivider()
+                    DropdownMenuItem(text = { Text("导入服务器…") }, onClick = {
+                        hostMenu = false; pickingTransfer = true
+                        try { chooseHostTransferFile(false)?.let { file ->
+                            check(file.length() <= 4 * 1024 * 1024) { "导入文件最多4MiB" }
+                            importing = HostTransfer.preview(file.readText(), hosts)
+                        } } catch (e: Exception) { note = e.message ?: "导入文件无法读取" }
+                        finally { pickingTransfer = false }
+                    })
+                    DropdownMenuItem(text = { Text("导出服务器（不含认证）…") }, enabled = hosts.isNotEmpty(), onClick = {
+                        hostMenu = false; pickingTransfer = true
+                        try { chooseHostTransferFile(true)?.let { file ->
+                            val target = file.canonicalFile
+                            check(!target.toPath().startsWith(Store.dir.canonicalFile.toPath())) { "请选择应用配置目录之外的位置" }
+                            check(hosts.none { it.keyPath.isNotBlank() && java.io.File(it.keyPath).canonicalFile == target }) { "不能覆盖现有私钥文件" }
+                            DurableFile.replace(target, HostTransfer.export(hosts))
+                            note = "已导出服务器地址，未包含密码或私钥路径。"
+                        } } catch (e: Exception) { note = e.message ?: "导出失败" }
+                        finally { pickingTransfer = false }
+                    })
                 }
             }
             IconButton({ editing = Host(id = UUID.randomUUID().toString(), alias = "", hostname = "", keyPath = defaultKey()) }, Modifier.size(28.dp)) {

@@ -24,7 +24,7 @@ import org.json.JSONObject
 import androidx.compose.ui.unit.dp
 import java.io.File
 
-/** 桌面版存的一台主机。私钥存**路径**（用户自己的 ~/.ssh/id_ed25519 之类），密码明文存文件（ponytail：先这样，之后接 DPAPI）。 */
+/** 桌面主机记录保存私钥引用；Windows持久化由HostConfigFile使用DPAPI保护。 */
 data class Host(
     val id: String,
     val alias: String,
