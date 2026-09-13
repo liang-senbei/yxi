@@ -42,10 +42,11 @@ class MeAuthTest {
         assertTrue(p("").isEmpty())
     }
 
-    /** 畸形串(没有等号、只有等号)不能让整个解析炸掉 —— 这个端口是对本机开放的,谁都能发一行过来 */
-    @Test fun `畸形串不炸`() {
-        val kv = p("GET /callback?justkey&=noname&code=ok HTTP/1.1")
-        assertEquals("ok", kv["code"])
+    /** 不从混合畸形参数中挑出一部分继续授权。拒绝整条请求，但不抛异常。 */
+    @Test fun `畸形或重复参数整体拒绝`() {
+        assertTrue(p("GET /callback?justkey&=noname&code=ok HTTP/1.1").isEmpty())
+        assertTrue(p("GET /callback?state=ok&state=%XX&code=ok HTTP/1.1").isEmpty())
+        assertTrue(p("GET /callback?state=ok&state=other&code=ok HTTP/1.1").isEmpty())
     }
 }
 

@@ -56,18 +56,20 @@ fun MePane(state: AppState) {
     var busy by remember { mutableStateOf(false) }
     var mailOpen by remember { mutableStateOf(false) }
     var supportOpen by remember { mutableStateOf(false) }
+    var loginRequest by remember { mutableStateOf(0L) }
 
     // 进页面拉一次:有令牌就顺手刷资料,没令牌就停在登录按钮上
     LaunchedEffect(Unit) { MeAuth.load() }
     val owner = MeAuth.me?.userId
+    val generation = MeAuth.sessionGeneration
     if (supportOpen && MeAuth.signedIn && owner != null) {
-        val api = remember(owner) { app.yxi.agent.SupportApi { path, method, body -> MeAuth.accountRequest(owner, path, method, body) } }
-        SupportPane(owner, api, state.support, onBack = { supportOpen = false }, onUnread = { MeAuth.supportUnread(owner, it) })
+        val api = remember(owner, generation) { app.yxi.agent.SupportApi { path, method, body -> MeAuth.accountRequest(owner, path, method, body, generation) } }
+        androidx.compose.runtime.key(owner, generation) { SupportPane(owner, api, state.support, onBack = { supportOpen = false }, onUnread = { MeAuth.supportUnread(owner, it, generation) }) }
         return
     }
     if (mailOpen && MeAuth.signedIn && owner != null) {
-        val api = remember(owner) { app.yxi.agent.MailApi { path, method, body -> MeAuth.accountRequest(owner, path, method, body) } }
-        MailPane(owner, api, onBack = { mailOpen = false; scope.launch { err = MeAuth.refresh().orEmpty() } }, onCounters = { MeAuth.mailCounters(owner, it) })
+        val api = remember(owner, generation) { app.yxi.agent.MailApi { path, method, body -> MeAuth.accountRequest(owner, path, method, body, generation) } }
+        androidx.compose.runtime.key(owner, generation) { MailPane(owner, api, onBack = { mailOpen = false; scope.launch { err = MeAuth.refresh().orEmpty() } }, onCounters = { MeAuth.mailCounters(owner, it, generation) }) }
         return
     }
 
@@ -87,21 +89,24 @@ fun MePane(state: AppState) {
                         waiting = MeAuth.waitingBrowser,
                         err = err,
                         busy = busy,
+                        onCancel = { loginRequest++; MeAuth.signOut(); busy = false; err = "" },
                     ) {
+                        val request = ++loginRequest
                         scope.launch {
                             busy = true; err = ""
-                            err = MeAuth.signIn().orEmpty()
-                            busy = false
+                            try {
+                                val problem = MeAuth.signIn().orEmpty()
+                                if (request == loginRequest) err = problem
+                            } finally { if (request == loginRequest) busy = false }
                         }
                     }
-                    me == null -> Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(Modifier.height(18.dp))
-                        Spacer(Modifier.height(0.dp))
-                        Text(
-                            if (err.isEmpty()) "正在读你的资料…" else err,
-                            Modifier.padding(start = 12.dp),
-                            color = if (err.isEmpty()) t.textMuted else t.danger,
-                        )
+                    me == null -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        val problem = err.ifBlank { MeAuth.profileError }
+                        Text(problem.ifBlank { "正在读取账户资料…" }, color = if (problem.isBlank()) t.textMuted else t.danger)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton({ scope.launch { busy = true; try { err = MeAuth.refresh().orEmpty() } finally { busy = false } } }, enabled = !busy) { Text(if (busy) "正在重试…" else "重试") }
+                            TextButton({ MeAuth.signOut(); err = "" }) { Text("返回登录") }
+                        }
                     }
                     else -> SignedIn(me, busy, err, onMail = { mailOpen = true }, onSupport = { supportOpen = true },
                         onRefresh = {
@@ -115,7 +120,7 @@ fun MePane(state: AppState) {
 }
 
 @Composable
-private fun SignInCard(why: String, waiting: Boolean, err: String, busy: Boolean, onSignIn: () -> Unit) {
+private fun SignInCard(why: String, waiting: Boolean, err: String, busy: Boolean, onCancel: () -> Unit, onSignIn: () -> Unit) {
     val t = Tokens.current
     Card {
         Text("还没登录", style = MaterialTheme.typography.titleMedium, color = t.textPrimary)
@@ -129,11 +134,12 @@ private fun SignInCard(why: String, waiting: Boolean, err: String, busy: Boolean
         }
         Spacer(Modifier.height(14.dp))
         Button(onClick = onSignIn, enabled = !busy && !waiting) {
-            Text(if (waiting) "等浏览器那边授权…" else "用 Yxi 账号登录")
+            Text(if (waiting) "等浏览器那边授权…" else if (busy) "正在准备登录…" else "用 Yxi 账号登录")
         }
         if (waiting) {
+            TextButton(onCancel) { Text("取消本次登录") }
             Text(
-                "浏览器已经打开了。授权完这一页会自己继续;要是浏览器没弹出来,再点一次会给你地址。",
+                "浏览器已打开，授权完成后会自动继续。也可以取消本次登录后重试。",
                 Modifier.padding(top = 10.dp), style = MaterialTheme.typography.bodySmall, color = t.textMuted,
             )
         }

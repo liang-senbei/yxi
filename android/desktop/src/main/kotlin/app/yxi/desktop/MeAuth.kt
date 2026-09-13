@@ -21,9 +21,7 @@ import java.net.URLDecoder
  * 用户看不到地址栏里的域名(钓鱼没法分辨)、密码管理器和已登录会话用不上、
  * 而且我们要多打包一个浏览器内核。
  *
- * ⚠️ **端口动态分配**(`ServerSocket(0)`),不写死。写死会撞用户机器上别的软件,
- * 被占了就登不进去 —— 而登录是「我的」这一整页的门,登不了整页就废了。
- * (pilot 2026-09-08:桌面壳的单实例锁也是 `ServerSocket(0)` 拿临时端口,同一个理由。)
+ * 回调端口使用服务端已注册的1455；占用时显示错误，不让用户进入无法返回的授权流程。
  *
  * ⚠️ **令牌存 `%LOCALAPPDATA%\Yxi`,不是 `%APPDATA%`**:后者是漫游目录,域账户换台机器登录、
  * 或者 OneDrive 备份开着,它会被同步到别处去 —— 那等于把登录凭据抄送到公司文件服务器。
@@ -46,30 +44,32 @@ object MeAuth {
     /** 正在等浏览器那边授权 —— 界面显示「已经在浏览器里打开,授权完这里会自己继续」。 */
     var waitingBrowser by mutableStateOf(false)
         private set
+    var profileError by mutableStateOf("")
+        private set
 
-    private val tokens = File(Store.dir, "auth.json")
-
-    private fun read(): JSONObject =
-        runCatching { JSONObject(tokens.readText()) }.getOrElse { JSONObject() }
-
-    private fun write(o: JSONObject) {
-        runCatching {
-            tokens.writeText(o.toString())
-            // ⚠️ 尽力把权限收到「只有本人能读」。Windows 上 setReadable(false, false) 是 no-op,
-            //    真正的防线是目录本身(%LOCALAPPDATA% 在用户 profile 下);Linux/macOS 上这一步有效。
-            tokens.setReadable(false, false); tokens.setReadable(true, true)
-        }.onFailure { Plat.logw("Yxi", "存令牌失败: ${it.message}") }
-    }
+    private val sessions = AuthSessionStore(File(Store.dir, "auth.json"))
+    private var callbackServer: ServerSocket? = null
+    internal val sessionGeneration get() = sessions.generation
 
     /** 启动时叫一次:有令牌就当已登录,顺手拉一次资料。 */
     suspend fun load() {
-        signedIn = read().optString("refresh").isNotEmpty()
-        if (signedIn) refresh()
+        val generation = sessionGeneration
+        try {
+            val active = sessions.read(generation).optString("refresh").isNotEmpty()
+            sessions.guarded(generation) { signedIn = active; if (!active) me = null }
+            if (active) {
+                val problem = refresh()
+                sessions.guarded(generation) { profileError = problem.orEmpty() }
+            }
+        } catch (_: StaleAuthSession) { }
+        catch (e: Exception) { runCatching { sessions.guarded(generation) { signedIn = false; signedOutWhy = "无法读取本地登录记录：${e.message}" } } }
     }
 
     fun signOut() {
-        runCatching { tokens.delete() }
-        signedIn = false; me = null
+        sessions.signOut(onNotice = { signedOutWhy = it.orEmpty() }) {
+            signedIn = false; me = null; waitingBrowser = false; profileError = ""
+            runCatching { callbackServer?.close() }; callbackServer = null
+        }
     }
 
     /**
@@ -82,10 +82,11 @@ object MeAuth {
         // 固定 1455（照 Codex 的做法）：Logto 的 redirect_uri 必须精确匹配，随机端口永远注册不上
         // （1.1.1 真机报 invalid_redirect_uri 就是随机端口害的；Logto 侧已注册 http://127.0.0.1:1455/callback）。
         // 先绑上再拼 redirect_uri，绑不上（别的程序占了口/上一个实例没退干净）就明说，别让浏览器白跑一趟。
-        val server = runCatching { ServerSocket(1455, 1, InetAddress.getLoopbackAddress()) }
+        val server = runCatching { ServerSocket(1455, 1, InetAddress.getByName("127.0.0.1")) }
             .getOrElse {
                 return@withContext "回调端口 1455 被占用（可能上一次登录还没退干净）。稍后再试，或重启电脑后重试。:${it.message}"
             }
+        val generation = sessions.begin { signedIn = false; me = null; profileError = ""; callbackServer = server }
         server.soTimeout = 5 * 60 * 1000            // 五分钟没人回来就收摊,别把线程和端口永远占着
         val redirect = "http://127.0.0.1:${server.localPort}/callback"
         val url = "${AccountApi.AUTH}/oidc/auth?" + mapOf(
@@ -101,10 +102,11 @@ object MeAuth {
 
         if (!openBrowser(url)) {
             runCatching { server.close() }
+            runCatching { sessions.guarded(generation) { callbackServer = null } }
             return@withContext "打不开浏览器。把这个地址复制到浏览器里也行:\n$url"
         }
-        waitingBrowser = true
         try {
+            sessions.guarded(generation) { waitingBrowser = true }
             val (code, backState, err) = server.use { awaitCallback(it, state) }
             when {
                 err.isNotEmpty() -> return@withContext "授权没通过:$err"
@@ -112,6 +114,7 @@ object MeAuth {
                 backState != state -> return@withContext "登录状态校验失败,重来一次"
                 code.isEmpty() -> return@withContext "浏览器没给授权码,重来一次"
             }
+            sessions.guarded(generation) { check(callbackServer === server) }
             val (c, body) = AccountApi.form(
                 "${AccountApi.AUTH}/oidc/token",
                 mapOf(
@@ -121,50 +124,56 @@ object MeAuth {
                 ),
             )
             if (c !in 200..299) return@withContext AccountApi.httpErr(c, body)
-            save(JSONObject(body))
-            signedIn = true; signedOutWhy = ""
+            sessions.guarded(generation) {
+                sessions.save(generation, JSONObject(body), fresh = true)
+                signedIn = true; signedOutWhy = ""
+            }
             refresh()
         } catch (e: java.net.SocketTimeoutException) {
-            "等了五分钟没等到浏览器那边的授权,重来一次"
+            "登录等待已超时，请重新尝试"
         } catch (e: Exception) {
-            "登录出错:${e.message}"
+            if (sessionGeneration != generation) "登录已取消" else "登录出错:${e.message}"
         } finally {
-            waitingBrowser = false
+            runCatching { sessions.guarded(generation) { waitingBrowser = false; callbackServer = null } }
         }
     }
 
     /** 拉一次 `/api/me`。@return 出错原因,成功 null。 */
-    internal suspend fun accountRequest(owner: String, path: String, method: String, body: String?): Pair<Int, String> = withContext(Dispatchers.IO) {
-        check(signedIn && me?.userId == owner) { "登录账号已变化，请重新进入信箱" }
+    internal suspend fun accountRequest(owner: String, path: String, method: String, body: String?, generation: Long = sessionGeneration): Pair<Int, String> = withContext(Dispatchers.IO) {
+        sessions.guarded(generation) { check(signedIn && me?.userId == owner) { "登录账号已变化，请重新进入账户页面" } }
         require(listOf("/api/mail", "/api/support/tickets").any { path == it || path.startsWith("$it/") || path.startsWith("$it?") })
-        val access = token() ?: error("登录已失效，请重新登录")
-        check(signedIn && me?.userId == owner) { "登录账号已变化" }
+        val access = token(generation) ?: error("登录暂不可用，请检查连接或重新登录")
+        sessions.guarded(generation) { check(signedIn && me?.userId == owner) { "登录账号已变化" } }
         val result = AccountApi.req(AccountApi.API + path, method, access, body)
-        check(signedIn && me?.userId == owner) { "登录账号已变化，已忽略旧账号的回复" }
+        sessions.guarded(generation) { check(signedIn && me?.userId == owner) { "登录账号已变化，已忽略旧账号的回复" } }
         result
     }
 
-    internal fun mailCounters(owner: String, result: JSONObject) {
-        val current = me?.takeIf { signedIn && it.userId == owner } ?: return
+    internal fun mailCounters(owner: String, result: JSONObject, generation: Long = sessionGeneration) = runCatching { sessions.guarded(generation) {
+        val current = me?.takeIf { signedIn && it.userId == owner } ?: return@guarded
         me = current.copy(
             unreadMail = result.optInt("unread", -1).takeIf { it >= 0 } ?: current.unreadMail,
             unclaimedMail = result.optInt("unclaimed", -1).takeIf { it >= 0 } ?: current.unclaimedMail,
             tickets = result.optInt("tickets", -1).takeIf { it >= 0 } ?: current.tickets,
             balanceCents = result.optLong("balanceCents", -1).takeIf { it >= 0 } ?: current.balanceCents,
         )
-    }
+    } }.let { Unit }
 
-    internal fun supportUnread(owner: String, count: Int) {
+    internal fun supportUnread(owner: String, count: Int, generation: Long = sessionGeneration) = runCatching { sessions.guarded(generation) {
         me?.takeIf { signedIn && it.userId == owner && count >= 0 }?.let { me = it.copy(unreadTickets = count) }
-    }
+    } }.let { Unit }
 
     suspend fun refresh(): String? = withContext(Dispatchers.IO) {
-        val tk = token() ?: return@withContext "没登录"
+        val generation = sessionGeneration
+        try {
+        val tk = token(generation) ?: return@withContext "登录暂不可用，请检查连接或重新登录"
         val (c, body) = AccountApi.req("${AccountApi.API}/api/me", "GET", tk, null)
         if (c !in 200..299) return@withContext AccountApi.httpErr(c, body)
-        runCatching { me = AccountApi.parseMe(JSONObject(body)) }
-            .onFailure { return@withContext "读不懂服务器的回复" }
+        val profile = runCatching { AccountApi.parseMe(JSONObject(body)) }.getOrElse { return@withContext "读不懂服务器的回复" }
+        sessions.guarded(generation) { check(signedIn); me = profile }
         null
+        } catch (_: StaleAuthSession) { "登录会话已变化" }
+        catch (e: Exception) { "登录信息无法更新：${e.message}" }
     }
 
     /**
@@ -175,8 +184,8 @@ object MeAuth {
      * 而且**同一时刻只能有一个线程在续** —— 两个线程同时进来会互相拿旧的重用。
      */
     @Synchronized
-    private fun token(): String? {
-        val o = read()
+    private fun token(generation: Long): String? {
+        val o = sessions.read(generation)
         val acc = o.optString("access").takeIf { it.isNotEmpty() }
         if (acc != null && System.currentTimeMillis() < o.optLong("exp") - 60_000L) return acc
         val rt = o.optString("refresh").takeIf { it.isNotEmpty() } ?: return acc
@@ -189,22 +198,22 @@ object MeAuth {
             Plat.logw("Yxi", "续令牌失败 HTTP $c")
             // ⚠️ 被拒(撤销 / 过期 / 旧令牌被重用过)才是真掉登录;**网络不通(code 0)不算** ——
             //    那种时候把人登出是最坏的处理。
-            if (c == 400 || c == 401) { signOut(); signedOutWhy = "登录失效了,重新登一次" }
+            if (c == 400 || c == 401) sessions.guarded(generation) {
+                signOut(); signedOutWhy = listOf("登录失效了,重新登一次", signedOutWhy).filter { it.isNotBlank() }.joinToString("；")
+            }
             return null
         }
-        save(JSONObject(body))
-        return read().optString("access").takeIf { it.isNotEmpty() }
+        try { sessions.save(generation, JSONObject(body)) }
+        catch (e: StaleAuthSession) { throw e }
+        catch (e: Exception) {
+            sessions.guarded(generation) {
+                signOut(); signedOutWhy = listOf("新的登录凭据无法保存，请重新登录：${e.message}", signedOutWhy).filter { it.isNotBlank() }.joinToString("；")
+            }
+            return null
+        }
+        return sessions.read(generation).optString("access").takeIf { it.isNotEmpty() }
     }
 
-    private fun save(j: JSONObject) {
-        val o = read()
-        j.optString("access_token").takeIf { it.isNotEmpty() }?.let { o.put("access", it) }
-        // ⚠️ **新的 refresh token 必须存回去**。漏了它,下次就是拿旧的重用 = 整条授权被撤销。
-        j.optString("refresh_token").takeIf { it.isNotEmpty() }?.let { o.put("refresh", it) }
-        val ttl = j.optLong("expires_in", 3600L)
-        o.put("exp", System.currentTimeMillis() + ttl * 1000L)
-        write(o)
-    }
 
     /**
      * 从请求行里解出回调参数。**抽成纯函数是为了测得到** —— 登录最容易错的就是这一段
@@ -216,12 +225,15 @@ object MeAuth {
         if (parts.size != 3 || parts[0] != "GET" || parts[1].substringBefore('?') != "/callback") return emptyMap()
         val q = line.substringAfter('?', "").substringBefore(' ')
         if (q.isEmpty()) return emptyMap()
-        return q.split('&').mapNotNull {
+        val pairs = q.split('&').map {
             val i = it.indexOf('=')
-            if (i <= 0) null else runCatching {
+            if (i <= 0) return emptyMap()
+            runCatching {
                 URLDecoder.decode(it.substring(0, i), "UTF-8") to URLDecoder.decode(it.substring(i + 1), "UTF-8")
-            }.getOrNull()
-        }.toMap()
+            }.getOrElse { return emptyMap() }
+        }
+        if (pairs.map { it.first }.distinct().size != pairs.size) return emptyMap()
+        return pairs.toMap()
     }
 
     /**
@@ -230,20 +242,51 @@ object MeAuth {
      *   不然会出现「浏览器说登录成功、应用说校验失败」这种自相矛盾(2026-09-08 在 Xvfb 上跑出来的:
      *   拿一个 state 不对的回调打进来,页面照样写「登录成功」)。只看 code 在不在是不够的。
      */
-    private fun awaitCallback(server: ServerSocket, expectState: String): Triple<String, String, String> {
-        server.accept().use { sock ->
-            val line = sock.getInputStream().bufferedReader().readLine().orEmpty()   // "GET /callback?... HTTP/1.1"
-            val kv = parseCallback(line)
+    internal fun awaitCallback(server: ServerSocket, expectState: String, timeoutMs: Int = 300_000, readMs: Int = 3000): Triple<String, String, String> {
+        val deadline = System.nanoTime() + timeoutMs * 1_000_000L
+        while (true) {
+          val remaining = ((deadline - System.nanoTime()) / 1_000_000).toInt()
+          if (remaining <= 0) throw java.net.SocketTimeoutException()
+          server.soTimeout = remaining
+          try { server.accept().use { sock ->
+            val requestDeadline = minOf(deadline, System.nanoTime() + readMs * 1_000_000L)
+            val bytes = java.io.ByteArrayOutputStream()
+            val input = sock.getInputStream()
+            while (bytes.size() < 8192) {
+                val left = ((requestDeadline - System.nanoTime()) / 1_000_000).toInt()
+                if (left <= 0) throw java.net.SocketTimeoutException()
+                sock.soTimeout = left
+                val byte = input.read()
+                if (byte < 0 || byte == 10) break
+                if (byte != 13) bytes.write(byte)
+            }
+            val line = if (bytes.size() >= 8192) "" else bytes.toString("UTF-8")
+            var blank = true
+            var headersDone = false
+            var headerSize = 0
+            while (headerSize++ < 16384) {
+                val left = ((requestDeadline - System.nanoTime()) / 1_000_000).toInt()
+                if (left <= 0) throw java.net.SocketTimeoutException()
+                sock.soTimeout = left
+                val byte = input.read()
+                if (byte < 0) break
+                if (byte == 10 && blank) { headersDone = true; break }
+                if (byte != 13) blank = byte == 10
+            }
+            val kv = if (headersDone) parseCallback(line) else emptyMap()
+            val valid = kv["state"] == expectState && (kv["code"].isNullOrEmpty() xor kv["error"].isNullOrEmpty())
             // 浏览器那边要看到一句人话,不然停在空白页会以为没成功
             val page = callbackPage(kv, expectState)
             val html = "<!doctype html><meta charset=utf-8><title>Yxi</title>" +
                 "<body style=\"font:16px/1.7 system-ui;padding:3rem;color:#222\">$page</body>"
             sock.getOutputStream().apply {
-                write(("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n" +
+                write(("HTTP/1.1 ${if (valid) "200 OK" else "400 Bad Request"}\r\nContent-Type: text/html; charset=utf-8\r\n" +
                        "Content-Length: ${html.toByteArray().size}\r\nConnection: close\r\n\r\n").toByteArray())
                 write(html.toByteArray()); flush()
             }
-            return Triple(kv["code"].orEmpty(), kv["state"].orEmpty(), kv["error"].orEmpty())
+            if (valid) return Triple(kv["code"].orEmpty(), kv["state"].orEmpty(), kv["error"].orEmpty())
+          } } catch (_: java.net.SocketTimeoutException) { /* Keep the original deadline. */ }
+          catch (e: java.io.IOException) { if (server.isClosed) throw e }
         }
     }
 
