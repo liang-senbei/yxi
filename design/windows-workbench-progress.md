@@ -514,3 +514,11 @@
 - 单元测试覆盖缺失后空写入被拒、无保护器不覆盖、预览不含密码、错误指纹拒绝、明确恢复及活动文件存在时拒绝覆盖。全量142项中134通过、8环境跳过，Linux打包通过（/tmp/yxi-host-recovery-build.log）。
 - Windows扩展NativeCheck通过：测试profile删除活动密文/备份后空写被拒，明确选择原加密副本成功恢复，并重读得到原虚构记录。证据tmp/host-recovery-native-20260913及artifact-sha256.txt，未操作真实用户配置。
 - 目前只允许活动文件均缺失时恢复；活动密文与备份均存在但不可读、历史副本时间/来源细化、多进程外部并发、完整exe恢复按钮/重启和Windows布局仍待验收，完整W01-A继续推进。
+
+## 第五十三轮：Windows应用入口的多主机跨进程验证（2026-09-13）
+
+- 新增--host-smoke入口，严格要求Windows、显式fixture根目录、匹配的user.home/APPDATA/LOCALAPPDATA，以及首次创建的测试标记；测试专用分支在Updater/连接/窗口逻辑前执行，不连接测试服务器。
+- 第一exe进程从虚构漫游目录导入两台服务器，核对ID、用户名、地址、端口与密码，保存别名与重连偏好；第二exe进程重新加载Store，核对两台记录、修改后的别名与偏好仍在。旧漫游main/bak清空，当前本地hosts相关文件不含测试明文密码。
+- windows-native-verify.ps1接入host-smoke/host-reopen并保留原启动、凭据、浏览器检查。基于干净Git提交e0ad813的完整源码归档，在hk13新目录构建Windows jar，构建日志/tmp/yxi-windows-e0ad813-build.log。
+- Windows本机实际app-image exe完成六项检查并正常退出；jar SHA256为a320bcf7274bc47fb1b46578b271bbd9fad774402f1dedca9d026f9807740ffb，与服务器一致。证据tmp/windows-e0ad813-native含分项日志、artifact-sha256.txt和source-manifest.json。
+- 这是实际exe入口及Store的跨进程迁移/保存检查，不等同恢复按钮完整点击、真实SSH重连或所有DPI/IME验收；测试程序仅在脚本注入的隔离环境中运行，没有替换用户安装版，完整PRD继续推进。
