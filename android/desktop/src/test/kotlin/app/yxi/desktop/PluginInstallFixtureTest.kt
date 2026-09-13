@@ -32,6 +32,7 @@ class PluginInstallFixtureTest {
         val conn = Conn(Host("install-fixture", "Installation test", "127.0.0.1", port, "root", fixture.resolve("client").path), FileHostKeys())
         val state = AppState().apply { this.conn = conn }
         var failure: Throwable? = null
+        var showInstalled by mutableStateOf(false)
         try {
             runBlocking {
                 conn.ssh.connect()
@@ -41,7 +42,7 @@ class PluginInstallFixtureTest {
             conn.status = Conn.Status.Connected
             application(exitProcessOnExit = false) {
                 Window(onCloseRequest = ::exitApplication, title = "Yxi plugin installation fixture", state = rememberWindowState(width = 820.dp, height = 820.dp)) {
-                    YxiTheme { PluginCatalogPane(state, conn) }
+                    YxiTheme { if (showInstalled) PluginInventoryPane(state, conn) else PluginCatalogPane(state, conn) }
                     LaunchedEffect(Unit) {
                         suspend fun shot(name: String) = withContext(Dispatchers.IO) { ImageIO.write(Robot().createScreenCapture(Rectangle(0, 0, 1400, 1000)), "png", fixture.resolve(name)) }
                         try {
@@ -57,6 +58,24 @@ class PluginInstallFixtureTest {
                             assertEquals("listed", inventory.plugins.single().runnerState)
                             assertEquals("installed", PluginOperations(File(Store.dir, "plugin-operations.json")).entries.single().status)
                             delay(1500); shot("04-installed.png")
+                            market.resolve("plugins/sample/.claude-plugin/plugin.json").writeText("""{"name":"sample","version":"1.1.0"}""")
+                            val definition = market.resolve(".claude-plugin/marketplace.json")
+                            val changed = JSONObject(definition.readText())
+                            changed.getJSONArray("plugins").getJSONObject(0).put("version", "1.1.0")
+                            definition.writeText(changed.toString())
+                            conn.ssh.exec("claude plugin marketplace update yxi-test")
+                            showInstalled = true
+                            delay(3000); shot("05-update-ready.png"); fixture.resolve("update-ready").writeText("ready")
+                            withTimeout(90000) { while (state.pluginOperations.entries.size < 2 || state.pluginOperations.running.isNotEmpty()) delay(100) }
+                            val result = state.pluginOperations.entries.last()
+                            assertEquals("updated", result.status)
+                            assertEquals("1.0.0", result.beforeVersion)
+                            assertEquals("1.1.0", result.afterVersion)
+                            val fresh = PluginInventory.parse(conn.ssh.exec(PluginInventory.command())).plugins.single()
+                            assertEquals("1.1.0", fresh.version)
+                            assertEquals("1.1.0", JSONObject(File(fresh.path, ".claude-plugin/plugin.json").readText()).getString("version"))
+                            assertEquals("1.1.0", PluginOperations(File(Store.dir, "plugin-operations.json")).entries.last().afterVersion)
+                            delay(2000); shot("07-updated.png")
                         } catch(e: Throwable) { failure = e; shot("failure.png") }
                         finally { exitApplication() }
                     }

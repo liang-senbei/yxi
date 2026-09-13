@@ -443,3 +443,11 @@
 - 持久化测试扩展到updated及版本字段跨重读保留；新增更新按钮后同步调整原卸载测试位置。桌面测试/打包通过（/tmp/yxi-update-ui-build.log）。
 - 更新按钮到实际市场升级的原生点击、精确目标版本固定、包回滚、Windows专项与完整W03仍待验证，不能将前轮CLI升级测试冒充本轮界面升级验收。
 - 原启停/恢复/卸载原生回归正常完成，日志/tmp/yxi-update-ui-regression/test.log，fixture.lWMQ7G。仅用于验证新增按钮后旧流程未受影响。
+
+## 第四十五轮：插件更新的原生流程验收（2026-09-13）
+
+- 扩展真实安装fixture：先通过目录安装1.0.0，再修改临时市场插件与索引到1.1.0，通过该测试市场的CLI索引更新后切到主机插件页，实际点击更新及确认。
+- 核对updated回执、beforeVersion=1.0.0、afterVersion=1.1.0；重新查询安装登记并直接读取安装目录plugin.json，均为1.1.0。新建PluginOperations读取本地文件，确认版本回执保留；这属于持久记录重读，不等同完整程序重启验收。
+- 已查看确认与结果截图：本机tmp/workbench-evidence/plugin-update-confirm.png和plugin-updated-verified.png；界面结果和卡片版本一致，运行器列表显示识别且启用。
+- 自动化完整执行并正常退出，日志/tmp/yxi-plugin-update-native/test.log，fixture.CjtwDX。本轮仅扩展测试/脚本与进度文档，没有重复无关生产打包，也没有更新生产插件。
+- 仍需精确升级目标版本固定、包回滚、远程来源/项目范围、多主机断线以及Windows更新专项。完整PRD继续推进。

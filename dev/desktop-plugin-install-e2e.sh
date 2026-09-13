@@ -35,6 +35,12 @@ tap 158 477
 tap 600 662
 sleep 2
 tap 620 619
+for attempt in $(seq 1 30); do [ -f "$fixture/update-ready" ] && break; sleep 1; done
+test -f "$fixture/update-ready"
+tap 255 577
+sleep 2
+import -window root "$fixture/06-update-confirm.png"
+tap 675 600
 wait "$test_pid"
 test_pid=
 echo "Plugin installation UI verified: $fixture"
