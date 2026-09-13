@@ -99,7 +99,8 @@ fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, onCreated: (Session) -> 
     var err by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var agent by remember { mutableStateOf("claude") }
-    val requestId = remember(path, agent) { DesktopLaunchPlan.newRequestId() }
+    var initialPrompt by remember { mutableStateOf("") }
+    val requestId = remember(path, agent, initialPrompt) { DesktopLaunchPlan.newRequestId() }
     WorkbenchDialog(
         onDismissRequest = { if (!busy) onDismiss() },
         title = { Text("在 ${conn.host.label} 上新建会话") },
@@ -108,6 +109,9 @@ fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, onCreated: (Session) -> 
                 WorkbenchTabs(listOf("Claude Code", "Codex"), if (agent == "codex") "Codex" else "Claude Code", { if (!busy) agent = if (it == "Codex") "codex" else "claude" })
                 Text("先检查运行器，再创建独立会话。目录不存在会创建；已有任务继续运行。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 OutlinedTextField(path, { path = it }, enabled = !busy, singleLine = true, label = { Text("服务器工作目录") }, placeholder = { Text("/opt/workspace/…") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(initialPrompt, { initialPrompt = it }, enabled = !busy, minLines = 2, maxLines = 5,
+                    label = { Text("启动提示词（可留空）") }, placeholder = { Text("描述目标、分工及需要遵守的项目约定") }, modifier = Modifier.fillMaxWidth())
+                if (initialPrompt.isNotBlank()) Text("创建后会把这段内容直接交给运行器，可能立即开始工作。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 Text("运行器沿用服务器的登录与权限设置。创建会话不代表模型请求已经成功。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 if (err.isNotBlank()) Text(err, style = MaterialTheme.typography.bodySmall, color = Tokens.current.danger)
             }
@@ -116,7 +120,7 @@ fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, onCreated: (Session) -> 
             TextButton(enabled = path.isNotBlank() && !busy, onClick = {
                 busy = true
                 scope.launch {
-                    try { createSession(conn, DesktopLaunchPlan(path.trim(), agent, requestId)).fold(onCreated) { err = it.message.orEmpty() } }
+                    try { createSession(conn, DesktopLaunchPlan(path.trim(), agent, requestId, initialPrompt)).fold(onCreated) { err = it.message.orEmpty() } }
                     catch (e: kotlinx.coroutines.CancellationException) { throw e }
                     catch (e: Exception) { err = e.message.orEmpty() }
                     finally { busy = false }
