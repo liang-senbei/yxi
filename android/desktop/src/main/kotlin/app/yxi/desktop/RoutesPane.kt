@@ -37,6 +37,7 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
     var resetting by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<Lines.Line?>(null) }
     var projectScope by remember { mutableStateOf(false) }
+    var search by remember { mutableStateOf("") }
     val cwd = state.session?.cwd?.takeIf { it.startsWith('/') }
     val chosenScope = if (engine == Lines.CLAUDE && projectScope) cwd else null
     suspend fun reload(scopePath: String? = chosenScope) {
@@ -107,10 +108,16 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
         if (note.isNotBlank()) Text(note, Modifier.padding(vertical = 12.dp), color = t.textSecondary)
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 10.dp))
         Spacer(Modifier.height(18.dp))
+        OutlinedTextField(search, { search = it }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+            placeholder = { Text("搜索线路名称、地址、模型或备注") })
+        Spacer(Modifier.height(10.dp))
+        val visibleLines = lines.orEmpty().filter { line -> line.agent == engine &&
+            listOf(line.name, line.baseUrl, routeModel(line), line.note).any { it.contains(search.trim(), ignoreCase = true) } }
         when {
             lines == null -> Text("线路清单未能读取。请确认连接、文件权限与内容格式。", color = t.textMuted)
             lines!!.none { it.agent == engine } -> Text("还没有保存的线路。添加后可配置模型、测试连通性，再应用到服务器。", color = t.textMuted)
-            else -> lines!!.filter { it.agent == engine }.forEach { line ->
+            visibleLines.isEmpty() -> Text("没有匹配的线路", color = t.textMuted)
+            else -> visibleLines.forEach { line ->
                 Surface(Modifier.fillMaxWidth().padding(bottom = 10.dp), shape = RoundedCornerShape(14.dp), color = t.surface2,
                     border = BorderStroke(0.5.dp, t.border)) {
                     Column(Modifier.padding(18.dp)) {
@@ -122,8 +129,10 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
                             if (line.id == current?.id) Text("配置匹配", style = MaterialTheme.typography.labelSmall, color = t.success)
                         }
                         Text("模型 · " + routeModel(line).ifBlank { "使用运行器默认值" }, Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyMedium)
-                        Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (line.note.isNotBlank()) Text(line.note, Modifier.padding(top = 6.dp), style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+                        Row(Modifier.padding(top = 10.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             TextButton({ editor = line }, enabled = !busy) { Text("编辑") }
+                            TextButton({ editor = line.copy(id = Lines.newId(), name = line.name + " · 副本", extra = org.json.JSONObject(line.extra.toString())) }, enabled = !busy) { Text("复制线路") }
                             TextButton({ act { note = Lines.probe(conn.ssh, line.baseUrl) + "；此测试不验证密钥或模型可用性。" } }, enabled = !busy) { Text("测连通性") }
                             TextButton({ note = ""; applying = line }, enabled = !busy) { Text("应用配置") }
                             TextButton({ note = ""; deleting = line }, enabled = !busy) { Text("移除记录") }
@@ -184,6 +193,7 @@ private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend
     var secret by remember { mutableStateOf(original.apiKey) }
     var authToken by remember { mutableStateOf(original.token) }
     var model by remember { mutableStateOf(routeModel(original)) }
+    var memo by remember { mutableStateOf(original.note) }
     var error by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     WorkbenchDialog(onDismissRequest = { if (!busy) onClose() }, title = { Text("${if (original.isCodex) "Codex" else "Claude Code"} 线路") },
@@ -193,12 +203,13 @@ private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend
             OutlinedTextField(secret, { secret = it }, label = { Text("API 密钥") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
             if (!original.isCodex) OutlinedTextField(authToken, { authToken = it }, label = { Text("Auth token（按提供方要求填写）") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
             OutlinedTextField(model, { model = it }, label = { Text("模型 ID（可留空）") }, singleLine = true)
+            OutlinedTextField(memo, { memo = it }, label = { Text("备注（例如用途、套餐或模型区别）") }, maxLines = 3)
             Text("模型 ID 由该线路提供方定义。保存不代表接口、密钥或模型已验证。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
             if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
         } },
         confirmButton = { TextButton({ scope.launch {
             busy = true; error = ""
-            try { onSave(editedRoute(original, name, url, secret, model, authToken)) }
+            try { onSave(editedRoute(original, name, url, secret, model, authToken).copy(note = memo.trim())) }
             catch (e: CancellationException) { throw e }
             catch (e: Exception) { error = e.message ?: "保存失败，输入已保留" }
             finally { busy = false }
