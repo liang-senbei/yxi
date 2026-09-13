@@ -44,6 +44,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun HostForm(h: Host, isNew: Boolean, onSave: (Host) -> Unit, onClose: () -> Unit) {
     var alias by remember { mutableStateOf(h.alias) }
+    var region by remember { mutableStateOf(h.region) }
     var hostname by remember { mutableStateOf(h.hostname) }
     var port by remember { mutableStateOf(h.port.toString()) }
     var username by remember { mutableStateOf(h.username) }
@@ -58,6 +59,7 @@ fun HostForm(h: Host, isNew: Boolean, onSave: (Host) -> Unit, onClose: () -> Uni
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Field(alias, { alias = it }, "名字（随便起，只给你自己看）")
+                Field(region, { region = it.take(80) }, "地区或分组标签，例如 香港 / 东京 / 公司")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Box(Modifier.weight(1f)) { Field(hostname, { hostname = it.trim() }, "IP 或域名，如 38.244.50.31") }
                     Box(Modifier.width(88.dp)) { Field(port, { port = it.filter(Char::isDigit).take(5) }, "端口") }
@@ -90,7 +92,7 @@ fun HostForm(h: Host, isNew: Boolean, onSave: (Host) -> Unit, onClose: () -> Uni
                     else -> ""
                 }
                 if (err.isEmpty() && p != null) runCatching { onSave(h.copy(
-                    alias = alias.trim(), hostname = hostname, port = p, username = username,
+                    alias = alias.trim(), region = region.trim(), hostname = hostname, port = p, username = username,
                     keyPath = if (usePassword) "" else kp, password = if (usePassword) password else "",
                 )) }.onFailure { err = "保存失败，输入已保留：${it.message}" }
             }) { Text("保存") }

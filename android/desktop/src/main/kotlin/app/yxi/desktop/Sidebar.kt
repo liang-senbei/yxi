@@ -163,7 +163,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
                 DropdownMenu(hostMenu, { hostMenu = false }) {
                     DropdownMenuItem(text = { Text("所有主机") }, onClick = { state.scopeHost(""); hostMenu = false })
                     hosts.forEach { h ->
-                        DropdownMenuItem(text = { Text(h.label + " · " + (connOf(h)?.status?.label?.ifBlank { "未连接" } ?: "未连接")) }, onClick = {
+                        DropdownMenuItem(text = { Text(h.label + (if (h.region.isBlank()) "" else " · ${h.region}") + " · " + (connOf(h)?.status?.label?.ifBlank { "未连接" } ?: "未连接")) }, onClick = {
                             hostMenu = false; state.scopeHost(h.id)
                             if (connOf(h) == null || connOf(h)?.status == Conn.Status.Failed) connect(h)
                             connOf(h)?.let { c -> if (state.conn !== c) state.select(c, null) }
@@ -225,8 +225,8 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
             hosts.forEachIndexed { i, h ->
                 if (state.hostScope.isNotEmpty() && state.hostScope != h.id) return@forEachIndexed
                 val c = connOf(h)
-                val sessions = c?.sessions?.filter { f.isEmpty() || h.label.contains(f, true) || it.short.contains(f, true) || it.name.contains(f, true) || it.cwd.contains(f, true) || state.navigation.title(taskNavigationKey(h, it))?.contains(f, true) == true } ?: emptyList()
-                val hostMatch = f.isEmpty() || h.label.contains(f, ignoreCase = true)
+                val sessions = c?.sessions?.filter { f.isEmpty() || h.label.contains(f, true) || h.region.contains(f, true) || it.short.contains(f, true) || it.name.contains(f, true) || it.cwd.contains(f, true) || state.navigation.title(taskNavigationKey(h, it))?.contains(f, true) == true } ?: emptyList()
+                val hostMatch = f.isEmpty() || h.label.contains(f, ignoreCase = true) || h.region.contains(f, ignoreCase = true)
                 if (!hostMatch && sessions.isEmpty()) return@forEachIndexed   // 滤空的整组不画，省得滚动列表里全是空组
                 Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
                     Box(Modifier.width(3.dp).fillMaxHeight().background(h.tint(i)))   // 连接颜色条，整组都带着
@@ -263,7 +263,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
         HostForm(h, isNew = hosts.none { it.id == h.id }, onSave = { n ->
             save(if (hosts.any { it.id == n.id }) hosts.map { if (it.id == n.id) n else it } else hosts + n)
             // 地址 / 认证改了，连着的那条作废重连；只改名字或颜色不用动
-            if (connOf(h) != null && n.copy(alias = h.alias, color = h.color) != h) connect(n)
+            if (connOf(h) != null && n.copy(alias = h.alias, color = h.color, region = h.region) != h) connect(n)
             editing = null
         }, onClose = { editing = null })
     }
@@ -318,10 +318,10 @@ private fun HostHeader(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         StatusDot(st)
-        Text(
-            h.label, Modifier.weight(1f).padding(horizontal = 8.dp), style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.SemiBold, color = t.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis,
-        )
+        Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
+            Text(h.label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = t.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (h.region.isNotBlank()) Text(h.region, style = MaterialTheme.typography.labelSmall, color = t.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
         if (st.label.isNotEmpty()) Text(st.label, style = MaterialTheme.typography.labelSmall, color = if (st == Conn.Status.Failed) t.danger else t.textMuted)
         Box {
             IconButton({ menu = true }, Modifier.size(24.dp)) { Icon(Icons.Default.MoreHoriz, "菜单", Modifier.size(16.dp), tint = t.textSecondary) }

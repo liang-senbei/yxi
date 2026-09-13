@@ -14,7 +14,7 @@ internal data class HostImportPlan(val original: List<Host>, val rows: List<Host
 }
 internal object HostTransfer {
     fun export(hosts: List<Host>): String = JSONObject().put("format", "yxi-hosts-export").put("version", 1)
-        .put("hosts", JSONArray(hosts.map { h -> JSONObject().put("id", h.id).put("alias", h.alias).put("hostname", h.hostname).put("port", h.port).put("username", h.username).put("color", h.color) })).toString(2)
+        .put("hosts", JSONArray(hosts.map { h -> JSONObject().put("id", h.id).put("alias", h.alias).put("hostname", h.hostname).put("port", h.port).put("username", h.username).put("color", h.color).put("region", h.region) })).toString(2)
     private fun endpoint(host: Host) = listOf(host.hostname.trim().removeSurrounding("[", "]").trimEnd('.').lowercase(), host.port.toString(), host.username)
     fun preview(raw: String, existing: List<Host>): HostImportPlan {
         require(raw.length <= 4 * 1024 * 1024) { "导入文件最多4MiB" }
@@ -39,7 +39,7 @@ internal object HostTransfer {
             require(incomingId.length <= 200 && incomingId.none { it < ' ' }) { "第${index + 1}条标识无效" }
             ignored = ignored || item.optString("password").isNotBlank() || item.optString("keyPath").isNotBlank() || item.has("privateKey")
             val host = Host(incomingId, (item.opt("alias") as? String).orEmpty().trim(), address, port, user,
-                color = item.optString("color").takeIf { it.isEmpty() || Regex("#[0-9a-fA-F]{6}").matches(it) }.orEmpty())
+                color = item.optString("color").takeIf { it.isEmpty() || Regex("#[0-9a-fA-F]{6}").matches(it) }.orEmpty(), region = (item.opt("region") as? String).orEmpty().trim().take(80))
             val duplicate = !endpoints.add(endpoint(host))
             val conflict = !duplicate && incomingId.isNotBlank() && incomingId in ids
             val id = if (incomingId.isBlank() || conflict) UUID.randomUUID().toString() else incomingId

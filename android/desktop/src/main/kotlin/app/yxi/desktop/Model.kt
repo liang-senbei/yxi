@@ -35,6 +35,7 @@ data class Host(
     val password: String = "",
     /** 连接颜色（Codex 的「连接颜色…」）：`#RRGGBB`；空 = 按侧栏顺序从 [HostColors] 里轮着分 */
     val color: String = "",
+    val region: String = "",
 ) {
     val label get() = alias.ifBlank { hostname }
     fun toConfig(): HostConfig = HostConfig(
@@ -150,10 +151,10 @@ object Store {
 
     private fun JSONObject.toHost() = Host(
         id = getString("id"), alias = optString("alias"), hostname = getString("hostname"), port = optInt("port", 22),
-        username = optString("username", "root"), keyPath = optString("keyPath"), password = optString("password"), color = optString("color"),
+        username = optString("username", "root"), keyPath = optString("keyPath"), password = optString("password"), color = optString("color"), region = optString("region"),
     )
     private fun Host.toJson() = JSONObject().put("id", id).put("alias", alias).put("hostname", hostname).put("port", port)
-        .put("username", username).put("keyPath", keyPath).put("password", password).put("color", color)
+        .put("username", username).put("keyPath", keyPath).put("password", password).put("color", color).put("region", region)
 }
 
 /**
