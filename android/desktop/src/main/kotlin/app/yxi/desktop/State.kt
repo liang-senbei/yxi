@@ -64,7 +64,14 @@ class AppState {
     val conns = mutableStateListOf<Conn>()                 // 连着的主机（顺序 = 侧栏分组顺序）
     var conn by mutableStateOf<Conn?>(null)                // 当前会话所在的主机
     var session by mutableStateOf<Session?>(null)          // 当前会话
-    var tab by mutableStateOf(0)                           // 0 对话 1 终端 2 文件
+    var tab by mutableStateOf(0)                           // 0 对话 1 终端 2 文件 3 改动
+    private data class TaskView(val tab: Int = 0, val files: Boolean = false, val browser: Boolean = false, val expanded: Boolean = false)
+    private val taskViews = mutableMapOf<String, TaskView>()
+    fun rememberTaskView() {
+        val host = conn?.host ?: return
+        val task = session ?: return
+        taskViews[taskNavigationKey(host, task)] = TaskView(tab, filePanelOpen, browserPanelOpen, previewExpanded)
+    }
     var page by mutableStateOf(Page.Workspace)             // 左栏底部的「配置」「我的」切这个
     var sidebarOpen by mutableStateOf(true)                // Ctrl+B；窗口 < 700 时自动收起
     var newSessionRequest by mutableStateOf(0)             // Ctrl+N：+1 一次，侧栏看到就弹「新建会话」
@@ -81,6 +88,16 @@ class AppState {
 
     /** ⚠️ 选会话顺带回工作区：人在「配置」页点了侧栏的会话，意思显然是「我要去看那个会话」。 */
     fun select(c: Conn, s: Session?) {
+        val oldKey = conn?.let { old -> session?.let { taskNavigationKey(old.host, it) } }
+        val nextKey = s?.let { taskNavigationKey(c.host, it) }
+        if (oldKey != nextKey) {
+            rememberTaskView()
+            val view = nextKey?.let { taskViews[it] } ?: TaskView()
+            tab = view.tab.coerceIn(0, 3)
+            filePanelOpen = view.files
+            browserPanelOpen = view.browser
+            previewExpanded = view.expanded
+        }
         conn = c; session = s; page = Page.Workspace; restoreSession = null; restoreRuntime = null
         if (s != null) {
             if (navigation.archived(taskNavigationKey(c.host, s))) navigation.setMode("归档")

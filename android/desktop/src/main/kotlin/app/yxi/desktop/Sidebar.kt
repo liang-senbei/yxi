@@ -107,7 +107,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
         keys.pending?.takeIf { it.host == keys.jschHost(h) }?.answer?.complete(false)
         val c = connOf(h) ?: return
         c.close(); state.conns.remove(c)
-        if (state.conn === c) { state.conn = null; state.session = null }
+        if (state.conn === c) { state.rememberTaskView(); state.conn = null; state.session = null }
     }
     fun connect(h: Host) {
         if (h.keyPath.isBlank() && h.password.isBlank()) {
