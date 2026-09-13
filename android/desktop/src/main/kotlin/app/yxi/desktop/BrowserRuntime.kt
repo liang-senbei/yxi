@@ -86,6 +86,7 @@ class BrowserPreview(val owner: Host, val taskId: String) {
     var viewportMode by mutableStateOf("fit")
     var viewportStatus by mutableStateOf("")
     var colorScheme by mutableStateOf("system")
+    var autoRefresh by mutableStateOf(false)
     var address by mutableStateOf("http://localhost:3000/")
     var title by mutableStateOf("网页预览")
     var status by mutableStateOf("输入地址或服务器端口以打开预览")

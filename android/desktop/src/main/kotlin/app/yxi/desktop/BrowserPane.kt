@@ -59,6 +59,17 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
         preview.handle?.stopFinding(true)
     }
     var viewportSize by remember(preview) { mutableStateOf(IntSize.Zero) }
+    val autoRefreshPaused = preview.loading || preview.preparing || preview.needsReconnect || preview.capturing ||
+        preview.picking || preview.selection != null || preview.stylePending != null || preview.hasUnsubmittedFeedback || NativeOverlays.active
+    LaunchedEffect(preview, preview.autoRefresh, autoRefreshPaused, preview.handle) {
+        if (!preview.autoRefresh || autoRefreshPaused || preview.handle == null) return@LaunchedEffect
+        while (true) {
+            kotlinx.coroutines.delay(5000)
+            if (preview.autoRefresh && !preview.loading && !preview.preparing && !preview.needsReconnect &&
+                !preview.capturing && !preview.picking && preview.selection == null && preview.stylePending == null &&
+                !preview.hasUnsubmittedFeedback && !NativeOverlays.active) preview.handle?.reload()
+        }
+    }
     LaunchedEffect(preview.handle, preview.colorScheme, preview.loading, preview.preparing) {
         val browser = preview.handle ?: return@LaunchedEffect
         if (preview.loading || preview.preparing) return@LaunchedEffect
@@ -168,6 +179,7 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
             Text((previewViewports.firstOrNull { it.id == preview.viewportMode }?.label ?: "自适应") + " · " + when(preview.colorScheme) { "dark" -> "暗色"; "light" -> "亮色"; else -> "系统主题" }, style = MaterialTheme.typography.labelSmall, color = t.textMuted)
             Spacer(Modifier.weight(1f))
             if (appearanceOpen) TextButton({
+                preview.autoRefresh = false
                 if (preview.viewportMode != "fit" || preview.colorScheme != "system") {
                     preview.viewportMode = "fit"; preview.colorScheme = "system"
                     if (preview.selection != null) preview.selectionStale = true
@@ -175,6 +187,13 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
             }) { Text("恢复默认") }
         }
         if (appearanceOpen) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(preview.autoRefresh, { preview.autoRefresh = it })
+            Column {
+                Text("每 5 秒自动刷新", style = MaterialTheme.typography.bodySmall)
+                Text("用于无热更新的开发页面，会重新加载页面内容。", style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+            }
+        }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             previewViewports.forEach { viewport ->
                 FilterChip(selected = preview.viewportMode == viewport.id, onClick = {
@@ -202,6 +221,7 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
         Text(preview.source, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
         if (state.projectPreviews.error.isNotBlank()) Text(state.projectPreviews.error, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = t.danger)
         Text(preview.status, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+        if (preview.autoRefresh) Text(if (autoRefreshPaused) "自动刷新暂缓 · 页面操作或反馈结束后继续" else "自动刷新已开启 · 每 5 秒", Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
         if (preview.remote && conn.status != Conn.Status.Connected) Text("SSH 已断开，当前画面可能过期；连接恢复后将重新加载。", Modifier.padding(12.dp), color = t.warning)
         if (preview.error.isNotBlank()) Text(preview.error, Modifier.padding(12.dp), color = t.danger)
         if (preview.loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 4.dp))
