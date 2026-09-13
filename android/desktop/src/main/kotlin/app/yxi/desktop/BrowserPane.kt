@@ -40,6 +40,22 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
     var addressDirty by remember(preview) { mutableStateOf(false) }
     var reviewingClose by remember(preview) { mutableStateOf(false) }
     var captureJob by remember(preview) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var pageSearchOpen by remember(preview) { mutableStateOf(false) }
+    var pageSearch by remember(preview) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue()) }
+    var matchCase by remember(preview) { mutableStateOf(false) }
+    var lastSearch by remember(preview) { mutableStateOf<Pair<String, Boolean>?>(null) }
+    fun findInPage(forward: Boolean) {
+        val text = pageSearch.text
+        val browser = preview.handle ?: return
+        if (text.isBlank()) return
+        val signature = text to matchCase
+        browser.find(text, forward, matchCase, lastSearch == signature)
+        lastSearch = signature
+    }
+    fun closePageSearch() {
+        pageSearchOpen = false; lastSearch = null
+        preview.handle?.stopFinding(true)
+    }
     var viewportSize by remember(preview) { mutableStateOf(IntSize.Zero) }
     LaunchedEffect(preview.handle, preview.colorScheme, preview.loading, preview.preparing) {
         val browser = preview.handle ?: return@LaunchedEffect
@@ -56,7 +72,7 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { preview.error = "视口设置未完成：${e.message}" }
     }
-    DisposableEffect(preview) { onDispose { captureJob?.cancel() } }
+    DisposableEffect(preview) { onDispose { captureJob?.cancel(); runCatching { preview.handle?.stopFinding(true) } } }
     fun closePreview() { preview.close(); state.browsers.remove(key); state.browserPanelOpen = false }
     LaunchedEffect(preview.address) { if (!addressDirty) input = androidx.compose.ui.text.input.TextFieldValue(preview.address) }
     fun open() { if (preview.preparing) return; restored = true; val requested = input.text; addressDirty = false; scope.launch {
@@ -108,6 +124,7 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
             IconButton({ addressDirty = false; preview.handle?.goForward() }, enabled = preview.canForward, modifier = Modifier.size(32.dp)) { Icon(Icons.Default.ArrowForward, "前进", Modifier.size(18.dp)) }
             IconButton({ if (preview.loading) preview.handle?.stopLoad() else { addressDirty = false; preview.handle?.reload() } }, enabled = preview.handle != null, modifier = Modifier.size(32.dp)) { Icon(if (preview.loading) Icons.Default.Stop else Icons.Default.Refresh, if (preview.loading) "停止" else "刷新", Modifier.size(18.dp)) }
             TextButton({ preview.pick() }, enabled = preview.handle != null && !preview.loading) { Text(if (preview.picking) "点选页面元素…" else "选择元素") }
+            TextButton({ pageSearchOpen = !pageSearchOpen; if (!pageSearchOpen) closePageSearch() }, enabled = preview.handle != null) { Text("页面查找") }
             TextButton({ runCatching { java.awt.Desktop.getDesktop().browse(java.net.URI(preview.handle?.url)) }.onFailure { preview.error = "外部浏览器未打开：${it.message}" } }, enabled = preview.handle != null) { Text("外部打开") }
             TextButton({ captureJob = scope.launch {
                 try {
@@ -117,6 +134,24 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
                 } catch (e: CancellationException) { throw e }
                 catch (e: Exception) { preview.error = "截图未复制：${e.message}" }
             } }, enabled = preview.handle != null && !preview.loading && !preview.preparing && !preview.capturing && !preview.needsReconnect) { Text(if (preview.capturing) "正在截图…" else "复制截图") }
+        }
+        if (pageSearchOpen) Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp)) {
+            OutlinedTextField(pageSearch, {
+                pageSearch = it; lastSearch = null; preview.handle?.stopFinding(true)
+            }, Modifier.fillMaxWidth().onPreviewKeyEvent {
+                when {
+                    it.type != KeyEventType.KeyDown || pageSearch.composition != null -> false
+                    it.key == Key.Enter -> { findInPage(!it.isShiftPressed); true }
+                    it.key == Key.Escape -> { closePageSearch(); true }
+                    else -> false
+                }
+            }, singleLine = true, label = { Text("查找网页文字") })
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                FilterChip(selected = matchCase, onClick = { matchCase = !matchCase; lastSearch = null }, label = { Text("区分大小写") })
+                TextButton({ findInPage(false) }, enabled = pageSearch.text.isNotBlank()) { Text("上一个") }
+                TextButton({ findInPage(true) }, enabled = pageSearch.text.isNotBlank()) { Text("下一个") }
+                TextButton(::closePageSearch) { Text("关闭") }
+            }
         }
         if (knownProject) PreviewServiceControls(state, conn, session, servicesOpen, preview.preparing, addressDirty, onConfigured = { servicesOpen = false }, onPreview = { address ->
             input = androidx.compose.ui.text.input.TextFieldValue(address); open()
