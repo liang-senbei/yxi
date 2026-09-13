@@ -283,3 +283,13 @@
 - 原生BrowserIntegrationTest确认计算字体切为serif，撤销恢复sans-serif及important。真实产品UI通过键盘选字体并试调，已查看衬线标题截图；加入对话后复制草稿核对font-family:serif，未发送给Agent。
 - 全量128项，123通过、5环境测试跳过，Linux打包通过（/tmp/yxi-font-build.log）。原生测试 /tmp/yxi-font-native.log；UI /tmp/yxi-font-ui-keyboard/；本机tmp/workbench-evidence/font-trial-verified.png及font-feedback-verified.png。
 - 初次菜单定位等待超时后改为完整键盘自动化，流程通过并保留脚本YXI_TEST_FONT入口。未实现自定义字体名/文件、文字内容试调、所有设备字体可用性与WindowsDPI专项；完整PRD继续推进，未发版。
+
+## 第二十七轮：网页文字试调（2026-09-13）
+
+- 样式面板加入“文字”，支持最多1000字符、保留空白与空字符串；Enter换行，Ctrl+Enter或试调按钮应用。纯文本以原Text节点data修改，拒绝混合子元素、输入框、隐藏/私有节点，不解析HTML，不替换元素或事件处理器。
+- 复用撤销/重置历史，核对原节点身份及当前值；外部代码修改文字或替换节点后拒绝覆盖。选择不支持文字的元素时禁用文字入口，CSS试调仍可用。
+- 反馈用独立纯文本段落记录JSON引号包围的原文/新文，空字符串和字面标记可辨；不会把text-content当作CSS输出。只加入对话草稿，不自动发送或修改源码。
+- 原生BrowserIntegrationTest验证字面<b>标签仍为文本、原点击事件保留、撤销恢复原文、外部更新后重置拒绝、嵌套span不被压平及密码字段不进入文字元数据。隔离日志 /tmp/yxi-text-native.log，fixture.VP41iV。
+- 实际UI通过文字菜单、Ctrl+Enter把标题改为A clearer heading，并加入草稿核对原文/新文；脚本核对测试HTML文件哈希不变。已查看本机tmp/workbench-evidence/text-trial-verified.png与text-feedback-verified.png，远端证据 /tmp/yxi-text-ui/。
+- 全量129项，124通过、5环境测试跳过，Linux打包通过（/tmp/yxi-text-build.log）。新增规范化/反馈测试覆盖空白、空字符串、px结尾文字、长度与空字节限制。
+- 当前支持单个纯文本节点，尚未覆盖富文本编辑、源码落实后的版本反馈闭环、Windows文字输入/DPI及完整PRD验收。未发布新版。

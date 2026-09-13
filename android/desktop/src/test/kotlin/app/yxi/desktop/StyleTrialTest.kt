@@ -29,4 +29,16 @@ class StyleTrialTest {
         assertEquals("", StyleTrial.initial("font-family", "Inter, Arial, sans-serif"))
         assertEquals("serif", StyleTrial.initial("font-family", "serif"))
     }
+    @Test fun `text preserves whitespace and markup as literal data`() {
+        val text = "  <b>label</b>\n20px"
+        assertEquals(text, StyleTrial.normalize(StyleTrial.TEXT, text))
+        assertEquals(text, StyleTrial.editorValue(StyleTrial.TEXT, text))
+        assertEquals("", StyleTrial.normalize(StyleTrial.TEXT, ""))
+        assertFails { StyleTrial.normalize(StyleTrial.TEXT, "x".repeat(1001)) }
+        assertFails { StyleTrial.normalize(StyleTrial.TEXT, "x\u0000y") }
+        val feedback = trialFeedback(mapOf(StyleTrial.TEXT to "", "font-size" to "30px"), text)
+        assertTrue(feedback.contains("font-size: 30px;"))
+        assertTrue(feedback.contains("新文：\"\""))
+        assertFalse(feedback.contains("text-content:"))
+    }
 }

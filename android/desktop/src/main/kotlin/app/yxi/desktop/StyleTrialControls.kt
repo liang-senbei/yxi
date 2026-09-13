@@ -20,7 +20,8 @@ import androidx.compose.ui.unit.dp
 fun StyleTrialControls(preview: BrowserPreview, selection: PageSelection) {
     val t = Tokens.current
     var property by remember(preview) { mutableStateOf("font-size") }
-    var value by remember(selection, property) { mutableStateOf(TextFieldValue(preview.styleChanges[property]?.removeSuffix("px") ?: StyleTrial.initial(property, selection.computed[property].orEmpty()))) }
+    var value by remember(selection, property) { mutableStateOf(TextFieldValue(preview.styleChanges[property]?.let { StyleTrial.editorValue(property, it) } ?: StyleTrial.initial(property, selection.computed[property].orEmpty()))) }
+    val textSupported = selection.computed.containsKey(StyleTrial.TEXT)
     var menu by remember { mutableStateOf(false) }
     var fontMenu by remember { mutableStateOf(false) }
     NativeOverlay(menu || fontMenu)
@@ -31,7 +32,7 @@ fun StyleTrialControls(preview: BrowserPreview, selection: PageSelection) {
             Box {
                 TextButton({ menu = true }) { Text(StyleTrial.properties.getValue(property) + " ▾") }
                 DropdownMenu(menu, { menu = false }) {
-                    StyleTrial.properties.forEach { (key, label) -> DropdownMenuItem(text = { Text(label) }, onClick = { property = key; menu = false; fontMenu = false }) }
+                    StyleTrial.properties.forEach { (key, label) -> DropdownMenuItem(text = { Text(label) }, enabled = key != StyleTrial.TEXT || textSupported, onClick = { property = key; menu = false; fontMenu = false }) }
                 }
             }
             if (property == "font-family") Box(Modifier.weight(1f)) {
@@ -43,13 +44,15 @@ fun StyleTrialControls(preview: BrowserPreview, selection: PageSelection) {
                 when {
                     it.type != KeyEventType.KeyDown -> false
                     it.isCtrlPressed && it.key == Key.A -> { value = value.copy(selection = TextRange(0, value.text.length)); true }
-                    it.key == Key.Enter -> { preview.trialStyle(property, value.text); true }
+                    it.key == Key.Enter && (property != StyleTrial.TEXT || it.isCtrlPressed) -> { preview.trialStyle(property, value.text); true }
                     else -> false
                 }
-            }, label = { Text(if (StyleTrial.isColor(property)) "颜色值" else "试调值 · px") }, singleLine = true, enabled = !preview.selectionStale)
-            TextButton({ preview.trialStyle(property, value.text) }, enabled = !preview.selectionStale && (property != "font-family" || value.text in StyleTrial.fonts)) { Text("试调") }
+            }, label = { Text(if (property == StyleTrial.TEXT) "替换文字 · Ctrl+Enter试调" else if (StyleTrial.isColor(property)) "颜色值" else "试调值 · px") }, singleLine = property != StyleTrial.TEXT, maxLines = 4, enabled = !preview.selectionStale && (property != StyleTrial.TEXT || textSupported))
+            TextButton({ preview.trialStyle(property, value.text) }, enabled = !preview.selectionStale && (property != "font-family" || value.text in StyleTrial.fonts) && (property != StyleTrial.TEXT || textSupported)) { Text("试调") }
         }
-        if (property == "font-family") {
+        if (property == StyleTrial.TEXT) {
+            Text(if (textSupported) "临时修改纯文本节点，保留元素结构与事件。" else "请选取纯文本子元素，或在源码中修改。", style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+        } else if (property == "font-family") {
             Text("使用浏览器可用的字体类型，实际字形取决于设备。", style = MaterialTheme.typography.labelSmall, color = t.textMuted)
         } else if (!StyleTrial.isColor(property)) {
             val bounds = StyleTrial.range(property)
@@ -69,6 +72,6 @@ fun StyleTrialControls(preview: BrowserPreview, selection: PageSelection) {
                 }
             }
         }
-        Text("选取时：${selection.computed[property].orEmpty().ifBlank { "未提供" }}", style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+        Text("选取时：${selection.computed[property].orEmpty().ifBlank { "未提供" }}", maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = t.textMuted)
     }
 }

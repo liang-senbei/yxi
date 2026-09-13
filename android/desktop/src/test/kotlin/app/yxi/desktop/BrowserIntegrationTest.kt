@@ -133,10 +133,37 @@ class BrowserIntegrationTest {
             js(a, "document.getElementById('probe').textContent='NEW_FONT='+document.getElementById('target').style.fontSize+';';")
             eventually { text(a).contains("NEW_FONT=;") }
             println("browser-fixture: style trials and restoration")
+            js(a, "document.getElementById('target').onclick=()=>{window.handlerHits=(window.handlerHits||0)+1;};")
+            withContext(Dispatchers.Swing) { a.pick() }
+            js(a, "document.getElementById('target').click();")
+            eventually { a.selection?.computed?.get(StyleTrial.TEXT) == "Replacement" }
+            withContext(Dispatchers.Swing) { a.trialStyle(StyleTrial.TEXT, "New <b>label</b>") }
+            eventually { a.stylePending == null && a.styleChanges[StyleTrial.TEXT] == "New <b>label</b>" }
+            js(a, "document.getElementById('target').click();document.getElementById('probe').textContent='CHILDREN='+document.getElementById('target').children.length+' HITS='+window.handlerHits;")
+            eventually { text(a).contains("CHILDREN=0 HITS=1") }
+            assertTrue(text(a).contains("New <b>label</b>"))
+            withContext(Dispatchers.Swing) { a.undoStyle() }
+            eventually { a.stylePending == null && a.styleChanges.isEmpty() && text(a).contains("Replacement") }
+            withContext(Dispatchers.Swing) { a.trialStyle(StyleTrial.TEXT, "Temporary") }
+            eventually { a.stylePending == null && a.styleChanges[StyleTrial.TEXT] == "Temporary" }
+            js(a, "document.getElementById('target').firstChild.data='External update';")
+            withContext(Dispatchers.Swing) { a.resetStyle() }
+            eventually { a.stylePending == null && a.selectionStale }
+            assertTrue(text(a).contains("External update"))
+            js(a, "document.getElementById('target').innerHTML='<span>Nested content</span>';")
+            withContext(Dispatchers.Swing) { a.pick() }
+            js(a, "document.getElementById('target').click();")
+            eventually { a.selection != null && !a.selectionStale }
+            assertFalse(a.selection!!.computed.containsKey(StyleTrial.TEXT))
+            withContext(Dispatchers.Swing) { a.trialStyle(StyleTrial.TEXT, "Do not flatten") }
+            eventually { a.stylePending == null && a.error.contains("不支持") }
+            assertTrue(text(a).contains("Nested content"))
+            println("browser-fixture: text trial keeps markup handlers and external updates")
             withContext(Dispatchers.Swing) { a.pick() }
             js(a, "document.getElementById('secret').click();")
             eventually { a.selection != null }
             assertEquals("", a.selection!!.text)
+            assertFalse(a.selection!!.computed.containsKey(StyleTrial.TEXT))
             withContext(Dispatchers.Swing) { a.handle!!.loadURL("file:///etc/passwd") }
             eventually { a.error.isNotBlank() }
             assertFalse(text(a).contains("root:x:"))

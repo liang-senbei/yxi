@@ -61,8 +61,9 @@ sleep 12
 tap() { DISPLAY=$D xdotool mousemove "$1" "$2" click 1; sleep 3; }
 shot() { DISPLAY=$D import -window root "$OUT/$1.png"; }
 shot 01-restored
-if [ "${YXI_TEST_FONT:-0}" = 1 ]; then
+if [ "${YXI_TEST_FONT:-0}" = 1 ] || [ "${YXI_TEST_TEXT:-0}" = 1 ]; then
   test -n "${WEB_FIXTURE:-}"
+  original_trial_hash=$(sha256sum "$WEB_FIXTURE/index.html" | cut -d ' ' -f 1)
   tap 1180 110
   tap 940 208
   DISPLAY=$D xdotool key ctrl+a
@@ -76,15 +77,26 @@ if [ "${YXI_TEST_FONT:-0}" = 1 ]; then
   shot 02-font-controls
   echo "Font controls ready: $OUT"
   tap 810 706
-  DISPLAY=$D xdotool key Down Down Return
-  sleep 1
-  DISPLAY=$D xdotool key Tab Return
-  sleep 1
-  DISPLAY=$D xdotool key Down Down Down Return
-  sleep 1
-  DISPLAY=$D xdotool key Tab Return
+  if [ "${YXI_TEST_TEXT:-0}" = 1 ]; then
+    DISPLAY=$D xdotool key Down Down Down Return
+    sleep 1
+    DISPLAY=$D xdotool key Tab
+    DISPLAY=$D xdotool key ctrl+a
+    sleep 1
+    DISPLAY=$D xdotool type --clearmodifiers 'A clearer heading'
+    DISPLAY=$D xdotool key ctrl+Return
+  else
+    DISPLAY=$D xdotool key Down Down Return
+    sleep 1
+    DISPLAY=$D xdotool key Tab Return
+    sleep 1
+    DISPLAY=$D xdotool key Down Down Down Return
+    sleep 1
+    DISPLAY=$D xdotool key Tab Return
+  fi
   sleep 2
   shot 03-font-trial
+  test "$(sha256sum "$WEB_FIXTURE/index.html" | cut -d ' ' -f 1)" = "$original_trial_hash"
   tap 820 824
   tap 500 780
   DISPLAY=$D xdotool key ctrl+a
@@ -92,7 +104,12 @@ if [ "${YXI_TEST_FONT:-0}" = 1 ]; then
   DISPLAY=$D xdotool key ctrl+c
   sleep 1
   DISPLAY=$D timeout 5 xclip -selection clipboard -o > "$OUT/font-feedback.txt"
-  grep -q 'font-family: serif;' "$OUT/font-feedback.txt"
+  if [ "${YXI_TEST_TEXT:-0}" = 1 ]; then
+    grep -Fq '新文："A clearer heading"' "$OUT/font-feedback.txt"
+    if grep -q 'text-content:' "$OUT/font-feedback.txt"; then exit 1; fi
+  else
+    grep -q 'font-family: serif;' "$OUT/font-feedback.txt"
+  fi
   shot 04-font-feedback
   echo 'Font trial included in conversation draft'
   exit 0

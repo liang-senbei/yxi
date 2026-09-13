@@ -200,7 +200,8 @@ class BrowserPreview(val owner: Host, val taskId: String) {
                                 val validated = runCatching { changes.keys().asSequence().associateWith { StyleTrial.normalize(it, changes.getString(it)) } }.getOrNull()
                                 if (validated == null) { selectionStale = true; error = "浏览器返回了无效的试调结果，请重新选择。" }
                                 else { styleChanges = validated; styleUndoAvailable = obj.optBoolean("undo"); commentAdded = false; error = "" }
-                            } else { selectionStale = true; error = "选中元素已变化或试调未确认，请重新选择。" }
+                            } else if (obj.optString("status") == "unsupported") { error = "此元素不支持纯文字试调，请选取文本子元素或在源码修改。" }
+                            else { selectionStale = true; error = "选中元素已变化或试调未确认，请重新选择。" }
                         }
                     }
                     callback.success("received"); return true
@@ -210,7 +211,7 @@ class BrowserPreview(val owner: Host, val taskId: String) {
                     if (picking && obj.optString("token") == selectionToken) {
                         val computed = obj.optJSONObject("computed") ?: JSONObject()
                         selection = PageSelection(address, obj.optString("selector").replace('\n', ' ').replace('\r', ' ').take(1000), obj.optString("text").take(4000), obj.optString("tag").replace('\n', ' ').replace('\r', ' ').take(30),
-                            computed = computed.keys().asSequence().filter { it in StyleTrial.properties }.associateWith { computed.optString(it).take(64) })
+                            computed = computed.keys().asSequence().filter { it in StyleTrial.properties }.associateWith { computed.optString(it).take(if (it == StyleTrial.TEXT) 1000 else 64) })
                         selectionStale = false; commentAdded = false
                         styleChanges = emptyMap(); styleUndoAvailable = false; stylePending = null
                         picking = false
@@ -294,7 +295,9 @@ event.preventDefault();event.stopImmediatePropagation();
 const el=event.target;if(!(el instanceof Element))return;
 selectedNode=el;
 const clone=el.cloneNode(true);clone.querySelectorAll('input,textarea,select,script,style,[contenteditable],[data-private],[hidden]').forEach(x=>x.remove());
-const sensitive=!!el.closest('input,textarea,select,[contenteditable],[data-private]');
+const sensitive=!!el.closest('input,textarea,select,script,style,[contenteditable],[data-private],[hidden]');
+const textNode=!sensitive&&/^(H[1-6]|P|SPAN|A|BUTTON|LABEL|DIV|LI|TD|TH|EM|STRONG|SMALL|BLOCKQUOTE|FIGCAPTION|SUMMARY)$/.test(el.tagName)&&el.childNodes.length===1&&el.firstChild.nodeType===Node.TEXT_NODE&&el.firstChild.data.length<=1000?el.firstChild:null;
+const textMatches=()=>textNode&&el.childNodes.length===1&&el.firstChild===textNode&&textNode.parentNode===el;
 let n=el,parts=[];while(n&&n!==document.documentElement&&parts.length<6){
  if(n.id){parts.unshift('#'+CSS.escape(n.id));break;}
  let index=1,s=n;while((s=s.previousElementSibling))if(s.tagName===n.tagName)index++;
@@ -302,9 +305,9 @@ let n=el,parts=[];while(n&&n!==document.documentElement&&parts.length<6){
 }
 const originals={},changes={},owned={};let history=[],lastGroup=null,lastProperty=null;
 const expanded={padding:['padding-top','padding-right','padding-bottom','padding-left'],margin:['margin-top','margin-right','margin-bottom','margin-left'],gap:['row-gap','column-gap'],'border-radius':['border-top-left-radius','border-top-right-radius','border-bottom-right-radius','border-bottom-left-radius']};
-const read=(p)=>({value:el.style.getPropertyValue(p),priority:el.style.getPropertyPriority(p)});
-const matches=(keys)=>keys.every(p=>!owned[p]||(read(p).value===owned[p].value&&read(p).priority===owned[p].priority));
-const restore=(property,previous)=>{if(previous.value)el.style.setProperty(property,previous.value,previous.priority);else el.style.removeProperty(property);};
+const read=(p)=>p==='text-content'?{value:textNode?.data||'',priority:''}:{value:el.style.getPropertyValue(p),priority:el.style.getPropertyPriority(p)};
+const matches=(keys)=>keys.every(p=>(p!=='text-content'||textMatches())&&(!owned[p]||(read(p).value===owned[p].value&&read(p).priority===owned[p].priority)));
+const restore=(property,previous)=>{if(property==='text-content'){if(textMatches())textNode.data=previous.value;}else if(previous.value)el.style.setProperty(property,previous.value,previous.priority);else el.style.removeProperty(property);};
 window.__yxiResetStyle=()=>{if(el.isConnected)Object.entries(originals).forEach(([p,v])=>{if(owned[p]&&matches([p]))restore(p,v);});};
 window.__yxiStyleTrial=(request)=>{
  const reply=(status)=>window.cefQuery({request:JSON.stringify({type:'style-result',token:selectionToken,operation:request.operation,status,changes,undo:history.length>0})});
@@ -313,12 +316,13 @@ window.__yxiStyleTrial=(request)=>{
  try {
   if(request.action==='apply'){
    const p=request.property,v=request.value;
-   if(!['font-size','font-family','color','background-color','padding','margin','gap','border-radius'].includes(p)||!CSS.supports(p,v)){reply('invalid');return;}
+   if(p==='text-content') {if(!textNode){reply('unsupported');return;}if(typeof v!=='string'||v.length>1000||v.includes(String.fromCharCode(0))){reply('invalid');return;}}
+   else if(!['font-size','font-family','color','background-color','padding','margin','gap','border-radius'].includes(p)||!CSS.supports(p,v)){reply('invalid');return;}
    const keys=expanded[p]||[p];if(!matches(keys)){reply('stale');return;}
    const previous=Object.fromEntries(keys.map(k=>[k,read(k)]));
    keys.forEach(k=>{if(!(k in originals))originals[k]=previous[k];});
    if(lastGroup!==request.group||lastProperty!==p){history.push({previous,changes:{...changes}});if(history.length>50)history.shift();}
-   lastGroup=request.group;lastProperty=p;el.style.setProperty(p,v,'important');changes[p]=v;keys.forEach(k=>owned[k]=read(k));
+   lastGroup=request.group;lastProperty=p;if(p==='text-content')textNode.data=v;else el.style.setProperty(p,v,'important');changes[p]=v;keys.forEach(k=>owned[k]=read(k));
   }else if(request.action==='undo'){
    const entry=history[history.length-1];if(entry){const keys=Object.keys(entry.previous);if(!matches(keys)){reply('stale');return;}history.pop();keys.forEach(k=>{restore(k,entry.previous[k]);owned[k]=read(k);});Object.keys(changes).forEach(p=>delete changes[p]);Object.assign(changes,entry.changes);}lastGroup=null;lastProperty=null;
   }else if(request.action==='reset'){
@@ -329,6 +333,7 @@ window.__yxiStyleTrial=(request)=>{
  }catch(e){reply('stale');}
 };
 const computed=Object.fromEntries(['font-size','font-family','color','background-color','padding','margin','gap','border-radius'].map(p=>[p,getComputedStyle(el).getPropertyValue(p)]));
+if(textNode)computed['text-content']=textNode.data;
 window.cefQuery({request:JSON.stringify({type:'selection',token:selectionToken,selector:parts.join(' > '),text:sensitive?'':(clone.textContent||'').trim().slice(0,4000),tag:el.tagName.toLowerCase(),computed})});
 window.__yxiPickCancel(true);window.__yxiPick=null;
 };document.addEventListener('click',window.__yxiPick,true);

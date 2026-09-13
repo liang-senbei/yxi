@@ -3,11 +3,13 @@ package app.yxi.desktop
 import org.json.JSONObject
 
 object StyleTrial {
-    val properties = linkedMapOf("font-size" to "字号", "font-family" to "字体", "color" to "文字颜色", "background-color" to "背景颜色", "padding" to "内边距", "margin" to "外边距", "gap" to "元素间距", "border-radius" to "圆角")
+    const val TEXT = "text-content"
+    val properties = linkedMapOf("font-size" to "字号", "font-family" to "字体", TEXT to "文字", "color" to "文字颜色", "background-color" to "背景颜色", "padding" to "内边距", "margin" to "外边距", "gap" to "元素间距", "border-radius" to "圆角")
     val fonts = linkedMapOf("system-ui" to "系统字体", "sans-serif" to "无衬线", "serif" to "衬线", "monospace" to "等宽")
     fun isColor(property: String) = property == "color" || property == "background-color"
     fun range(property: String) = if (property == "font-size") 8f..96f else 0f..120f
     fun initial(property: String, computed: String): String {
+        if (property == TEXT) return computed
         if (property == "font-family") return computed.trim().takeIf { it in fonts }.orEmpty()
         if (isColor(property)) {
             val rgb = Regex("rgba?\\(\\s*(\\d+)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)").find(computed)
@@ -18,6 +20,10 @@ object StyleTrial {
     }
     fun normalize(property: String, input: String): String {
         require(property in properties) { "不支持的样式属性" }
+        if (property == TEXT) {
+            require(input.length <= 1000 && '\u0000' !in input) { "文字试调最多1000字符，不含空字节" }
+            return input
+        }
         val value = input.trim()
         if (property == "font-family") {
             require(value in fonts) { "请选择提供的字体类型" }
@@ -32,6 +38,7 @@ object StyleTrial {
         require(number != null && number.isFinite() && number >= range.start && number <= range.endInclusive) { "请输入 ${range.start.toInt()}–${range.endInclusive.toInt()} 之间的像素值" }
         return java.math.BigDecimal.valueOf(number).stripTrailingZeros().toPlainString() + "px"
     }
+    fun editorValue(property: String, value: String) = if (property == TEXT) value else value.removeSuffix("px")
     fun script(token: String, operation: String, action: String, property: String = "", value: String = "", group: String = operation): String {
         require(action in listOf("apply", "undo", "reset"))
         val body = JSONObject().put("token", token).put("operation", operation).put("action", action).put("property", property).put("value", if (action == "apply") normalize(property, value) else "").put("group", group)

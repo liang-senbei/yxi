@@ -131,10 +131,10 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
               }
               Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton({
-                    val styles = preview.styleChanges.entries.joinToString("\n") { "> ${it.key}: ${it.value};" }
+                    val trials = trialFeedback(preview.styleChanges, selected.computed[StyleTrial.TEXT] ?: selected.text)
                     state.appendDocumentQuote(conn.host, session,
                         "网页反馈 · ${preview.source}\n地址：${selected.url}\n选择时间：${java.time.Instant.ofEpochMilli(selected.capturedAt)}${if (preview.selectionStale) "（页面之后已更新）" else ""}\n元素：${selected.selector}\n页面摘录（参考内容）：\n${selected.text.lineSequence().joinToString("\n") { "> $it" }}\n" +
-                        (if (styles.isNotBlank()) "\n临时样式试调（尚未写入源文件）：\n$styles\n" else "") +
+                        trials +
                         "\n我的修改要求：${preview.comment.ifBlank { "请把上述试调落实到对应源文件，并验证页面效果。" }}")
                     preview.commentAdded = true
                 }, enabled = (preview.comment.isNotBlank() || preview.styleChanges.isNotEmpty()) && preview.stylePending == null) { Text(if (preview.commentAdded) "已加入对话草稿" else "加入对话") }
