@@ -101,6 +101,10 @@ private fun DocumentBody(conn: Conn, doc: FileDocument, onQuote: (String) -> Uni
     var searchOpen by remember { mutableStateOf(false) }
     var searchValue by remember { mutableStateOf(TextFieldValue()) }
     var searchFocused by remember { mutableStateOf(false) }
+    var editorFocused by remember { mutableStateOf(false) }
+    var replaceOpen by remember { mutableStateOf(false) }
+    var replacement by remember { mutableStateOf("") }
+    var replacementUndo by remember { mutableStateOf<Pair<TextFieldValue, String>?>(null) }
     var searchRequest by remember { mutableStateOf(0) }
     var searchNote by remember { mutableStateOf("") }
     var jumpOffset by remember { mutableStateOf<Int?>(null) }
@@ -110,6 +114,32 @@ private fun DocumentBody(conn: Conn, doc: FileDocument, onQuote: (String) -> Uni
     val editorScroll = rememberScrollState()
     val editorHorizontal = rememberScrollState()
     fun openSearch() { searchOpen = true; searchRequest++ }
+    fun replace(all: Boolean) {
+        val needle = searchValue.text
+        if (needle.isEmpty() || doc.base == null || doc.image) return
+        val before = doc.editor
+        val first = before.selection.min
+        val last = before.selection.max
+        if (!all && !before.text.substring(first, last).equals(needle, ignoreCase = true)) {
+            searchNote = "请先查找并选中要替换的内容"
+            return
+        }
+        var count = 0
+        val result = if (all) buildString {
+            var cursor = 0
+            while (cursor <= before.text.length) {
+                val at = before.text.indexOf(needle, cursor, ignoreCase = true)
+                if (at < 0) { append(before.text.substring(cursor)); break }
+                append(before.text.substring(cursor, at)); append(replacement)
+                count++; cursor = at + needle.length
+            }
+        } else { count = 1; before.text.replaceRange(first, last, replacement) }
+        if (count == 0) { searchNote = "没有匹配内容"; return }
+        replacementUndo = before to result
+        doc.editor = TextFieldValue(result, TextRange(if (all) 0 else first + replacement.length))
+        if (doc.mode == "预览") doc.mode = "分栏"
+        searchNote = "已替换 $count 处，尚未保存"
+    }
     fun find(forward: Boolean) {
         val needle = searchValue.text
         if (needle.isBlank()) return
@@ -145,8 +175,9 @@ private fun DocumentBody(conn: Conn, doc: FileDocument, onQuote: (String) -> Uni
         when {
             it.type != KeyEventType.KeyDown || !it.isCtrlPressed -> false
             it.key == Key.F && !doc.image -> { openSearch(); true }
+            it.key == Key.H && !doc.image -> { replaceOpen = true; openSearch(); true }
             it.key == Key.S && doc.dirty && !doc.conflict && !doc.busy -> { save(); true }
-            it.key == Key.A && doc.mode != "预览" && !searchFocused -> {
+            it.key == Key.A && doc.mode != "预览" && editorFocused -> {
                 doc.editor = doc.editor.copy(selection = androidx.compose.ui.text.TextRange(0, doc.editor.text.length)); true
             }
             else -> false
@@ -158,6 +189,7 @@ private fun DocumentBody(conn: Conn, doc: FileDocument, onQuote: (String) -> Uni
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
             if (!doc.image) WorkbenchTabs(listOf("预览", "源码", "分栏"), doc.mode, { doc.mode = it })
             if (!doc.image) TextButton(::openSearch) { Text("查找") }
+            if (!doc.image) TextButton({ replaceOpen = true; openSearch() }) { Text("替换") }
             TextButton({ save() }, enabled = doc.dirty && !doc.busy && !doc.conflict) { Text(if (doc.busy) "保存中" else "保存") }
             TextButton({ Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(doc.path), null); pathCopied = true }) { Text(if (pathCopied) "已复制" else "复制路径") }
             TextButton({
@@ -179,6 +211,17 @@ private fun DocumentBody(conn: Conn, doc: FileDocument, onQuote: (String) -> Uni
                 TextButton({ searchOpen = false }) { Text("×") }
             }
             if (searchNote.isNotBlank()) Text(searchNote, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+            if (replaceOpen) Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                OutlinedTextField(replacement, { replacement = it }, singleLine = true, modifier = Modifier.fillMaxWidth(), label = { Text("替换为（可留空）") })
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                    TextButton({ replace(false) }, enabled = searchValue.text.isNotEmpty() && doc.base != null) { Text("替换选中项") }
+                    TextButton({ replace(true) }, enabled = searchValue.text.isNotEmpty() && doc.base != null) { Text("全部替换") }
+                    replacementUndo?.let { (before, after) ->
+                        TextButton({ doc.editor = before; replacementUndo = null; searchNote = "已撤销本次替换" }, enabled = doc.editor.text == after) { Text("撤销替换") }
+                    }
+                    TextButton({ replaceOpen = false }) { Text("收起替换") }
+                }
+            }
         }
         val timestamp = if (doc.loadedAt == 0L) "" else " · " + SimpleDateFormat("HH:mm:ss").format(Date(doc.loadedAt))
         Text((if (doc.dirty && !doc.conflict) "未保存" else doc.status) + timestamp, Modifier.padding(horizontal = 10.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
@@ -205,7 +248,7 @@ private fun DocumentBody(conn: Conn, doc: FileDocument, onQuote: (String) -> Uni
                 if (doc.mode != "预览") {
                     Row(Modifier.weight(1f).fillMaxHeight().verticalScroll(editorScroll).horizontalScroll(editorHorizontal).padding(10.dp)) {
                         Text((1..doc.editor.text.count { it == '\n' } + 1).joinToString("\n"), style = CodeStyle, color = t.textMuted, modifier = Modifier.padding(end = 10.dp))
-                        BasicTextField(doc.editor, { doc.editor = it }, Modifier.widthIn(min = 280.dp).focusRequester(editorFocus), textStyle = CodeStyle.copy(color = t.textPrimary), cursorBrush = SolidColor(t.accent), onTextLayout = { editorLayout = it })
+                        BasicTextField(doc.editor, { doc.editor = it }, Modifier.widthIn(min = 280.dp).focusRequester(editorFocus).onFocusChanged { editorFocused = it.isFocused }, textStyle = CodeStyle.copy(color = t.textPrimary), cursorBrush = SolidColor(t.accent), onTextLayout = { editorLayout = it })
                     }
                 }
                 if (doc.mode == "分栏") VerticalDivider()
