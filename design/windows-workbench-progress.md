@@ -319,3 +319,12 @@
 - 全量132项测试中126通过、6环境测试跳过，Linux打包成功（/tmp/yxi-plugin-ui-build.log）；另行运行插件UI测试通过。宽窄屏截图均已查看，长名称/来源/路径未截断，状态清楚，证据本机tmp/workbench-evidence/plugins-820.png与plugins-460.png。
 - 这轮仅验证插件展示组件，不代替完整配置页导航/多主机往返、WindowsDPI/键盘/深色验收。安装、启停、升级和恢复等W03流程继续推进，未发布新版。
 - 追加原生搜索检查：两种宽度实际输入zzzz后，截图确认无匹配文案且旧卡片消失；刷新点击仍通过。证据/tmp/yxi-plugin-ui-search/及本机plugins-search-460.png、plugins-search-820.png。
+
+## 第三十一轮：插件启停操作底层（2026-09-13）
+
+- 新增plugin-operation.py与PluginOperationPlan，prepare返回配置路径/当前显式状态/配置及安装记录指纹；set使用明确user/project/local范围及固定argv的Claude enable/disable；status可按原操作ID查询。
+- 服务端私有plugin-operations目录以文件锁串行本工具的变更。执行前检查指纹、原子保存配置恢复副本和started意图，再调用CLI；结束读取配置核对目标布尔值，成功只表示configured，不表示当前会话已加载。
+- 同一操作ID不重复执行，不同目标复用ID被拒绝；超时/异常/CLI回执与配置不符保留unknown，重启遗留started查询也按unknown处理。CLI输出不返回客户端，恢复副本留在服务器权限600的私有目录；新增备份不在项目仓库内。
+- 拒绝不支持的配置主目录、明显符号链接、非规范化项目目录和不唯一安装记录；读取配置最多4MiB。文件锁仅协调Yxi自身，不能阻止外部CLI/编辑器在检查后改文件，未宣称跨进程原子事务。
+- dev/test-plugin-operation.py在独立HOME/CLAUDE_CONFIG_DIR中实际验证用户停用/启用、project/local停用，原env字段保留；模拟验证一次执行、同ID回执、目标冲突、过期指纹、超时不重发、恢复副本内容及权限。未修改生产插件。
+- 桌面测试与Linux打包成功（/tmp/yxi-plugin-operation-build.log）。尚未接入客户端持久操作账本/按钮/退出保护，也未实现恢复按钮、运行器加载验证、安装升级卸载流程及Windows专项；完整W03继续推进。
