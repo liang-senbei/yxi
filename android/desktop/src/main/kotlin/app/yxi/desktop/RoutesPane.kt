@@ -129,7 +129,7 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
                             if (line.id == current?.id) Text("配置匹配", style = MaterialTheme.typography.labelSmall, color = t.success)
                         }
                         Text("模型 · " + routeModel(line).ifBlank { "使用运行器默认值" }, Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyMedium)
-                        if (line.isCodex && routeModel(line).isNotBlank()) Text("此模型目前仅保存在记录中，应用线路尚不写入 Codex 模型设置。", style = MaterialTheme.typography.bodySmall, color = t.warning)
+                        if (line.isCodex && line.extra.optString("model_reasoning_effort").isNotBlank()) Text("推理强度 · ${line.extra.optString("model_reasoning_effort")}", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
                         if (!line.isCodex && line.extra.optString("effortLevel").isNotBlank()) Text("推理强度 · ${line.extra.optString("effortLevel")}", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
                         if (line.note.isNotBlank()) Text(line.note, Modifier.padding(top = 6.dp), style = MaterialTheme.typography.bodySmall, color = t.textMuted)
                         Row(Modifier.padding(top = 10.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -196,7 +196,8 @@ private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend
     var authToken by remember { mutableStateOf(original.token) }
     var model by remember { mutableStateOf(routeModel(original)) }
     var memo by remember { mutableStateOf(original.note) }
-    var effort by remember { mutableStateOf(original.extra.optString("effortLevel")) }
+    val effortKey = if (original.isCodex) "model_reasoning_effort" else "effortLevel"
+    var effort by remember { mutableStateOf(original.extra.optString(effortKey)) }
     var error by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     WorkbenchDialog(onDismissRequest = { if (!busy) onClose() }, title = { Text("${if (original.isCodex) "Codex" else "Claude Code"} 线路") },
@@ -206,9 +207,8 @@ private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend
             OutlinedTextField(secret, { secret = it }, label = { Text("API 密钥") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
             if (!original.isCodex) OutlinedTextField(authToken, { authToken = it }, label = { Text("Auth token（按提供方要求填写）") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
             OutlinedTextField(model, { model = it }, label = { Text("模型 ID（可留空）") }, singleLine = true)
-            if (original.isCodex) Text("当前应用线路只切换提供方与认证，模型 ID 暂仅保存在记录中。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.warning)
-            else {
-                OutlinedTextField(effort, { effort = it }, label = { Text("推理强度（effortLevel，可留空）") }, singleLine = true)
+            run {
+                OutlinedTextField(effort, { effort = it }, label = { Text("推理强度（可留空）") }, singleLine = true)
                 Text("按运行器与模型支持的值填写；更改后可能需要重开会话。留空移除此线路的强度设置。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
             }
             OutlinedTextField(memo, { memo = it }, label = { Text("备注（例如用途、套餐或模型区别）") }, maxLines = 3)
@@ -220,9 +220,7 @@ private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend
             try {
                 require(effort.none { it < ' ' }) { "推理强度不能包含控制字符" }
                 val edited = editedRoute(original, name, url, secret, model, authToken).copy(note = memo.trim())
-                if (!edited.isCodex) {
-                    if (effort.isBlank()) edited.extra.remove("effortLevel") else edited.extra.put("effortLevel", effort.trim())
-                }
+                if (effort.isBlank()) edited.extra.remove(effortKey) else edited.extra.put(effortKey, effort.trim())
                 onSave(edited)
             }
             catch (e: CancellationException) { throw e }

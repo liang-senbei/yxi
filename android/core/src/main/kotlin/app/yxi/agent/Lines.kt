@@ -460,6 +460,22 @@ object Lines {
     private const val HEAD_OFF = "# <<< yxi line <<<"
     private const val BODY_ON = "# >>> yxi provider >>>"
     private const val BODY_OFF = "# <<< yxi provider <<<"
+    private const val ORIGINAL_ROOT = "# yxi original root: "
+
+    /** Preserve displaced root assignments as comments so removing our blocks restores them. */
+    private fun shadowCodexRoot(body: String, keys: Set<String>): String {
+        var root = true
+        return body.lineSequence().joinToString("\n") { line ->
+            val trimmed = line.trimStart()
+            if (root && !trimmed.startsWith("#")) {
+                require(!line.contains("\"\"\"") && !line.contains("'''")) { "顶层包含多行 TOML 字符串，请先将配置改为单行字符串再切换线路" }
+                if (trimmed.startsWith("[")) root = false
+            }
+            val name = if (root) Regex("""^\s*(?:([A-Za-z0-9_-]+)|"([A-Za-z0-9_-]+)"|'([A-Za-z0-9_-]+)')\s*=""").find(line)
+                ?.groupValues?.drop(1)?.firstOrNull { it.isNotEmpty() } else null
+            if (name in keys) ORIGINAL_ROOT + line else line
+        }
+    }
 
     /**
      * 把我们那两段从 config.toml 里挖掉，其余**一字不动**。
@@ -486,7 +502,7 @@ object Lines {
                 inside != null && t == inside -> inside = null
                 inside != null && (t == HEAD_ON || t == BODY_ON || t == HEAD_OFF || t == BODY_OFF) -> return null
                 inside == null && (t == HEAD_OFF || t == BODY_OFF) -> return null
-                inside == null -> out.add(ln)
+                inside == null -> out.add(if (ln.startsWith(ORIGINAL_ROOT)) ln.removePrefix(ORIGINAL_ROOT) else ln)
             }
         }
         // ⚠️ 开了没关 = 标记不成对。**宁可拒绝，不能猜**：原来遇到这种情况是把后面整段截掉，
@@ -514,9 +530,10 @@ object Lines {
     }
 
     /** Codex 此刻被我们接管到的端点 + 钥匙。**两个都要比**：同一个中转常挂几家，端点一样钥匙不一样。 */
-    data class CodexNow(val baseUrl: String, val apiKey: String)
+    data class CodexNow(val baseUrl: String, val apiKey: String, val model: String = "", val effort: String = "")
 
-    fun matchesCodex(line: Line, now: CodexNow): Boolean = line.baseUrl == now.baseUrl && line.apiKey == now.apiKey
+    fun matchesCodex(line: Line, now: CodexNow): Boolean = line.baseUrl == now.baseUrl && line.apiKey == now.apiKey &&
+        line.extra.optString("model") == now.model && line.extra.optString("model_reasoning_effort") == now.effort
 
     /** Codex 现在走的是不是我们设的线；null = 没被我们接管（走它自己的登录）。 */
     suspend fun currentCodex(ssh: SshSession?): CodexNow? = withContext(Dispatchers.IO) {
@@ -530,7 +547,12 @@ object Lines {
             ?.let { tomlUnescape(it) } ?: return@withContext null
         // 钥匙只读进内存做比对，不显示、不落日志
         val key = ConfigRemote.readFile(ssh, keyPath(h))?.trimEnd('\n').orEmpty()
-        CodexNow(url, key)
+        val headStart = ls.indexOf(HEAD_ON); val headEnd = ls.indexOf(HEAD_OFF)
+        val head = if (headStart >= 0 && headEnd > headStart) ls.subList(headStart + 1, headEnd) else emptyList()
+        fun ownedValue(name: String) = head.firstNotNullOfOrNull { row ->
+            Regex("""^$name\s*=\s*"(.*)"\s*$""").find(row)?.groupValues?.get(1)?.let(::tomlUnescape)
+        }.orEmpty()
+        CodexNow(url, key, ownedValue("model"), ownedValue("model_reasoning_effort"))
     }
 
     /**
@@ -555,12 +577,20 @@ object Lines {
                 val t = it.trim(); t == "[model_providers.$PROVIDER_ID]" || t.startsWith("[model_providers.$PROVIDER_ID.")
             }
         ) return@withContext "config.toml 里已经有一个你自己写的 [model_providers.$PROVIDER_ID]，跟 Yxi 要写的撞名了 —— 先把它改个名再试"
+        val model = line?.extra?.optString("model").orEmpty()
+        val effort = line?.extra?.optString("model_reasoning_effort").orEmpty()
+        val ownedKeys = setOf("model_provider") + (if (model.isBlank()) emptySet() else setOf("model")) +
+            (if (effort.isBlank()) emptySet() else setOf("model_reasoning_effort"))
+        val preserved = if (line == null) body else try { shadowCodexRoot(body, ownedKeys) }
+            catch (e: IllegalArgumentException) { return@withContext e.message }
         val next = if (line == null) body else buildString {
             append(HEAD_ON).append('\n')
             append("# 这两段是 Yxi「线路」自动写的，手改会被覆盖。\n")
             append("model_provider = \"").append(PROVIDER_ID).append("\"\n")
+            if (model.isNotBlank()) append("model = \"").append(tomlEscape(model)).append("\"\n")
+            if (effort.isNotBlank()) append("model_reasoning_effort = \"").append(tomlEscape(effort)).append("\"\n")
             append(HEAD_OFF).append("\n\n")
-            if (body.isNotBlank()) append(body).append("\n\n")
+            if (preserved.isNotBlank()) append(preserved).append("\n\n")
             append(BODY_ON).append('\n')
             append("[model_providers.").append(PROVIDER_ID).append("]\n")
             append("name = \"").append(tomlEscape(line.name)).append("\"\n")
