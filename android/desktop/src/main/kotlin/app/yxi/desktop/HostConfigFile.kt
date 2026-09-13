@@ -6,12 +6,52 @@ import java.security.MessageDigest
 import org.json.JSONArray
 import org.json.JSONObject
 
+internal data class HostRecoveryCopy(val name: String, val fingerprint: String, val count: Int?, val summary: List<String>, val valid: Boolean)
+
 /** Encrypt the host list and its active backup; retain encrypted migration copies
  * before clearing legacy plaintext, including an older backup or damaged input. */
 internal class HostConfigFile(private val file: File, private val protector: CredentialProtector?, private val validate: (String) -> Unit) {
     private val legacy = DurableFile(file, validate)
     private val encrypted = DurableFile(File(file.parentFile, file.name + ".protected")) { validate(decode(it)) }
     var recovered = false; private set
+    private fun copies(): List<File> {
+        val directory = file.absoluteFile.parentFile
+        if (!directory.exists()) return emptyList()
+        val exact = setOf(file.name + ".migration-copy.protected", file.name + ".bak.migration-copy.protected", file.name + ".damaged.migration-copy.protected")
+        val imported = Regex(Regex.escape(file.name) + "\\.import-[a-f0-9]{64}\\.protected")
+        return (directory.listFiles() ?: error("无法读取服务器副本目录")).filter { it.name in exact || imported.matches(it.name) }.sortedBy { it.name }
+    }
+    fun needsRecovery() = protector != null && !encrypted.file.exists() && !File(file.parentFile, file.name + ".protected.bak").exists() && copies().isNotEmpty()
+    private fun fingerprint(text: String) = MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
+    @Synchronized fun recoveryCopies(): List<HostRecoveryCopy> {
+        require(protector != null) { "请使用原Windows账号恢复服务器配置" }
+        return copies().map { copy ->
+            runCatching {
+                val cipher = copy.readText()
+                val raw = decode(cipher).also(validate)
+                val hosts = JSONArray(raw)
+                HostRecoveryCopy(copy.name, fingerprint(cipher), hosts.length(), (0 until hosts.length()).map {
+                    val host = hosts.getJSONObject(it)
+                    "${host.optString("alias").ifBlank { host.optString("hostname", "未命名主机") }} · ${host.optString("hostname")} : ${host.optInt("port", 22)}"
+                }, true)
+            }.getOrElse { HostRecoveryCopy(copy.name, "", null, emptyList(), false) }
+        }
+    }
+    @Synchronized fun restoreMissing(name: String, expectedFingerprint: String): String {
+        check(needsRecovery()) { "当前主配置或活动备份仍存在，未覆盖它们" }
+        val source = copies().singleOrNull { it.name == name } ?: error("所选副本不存在")
+        val cipher = source.readText()
+        check(fingerprint(cipher) == expectedFingerprint) { "副本已经变化，请重新选择" }
+        val raw = decode(cipher).also(validate)
+        val old = if (file.exists()) readPlain(file).also(validate) else null
+        check(old == null || JSONArray(old).length() == 0 || JSONArray(old).similar(JSONArray(raw))) { "本地存在不同的明文记录，已保留双方" }
+        val protected = encode(raw)
+        check(needsRecovery() && source.readText() == cipher) { "恢复目标已变化，未覆盖" }
+        encrypted.write(protected)
+        check(decode(encrypted.read()!!) == raw)
+        clearPlaintext(old)
+        return raw
+    }
     private fun decode(raw: String): String {
         val value = JSONObject(raw)
         require(value.getString("format") == "yxi-hosts-dpapi-v1") { "服务器保护格式无法识别" }
@@ -71,7 +111,7 @@ internal class HostConfigFile(private val file: File, private val protector: Cre
     @Synchronized fun read(): String? {
         recovered = false
         if (protector == null) {
-            check(!encrypted.file.exists() && !File(file.parentFile, file.name + ".protected.bak").exists()) { "请在原Windows账号下读取受保护的服务器配置" }
+            check(!encrypted.file.exists() && !File(file.parentFile, file.name + ".protected.bak").exists() && copies().isEmpty()) { "请在原Windows账号下读取受保护的服务器配置" }
             return legacy.read().also { recovered = legacy.recovered }
         }
         val saved = encrypted.read()
@@ -85,6 +125,7 @@ internal class HostConfigFile(private val file: File, private val protector: Cre
             clearPlaintext(old)
             return raw
         }
+        check(!needsRecovery()) { "受保护服务器主配置缺失，发现迁移副本；请先选择恢复，不会保存为空列表" }
         val raw = legacy.read() ?: return null
         recovered = legacy.recovered
         encrypted.write(encode(raw))

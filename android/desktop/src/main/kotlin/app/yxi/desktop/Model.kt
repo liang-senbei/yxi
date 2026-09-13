@@ -102,6 +102,13 @@ object Store {
         }
     }
     val knownHostsFile = File(dir, "known_hosts")
+    internal fun hostRecoveryNeeded() = runCatching { hostData.needsRecovery() }.getOrDefault(false)
+    internal fun hostRecoveryCopies() = hostData.recoveryCopies()
+    internal fun recoverHosts(copy: HostRecoveryCopy): List<Host> {
+        val restored = JSONArray(hostData.restoreMissing(copy.name, copy.fingerprint))
+        warning = "已从所选副本恢复服务器，请核对列表后手动连接。"
+        return (0 until restored.length()).map { restored.getJSONObject(it).toHost() }
+    }
 
     fun hosts(): List<Host> = runCatching {
         val text = hostData.read() ?: return@runCatching emptyList()

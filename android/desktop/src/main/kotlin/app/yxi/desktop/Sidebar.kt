@@ -80,6 +80,12 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
     var installingKey by remember { mutableStateOf<Host?>(null) }
     var note by remember { mutableStateOf("") }       // 不属于某条连接的错（Conn 都没建出来）
     var hostMenu by remember { mutableStateOf(false) }
+    var recoveringHosts by remember { mutableStateOf(false) }
+    if (recoveringHosts) HostRecoveryDialog({ recoveringHosts = false }) { copy ->
+        check(state.conns.isEmpty()) { "请先断开现有连接再恢复服务器列表" }
+        hosts = Store.recoverHosts(copy)
+        recoveringHosts = false
+    }
     NativeOverlay(hostMenu)
     val keys = remember { FileHostKeys() }
     // 账号行的资料：进来就拉一次（幂等；Me 页里还会再拉）。侧栏收起再展开会重跑，无害
@@ -160,6 +166,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
         }
         if (note.isNotBlank()) Text(note, Modifier.padding(14.dp, 2.dp), color = t.danger, style = MaterialTheme.typography.bodySmall)
         if (Store.warning.isNotBlank()) Text(Store.warning, Modifier.padding(14.dp, 2.dp), color = t.danger, style = MaterialTheme.typography.bodySmall)
+        if (Store.hostRecoveryNeeded()) TextButton({ recoveringHosts = true }, enabled = state.conns.isEmpty()) { Text(if (state.conns.isEmpty()) "从受保护副本恢复服务器" else "恢复前请先断开连接") }
         TextButton({
             val c = if (state.hostScope.isEmpty()) state.conn else state.conns.firstOrNull { it.host.id == state.hostScope }
             if (c?.status == Conn.Status.Connected) creatingOn = c else note = "先选择并连接要运行 Agent 的主机"

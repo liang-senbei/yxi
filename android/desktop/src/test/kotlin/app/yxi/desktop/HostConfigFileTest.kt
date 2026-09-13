@@ -11,6 +11,26 @@ class HostConfigFileTest {
         override fun unprotect(cipher: ByteArray): ByteArray { require(cipher.first() == 42.toByte()); return cipher.drop(1).toByteArray().reversedArray() }
     }
     private fun store(file: File, protector: CredentialProtector? = codec) = HostConfigFile(file, protector) { JSONArray(it) }
+    @Test fun `missing protected records block empty writes and require explicit unchanged copy selection`() {
+        val root = Files.createTempDirectory("host-recovery").toFile()
+        val file = File(root, "hosts.json")
+        val raw = """[{"id":"a","alias":"Test","hostname":"host.test","password":"private-fixture"}]"""
+        file.writeText(raw)
+        store(file).read()
+        File(root, "hosts.json.protected").delete()
+        val missing = store(file)
+        assertTrue(missing.needsRecovery())
+        assertFails { missing.read() }
+        assertFails { missing.write("[]") }
+        assertFails { store(file, null).write("[]") }
+        val copy = missing.recoveryCopies().single()
+        assertEquals(1, copy.count)
+        assertFalse(copy.summary.joinToString().contains("private-fixture"))
+        assertFails { missing.restoreMissing(copy.name, "changed") }
+        assertEquals(raw, missing.restoreMissing(copy.name, copy.fingerprint))
+        assertEquals(raw, store(file).read())
+        assertFails { missing.restoreMissing(copy.name, copy.fingerprint) }
+    }
     @Test fun `roaming import keeps encrypted copies locally and resumes after cleared markers`() {
         val root = Files.createTempDirectory("host-roaming").toFile()
         val roaming = File(root, "roaming").apply { mkdirs() }

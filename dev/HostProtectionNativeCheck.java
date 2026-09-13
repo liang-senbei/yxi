@@ -40,7 +40,16 @@ public class HostProtectionNativeCheck {
             if (!rejected) throw new AssertionError("Incorrect protection purpose accepted");
             store(file, purpose).write("[]");
             if (!"[]".equals(store(file, purpose).read())) throw new AssertionError("Protected save failed");
+            Files.delete(root.resolve("hosts.json.protected"));
+            Files.delete(root.resolve("hosts.json.protected.bak"));
+            boolean missingBlocked = false;
+            try { store(file, purpose).write("[]"); } catch (Exception expected) { missingBlocked = true; }
+            if (!missingBlocked) throw new AssertionError("Missing encrypted state accepted empty overwrite");
+            var copy = store(file, purpose).recoveryCopies().stream().filter(candidate -> candidate.getName().equals("hosts.json.migration-copy.protected")).findFirst().orElseThrow();
+            if (!raw.equals(store(file, purpose).restoreMissing(copy.getName(), copy.getFingerprint()))) throw new AssertionError("Selected copy recovery failed");
+            if (!raw.equals(store(file, purpose).read())) throw new AssertionError("Recovered hosts not persisted");
             System.out.println("host DPAPI reopen purpose isolation and save passed");
+            System.out.println("host missing-state guard and explicit encrypted recovery passed");
         } else throw new IllegalArgumentException("Unknown check mode");
     }
 }
