@@ -86,7 +86,7 @@ fun App(state: AppState) {
                             }
                             // 对齐手机的 终端 / 对话 / 文件（实验室是手机上的调试入口，桌面不做）
                             Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                val views = listOf("对话", "终端", "文件")
+                                val views = listOf("对话", "终端", "文件", "改动")
                                 WorkbenchTabs(views, views[state.tab], { state.tab = views.indexOf(it) })
                                 Text(sess.cwd, Modifier.weight(1f).padding(start = 18.dp), color = Tokens.current.textMuted,
                                     style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -107,7 +107,8 @@ fun App(state: AppState) {
                                             else key(taskKey) { when (state.tab) {
                                                 0 -> ChatPane(conn, sess, state.instructions, savedDraft = state.chatDrafts.getOrPut(taskKey) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue()) }, displayName = state.navigation.title(taskKey))
                                                 1 -> TermPane(conn, sess)
-                                                else -> FilesPane(conn, sess, ::openFile)
+                                                2 -> FilesPane(conn, sess, ::openFile)
+                                                else -> GitChangesPane(conn, sess.cwd, ::openFile)
                                             } }
                                         }
                                         if (panel) {
