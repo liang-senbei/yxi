@@ -19,6 +19,12 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
     var busy by remember(conn) { mutableStateOf(true) }
     var revision by remember(conn) { mutableStateOf(0) }
     var selected by remember(conn) { mutableStateOf("") }
+    var editing by remember(conn) { mutableStateOf(false) }
+    var editingName by remember(conn) { mutableStateOf<String?>(null) }
+    if (editing && table != null) {
+        GroupEditorDialog(conn, editingName, table!!, { editing = false }) { name -> selected = name; editing = false; revision++ }
+        return
+    }
     LaunchedEffect(conn, revision) {
         busy = true; error = ""
         try {
@@ -36,6 +42,10 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
             table?.let { data ->
+                Row {
+                    TextButton({ editingName = null; editing = true }, enabled = !busy && error.isBlank()) { Text("新建组") }
+                    TextButton({ editingName = selected; editing = true }, enabled = !busy && error.isBlank() && selected in data.groups) { Text("编辑成员与组规") }
+                }
                 if (data.groups.isEmpty()) Text("此服务器尚未配置协作组。", color = Tokens.current.textMuted)
                 data.groups.keys.sorted().forEach { name ->
                     FilterChip(selected == name, { selected = name }, label = { Text("$name · ${data.groups[name].orEmpty().size} 位成员") })
