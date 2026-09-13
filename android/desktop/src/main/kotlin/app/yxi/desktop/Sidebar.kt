@@ -202,6 +202,10 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
             val c = if (state.hostScope.isEmpty()) state.conn else state.conns.firstOrNull { it.host.id == state.hostScope }
             if (c?.status == Conn.Status.Connected) creatingOn = c else note = "先选择并连接要运行 Agent 的主机"
         }, Modifier.fillMaxWidth()) { Text("＋ 新对话") }
+        TextButton({ state.showTaskSwitcher = true }, Modifier.fillMaxWidth()) {
+            Text("切换任务", Modifier.weight(1f))
+            Text("Ctrl+K", style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+        }
         // 会话过滤（ZCode 的搜索框 / Codex 的过滤）：按会话名 / 主机名滤，主机全不匹配就整组藏掉
         var filter by remember { mutableStateOf("") }
         if (hosts.isNotEmpty()) Row(

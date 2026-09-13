@@ -127,4 +127,5 @@ fun App(state: AppState) {
     }
     if (state.showSettings) SettingsDialog(state)
     if (state.showShortcuts) ShortcutsDialog(state)
+    if (state.showTaskSwitcher) TaskSwitcherDialog(state)
 }

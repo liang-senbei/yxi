@@ -14,6 +14,7 @@ import androidx.compose.ui.unit.dp
 /** 快捷键表（Ctrl+/）。实现在 Shell.kt 的 shortcut()，这里只是给人看的清单；两边一起改。 */
 private val shortcuts = listOf(
     "Ctrl+N" to "新建会话",
+    "Ctrl+K" to "搜索并切换任务",
     "Ctrl+B" to "切换侧边栏",
     "Ctrl+J" to "切换对话 / 终端",
     "Ctrl+Tab · Ctrl+Shift+Tab" to "下一个 / 上一个会话",

@@ -200,6 +200,7 @@ fun shortcut(e: KeyEvent, state: AppState, scope: CoroutineScope): Boolean {
     val digit = (e.key.keyCode - Key.One.keyCode).toInt()     // 桌面 keyCode = VK_1…VK_9 连号
     when {
         e.key == Key.N -> state.newSessionRequest++
+        e.key == Key.K -> state.showTaskSwitcher = true
         e.key == Key.B -> state.sidebarOpen = !state.sidebarOpen
         e.key == Key.J -> state.tab = if (state.tab == 1) 0 else 1
         e.key == Key.Tab -> state.selectByOffset(if (e.isShiftPressed) -1 else 1)
