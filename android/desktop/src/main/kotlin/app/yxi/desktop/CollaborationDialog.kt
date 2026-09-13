@@ -3,6 +3,7 @@ package app.yxi.desktop
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -19,6 +20,7 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
     var busy by remember(conn) { mutableStateOf(true) }
     var revision by remember(conn) { mutableStateOf(0) }
     var selected by remember(conn) { mutableStateOf("") }
+    var section by remember(conn) { mutableStateOf("成员") }
     var editing by remember(conn) { mutableStateOf(false) }
     var editingName by remember(conn) { mutableStateOf<String?>(null) }
     var removing by remember(conn) { mutableStateOf(false) }
@@ -66,23 +68,27 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
             table?.let { data ->
-                Row {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
                     TextButton({ removing = false; editingName = null; editing = true }, enabled = !busy && error.isBlank()) { Text("新建组") }
                     TextButton({ removing = false; editingName = selected; editing = true }, enabled = !busy && error.isBlank() && selected in data.groups) { Text("编辑成员与组规") }
                     TextButton({ removing = true; editingName = selected; editing = true }, enabled = !busy && error.isBlank() && selected in data.groups) { Text("移除组", color = Tokens.current.danger) }
                 }
                 if (data.groups.isEmpty()) Text("此服务器尚未配置协作组。", color = Tokens.current.textMuted)
-                data.groups.keys.sorted().forEach { name ->
-                    FilterChip(selected == name, { selected = name }, label = { Text("$name · ${data.groups[name].orEmpty().size} 位成员") })
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    data.groups.keys.sorted().forEach { name ->
+                        FilterChip(selected == name, { selected = name; section = "成员" }, label = { Text("$name · ${data.groups[name].orEmpty().size} 位成员") })
+                    }
                 }
                 if (selected in data.groups) {
                     HorizontalDivider()
                     Text(selected, style = MaterialTheme.typography.titleMedium)
-                    TextButton({ creatingMember = true }, enabled = !busy && error.isBlank()) { Text("在组内新建 Agent") }
-                    key(conn, selected) { GroupDeliveryControls(conn, selected) }
-                    SelectionContainer { Text(data.rules[selected].orEmpty().ifBlank { "尚未设置组规" }, style = MaterialTheme.typography.bodySmall) }
+                    WorkbenchTabs(listOf("成员", "指派", "组规", "投递控制"), section, { section = it })
+                    if (section == "成员") TextButton({ creatingMember = true }, enabled = !busy && error.isBlank()) { Text("在组内新建 Agent") }
+                    if (section == "投递控制") key(conn, selected) { GroupDeliveryControls(conn, selected) }
+                    if (section == "组规") SelectionContainer { Text(data.rules[selected].orEmpty().ifBlank { "尚未设置组规，可在上方编辑成员与组规中填写。" }, style = MaterialTheme.typography.bodySmall) }
                     val assignments = state.instructions.entries.filter { it.assignmentGroup == selected && it.assignmentHost == projectKey(conn.host, "/") }
-                    if (assignments.isNotEmpty()) {
+                    if (section == "指派" && assignments.isEmpty()) Text("暂无本机指派记录，可在成员页选择任务进行指派。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                    if (section == "指派" && assignments.isNotEmpty()) {
                         Text("本机指派记录 · ${assignments.size}", style = MaterialTheme.typography.titleSmall)
                         assignments.asReversed().forEach { item ->
                             val target = conn.sessions.firstOrNull { taskNavigationKey(conn.host, it) == item.taskKey }
@@ -104,12 +110,13 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
                             }
                         }
                     }
-                    data.groups[selected].orEmpty().forEach { name ->
+                    if (section == "成员" && data.groups[selected].orEmpty().isEmpty()) Text("此组暂无成员，可以新建 Agent 或加入现有任务。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                    if (section == "成员") data.groups[selected].orEmpty().forEach { name ->
                         val session = conn.sessions.firstOrNull { it.name == name }
                         OutlinedCard(Modifier.fillMaxWidth()) {
                             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text(session?.let { state.navigation.title(taskNavigationKey(conn.host, it)) } ?: name, style = MaterialTheme.typography.titleSmall)
-                                Text(if (session == null) "当前会话列表未找到 · 可能离线或已结束" else "${session.state} · ${if (session.isCodex) "Codex" else "Claude Code"}", style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
+                                Text(if (session == null) "当前会话列表未找到 · 可能离线或已结束" else "${session.state.label} · ${if (session.isCodex) "Codex" else "Claude Code"}", style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
                                 if (session != null) {
                                     Text(session.cwd, style = MaterialTheme.typography.bodySmall)
                                     TextButton({ state.select(conn, session); close() }) { Text("打开成员任务") }
