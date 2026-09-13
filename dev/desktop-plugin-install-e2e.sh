@@ -2,8 +2,6 @@
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 export DISPLAY=${YXI_DISPLAY:-:125}
-# Exercise UI interactions deterministically in Xvfb; GPU/Windows checks run separately.
-export SKIKO_RENDER_API=${SKIKO_RENDER_API:-SOFTWARE_COMPAT}
 OUT=${YXI_E2E_OUT:-/tmp/yxi-plugin-install-ui}
 mkdir -p "$OUT"
 test ! -e "/tmp/.X11-unix/X${DISPLAY#:}"

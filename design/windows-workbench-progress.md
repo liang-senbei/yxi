@@ -399,7 +399,7 @@
 - 已实际查看目录、范围选择与目标确认截图，路径完整；初轮人工驱动真实点击通过，fixture.LWx5GM及/tmp/yxi-plugin-install-ui/test.log。将坐标步骤固化到desktop-plugin-install-e2e.sh，以ready/cancel-verified同步，测试失败清理仅针对本轮进程组。
 - 安装成功后目录移除已装条目，原空白提示改为圆角空状态卡片，配置页提供查看主机插件入口；搜索无结果和没有可安装条目分别说明。
 - 本轮只覆盖用户级本地市场安装，远程Git/命令来源、项目范围原生点击、多主机/断线恢复和Windows专项仍待验证。未安装生产插件，完整W03继续推进。
-- 自动化首次复跑在截图完成、窗口关闭后，Gradle测试worker卡在JVM Shutdown.halt0；jhsdb诊断未发现Java锁死，根因未确定。保留/tmp/yxi-install-sa.txt等诊断并停止该测试worker，未重发原安装。脚本新增180秒/10秒强制退出边界；之后fixture.ViNmP2完整复跑39秒正常退出，日志/tmp/yxi-plugin-install-ui-bounded/test.log，最终空状态截图已查看。该偶发Linux JVM退出问题仍需后续专项排查。
+- 自动化首次复跑在截图完成、窗口关闭后，Gradle测试worker卡在JVM Shutdown.halt0；jhsdb诊断未发现Java锁死，根因未确定。保留/tmp/yxi-install-sa.txt等诊断并停止该测试worker，未重发原安装。脚本新增180秒/10秒强制退出边界；之后fixture.ViNmP2完整复跑39秒正常退出，日志/tmp/yxi-plugin-install-ui-bounded/test.log，最终空状态截图已查看。更正：用户已说明所讨论的退出中断由关机引起，上述观测不足以认定应用缺陷，撤回据此新增的退出故障排查项；保留原始日志备查。
 - 最终全量136项中128通过、8环境测试跳过，Linux打包成功，日志/tmp/yxi-plugin-install-e2e-package.log；本机最终截图tmp/workbench-evidence/plugin-installed-verified.png。
 
 ## 第四十轮：干净提交构建与Windows原生复核（2026-09-13）
@@ -476,5 +476,14 @@
 - 可查询历史回执，已确认的设置变更/升级/卸载记录可进入相应恢复确认；恢复沿用服务器原指纹检查，不绕过后续变更保护。未知操作存在时仍阻止该主机新变更。
 - 已拒绝终态在查询不可用时不降级未知，避免旧拒绝操作重新阻塞主机；拒绝记录不提供无意义的服务器查询按钮。新增测试验证A/B历史隔离、顺序与拒绝状态跨重读保留。
 - 桌面测试/打包通过（/tmp/yxi-plugin-history-build.log），原生历史弹窗验证另记。历史恢复选择的完整点击、缺失本地记录对账、跨文件中断恢复和Windows专项仍需推进。
-- 原生弹窗打开/关闭先通过（fixture.rGiIt2）；增加滚动条后默认渲染测试在窗口关闭阶段再次卡住，按超时终止，并核对环境后清理该测试worker。根据已安装Skiko 0.150.1字节码确认SKIKO_RENDER_API支持SOFTWARE_COMPAT，仅为Xvfb交互脚本设置默认值，正式应用设置不变。软件渲染复跑fixture.YRl5RH在59秒正常结束，日志/tmp/yxi-history-software-final/test.log；已查看滚动后的较早安装记录截图tmp/workbench-evidence/plugin-history-older.png。原默认渲染退出异常根因未解决，不能把本轮当作GPU/Windows渲染验收。
+- 原生弹窗打开/关闭先通过（fixture.rGiIt2）；增加滚动条后默认渲染测试在窗口关闭阶段再次卡住，按超时终止，并核对环境后清理该测试worker。根据已安装Skiko 0.150.1字节码确认SKIKO_RENDER_API支持SOFTWARE_COMPAT，仅为Xvfb交互脚本设置默认值，正式应用设置不变。软件渲染复跑fixture.YRl5RH在59秒正常结束，日志/tmp/yxi-history-software-final/test.log；已查看滚动后的较早安装记录截图tmp/workbench-evidence/plugin-history-older.png。更正：用户已说明所讨论的退出中断由关机引起，撤回默认渲染存在退出故障的推断，并移除脚本中据此设置的软件渲染默认值。此前软件渲染结果仍仅证明对应测试范围，不扩展为GPU/Windows验收。
 - 最终Linux打包通过，日志/tmp/yxi-history-final-package.log；首次全量桌面验证日志/tmp/yxi-plugin-history-build.log。
+
+## 第四十九轮：按用户说明更正退出记录与测试缓存（2026-09-13）
+
+- 用户明确说明先前退出中断来自关机。已更正第三十九/四十八轮及handover中的故障归因，撤回应用退出缺陷判断；原始测试日志仅保留作为中断记录。
+- 删除Xvfb安装脚本中据此新增的SOFTWARE_COMPAT默认值；不修改正式应用渲染偏好。保留一般性的测试时限，避免自动化无限等待。
+- 复核发现Gradle把新隔离目录的UI测试判为UP-TO-DATE，导致没有启动窗口。将各类fixture标识与显式渲染参数声明为Test输入，确保新隔离环境触发实际执行。
+- 缓存修正后的默认渲染复核实际走完界面步骤并生成history-closed，但测试进程未在时限内结束；本次不计为通过，也不将此测试环境结果作为正式应用故障结论。终止后仅按精确fixture环境校验清理对应worker。日志/tmp/yxi-history-default-executed/test.log，fixture.zbsxa3。
+- 下一项优先补齐PRD W01-A的服务器秘密系统保护：当前Store仍通过DurableFile保存hosts.json，密码字段尚未接入现有DPAPI能力；本轮仅核对代码，不访问用户密码。
+- 缓存配置修改后普通桌面测试137项中129通过、8环境测试跳过；日志/tmp/yxi-fixture-input-tests.log。未把普通测试结果扩展为默认渲染完整退出验收。
