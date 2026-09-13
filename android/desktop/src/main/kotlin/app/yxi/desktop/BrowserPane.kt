@@ -125,7 +125,7 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
             OutlinedTextField(input, { input = it; addressDirty = true }, Modifier.weight(1f).onPreviewKeyEvent {
                 when {
                     it.type != KeyEventType.KeyDown -> false
-                    it.key == Key.Enter -> { open(); true }
+                    it.key == Key.Enter && input.composition == null -> { open(); true }
                     it.isCtrlPressed && it.key == Key.A -> { input = input.copy(selection = androidx.compose.ui.text.TextRange(0, input.text.length)); true }
                     else -> false
                 }
