@@ -6,6 +6,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -20,8 +23,19 @@ internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliv
     var editing by remember(taskKey) { mutableStateOf<QueuedInstruction?>(null) }
     var text by remember(taskKey) { mutableStateOf("") }
     var error by remember(taskKey) { mutableStateOf("") }
-    fun act(block: () -> Unit) { runCatching(block).onFailure { error = it.message.orEmpty() } }
+    var menuId by remember(taskKey) { mutableStateOf<String?>(null) }
+    var withdrawn by remember(taskKey) { mutableStateOf<Pair<QueuedInstruction, Long>?>(null) }
+    NativeOverlay(menuId != null)
+    fun act(block: () -> Unit) { error = ""; runCatching(block).onFailure { error = it.message.orEmpty() } }
     if (queue.error.isNotEmpty()) Text(queue.error, color = t.danger, modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
+    if (error.isNotBlank() && editing == null) Text(error, color = t.danger, modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
+    withdrawn?.let { (item, revision) ->
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("已撤回待发送指令", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+            TextButton({ act { queue.restoreCancelled(item.id, revision); withdrawn = null } }) { Text("撤销") }
+            TextButton({ withdrawn = null }) { Text("关闭") }
+        }
+    }
     if (active.isNotEmpty()) Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp).heightIn(max = 220.dp)
         .background(t.surface1, RoundedCornerShape(12.dp)).border(0.5.dp, t.border, RoundedCornerShape(12.dp))) {
         Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -39,6 +53,25 @@ internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliv
                     }
                     if (item.status == InstructionStatus.Local && index == 0) TextButton({ onDeliver(item) }, enabled = canDeliver) { Text("发送") }
                     TextButton({ editing = item; text = item.text; error = "" }) { Text(if (item.status == InstructionStatus.Local) "编辑" else "核对") }
+                    if (item.status == InstructionStatus.Local) IconButton({ act {
+                        val cancelled = queue.cancel(item.id, item.revision)
+                        withdrawn = item to cancelled.revision
+                    } }, Modifier.size(32.dp)) { Icon(Icons.Outlined.DeleteOutline, "撤回指令", Modifier.size(16.dp), tint = t.textMuted) }
+                    Box {
+                        IconButton({ menuId = item.id }, Modifier.size(32.dp)) { Icon(Icons.Outlined.MoreHoriz, "更多指令操作", Modifier.size(16.dp), tint = t.textMuted) }
+                        DropdownMenu(menuId == item.id, { menuId = null }) {
+                            DropdownMenuItem(text = { Text("查看完整内容") }, onClick = { menuId = null; editing = item; text = item.text; error = "" })
+                            if (item.status == InstructionStatus.Local) {
+                                val localItems = active.filter { it.status == InstructionStatus.Local }
+                                val position = localItems.indexOfFirst { it.id == item.id }
+                                val previous = localItems.getOrNull(position - 1)
+                                val next = localItems.getOrNull(position + 1)
+                                DropdownMenuItem(text = { Text("上移") }, enabled = previous != null, onClick = { menuId = null; previous?.let { act { queue.moveBefore(item.id, item.revision, it.id) } } })
+                                DropdownMenuItem(text = { Text("下移") }, enabled = next != null, onClick = { menuId = null; next?.let { act { queue.moveAfter(item.id, item.revision, it.id) } } })
+                                DropdownMenuItem(text = { Text("移到待发送首位") }, enabled = position > 0, onClick = { menuId = null; act { queue.moveBefore(item.id, item.revision, localItems.first().id) } })
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -52,7 +85,11 @@ internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliv
                 original.attachments.forEach { Text(it.name, color = t.textMuted, style = MaterialTheme.typography.bodySmall) }
                 Text(current?.detail.orEmpty().ifBlank { "此指令尚未投递，可以编辑、调整顺序或撤回。主输入框草稿不受影响。" }, style = MaterialTheme.typography.bodySmall)
                 if (local) Row {
-                    TextButton({ act { queue.cancel(original.id, original.revision); editing = null } }) { Text("撤回") }
+                    TextButton({ act {
+                        val cancelled = queue.cancel(original.id, original.revision)
+                        withdrawn = original to cancelled.revision
+                        editing = null
+                    } }) { Text("撤回") }
                     val previous = active.takeWhile { it.id != original.id }.lastOrNull { it.status == InstructionStatus.Local }
                     if (previous != null) TextButton({ act { queue.moveBefore(original.id, original.revision, previous.id); editing = null } }) { Text("上移") }
                 }

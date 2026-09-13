@@ -65,6 +65,9 @@ internal class InstructionQueue(file: File) {
     }
     fun edit(id: String, revision: Long, text: String) = change(id, revision, setOf(InstructionStatus.Local)) { it.copy(text = text) }
     fun cancel(id: String, revision: Long) = change(id, revision, setOf(InstructionStatus.Local)) { it.copy(status = InstructionStatus.Cancelled) }
+    fun restoreCancelled(id: String, revision: Long) = change(id, revision, setOf(InstructionStatus.Cancelled)) {
+        it.copy(status = InstructionStatus.Local, detail = "已撤销本地撤回，等待发送")
+    }
     fun beginDelivery(id: String, revision: Long) = change(id, revision, setOf(InstructionStatus.Local)) { current ->
         check(entries.firstOrNull { it.taskKey == current.taskKey && it.status !in setOf(InstructionStatus.Cancelled, InstructionStatus.Accepted, InstructionStatus.Resolved) }?.id == id) { "请先处理前面的指令" }
         current.copy(status = InstructionStatus.Delivering)
@@ -82,6 +85,15 @@ internal class InstructionQueue(file: File) {
         check(current.revision == revision && current.status == InstructionStatus.Local && target.status == InstructionStatus.Local && current.taskKey == target.taskKey && id != beforeId) { "只能调整同一任务的本地待发送指令" }
         val next = entries.filterNot { it.id == id }.toMutableList()
         next.add(next.indexOfFirst { it.id == beforeId }, current.copy(revision = current.revision + 1))
+        commit(next)
+    }
+
+    @Synchronized fun moveAfter(id: String, revision: Long, afterId: String) {
+        val current = entries.single { it.id == id }
+        val target = entries.single { it.id == afterId }
+        check(current.revision == revision && current.status == InstructionStatus.Local && target.status == InstructionStatus.Local && current.taskKey == target.taskKey && id != afterId) { "只能调整同一任务的本地待发送指令" }
+        val next = entries.filterNot { it.id == id }.toMutableList()
+        next.add(next.indexOfFirst { it.id == afterId } + 1, current.copy(revision = current.revision + 1))
         commit(next)
     }
 
