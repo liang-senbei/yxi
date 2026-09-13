@@ -23,6 +23,11 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
     var editingName by remember(conn) { mutableStateOf<String?>(null) }
     var removing by remember(conn) { mutableStateOf(false) }
     var history by remember(conn) { mutableStateOf(false) }
+    var assignment by remember(conn) { mutableStateOf<Pair<String, app.yxi.agent.Session>?>(null) }
+    assignment?.let { (group, target) ->
+        MemberAssignmentDialog(state, conn, target, group, { assignment = null }, close)
+        return
+    }
     if (history) {
         CollaborationHistoryDialog(conn) { history = false }
         return
@@ -71,6 +76,7 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
                                 if (session != null) {
                                     Text(session.cwd, style = MaterialTheme.typography.bodySmall)
                                     TextButton({ state.select(conn, session); close() }) { Text("打开成员任务") }
+                                    TextButton({ assignment = selected to session }) { Text("指派任务") }
                                 }
                             }
                         }
