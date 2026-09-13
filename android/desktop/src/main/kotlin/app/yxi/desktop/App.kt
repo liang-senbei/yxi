@@ -11,6 +11,10 @@ import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
@@ -87,13 +91,24 @@ fun App(state: AppState) {
                             // 对齐手机的 终端 / 对话 / 文件（实验室是手机上的调试入口，桌面不做）
                             Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                                 val views = listOf("对话", "终端", "文件", "改动")
-                                WorkbenchTabs(views, views[state.tab], { state.tab = views.indexOf(it) })
-                                Text(sess.cwd, Modifier.weight(1f).padding(start = 18.dp), color = Tokens.current.textMuted,
-                                    style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                TextButton({ state.page = Page.Routes }) { Text("模型与线路") }
-                                TextButton({ state.showCollaboration = true }) { Text("协作组") }
+                                Box(Modifier.weight(1f).horizontalScroll(rememberScrollState())) {
+                                    WorkbenchTabs(views, views[state.tab], { state.tab = views.indexOf(it) })
+                                }
                                 TextButton({ state.browserPanelOpen = true; state.filePanelOpen = false }) { Text("网页预览") }
+                                val taskMenu = remember(taskKey) { mutableStateOf(false) }
+                                NativeOverlay(taskMenu.value)
+                                Box {
+                                    TextButton({ taskMenu.value = true }) { Text("更多") }
+                                    DropdownMenu(taskMenu.value, { taskMenu.value = false }) {
+                                        DropdownMenuItem(text = { Text("模型与线路") }, onClick = { taskMenu.value = false; state.page = Page.Routes })
+                                        DropdownMenuItem(text = { Text("协作组") }, onClick = { taskMenu.value = false; state.showCollaboration = true })
+                                        DropdownMenuItem(text = { Text("切换任务 · Ctrl+K") }, onClick = { taskMenu.value = false; state.showTaskSwitcher = true })
+                                        DropdownMenuItem(text = { Text("键盘快捷键") }, onClick = { taskMenu.value = false; state.showShortcuts = true })
+                                    }
+                                }
                             }
+                            Text(sess.cwd, Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 6.dp), color = Tokens.current.textMuted,
+                                style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             if (state.workspaceError.isNotBlank()) Text(state.workspaceError, color = Tokens.current.danger)
                             if (!state.filePanelOpen && !state.browserPanelOpen && state.documents.any { it.hostId == conn.host.id && it.matchesTask(sess) }) TextButton({ state.filePanelOpen = true }) { Text("打开文件侧栏") }
                             CompositionLocalProvider(LocalUriHandler provides links) {
