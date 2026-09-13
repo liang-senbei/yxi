@@ -16,7 +16,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 @Composable
-internal fun GroupEditorDialog(conn: Conn, original: String?, table: Groups.Table, close: () -> Unit, saved: (String) -> Unit) {
+internal fun GroupEditorDialog(conn: Conn, original: String?, table: Groups.Table, close: () -> Unit, removing: Boolean = false, saved: (String) -> Unit) {
     var name by remember { mutableStateOf(original.orEmpty()) }
     var rule by remember { mutableStateOf(table.rules[original].orEmpty()) }
     var members by remember { mutableStateOf(table.groups[original].orEmpty().toSet()) }
@@ -24,15 +24,15 @@ internal fun GroupEditorDialog(conn: Conn, original: String?, table: Groups.Tabl
     var error by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     val candidates = (conn.sessions.map { it.name } + members).distinct().sorted()
-    WorkbenchDialog(onDismissRequest = { if (!busy) close() }, title = { Text(if (original == null) "新建协作组" else "编辑协作组") }, text = {
+    WorkbenchDialog(onDismissRequest = { if (!busy) close() }, title = { Text(if (removing) "移除协作组" else if (original == null) "新建协作组" else "编辑协作组") }, text = {
         Column(Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(conn.host.label, style = MaterialTheme.typography.labelMedium)
             OutlinedTextField(name, { name = it }, readOnly = original != null, enabled = !busy, singleLine = true, label = { Text("组名") })
-            OutlinedTextField(rule, { rule = it }, enabled = !busy, modifier = Modifier.fillMaxWidth(), minLines = 3, maxLines = 6, label = { Text("组规与分工") })
-            Text("选择成员；保存不会自动发消息，组规由服务器现有协作机制读取。", style = MaterialTheme.typography.bodySmall)
-            candidates.forEach { candidate ->
+            OutlinedTextField(rule, { rule = it }, readOnly = removing, enabled = !busy, modifier = Modifier.fillMaxWidth(), minLines = 3, maxLines = 6, label = { Text("组规与分工") })
+            Text(if (removing) "将移除此分组及组规，成员会话、文件和已有对话继续保留。已在运行的 Agent 可能仍记得旧组规，此操作不会停止它们。" else "选择成员；保存不会自动发消息，组规由服务器现有协作机制读取。", style = MaterialTheme.typography.bodySmall)
+            (if (removing) members.sorted() else candidates).forEach { candidate ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(candidate in members, { checked -> members = if (checked) members + candidate else members - candidate }, enabled = !busy)
+                    Checkbox(candidate in members, { checked -> members = if (checked) members + candidate else members - candidate }, enabled = !busy && !removing)
                     Column {
                         Text(candidate, style = MaterialTheme.typography.bodyMedium)
                         Text(conn.sessions.firstOrNull { it.name == candidate }?.cwd ?: "当前会话列表未找到", style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
@@ -47,7 +47,7 @@ internal fun GroupEditorDialog(conn: Conn, original: String?, table: Groups.Tabl
             try {
                 val group = name.trim()
                 require(group.isNotEmpty() && group.none { it < ' ' }) { "请填写有效组名" }
-                val request = JSONObject().put("name", group).put("new", original == null)
+                val request = JSONObject().put("name", group).put("new", original == null).put("remove", removing)
                     .put("members", JSONArray(members.sorted())).put("rule", rule.trim())
                     .put("previousMembers", JSONArray(table.groups[original].orEmpty())).put("previousRule", table.rules[original].orEmpty())
                 val script = """
@@ -62,9 +62,13 @@ if r['new']:
     if n in groups: raise ValueError('组名已存在，请刷新后编辑')
 elif groups.get(n) != r['previousMembers'] or rules.get(n, '') != r['previousRule']:
     raise ValueError('此分组已被其他客户端修改，请刷新后再编辑')
-groups[n] = r['members']
-if r['rule']: rules[n] = r['rule']
-else: rules.pop(n, None)
+if r['remove']:
+    groups.pop(n, None)
+    rules.pop(n, None)
+else:
+    groups[n] = r['members']
+    if r['rule']: rules[n] = r['rule']
+    else: rules.pop(n, None)
 p.parent.mkdir(parents=True, exist_ok=True)
 fd, temp = tempfile.mkstemp(prefix='groups-', suffix='.tmp', dir=p.parent)
 try:
@@ -83,6 +87,6 @@ print('__YXI_GROUP_SAVED__')
             catch (e: Exception) { error = e.message.orEmpty() }
             finally { busy = false }
         }
-    }, enabled = !busy && name.isNotBlank()) { Text(if (busy) "保存中…" else "保存到服务器") } },
+    }, enabled = !busy && name.isNotBlank()) { Text(if (busy) "保存中…" else if (removing) "移除分组" else "保存到服务器", color = if (removing) Tokens.current.danger else Tokens.current.accent) } },
         dismissButton = { TextButton(close, enabled = !busy) { Text("取消") } })
 }

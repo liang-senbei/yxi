@@ -21,8 +21,9 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
     var selected by remember(conn) { mutableStateOf("") }
     var editing by remember(conn) { mutableStateOf(false) }
     var editingName by remember(conn) { mutableStateOf<String?>(null) }
+    var removing by remember(conn) { mutableStateOf(false) }
     if (editing && table != null) {
-        GroupEditorDialog(conn, editingName, table!!, { editing = false }) { name -> selected = name; editing = false; revision++ }
+        GroupEditorDialog(conn, editingName, table!!, { editing = false }, removing = removing) { name -> selected = name; editing = false; revision++ }
         return
     }
     LaunchedEffect(conn, revision) {
@@ -43,8 +44,9 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
             if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
             table?.let { data ->
                 Row {
-                    TextButton({ editingName = null; editing = true }, enabled = !busy && error.isBlank()) { Text("新建组") }
-                    TextButton({ editingName = selected; editing = true }, enabled = !busy && error.isBlank() && selected in data.groups) { Text("编辑成员与组规") }
+                    TextButton({ removing = false; editingName = null; editing = true }, enabled = !busy && error.isBlank()) { Text("新建组") }
+                    TextButton({ removing = false; editingName = selected; editing = true }, enabled = !busy && error.isBlank() && selected in data.groups) { Text("编辑成员与组规") }
+                    TextButton({ removing = true; editingName = selected; editing = true }, enabled = !busy && error.isBlank() && selected in data.groups) { Text("移除组", color = Tokens.current.danger) }
                 }
                 if (data.groups.isEmpty()) Text("此服务器尚未配置协作组。", color = Tokens.current.textMuted)
                 data.groups.keys.sorted().forEach { name ->
