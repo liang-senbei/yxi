@@ -27,13 +27,18 @@ internal object PluginCatalog {
 }
 
 @Composable
-internal fun PluginCatalogPane(conn: Conn) {
+internal fun PluginCatalogPane(state: AppState, conn: Conn) {
     val t = Tokens.current
     var revision by remember(conn) { mutableStateOf(0) }
     var entries by remember(conn) { mutableStateOf<List<CatalogPlugin>>(emptyList()) }
     var busy by remember(conn) { mutableStateOf(true) }
     var error by remember(conn) { mutableStateOf("") }
     var query by remember(conn) { mutableStateOf("") }
+    var selected by remember(conn) { mutableStateOf<CatalogPlugin?>(null) }
+    val operations = state.pluginOperations
+    val host = projectKey(conn.host, "/")
+    val last = operations.latest(host)
+    LaunchedEffect(last?.id, last?.status) { if (last?.status == "installed") revision++ }
     LaunchedEffect(conn, revision) {
         busy = true; entries = emptyList(); error = ""
         try { entries = PluginCatalog.parse(conn.ssh.exec(PluginCatalog.command())) }
@@ -50,6 +55,11 @@ internal fun PluginCatalogPane(conn: Conn) {
             OutlinedButton({ revision++ }, enabled = !busy) { Text("刷新目录") }
         }
         Text("来自这台主机已配置的市场。目录条目不代表已安装或已验证兼容。", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+        if (last != null) Row(Modifier.fillMaxWidth()) {
+            Text(when(last.status) { "installed" -> "安装完成，运行器已识别；请在新会话测试"; "sending" -> "插件操作中…"; "unknown" -> "结果待确认，请查询原操作"; "rejected" -> "操作未执行，请刷新目录后核对"; else -> "上次操作已确认" }, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+            TextButton({ operations.query(conn, last) }, enabled = last.id !in operations.running && conn.status == Conn.Status.Connected) { Text("查询结果") }
+        }
+        if (operations.error.isNotBlank()) Text(operations.error, color = t.danger)
         OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("搜索插件或市场") }, shape = RoundedCornerShape(14.dp))
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (error.isNotBlank()) Text(error, color = t.danger)
@@ -64,8 +74,11 @@ internal fun PluginCatalogPane(conn: Conn) {
                     if (p.description.isNotBlank()) Text(p.description, style = MaterialTheme.typography.bodySmall)
                     Text("版本：${p.version.ifBlank { "目录未提供" }} · 来源：${when(p.source) { "marketplace-path" -> "市场内目录"; "url", "git-subdir", "github" -> "代码仓库"; "npm", "pip" -> "软件包"; "command" -> "安装命令"; else -> "未识别" }}", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
                     if (p.location.isNotBlank()) Text(p.location, style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+                    OutlinedButton({ selected = p }, enabled = conn.status == Conn.Status.Connected && !operations.unresolved(host) && operations.error.isBlank() && p.source != "command") { Text("安装到此主机") }
+                    if (p.source == "command") Text("此来源需要单独授权安装命令。", style = MaterialTheme.typography.bodySmall, color = t.warning)
                 }
             } }
         }
     }
+    selected?.let { plugin -> PluginInstallDialog(state, conn, plugin) { selected = null } }
 }

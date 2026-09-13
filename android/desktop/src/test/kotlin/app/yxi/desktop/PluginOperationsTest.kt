@@ -5,6 +5,15 @@ import java.nio.file.Files
 import kotlin.test.*
 
 class PluginOperationsTest {
+    @Test fun `installed results persist and survive unavailable status queries`() {
+        val file = Files.createTempDirectory("plugin-install-ledger").resolve("operations.json").toFile()
+        val ledger = PluginOperations(file)
+        ledger.begin("host", JSONObject().put("operation", "d".repeat(32)).put("action", "install"))
+        ledger.finish("d".repeat(32), "installed")
+        ledger.finish("d".repeat(32), "unknown")
+        assertEquals("installed", PluginOperations(file).latest("host")!!.status)
+        assertFalse(ledger.unresolved("host"))
+    }
     @Test fun `restart retains operation identity and blocks new sends until queried`() {
         val file = Files.createTempDirectory("plugin-ledger").resolve("operations.json").toFile()
         val original = PluginOperations(file)

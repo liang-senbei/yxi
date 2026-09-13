@@ -41,7 +41,7 @@ internal fun PluginInventoryPane(state: AppState, conn: Conn) {
     LaunchedEffect(last?.status) { if (last?.status in setOf("configured", "restored")) revision++ }
     Column(Modifier.fillMaxSize()) {
         if (last != null) Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(when (last.status) { "configured" -> "插件设置已更新 · 请在新会话验证加载"; "restored" -> "已恢复操作前设置 · 请在新会话验证加载"; "rejected" -> "变更未执行，配置可能已变化或副本不可用"; "sending" -> "插件操作中…"; else -> "插件操作待确认，请查询原操作" }, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+            Text(when (last.status) { "installed" -> "插件已安装并被运行器识别 · 请在新会话测试"; "configured" -> "插件设置已更新 · 请在新会话验证加载"; "restored" -> "已恢复操作前设置 · 请在新会话验证加载"; "rejected" -> "变更未执行，配置可能已变化或副本不可用"; "sending" -> "插件操作中…"; else -> "插件操作待确认，请查询原操作" }, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
             if (last.status == "configured") TextButton({
                 prepared = JSONObject(last.request).put("action", "restore").put("restores", last.id).put("operation", UUID.randomUUID().toString().replace("-", ""))
             }, enabled = last.id !in operations.running && !operations.unresolved(hostKey) && operations.error.isBlank() && conn.status == Conn.Status.Connected) { Text("恢复设置") }
