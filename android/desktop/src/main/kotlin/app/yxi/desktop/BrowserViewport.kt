@@ -5,6 +5,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.swing.Swing
 import org.cef.browser.CefBrowser
 import org.json.JSONObject
+import org.json.JSONArray
 import java.util.concurrent.TimeUnit
 
 internal data class PreviewViewport(val id: String, val label: String, val width: Int, val height: Int)
@@ -14,6 +15,18 @@ internal val previewViewports = listOf(
     PreviewViewport("tablet", "平板", 768, 1024),
     PreviewViewport("phone", "手机", 390, 844),
 )
+
+internal suspend fun applyPreviewColorScheme(browser: CefBrowser, scheme: String) {
+    require(scheme in setOf("system", "light", "dark"))
+    val client = withContext(Dispatchers.Swing) { browser.devToolsClient ?: error("浏览器尚未就绪") }
+    try {
+        val features = JSONArray()
+        if (scheme != "system") features.put(JSONObject().put("name", "prefers-color-scheme").put("value", scheme))
+        val future = withContext(Dispatchers.Swing) { client.executeDevToolsMethod("Emulation.setEmulatedMedia", JSONObject().put("features", features).toString()) }
+        val response = withContext(Dispatchers.IO) { future.get(10, TimeUnit.SECONDS) }
+        check(!JSONObject(response).has("error")) { "浏览器未接受网页主题设置" }
+    } finally { client.close() }
+}
 
 internal suspend fun applyPreviewViewport(browser: CefBrowser, viewport: PreviewViewport): String {
     val client = withContext(Dispatchers.Swing) { browser.devToolsClient ?: error("浏览器尚未就绪") }

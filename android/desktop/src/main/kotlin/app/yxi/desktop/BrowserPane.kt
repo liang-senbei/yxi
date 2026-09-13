@@ -41,6 +41,13 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
     var reviewingClose by remember(preview) { mutableStateOf(false) }
     var captureJob by remember(preview) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var viewportSize by remember(preview) { mutableStateOf(IntSize.Zero) }
+    LaunchedEffect(preview.handle, preview.colorScheme, preview.loading, preview.preparing) {
+        val browser = preview.handle ?: return@LaunchedEffect
+        if (preview.loading || preview.preparing) return@LaunchedEffect
+        try { applyPreviewColorScheme(browser, preview.colorScheme) }
+        catch (e: CancellationException) { throw e }
+        catch (e: Exception) { preview.error = "网页主题未切换：${e.message}" }
+    }
     LaunchedEffect(preview.handle, preview.viewportMode, viewportSize, preview.loading, preview.preparing) {
         val browser = preview.handle ?: return@LaunchedEffect
         if (preview.loading || preview.preparing || viewportSize.width == 0 || viewportSize.height == 0) return@LaunchedEffect
@@ -126,6 +133,17 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
             }
         }
         if (preview.viewportStatus.isNotBlank()) Text(preview.viewportStatus, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("网页主题", style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+            listOf("system" to "跟随系统", "light" to "亮色", "dark" to "暗色").forEach { (value, label) ->
+                FilterChip(selected = preview.colorScheme == value, onClick = {
+                    if (preview.colorScheme != value) {
+                        preview.colorScheme = value
+                        if (preview.selection != null) preview.selectionStale = true
+                    }
+                }, label = { Text(label) })
+            }
+        }
         Text(preview.source, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
         if (state.projectPreviews.error.isNotBlank()) Text(state.projectPreviews.error, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = t.danger)
         Text(preview.status, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
