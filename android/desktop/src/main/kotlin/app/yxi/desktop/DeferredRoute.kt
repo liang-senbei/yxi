@@ -1,6 +1,11 @@
 package app.yxi.desktop
 
 import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import app.yxi.agent.Lines
 import app.yxi.agent.SessionState
 import app.yxi.ssh.Shell
@@ -16,6 +21,31 @@ internal class DeferredRoute(val conn: Conn, line: Lines.Line, val directory: St
     val catalog = catalog.map { it.copy(extra = org.json.JSONObject(it.extra.toString())) }
     var applying by mutableStateOf(false)
     var status by mutableStateOf("等待目标范围内的任务空闲")
+}
+
+@Composable
+internal fun DeferredRouteStatus(state: AppState) {
+    val request = state.deferredRoute
+    if (request == null && state.deferredRouteNotice.isBlank()) return
+    Surface(color = Tokens.current.surface1, modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(horizontal = 14.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                if (request != null) {
+                    Text("${request.conn.host.label} · ${request.line.name}", style = MaterialTheme.typography.labelMedium)
+                    Text("${request.status} · ${request.directory ?: "用户级配置"}", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                } else Text(state.deferredRouteNotice, style = MaterialTheme.typography.bodySmall)
+            }
+            if (request != null) {
+                if (request.applying) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                else TextButton({
+                    if (state.deferredRoute === request && !request.applying) {
+                        state.deferredRoute = null
+                        state.deferredRouteNotice = "已取消 ${request.conn.host.label} 的等待切换，未写入配置"
+                    }
+                }) { Text("取消等待") }
+            } else TextButton({ state.deferredRouteNotice = "" }) { Text("关闭提示") }
+        }
+    }
 }
 
 @Composable

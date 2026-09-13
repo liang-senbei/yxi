@@ -111,6 +111,7 @@ fun App(state: AppState) {
                             Text(sess.cwd, Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 6.dp), color = Tokens.current.textMuted,
                                 style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             if (state.workspaceError.isNotBlank()) Text(state.workspaceError, color = Tokens.current.danger)
+                            DeferredRouteStatus(state)
                             if (!state.filePanelOpen && !state.browserPanelOpen && state.documents.any { it.hostId == conn.host.id && it.matchesTask(sess) }) TextButton({ state.filePanelOpen = true }) { Text("打开文件侧栏") }
                             CompositionLocalProvider(LocalUriHandler provides links) {
                                 BoxWithConstraints(Modifier.fillMaxSize()) {
