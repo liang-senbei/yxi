@@ -24,7 +24,7 @@ import json,pathlib,sys
 home,key,session,fixture=sys.argv[1:]
 p=pathlib.Path(home)/'.config/yxi'
 (p/'hosts.json').write_text(json.dumps([dict(id='doc-test',alias='Preview test',hostname='127.0.0.1',username='root',keyPath=key)]))
-(p/'prefs.json').write_text(json.dumps(dict(lastHost='doc-test',lastSession=session,theme='light')))
+(p/'prefs.json').write_text(json.dumps(dict(lastHost='doc-test',lastSession=session,theme='light',closeToTray='0')))
 (pathlib.Path(fixture)/'PRD.md').write_text('# Live document preview\n\n| Feature | Status |\n| --- | --- |\n| Remote files | Ready |\n| Markdown tables | Ready |\n\nEdit this document beside the conversation.\n')
 PY
 tmux new-session -d -s "$SESSION" -c "$FIXTURE" 'sleep 600'
@@ -61,6 +61,50 @@ sleep 12
 tap() { DISPLAY=$D xdotool mousemove "$1" "$2" click 1; sleep 3; }
 shot() { DISPLAY=$D import -window root "$OUT/$1.png"; }
 shot 01-restored
+if [ "${YXI_TEST_PROJECT_PREVIEW:-0}" = 1 ]; then
+  test -n "${WEB_FIXTURE:-}"
+  tap 1180 110
+  tap 1080 159
+  shot 02-project-settings
+  echo "Project preview settings ready: $OUT; port: $(cat "$WEB_FIXTURE/browser-port")"
+  tap 630 468
+  DISPLAY=$D xdotool key ctrl+a
+  sleep 1
+  DISPLAY=$D xdotool type --clearmodifiers "$(cat "$WEB_FIXTURE/browser-port")"
+  DISPLAY=$D xdotool key ctrl+a
+  sleep 1
+  DISPLAY=$D xdotool key ctrl+c
+  sleep 1
+  DISPLAY=$D timeout 5 xclip -selection clipboard -o > "$OUT/preset-input.txt"
+  test "$(cat "$OUT/preset-input.txt")" = "$(cat "$WEB_FIXTURE/browser-port")"
+  tap 854 544
+  python3 - "$TEST_HOME/.config/yxi/project-previews.json" "$WEB_FIXTURE/browser-port" <<'PY'
+import pathlib,json,sys
+values=json.load(open(sys.argv[1]))['projects']
+assert list(values.values())==['http://localhost:'+pathlib.Path(sys.argv[2]).read_text().strip()+'/']
+PY
+  sleep 10
+  shot 03-project-opened
+  tap 1207 159
+  tap 1225 68
+  for attempt in $(seq 1 30); do kill -0 "$app_pid" 2>/dev/null || break; sleep 1; done
+  if kill -0 "$app_pid" 2>/dev/null; then echo 'App did not exit' >&2; exit 1; fi
+  wait "$app_pid"; app_pid=
+  DISPLAY=$D "${JAVA_HOME:+$JAVA_HOME/bin/}java" "${browser_args[@]}" -Duser.home="$TEST_HOME" -jar "$jar" >"$OUT/restart.log" 2>&1 & app_pid=$!
+  sleep 15
+  tap 1180 110
+  sleep 12
+  shot 04-project-restored
+  tap 950 392
+  DISPLAY=$D xdotool key ctrl+a
+  sleep 1
+  DISPLAY=$D xdotool key ctrl+c
+  sleep 1
+  DISPLAY=$D timeout 5 xclip -selection clipboard -o > "$OUT/restored-page.txt"
+  grep -q 'Before the edit' "$OUT/restored-page.txt"
+  echo 'Project address restored after application restart'
+  exit 0
+fi
 if [ "${YXI_TEST_SCREENSHOT:-0}" = 1 ]; then
   test -n "${WEB_FIXTURE:-}"
   tap 1180 110

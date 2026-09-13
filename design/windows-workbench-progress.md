@@ -219,3 +219,14 @@
 - 真实产品按钮在隔离Xvfb中点击，通过xclip读取系统image/png，PIL检查尺寸与非空像素，已查看输出。证据hk13 /tmp/yxi-copy-screenshot-ui/；本机tmp/workbench-evidence/copied-page.png与screenshot-toolbar.png。测试页为合成内容，未读取用户Windows剪贴板或上传图片。
 - dev/desktop-document-e2e.sh增加YXI_TEST_SCREENSHOT模式，并更新紧凑导航后的选择按钮坐标。首轮采用手动点击再继续验证，脚本已固化同一坐标；窗口数据与图片均来自真实渲染，不是UI设计稿。
 - 本轮是可见区域复制，未实现区域框选、截图与URL/元素/评论的一体附件、Windows系统剪贴板到附件的完整E2E，以及所有导航竞争时序。现有Ctrl+V附件入口可由用户主动使用，不能据此宣称完整W06截图反馈闭环已验收。完整PRD继续推进，未发版。
+
+## 第二十一轮：项目预览地址持久化（2026-09-13）
+
+- 新增ProjectPreviews，显式保存起始地址，落盘到project-previews.json；沿用原子写入/备份恢复，损坏时阻止覆盖，旧编辑值不能覆盖新设置。支持端口简写和HTTP(S)地址，拒绝文件协议及URL内用户名密码。
+- 通过现有projectKey绑定服务器ID、端点、SSH用户和规范化项目路径；同服务器同项目的新任务复用地址，重命名显示名不丢失配置，不同目录/端口/用户不串用。
+- 浏览器标题栏增加“项目地址”设置，保存并打开、移除记录、错误保留输入。只有用户显式保存时更新记录，重定向和正常导航不会写成项目起始页。
+- 再次打开预览时自动访问已保存地址，远端端口等待SSH连接可用；不覆盖用户正在输入的地址。任务目录变化时阻止旧设置提交。移除/重新打开后以浏览器映射中的当前实例为准，避免记住已关闭对象。
+- 3项新测试覆盖跨端点/项目恢复、旧编辑冲突、移除只影响目标、非法URL、存储损坏不覆盖。全量116项，112通过、4环境测试跳过，Linux打包通过（/tmp/yxi-project-address-build.log）。
+- 原生E2E实际打开设置、填写测试服务端口、校验本地记录为远端逻辑URL；退出应用并等待进程结束，再以同一隔离profile启动。点击网页预览后不输入地址，复制页面文字核对Before the edit成功；已查看重启后截图。证据hk13 /tmp/yxi-project-address-final/ 与 /tmp/yxi-project-address-final.log；本机tmp/workbench-evidence/project-preview-restored.png。
+- dev/desktop-document-e2e.sh加入YXI_TEST_PROJECT_PREVIEW模式，测试profile明确关闭托盘隐藏；已固化UI动作，并补提交前读取输入值的断言以避免错误端口访问。初次定位弹窗等待超时后，自动化重跑完整通过。
+- 当前只保存预览地址，开发服务需已运行。启动命令、工作目录启动器、健康进程复用、构建日志/版本状态与自动刷新控制仍未实现；不能视为W06-A全部完成。Windows完整项目恢复与其它PRD验收继续推进，未发布。

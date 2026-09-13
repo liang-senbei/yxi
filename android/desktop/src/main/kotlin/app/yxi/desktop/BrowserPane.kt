@@ -27,7 +27,12 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
     val t = Tokens.current
     val scope = rememberCoroutineScope()
     val key = taskNavigationKey(conn.host, session)
-    val preview = remember(key) { state.browsers.getOrPut(key) { BrowserPreview(conn.host, key) } }
+    val project = projectKey(conn.host, session.cwd)
+    val knownProject = session.cwd.startsWith('/') && session.cwd.none { it < ' ' }
+    val savedAddress = if (knownProject) state.projectPreviews.address(project) else null
+    val preview = state.browsers.getOrPut(key) { BrowserPreview(conn.host, key).apply { savedAddress?.let { address = it } } }
+    var restored by remember(preview) { mutableStateOf(false) }
+    var settings by remember(preview) { mutableStateOf<PreviewAddressSettings?>(null) }
     var input by remember(preview) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(preview.address)) }
     var addressDirty by remember(preview) { mutableStateOf(false) }
     var reviewingClose by remember(preview) { mutableStateOf(false) }
@@ -35,11 +40,20 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
     DisposableEffect(preview) { onDispose { captureJob?.cancel() } }
     fun closePreview() { preview.close(); state.browsers.remove(key); state.browserPanelOpen = false }
     LaunchedEffect(preview.address) { if (!addressDirty) input = androidx.compose.ui.text.input.TextFieldValue(preview.address) }
-    fun open() { if (preview.preparing) return; val requested = input.text; addressDirty = false; scope.launch {
+    fun open() { if (preview.preparing) return; restored = true; val requested = input.text; addressDirty = false; scope.launch {
         try { preview.open(conn, requested) }
         catch (e: CancellationException) { throw e }
         catch (e: Throwable) { preview.error = "预览未打开：${e.message}" }
     } }
+    LaunchedEffect(preview, savedAddress, conn.status) {
+        if (!restored && !addressDirty && savedAddress != null && preview.handle == null && !preview.preparing &&
+            (conn.status == Conn.Status.Connected || PreviewAddress.parse(savedAddress).remotePort == null)) {
+            restored = true
+            try { preview.open(conn, savedAddress) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { preview.error = "项目预览未打开：${e.message}" }
+        }
+    }
     LaunchedEffect(conn.status, preview.remote) {
         if (conn.status == Conn.Status.Connected && preview.needsReconnect && !preview.preparing) {
             try { preview.open(conn, preview.address) }
@@ -50,6 +64,7 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
     Column(Modifier.fillMaxSize().background(t.surface0)) {
         Row(Modifier.fillMaxWidth().height(46.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(preview.title.ifBlank { "网页预览" }, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            TextButton({ settings = PreviewAddressSettings(project, session.cwd, savedAddress, savedAddress ?: input.text) }, enabled = knownProject && !preview.preparing) { Text("项目地址") }
             TextButton({ state.browserPanelOpen = false }) { Text("收起") }
             TextButton({
                 if (preview.hasUnsubmittedFeedback || preview.preparing || preview.stylePending != null || preview.capturing) reviewingClose = true
@@ -84,6 +99,7 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
             } }, enabled = preview.handle != null && !preview.loading && !preview.preparing && !preview.capturing && !preview.needsReconnect) { Text(if (preview.capturing) "正在截图…" else "复制截图") }
         }
         Text(preview.source, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+        if (state.projectPreviews.error.isNotBlank()) Text(state.projectPreviews.error, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = t.danger)
         Text(preview.status, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
         if (preview.remote && conn.status != Conn.Status.Connected) Text("SSH 已断开，当前画面可能过期；连接恢复后将重新加载。", Modifier.padding(12.dp), color = t.warning)
         if (preview.error.isNotBlank()) Text(preview.error, Modifier.padding(12.dp), color = t.danger)
@@ -127,8 +143,40 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
             }
         }
     }
+    settings?.let { edit -> ProjectPreviewDialog(edit, current = edit.project == project, busy = preview.preparing, onClose = { settings = null }, onSave = { value ->
+        check(edit.project == project) { "当前任务目录已变化，请重新打开设置" }
+        val address = state.projectPreviews.save(edit.project, value, edit.saved)
+        restored = true
+        input = androidx.compose.ui.text.input.TextFieldValue(address)
+        settings = null
+        open()
+    }, onRemove = {
+        check(edit.project == project)
+        state.projectPreviews.remove(edit.project, edit.saved)
+        settings = null
+    }) }
     if (reviewingClose) WorkbenchDialog(onDismissRequest = { reviewingClose = false }, title = { Text("保留这份网页反馈？") },
         text = { Text(if (preview.preparing || preview.stylePending != null || preview.capturing) "网页操作尚未完成，请稍后再关闭。" else "这份意见或试调还没有加入对话。可以收起预览继续保留，或丢弃后关闭。") },
         confirmButton = { TextButton({ reviewingClose = false; state.browserPanelOpen = false }) { Text("收起并保留") } },
         dismissButton = { TextButton({ reviewingClose = false; closePreview() }, enabled = !preview.preparing && preview.stylePending == null && !preview.capturing) { Text("丢弃并关闭") } })
+}
+
+private data class PreviewAddressSettings(val project: String, val directory: String, val saved: String?, val initial: String)
+
+@Composable
+private fun ProjectPreviewDialog(edit: PreviewAddressSettings, current: Boolean, busy: Boolean, onClose: () -> Unit, onSave: (String) -> Unit, onRemove: () -> Unit) {
+    var value by remember(edit) { mutableStateOf(edit.initial) }
+    var error by remember(edit) { mutableStateOf("") }
+    WorkbenchDialog(onDismissRequest = onClose, title = { Text("项目预览地址") }, text = {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(edit.directory, style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            Text("同一服务器、同一项目的任务共用此地址。下次打开预览时自动访问，开发服务需已运行。", style = MaterialTheme.typography.bodySmall)
+            OutlinedTextField(value, { value = it }, label = { Text("地址或远端端口") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            if (!current) Text("任务目录已变化，请关闭后重新打开设置", color = Tokens.current.danger)
+            if (busy) Text("页面正在准备，请稍后保存并打开", style = MaterialTheme.typography.bodySmall)
+            if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
+            if (edit.saved != null) TextButton({ runCatching(onRemove).onFailure { error = it.message.orEmpty() } }, enabled = current) { Text("移除已保存的地址") }
+        }
+    }, confirmButton = { TextButton({ runCatching { onSave(value) }.onFailure { error = it.message.orEmpty() } }, enabled = current && !busy && value.isNotBlank()) { Text("保存并打开") } },
+        dismissButton = { TextButton(onClose) { Text("取消") } })
 }

@@ -25,6 +25,7 @@ class AppState {
     val browsers = mutableMapOf<String, BrowserPreview>()
     var browserPanelOpen by mutableStateOf(false)
     val navigation = WorkspaceNavigation(java.io.File(Store.dir, "workspace.json"))
+    internal val projectPreviews = ProjectPreviews(java.io.File(Store.dir, "project-previews.json"))
     internal val instructions = InstructionQueue(java.io.File(Store.dir, "instructions.json"))
     internal val support = SupportWorkspace(java.io.File(Store.dir, "support-drafts.json"))
     val documents = mutableStateListOf<FileDocument>()
