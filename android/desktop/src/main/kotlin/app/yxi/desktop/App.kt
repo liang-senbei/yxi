@@ -91,6 +91,7 @@ fun App(state: AppState) {
                                 Text(sess.cwd, Modifier.weight(1f).padding(start = 18.dp), color = Tokens.current.textMuted,
                                     style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 TextButton({ state.page = Page.Routes }) { Text("模型与线路") }
+                                TextButton({ state.showCollaboration = true }) { Text("协作组") }
                                 TextButton({ state.browserPanelOpen = true; state.filePanelOpen = false }) { Text("网页预览") }
                             }
                             if (state.workspaceError.isNotBlank()) Text(state.workspaceError, color = Tokens.current.danger)
@@ -129,4 +130,5 @@ fun App(state: AppState) {
     if (state.showSettings) SettingsDialog(state)
     if (state.showShortcuts) ShortcutsDialog(state)
     if (state.showTaskSwitcher) TaskSwitcherDialog(state)
+    if (state.showCollaboration) state.conn?.let { conn -> CollaborationDialog(state, conn) { state.showCollaboration = false } }
 }

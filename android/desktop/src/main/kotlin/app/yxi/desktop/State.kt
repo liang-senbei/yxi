@@ -75,6 +75,7 @@ class AppState {
     var showSettings by mutableStateOf(false)              // Ctrl+,
     var showShortcuts by mutableStateOf(false)             // Ctrl+/
     var showTaskSwitcher by mutableStateOf(false)          // Ctrl+K
+    var showCollaboration by mutableStateOf(false)
 
     /** ⚠️ 选会话顺带回工作区：人在「配置」页点了侧栏的会话，意思显然是「我要去看那个会话」。 */
     fun select(c: Conn, s: Session?) {
