@@ -29,12 +29,16 @@ internal fun GitChangesPane(conn: Conn, directory: String, openFile: (String) ->
         busy = true; error = ""; snapshot = null
         try {
             val script = """
-import json, pathlib, subprocess, sys
+import datetime, json, pathlib, subprocess, sys
 cwd, selected, staged = sys.argv[1:]
 def git(*args):
     return subprocess.check_output(['git', '--no-pager', '-C', cwd, *args])
 root = git('rev-parse', '--show-toplevel').decode().strip()
 cwd = root
+head_result = subprocess.run(['git', '-C', cwd, 'rev-parse', '--verify', 'HEAD'], capture_output=True, text=True)
+head = head_result.stdout.strip() if head_result.returncode == 0 else ''
+branch_result = subprocess.run(['git', '-C', cwd, 'symbolic-ref', '--short', '-q', 'HEAD'], capture_output=True, text=True)
+branch = branch_result.stdout.strip() if branch_result.returncode == 0 else ''
 records = git('status', '--porcelain=v1', '-z', '--untracked-files=normal').split(b'\0')
 files, index = [], 0
 while index < len(records):
@@ -62,7 +66,8 @@ if entry:
             text = data[:262144].decode('utf-8', errors='replace')
         finally:
             if process.poll() is None: process.kill(); process.wait()
-print('__YXI_GIT__:' + json.dumps({'root': root, 'files': files, 'diff': text, 'clipped': clipped}, ensure_ascii=False))
+print('__YXI_GIT__:' + json.dumps({'root': root, 'files': files, 'diff': text, 'clipped': clipped, 'head': head, 'branch': branch,
+    'readAt': datetime.datetime.now(datetime.timezone.utc).isoformat()}, ensure_ascii=False))
 """.trimIndent()
             val raw = conn.ssh.exec("python3 -c " + Shell.q(script) + " " + Shell.q(directory) + " " + Shell.q(file) + " " + Shell.q(staged.toString()))
             val result = raw.lineSequence().lastOrNull { it.startsWith("__YXI_GIT__:") } ?: error("无法读取 Git 改动，请确认目录属于 Git 仓库")
@@ -81,6 +86,9 @@ print('__YXI_GIT__:' + json.dumps({'root': root, 'files': files, 'diff': text, '
         if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
         snapshot?.let { data ->
             Text(data.getString("root"), style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
+            SelectionContainer {
+                Text("${data.optString("branch").ifBlank { "分离 HEAD" }} · ${data.optString("head").take(12).ifBlank { "尚无提交" }}", style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
+            }
             val files = data.getJSONArray("files")
             Column(Modifier.fillMaxWidth().heightIn(max = 180.dp).verticalScroll(rememberScrollState())) {
                 if (files.length() == 0) Text("当前没有工作区改动", style = MaterialTheme.typography.bodySmall)
@@ -95,7 +103,7 @@ print('__YXI_GIT__:' + json.dumps({'root': root, 'files': files, 'diff': text, '
                 val diff = data.getString("diff")
                 TextButton({
                     val excerpt = diff.take(12000)
-                    feedbackContext = "Git 差异参考\n服务器：${conn.host.label}\n仓库：${data.getString("root")}\n文件：$file\n范围：${if (staged) "已暂存" else "未暂存"}\n读取快照时间：${java.time.Instant.now()}\n" +
+                    feedbackContext = "Git 差异参考\n服务器：${conn.host.label}\n仓库：${data.getString("root")}\n文件：$file\n范围：${if (staged) "已暂存" else "未暂存"}\n分支：${data.optString("branch").ifBlank { "分离 HEAD" }}\n提交：${data.optString("head").ifBlank { "尚无提交" }}\n读取时间：${data.optString("readAt")}\n" +
                         excerpt.lineSequence().joinToString("\n") { "> $it" } +
                         (if (diff.length > excerpt.length || data.optBoolean("clipped")) "\n（差异已截取，完整内容请从仓库读取。）" else "")
                 }, enabled = !busy && diff.isNotBlank()) { Text("针对这份差异提要求") }
