@@ -56,22 +56,27 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
         catch (e: Exception) { note = e.message ?: "读取失败" }
         finally { busy = false }
     }
-    fun applyRoute(line: Lines.Line?) = act {
+    fun applyRoute(line: Lines.Line?) {
+        val targetEngine = engine
+        val targetScope = chosenScope
+        val catalog = lines.orEmpty().toList()
+        act {
         check(conn.status == Conn.Status.Connected) { "主机未连接，未修改配置" }
         conn.refresh()
-        check(conn.sessions.none { it.state == app.yxi.agent.SessionState.Working && (chosenScope == null || it.cwd == chosenScope) }) { "目标范围内仍有 Agent 正在工作，请等本轮结束后再应用配置。" }
-        val result = if (engine == Lines.CODEX) {
+        check(conn.sessions.none { it.state == app.yxi.agent.SessionState.Working && it.isCodex == (targetEngine == Lines.CODEX) && (targetScope == null || it.cwd == targetScope) }) { "目标范围内仍有 Agent 正在工作，请等本轮结束后再应用配置。" }
+        val result = if (targetEngine == Lines.CODEX) {
             Lines.applyCodex(conn.ssh, line)?.let { error(it) }
             "配置已写入；Codex 需要重开会话后才能生效。尚未验证模型请求。"
         } else {
-            val changed = Lines.apply(conn.ssh, line, chosenScope, lines.orEmpty())
+            val changed = Lines.apply(conn.ssh, line, targetScope, catalog)
             changed.err?.let { error(it) }
             if (changed.restart.isNotEmpty()) "配置已写入；${changed.restart.joinToString()} 需要重开会话后生效。尚未验证模型请求。"
             else "配置已写入，后续请求的生效情况仍需验证。"
         }
-        reload()
+        reload(targetScope)
         if (line != null) check(if (line.isCodex) codex?.let { Lines.matchesCodex(line, it) } == true else active?.let { Lines.matches(line, it.env) } == true) { "配置回读不匹配，请检查服务器配置" }
         note = result; applying = null; resetting = false
+        }
     }
     Column(Modifier.fillMaxSize().background(t.surface0).verticalScroll(rememberScrollState()).padding(28.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -83,7 +88,7 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
             Button({ editor = Lines.Line(Lines.newId(), "", agent = engine) }, enabled = lines != null && !busy) { Text("新增线路") }
         }
         Spacer(Modifier.height(22.dp))
-        WorkbenchTabs(listOf("Claude Code", "Codex"), if (engine == Lines.CODEX) "Codex" else "Claude Code", { engine = if (it == "Codex") Lines.CODEX else Lines.CLAUDE; projectScope = false })
+        WorkbenchTabs(listOf("Claude Code", "Codex"), if (engine == Lines.CODEX) "Codex" else "Claude Code", { if (!busy) { engine = if (it == "Codex") Lines.CODEX else Lines.CLAUDE; projectScope = false } })
         if (engine == Lines.CLAUDE && cwd != null) Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(projectScope, { projectScope = it }, enabled = !busy)
             Text("仅配置当前项目 · $cwd", style = MaterialTheme.typography.bodySmall)
@@ -141,8 +146,16 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
     } }
     if (applying != null || resetting) WorkbenchDialog(onDismissRequest = { if (!busy) { applying = null; resetting = false } },
         title = { Text(if (resetting) "恢复默认线路？" else "应用 ${applying!!.name}？") },
-        text = { Column {
+        text = { Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("目标：${conn.host.label}\n范围：${chosenScope ?: "服务器用户级"}\n" + if (chosenScope == null) "可能影响同一用户下的其他 Agent。正在执行的请求不会被当作已完成切换；需要重开的会话会明确提示。" else "该项目下的其他 Agent 也可能受影响。")
+            Text("运行器：${if (engine == Lines.CODEX) "Codex" else "Claude Code"}\n模型：${applying?.let(::routeModel)?.ifBlank { "运行器默认值" } ?: "运行器默认值"}", style = MaterialTheme.typography.bodySmall)
+            val affected = conn.sessions.filter { it.isCodex == (engine == Lines.CODEX) && (chosenScope == null || it.cwd == chosenScope) }
+            Text("当前已知范围内任务 · ${affected.size}", style = MaterialTheme.typography.labelMedium)
+            affected.forEach { task ->
+                Text((state.navigation.title(taskNavigationKey(conn.host, task)) ?: task.short) +
+                    (if (task.state == app.yxi.agent.SessionState.Working) " · 运行中，需等待本轮结束" else "") + "\n${task.cwd}",
+                    style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+            }
             if (note.isNotBlank()) Text(note, Modifier.padding(top = 12.dp), color = t.danger)
         } },
         confirmButton = { TextButton({ applyRoute(applying) }, enabled = !busy) { Text("确认应用") } },
