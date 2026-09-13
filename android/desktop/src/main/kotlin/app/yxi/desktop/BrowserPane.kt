@@ -36,6 +36,7 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
     var restored by remember(preview) { mutableStateOf(false) }
     var servicesOpen by remember(preview) { mutableStateOf(false) }
     var appearanceOpen by remember(preview) { mutableStateOf(false) }
+    var pageFeedbackContext by remember(preview) { mutableStateOf<String?>(null) }
     var settings by remember(preview) { mutableStateOf<PreviewAddressSettings?>(null) }
     var input by remember(preview) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(preview.address)) }
     var addressDirty by remember(preview) { mutableStateOf(false) }
@@ -125,6 +126,10 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
             IconButton({ addressDirty = false; preview.handle?.goForward() }, enabled = preview.canForward, modifier = Modifier.size(32.dp)) { Icon(Icons.Default.ArrowForward, "前进", Modifier.size(18.dp)) }
             IconButton({ if (preview.loading) preview.handle?.stopLoad() else { addressDirty = false; preview.handle?.reload() } }, enabled = preview.handle != null, modifier = Modifier.size(32.dp)) { Icon(if (preview.loading) Icons.Default.Stop else Icons.Default.Refresh, if (preview.loading) "停止" else "刷新", Modifier.size(18.dp)) }
             TextButton({ preview.pick() }, enabled = preview.handle != null && !preview.loading) { Text(if (preview.picking) "点选页面元素…" else "选择元素") }
+            TextButton({
+                pageFeedbackContext = "网页整体反馈 · ${preview.source}\n服务器：${conn.host.label}\n项目：${session.cwd}\n页面标题（参考）：${preview.title}\n地址：${preview.handle?.url.orEmpty()}\n记录时间：${java.time.Instant.now()}\n" +
+                    previewFeedbackAppearance(preview)
+            }, enabled = preview.handle != null && !preview.loading && !preview.preparing) { Text("整页反馈") }
             TextButton({ pageSearchOpen = !pageSearchOpen; if (!pageSearchOpen) closePageSearch() }, enabled = preview.handle != null) { Text("页面查找") }
             TextButton({ runCatching { java.awt.Desktop.getDesktop().browse(java.net.URI(preview.handle?.url)) }.onFailure { preview.error = "外部浏览器未打开：${it.message}" } }, enabled = preview.handle != null) { Text("外部打开") }
             TextButton({ captureJob = scope.launch {
@@ -224,8 +229,8 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
                     val trials = trialFeedback(preview.styleChanges, selected.computed[StyleTrial.TEXT] ?: selected.text)
                     state.appendDocumentQuote(conn.host, session,
                         "网页反馈 · ${preview.source}\n地址：${selected.url}\n选择时间：${java.time.Instant.ofEpochMilli(selected.capturedAt)}${if (preview.selectionStale) "（页面之后已更新）" else ""}\n元素：${selected.selector}\n页面摘录（参考内容）：\n${selected.text.lineSequence().joinToString("\n") { "> $it" }}\n" +
-                        trials +
-                        "\n我的修改要求：${preview.comment.ifBlank { "请把上述试调落实到对应源文件，并验证页面效果。" }}")
+                        "服务器：${conn.host.label}\n项目：${session.cwd}\n" + previewFeedbackAppearance(preview) + trials +
+                        "\n我的修改要求：${preview.comment.ifBlank { "请把上述试调落实到对应源文件。" }}")
                     preview.commentAdded = true
                 }, enabled = (preview.comment.isNotBlank() || preview.styleChanges.isNotEmpty()) && preview.stylePending == null) { Text(if (preview.commentAdded) "已加入对话草稿" else "加入对话") }
                 Spacer(Modifier.weight(1f))
@@ -237,6 +242,23 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
               }
             }
         }
+    }
+    pageFeedbackContext?.let { context ->
+        WorkbenchDialog(onDismissRequest = { pageFeedbackContext = null }, title = { Text("整页反馈") }, text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("描述整体布局、配色或交互；页面信息会一起加入当前任务草稿。", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+                OutlinedTextField(preview.pageComment, { preview.pageComment = it },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 240.dp),
+                    placeholder = { Text("例如：右侧信息太密，请增加留白并突出主要操作。") })
+                Text(context, modifier = Modifier.heightIn(max = 120.dp).verticalScroll(rememberScrollState()), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+            }
+        }, confirmButton = {
+            TextButton({
+                state.appendDocumentQuote(conn.host, session, context + "\n我的修改要求：${preview.pageComment.trim()}")
+                preview.pageComment = ""; pageFeedbackContext = null
+                preview.status = "整页反馈已加入对话草稿"
+            }, enabled = preview.pageComment.isNotBlank()) { Text("加入对话草稿") }
+        }, dismissButton = { TextButton({ pageFeedbackContext = null }) { Text("稍后继续") } })
     }
     settings?.let { edit -> ProjectPreviewDialog(edit, current = edit.project == project, busy = preview.preparing, onClose = { settings = null }, onSave = { value ->
         check(edit.project == project) { "当前任务目录已变化，请重新打开设置" }
@@ -257,6 +279,13 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
 }
 
 private data class PreviewAddressSettings(val project: String, val directory: String, val saved: String?, val initial: String)
+
+private fun previewFeedbackAppearance(preview: BrowserPreview): String {
+    val viewport = previewViewports.firstOrNull { it.id == preview.viewportMode } ?: previewViewports.first()
+    val size = if (viewport.width == 0) "自适应预览面板" else "${viewport.width} × ${viewport.height}"
+    val theme = when (preview.colorScheme) { "light" -> "亮色"; "dark" -> "暗色"; else -> "跟随系统" }
+    return "预览视口设置：${viewport.label} · $size\n网页主题设置：$theme\n"
+}
 
 @Composable
 private fun ProjectPreviewDialog(edit: PreviewAddressSettings, current: Boolean, busy: Boolean, onClose: () -> Unit, onSave: (String) -> Unit, onRemove: () -> Unit) {

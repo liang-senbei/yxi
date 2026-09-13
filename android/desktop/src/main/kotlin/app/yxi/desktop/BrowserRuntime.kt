@@ -98,7 +98,8 @@ class BrowserPreview(val owner: Host, val taskId: String) {
     @Volatile private var pageVersion = 0L
     var comment by mutableStateOf("")
     var commentAdded by mutableStateOf(false)
-    val hasUnsubmittedFeedback get() = !commentAdded && (comment.isNotBlank() || styleChanges.isNotEmpty())
+    var pageComment by mutableStateOf("")
+    val hasUnsubmittedFeedback get() = pageComment.isNotBlank() || (!commentAdded && (comment.isNotBlank() || styleChanges.isNotEmpty()))
     var selectionStale by mutableStateOf(false)
     var stylePanelOpen by mutableStateOf(false)
     var styleChanges by mutableStateOf<Map<String, String>>(emptyMap())
