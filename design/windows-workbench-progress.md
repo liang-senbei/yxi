@@ -401,3 +401,12 @@
 - 本轮只覆盖用户级本地市场安装，远程Git/命令来源、项目范围原生点击、多主机/断线恢复和Windows专项仍待验证。未安装生产插件，完整W03继续推进。
 - 自动化首次复跑在截图完成、窗口关闭后，Gradle测试worker卡在JVM Shutdown.halt0；jhsdb诊断未发现Java锁死，根因未确定。保留/tmp/yxi-install-sa.txt等诊断并停止该测试worker，未重发原安装。脚本新增180秒/10秒强制退出边界；之后fixture.ViNmP2完整复跑39秒正常退出，日志/tmp/yxi-plugin-install-ui-bounded/test.log，最终空状态截图已查看。该偶发Linux JVM退出问题仍需后续专项排查。
 - 最终全量136项中128通过、8环境测试跳过，Linux打包成功，日志/tmp/yxi-plugin-install-e2e-package.log；本机最终截图tmp/workbench-evidence/plugin-installed-verified.png。
+
+## 第四十轮：干净提交构建与Windows原生复核（2026-09-13）
+
+- 从52045a1导出的源码包暴露gradlew换行问题：索引LF，但Windows git archive在缺少该文件属性时导出CRLF，Linux报cannot execute: required file not found。新增.gitattributes中android/gradlew text eol=lf，提交0b9f98e。
+- 从0b9f98e重新导出完整源码，在hk13全新/root/.cache/yxi-windows-build-0b9f98e中解压，确认gradlew为LF并完成Windows uber jar构建；未依赖长期工作目录的临时修正。日志/tmp/yxi-windows-0b9f98e-build.log。
+- 下载后核对Windows jar SHA256：0f82e290b689034bde56f4c9ca3dfbf2cdb6a0879cd7e6854aa2077cabfe4a6d；与服务器一致。通过windows-native-verify.ps1在Windows本机创建独立app-image。
+- 实际exe完成smoke、虚构令牌的DPAPI迁移/轮换/篡改拒绝、跨进程重读/退出/重登、原生浏览器载入/非空像素/40px样式/退出检查。已查看浏览器像素截图，未访问真实账号或用户剪贴板。
+- 产物本机tmp/windows-0b9f98e-native/YxiWorkbench/YxiWorkbench.exe；该目录包含所有检查日志、browser-native.png、artifact-sha256.txt与source-manifest.json。没有替换已安装Yxi，没有生成或发布新Setup版本。
+- 本轮证明当前完整源码可构建并通过Windows启动/凭据/浏览器冒烟，不等同插件完整操作、所有UI/DPI/IME、SSH多主机、升级安装或完整PRD验收。上述专项和W03剩余能力仍需继续。
