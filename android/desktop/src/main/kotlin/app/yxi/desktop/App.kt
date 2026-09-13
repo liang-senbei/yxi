@@ -69,7 +69,7 @@ fun App(state: AppState) {
                     Page.Workspace -> {
                         val conn = state.conn; val sess = state.session
                         if (conn == null || sess == null) {
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("左边选一台主机，连上后选一个会话") }
+                            WorkspaceWelcome(state)
                         } else {
                             val taskKey = taskNavigationKey(conn.host, sess)
                             val replaced = sess.runtimeId.isNotEmpty() && conn.sessions.any { it.name == sess.name && it.runtimeId.isNotEmpty() && it.runtimeId != sess.runtimeId }
