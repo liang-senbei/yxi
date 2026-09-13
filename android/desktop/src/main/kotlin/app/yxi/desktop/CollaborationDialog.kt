@@ -22,6 +22,11 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
     var editing by remember(conn) { mutableStateOf(false) }
     var editingName by remember(conn) { mutableStateOf<String?>(null) }
     var removing by remember(conn) { mutableStateOf(false) }
+    var history by remember(conn) { mutableStateOf(false) }
+    if (history) {
+        CollaborationHistoryDialog(conn) { history = false }
+        return
+    }
     if (editing && table != null) {
         GroupEditorDialog(conn, editingName, table!!, { editing = false }, removing = removing) { name -> selected = name; editing = false; revision++ }
         return
@@ -40,6 +45,7 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
     WorkbenchDialog(onDismissRequest = close, title = { Text("协作组 · ${conn.host.label}") }, text = {
         Column(Modifier.widthIn(max = 640.dp).heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("服务器上的分组与组规", style = MaterialTheme.typography.labelMedium, color = Tokens.current.textMuted)
+            TextButton({ history = true }) { Text("查看协作记录") }
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
             table?.let { data ->
