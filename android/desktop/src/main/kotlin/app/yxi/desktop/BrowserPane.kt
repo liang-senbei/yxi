@@ -6,6 +6,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
@@ -26,6 +31,8 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
     var input by remember(preview) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(preview.address)) }
     var addressDirty by remember(preview) { mutableStateOf(false) }
     var reviewingClose by remember(preview) { mutableStateOf(false) }
+    var captureJob by remember(preview) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    DisposableEffect(preview) { onDispose { captureJob?.cancel() } }
     fun closePreview() { preview.close(); state.browsers.remove(key); state.browserPanelOpen = false }
     LaunchedEffect(preview.address) { if (!addressDirty) input = androidx.compose.ui.text.input.TextFieldValue(preview.address) }
     fun open() { if (preview.preparing) return; val requested = input.text; addressDirty = false; scope.launch {
@@ -45,7 +52,7 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
             Text(preview.title.ifBlank { "网页预览" }, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             TextButton({ state.browserPanelOpen = false }) { Text("收起") }
             TextButton({
-                if (preview.hasUnsubmittedFeedback || preview.preparing || preview.stylePending != null) reviewingClose = true
+                if (preview.hasUnsubmittedFeedback || preview.preparing || preview.stylePending != null || preview.capturing) reviewingClose = true
                 else closePreview()
             }) { Text("关闭") }
         }
@@ -62,11 +69,19 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
             TextButton({ open() }, enabled = !preview.preparing) { Text("打开") }
         }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
-            TextButton({ addressDirty = false; preview.handle?.goBack() }, enabled = preview.canBack) { Text("后退") }
-            TextButton({ addressDirty = false; preview.handle?.goForward() }, enabled = preview.canForward) { Text("前进") }
-            TextButton({ if (preview.loading) preview.handle?.stopLoad() else { addressDirty = false; preview.handle?.reload() } }, enabled = preview.handle != null) { Text(if (preview.loading) "停止" else "刷新") }
+            IconButton({ addressDirty = false; preview.handle?.goBack() }, enabled = preview.canBack, modifier = Modifier.size(32.dp)) { Icon(Icons.Default.ArrowBack, "后退", Modifier.size(18.dp)) }
+            IconButton({ addressDirty = false; preview.handle?.goForward() }, enabled = preview.canForward, modifier = Modifier.size(32.dp)) { Icon(Icons.Default.ArrowForward, "前进", Modifier.size(18.dp)) }
+            IconButton({ if (preview.loading) preview.handle?.stopLoad() else { addressDirty = false; preview.handle?.reload() } }, enabled = preview.handle != null, modifier = Modifier.size(32.dp)) { Icon(if (preview.loading) Icons.Default.Stop else Icons.Default.Refresh, if (preview.loading) "停止" else "刷新", Modifier.size(18.dp)) }
             TextButton({ preview.pick() }, enabled = preview.handle != null && !preview.loading) { Text(if (preview.picking) "点选页面元素…" else "选择元素") }
             TextButton({ runCatching { java.awt.Desktop.getDesktop().browse(java.net.URI(preview.handle?.url)) }.onFailure { preview.error = "外部浏览器未打开：${it.message}" } }, enabled = preview.handle != null) { Text("外部打开") }
+            TextButton({ captureJob = scope.launch {
+                try {
+                    val screenshot = preview.captureImage()
+                    screenshot.copyTo(java.awt.Toolkit.getDefaultToolkit().systemClipboard)
+                    preview.error = ""; preview.status = "截图已复制，可在对话输入框按 Ctrl+V 添加"
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) { preview.error = "截图未复制：${e.message}" }
+            } }, enabled = preview.handle != null && !preview.loading && !preview.preparing && !preview.capturing && !preview.needsReconnect) { Text(if (preview.capturing) "正在截图…" else "复制截图") }
         }
         Text(preview.source, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
         Text(preview.status, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
@@ -113,7 +128,7 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
         }
     }
     if (reviewingClose) WorkbenchDialog(onDismissRequest = { reviewingClose = false }, title = { Text("保留这份网页反馈？") },
-        text = { Text(if (preview.preparing || preview.stylePending != null) "网页操作尚未完成，请稍后再关闭。" else "这份意见或试调还没有加入对话。可以收起预览继续保留，或丢弃后关闭。") },
+        text = { Text(if (preview.preparing || preview.stylePending != null || preview.capturing) "网页操作尚未完成，请稍后再关闭。" else "这份意见或试调还没有加入对话。可以收起预览继续保留，或丢弃后关闭。") },
         confirmButton = { TextButton({ reviewingClose = false; state.browserPanelOpen = false }) { Text("收起并保留") } },
-        dismissButton = { TextButton({ reviewingClose = false; closePreview() }, enabled = !preview.preparing && preview.stylePending == null) { Text("丢弃并关闭") } })
+        dismissButton = { TextButton({ reviewingClose = false; closePreview() }, enabled = !preview.preparing && preview.stylePending == null && !preview.capturing) { Text("丢弃并关闭") } })
 }

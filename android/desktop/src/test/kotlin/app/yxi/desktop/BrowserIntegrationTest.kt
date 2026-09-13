@@ -57,6 +57,14 @@ class BrowserIntegrationTest {
             assertEquals("", a.error)
             eventually { text(a).contains("INITIAL_PREVIEW") }
             println("browser-fixture: initial render")
+            val captured = a.captureImage()
+            assertTrue(captured.pixels.width > 100 && captured.pixels.height > 100)
+            val clipboard = java.awt.datatransfer.Clipboard("isolated browser screenshot")
+            captured.copyTo(clipboard)
+            assertTrue(clipboard.isDataFlavorAvailable(java.awt.datatransfer.DataFlavor.imageFlavor))
+            assertFalse(clipboard.isDataFlavorAvailable(java.awt.datatransfer.DataFlavor.stringFlavor))
+            assertTrue(a.captureImage().png.isNotEmpty()) // A closed DevTools client must be recreated on a second capture.
+            println("browser-fixture: repeated screenshot and image clipboard")
             js(a, "window.live=new WebSocket(location.origin.replace('http','ws')+'/live');live.onmessage=e=>document.body.innerText=e.data;")
             root.resolve("browser-state.txt").writeText("UPDATED_OVER_WEBSOCKET")
             eventually { text(a).contains("UPDATED_OVER_WEBSOCKET") }

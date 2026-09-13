@@ -8,6 +8,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.swing.Swing
 import me.friwi.jcefmaven.CefAppBuilder
 import org.cef.CefApp
 import org.cef.CefSettings
@@ -89,6 +90,9 @@ class BrowserPreview(val owner: Host, val taskId: String) {
     var loading by mutableStateOf(false)
     var preparing by mutableStateOf(false)
         private set
+    var capturing by mutableStateOf(false)
+        private set
+    @Volatile private var pageVersion = 0L
     var comment by mutableStateOf("")
     var commentAdded by mutableStateOf(false)
     val hasUnsubmittedFeedback get() = !commentAdded && (comment.isNotBlank() || styleChanges.isNotEmpty())
@@ -178,7 +182,7 @@ class BrowserPreview(val owner: Host, val taskId: String) {
         })
         c.addLoadHandler(object : CefLoadHandlerAdapter() {
             override fun onLoadingStateChange(browser: CefBrowser, busy: Boolean, back: Boolean, next: Boolean) { ui { loading = busy; canBack = back; canForward = next; if (!busy && error.isBlank()) status = "页面已载入" } }
-            override fun onLoadStart(browser: CefBrowser, frame: CefFrame, transition: CefRequest.TransitionType) { if (frame.isMain) ui { selectionStale = selection != null; stylePending = null; picking = false; error = ""; status = "正在加载…" } }
+            override fun onLoadStart(browser: CefBrowser, frame: CefFrame, transition: CefRequest.TransitionType) { if (frame.isMain) ui { pageVersion++; selectionStale = selection != null; stylePending = null; picking = false; error = ""; status = "正在加载…" } }
             override fun onLoadError(browser: CefBrowser, frame: CefFrame, code: CefLoadHandler.ErrorCode, text: String, url: String) { if (frame.isMain && code != CefLoadHandler.ErrorCode.ERR_ABORTED) ui { error = "加载失败：$text"; loading = false } }
         })
         val router = CefMessageRouter.create()
@@ -242,7 +246,23 @@ class BrowserPreview(val owner: Host, val taskId: String) {
             if (stylePending == operation) { stylePending = null; error = "试调结果未确认，请刷新或重新选择元素。"; selectionStale = true }
         }.apply { isRepeats = false; start() }
     }
+    internal suspend fun captureImage(): BrowserCapture {
+        val start = withContext(kotlinx.coroutines.Dispatchers.Swing) {
+            check(!capturing && !preparing && !loading && !needsReconnect) { "页面尚未就绪，请稍后截图" }
+            val browser = handle ?: error("请先打开网页")
+            capturing = true
+            Triple(browser, pageVersion, browser.url)
+        }
+        try {
+            val result = BrowserCapture.capture(start.first)
+            withContext(kotlinx.coroutines.Dispatchers.Swing) {
+                check(handle === start.first && pageVersion == start.second && start.first.url == start.third && !loading && !needsReconnect) { "页面已切换，请重新截图" }
+            }
+            return result
+        } finally { withContext(kotlinx.coroutines.NonCancellable + kotlinx.coroutines.Dispatchers.Swing) { capturing = false } }
+    }
     fun close() {
+        pageVersion++
         forwards.values.forEach { it.lease.close() }; forwards.clear()
         handle?.close(true); handle = null
         client?.let { BrowserRuntime.retire(it) }; client = null

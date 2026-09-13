@@ -208,3 +208,14 @@
 - 4项新增测试覆盖缺失对象/JSON null、显式不限与字符串伪布尔、真实零额度/未知总数、负数/小数/错误字符串/整数溢出。:desktop:test全量110项，106通过、4环境测试跳过；日志hk13 /tmp/yxi-quota-tests.log。
 - Android构建入口检查`:app:compileDebugKotlin --dry-run`在任务依赖阶段失败：SDK location not found（/tmp/yxi-quota-android-check.log）。安卓两处显示调整尚未编译验证；没有生成或发布新APK，也未改变真实用户权益。
 - 本轮只修复资料额度。钱包、其它计数与时间的统一呈现，以及Windows完整UI/服务集成验收仍需继续核对，不能把这项修复当作全部账户数据已完成验收。
+
+## 第二十轮：网页截图复制（2026-09-13）
+
+- 右侧预览工具栏增加“复制截图”，导航按钮改为紧凑图标，使常见宽度下的操作可见。复制后提示在对话输入框Ctrl+V添加；不自动上传或发送，也不向剪贴板附加隐含URL/文本数据。
+- 提取BrowserCapture复用Chromium Page.captureScreenshot，捕获当前可见网页区域；BrowserNativeSmoke也使用同一路径。使用内存ImageInputStream，先检查格式与尺寸再解码，限制响应大小和总像素；合法纯色网页不被误当成无效截图。
+- 截图串行执行，重复操作可重建已关闭DevTools客户端。BrowserPreview跟踪截图状态、页面版本、真实URL和实例；变化后拒绝结果。切任务/移除面板取消旧作业，截图忙碌状态纳入预览关闭和主窗口退出保护。
+- 3项新单元测试验证图片剪贴板没有文字负载、PNG像素正确、畸形/超大尺寸被拒绝、兼容两种DevTools结果封装。全量113项，109通过、4项外部环境测试跳过；Linux打包通过（/tmp/yxi-capture-final.log）。
+- 原生BrowserIntegrationTest在独立SSH/显示环境中连续截图两次，并验证图片剪贴板格式；原有WebSocket、选择、试调等测试继续通过（/tmp/yxi-capture-native.log）。
+- 真实产品按钮在隔离Xvfb中点击，通过xclip读取系统image/png，PIL检查尺寸与非空像素，已查看输出。证据hk13 /tmp/yxi-copy-screenshot-ui/；本机tmp/workbench-evidence/copied-page.png与screenshot-toolbar.png。测试页为合成内容，未读取用户Windows剪贴板或上传图片。
+- dev/desktop-document-e2e.sh增加YXI_TEST_SCREENSHOT模式，并更新紧凑导航后的选择按钮坐标。首轮采用手动点击再继续验证，脚本已固化同一坐标；窗口数据与图片均来自真实渲染，不是UI设计稿。
+- 本轮是可见区域复制，未实现区域框选、截图与URL/元素/评论的一体附件、Windows系统剪贴板到附件的完整E2E，以及所有导航竞争时序。现有Ctrl+V附件入口可由用户主动使用，不能据此宣称完整W06截图反馈闭环已验收。完整PRD继续推进，未发版。

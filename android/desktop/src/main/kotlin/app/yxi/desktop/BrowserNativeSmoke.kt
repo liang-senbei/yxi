@@ -50,19 +50,13 @@ internal fun runBrowserNativeSmoke() = runBlocking {
             // Desktop capture can be black in a disconnected Windows session.
             // Capture Chromium's composed surface rather than claiming that
             // reading DOM text proves pixels were rendered.
-            val devTools = withContext(Dispatchers.Swing) { browser!!.devToolsClient }
-            try {
-                val future = withContext(Dispatchers.Swing) { devTools.executeDevToolsMethod("Page.captureScreenshot", "{\"format\":\"png\",\"fromSurface\":true,\"captureBeyondViewport\":false}") }
-                val reply = org.json.JSONObject(withContext(Dispatchers.IO) { future.get(15, java.util.concurrent.TimeUnit.SECONDS) })
-                val payload = (reply.optJSONObject("result") ?: reply).getString("data")
-                val bytes = java.util.Base64.getDecoder().decode(payload)
-                val pixels = javax.imageio.ImageIO.read(bytes.inputStream()) ?: error("Chromium did not return a PNG")
+                val screenshot = BrowserCapture.capture(browser!!)
+                val pixels = screenshot.pixels
                 check(pixels.width >= 100 && pixels.height >= 100)
                 val base = pixels.getRGB(0, 0)
                 check((0 until pixels.height step 3).any { y -> (0 until pixels.width step 3).any { x -> pixels.getRGB(x, y) != base } }) { "Chromium screenshot is blank" }
-                java.io.File(path).writeBytes(bytes)
+                java.io.File(path).writeBytes(screenshot.png)
                 println("browser native pixels ok")
-            } finally { devTools.close() }
         }
         println("browser native render and live style ok")
     } finally {

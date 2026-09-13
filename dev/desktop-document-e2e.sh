@@ -61,6 +61,30 @@ sleep 12
 tap() { DISPLAY=$D xdotool mousemove "$1" "$2" click 1; sleep 3; }
 shot() { DISPLAY=$D import -window root "$OUT/$1.png"; }
 shot 01-restored
+if [ "${YXI_TEST_SCREENSHOT:-0}" = 1 ]; then
+  test -n "${WEB_FIXTURE:-}"
+  tap 1180 110
+  tap 940 208
+  DISPLAY=$D xdotool key ctrl+a
+  sleep 1
+  DISPLAY=$D xdotool type --clearmodifiers "$(cat "$WEB_FIXTURE/browser-port")"
+  DISPLAY=$D xdotool key Return
+  sleep 12
+  shot 02-screenshot-ready
+  echo "Screenshot fixture ready: $OUT"
+  tap 1054 262
+  DISPLAY=$D timeout 5 xclip -selection clipboard -t image/png -o > "$OUT/clipboard-page.png"
+  python3 - "$OUT/clipboard-page.png" <<'PY'
+import sys
+from PIL import Image
+image=Image.open(sys.argv[1]).convert('RGB')
+assert image.width>100 and image.height>100
+assert any(a!=b for a,b in image.getextrema())
+PY
+  shot 03-screenshot-copied
+  echo 'Screenshot clipboard verified'
+  exit 0
+fi
 if [ "${YXI_TEST_QUEUE:-0}" = 1 ]; then
   tap 700 784
   DISPLAY=$D xdotool type --clearmodifiers 'KEEP_EXISTING_DRAFT'
@@ -148,7 +172,7 @@ if [ "${YXI_TEST_BROWSER:-0}" = 1 ]; then
   printf 'LIVE UPDATE CONFIRMED' > "$WEB_FIXTURE/browser-live.txt"
   sleep 3
   shot 09-browser-live
-  tap 984 262
+  tap 903 262
   tap 950 392
   shot 10-browser-selected
   if [ "${YXI_TEST_STYLES:-0}" = 1 ]; then

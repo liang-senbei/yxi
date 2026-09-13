@@ -18,7 +18,7 @@ data class PendingWork(val files: List<String>, val drafts: Int, val feedback: I
 internal fun pendingWorkOf(documents: List<FileDocument>, drafts: List<String>, browsers: Collection<BrowserPreview>) = PendingWork(
     documents.filter { it.dirty }.map { it.path }, drafts.count { it.isNotBlank() },
     browsers.count { it.hasUnsubmittedFeedback },
-    documents.count { it.busy } + browsers.count { it.preparing || it.stylePending != null },
+    documents.count { it.busy } + browsers.count { it.preparing || it.stylePending != null || it.capturing },
 )
 fun AppState.pendingWork() = pendingWorkOf(documents, chatDrafts.values.map { it.value.text }, browsers.values).let {
     it.copy(operations = it.operations + instructions.entries.count { item -> item.status == InstructionStatus.Delivering } + support.running.size,
