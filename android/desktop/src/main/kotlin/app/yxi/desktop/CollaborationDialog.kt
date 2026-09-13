@@ -66,6 +66,7 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
                 if (selected in data.groups) {
                     HorizontalDivider()
                     Text(selected, style = MaterialTheme.typography.titleMedium)
+                    key(conn, selected) { GroupDeliveryControls(conn, selected) }
                     SelectionContainer { Text(data.rules[selected].orEmpty().ifBlank { "尚未设置组规" }, style = MaterialTheme.typography.bodySmall) }
                     val assignments = state.instructions.entries.filter { it.assignmentGroup == selected && it.assignmentHost == projectKey(conn.host, "/") }
                     if (assignments.isNotEmpty()) {
