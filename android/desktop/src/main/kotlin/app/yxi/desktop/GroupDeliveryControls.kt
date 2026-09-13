@@ -49,7 +49,9 @@ if [ -z "${'$'}hub" ] && [ -x "${'$'}HOME/.local/bin/yxi-hub" ]; then hub="${'$'
             val capped = budget?.let { it.optBoolean("budgetExpired") || (it.optInt("messageLimit") > 0 && it.optInt("messagesUsed") >= it.optInt("messageLimit")) } == true
             Text(when { paused == null -> "组消息投递状态未确认"; paused == true -> "组消息投递已暂停"; capped -> "协作预算已到限"; else -> "组消息投递已开放" }, style = MaterialTheme.typography.titleSmall)
             budget?.takeIf { it.optInt("messageLimit") > 0 }?.let { value ->
-                Text("消息 ${value.optInt("messagesUsed")} / ${value.getInt("messageLimit")} · 截止 ${java.time.Instant.ofEpochSecond(value.optDouble("deadline").toLong())}", style = MaterialTheme.typography.bodySmall)
+                val deadline = if (value.has("deadline") && !value.isNull("deadline")) value.optDouble("deadline").toLong() else 0L
+                val deadlineText = if (deadline > 0) " · 截止 " + java.time.Instant.ofEpochSecond(deadline).atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")) else ""
+                Text("消息 ${value.optInt("messagesUsed")} / ${value.getInt("messageLimit")}$deadlineText", style = MaterialTheme.typography.bodySmall)
             }
             Text("控制后续 yxi-hub 消息；不会中断运行中的 Agent，也不会自动发送本地待处理指令。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
             if (updated.isNotBlank()) Text("服务器更新时间 · $updated", style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
