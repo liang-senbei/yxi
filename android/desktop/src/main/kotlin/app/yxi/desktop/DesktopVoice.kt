@@ -18,6 +18,11 @@ internal object VoiceActivity {
 }
 
 internal class DesktopRecorder {
+    companion object {
+        fun microphones(): List<String> = AudioSystem.getMixerInfo().filter { info ->
+            runCatching { AudioSystem.getMixer(info).targetLineInfo.any { TargetDataLine::class.java.isAssignableFrom(it.lineClass) } }.getOrDefault(false)
+        }.map { it.name }.distinct()
+    }
     @Volatile var running = false; private set
     @Volatile var level = 0f; private set
     @Volatile var seconds = 0; private set
@@ -26,13 +31,14 @@ internal class DesktopRecorder {
     private var format = AudioFormat(16000f, 16, 1, true, false)
     private val audio = ByteArrayOutputStream()
     @Volatile private var problem: Throwable? = null
-    fun start() {
+    fun start(device: String = "") {
         check(!running)
         audio.reset(); problem = null; seconds = 0
         var opened: TargetDataLine? = null
+        val selectedMixer = if (device.isBlank()) null else AudioSystem.getMixerInfo().firstOrNull { it.name == device } ?: error("所选麦克风已断开，请重新选择设备")
         for (rate in listOf(16000f, 48000f, 44100f)) {
             val candidate = AudioFormat(rate, 16, 1, true, false)
-            val capture = runCatching { AudioSystem.getTargetDataLine(candidate) }.getOrNull() ?: continue
+            val capture = runCatching { if (selectedMixer == null) AudioSystem.getTargetDataLine(candidate) else AudioSystem.getTargetDataLine(candidate, selectedMixer) }.getOrNull() ?: continue
             try { capture.open(candidate); format = candidate; opened = capture; break }
             catch (_: Exception) { capture.close() }
         }

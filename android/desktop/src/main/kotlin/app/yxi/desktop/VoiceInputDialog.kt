@@ -19,6 +19,14 @@ internal fun VoiceInputDialog(conn: Conn, close: () -> Unit, useText: (String) -
     var error by remember { mutableStateOf("") }
     var level by remember { mutableStateOf(0f) }
     var seconds by remember { mutableStateOf(0) }
+    var microphones by remember { mutableStateOf<List<String>>(emptyList()) }
+    var microphone by remember { mutableStateOf(Store.pref("voiceMicrophone", "")) }
+    var deviceMenu by remember { mutableStateOf(false) }
+    var devicesRevision by remember { mutableStateOf(0) }
+    NativeOverlay(deviceMenu)
+    LaunchedEffect(devicesRevision) {
+        microphones = withContext(Dispatchers.IO) { runCatching { DesktopRecorder.microphones() }.getOrDefault(emptyList()) }
+    }
     SideEffect { VoiceActivity.busy = checking || recording || transcribing; VoiceActivity.hasDraft = text.isNotBlank() }
     DisposableEffect(Unit) { onDispose { recorder.cancel(); VoiceActivity.busy = false; VoiceActivity.hasDraft = false } }
     fun finishRecording() {
@@ -44,6 +52,16 @@ internal fun VoiceInputDialog(conn: Conn, close: () -> Unit, useText: (String) -
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("识别服务器：${conn.host.label} · ${conn.host.hostname}", style = MaterialTheme.typography.titleSmall)
             Text("录音通过SSH发送到此服务器的 yxi-asr 识别，文字先供你编辑，不自动发送给Agent。", style = MaterialTheme.typography.bodySmall)
+            Row {
+                Box(Modifier.weight(1f)) {
+                    OutlinedButton({ deviceMenu = true }, enabled = !checking && !recording && !transcribing) { Text(microphone.ifBlank { "系统默认麦克风" }, maxLines = 2) }
+                    DropdownMenu(deviceMenu, { deviceMenu = false }) {
+                        DropdownMenuItem(text = { Text("系统默认麦克风") }, onClick = { microphone = ""; Store.setPref("voiceMicrophone", ""); deviceMenu = false })
+                        microphones.forEach { name -> DropdownMenuItem(text = { Text(name) }, onClick = { microphone = name; Store.setPref("voiceMicrophone", name); deviceMenu = false }) }
+                    }
+                }
+                TextButton({ devicesRevision++ }, enabled = !checking && !recording && !transcribing) { Text("刷新设备") }
+            }
             when {
                 checking -> { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("准备录音与识别服务…") }
                 recording -> { Text("正在录音 · ${seconds}s / 120s"); LinearProgressIndicator(progress = { level }, modifier = Modifier.fillMaxWidth()) }
@@ -56,7 +74,7 @@ internal fun VoiceInputDialog(conn: Conn, close: () -> Unit, useText: (String) -
                     try {
                         check(conn.ssh.isConnected) { "请先连接要使用的服务器" }
                         directory = DesktopAsr.prepare(conn.ssh)
-                        withContext(Dispatchers.IO) { recorder.start() }
+                        withContext(Dispatchers.IO) { recorder.start(microphone) }
                         recording = true
                     } catch (e: CancellationException) { throw e }
                     catch (e: Exception) { error = e.message ?: "无法开始录音" }
