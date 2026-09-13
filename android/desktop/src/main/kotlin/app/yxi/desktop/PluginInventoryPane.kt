@@ -31,6 +31,8 @@ internal fun PluginInventoryPane(state: AppState, conn: Conn) {
     var preparing by remember(conn) { mutableStateOf(false) }
     var actionError by remember(conn) { mutableStateOf("") }
     var historyOpen by remember(conn) { mutableStateOf(false) }
+    var reading by remember(conn) { mutableStateOf<InstalledPlugin?>(null) }
+    reading?.let { PluginReadmeDialog(conn, it) { reading = null } }
     LaunchedEffect(conn, revision) {
         busy = true; snapshot = null; error = ""
         try { snapshot = PluginInventory.parse(conn.ssh.exec(PluginInventory.command())) }
@@ -55,6 +57,7 @@ internal fun PluginInventoryPane(state: AppState, conn: Conn) {
         if (operations.error.isNotBlank() || actionError.isNotBlank()) Text(operations.error.ifBlank { actionError }, Modifier.padding(horizontal = 24.dp), color = t.danger)
         Box(Modifier.weight(1f)) {
             PluginInventoryContent(conn.host.label, snapshot, error, busy, { revision++ },
+                readme = { reading = it },
                 toggle = { plugin, action -> scope.launch {
                     preparing = true; actionError = ""
                     try {
@@ -93,7 +96,7 @@ internal fun PluginInventoryPane(state: AppState, conn: Conn) {
 }
 
 @Composable
-internal fun PluginInventoryContent(host: String, snapshot: PluginInventory?, error: String, busy: Boolean, refresh: () -> Unit, toggle: ((InstalledPlugin, String) -> Unit)? = null, toggleEnabled: Boolean = false) {
+internal fun PluginInventoryContent(host: String, snapshot: PluginInventory?, error: String, busy: Boolean, refresh: () -> Unit, toggle: ((InstalledPlugin, String) -> Unit)? = null, toggleEnabled: Boolean = false, readme: ((InstalledPlugin) -> Unit)? = null) {
     val t = Tokens.current
     var query by remember(host) { mutableStateOf("") }
     Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -134,6 +137,7 @@ internal fun PluginInventoryContent(host: String, snapshot: PluginInventory?, er
                             else -> "运行器状态未确认"
                         }, color = if (plugin.runnerState == "listed") t.textSecondary else t.warning, style = MaterialTheme.typography.bodySmall)
                         Text("用户默认：${when (plugin.userEnabled) { true -> "启用"; false -> "停用"; null -> "未明确设置" }}", style = MaterialTheme.typography.bodySmall)
+                        if (readme != null) TextButton({ readme(plugin) }, enabled = plugin.present && !busy) { Text("使用说明") }
                         if (toggle != null) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             TextButton({ toggle(plugin, "enable") }, enabled = toggleEnabled && plugin.scope in setOf("user", "project", "local")) { Text("启用") }
                             TextButton({ toggle(plugin, "disable") }, enabled = toggleEnabled && plugin.scope in setOf("user", "project", "local")) { Text("停用") }
