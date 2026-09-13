@@ -38,13 +38,16 @@ internal fun PluginInventoryPane(state: AppState, conn: Conn) {
         finally { busy = false }
     }
     val last = operations.latest(hostKey)
-    LaunchedEffect(last?.status) { if (last?.status in setOf("configured", "restored", "installed", "uninstalled", "updated")) revision++ }
+    LaunchedEffect(last?.status) { if (last?.status in setOf("configured", "restored", "installed", "uninstalled", "updated", "package-restored")) revision++ }
     Column(Modifier.fillMaxSize()) {
         if (last != null) Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(when (last.status) { "updated" -> "更新结果：${last.beforeVersion.ifBlank { "未知" }} → ${last.afterVersion.ifBlank { "未知" }} · 请在新会话验证"; "uninstalled" -> "插件已卸载 · 持久数据和操作副本已保留"; "installed" -> "插件已安装并被运行器识别 · 请在新会话测试"; "configured" -> "插件设置已更新 · 请在新会话验证加载"; "restored" -> "已恢复操作前设置 · 请在新会话验证加载"; "rejected" -> "变更未执行，配置可能已变化或副本不可用"; "sending" -> "插件操作中…"; else -> "插件操作待确认，请查询原操作" }, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+            Text(when (last.status) { "package-restored" -> "插件包已恢复：${last.afterVersion.ifBlank { "版本未知" }} · 请在新会话验证"; "updated" -> "更新结果：${last.beforeVersion.ifBlank { "未知" }} → ${last.afterVersion.ifBlank { "未知" }} · 请在新会话验证"; "uninstalled" -> "插件已卸载 · 持久数据和操作副本已保留"; "installed" -> "插件已安装并被运行器识别 · 请在新会话测试"; "configured" -> "插件设置已更新 · 请在新会话验证加载"; "restored" -> "已恢复操作前设置 · 请在新会话验证加载"; "rejected" -> "变更未执行，配置可能已变化或副本不可用"; "sending" -> "插件操作中…"; else -> "插件操作待确认，请查询原操作" }, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
             if (last.status == "configured") TextButton({
                 prepared = JSONObject(last.request).put("action", "restore").put("restores", last.id).put("operation", UUID.randomUUID().toString().replace("-", ""))
             }, enabled = last.id !in operations.running && !operations.unresolved(hostKey) && operations.error.isBlank() && conn.status == Conn.Status.Connected) { Text("恢复设置") }
+            if (last.status in setOf("updated", "uninstalled")) TextButton({
+                prepared = JSONObject(last.request).put("action", "rollback").put("restores", last.id).put("operation", UUID.randomUUID().toString().replace("-", "")).put("restoreVersion", last.beforeVersion.ifBlank { JSONObject(last.request).optString("listedVersion") })
+            }, enabled = last.id !in operations.running && !operations.unresolved(hostKey) && operations.error.isBlank() && conn.status == Conn.Status.Connected) { Text("恢复插件包") }
             TextButton({ operations.query(conn, last) }, enabled = last.id !in operations.running) { Text("查询结果") }
         }
         if (operations.error.isNotBlank() || actionError.isNotBlank()) Text(operations.error.ifBlank { actionError }, Modifier.padding(horizontal = 24.dp), color = t.danger)
@@ -65,19 +68,21 @@ internal fun PluginInventoryPane(state: AppState, conn: Conn) {
     }
     prepared?.let { request ->
         val restoring = request.getString("action") == "restore"
+        val rollback = request.getString("action") == "rollback"
         val removing = request.getString("action") == "uninstall"
         val updating = request.getString("action") == "update"
-        WorkbenchDialog(onDismissRequest = { prepared = null }, title = { Text(if (updating) "更新插件" else if (removing) "卸载插件" else if (restoring) "恢复操作前设置" else if (request.getBoolean("enabled")) "启用插件" else "停用插件") },
+        WorkbenchDialog(onDismissRequest = { prepared = null }, title = { Text(if (rollback) "恢复插件包" else if (updating) "更新插件" else if (removing) "卸载插件" else if (restoring) "恢复操作前设置" else if (request.getBoolean("enabled")) "启用插件" else "停用插件") },
             text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("主机：${conn.host.label}")
                 Text(request.getString("plugin"))
                 Text("范围：${when (request.getString("scope")) { "user" -> "用户级"; "project" -> "项目级"; "local" -> "本地项目级"; else -> "未知" }}")
                 Text(request.getString("path"), style = MaterialTheme.typography.bodySmall)
+                if (rollback) Text("恢复版本：${request.optString("restoreVersion").ifBlank { "未知" }}", style = MaterialTheme.typography.bodySmall)
                 if (updating) Text("列表记录版本：${request.optString("listedVersion").ifBlank { "未知" }}", style = MaterialTheme.typography.bodySmall)
-                Text(if (updating) "将请求市场提供的版本，实际版本以更新回执为准。更新前保留插件文件副本，当前会话不会重启。" else if (removing) "仅卸载上述范围，保留插件持久数据，不自动清理依赖。卸载前保存配置和插件文件副本；当前会话不会被重启。" else if (restoring) "恢复此配置文件在该次操作前的内容；如果之后配置或安装记录有变化，将拒绝覆盖。当前会话不会被重启。" else "变更前保存服务器恢复副本。当前运行中的会话不会被重启。", style = MaterialTheme.typography.bodySmall)
+                Text(if (rollback) "将从副本恢复插件文件及该次操作前的配置，文件放入独立恢复目录。如果之后配置有变化，将停止恢复。当前会话不会重启。" else if (updating) "将请求市场提供的版本，实际版本以更新回执为准。更新前保留插件文件副本，当前会话不会重启。" else if (removing) "仅卸载上述范围，保留插件持久数据，不自动清理依赖。卸载前保存配置和插件文件副本；当前会话不会被重启。" else if (restoring) "恢复此配置文件在该次操作前的内容；如果之后配置或安装记录有变化，将拒绝覆盖。当前会话不会被重启。" else "变更前保存服务器恢复副本。当前运行中的会话不会被重启。", style = MaterialTheme.typography.bodySmall)
             } }, confirmButton = { TextButton({
                 runCatching { check(state.conn === conn); operations.submit(conn, request); prepared = null }.onFailure { actionError = it.message.orEmpty(); prepared = null }
-            }) { Text(if (updating) "确认更新" else if (removing) "确认卸载" else "确认变更") } }, dismissButton = { TextButton({ prepared = null }) { Text("取消") } })
+            }) { Text(if (rollback) "确认恢复" else if (updating) "确认更新" else if (removing) "确认卸载" else "确认变更") } }, dismissButton = { TextButton({ prepared = null }) { Text("取消") } })
     }
 }
 

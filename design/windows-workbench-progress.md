@@ -461,3 +461,11 @@
 - 配置与登记是逐文件原子写入，尚非跨文件事务；中断可能留下待确认状态，当前不自动继续恢复。新目录恢复对依赖绝对原安装路径的插件仍需验证。package-restored客户端/UI、崩溃恢复、Windows专项与完整W03仍待推进。
 - 发现本地Python测试在资源目录生成__pycache__，新增资源打包排除规则，防止测试缓存混入应用。最终包检查另记。
 - 桌面测试/打包日志/tmp/yxi-plugin-rollback-build.log；追加回读验证后Python回滚测试和最终打包通过（/tmp/yxi-plugin-rollback-package.log）。逐项检查jar：必要plugin-operation.py存在，__pycache__/pyc为零。
+
+## 第四十七轮：插件包恢复入口与持久终态（2026-09-13）
+
+- updated/uninstalled结果栏增加恢复插件包，确认弹窗显示主机、范围、原配置路径及恢复版本，说明独立恢复目录与后续配置变化拒绝覆盖。提交仍沿用原操作来源和新操作ID。
+- package-restored接入客户端持久终态，保存恢复版本并刷新安装列表；查询网络失败不会抹掉已确认结果。持久化测试覆盖恢复版本及重读状态。
+- 桌面测试与Linux打包通过（/tmp/yxi-rollback-ui-build.log）。扩展原生安装fixture到更新后包回滚，真实界面结果另记。
+- 当前仅显示最近操作的恢复入口，历史操作选择、跨文件中断恢复、绝对路径依赖插件、Windows回滚与完整W03仍待推进。
+- 原生完整安装→更新→回滚通过且正常退出，日志/tmp/yxi-rollback-native/test.log，fixture.pwM9BS；断言实际plugin.json为1.0.0、路径属于plugin-operations/restored，登记及持久记录一致。已查看本机tmp/workbench-evidence/plugin-rollback-confirm.png与plugin-package-restored.png。

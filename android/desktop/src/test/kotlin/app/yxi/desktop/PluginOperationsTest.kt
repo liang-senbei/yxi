@@ -24,6 +24,11 @@ class PluginOperationsTest {
         assertEquals("updated", upgrade.status)
         assertEquals("1.0.0", upgrade.beforeVersion)
         assertEquals("1.1.0", upgrade.afterVersion)
+        ledger.begin("host", JSONObject().put("operation", "1".repeat(32)).put("action", "rollback"))
+        ledger.finish("1".repeat(32), "package-restored", afterVersion = "1.0.0")
+        ledger.finish("1".repeat(32), "unknown")
+        assertEquals("package-restored", PluginOperations(file).latest("host")!!.status)
+        assertEquals("1.0.0", PluginOperations(file).latest("host")!!.afterVersion)
     }
     @Test fun `restart retains operation identity and blocks new sends until queried`() {
         val file = Files.createTempDirectory("plugin-ledger").resolve("operations.json").toFile()

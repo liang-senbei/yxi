@@ -41,6 +41,12 @@ tap 255 577
 sleep 2
 import -window root "$fixture/06-update-confirm.png"
 tap 675 600
+for attempt in $(seq 1 30); do [ -f "$fixture/rollback-ready" ] && break; sleep 1; done
+test -f "$fixture/rollback-ready"
+tap 714 110
+sleep 1
+import -window root "$fixture/08-rollback-confirm.png"
+tap 675 610
 wait "$test_pid"
 test_pid=
 echo "Plugin installation UI verified: $fixture"

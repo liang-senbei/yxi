@@ -76,6 +76,17 @@ class PluginInstallFixtureTest {
                             assertEquals("1.1.0", JSONObject(File(fresh.path, ".claude-plugin/plugin.json").readText()).getString("version"))
                             assertEquals("1.1.0", PluginOperations(File(Store.dir, "plugin-operations.json")).entries.last().afterVersion)
                             delay(2000); shot("07-updated.png")
+                            fixture.resolve("rollback-ready").writeText("ready")
+                            withTimeout(90000) { while (state.pluginOperations.entries.size < 3 || state.pluginOperations.running.isNotEmpty()) delay(100) }
+                            val rollback = state.pluginOperations.entries.last()
+                            assertEquals("package-restored", rollback.status)
+                            assertEquals("1.0.0", rollback.afterVersion)
+                            val restored = PluginInventory.parse(conn.ssh.exec(PluginInventory.command())).plugins.single()
+                            assertEquals("1.0.0", restored.version)
+                            assertTrue(restored.path.contains("/plugin-operations/restored/"))
+                            assertEquals("1.0.0", JSONObject(File(restored.path, ".claude-plugin/plugin.json").readText()).getString("version"))
+                            assertEquals("package-restored", PluginOperations(File(Store.dir, "plugin-operations.json")).entries.last().status)
+                            delay(1500); shot("09-package-restored.png")
                         } catch(e: Throwable) { failure = e; shot("failure.png") }
                         finally { exitApplication() }
                     }

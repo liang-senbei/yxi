@@ -42,8 +42,8 @@ internal class PluginOperations(file: File) {
         return entry
     }
     internal fun finish(id: String, state: String, beforeVersion: String? = null, afterVersion: String? = null) {
-        val status = when (state) { "configured", "restored", "installed", "uninstalled", "updated" -> state; "changed", "invalid", "invalid-directory", "unsupported-config-home", "unsupported-linked-config", "restore-unavailable", "catalog-changed", "already-installed" -> "rejected"; else -> "unknown" }
-        save(entries.map { if (it.id == id && !(status == "unknown" && it.status in setOf("configured", "restored", "installed", "uninstalled", "updated"))) it.copy(status = status, beforeVersion = beforeVersion?.take(200) ?: it.beforeVersion, afterVersion = afterVersion?.take(200) ?: it.afterVersion) else it })
+        val status = when (state) { "configured", "restored", "installed", "uninstalled", "updated", "package-restored" -> state; "changed", "invalid", "invalid-directory", "unsupported-config-home", "unsupported-linked-config", "restore-unavailable", "catalog-changed", "already-installed" -> "rejected"; else -> "unknown" }
+        save(entries.map { if (it.id == id && !(status == "unknown" && it.status in setOf("configured", "restored", "installed", "uninstalled", "updated", "package-restored"))) it.copy(status = status, beforeVersion = beforeVersion?.take(200) ?: it.beforeVersion, afterVersion = afterVersion?.take(200) ?: it.afterVersion) else it })
     }
     fun submit(conn: Conn, request: JSONObject) {
         val entry = begin(projectKey(conn.host, "/"), request)
@@ -71,7 +71,7 @@ internal class PluginOperations(file: File) {
                 PluginOperationEntry(o.getString("host"), o.getString("id"), o.getString("request"), o.getString("status"), o.optString("beforeVersion").take(200), o.optString("afterVersion").take(200)).also { e ->
                     require(Regex("[a-f0-9]{32}").matches(e.id))
                     require(JSONObject(e.request).getString("operation") == e.id)
-                    require(e.status in setOf("sending", "unknown", "configured", "restored", "installed", "uninstalled", "updated", "rejected"))
+                    require(e.status in setOf("sending", "unknown", "configured", "restored", "installed", "uninstalled", "updated", "package-restored", "rejected"))
                 }
             }.also { require(it.map { e -> e.id }.distinct().size == it.size) }
         }
