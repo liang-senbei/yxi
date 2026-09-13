@@ -68,6 +68,27 @@ class PluginToggleFixtureTest {
                             assertEquals("Read", JSONObject(config.readText()).getJSONObject("permissions").getJSONArray("allow").getString(0))
                             delay(2000)
                             shot("03-disabled.png")
+                            click(origin.x + 650, origin.y + 32)
+                            awaitCondition { NativeOverlays.active }
+                            delay(600)
+                            shot("04-restore-confirm.png")
+                            click(origin.x + 570, origin.y + 512)
+                            awaitCondition { !NativeOverlays.active }
+                            assertEquals(1, state.pluginOperations.entries.size)
+                            assertFalse(JSONObject(config.readText()).getJSONObject("enabledPlugins").getBoolean("sample@fixture"))
+                            delay(800)
+                            click(origin.x + 650, origin.y + 32)
+                            awaitCondition { NativeOverlays.active }
+                            delay(600)
+                            click(origin.x + 625, origin.y + 512)
+                            awaitCondition { state.pluginOperations.entries.size == 2 && state.pluginOperations.running.isEmpty() }
+                            assertEquals("restored", state.pluginOperations.entries.last().status)
+                            assertEquals(original, config.readText())
+                            val reopened = PluginOperations(File(Store.dir, "plugin-operations.json"))
+                            assertEquals("restored", reopened.entries.last().status)
+                            assertEquals(2, reopened.entries.size)
+                            delay(2000)
+                            shot("05-restored.png")
                         } catch (e: Throwable) { failure = e; shot("failure.png") }
                         finally { exitApplication() }
                     }
