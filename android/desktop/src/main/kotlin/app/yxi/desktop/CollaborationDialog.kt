@@ -67,6 +67,29 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
                     HorizontalDivider()
                     Text(selected, style = MaterialTheme.typography.titleMedium)
                     SelectionContainer { Text(data.rules[selected].orEmpty().ifBlank { "尚未设置组规" }, style = MaterialTheme.typography.bodySmall) }
+                    val assignments = state.instructions.entries.filter { it.assignmentGroup == selected && it.assignmentHost == projectKey(conn.host, "/") }
+                    if (assignments.isNotEmpty()) {
+                        Text("本机指派记录 · ${assignments.size}", style = MaterialTheme.typography.titleSmall)
+                        assignments.asReversed().forEach { item ->
+                            val target = conn.sessions.firstOrNull { taskNavigationKey(conn.host, it) == item.taskKey }
+                            OutlinedCard(Modifier.fillMaxWidth()) {
+                                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(when (item.status) {
+                                        InstructionStatus.Local -> "本地待发送"
+                                        InstructionStatus.Delivering -> "投递中"
+                                        InstructionStatus.Unknown -> "投递状态待确认"
+                                        InstructionStatus.Accepted -> "运行器已接收"
+                                        InstructionStatus.Cancelled -> "已撤回"
+                                        InstructionStatus.Resolved -> "已人工核对"
+                                    }, style = MaterialTheme.typography.labelMedium)
+                                    Text(item.text.substringAfter("用户要求：\n", item.text), maxLines = 3, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+                                    Text("指派 ID：${item.id}", style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
+                                    if (target != null) TextButton({ state.select(conn, target); state.tab = 0; close() }) { Text("查看 ${target.short}") }
+                                    else Text("目标任务当前不可见，记录仍保留", style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
+                    }
                     data.groups[selected].orEmpty().forEach { name ->
                         val session = conn.sessions.firstOrNull { it.name == name }
                         OutlinedCard(Modifier.fillMaxWidth()) {

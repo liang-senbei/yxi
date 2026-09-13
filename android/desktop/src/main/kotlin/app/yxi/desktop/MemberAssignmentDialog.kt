@@ -30,7 +30,8 @@ internal fun MemberAssignmentDialog(state: AppState, conn: Conn, target: Session
             val message = "[用户协作指派 · $group]\n指派 ID：$id\n主机：${conn.host.label}\n接收任务：${target.name}\n项目：${target.cwd}\n" +
                 (source?.let { "发起时所在任务：${it.name}（用户操作，不代表该 Agent 发言）\n" }.orEmpty()) +
                 "\n用户要求：\n${text.trim()}"
-            state.instructions.enqueue(taskNavigationKey(conn.host, target), message, id = id)
+            state.instructions.enqueue(taskNavigationKey(conn.host, target), message, id = id,
+                assignmentGroup = group, assignmentHost = projectKey(conn.host, "/"), sourceTask = source?.let { taskNavigationKey(conn.host, it) }.orEmpty())
             state.select(conn, target); state.tab = 0
             done()
         }.onFailure { error = it.message.orEmpty() }

@@ -16,6 +16,7 @@ internal data class QueuedInstruction(
     val status: InstructionStatus = InstructionStatus.Local,
     val revision: Long = 0, val detail: String = "",
     val deliveryObservation: String = "", val deliveryObservedAt: Long = 0,
+    val assignmentGroup: String = "", val assignmentHost: String = "", val sourceTask: String = "",
 )
 
 /** Durable outbox, not a claim about a runner's remote queue. Network adapters must
@@ -47,10 +48,10 @@ internal class InstructionQueue(file: File) {
         catch (e: Exception) { error = "指令未保存：${e.message}"; throw e }
     }
 
-    @Synchronized fun enqueue(taskKey: String, text: String, attachments: List<InstructionAttachment> = emptyList(), id: String = UUID.randomUUID().toString()): QueuedInstruction {
-        val item = QueuedInstruction(id, taskKey, text, attachments.toList())
+    @Synchronized fun enqueue(taskKey: String, text: String, attachments: List<InstructionAttachment> = emptyList(), id: String = UUID.randomUUID().toString(), assignmentGroup: String = "", assignmentHost: String = "", sourceTask: String = ""): QueuedInstruction {
+        val item = QueuedInstruction(id, taskKey, text, attachments.toList(), assignmentGroup = assignmentGroup, assignmentHost = assignmentHost, sourceTask = sourceTask)
         entries.firstOrNull { it.id == id }?.let {
-            check(it.taskKey == taskKey && it.text == text && it.attachments == attachments) { "同一指令标识对应不同内容" }
+            check(it.taskKey == taskKey && it.text == text && it.attachments == attachments && it.assignmentGroup == assignmentGroup && it.assignmentHost == assignmentHost && it.sourceTask == sourceTask) { "同一指令标识对应不同内容" }
             return it
         }
         commit(entries + item)
@@ -106,6 +107,7 @@ internal class InstructionQueue(file: File) {
             JSONObject().put("id", item.id).put("taskKey", item.taskKey).put("text", item.text).put("status", item.status.name)
                 .put("revision", item.revision).put("detail", item.detail)
                 .put("deliveryObservation", item.deliveryObservation).put("deliveryObservedAt", item.deliveryObservedAt)
+                .put("assignmentGroup", item.assignmentGroup).put("assignmentHost", item.assignmentHost).put("sourceTask", item.sourceTask)
                 .put("attachments", JSONArray(item.attachments.map { JSONObject().put("name", it.name).put("remotePath", it.remotePath) }))
         })).toString(2)
         private fun decode(raw: String): List<QueuedInstruction> {
@@ -118,7 +120,8 @@ internal class InstructionQueue(file: File) {
                 QueuedInstruction(item.getString("id"), item.getString("taskKey"), item.getString("text"),
                     (0 until attachments.length()).map { attachments.getJSONObject(it).let { a -> InstructionAttachment(a.getString("name"), a.getString("remotePath")) } },
                     InstructionStatus.valueOf(item.getString("status")), item.getLong("revision"), item.getString("detail"),
-                    item.optString("deliveryObservation", ""), item.optLong("deliveryObservedAt", 0))
+                    item.optString("deliveryObservation", ""), item.optLong("deliveryObservedAt", 0),
+                    item.optString("assignmentGroup", ""), item.optString("assignmentHost", ""), item.optString("sourceTask", ""))
                     .also { q ->
                         require(q.id.isNotBlank() && q.taskKey.isNotBlank() && q.revision >= 0)
                         require(q.text.isNotBlank() || q.attachments.isNotEmpty())
