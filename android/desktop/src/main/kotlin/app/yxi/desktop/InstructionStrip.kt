@@ -14,15 +14,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 
 @Composable
-internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliver: Boolean, onDeliver: (QueuedInstruction) -> Unit) {
+internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliver: Boolean, onDeliver: (QueuedInstruction) -> Unit, onQuery: (suspend (QueuedInstruction) -> String)? = null) {
     val t = Tokens.current
     val active = queue.entries.filter { it.taskKey == taskKey && it.status !in setOf(InstructionStatus.Accepted, InstructionStatus.Cancelled, InstructionStatus.Resolved) }
     var expanded by remember(taskKey) { mutableStateOf(false) }
     var editing by remember(taskKey) { mutableStateOf<QueuedInstruction?>(null) }
     var text by remember(taskKey) { mutableStateOf("") }
     var error by remember(taskKey) { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    var querying by remember(taskKey) { mutableStateOf(false) }
+    var queryResult by remember(taskKey, editing?.id) { mutableStateOf("") }
     var menuId by remember(taskKey) { mutableStateOf<String?>(null) }
     var withdrawn by remember(taskKey) { mutableStateOf<Pair<QueuedInstruction, Long>?>(null) }
     NativeOverlay(menuId != null)
@@ -94,6 +99,18 @@ internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliv
                     if (previous != null) TextButton({ act { queue.moveBefore(original.id, original.revision, previous.id); editing = null } }) { Text("上移") }
                 }
                 if (current?.status == InstructionStatus.Unknown) Text("请先查看对话或终端确认实际结果。解除阻塞不会重新发送，也不会标记为运行器已接收。", style = MaterialTheme.typography.bodySmall)
+                if (current?.status == InstructionStatus.Unknown && onQuery != null) {
+                    TextButton({
+                        querying = true
+                        scope.launch {
+                            try { queryResult = onQuery(current) }
+                            catch (e: CancellationException) { throw e }
+                            catch (e: Exception) { queryResult = "查询失败：${e.message}" }
+                            finally { querying = false }
+                        }
+                    }, enabled = !querying) { Text(if (querying) "查询中…" else "查询投递记录") }
+                    if (queryResult.isNotBlank()) Text(queryResult, style = MaterialTheme.typography.bodySmall)
+                }
                 if (error.isNotBlank()) Text(error, color = t.danger)
             }
         }, confirmButton = {

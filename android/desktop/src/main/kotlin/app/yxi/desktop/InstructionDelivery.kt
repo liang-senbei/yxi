@@ -33,6 +33,7 @@ internal suspend fun deliverInstruction(conn: Conn, session: Session, queue: Ins
 }
 
 internal fun instructionDeliveryCommand(session: Session, item: QueuedInstruction, screen: String): String {
+    val journal = deliveryJournalKey(session, item)
     val body = item.attachments.joinToString("") { "[${it.name}] ${it.remotePath}\n" } + item.text
     val checks = item.attachments.joinToString("\n") { "[ -r ${Shell.q(it.remotePath)} ] || { echo '__YXI_DELIVERY__:attachment'; exit 0; }" }
     return """
@@ -43,9 +44,40 @@ p=${'$'}(tmux display-message -p -t "${'$'}t" '#{pane_id}' 2>/dev/null)
 before=${'$'}(tmux capture-pane -p -t "${'$'}p" 2>/dev/null)
 [ "${'$'}before" = ${Shell.q(screen.trimEnd('\n'))} ] || { echo '__YXI_DELIVERY__:blocked'; exit 0; }
 $checks
+umask 077
+root="${'$'}HOME/.yxi/instruction-deliveries"
+mkdir -p "${'$'}root" || exit 1
+record="${'$'}root/$journal"
+if ! mkdir "${'$'}record" 2>/dev/null; then
+    if [ -f "${'$'}record/terminal" ]; then echo '__YXI_DELIVERY__:terminal'; else echo '__YXI_DELIVERY__:reserved'; fi
+    exit 0
+fi
+date -u '+%Y-%m-%dT%H:%M:%SZ' > "${'$'}record/started"
 tmux send-keys -t "${'$'}p" -l ${Shell.q(body)} || exit 1
 sleep 0.4
 tmux send-keys -t "${'$'}p" Enter || exit 1
+date -u '+%Y-%m-%dT%H:%M:%SZ' > "${'$'}record/terminal.tmp" && mv "${'$'}record/terminal.tmp" "${'$'}record/terminal" || exit 1
 echo '__YXI_DELIVERY__:terminal'
 """.trimIndent()
+}
+
+private fun deliveryJournalKey(session: Session, item: QueuedInstruction): String =
+    contentHash((session.runtimeId + "\n" + item.taskKey + "\n" + item.id).toByteArray())
+
+internal suspend fun queryInstructionDelivery(conn: Conn, session: Session, item: QueuedInstruction): String {
+    check(item.taskKey == taskNavigationKey(conn.host, session)) { "任务身份已变化" }
+    val key = deliveryJournalKey(session, item)
+    val result = conn.ssh.exec("""
+record="${'$'}HOME/.yxi/instruction-deliveries/$key"
+if [ -f "${'$'}record/terminal" ]; then
+    echo '__YXI_RECORD__:terminal'
+    cat "${'$'}record/terminal"
+elif [ -d "${'$'}record" ]; then echo '__YXI_RECORD__:reserved'
+else echo '__YXI_RECORD__:missing'; fi
+""".trimIndent())
+    return when {
+        result.lineSequence().any { it == "__YXI_RECORD__:terminal" } -> "服务端记录：终端文字与回车已写入。运行器接收和执行仍需查看对话确认。\n" + result.lineSequence().filterNot { it.startsWith("__YXI_RECORD__:") }.joinToString("\n").take(100)
+        result.lineSequence().any { it == "__YXI_RECORD__:reserved" } -> "服务端已登记本指令，但没有完整写入记录；可能只写入了部分内容。请查看终端，不要重复发送。"
+        else -> "未找到服务端记录，旧版投递也可能没有记录；不能据此判定未发送。请查看对话或终端。"
+    }
 }

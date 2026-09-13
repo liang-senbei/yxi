@@ -417,7 +417,8 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                 }
             }
         }
-        InstructionStrip(instructions, taskNavigationKey(conn.host, session), !sending && !live.busy && pending == null && ssh.isConnected, ::deliver)
+        InstructionStrip(instructions, taskNavigationKey(conn.host, session), !sending && !live.busy && pending == null && ssh.isConnected, ::deliver,
+            onQuery = { queryInstructionDelivery(conn, session, it) })
         Composer(
             draft, { draft = it }, focus,
             ctx = ctx,
