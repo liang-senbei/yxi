@@ -22,7 +22,8 @@ fun StyleTrialControls(preview: BrowserPreview, selection: PageSelection) {
     var property by remember(preview) { mutableStateOf("font-size") }
     var value by remember(selection, property) { mutableStateOf(TextFieldValue(preview.styleChanges[property]?.removeSuffix("px") ?: StyleTrial.initial(property, selection.computed[property].orEmpty()))) }
     var menu by remember { mutableStateOf(false) }
-    NativeOverlay(menu)
+    var fontMenu by remember { mutableStateOf(false) }
+    NativeOverlay(menu || fontMenu)
     var gesture by remember(property) { mutableStateOf<String?>(null) }
     Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
         Text(if (preview.stylePending != null) "正在试调…" else "临时预览 · 尚未修改源文件", style = MaterialTheme.typography.labelSmall, color = t.warning)
@@ -30,10 +31,15 @@ fun StyleTrialControls(preview: BrowserPreview, selection: PageSelection) {
             Box {
                 TextButton({ menu = true }) { Text(StyleTrial.properties.getValue(property) + " ▾") }
                 DropdownMenu(menu, { menu = false }) {
-                    StyleTrial.properties.forEach { (key, label) -> DropdownMenuItem(text = { Text(label) }, onClick = { property = key; menu = false }) }
+                    StyleTrial.properties.forEach { (key, label) -> DropdownMenuItem(text = { Text(label) }, onClick = { property = key; menu = false; fontMenu = false }) }
                 }
             }
-            OutlinedTextField(value, { value = it }, Modifier.weight(1f).onPreviewKeyEvent {
+            if (property == "font-family") Box(Modifier.weight(1f)) {
+                TextButton({ fontMenu = true }, enabled = !preview.selectionStale) { Text((StyleTrial.fonts[value.text] ?: "选择字体") + " ▾") }
+                DropdownMenu(fontMenu, { fontMenu = false }) {
+                    StyleTrial.fonts.forEach { (font, label) -> DropdownMenuItem(text = { Text(label) }, onClick = { value = TextFieldValue(font); fontMenu = false }) }
+                }
+            } else OutlinedTextField(value, { value = it }, Modifier.weight(1f).onPreviewKeyEvent {
                 when {
                     it.type != KeyEventType.KeyDown -> false
                     it.isCtrlPressed && it.key == Key.A -> { value = value.copy(selection = TextRange(0, value.text.length)); true }
@@ -41,9 +47,11 @@ fun StyleTrialControls(preview: BrowserPreview, selection: PageSelection) {
                     else -> false
                 }
             }, label = { Text(if (StyleTrial.isColor(property)) "颜色值" else "试调值 · px") }, singleLine = true, enabled = !preview.selectionStale)
-            TextButton({ preview.trialStyle(property, value.text) }, enabled = !preview.selectionStale) { Text("试调") }
+            TextButton({ preview.trialStyle(property, value.text) }, enabled = !preview.selectionStale && (property != "font-family" || value.text in StyleTrial.fonts)) { Text("试调") }
         }
-        if (!StyleTrial.isColor(property)) {
+        if (property == "font-family") {
+            Text("使用浏览器可用的字体类型，实际字形取决于设备。", style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+        } else if (!StyleTrial.isColor(property)) {
             val bounds = StyleTrial.range(property)
             Slider(value.text.toFloatOrNull()?.coerceIn(bounds) ?: bounds.start,
                 onValueChange = {

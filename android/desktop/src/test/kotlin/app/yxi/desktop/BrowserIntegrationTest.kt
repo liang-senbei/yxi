@@ -90,11 +90,21 @@ class BrowserIntegrationTest {
             js(b, "document.body.innerText=document.cookie||'COOKIE_ISOLATED';")
             eventually { text(b).contains("COOKIE_ISOLATED") }
             println("browser-fixture: cookie isolation")
-            js(a, """document.body.innerHTML='<button id=target style="font-size:16px!important;padding-top:3px!important;padding-right:9px">Selected component</button><input id=secret type=password value=DO_NOT_CAPTURE><span id=probe></span>';""")
+            js(a, """document.body.innerHTML='<button id=target style="font-family:sans-serif!important;font-size:16px!important;padding-top:3px!important;padding-right:9px">Selected component</button><input id=secret type=password value=DO_NOT_CAPTURE><span id=probe></span>';""")
             withContext(Dispatchers.Swing) { a.pick() }
             js(a, "document.getElementById('target').click();")
             eventually { a.selection != null }
             assertEquals("Selected component", a.selection!!.text)
+            assertEquals("sans-serif", a.selection!!.computed["font-family"])
+            withContext(Dispatchers.Swing) { a.trialStyle("font-family", "serif") }
+            eventually { a.stylePending == null && a.styleChanges["font-family"] == "serif" }
+            js(a, "document.getElementById('probe').textContent='FAMILY='+getComputedStyle(document.getElementById('target')).fontFamily;")
+            eventually { text(a).contains("FAMILY=serif") }
+            withContext(Dispatchers.Swing) { a.undoStyle() }
+            eventually { a.stylePending == null && a.styleChanges.isEmpty() }
+            js(a, "document.getElementById('probe').textContent='RESTORED_FAMILY='+document.getElementById('target').style.fontFamily+'/'+document.getElementById('target').style.getPropertyPriority('font-family');")
+            eventually { text(a).contains("RESTORED_FAMILY=sans-serif/important") }
+            println("browser-fixture: font family trial and original priority restored")
             withContext(Dispatchers.Swing) { a.trialStyle("font-size", "36", "drag-1") }
             eventually { a.stylePending == null && a.styleChanges["font-size"] == "36px" }
             js(a, "document.getElementById('probe').textContent='FONT='+getComputedStyle(document.getElementById('target')).fontSize;")

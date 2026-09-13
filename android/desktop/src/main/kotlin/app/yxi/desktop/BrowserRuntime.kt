@@ -313,7 +313,7 @@ window.__yxiStyleTrial=(request)=>{
  try {
   if(request.action==='apply'){
    const p=request.property,v=request.value;
-   if(!['font-size','color','background-color','padding','margin','gap','border-radius'].includes(p)||!CSS.supports(p,v)){reply('invalid');return;}
+   if(!['font-size','font-family','color','background-color','padding','margin','gap','border-radius'].includes(p)||!CSS.supports(p,v)){reply('invalid');return;}
    const keys=expanded[p]||[p];if(!matches(keys)){reply('stale');return;}
    const previous=Object.fromEntries(keys.map(k=>[k,read(k)]));
    keys.forEach(k=>{if(!(k in originals))originals[k]=previous[k];});
@@ -328,7 +328,7 @@ window.__yxiStyleTrial=(request)=>{
   refresh();reply('ok');
  }catch(e){reply('stale');}
 };
-const computed=Object.fromEntries(['font-size','color','background-color','padding','margin','gap','border-radius'].map(p=>[p,getComputedStyle(el).getPropertyValue(p)]));
+const computed=Object.fromEntries(['font-size','font-family','color','background-color','padding','margin','gap','border-radius'].map(p=>[p,getComputedStyle(el).getPropertyValue(p)]));
 window.cefQuery({request:JSON.stringify({type:'selection',token:selectionToken,selector:parts.join(' > '),text:sensitive?'':(clone.textContent||'').trim().slice(0,4000),tag:el.tagName.toLowerCase(),computed})});
 window.__yxiPickCancel(true);window.__yxiPick=null;
 };document.addEventListener('click',window.__yxiPick,true);

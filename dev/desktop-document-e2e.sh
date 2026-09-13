@@ -61,6 +61,42 @@ sleep 12
 tap() { DISPLAY=$D xdotool mousemove "$1" "$2" click 1; sleep 3; }
 shot() { DISPLAY=$D import -window root "$OUT/$1.png"; }
 shot 01-restored
+if [ "${YXI_TEST_FONT:-0}" = 1 ]; then
+  test -n "${WEB_FIXTURE:-}"
+  tap 1180 110
+  tap 940 208
+  DISPLAY=$D xdotool key ctrl+a
+  sleep 1
+  DISPLAY=$D xdotool type --clearmodifiers "$(cat "$WEB_FIXTURE/browser-port")"
+  DISPLAY=$D xdotool key Return
+  sleep 12
+  tap 903 262
+  tap 950 392
+  tap 1190 824
+  shot 02-font-controls
+  echo "Font controls ready: $OUT"
+  tap 810 706
+  DISPLAY=$D xdotool key Down Down Return
+  sleep 1
+  DISPLAY=$D xdotool key Tab Return
+  sleep 1
+  DISPLAY=$D xdotool key Down Down Down Return
+  sleep 1
+  DISPLAY=$D xdotool key Tab Return
+  sleep 2
+  shot 03-font-trial
+  tap 820 824
+  tap 500 780
+  DISPLAY=$D xdotool key ctrl+a
+  sleep 1
+  DISPLAY=$D xdotool key ctrl+c
+  sleep 1
+  DISPLAY=$D timeout 5 xclip -selection clipboard -o > "$OUT/font-feedback.txt"
+  grep -q 'font-family: serif;' "$OUT/font-feedback.txt"
+  shot 04-font-feedback
+  echo 'Font trial included in conversation draft'
+  exit 0
+fi
 if [ "${YXI_TEST_PROJECT_PREVIEW:-0}" = 1 ]; then
   test -n "${WEB_FIXTURE:-}"
   tap 1180 110

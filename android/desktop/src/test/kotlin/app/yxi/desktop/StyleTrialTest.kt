@@ -22,4 +22,11 @@ class StyleTrialTest {
         assertTrue(script.contains("quote\\\"\\nmarker"))
         assertFalse(script.contains("quote\"\nmarker"))
     }
+    @Test fun `font choices are explicit and cannot inject additional styles`() {
+        StyleTrial.fonts.keys.forEach { assertEquals(it, StyleTrial.normalize("font-family", it)) }
+        assertFails { StyleTrial.normalize("font-family", "serif; color:red") }
+        assertFails { StyleTrial.normalize("font-family", "url(https://example.com/font)") }
+        assertEquals("", StyleTrial.initial("font-family", "Inter, Arial, sans-serif"))
+        assertEquals("serif", StyleTrial.initial("font-family", "serif"))
+    }
 }

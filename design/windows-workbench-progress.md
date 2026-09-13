@@ -274,3 +274,12 @@
 - 实际GUI填写并保存/health/ready，模拟服务只在该路径通过检测，自动打开另一个/app预览入口；脚本没有手动预览点击，仍核对UI_DEV_SERVICE_READY及停止。截图已查看：本机tmp/workbench-evidence/custom-readiness.png；远端 /tmp/yxi-health-path-ui/。
 - 追加路径校验/编码及v1升级测试；全量127项，122通过、5环境测试跳过，Linux打包通过，日志 /tmp/yxi-health-path-final.log。
 - 仍未支持HTTP认证头、TLS探测、自定义成功内容判据、代码版本/构建状态关联、非HMR自动刷新及Windows专项；就绪路径返回200不等同全部页面或代码已完成同步。完整PRD继续推进，未发版。
+
+## 第二十六轮：字体类型试调（2026-09-13）
+
+- font-family加入样式白名单与选择时计算样式。提供系统字体、无衬线、衬线、等宽四种类型；实际字形由设备字体决定。原自定义字体栈继续显示，不自动选成其它类型。
+- 字体使用下拉选择，禁用像素滑杆；未选择有效字体时不可试调。菜单仍使用原生浮层保护，切属性关闭旧字体菜单。只接受列出的字体值，不允许拼接额外CSS或外部字体URL。
+- 沿用原声明/优先级记录、撤销、重置及加入对话草稿。样式仍明确是临时效果，不代表源文件已保存。
+- 原生BrowserIntegrationTest确认计算字体切为serif，撤销恢复sans-serif及important。真实产品UI通过键盘选字体并试调，已查看衬线标题截图；加入对话后复制草稿核对font-family:serif，未发送给Agent。
+- 全量128项，123通过、5环境测试跳过，Linux打包通过（/tmp/yxi-font-build.log）。原生测试 /tmp/yxi-font-native.log；UI /tmp/yxi-font-ui-keyboard/；本机tmp/workbench-evidence/font-trial-verified.png及font-feedback-verified.png。
+- 初次菜单定位等待超时后改为完整键盘自动化，流程通过并保留脚本YXI_TEST_FONT入口。未实现自定义字体名/文件、文字内容试调、所有设备字体可用性与WindowsDPI专项；完整PRD继续推进，未发版。
