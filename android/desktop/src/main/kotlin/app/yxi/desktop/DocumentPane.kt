@@ -9,6 +9,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.style.TextOverflow
@@ -92,6 +98,41 @@ private fun DocumentBody(conn: Conn, doc: FileDocument, onQuote: (String) -> Uni
     var quoteAdded by remember { mutableStateOf(false) }
     var quoteRange by remember { mutableStateOf(androidx.compose.ui.text.TextRange.Zero) }
     var quoteText by remember { mutableStateOf("") }
+    var searchOpen by remember { mutableStateOf(false) }
+    var searchValue by remember { mutableStateOf(TextFieldValue()) }
+    var searchFocused by remember { mutableStateOf(false) }
+    var searchRequest by remember { mutableStateOf(0) }
+    var searchNote by remember { mutableStateOf("") }
+    var jumpOffset by remember { mutableStateOf<Int?>(null) }
+    var editorLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    val searchFocus = remember { FocusRequester() }
+    val editorFocus = remember { FocusRequester() }
+    val editorScroll = rememberScrollState()
+    val editorHorizontal = rememberScrollState()
+    fun openSearch() { searchOpen = true; searchRequest++ }
+    fun find(forward: Boolean) {
+        val needle = searchValue.text
+        if (needle.isBlank()) return
+        val text = doc.editor.text
+        val at = if (forward) text.indexOf(needle, doc.editor.selection.max, ignoreCase = true).takeIf { it >= 0 } ?: text.indexOf(needle, ignoreCase = true)
+            else text.lastIndexOf(needle, doc.editor.selection.min - 1, ignoreCase = true).takeIf { it >= 0 } ?: text.lastIndexOf(needle, ignoreCase = true)
+        if (at < 0) { searchNote = "没有匹配内容"; return }
+        if (doc.mode == "预览") doc.mode = "源码"
+        doc.editor = doc.editor.copy(selection = TextRange(at, at + needle.length))
+        jumpOffset = at
+        searchNote = "第 ${text.take(at).count { it == '\n' } + 1} 行"
+    }
+    LaunchedEffect(searchOpen, searchRequest) { if (searchOpen) searchFocus.requestFocus() }
+    LaunchedEffect(jumpOffset, editorLayout, doc.mode) {
+        val offset = jumpOffset ?: return@LaunchedEffect
+        val layout = editorLayout ?: return@LaunchedEffect
+        if (doc.mode == "预览" || layout.layoutInput.text.text != doc.editor.text) return@LaunchedEffect
+        val rect = layout.getCursorRect(offset.coerceIn(0, doc.editor.text.length))
+        editorScroll.scrollTo(rect.top.toInt().coerceAtLeast(0))
+        editorHorizontal.scrollTo(rect.left.toInt().coerceAtLeast(0))
+        editorFocus.requestFocus()
+        jumpOffset = null
+    }
     LaunchedEffect(doc.editor) {
         if (!doc.editor.selection.collapsed) { quoteRange = doc.editor.selection; quoteText = doc.editor.text; quoteAdded = false }
         else if (doc.editor.text != quoteText) { quoteRange = androidx.compose.ui.text.TextRange.Zero; quoteText = ""; quoteAdded = false }
@@ -103,8 +144,9 @@ private fun DocumentBody(conn: Conn, doc: FileDocument, onQuote: (String) -> Uni
     Column(Modifier.fillMaxSize().onPreviewKeyEvent {
         when {
             it.type != KeyEventType.KeyDown || !it.isCtrlPressed -> false
+            it.key == Key.F && !doc.image -> { openSearch(); true }
             it.key == Key.S && doc.dirty && !doc.conflict && !doc.busy -> { save(); true }
-            it.key == Key.A && doc.mode != "预览" -> {
+            it.key == Key.A && doc.mode != "预览" && !searchFocused -> {
                 doc.editor = doc.editor.copy(selection = androidx.compose.ui.text.TextRange(0, doc.editor.text.length)); true
             }
             else -> false
@@ -115,6 +157,7 @@ private fun DocumentBody(conn: Conn, doc: FileDocument, onQuote: (String) -> Uni
         }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
             if (!doc.image) WorkbenchTabs(listOf("预览", "源码", "分栏"), doc.mode, { doc.mode = it })
+            if (!doc.image) TextButton(::openSearch) { Text("查找") }
             TextButton({ save() }, enabled = doc.dirty && !doc.busy && !doc.conflict) { Text(if (doc.busy) "保存中" else "保存") }
             TextButton({ Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(doc.path), null); pathCopied = true }) { Text(if (pathCopied) "已复制" else "复制路径") }
             TextButton({
@@ -125,6 +168,17 @@ private fun DocumentBody(conn: Conn, doc: FileDocument, onQuote: (String) -> Uni
                         .onFailure { doc.error = "另存为失败：${it.message}" }
                 }
             }, enabled = doc.base != null) { Text("另存为") }
+        }
+        if (searchOpen && !doc.image) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(searchValue, { searchValue = it; searchNote = "" }, Modifier.weight(1f).focusRequester(searchFocus).onFocusChanged { searchFocused = it.isFocused }.onPreviewKeyEvent {
+                    if (it.type == KeyEventType.KeyDown && it.key == Key.Enter && searchValue.composition == null) { find(!it.isShiftPressed); true } else false
+                }, singleLine = true, label = { Text("查找文字") })
+                TextButton({ find(false) }) { Text("上一个") }
+                TextButton({ find(true) }) { Text("下一个") }
+                TextButton({ searchOpen = false }) { Text("×") }
+            }
+            if (searchNote.isNotBlank()) Text(searchNote, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
         }
         val timestamp = if (doc.loadedAt == 0L) "" else " · " + SimpleDateFormat("HH:mm:ss").format(Date(doc.loadedAt))
         Text((if (doc.dirty && !doc.conflict) "未保存" else doc.status) + timestamp, Modifier.padding(horizontal = 10.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
@@ -149,10 +203,9 @@ private fun DocumentBody(conn: Conn, doc: FileDocument, onQuote: (String) -> Uni
         } else {
             Row(Modifier.weight(1f).fillMaxWidth()) {
                 if (doc.mode != "预览") {
-                    val scroll = rememberScrollState()
-                    Row(Modifier.weight(1f).fillMaxHeight().verticalScroll(scroll).horizontalScroll(rememberScrollState()).padding(10.dp)) {
+                    Row(Modifier.weight(1f).fillMaxHeight().verticalScroll(editorScroll).horizontalScroll(editorHorizontal).padding(10.dp)) {
                         Text((1..doc.editor.text.count { it == '\n' } + 1).joinToString("\n"), style = CodeStyle, color = t.textMuted, modifier = Modifier.padding(end = 10.dp))
-                        BasicTextField(doc.editor, { doc.editor = it }, Modifier.widthIn(min = 280.dp), textStyle = CodeStyle.copy(color = t.textPrimary), cursorBrush = SolidColor(t.accent))
+                        BasicTextField(doc.editor, { doc.editor = it }, Modifier.widthIn(min = 280.dp).focusRequester(editorFocus), textStyle = CodeStyle.copy(color = t.textPrimary), cursorBrush = SolidColor(t.accent), onTextLayout = { editorLayout = it })
                     }
                 }
                 if (doc.mode == "分栏") VerticalDivider()
