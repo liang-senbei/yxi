@@ -100,7 +100,7 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
                 catch (e: Exception) { preview.error = "截图未复制：${e.message}" }
             } }, enabled = preview.handle != null && !preview.loading && !preview.preparing && !preview.capturing && !preview.needsReconnect) { Text(if (preview.capturing) "正在截图…" else "复制截图") }
         }
-        if (knownProject) PreviewServiceControls(state, conn, session, servicesOpen, onConfigured = { servicesOpen = false }, onPreview = { address ->
+        if (knownProject) PreviewServiceControls(state, conn, session, servicesOpen, preview.preparing, addressDirty, onConfigured = { servicesOpen = false }, onPreview = { address ->
             input = androidx.compose.ui.text.input.TextFieldValue(address); open()
         })
         Text(preview.source, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)

@@ -16,7 +16,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun PreviewServiceControls(state: AppState, conn: Conn, session: Session, configure: Boolean, onConfigured: () -> Unit, onPreview: (String) -> Unit) {
+internal fun PreviewServiceControls(state: AppState, conn: Conn, session: Session, configure: Boolean, previewPreparing: Boolean, addressEdited: Boolean, onConfigured: () -> Unit, onPreview: (String) -> Unit) {
     val project = projectKey(conn.host, session.cwd)
     val settings = state.projectServices.get(project)
     val controller = state.serviceControllers.getOrPut(project) { PreviewServiceController(project, session.cwd) }
@@ -24,6 +24,7 @@ internal fun PreviewServiceControls(state: AppState, conn: Conn, session: Sessio
     var error by remember(project) { mutableStateOf("") }
     var logs by remember(project) { mutableStateOf(false) }
     var more by remember(project) { mutableStateOf(false) }
+    var openWhenReady by remember(project) { mutableStateOf<String?>(null) }
     NativeOverlay(more)
     fun act(action: suspend () -> Unit) { scope.launch {
         try { error = ""; action() }
@@ -42,12 +43,25 @@ internal fun PreviewServiceControls(state: AppState, conn: Conn, session: Sessio
     val status = snapshot?.optString("state")
     val owned = status in listOf("starting", "running", "exited", "configuration-conflict")
     val connected = conn.status == Conn.Status.Connected
+    LaunchedEffect(snapshot, settings, connected, openWhenReady, previewPreparing, addressEdited) {
+        val wanted = openWhenReady
+        if (wanted != null && snapshot != null) {
+            if (addressEdited || status !in listOf("starting", "running") || snapshot.optString("runtime") != wanted) openWhenReady = null
+            else if (settings == null || snapshot.optString("config") != settings.plan(project).signature) openWhenReady = null
+            else if (connected && !previewPreparing && settings != null && snapshot.optString("readiness") == "ready" && snapshot.optString("config") == settings.plan(project).signature) {
+                val saved = state.projectPreviews.address(project)
+                val address = readyPreviewAddress(settings.port, saved, snapshot.optString("probeHost"))
+                openWhenReady = null
+                address?.let(onPreview)
+            }
+        }
+    }
     if (settings != null || owned) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("开发服务 · " + if (!connected) "未连接" else if (controller.mutating) "操作中…" else when(status) {
                 "missing", "stopped" -> "未运行"
                 "starting" -> "启动未完成"
-                "running" -> "进程运行中"
+                "running" -> if (snapshot?.optString("readiness") == "ready") "HTTP可访问" else "进程运行中"
                 "exited" -> "已退出（${snapshot?.opt("exitCode")?.takeUnless { it == org.json.JSONObject.NULL } ?: "未知退出码"}）"
                 "port-busy" -> "端口已有服务"
                 "unowned" -> "会话归属不匹配"
@@ -55,12 +69,17 @@ internal fun PreviewServiceControls(state: AppState, conn: Conn, session: Sessio
                 else -> "状态待检查"
             }, Modifier.weight(1f).padding(start = 12.dp, top = 12.dp), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
             if (owned) TextButton({
+                openWhenReady = null
                 val runtime = snapshot?.optString("runtime").orEmpty(); val config = snapshot?.optString("config").orEmpty()
                 act { controller.stop(conn, runtime, config) }
             }, enabled = connected && !controller.mutating && owned) { Text(if (status == "exited") "清理会话" else "停止") }
-            else if (settings != null && status in listOf("missing", "stopped")) TextButton({ act { controller.start(conn, settings) } }, enabled = connected && !controller.mutating) { Text("启动") }
+            else if (settings != null && status in listOf("missing", "stopped")) TextButton({ act {
+                controller.start(conn, settings)
+                val started = controller.snapshot
+                if (started?.optString("state") in listOf("starting", "running") && started?.optString("config") == settings.plan(project).signature) openWhenReady = started?.optString("runtime")
+            } }, enabled = connected && !controller.mutating) { Text("启动") }
             else TextButton({ act { controller.refresh(conn) } }, enabled = connected && !controller.busy) { Text("检查") }
-            TextButton({ settings?.let { onPreview(state.projectPreviews.address(project) ?: "http://localhost:${it.port}/") } }, enabled = settings != null && connected) { Text("预览") }
+            TextButton({ settings?.let { onPreview(state.projectPreviews.address(project) ?: "http://localhost:${it.port}/") } }, enabled = settings != null && connected && !previewPreparing) { Text("预览") }
             Box {
                 IconButton({ more = true }) { Icon(Icons.Default.MoreVert, "开发服务更多操作") }
                 DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
@@ -69,7 +88,14 @@ internal fun PreviewServiceControls(state: AppState, conn: Conn, session: Sessio
                 }
             }
         }
-        if (status == "running") Text("网页是否就绪请以预览结果为准。", Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
+        if (status == "running") Text(when(snapshot?.optString("readiness")) {
+            "ready" -> "${snapshot.optString("probeHost")} 根路径HTTP ${snapshot.optInt("httpStatus")}；非代码同步确认。"
+            "not-listening" -> "等待服务监听配置的端口。"
+            "unmatched-listener" -> "端口尚未关联到本会话，未进行HTTP就绪确认。"
+            "changed" -> "检查期间进程或监听已变化，等待重新检查。"
+            "http-response" -> "HTTP ${snapshot.optInt("httpStatus")}，页面就绪仍需核对。"
+            else -> "HTTP或监听归属尚未确认，可查看日志和预览。"
+        }, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
         if (owned && settings != null && snapshot?.optString("config") != settings.plan(project).signature) Text("现有会话使用旧配置，停止后可按新配置启动。", Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall)
     }
     if (controller.error.isNotBlank() || error.isNotBlank()) Text(error.ifBlank { controller.error }, Modifier.padding(horizontal = 12.dp), color = Tokens.current.danger, style = MaterialTheme.typography.bodySmall)

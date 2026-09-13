@@ -1,4 +1,93 @@
-import base64, fcntl, json, os, pathlib, re, shutil, socket, stat, subprocess, sys
+import base64, fcntl, json, os, pathlib, re, shutil, socket, stat, subprocess, sys, http.client, time, ipaddress
+
+def process_info(pid):
+    try:
+        fields = pathlib.Path('/proc', str(pid), 'stat').read_text(errors='replace').rpartition(')')[2].split()
+        return int(fields[1]), fields[19]
+    except (OSError, ValueError, IndexError):
+        return None
+
+def listeners(port, host):
+    found = set()
+    for name in ('tcp', 'tcp6'):
+        path = pathlib.Path('/proc/net', name)
+        if not path.exists():
+            if name == 'tcp': raise OSError('Linux socket table unavailable')
+            continue
+        for row in path.read_text().splitlines()[1:]:
+            fields = row.split()
+            address, number = fields[1].split(':')
+            if fields[3] != '0A' or int(number, 16) != port: continue
+            # Include IPv6 wildcard because it can also accept IPv4. Never
+            # certify a port that has another matching listener outside our tree.
+            data = bytes.fromhex(address)
+            if sys.byteorder == 'little': data = b''.join(data[i:i+4][::-1] for i in range(0, len(data), 4))
+            ip = ipaddress.ip_address(data)
+            matches = ((ip.version == 4 and (ip.is_unspecified or str(ip) == host)) or
+                       (ip.version == 6 and (ip.is_unspecified or str(getattr(ip, 'ipv4_mapped', None)) == host))) if host == '127.0.0.1' else (ip.version == 6 and (ip.is_unspecified or str(ip) == '::1'))
+            if matches:
+                found.add(fields[9])
+    return found
+
+def owned_listener(pid, port, host):
+    initial = process_info(pid)
+    if initial is None: return 'unverified', None
+    table = {}
+    for entry in pathlib.Path('/proc').iterdir():
+        if entry.name.isdigit():
+            info = process_info(int(entry.name))
+            if info is not None: table[int(entry.name)] = info
+    children = {pid}
+    while True:
+        expanded = children | {child for child, info in table.items() if info[0] in children}
+        if expanded == children: break
+        children = expanded
+    sockets = set()
+    for child in children:
+        expected = table.get(child)
+        if expected is None or process_info(child) != expected: continue
+        local = set()
+        try:
+            for descriptor in pathlib.Path('/proc', str(child), 'fd').iterdir():
+                try:
+                    match = re.fullmatch(r'socket:\[([0-9]+)\]', os.readlink(descriptor))
+                    if match: local.add(match.group(1))
+                except OSError: pass
+        except OSError: continue
+        if process_info(child) == expected: sockets |= local
+    candidates = listeners(port, host)
+    if process_info(pid) != initial: return 'changed', None
+    if not candidates: return 'not-listening', None
+    if not candidates.issubset(sockets): return 'unmatched-listener', None
+    return 'owned', (initial, frozenset(candidates))
+
+def probe_http(pid, port, host):
+    checked = int(time.time() * 1000)
+    try:
+        ownership, identity = owned_listener(pid, port, host)
+        if ownership != 'owned': return dict(readiness=ownership, checkedAt=checked)
+        connection = http.client.HTTPConnection(host, port, timeout=1)
+        try:
+            connection.request('GET', '/', headers={'Connection': 'close'})
+            response = connection.getresponse()
+            status = response.status
+            if 200 <= status < 300: response.read(1024)
+        finally: connection.close()
+        after, current = owned_listener(pid, port, host)
+        if after != 'owned' or current != identity: return dict(readiness='changed', checkedAt=checked)
+        return dict(readiness='ready' if 200 <= status < 300 else 'http-response', httpStatus=status, checkedAt=checked, probeHost=host)
+    except (OSError, http.client.HTTPException):
+        return dict(readiness='unverified', checkedAt=checked)
+
+def readiness(pid, port):
+    results = []
+    for host in ('127.0.0.1', '::1'):
+        result = probe_http(pid, port, host)
+        if result['readiness'] in ('ready', 'changed'): return result
+        results.append(result)
+    for state in ('http-response', 'unmatched-listener', 'unverified', 'not-listening'):
+        for result in results:
+            if result['readiness'] == state: return result
 
 def emit(state, **fields):
     print('__YXI_PREVIEW__:' + json.dumps(dict(state=state, **fields), ensure_ascii=False))
@@ -44,7 +133,7 @@ def main():
         if check and result.returncode:
             raise RuntimeError(result.stderr.strip() or 'tmux operation failed')
         return result
-    def snapshot():
+    def snapshot(probe=False):
         if run('has-session', '-t', target, check=False).returncode:
             return None
         sid = run('display-message', '-p', '-t', target + ':', '#{session_id}').stdout.strip()
@@ -55,14 +144,20 @@ def main():
             return dict(state='unowned')
         signature = environment('YXI_PREVIEW_CONFIG')
         launched = environment('YXI_PREVIEW_PHASE') == 'launched'
-        fields = run('display-message', '-p', '-t', target + ':', '#{pid}:#{session_id}:#{session_created}\t#{pane_id}\t#{pane_dead}\t#{pane_dead_status}').stdout.strip().split('\t')
+        fields = run('display-message', '-p', '-t', target + ':', '#{pid}:#{session_id}:#{session_created}\t#{pane_id}\t#{pane_dead}\t#{pane_dead_status}\t#{pane_pid}').stdout.strip().split('\t')
         runtime, pane, dead = fields[:3]
-        return dict(state='exited' if dead == '1' else ('running' if launched else 'starting'), runtime=runtime, pane=pane, config=signature,
+        result = dict(state='exited' if dead == '1' else ('running' if launched else 'starting'), runtime=runtime, pane=pane, config=signature,
                     matchesConfig=signature == cfg['config'] if 'config' in cfg else None, exitCode=int(fields[3]) if len(fields)>3 and fields[3].isdigit() else None,
                     log=run('capture-pane', '-p', '-S', '-200', '-t', pane, check=False).stdout[-32000:])
+        port = environment('YXI_PREVIEW_PORT')
+        if probe and result['state'] == 'running':
+            if port.isdigit() and len(fields) > 4 and fields[4].isdigit() and 1 <= int(port) <= 65535:
+                result.update(readiness(int(fields[4]), int(port)))
+            else: result['readiness'] = 'unverified'
+        return result
     with (root / 'lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        current = snapshot()
+        current = snapshot(probe=action == 'status')
         if action == 'status':
             emit(**current) if current else emit('missing')
             return
@@ -100,6 +195,7 @@ def main():
             emit('port-busy', message='目标端口已有服务，未启动或停止任何进程'); return
         pane = run('new-session', '-d', '-P', '-F', '#{pane_id}', '-s', name, '-c', cwd,
                    '-e', 'YXI_PREVIEW_PROJECT=' + cfg['project'], '-e', 'YXI_PREVIEW_CONFIG=' + cfg['config'],
+                   '-e', 'YXI_PREVIEW_PORT=' + str(cfg['port']),
                    '-e', 'YXI_PREVIEW_PHASE=starting', '/bin/sleep', '86400').stdout.strip()
         if not re.fullmatch(r'%[0-9]+', pane):
             raise RuntimeError('Preview pane was not confirmed')

@@ -79,4 +79,5 @@ elif [ "${YXI_TEST_BROWSER:-0}" = 1 ]; then
 else
   YXI_ROUTE_FIXTURE="$FIXTURE" ./gradlew :desktop:test --tests app.yxi.desktop.RemoteRoutesTest --rerun --no-daemon
 fi
+cp -r "$ROOT/android/desktop/build/test-results/test" "$FIXTURE/test-results"
 echo "Isolated SSH route fixture: $FIXTURE"

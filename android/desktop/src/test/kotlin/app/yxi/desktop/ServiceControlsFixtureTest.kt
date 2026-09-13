@@ -30,6 +30,12 @@ class ServiceControlsFixtureTest {
         val project = projectKey(host, cwd)
         state.projectPreviews.save(project, port.toString(), null)
         val session = Session("fixture", 1, false, cwd, 0, SessionState.Idle, "", 0.0)
+        val observedReady = java.util.concurrent.atomic.AtomicBoolean(false)
+        val watcher = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        watcher.launch { while (isActive) {
+            if (state.serviceControllers[project]?.snapshot?.optString("readiness") == "ready") observedReady.set(true)
+            delay(100)
+        } }
         try {
             runBlocking { conn.ssh.connect() }; conn.status = Conn.Status.Connected
             runBlocking {
@@ -56,6 +62,7 @@ class ServiceControlsFixtureTest {
                 }
             }
             assertEquals(port, state.projectServices.get(project)!!.port)
+            assertTrue(observedReady.get(), "Owned HTTP listener was never confirmed ready")
             assertEquals("python3 -m http.server $port --bind 127.0.0.1", state.projectServices.get(project)!!.command)
             val status = runBlocking { PreviewServicePlan.result(conn.ssh.exec(PreviewServicePlan.statusCommand(project))) }
             assertEquals("missing", status.getString("state"))
@@ -64,6 +71,6 @@ class ServiceControlsFixtureTest {
             } }
             assertTrue(state.serviceControllers.values.none { it.mutating })
             assertTrue(state.serviceEditors.isEmpty())
-        } finally { conn.ssh.disconnect() }
+        } finally { watcher.cancel(); conn.ssh.disconnect() }
     }
 }

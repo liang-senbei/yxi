@@ -183,7 +183,7 @@ class BrowserPreview(val owner: Host, val taskId: String) {
         c.addLoadHandler(object : CefLoadHandlerAdapter() {
             override fun onLoadingStateChange(browser: CefBrowser, busy: Boolean, back: Boolean, next: Boolean) { ui { loading = busy; canBack = back; canForward = next; if (!busy && error.isBlank()) status = "页面已载入" } }
             override fun onLoadStart(browser: CefBrowser, frame: CefFrame, transition: CefRequest.TransitionType) { if (frame.isMain) ui { pageVersion++; selectionStale = selection != null; stylePending = null; picking = false; error = ""; status = "正在加载…" } }
-            override fun onLoadError(browser: CefBrowser, frame: CefFrame, code: CefLoadHandler.ErrorCode, text: String, url: String) { if (frame.isMain && code != CefLoadHandler.ErrorCode.ERR_ABORTED) ui { error = "加载失败：$text"; loading = false; status = "页面加载失败" } }
+            override fun onLoadError(browser: CefBrowser, frame: CefFrame, code: CefLoadHandler.ErrorCode, text: String, url: String) { if (frame.isMain && code != CefLoadHandler.ErrorCode.ERR_ABORTED) ui { if (browser.url == url) { error = "加载失败：$text"; loading = false; status = "页面加载失败" } } }
         })
         val router = CefMessageRouter.create()
         router.addHandler(object : CefMessageRouterHandlerAdapter() {

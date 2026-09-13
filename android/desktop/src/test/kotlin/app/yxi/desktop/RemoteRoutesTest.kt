@@ -89,6 +89,15 @@ class RemoteRoutesTest {
             assertEquals(previewRuntime, service(plan.startCommand()).getString("runtime"))
             assertTrue(service(plan.startCommand()).getBoolean("reused"))
             kotlinx.coroutines.withTimeout(5000) { while (!service(plan.statusCommand()).getString("log").contains("DEV_READY")) kotlinx.coroutines.delay(100) }
+            assertEquals("not-listening", service(plan.statusCommand()).getString("readiness"))
+            val unrelatedRequests = java.util.concurrent.atomic.AtomicInteger()
+            val unrelated = com.sun.net.httpserver.HttpServer.create(java.net.InetSocketAddress("127.0.0.1", freePort), 0)
+            unrelated.createContext("/") { exchange -> unrelatedRequests.incrementAndGet(); exchange.sendResponseHeaders(200, -1); exchange.close() }
+            unrelated.start()
+            try {
+                assertEquals("unmatched-listener", service(plan.statusCommand()).getString("readiness"))
+                assertEquals(0, unrelatedRequests.get())
+            } finally { unrelated.stop(0) }
             val changedPlan = plan.copy(command = "exec sleep 600")
             assertEquals("configuration-conflict", service(changedPlan.startCommand()).getString("state"))
             assertEquals("stopped", service(plan.stopCommand(previewRuntime)).getString("state"))
@@ -104,6 +113,17 @@ class RemoteRoutesTest {
             assertEquals(7, failed.getInt("exitCode")); assertTrue(failed.getString("log").contains("DEV_FAILED"))
             service(failedPlan.stopCommand(failed.getString("runtime")))
             assertEquals("port-busy", service(plan.copy(port = remotePort).startCommand()).getString("state"))
+            val ipv6Port = runCatching { java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("::1")).use { it.localPort } }.getOrNull()
+            if (ipv6Port != null) {
+                val ipv6Plan = plan.copy(port = ipv6Port, command = "python3 -m http.server $ipv6Port --bind ::1")
+                service(ipv6Plan.startCommand())
+                var ready6 = service(ipv6Plan.statusCommand())
+                kotlinx.coroutines.withTimeout(10000) { while (ready6.optString("readiness") != "ready") { kotlinx.coroutines.delay(100); ready6 = service(ipv6Plan.statusCommand()) } }
+                assertEquals("::1", ready6.getString("probeHost"))
+                assertEquals(200, ready6.getInt("httpStatus"))
+                service(ipv6Plan.stopCommand(ready6.getString("runtime")))
+                println("preview readiness: IPv6 ownership and HTTP verified")
+            } else println("preview readiness: IPv6 loopback unavailable in fixture")
             val foreignPlan = plan.copy(project = "b".repeat(64))
             val socketArg = app.yxi.ssh.Shell.q("$home/.yxi/preview-runtime/tmux.sock")
             val foreignName = "pv-" + foreignPlan.project

@@ -39,7 +39,6 @@ sleep 2
 shot 03-configured
 tap 599 251
 sleep 4
-tap 663 252
 sleep 8
 shot 04-running
 tap 300 353
