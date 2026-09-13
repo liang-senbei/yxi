@@ -8,6 +8,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import app.yxi.ssh.Shell
 import kotlinx.coroutines.CancellationException
 import org.json.JSONObject
@@ -87,7 +90,29 @@ print('__YXI_GIT__:' + json.dumps({'root': root, 'files': files, 'diff': text, '
             if (file.isNotBlank()) {
                 TextButton({ openFile(data.getString("root").trimEnd('/') + "/" + file) }) { Text("打开文件 · $file") }
                 if (data.optBoolean("clipped")) Text("差异较长，显示前 256 KiB", style = MaterialTheme.typography.labelSmall)
-                SelectionContainer { Text(data.getString("diff").ifBlank { "当前范围无差异" }, Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()), style = CodeStyle) }
+                val diff = data.getString("diff")
+                val colors = Tokens.current
+                val rendered = remember(diff, colors) {
+                    buildAnnotatedString {
+                        diff.lineSequence().forEach { line ->
+                            val color = when {
+                                line.startsWith("@@") -> colors.accent
+                                line.startsWith("+++") || line.startsWith("---") || line.startsWith("diff --git") || line.startsWith("index ") -> colors.textMuted
+                                line.startsWith("+") -> colors.success
+                                line.startsWith("-") -> colors.danger
+                                else -> colors.textPrimary
+                            }
+                            withStyle(SpanStyle(color = color)) { append(line); append('\n') }
+                        }
+                    }
+                }
+                val added = diff.lineSequence().count { it.startsWith("+") && !it.startsWith("+++") }
+                val removed = diff.lineSequence().count { it.startsWith("-") && !it.startsWith("---") }
+                if (diff.isNotBlank()) Text("当前显示差异：+$added / −$removed" + if (data.optBoolean("clipped")) "（截取部分）" else "", style = MaterialTheme.typography.labelSmall, color = colors.textMuted)
+                SelectionContainer {
+                    if (diff.isBlank()) Text("当前范围无差异", style = CodeStyle)
+                    else Text(rendered, Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()), style = CodeStyle)
+                }
             } else Text("选择文件查看差异", color = Tokens.current.textMuted)
         }
     }
