@@ -7,8 +7,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 
-internal data class ServiceSettings(val directory: String, val command: String, val port: Int) {
+internal data class ServiceSettings(val directory: String, val command: String, val port: Int, val readinessPath: String = "/") {
     fun plan(project: String) = PreviewServicePlan(project, directory, command, port)
+    val queryPath get() = normalizeReadinessPath(readinessPath)
 }
 internal class ProjectServices(file: File, protector: CredentialProtector? = WindowsCredentialProtector.forPlatform()) {
     private val disk = CredentialFile(file, protector)
@@ -19,10 +20,10 @@ internal class ProjectServices(file: File, protector: CredentialProtector? = Win
     init { try {
         val root = disk.read()
         if (root.length() > 0) {
-            require(root.getInt("version") == 1)
+            require(root.getInt("version") in 1..2)
             val entries = root.getJSONObject("projects")
             records = entries.keys().asSequence().associateWith { key -> entries.getJSONObject(key).let {
-                ServiceSettings(it.getString("directory"), it.getString("command"), it.getInt("port")).also { value -> value.plan(key) }
+                ServiceSettings(it.getString("directory"), it.getString("command"), it.getInt("port"), if (it.isNull("readinessPath")) "/" else it.getString("readinessPath")).also { value -> value.plan(key); value.queryPath }
             } }
         }
     } catch (e: Exception) { readable = false; error = "开发服务配置无法读取，原文件已保留：${e.message}" } }
@@ -30,10 +31,10 @@ internal class ProjectServices(file: File, protector: CredentialProtector? = Win
     @Synchronized fun save(project: String, value: ServiceSettings, expected: ServiceSettings?) {
         check(readable) { error }; check(records[project] == expected) { "配置已变化，请重新打开" }
         value.plan(project)
-        val next = records + (project to value)
+        val next = records + (project to value.copy(readinessPath = value.queryPath))
         val data = JSONObject()
-        next.forEach { (key, entry) -> data.put(key, JSONObject().put("directory", entry.directory).put("command", entry.command).put("port", entry.port)) }
-        try { disk.write(JSONObject().put("version", 1).put("projects", data)); records = next; error = "" }
+        next.forEach { (key, entry) -> data.put(key, JSONObject().put("directory", entry.directory).put("command", entry.command).put("port", entry.port).put("readinessPath", entry.queryPath)) }
+        try { disk.write(JSONObject().put("version", 2).put("projects", data)); records = next; error = "" }
         catch (e: Exception) { error = "开发服务配置未保存：${e.message}"; throw e }
     }
 }
@@ -49,7 +50,7 @@ internal class PreviewServiceController(val project: String, private val root: S
     private var actionError by mutableStateOf("")
     private var queryError by mutableStateOf("")
     val error get() = actionError.ifBlank { queryError }
-    suspend fun refresh(conn: Conn) = execute(conn, PreviewServicePlan.statusCommand(project), false)
+    suspend fun refresh(conn: Conn, path: String = "/") = execute(conn, PreviewServicePlan.statusCommand(project, path), false)
     suspend fun start(conn: Conn, settings: ServiceSettings) = execute(conn, settings.plan(project).startCommand(), true)
     suspend fun stop(conn: Conn, runtime: String, config: String) = execute(conn, PreviewServicePlan.stopCommand(project, runtime, config), true)
     private suspend fun execute(conn: Conn, command: String, mutation: Boolean) {
@@ -96,7 +97,15 @@ internal class ServiceEditor(val project: String, root: String, val saved: Servi
     var directory by mutableStateOf(initial.directory)
     var command by mutableStateOf(initial.command)
     var port by mutableStateOf(initial.port.toString())
-    val dirty get() = directory != initial.directory || command != initial.command || port != initial.port.toString()
-    fun value(): ServiceSettings = ServiceSettings(directory, command, port.trim().toIntOrNull() ?: error("请输入有效端口"))
+    var readinessPath by mutableStateOf(initial.readinessPath)
+    val dirty get() = directory != initial.directory || command != initial.command || port != initial.port.toString() || readinessPath != initial.readinessPath
+    fun value(): ServiceSettings = ServiceSettings(directory, command, port.trim().toIntOrNull() ?: error("请输入有效端口"), normalizeReadinessPath(readinessPath))
         .also { it.plan(project) }
+}
+
+internal fun normalizeReadinessPath(value: String): String {
+    require(value.startsWith('/') && !value.startsWith("//") && value.length <= 2048 && value.none { it.isISOControl() } && '#' !in value) { "就绪路径需以单个 / 开头，不含控制字符或片段" }
+    val uri = runCatching { java.net.URI(value) }.getOrElse { error("就绪路径格式无效，请使用URL编码") }
+    require(uri.scheme == null && uri.rawAuthority == null)
+    return uri.toASCIIString().also { require(it.length <= 2048) { "编码后的就绪路径过长" } }
 }

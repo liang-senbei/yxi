@@ -264,3 +264,13 @@
 - 原生隔离测试确认：仅有运行进程但未监听时不就绪；无关HTTP监听出现时不发送任何探测请求；IPv6服务的进程归属与HTTP200通过。原生报告已保存在fixture目录，证据 /tmp/yxi-ready-native-final.log 及 fixture.fQ9cAp/test-results。
 - GUI测试移除了手动预览点击，仍验证UI_DEV_SERVICE_READY载入、就绪被观察、停止后端口关闭。截图已查看：本机tmp/workbench-evidence/service-ready-automatic.png；远端 /tmp/yxi-ready-final-ui/。新增3项自动地址选择测试；全量125项，120通过、5环境测试跳过，Linux打包通过（/tmp/yxi-ready-package.log）。
 - 仍未覆盖自定义就绪路径、TLS/认证页面、代理或容器不在子进程树的监听、所有端口重绑定时序和Windows客户端专项。就绪检查是时间点证据，不代表未来连接永不变化；构建版本关联与无HMR自动刷新仍未实现。没有检查或改动生产开发服务，完整PRD继续推进。
+
+## 第二十五轮：可配置就绪路径（2026-09-13）
+
+- 服务配置增加就绪路径（GET），可使用/health等专用入口。查询和日志刷新都使用当前路径，服务端回传实际检测路径；界面及自动打开要求检测结果与当前路径一致，不能沿用旧结果。
+- 检测路径不进入启动命令指纹，单独修改不重启服务。旧v1配置默认/，保存升级v2，避免旧客户端悄悄丢弃新增字段；启动命令和目录保持。
+- 路径限定同源的/开头目标，拒绝绝对外部URL、//、控制字符和片段；URL编码与查询保留，Unicode转ASCII编码，编码后也限长。状态说明只显示查询之前的路径。
+- 隔离SSH测试使用真实HTTP进程：根路径503、专用路径200，切换检测路径后正确变为可访问，再检查根路径仍是503，运行实例不变。证据hk13 /tmp/yxi-health-path-native.log。
+- 实际GUI填写并保存/health/ready，模拟服务只在该路径通过检测，自动打开另一个/app预览入口；脚本没有手动预览点击，仍核对UI_DEV_SERVICE_READY及停止。截图已查看：本机tmp/workbench-evidence/custom-readiness.png；远端 /tmp/yxi-health-path-ui/。
+- 追加路径校验/编码及v1升级测试；全量127项，122通过、5环境测试跳过，Linux打包通过，日志 /tmp/yxi-health-path-final.log。
+- 仍未支持HTTP认证头、TLS探测、自定义成功内容判据、代码版本/构建状态关联、非HMR自动刷新及Windows专项；就绪路径返回200不等同全部页面或代码已完成同步。完整PRD继续推进，未发版。

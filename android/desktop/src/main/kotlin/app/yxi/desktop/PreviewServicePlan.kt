@@ -14,7 +14,7 @@ internal data class PreviewServicePlan(val project: String, val directory: Strin
     }
     val signature get() = MessageDigest.getInstance("SHA-256").digest(listOf(project, directory, command, port.toString()).joinToString("\u0000").toByteArray()).joinToString("") { "%02x".format(it) }
     fun startCommand() = request(JSONObject().put("action", "start").put("project", project).put("directory", directory).put("command", command).put("port", port).put("config", signature))
-    fun statusCommand() = request(JSONObject().put("action", "status").put("project", project).put("config", signature))
+    fun statusCommand(path: String = "/") = request(JSONObject().put("action", "status").put("project", project).put("config", signature).put("probePath", normalizeReadinessPath(path)))
     fun stopCommand(runtimeId: String, expectedConfig: String = signature): String {
         require(Regex("[0-9]+:\\$[0-9]+:[0-9]+").matches(runtimeId))
         require(Regex("[a-f0-9]{64}").matches(expectedConfig))
@@ -26,9 +26,9 @@ internal data class PreviewServicePlan(val project: String, val directory: Strin
             val encoded = Base64.getEncoder().encodeToString(json.toString().toByteArray())
             return "python3 -c ${Shell.q(script)} ${Shell.q(encoded)}"
         }
-        fun statusCommand(project: String): String {
+        fun statusCommand(project: String, path: String = "/"): String {
             require(Regex("[a-f0-9]{64}").matches(project))
-            return request(JSONObject().put("action", "status").put("project", project))
+            return request(JSONObject().put("action", "status").put("project", project).put("probePath", normalizeReadinessPath(path)))
         }
         fun stopCommand(project: String, runtime: String, config: String): String {
             require(Regex("[a-f0-9]{64}").matches(project) && Regex("[a-f0-9]{64}").matches(config))

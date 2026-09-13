@@ -24,16 +24,17 @@ class ServiceControlsFixtureTest {
         val conn = Conn(host, FileHostKeys())
         val state = AppState()
         val cwd = fixture.resolve("home/project").path
-        fixture.resolve("home/project/index.html").writeText("<title>Service preview</title><h1>UI_DEV_SERVICE_READY</h1>")
+        fixture.resolve("home/project/serve.py").writeText("import http.server,sys\nclass H(http.server.BaseHTTPRequestHandler):\n def do_GET(self):\n  page=b'<title>Service preview</title><h1>UI_DEV_SERVICE_READY</h1>' if self.path=='/app' else b'health'\n  self.send_response(200 if self.path in ('/app','/health/ready') else 503)\n  self.send_header('Content-Type','text/html')\n  self.send_header('Content-Length',str(len(page)))\n  self.end_headers()\n  self.wfile.write(page)\nhttp.server.HTTPServer(('127.0.0.1',int(sys.argv[1])),H).serve_forever()\n")
         val port = ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { it.localPort }
         fixture.resolve("service-port").writeText(port.toString())
         val project = projectKey(host, cwd)
-        state.projectPreviews.save(project, port.toString(), null)
+        state.projectPreviews.save(project, "http://localhost:$port/app", null)
         val session = Session("fixture", 1, false, cwd, 0, SessionState.Idle, "", 0.0)
         val observedReady = java.util.concurrent.atomic.AtomicBoolean(false)
         val watcher = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         watcher.launch { while (isActive) {
-            if (state.serviceControllers[project]?.snapshot?.optString("readiness") == "ready") observedReady.set(true)
+            val snapshot = state.serviceControllers[project]?.snapshot
+            if (snapshot?.optString("readiness") == "ready" && snapshot.optString("probePath") == "/health/ready") observedReady.set(true)
             delay(100)
         } }
         try {
@@ -63,7 +64,8 @@ class ServiceControlsFixtureTest {
             }
             assertEquals(port, state.projectServices.get(project)!!.port)
             assertTrue(observedReady.get(), "Owned HTTP listener was never confirmed ready")
-            assertEquals("python3 -m http.server $port --bind 127.0.0.1", state.projectServices.get(project)!!.command)
+            assertEquals("python3 serve.py $port", state.projectServices.get(project)!!.command)
+            assertEquals("/health/ready", state.projectServices.get(project)!!.readinessPath)
             val status = runBlocking { PreviewServicePlan.result(conn.ssh.exec(PreviewServicePlan.statusCommand(project))) }
             assertEquals("missing", status.getString("state"))
             runBlocking { withTimeout(5000) {

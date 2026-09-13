@@ -61,14 +61,14 @@ def owned_listener(pid, port, host):
     if not candidates.issubset(sockets): return 'unmatched-listener', None
     return 'owned', (initial, frozenset(candidates))
 
-def probe_http(pid, port, host):
+def probe_http(pid, port, host, path):
     checked = int(time.time() * 1000)
     try:
         ownership, identity = owned_listener(pid, port, host)
         if ownership != 'owned': return dict(readiness=ownership, checkedAt=checked)
         connection = http.client.HTTPConnection(host, port, timeout=1)
         try:
-            connection.request('GET', '/', headers={'Connection': 'close'})
+            connection.request('GET', path, headers={'Connection': 'close'})
             response = connection.getresponse()
             status = response.status
             if 200 <= status < 300: response.read(1024)
@@ -79,10 +79,11 @@ def probe_http(pid, port, host):
     except (OSError, http.client.HTTPException):
         return dict(readiness='unverified', checkedAt=checked)
 
-def readiness(pid, port):
+def readiness(pid, port, path):
     results = []
     for host in ('127.0.0.1', '::1'):
-        result = probe_http(pid, port, host)
+        result = probe_http(pid, port, host, path)
+        result['probePath'] = path
         if result['readiness'] in ('ready', 'changed'): return result
         results.append(result)
     for state in ('http-response', 'unmatched-listener', 'unverified', 'not-listening'):
@@ -100,6 +101,9 @@ def main():
     action = cfg['action']
     if action not in ('start', 'status', 'stop'):
         raise ValueError('Invalid preview action')
+    probe_path = cfg.get('probePath', '/')
+    if not isinstance(probe_path, str) or not probe_path.startswith('/') or probe_path.startswith('//') or len(probe_path)>2048 or not probe_path.isascii() or '#' in probe_path or any(ord(c)<32 or ord(c)==127 for c in probe_path):
+        raise ValueError('Invalid readiness path')
     if action == 'start':
         if not isinstance(cfg['port'], int) or not 1 <= cfg['port'] <= 65535:
             raise ValueError('Invalid preview port')
@@ -151,8 +155,9 @@ def main():
                     log=run('capture-pane', '-p', '-S', '-200', '-t', pane, check=False).stdout[-32000:])
         port = environment('YXI_PREVIEW_PORT')
         if probe and result['state'] == 'running':
+            result['probePath'] = probe_path
             if port.isdigit() and len(fields) > 4 and fields[4].isdigit() and 1 <= int(port) <= 65535:
-                result.update(readiness(int(fields[4]), int(port)))
+                result.update(readiness(int(fields[4]), int(port), probe_path))
             else: result['readiness'] = 'unverified'
         return result
     with (root / 'lock').open('a') as lock:

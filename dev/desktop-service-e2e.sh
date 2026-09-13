@@ -33,7 +33,11 @@ shot() { DISPLAY=$D import -window root "$OUT/$1.png"; }
 tap 499 101
 shot 02-configure
 tap 350 460
-DISPLAY=$D xdotool type --clearmodifiers --delay 20 "python3 -m http.server $(cat "$fixture/service-port") --bind 127.0.0.1"
+DISPLAY=$D xdotool type --clearmodifiers --delay 20 "python3 serve.py $(cat "$fixture/service-port")"
+tap 530 544
+DISPLAY=$D xdotool key ctrl+a
+sleep 1
+DISPLAY=$D xdotool type --clearmodifiers '/health/ready'
 tap 614 663
 sleep 2
 shot 03-configured

@@ -113,6 +113,20 @@ class RemoteRoutesTest {
             assertEquals(7, failed.getInt("exitCode")); assertTrue(failed.getString("log").contains("DEV_FAILED"))
             service(failedPlan.stopCommand(failed.getString("runtime")))
             assertEquals("port-busy", service(plan.copy(port = remotePort).startCommand()).getString("state"))
+            val healthScript = root.resolve("home/project/health-server.py")
+            healthScript.writeText("import http.server,sys\nclass H(http.server.BaseHTTPRequestHandler):\n def do_GET(self):\n  self.send_response(200 if self.path=='/health/ready?check=one' else 503)\n  self.send_header('Content-Length','0')\n  self.end_headers()\nhttp.server.HTTPServer(('127.0.0.1',int(sys.argv[1])),H).serve_forever()\n")
+            val healthPort = java.net.ServerSocket(0).use { it.localPort }
+            val healthPlan = plan.copy(port = healthPort, command = "python3 health-server.py $healthPort")
+            val healthStart = service(healthPlan.startCommand())
+            var rootHealth = service(healthPlan.statusCommand())
+            kotlinx.coroutines.withTimeout(10000) { while (rootHealth.optString("readiness") != "http-response") { kotlinx.coroutines.delay(100); rootHealth = service(healthPlan.statusCommand()) } }
+            assertEquals(503, rootHealth.getInt("httpStatus"))
+            val customHealth = service(healthPlan.statusCommand("/health/ready?check=one"))
+            assertEquals("ready", customHealth.getString("readiness"))
+            assertEquals("/health/ready?check=one", customHealth.getString("probePath"))
+            assertEquals(healthStart.getString("runtime"), customHealth.getString("runtime"))
+            assertEquals(503, service(healthPlan.statusCommand()).getInt("httpStatus"))
+            service(healthPlan.stopCommand(customHealth.getString("runtime")))
             val ipv6Port = runCatching { java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("::1")).use { it.localPort } }.getOrNull()
             if (ipv6Port != null) {
                 val ipv6Plan = plan.copy(port = ipv6Port, command = "python3 -m http.server $ipv6Port --bind ::1")
