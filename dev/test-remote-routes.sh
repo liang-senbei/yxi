@@ -38,7 +38,7 @@ ForceCommand $FIXTURE/command
 EOF
 /usr/sbin/sshd -D -e -f "$FIXTURE/sshd_config" > "$FIXTURE/sshd.log" 2>&1 & server=$!
 http_server=
-trap 'TMUX_TMPDIR="$FIXTURE/tmux" tmux kill-server 2>/dev/null || true; kill "$server" ${http_server:+"$http_server"} 2>/dev/null || true; wait "$server" 2>/dev/null || true' EXIT
+trap 'tmux -S "$FIXTURE/home/.yxi/preview-runtime/tmux.sock" kill-server 2>/dev/null || true; TMUX_TMPDIR="$FIXTURE/tmux" tmux kill-server 2>/dev/null || true; kill "$server" ${http_server:+"$http_server"} 2>/dev/null || true; wait "$server" 2>/dev/null || true' EXIT
 sleep 1
 kill -0 "$server"
 python3 - "$FIXTURE" > "$FIXTURE/http.log" 2>&1 <<'PY' &

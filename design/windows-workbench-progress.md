@@ -230,3 +230,14 @@
 - 原生E2E实际打开设置、填写测试服务端口、校验本地记录为远端逻辑URL；退出应用并等待进程结束，再以同一隔离profile启动。点击网页预览后不输入地址，复制页面文字核对Before the edit成功；已查看重启后截图。证据hk13 /tmp/yxi-project-address-final/ 与 /tmp/yxi-project-address-final.log；本机tmp/workbench-evidence/project-preview-restored.png。
 - dev/desktop-document-e2e.sh加入YXI_TEST_PROJECT_PREVIEW模式，测试profile明确关闭托盘隐藏；已固化UI动作，并补提交前读取输入值的断言以避免错误端口访问。初次定位弹窗等待超时后，自动化重跑完整通过。
 - 当前只保存预览地址，开发服务需已运行。启动命令、工作目录启动器、健康进程复用、构建日志/版本状态与自动刷新控制仍未实现；不能视为W06-A全部完成。Windows完整项目恢复与其它PRD验收继续推进，未发布。
+
+## 第二十二轮：开发服务管理底层（2026-09-13）
+
+- 新增PreviewServicePlan和打包资源preview-service.py，通过现有SSH通道执行。使用服务端用户目录下的独立tmux socket，检查目录归属/权限/标记，拒绝socket符号链接，不使用普通Agent的tmux通信文件。
+- 会话创建时原子设置项目、配置指纹和starting环境标记；设置退出后保留终端，再运行用户前台命令，收到执行回执后标记launched。状态区分starting/running/exited，失败保留退出码及最近200行、至多32000字符日志。
+- 相同项目与配置的现有会话返回复用，不再次执行命令；配置改变返回冲突。停止在同一tmux连接里校验项目、配置与会话实例，旧实例请求和无归属会话不能停止当前会话。
+- 启动前探测IPv4/IPv6回环端口，有现有服务则返回port-busy，不抢占端口或杀进程。此探测不是HTTP健康检查，也不能证明最终监听端口属于启动命令；running只表示托管会话正在运行。
+- 首轮定位到tmux选项命令不接受=name目标，改为使用明确的会话/窗口/面板ID；随后将归属标记前移到创建时，避免初始化中断后丢失归属。当前服务器实测tmux3.4。
+- 隔离SSH测试通过：一次启动、重复复用、日志DEV_READY、配置冲突、停止后新实例、旧停止请求被拒、exit7和错误日志保留、占用端口拒绝、无归属会话不被接管/停止、普通测试会话列表不变。所有进程/端口均为独立fixture，清理仅针对该fixture的socket。
+- 新增3项计划/回执校验测试；全量119项，115通过、4环境测试跳过，Linux打包通过。最终证据hk13 /tmp/yxi-preview-service-verified.log、/tmp/yxi-preview-service-package.log；没有向生产Agent发送指令。
+- 尚未接入项目设置中的命令保存、启动/停止按钮、状态轮询和日志界面。仅支持前台命令，会话停止不保证任意守护化后代全部回收；HTTP就绪与监听进程归属、初始化中断恢复、跨版本兼容及完整W06-A仍待完成，不能据本轮声称项目预览启动闭环已交付。
