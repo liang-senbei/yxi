@@ -42,8 +42,8 @@ internal class PluginOperations(file: File) {
         return entry
     }
     internal fun finish(id: String, state: String) {
-        val status = when (state) { "configured" -> "configured"; "changed", "invalid", "invalid-directory", "unsupported-config-home", "unsupported-linked-config" -> "rejected"; else -> "unknown" }
-        save(entries.map { if (it.id == id) it.copy(status = status) else it })
+        val status = when (state) { "configured", "restored" -> state; "changed", "invalid", "invalid-directory", "unsupported-config-home", "unsupported-linked-config", "restore-unavailable" -> "rejected"; else -> "unknown" }
+        save(entries.map { if (it.id == id && !(status == "unknown" && it.status in setOf("configured", "restored"))) it.copy(status = status) else it })
     }
     fun submit(conn: Conn, request: JSONObject) {
         val entry = begin(projectKey(conn.host, "/"), request)
@@ -71,7 +71,7 @@ internal class PluginOperations(file: File) {
                 PluginOperationEntry(o.getString("host"), o.getString("id"), o.getString("request"), o.getString("status")).also { e ->
                     require(Regex("[a-f0-9]{32}").matches(e.id))
                     require(JSONObject(e.request).getString("operation") == e.id)
-                    require(e.status in setOf("sending", "unknown", "configured", "rejected"))
+                    require(e.status in setOf("sending", "unknown", "configured", "restored", "rejected"))
                 }
             }.also { require(it.map { e -> e.id }.distinct().size == it.size) }
         }

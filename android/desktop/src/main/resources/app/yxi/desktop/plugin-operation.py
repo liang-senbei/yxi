@@ -40,6 +40,9 @@ def write_file(path, data):
     finally:
         if os.path.exists(name): os.unlink(name)
 
+def fingerprint(raw, registry):
+    return hashlib.sha256(json.dumps([None if raw is None else base64.b64encode(raw).decode(), None if registry is None else base64.b64encode(registry).decode()]).encode()).hexdigest()
+
 def execute(request, home=None, run=subprocess.run):
     home = Path(home or os.path.expanduser('~')).resolve()
     base = home / '.claude'
@@ -47,7 +50,7 @@ def execute(request, home=None, run=subprocess.run):
         return {'state': 'unsupported-config-home'}
     action = request.get('action')
     operation = request.get('operation', '')
-    if action not in ('prepare', 'set', 'status') or not re.fullmatch(r'[a-f0-9]{32}', operation):
+    if action not in ('prepare', 'set', 'status', 'restore') or not re.fullmatch(r'[a-f0-9]{32}', operation):
         return {'state': 'invalid'}
     store = home / '.yxi'
     private_directory(store)
@@ -64,6 +67,16 @@ def execute(request, home=None, run=subprocess.run):
             result = json.loads(previous)
             if result['state'] == 'started': result['state'] = 'unknown'
             return result
+        source = None
+        if action == 'restore':
+            source_id = request.get('restores', '')
+            if not re.fullmatch(r'[a-f0-9]{32}', source_id) or source_id == operation:
+                return {'state': 'invalid'}
+            source_raw = read_file(store / (source_id + '.json'))
+            source = json.loads(source_raw) if source_raw else None
+            if source is None or source.get('state') != 'configured' or not source.get('after'):
+                return {'state': 'restore-unavailable'}
+            request = dict(source['target'], restores=source_id, fingerprint=source['after'])
         plugin = request.get('plugin', '')
         scope = request.get('scope')
         directory = request.get('directory', '')
@@ -85,12 +98,13 @@ def execute(request, home=None, run=subprocess.run):
             entries = installed.get('plugins', {}).get(plugin, [])
             matches = [p for p in entries if p.get('scope') == scope and (scope == 'user' or p.get('projectPath') == str(cwd))]
             if len(matches) != 1: raise ValueError('installation not unique')
-            digest = hashlib.sha256(json.dumps([None if raw is None else base64.b64encode(raw).decode(), None if registry is None else base64.b64encode(registry).decode()]).encode()).hexdigest()
+            digest = fingerprint(raw, registry)
             return raw, parsed, digest
         desired = request.get('enabled')
         if action == 'set' and type(desired) is not bool:
             return {'state': 'invalid'}
         identity = dict(plugin=plugin, scope=scope, directory=str(cwd), enabled=desired)
+        if source is not None: identity['restores'] = request['restores']
         if previous is not None:
             old = json.loads(previous)
             if old.get('target') != identity: return {'state': 'operation-conflict'}
@@ -102,16 +116,36 @@ def execute(request, home=None, run=subprocess.run):
             return dict(state='prepared', fingerprint=digest, path=str(config), enabled=value if type(value) is bool else None)
         if request.get('fingerprint') != digest:
             return {'state': 'changed'}
+        restore_bytes = None
+        if source is not None:
+            restore_bytes = read_file(store / (request['restores'] + '.before'))
+            if restore_bytes is None or fingerprint(restore_bytes if source['existed'] else None, read_file(base / 'plugins' / 'installed_plugins.json')) != source['before']:
+                return {'state': 'restore-unavailable'}
         # No execution until the prior config and durable intent have both been saved.
         backup = store / (operation + '.before')
         write_file(backup, raw if raw is not None else b'')
         result = dict(state='started', operation=operation, target=identity, existed=raw is not None, before=digest)
         write_file(record, json.dumps(result).encode())
         try:
-            with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
-                completed = run(['claude', 'plugin', 'enable' if desired else 'disable', plugin, '--scope', scope], cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=out, stderr=err, timeout=20)
-            _, after, after_digest = snapshot()
-            result['state'] = 'configured' if completed.returncode == 0 and after.get('enabledPlugins', {}).get(plugin) is desired else 'unknown'
+            if source is not None:
+                if snapshot()[2] != digest:
+                    result['state'] = 'changed'
+                    write_file(record, json.dumps(result).encode())
+                    return result
+                if source['existed']:
+                    write_file(config, restore_bytes)
+                else:
+                    config.unlink()
+                    fd = os.open(config.parent, os.O_RDONLY | os.O_DIRECTORY)
+                    try: os.fsync(fd)
+                    finally: os.close(fd)
+                restored, _, after_digest = snapshot()
+                result['state'] = 'restored' if restored == (restore_bytes if source['existed'] else None) else 'unknown'
+            else:
+                with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+                    completed = run(['claude', 'plugin', 'enable' if desired else 'disable', plugin, '--scope', scope], cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=out, stderr=err, timeout=20)
+                _, after, after_digest = snapshot()
+                result['state'] = 'configured' if completed.returncode == 0 and after.get('enabledPlugins', {}).get(plugin) is desired else 'unknown'
             result['after'] = after_digest
         except Exception:
             result['state'] = 'unknown'

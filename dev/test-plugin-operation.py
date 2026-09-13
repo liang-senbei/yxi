@@ -54,6 +54,22 @@ with tempfile.TemporaryDirectory(prefix='yxi-plugin-operation-') as root:
     actual = module.execute(dict(request, operation='d'*32, fingerprint=fresh['fingerprint']), root)
     assert actual['state'] == 'configured', actual
     assert json.loads(config.read_text())['env'] == original['env']
+    restore = dict(action='restore', operation='2'*32, restores='d'*32)
+    assert module.execute(restore, root)['state'] == 'restored'
+    assert json.loads(config.read_text()) == original
+    assert module.execute(restore, root)['state'] == 'restored'
+    assert module.execute(dict(action='status', operation='2'*32), root)['state'] == 'restored'
+    next_target = dict(target, operation='3'*32)
+    prep = module.execute(dict(next_target, action='prepare'), root)
+    module.execute(dict(next_target, action='set', enabled=False, fingerprint=prep['fingerprint']), root)
+    exact_after = config.read_bytes()
+    changed = json.loads(config.read_text()); changed['laterEdit'] = True
+    config.write_text(json.dumps(changed))
+    assert module.execute(dict(action='restore', operation='4'*32, restores='3'*32), root)['state'] == 'changed'
+    assert json.loads(config.read_text())['laterEdit'] is True
+    config.write_bytes(exact_after)
+    (home / '.yxi/plugin-operations' / ('3'*32 + '.before')).write_text('{}')
+    assert module.execute(dict(action='restore', operation='5'*32, restores='3'*32), root)['state'] == 'restore-unavailable'
     for scope, letter in [('project', 'e'), ('local', 'f')]:
         project = home / ('project-' + scope)
         (project / '.claude').mkdir(parents=True)
@@ -74,4 +90,13 @@ with tempfile.TemporaryDirectory(prefix='yxi-plugin-operation-') as root:
     enabled = module.execute(dict(enable_target, action='set', enabled=True, fingerprint=prep['fingerprint']), root)
     assert enabled['state'] == 'configured', enabled
     assert json.loads(config.read_text())['enabledPlugins']['sample@fixture'] is True
+    config.unlink()
+    absent_target = dict(target, operation='6'*32)
+    prep = module.execute(dict(absent_target, action='prepare'), root)
+    def create_config(*args, **kwargs):
+        config.write_text('{"enabledPlugins":{"sample@fixture":false}}')
+        return SimpleNamespace(returncode=0)
+    assert module.execute(dict(absent_target, action='set', enabled=False, fingerprint=prep['fingerprint']), root, create_config)['state'] == 'configured'
+    assert module.execute(dict(action='restore', operation='7'*32, restores='6'*32), root)['state'] == 'restored'
+    assert not config.exists()
 print('plugin operation: backup, idempotency, conflict, lost response, real CLI disable passed')

@@ -16,6 +16,8 @@ class PluginOperationsTest {
         assertFalse(reopened.unresolved("host-b"))
         assertFails { reopened.begin("host-a", JSONObject().put("operation", "b".repeat(32))) }
         reopened.finish("a".repeat(32), "configured")
+        reopened.finish("a".repeat(32), "unknown")
+        assertEquals("configured", reopened.latest("host-a")!!.status)
         assertFalse(PluginOperations(file).unresolved("host-a"))
         file.writeText("broken")
         val recovered = PluginOperations(file)
