@@ -83,6 +83,8 @@ object BrowserRuntime {
 data class PageSelection(val url: String, val selector: String, val text: String, val tag: String, val capturedAt: Long = System.currentTimeMillis(), val computed: Map<String, String> = emptyMap())
 
 class BrowserPreview(val owner: Host, val taskId: String) {
+    var viewportMode by mutableStateOf("fit")
+    var viewportStatus by mutableStateOf("")
     var address by mutableStateOf("http://localhost:3000/")
     var title by mutableStateOf("网页预览")
     var status by mutableStateOf("输入地址或服务器端口以打开预览")

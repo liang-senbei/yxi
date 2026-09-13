@@ -16,6 +16,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.awt.SwingPanel
 import androidx.compose.ui.input.key.*
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.style.TextOverflow
 import app.yxi.agent.Session
@@ -38,6 +40,15 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
     var addressDirty by remember(preview) { mutableStateOf(false) }
     var reviewingClose by remember(preview) { mutableStateOf(false) }
     var captureJob by remember(preview) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var viewportSize by remember(preview) { mutableStateOf(IntSize.Zero) }
+    LaunchedEffect(preview.handle, preview.viewportMode, viewportSize, preview.loading, preview.preparing) {
+        val browser = preview.handle ?: return@LaunchedEffect
+        if (preview.loading || preview.preparing || viewportSize.width == 0 || viewportSize.height == 0) return@LaunchedEffect
+        try {
+            preview.viewportStatus = applyPreviewViewport(browser, previewViewports.firstOrNull { it.id == preview.viewportMode } ?: previewViewports.first())
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { preview.error = "视口设置未完成：${e.message}" }
+    }
     DisposableEffect(preview) { onDispose { captureJob?.cancel() } }
     fun closePreview() { preview.close(); state.browsers.remove(key); state.browserPanelOpen = false }
     LaunchedEffect(preview.address) { if (!addressDirty) input = androidx.compose.ui.text.input.TextFieldValue(preview.address) }
@@ -103,6 +114,18 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
         if (knownProject) PreviewServiceControls(state, conn, session, servicesOpen, preview.preparing, addressDirty, onConfigured = { servicesOpen = false }, onPreview = { address ->
             input = androidx.compose.ui.text.input.TextFieldValue(address); open()
         })
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            previewViewports.forEach { viewport ->
+                FilterChip(selected = preview.viewportMode == viewport.id, onClick = {
+                    if (preview.viewportMode != viewport.id) {
+                        preview.viewportMode = viewport.id
+                        preview.viewportStatus = if (preview.handle == null) "打开页面后应用所选尺寸" else "正在切换视口…"
+                        if (preview.selection != null) preview.selectionStale = true
+                    }
+                }, label = { Text(viewport.label) })
+            }
+        }
+        if (preview.viewportStatus.isNotBlank()) Text(preview.viewportStatus, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
         Text(preview.source, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
         if (state.projectPreviews.error.isNotBlank()) Text(state.projectPreviews.error, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = t.danger)
         Text(preview.status, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
@@ -110,7 +133,7 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
         if (preview.error.isNotBlank()) Text(preview.error, Modifier.padding(12.dp), color = t.danger)
         if (preview.loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 4.dp))
         val browser = preview.handle
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+        Box(Modifier.weight(1f).fillMaxWidth().onSizeChanged { viewportSize = it }) {
             if (browser == null) Column(Modifier.align(Alignment.Center).padding(24.dp)) {
                 Text("边看页面，边指导修改", style = MaterialTheme.typography.titleMedium)
                 Text("输入服务器开发端口，或粘贴网页地址。开发服务器支持热更新时，代码变化会直接呈现在这里。", Modifier.padding(top = 10.dp), style = MaterialTheme.typography.bodyMedium, color = t.textMuted)
