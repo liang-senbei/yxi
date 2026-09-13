@@ -43,6 +43,55 @@ def write_file(path, data):
 def fingerprint(raw, registry):
     return hashlib.sha256(json.dumps([None if raw is None else base64.b64encode(raw).decode(), None if registry is None else base64.b64encode(registry).decode()]).encode()).hexdigest()
 
+def install_operation(request, home, config, cwd, store, record, previous, run):
+    plugin, scope, operation = request['plugin'], request['scope'], request['operation']
+    identity = dict(plugin=plugin, scope=scope, directory=str(cwd), kind='install')
+    if previous is not None:
+        old = json.loads(previous)
+        if old.get('target') != identity: return {'state': 'operation-conflict'}
+        if old['state'] == 'started': old['state'] = 'unknown'
+        return old
+    def cli_json(args):
+        with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+            result = run(['claude', 'plugin'] + args, cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=out, stderr=err, timeout=15)
+            if result.returncode: raise ValueError('CLI query failed')
+            out.seek(0); raw = out.read(8388609)
+            if len(raw) > 8388608: raise ValueError('large output')
+            return json.loads(raw)
+    registry_path = home / '.claude/plugins/installed_plugins.json'
+    before = read_file(config)
+    registry = read_file(registry_path)
+    settings = json.loads(before) if before is not None else {}
+    if not isinstance(settings, dict): return {'state': 'invalid'}
+    installed = json.loads(registry) if registry is not None else {}
+    records = installed.get('plugins', {}).get(plugin, [])
+    if any(p.get('scope') == scope and (scope == 'user' or p.get('projectPath') == str(cwd)) for p in records):
+        return {'state': 'already-installed'}
+    catalog = cli_json(['list', '--available', '--json'])
+    candidates = [p for p in catalog['available'] if p.get('pluginId') == plugin]
+    if len(candidates) != 1: return {'state': 'catalog-changed'}
+    catalog_digest = hashlib.sha256(json.dumps(candidates[0], sort_keys=True).encode()).hexdigest()
+    if catalog_digest != request.get('catalogFingerprint'): return {'state': 'catalog-changed'}
+    digest = fingerprint(before, registry)
+    if request['action'] == 'prepare-install':
+        return dict(state='prepared', path=str(config), fingerprint=digest, catalogFingerprint=catalog_digest)
+    if request.get('fingerprint') != digest: return {'state': 'changed'}
+    write_file(store / (operation + '.before'), before if before is not None else b'')
+    write_file(store / (operation + '.registry-before'), registry if registry is not None else b'')
+    result = dict(state='started', operation=operation, target=identity, before=digest, existed=before is not None, registryExisted=registry is not None, catalogFingerprint=catalog_digest)
+    write_file(record, json.dumps(result).encode())
+    try:
+        # Do not auto-accept marketplace-provided shell commands or headers helpers.
+        with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+            completed = run(['claude', 'plugin', 'install', plugin, '--scope', scope], cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=out, stderr=err, timeout=45)
+        actual = cli_json(['list', '--json'])
+        matches = [p for p in actual if p.get('id') == plugin and p.get('scope') == scope and (scope == 'user' or p.get('projectPath') == str(cwd))]
+        result['state'] = 'installed' if completed.returncode == 0 and len(matches) == 1 and not matches[0].get('errors') and os.path.isdir(matches[0].get('installPath', '')) else 'unknown'
+        result['after'] = fingerprint(read_file(config), read_file(registry_path))
+    except Exception: result['state'] = 'unknown'
+    write_file(record, json.dumps(result).encode())
+    return result
+
 def execute(request, home=None, run=subprocess.run):
     home = Path(home or os.path.expanduser('~')).resolve()
     base = home / '.claude'
@@ -50,7 +99,7 @@ def execute(request, home=None, run=subprocess.run):
         return {'state': 'unsupported-config-home'}
     action = request.get('action')
     operation = request.get('operation', '')
-    if action not in ('prepare', 'set', 'status', 'restore') or not re.fullmatch(r'[a-f0-9]{32}', operation):
+    if action not in ('prepare', 'set', 'status', 'restore', 'prepare-install', 'install') or not re.fullmatch(r'[a-f0-9]{32}', operation):
         return {'state': 'invalid'}
     store = home / '.yxi'
     private_directory(store)
@@ -88,6 +137,8 @@ def execute(request, home=None, run=subprocess.run):
         config = base / 'settings.json' if scope == 'user' else cwd / '.claude' / ('settings.local.json' if scope == 'local' else 'settings.json')
         if config.parent.is_symlink() or base.is_symlink():
             return {'state': 'unsupported-linked-config'}
+        if action in ('prepare-install', 'install'):
+            return install_operation(request, home, config, cwd, store, record, previous, run)
         def snapshot():
             raw = read_file(config)
             registry = read_file(base / 'plugins' / 'installed_plugins.json')
