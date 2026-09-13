@@ -58,6 +58,7 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
         finally { busy = false }
     }
     fun applyRoute(line: Lines.Line?) {
+        if (state.deferredRoute != null) { note = "请先取消或等待已排队的线路切换"; return }
         val targetEngine = engine
         val targetScope = chosenScope
         val catalog = lines.orEmpty().toList()
@@ -89,6 +90,16 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
             Button({ editor = Lines.Line(Lines.newId(), "", agent = engine) }, enabled = lines != null && !busy) { Text("新增线路") }
         }
         Spacer(Modifier.height(22.dp))
+        state.deferredRoute?.let { request ->
+            OutlinedCard(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("等待切换 · ${request.conn.host.label} · ${request.line.name}", style = MaterialTheme.typography.titleSmall)
+                    Text("${request.directory ?: "服务器用户级"} · ${request.status}", style = MaterialTheme.typography.bodySmall)
+                    TextButton({ state.deferredRoute = null; state.deferredRouteNotice = "已取消等待切换，未写入配置" }, enabled = !request.applying) { Text("取消等待") }
+                }
+            }
+        }
+        if (state.deferredRouteNotice.isNotBlank()) Text(state.deferredRouteNotice, Modifier.padding(bottom = 12.dp), style = MaterialTheme.typography.bodySmall)
         WorkbenchTabs(listOf("Claude Code", "Codex"), if (engine == Lines.CODEX) "Codex" else "Claude Code", { if (!busy) { engine = if (it == "Codex") Lines.CODEX else Lines.CLAUDE; projectScope = false } })
         if (engine == Lines.CLAUDE && cwd != null) Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(projectScope, { projectScope = it }, enabled = !busy)
@@ -169,7 +180,14 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
             }
             if (note.isNotBlank()) Text(note, Modifier.padding(top = 12.dp), color = t.danger)
         } },
-        confirmButton = { TextButton({ applyRoute(applying) }, enabled = !busy) { Text("确认应用") } },
+        confirmButton = { Column {
+            TextButton({ applyRoute(applying) }, enabled = !busy && state.deferredRoute == null) { Text("确认应用") }
+            applying?.let { line -> TextButton({
+                state.deferredRoute = DeferredRoute(conn, line, chosenScope, lines.orEmpty())
+                state.deferredRouteNotice = ""; applying = null
+            }, enabled = !busy && lines != null && state.deferredRoute == null) { Text("等待任务空闲后应用") } }
+            Text("等待仅在应用运行期间有效；不会中断任务。", style = MaterialTheme.typography.labelSmall)
+        } },
         dismissButton = { TextButton({ applying = null; resetting = false }, enabled = !busy) { Text("取消") } })
     deleting?.let { line -> WorkbenchDialog(onDismissRequest = { if (!busy) deleting = null }, title = { Text("移除 ${line.name}？") },
         text = { Column {

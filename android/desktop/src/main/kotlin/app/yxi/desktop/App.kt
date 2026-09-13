@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
  */
 @Composable
 fun App(state: AppState) {
+    DeferredRouteRunner(state)
     val scope = rememberCoroutineScope()
     val defaultUris = LocalUriHandler.current
     val density = LocalDensity.current.density
