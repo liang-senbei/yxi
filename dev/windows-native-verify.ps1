@@ -24,10 +24,11 @@ try {
     $taskImage = Join-Path $taskOutput 'browser-native.png'
     $taskCredentials = Join-Path $taskOutput 'synthetic-credentials'
     $env:JAVA_TOOL_OPTIONS = '-Duser.home="' + $taskProfile + '" -Dyxi.browser.localFixture=true -Dyxi.browser.smokeImage="' + $taskImage + '" -Dyxi.credential.smokeDir="' + $taskCredentials + '"'
-    foreach ($taskMode in @('smoke','credential-smoke','credential-reopen','browser-smoke')) {
+    $env:JAVA_TOOL_OPTIONS += ' -Dyxi.host.smokeRoot="' + $taskProfile + '"'
+    foreach ($taskMode in @('host-smoke','host-reopen','smoke','credential-smoke','credential-reopen','browser-smoke')) {
         $taskStdout = Join-Path $taskOutput ($taskMode + '-out.txt')
         $taskStderr = Join-Path $taskOutput ($taskMode + '-err.txt')
-        $taskArguments = if ($taskMode -eq 'credential-reopen') { '--credential-smoke --reopen' } else { '--' + $taskMode }
+        $taskArguments = if ($taskMode -eq 'credential-reopen') { '--credential-smoke --reopen' } elseif ($taskMode -eq 'host-reopen') { '--host-smoke --reopen' } else { '--' + $taskMode }
         $taskProcess = Start-Process -FilePath $taskExe -ArgumentList $taskArguments -WindowStyle Hidden -PassThru -RedirectStandardOutput $taskStdout -RedirectStandardError $taskStderr
         if (-not $taskProcess.WaitForExit(180000)) {
             # Only this test process tree, never the user's installed app.
@@ -36,6 +37,8 @@ try {
         }
         if ($taskProcess.ExitCode -ne 0) { throw "$taskMode failed with exit $($taskProcess.ExitCode); logs at $taskOutput" }
         $taskExpected = switch ($taskMode) {
+            'host-smoke' { @('host Store migration and save ok') }
+            'host-reopen' { @('host Store cross-process reopen ok') }
             'smoke' { @('smoke ok') }
             'credential-smoke' { @('credential native migration rotation and tamper checks ok') }
             'credential-reopen' { @('credential native cross-process reopen logout and login ok') }
