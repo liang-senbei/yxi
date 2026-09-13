@@ -5,6 +5,21 @@ import java.nio.file.Files
 import kotlin.test.*
 
 class PluginOperationsTest {
+    @Test fun `history isolates hosts and retains a rejected decision after query failure`() {
+        val file = Files.createTempDirectory("plugin-history").resolve("operations.json").toFile()
+        val ledger = PluginOperations(file)
+        ledger.begin("a", JSONObject().put("operation", "2".repeat(32)))
+        ledger.finish("2".repeat(32), "changed")
+        ledger.begin("b", JSONObject().put("operation", "3".repeat(32)))
+        ledger.finish("3".repeat(32), "installed")
+        ledger.begin("a", JSONObject().put("operation", "4".repeat(32)))
+        ledger.finish("4".repeat(32), "updated")
+        ledger.finish("2".repeat(32), "unknown")
+        val reopened = PluginOperations(file)
+        assertEquals(listOf("4".repeat(32), "2".repeat(32)), reopened.history("a").map { it.id })
+        assertEquals("rejected", reopened.history("a").last().status)
+        assertFalse(reopened.unresolved("a"))
+    }
     @Test fun `installed results persist and survive unavailable status queries`() {
         val file = Files.createTempDirectory("plugin-install-ledger").resolve("operations.json").toFile()
         val ledger = PluginOperations(file)

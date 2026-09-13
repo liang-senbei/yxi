@@ -87,6 +87,10 @@ class PluginInstallFixtureTest {
                             assertEquals("1.0.0", JSONObject(File(restored.path, ".claude-plugin/plugin.json").readText()).getString("version"))
                             assertEquals("package-restored", PluginOperations(File(Store.dir, "plugin-operations.json")).entries.last().status)
                             delay(1500); shot("09-package-restored.png")
+                            fixture.resolve("history-ready").writeText("ready")
+                            withTimeout(30000) { while (!fixture.resolve("history-closed").exists()) delay(100) }
+                            assertEquals(3, state.pluginOperations.entries.size)
+                            assertFalse(NativeOverlays.active)
                         } catch(e: Throwable) { failure = e; shot("failure.png") }
                         finally { exitApplication() }
                     }

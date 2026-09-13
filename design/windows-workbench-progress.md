@@ -469,3 +469,12 @@
 - 桌面测试与Linux打包通过（/tmp/yxi-rollback-ui-build.log）。扩展原生安装fixture到更新后包回滚，真实界面结果另记。
 - 当前仅显示最近操作的恢复入口，历史操作选择、跨文件中断恢复、绝对路径依赖插件、Windows回滚与完整W03仍待推进。
 - 原生完整安装→更新→回滚通过且正常退出，日志/tmp/yxi-rollback-native/test.log，fixture.pwM9BS；断言实际plugin.json为1.0.0、路径属于plugin-operations/restored，登记及持久记录一致。已查看本机tmp/workbench-evidence/plugin-rollback-confirm.png与plugin-package-restored.png。
+
+## 第四十八轮：插件操作历史（2026-09-13）
+
+- 主机插件页增加操作记录弹窗，按主机端点键过滤、最近在前，可搜索插件/编号；展示动作、范围、版本、目录和可选择复制的操作ID。
+- 可查询历史回执，已确认的设置变更/升级/卸载记录可进入相应恢复确认；恢复沿用服务器原指纹检查，不绕过后续变更保护。未知操作存在时仍阻止该主机新变更。
+- 已拒绝终态在查询不可用时不降级未知，避免旧拒绝操作重新阻塞主机；拒绝记录不提供无意义的服务器查询按钮。新增测试验证A/B历史隔离、顺序与拒绝状态跨重读保留。
+- 桌面测试/打包通过（/tmp/yxi-plugin-history-build.log），原生历史弹窗验证另记。历史恢复选择的完整点击、缺失本地记录对账、跨文件中断恢复和Windows专项仍需推进。
+- 原生弹窗打开/关闭先通过（fixture.rGiIt2）；增加滚动条后默认渲染测试在窗口关闭阶段再次卡住，按超时终止，并核对环境后清理该测试worker。根据已安装Skiko 0.150.1字节码确认SKIKO_RENDER_API支持SOFTWARE_COMPAT，仅为Xvfb交互脚本设置默认值，正式应用设置不变。软件渲染复跑fixture.YRl5RH在59秒正常结束，日志/tmp/yxi-history-software-final/test.log；已查看滚动后的较早安装记录截图tmp/workbench-evidence/plugin-history-older.png。原默认渲染退出异常根因未解决，不能把本轮当作GPU/Windows渲染验收。
+- 最终Linux打包通过，日志/tmp/yxi-history-final-package.log；首次全量桌面验证日志/tmp/yxi-plugin-history-build.log。

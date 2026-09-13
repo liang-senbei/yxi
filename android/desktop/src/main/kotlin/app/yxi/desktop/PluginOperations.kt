@@ -26,6 +26,7 @@ internal class PluginOperations(file: File) {
         catch (_: Exception) { readable = false; error = "插件操作记录无法读取，已保留原文件" }
     }
     fun latest(host: String) = entries.lastOrNull { it.host == host }
+    fun history(host: String) = entries.filter { it.host == host }.asReversed()
     fun unresolved(host: String) = entries.any { it.host == host && it.status in setOf("sending", "unknown") }
     private fun save(next: List<PluginOperationEntry>) {
         check(readable) { error }
@@ -43,7 +44,7 @@ internal class PluginOperations(file: File) {
     }
     internal fun finish(id: String, state: String, beforeVersion: String? = null, afterVersion: String? = null) {
         val status = when (state) { "configured", "restored", "installed", "uninstalled", "updated", "package-restored" -> state; "changed", "invalid", "invalid-directory", "unsupported-config-home", "unsupported-linked-config", "restore-unavailable", "catalog-changed", "already-installed" -> "rejected"; else -> "unknown" }
-        save(entries.map { if (it.id == id && !(status == "unknown" && it.status in setOf("configured", "restored", "installed", "uninstalled", "updated", "package-restored"))) it.copy(status = status, beforeVersion = beforeVersion?.take(200) ?: it.beforeVersion, afterVersion = afterVersion?.take(200) ?: it.afterVersion) else it })
+        save(entries.map { if (it.id == id && !(status == "unknown" && it.status in setOf("configured", "restored", "installed", "uninstalled", "updated", "package-restored", "rejected"))) it.copy(status = status, beforeVersion = beforeVersion?.take(200) ?: it.beforeVersion, afterVersion = afterVersion?.take(200) ?: it.afterVersion) else it })
     }
     fun submit(conn: Conn, request: JSONObject) {
         val entry = begin(projectKey(conn.host, "/"), request)

@@ -2,6 +2,8 @@
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 export DISPLAY=${YXI_DISPLAY:-:125}
+# Exercise UI interactions deterministically in Xvfb; GPU/Windows checks run separately.
+export SKIKO_RENDER_API=${SKIKO_RENDER_API:-SOFTWARE_COMPAT}
 OUT=${YXI_E2E_OUT:-/tmp/yxi-plugin-install-ui}
 mkdir -p "$OUT"
 test ! -e "/tmp/.X11-unix/X${DISPLAY#:}"
@@ -47,6 +49,17 @@ tap 714 110
 sleep 1
 import -window root "$fixture/08-rollback-confirm.png"
 tap 675 610
+for attempt in $(seq 1 30); do [ -f "$fixture/history-ready" ] && break; sleep 1; done
+test -f "$fixture/history-ready"
+tap 714 110
+sleep 1
+import -window root "$fixture/10-history.png"
+xdotool mousemove 650 620 click --repeat 5 --delay 100 5
+sleep 1
+import -window root "$fixture/11-history-older.png"
+xdotool key Escape
+sleep 1
+touch "$fixture/history-closed"
 wait "$test_pid"
 test_pid=
 echo "Plugin installation UI verified: $fixture"

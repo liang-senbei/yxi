@@ -30,6 +30,7 @@ internal fun PluginInventoryPane(state: AppState, conn: Conn) {
     var prepared by remember(conn) { mutableStateOf<JSONObject?>(null) }
     var preparing by remember(conn) { mutableStateOf(false) }
     var actionError by remember(conn) { mutableStateOf("") }
+    var historyOpen by remember(conn) { mutableStateOf(false) }
     LaunchedEffect(conn, revision) {
         busy = true; snapshot = null; error = ""
         try { snapshot = PluginInventory.parse(conn.ssh.exec(PluginInventory.command())) }
@@ -42,6 +43,7 @@ internal fun PluginInventoryPane(state: AppState, conn: Conn) {
     Column(Modifier.fillMaxSize()) {
         if (last != null) Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(when (last.status) { "package-restored" -> "插件包已恢复：${last.afterVersion.ifBlank { "版本未知" }} · 请在新会话验证"; "updated" -> "更新结果：${last.beforeVersion.ifBlank { "未知" }} → ${last.afterVersion.ifBlank { "未知" }} · 请在新会话验证"; "uninstalled" -> "插件已卸载 · 持久数据和操作副本已保留"; "installed" -> "插件已安装并被运行器识别 · 请在新会话测试"; "configured" -> "插件设置已更新 · 请在新会话验证加载"; "restored" -> "已恢复操作前设置 · 请在新会话验证加载"; "rejected" -> "变更未执行，配置可能已变化或副本不可用"; "sending" -> "插件操作中…"; else -> "插件操作待确认，请查询原操作" }, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+            TextButton({ historyOpen = true }) { Text("操作记录") }
             if (last.status == "configured") TextButton({
                 prepared = JSONObject(last.request).put("action", "restore").put("restores", last.id).put("operation", UUID.randomUUID().toString().replace("-", ""))
             }, enabled = last.id !in operations.running && !operations.unresolved(hostKey) && operations.error.isBlank() && conn.status == Conn.Status.Connected) { Text("恢复设置") }
@@ -65,6 +67,10 @@ internal fun PluginInventoryPane(state: AppState, conn: Conn) {
                     finally { preparing = false }
                 } }, toggleEnabled = !preparing && !operations.unresolved(hostKey) && conn.status == Conn.Status.Connected && operations.error.isBlank())
         }
+    }
+    if (historyOpen) PluginHistoryDialog(conn, operations, { historyOpen = false }) { entry ->
+        prepared = JSONObject(entry.request).put("action", if(entry.status == "configured") "restore" else "rollback").put("restores", entry.id).put("operation", UUID.randomUUID().toString().replace("-", "")).put("restoreVersion", entry.beforeVersion.ifBlank { JSONObject(entry.request).optString("listedVersion") })
+        historyOpen = false
     }
     prepared?.let { request ->
         val restoring = request.getString("action") == "restore"
