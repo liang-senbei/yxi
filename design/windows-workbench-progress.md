@@ -419,3 +419,11 @@
 - 临时市场实际安装后卸载测试通过：重复原ID返回uninstalled、真实CLI列表目标消失、其他enabledPlugins字段保留、持久数据文件存在；核对副本权限、hash及plugin.json内容。原启停/恢复测试回归通过，未卸载生产插件。
 - 包副本目前仅保留可供后续恢复的数据，尚未实现卸载后恢复/重新安装UI；并发外部文件改动的一致性、所有作用范围、Windows专项和完整W03仍待完成。
 - 桌面测试与Linux打包通过，日志hk13 /tmp/yxi-plugin-uninstall-build.log。
+
+## 第四十二轮：卸载界面与操作终态（2026-09-13）
+
+- 插件卡片加入卸载入口，与启用/停用共享准备流程，确认弹窗明确主机、范围、配置路径，以及保留数据、不清理依赖、先保存副本。目录不存在时暂禁用卸载，需要后续残留登记清理流程。
+- uninstalled加入客户端持久终态及查询失败不降级逻辑；卸载完成刷新主机列表，目录重新获取可安装项，状态说明保留数据与副本。原生测试脚本增加180秒超时边界。
+- 新增终态持久/查询失败保留检查；扩展原生测试为恢复后取消卸载、再次确认卸载，核对剩余配置、目标登记、插件tar副本及重读客户端记录。
+- 桌面测试与Linux打包通过（/tmp/yxi-uninstall-ui-build.log）；真实界面测试结果另记。Windows卸载、缺失目录清理、包恢复、升级和完整W03仍待完成。
+- 原生全流程已通过，日志/tmp/yxi-uninstall-ui-verified/test.log，fixture.oAB6jd。实际确认取消不改配置、确认后目标安装记录为空且Read权限保留、tar副本存在、重读末条uninstalled。已查看本机tmp/workbench-evidence/plugin-uninstall-confirm.png及plugin-uninstalled-verified.png。

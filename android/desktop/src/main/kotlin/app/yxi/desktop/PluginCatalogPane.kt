@@ -38,7 +38,7 @@ internal fun PluginCatalogPane(state: AppState, conn: Conn, showInstalled: (() -
     val operations = state.pluginOperations
     val host = projectKey(conn.host, "/")
     val last = operations.latest(host)
-    LaunchedEffect(last?.id, last?.status) { if (last?.status == "installed") revision++ }
+    LaunchedEffect(last?.id, last?.status) { if (last?.status in setOf("installed", "uninstalled")) revision++ }
     LaunchedEffect(conn, revision) {
         busy = true; entries = emptyList(); error = ""
         try { entries = PluginCatalog.parse(conn.ssh.exec(PluginCatalog.command())) }

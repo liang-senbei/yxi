@@ -11,4 +11,4 @@ trap 'kill "$display_pid" ${wm_pid:+"$wm_pid"} 2>/dev/null || true' EXIT
 sleep 2
 xfwm4 >"$OUT/wm.log" 2>&1 & wm_pid=$!
 cd "$ROOT"
-YXI_TEST_PLUGIN_TOGGLE=1 bash dev/test-remote-routes.sh >"$OUT/test.log" 2>&1
+timeout --kill-after=10s 180s env YXI_TEST_PLUGIN_TOGGLE=1 bash dev/test-remote-routes.sh >"$OUT/test.log" 2>&1

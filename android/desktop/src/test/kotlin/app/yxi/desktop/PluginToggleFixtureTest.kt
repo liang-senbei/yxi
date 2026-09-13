@@ -89,6 +89,24 @@ class PluginToggleFixtureTest {
                             assertEquals(2, reopened.entries.size)
                             delay(2000)
                             shot("05-restored.png")
+                            click(origin.x + 205, origin.y + 500)
+                            awaitCondition { NativeOverlays.active }; delay(600)
+                            shot("06-uninstall-confirm.png")
+                            withContext(Dispatchers.IO) { Robot().apply { keyPress(KeyEvent.VK_ESCAPE); keyRelease(KeyEvent.VK_ESCAPE) } }
+                            awaitCondition { !NativeOverlays.active }
+                            assertEquals(2, state.pluginOperations.entries.size)
+                            assertEquals(original, config.readText())
+                            delay(800)
+                            click(origin.x + 205, origin.y + 500)
+                            awaitCondition { NativeOverlays.active }; delay(600)
+                            click(origin.x + 625, origin.y + 512)
+                            awaitCondition { state.pluginOperations.entries.size == 3 && state.pluginOperations.running.isEmpty() }
+                            assertEquals("uninstalled", state.pluginOperations.entries.last().status)
+                            assertTrue(PluginInventory.parse(conn.ssh.exec(PluginInventory.command())).plugins.isEmpty())
+                            assertEquals("Read", JSONObject(config.readText()).getJSONObject("permissions").getJSONArray("allow").getString(0))
+                            assertTrue(home.resolve(".yxi/plugin-operations/${state.pluginOperations.entries.last().id}.plugin-before.tar").isFile)
+                            assertEquals("uninstalled", PluginOperations(File(Store.dir, "plugin-operations.json")).entries.last().status)
+                            delay(1500); shot("07-uninstalled.png")
                         } catch (e: Throwable) { failure = e; shot("failure.png") }
                         finally { exitApplication() }
                     }
