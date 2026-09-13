@@ -8,9 +8,11 @@ internal class StaleAuthSession : IllegalStateException("登录会话已变化�
 
 /** Short critical sections only: callers perform network IO outside guarded().
  * Rotating refresh tokens must never be recovered from an older backup. */
-internal class AuthSessionStore(private val file: File, private val replace: (File, String) -> Unit = { target, text -> DurableFile.replace(target, text) }) {
+internal class AuthSessionStore(private val file: File, private val protector: CredentialProtector? = null,
+    private val replace: (File, String) -> Unit = { target, text -> DurableFile.replace(target, text) }) {
     private val lock = Any()
     private val signedOut = File(file.parentFile, file.name + ".signed-out")
+    private val credentials = CredentialFile(file, protector, replace)
     private var blocked = false
     private var loggingIn = false
     private var epoch by mutableStateOf(0L)
@@ -21,7 +23,7 @@ internal class AuthSessionStore(private val file: File, private val replace: (Fi
         action()
     }
     fun read(expected: Long): JSONObject = guarded(expected) {
-        if (blocked || loggingIn || signedOut.exists() || !file.exists()) JSONObject() else JSONObject(file.readText())
+        if (blocked || loggingIn || signedOut.exists()) JSONObject() else credentials.read()
     }
     fun save(expected: Long, response: JSONObject, fresh: Boolean = false) = guarded(expected) {
         val next = if (fresh) JSONObject() else read(expected)
@@ -32,7 +34,7 @@ internal class AuthSessionStore(private val file: File, private val replace: (Fi
         val ttl = response.optLong("expires_in", 3600)
         require(ttl > 0)
         next.put("access", access).put("refresh", refresh).put("exp", Math.addExact(System.currentTimeMillis(), Math.multiplyExact(ttl, 1000)))
-        replace(file, next.toString())
+        credentials.write(next)
         if (fresh) {
             check(!signedOut.exists() || signedOut.delete()) { "无法解除本机退出标记，登录尚未完成" }
             blocked = false
@@ -44,7 +46,7 @@ internal class AuthSessionStore(private val file: File, private val replace: (Fi
     fun signOut(onNotice: (String?) -> Unit = {}, action: () -> Unit): String? = synchronized(lock) {
         epoch++; blocked = true; loggingIn = false; action()
         val marker = runCatching { replace(signedOut, "signed-out") }.isSuccess
-        val erased = runCatching { replace(file, "{}") }.isSuccess
+        val erased = runCatching { credentials.clear() }.isSuccess
         val notice = when {
             !marker && !erased -> "已退出当前会话，但本地登录记录无法清除；请检查存储权限，重启前清理登录记录"
             !erased -> "已退出并阻止自动恢复，但旧登录文件未能清理，请检查存储权限"

@@ -187,3 +187,15 @@
 - 新增6项凭据/会话测试与3项真实本机Socket测试：旧刷新不能恢复退出状态、新旧账号隔离、不恢复过期备份、写入失败不能发布登录、退出文件锁定时标记有效、存储全失败提示；favicon/旧state/重复参数后正常回调仍成功、空连接释放、关闭监听终止等待。测试仅使用临时文件、虚构令牌和本机随机端口。
 - 更新一条旧测试：原来期望畸形参数被部分丢弃后继续解析code，现在要求整条畸形/重复参数回调拒绝；正常回调和拒绝授权测试保留。全量99项，95通过、4环境测试跳过，Linux打包通过，日志hk13 /tmp/yxi-auth-verified.log。
 - 未完成：Windows用户级DPAPI保护和旧明文迁移、刷新请求已送出但响应丢失时的持久恢复协议、真实Logto授权与撤销、Windows取消/端口占用/IME/UI全过程。临时网络失败保持原有不误退出策略，但不能据此宣称轮换令牌的所有未知结果都已处理。没有访问真实账号令牌、登录生产账号或授予权益，完整PRD目标继续进行。
+
+## 第十八轮：Windows 账号凭据保护（2026-09-13）
+
+- Windows的MeAuth选择WindowsCredentialProtector，通过JNA5.17.0调用CryptProtectData/CryptUnprotectData，使用UI_FORBIDDEN，不使用LOCAL_MACHINE，附加Yxi账号凭据用途熵。其他平台保留原有存储方式，不声称具备Windows保护。
+- 格式为auth.json.protected中的yxi-dpapi-v1封装。先校验加密/解密往返，原子写入后回读校验，最后才把应用的旧auth.json清空为{}；不生成明文备份。迁移期间旧文件变化则保留；已有加密/明文记录冲突需重新登录，不能静默挑选。
+- 加密记录无法解析或解密时不回退旧明文。旧明文清理中断后可再次校验并完成清理。退出无需解密即可清理两份应用记录，同时沿用退出标记；新登录写入与迁移失败都不能发布成功状态。
+- 临时明文字节数组用后清零，但不宣称Java字符串或系统历史副本已被物理擦除。当前迁移范围是Store.dir/auth.json；未遍历用户备份或历史漫游目录，SSH密码/私钥等也不在本轮范围。
+- 依据：[Microsoft CryptProtectData](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata)；[JNA 5.17.0 Crypt32Util源码](https://raw.githubusercontent.com/java-native-access/jna/5.17.0/contrib/platform/src/com/sun/jna/platform/win32/Crypt32Util.java)。用户级保护依赖Windows账号上下文，不等同跨机器/跨用户可用的通用密钥。
+- 全量104项测试，100通过、4项外部环境测试跳过（/tmp/yxi-dpapi-tests.log）。随后补目的文件损坏与清理中断恢复测试，7项CredentialFile定向测试全部通过（/tmp/yxi-dpapi-migration-tests.log）。单元测试使用测试codec，不冒充真实DPAPI。
+- Windows本机实际exe验证：虚构旧令牌迁移后明文为空、轮换密文不含新令牌明文、篡改blob被DPAPI拒绝；第二个独立进程读取正确轮换令牌，并完成退出后空状态及再次登录。主界面smoke和Chromium内容/像素/退出也通过。没有读取或修改真实账号凭据。
+- 本机证据：../tmp/windows-dpapi-20260913/（两阶段credential日志、synthetic-credentials、app-image、浏览器PNG、哈希文件）。测试jar SHA256：CCB6BA2454F77F7F75F00C6F8C672021852BE136B8921787757F64B6BD805FF3；远端Windows构建日志 /tmp/yxi-dpapi-windows-build.log。
+- windows-native-verify.ps1与CI安装后检查增加凭据两进程门禁；本机脚本实际通过，CI PowerShell语法通过，GitHub CI尚未执行。未覆盖安装版、未发版；真实Logto授权/撤销、刷新响应丢失恢复、Windows完整UI与其它PRD需求继续推进。

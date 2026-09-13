@@ -30,6 +30,10 @@ import kotlin.system.exitProcess
 /** Yxi 桌面版入口：单实例 → 窗口（自绘标题栏、关窗留托盘、全局快捷键、缩放）→ 托盘。壳的实现在 Shell.kt，布局在 App.kt。 */
 @OptIn(ExperimentalComposeUiApi::class)   // WindowDecoration（自绘标题栏 + 边缘改大小）在 1.12 还是实验 API
 fun main(args: Array<String>) {
+    if ("--credential-smoke" in args) {
+        try { runCredentialNativeSmoke("--reopen" in args); exitProcess(0) }
+        catch (e: Throwable) { e.printStackTrace(); exitProcess(1) }
+    }
     if ("--browser-smoke" in args) {
         try { runBrowserNativeSmoke(); exitProcess(0) }
         catch (e: Throwable) { e.printStackTrace(); exitProcess(1) }

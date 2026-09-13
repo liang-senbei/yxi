@@ -27,6 +27,7 @@ dependencies {
     implementation("org.slf4j:slf4j-api:2.0.16")                 // ⚠️ jediterm 内部打日志用，POM 同样没声明（真机/运行时才炸）
     runtimeOnly("org.slf4j:slf4j-nop:2.0.16")                    // 终端库的日志静默掉
     implementation(libs.org.json)
+    implementation("net.java.dev.jna:jna-platform:5.17.0")
     implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.44.0")
     implementation("me.friwi:jcefmaven:146.0.10")
     val browserPlatform = when (yxiOs) {

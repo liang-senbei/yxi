@@ -22,18 +22,25 @@ try {
     $env:LOCALAPPDATA = Join-Path $taskProfile 'Local'
     New-Item -ItemType Directory -Path $env:APPDATA,$env:LOCALAPPDATA | Out-Null
     $taskImage = Join-Path $taskOutput 'browser-native.png'
-    $env:JAVA_TOOL_OPTIONS = '-Duser.home="' + $taskProfile + '" -Dyxi.browser.localFixture=true -Dyxi.browser.smokeImage="' + $taskImage + '"'
-    foreach ($taskMode in @('smoke','browser-smoke')) {
+    $taskCredentials = Join-Path $taskOutput 'synthetic-credentials'
+    $env:JAVA_TOOL_OPTIONS = '-Duser.home="' + $taskProfile + '" -Dyxi.browser.localFixture=true -Dyxi.browser.smokeImage="' + $taskImage + '" -Dyxi.credential.smokeDir="' + $taskCredentials + '"'
+    foreach ($taskMode in @('smoke','credential-smoke','credential-reopen','browser-smoke')) {
         $taskStdout = Join-Path $taskOutput ($taskMode + '-out.txt')
         $taskStderr = Join-Path $taskOutput ($taskMode + '-err.txt')
-        $taskProcess = Start-Process -FilePath $taskExe -ArgumentList ('--' + $taskMode) -WindowStyle Hidden -PassThru -RedirectStandardOutput $taskStdout -RedirectStandardError $taskStderr
+        $taskArguments = if ($taskMode -eq 'credential-reopen') { '--credential-smoke --reopen' } else { '--' + $taskMode }
+        $taskProcess = Start-Process -FilePath $taskExe -ArgumentList $taskArguments -WindowStyle Hidden -PassThru -RedirectStandardOutput $taskStdout -RedirectStandardError $taskStderr
         if (-not $taskProcess.WaitForExit(180000)) {
             # Only this test process tree, never the user's installed app.
             $taskProcess.Kill($true)
             throw "$taskMode timed out; logs kept at $taskOutput"
         }
         if ($taskProcess.ExitCode -ne 0) { throw "$taskMode failed with exit $($taskProcess.ExitCode); logs at $taskOutput" }
-        $taskExpected = if ($taskMode -eq 'smoke') { @('smoke ok') } else { @('browser native render and live style ok','browser native pixels ok','browser native shutdown ok') }
+        $taskExpected = switch ($taskMode) {
+            'smoke' { @('smoke ok') }
+            'credential-smoke' { @('credential native migration rotation and tamper checks ok') }
+            'credential-reopen' { @('credential native cross-process reopen logout and login ok') }
+            default { @('browser native render and live style ok','browser native pixels ok','browser native shutdown ok') }
+        }
         $taskLog = Get-Content -LiteralPath $taskStdout -Raw
         foreach ($taskMarker in $taskExpected) { if (-not $taskLog.Contains($taskMarker)) { throw "Missing $taskMarker" } }
         Write-Output "$taskMode passed"

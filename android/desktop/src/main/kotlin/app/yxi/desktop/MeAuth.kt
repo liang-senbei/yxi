@@ -47,7 +47,7 @@ object MeAuth {
     var profileError by mutableStateOf("")
         private set
 
-    private val sessions = AuthSessionStore(File(Store.dir, "auth.json"))
+    private val sessions = AuthSessionStore(File(Store.dir, "auth.json"), WindowsCredentialProtector.forPlatform())
     private var callbackServer: ServerSocket? = null
     internal val sessionGeneration get() = sessions.generation
 

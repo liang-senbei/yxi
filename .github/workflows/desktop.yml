@@ -83,7 +83,15 @@ jobs:
           if (-not (Select-String -Path smoke-out.txt,smoke-err.txt -Pattern "smoke ok" -Quiet)) { throw "缺少 smoke ok，不能仅凭退出码判断启动成功" }
           $browserOptions = $env:JAVA_TOOL_OPTIONS
           try {
-            $env:JAVA_TOOL_OPTIONS = '-Dyxi.browser.localFixture=true -Dyxi.browser.smokeImage="' + "$env:GITHUB_WORKSPACE\smoke-browser.png" + '"'
+            $env:JAVA_TOOL_OPTIONS = '-Dyxi.browser.localFixture=true -Dyxi.browser.smokeImage="' + "$env:GITHUB_WORKSPACE\smoke-browser.png" + '" -Dyxi.credential.smokeDir="' + "$env:GITHUB_WORKSPACE\smoke-synthetic-credentials" + '"'
+            foreach ($phase in @('write','reopen')) {
+              $credentialArgs = if ($phase -eq 'write') { '--credential-smoke' } else { '--credential-smoke --reopen' }
+              $credentialTest = Start-Process -FilePath $exe -ArgumentList $credentialArgs -WindowStyle Hidden -PassThru -RedirectStandardOutput "smoke-credential-$phase-out.txt" -RedirectStandardError "smoke-credential-$phase-err.txt"
+              if (-not $credentialTest.WaitForExit(60000)) { $credentialTest.Kill($true); throw "凭据原生验证超时" }
+              if ($credentialTest.ExitCode -ne 0) { throw "凭据原生验证失败：$($credentialTest.ExitCode)" }
+              $credentialMarker = if ($phase -eq 'write') { 'credential native migration rotation and tamper checks ok' } else { 'credential native cross-process reopen logout and login ok' }
+              if (-not (Get-Content "smoke-credential-$phase-out.txt" -Raw).Contains($credentialMarker)) { throw "缺少凭据验证标记" }
+            }
             $browserTest = Start-Process -FilePath $exe -ArgumentList "--browser-smoke" -WindowStyle Hidden -PassThru -RedirectStandardOutput smoke-browser-out.txt -RedirectStandardError smoke-browser-err.txt
             if (-not $browserTest.WaitForExit(180000)) { $browserTest.Kill($true); throw "浏览器原生验证超时" }
             if ($browserTest.ExitCode -ne 0) { throw "浏览器原生验证失败：$($browserTest.ExitCode)" }
