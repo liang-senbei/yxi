@@ -9,10 +9,10 @@ import app.yxi.agent.Session
 import java.util.UUID
 
 @Composable
-internal fun MemberAssignmentDialog(state: AppState, conn: Conn, target: Session, group: String, close: () -> Unit, done: () -> Unit) {
+internal fun MemberAssignmentDialog(state: AppState, conn: Conn, target: Session, group: String, close: () -> Unit, done: () -> Unit, initialText: String = "") {
     val id = remember { UUID.randomUUID().toString() }
     val source = remember { state.session?.takeIf { state.conn === conn } }
-    var text by remember { mutableStateOf("") }
+    var text by remember { mutableStateOf(initialText) }
     var error by remember { mutableStateOf("") }
     val current = conn.sessions.firstOrNull { it.name == target.name && it.runtimeId == target.runtimeId }
     WorkbenchDialog(onDismissRequest = close, title = { Text("指派给 ${target.short}") }, text = {

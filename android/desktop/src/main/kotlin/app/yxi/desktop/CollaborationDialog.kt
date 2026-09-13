@@ -37,8 +37,9 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
     }
     if (setup) { HubSetupDialog(conn.host) { setup = false }; return }
     var assignment by remember(conn) { mutableStateOf<Pair<String, app.yxi.agent.Session>?>(null) }
+    var assignmentText by remember(conn) { mutableStateOf("") }
     assignment?.let { (group, target) ->
-        MemberAssignmentDialog(state, conn, target, group, { assignment = null }, close)
+        MemberAssignmentDialog(state, conn, target, group, { assignment = null }, close, initialText = assignmentText)
         return
     }
     if (history) {
@@ -88,6 +89,26 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
                     if (section == "投递控制") key(conn, selected) { GroupDeliveryControls(conn, selected) }
                     if (section == "组规") SelectionContainer { Text(data.rules[selected].orEmpty().ifBlank { "尚未设置组规，可在上方编辑成员与组规中填写。" }, style = MaterialTheme.typography.bodySmall) }
                     val assignments = state.instructions.entries.filter { it.assignmentGroup == selected && it.assignmentHost == projectKey(conn.host, "/") }
+                    if (section == "指派") {
+                        val owner = conn.sessions.firstOrNull { it.name == data.owners[selected] && it.name in data.groups[selected].orEmpty() }
+                        TextButton({
+                            assignmentText = buildString {
+                                append("请作为「$selected」负责人汇总目前协作成果：已完成的改动、交付文件、未完成项、依赖和需要我决定的问题。引用相关消息 ID 或文件路径；不要把终端已投递或人工核对当成执行完成，也不要自动合并成员改动。\n\n")
+                                append("以下是桌面端当前快照，供参考，以实际任务和文件为准。\n成员：\n")
+                                data.groups[selected].orEmpty().forEach { name ->
+                                    val member = conn.sessions.firstOrNull { it.name == name }
+                                    append("- $name · ${member?.state?.label ?: "当前未找到"} · ${member?.cwd.orEmpty()}\n")
+                                }
+                                append("\n本机最近指派记录（最多 20 条）：\n")
+                                assignments.takeLast(20).forEach { item ->
+                                    append("- ${item.id} · ${item.status.name} · ${item.text.substringAfter("用户要求：\n", item.text).take(240)}\n")
+                                }
+                                append("\n队列状态含义：Local=本地待发送，Delivering=投递中，Unknown=投递未确认，Accepted=运行器接收，Cancelled=撤回，Resolved=人工核对。它们都不等于工作已完成。")
+                            }
+                            assignment = selected to owner!!
+                        }, enabled = owner != null && !busy) { Text("请负责人汇总") }
+                        if (owner == null) Text("请先指定当前在线的负责人成员。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                    }
                     if (section == "指派" && assignments.isEmpty()) Text("暂无本机指派记录，可在成员页选择任务进行指派。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                     if (section == "指派" && assignments.isNotEmpty()) {
                         Text("本机指派记录 · ${assignments.size}", style = MaterialTheme.typography.titleSmall)
@@ -122,7 +143,7 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
                                 if (session != null) {
                                     Text(session.cwd, style = MaterialTheme.typography.bodySmall)
                                     TextButton({ state.select(conn, session); close() }) { Text("打开成员任务") }
-                                    TextButton({ assignment = selected to session }) { Text("指派任务") }
+                                    TextButton({ assignmentText = ""; assignment = selected to session }) { Text("指派任务") }
                                 }
                             }
                         }
