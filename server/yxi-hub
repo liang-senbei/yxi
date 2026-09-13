@@ -87,13 +87,14 @@ print("\n".join(g for g,m in d.get("groups",{}).items() if sys.argv[2] in m))' "
 #    ⚠️ 单行消息不会触发（不够长，不当粘贴），所以这个坑只有 agent 之间
 #    发长消息时才露头 —— 手测「你好」是测不出来的。
 record_event() {
-  python3 - "$HOME/.yxi/hub-events.jsonl" "$@" <<'PY'
+  python3 - "$HOME/.yxi/hub-events.jsonl" "$@" "${sender_instance:-}" "${recipient_instance:-}" <<'PY'
 import datetime, fcntl, json, os, pathlib, sys, uuid
-path, message, sender, recipient, stage, body, reply = sys.argv[1:]
+path, message, sender, recipient, stage, body, reply, sender_instance, recipient_instance = sys.argv[1:]
 if str(uuid.UUID(message)) != message: raise ValueError('消息 ID 必须是标准小写 UUID')
 p = pathlib.Path(path)
 p.parent.mkdir(parents=True, exist_ok=True)
 event = {'version': 1, 'id': message, 'sender': sender, 'recipient': recipient,
+         'senderInstance': sender_instance, 'recipientInstance': recipient_instance,
          'stage': stage, 'text': body, 'replyTo': reply, 'time': datetime.datetime.now(datetime.timezone.utc).isoformat()}
 fd = os.open(p, os.O_RDWR | os.O_CREAT | os.O_APPEND, 0o600)
 with os.fdopen(fd, 'a+', encoding='utf-8') as f:
@@ -108,7 +109,7 @@ with os.fdopen(fd, 'a+', encoding='utf-8') as f:
             if stored.get('id') == message: previous.append(stored)
         if previous:
             first = next((e for e in previous if e.get('stage') == 'attempting'), None)
-            if first is None or any(first.get(k, '') != event[k] for k in ['sender', 'recipient', 'text', 'replyTo']):
+            if first is None or any(first.get(k, '') != event[k] for k in ['sender', 'recipient', 'text', 'replyTo', 'senderInstance', 'recipientInstance']):
                 raise ValueError('同一消息 ID 对应不同内容或缺少原始记录，拒绝重发')
             if previous[-1].get('stage') == 'terminal-written':
                 print('duplicate-terminal')
@@ -122,18 +123,28 @@ PY
 
 push() {
   local target="$1" text="$2" sender="${3:-?}" reply="${4:-}" message="${5:-}" reservation
+  local sender_instance recipient_instance pane target_info
+  sender_instance="$(tmux display-message -p -t "=$sender:" '#{pid}:#{session_id}:#{session_created}')" || return 1
+  target_info="$(tmux display-message -p -t "=$target:" '#{pid}:#{session_id}:#{session_created} #{pane_id}')" || return 1
+  read -r recipient_instance pane <<< "$target_info"
+  [ -n "$sender_instance" ] && [ -n "$recipient_instance" ] && [ -n "$pane" ] || return 1
   if [ -z "$message" ]; then message="$(python3 -c 'import uuid; print(uuid.uuid4())')"; fi
   reservation="$(record_event "$message" "$sender" "$target" attempting "$text" "$reply")" || return 1
   if [ "$reservation" = duplicate-terminal ]; then
     echo "消息 $message 之前已写入终端，本次未重复投递（不代表 Agent 已处理）"
     return 0
   fi
-  if ! tmux send-keys -t "$target" -l "[协作消息 $message] $text"; then
+  if [ "$(tmux display-message -p -t "$pane" '#{pid}:#{session_id}:#{session_created}' 2>/dev/null)" != "$recipient_instance" ]; then
+    record_event "$message" "$sender" "$target" write-unknown "" "$reply" || true
+    echo "目标任务实例已变化，未继续写入" >&2
+    return 1
+  fi
+  if ! tmux send-keys -t "$pane" -l "[协作消息 $message] $text"; then
     record_event "$message" "$sender" "$target" write-unknown "" "$reply" || true
     return 1
   fi
   sleep 0.4
-  if ! tmux send-keys -t "$target" Enter; then
+  if [ "$(tmux display-message -p -t "$pane" '#{pid}:#{session_id}:#{session_created}' 2>/dev/null)" != "$recipient_instance" ] || ! tmux send-keys -t "$pane" Enter; then
     record_event "$message" "$sender" "$target" submit-unknown "" "$reply" || true
     return 1
   fi
@@ -215,18 +226,26 @@ for g,m in (d.get("groups") or {}).items():
     if [ "$1" = reply ]; then
       reply_to="$target"
       target="$(python3 - "$HOME/.yxi/hub-events.jsonl" "$reply_to" "$self" <<'PY'
-import json, pathlib, sys, uuid
+import json, pathlib, subprocess, sys, uuid
 path, requested, recipient = sys.argv[1:]
 uuid.UUID(requested)
 sender = None
+original = None
 with pathlib.Path(path).open(encoding='utf-8') as f:
     for line in f:
         try: event = json.loads(line)
         except ValueError: continue
         if event.get('id') == requested and event.get('stage') == 'attempting' and event.get('recipient') == recipient:
             sender = event.get('sender')
+            original = event
 if not isinstance(sender, str) or not sender or any(ord(c) < 32 for c in sender):
     raise ValueError('没有找到发给当前会话的原消息，不能回复')
+def identity(name):
+    return subprocess.check_output(['tmux', 'display-message', '-p', '-t', '=' + name + ':', '#{pid}:#{session_id}:#{session_created}'], text=True).strip()
+if not original.get('senderInstance') or not original.get('recipientInstance'):
+    raise ValueError('旧消息缺少任务实例信息，请人工确认后使用 say 新建消息')
+if identity(sender) != original['senderInstance'] or identity(recipient) != original['recipientInstance']:
+    raise ValueError('原消息对应的任务实例已变化，拒绝回复同名新任务')
 print(sender)
 PY
 )"
