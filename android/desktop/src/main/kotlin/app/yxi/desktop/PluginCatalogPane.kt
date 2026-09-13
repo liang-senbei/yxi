@@ -27,7 +27,7 @@ internal object PluginCatalog {
 }
 
 @Composable
-internal fun PluginCatalogPane(state: AppState, conn: Conn) {
+internal fun PluginCatalogPane(state: AppState, conn: Conn, showInstalled: (() -> Unit)? = null) {
     val t = Tokens.current
     var revision by remember(conn) { mutableStateOf(0) }
     var entries by remember(conn) { mutableStateOf<List<CatalogPlugin>>(emptyList()) }
@@ -66,7 +66,15 @@ internal fun PluginCatalogPane(state: AppState, conn: Conn) {
         val shown = entries.filter { "${it.id} ${it.description}".contains(query.trim(), ignoreCase = true) }
         Text("${shown.size} / ${entries.size} 个插件", style = MaterialTheme.typography.labelMedium, color = t.textMuted)
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (!busy && error.isBlank() && shown.isEmpty()) item { Text("没有匹配的目录条目", color = t.textMuted) }
+            if (!busy && error.isBlank() && shown.isEmpty()) item {
+                OutlinedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp)) {
+                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(if (entries.isEmpty()) "暂无可安装条目" else "没有匹配的插件", style = MaterialTheme.typography.titleMedium)
+                        Text(if (entries.isEmpty()) "已安装的插件可在主机插件中查看和管理。" else "尝试其他名称或市场关键词。", color = t.textMuted, style = MaterialTheme.typography.bodySmall)
+                        if (showInstalled != null) TextButton(showInstalled) { Text("查看主机插件") }
+                    }
+                }
+            }
             items(shown) { p -> OutlinedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp)) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(p.name.ifBlank { p.id }, style = MaterialTheme.typography.titleMedium)

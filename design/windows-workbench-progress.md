@@ -392,3 +392,12 @@
 - 目录缺少完整权限、依赖和兼容性声明时如实显示未知，本轮没有完成manifest级权限解析。安装后失败清理、跨范围复用、升级卸载与包回滚仍未完成。
 - 新增安装结果持久化与查询失败保留终态测试；安装确认弹窗/实际CLI的完整原生点击、窄屏及Windows专项尚待验证，未安装生产插件。
 - 最终135项中128通过、7环境测试跳过，Linux打包成功，日志hk13 /tmp/yxi-plugin-install-ui-build.log。
+
+## 第三十九轮：目录安装的原生流程与空状态（2026-09-13）
+
+- 新增PluginInstallFixtureTest，真实目录页通过隔离SSH读取临时本地市场，打开范围选择、核对目标，再取消；核对无客户端操作且插件仍可安装。重新确认后核对installed落盘、CLI识别、安装登记唯一、重读本地账本仍为installed。
+- 已实际查看目录、范围选择与目标确认截图，路径完整；初轮人工驱动真实点击通过，fixture.LWx5GM及/tmp/yxi-plugin-install-ui/test.log。将坐标步骤固化到desktop-plugin-install-e2e.sh，以ready/cancel-verified同步，测试失败清理仅针对本轮进程组。
+- 安装成功后目录移除已装条目，原空白提示改为圆角空状态卡片，配置页提供查看主机插件入口；搜索无结果和没有可安装条目分别说明。
+- 本轮只覆盖用户级本地市场安装，远程Git/命令来源、项目范围原生点击、多主机/断线恢复和Windows专项仍待验证。未安装生产插件，完整W03继续推进。
+- 自动化首次复跑在截图完成、窗口关闭后，Gradle测试worker卡在JVM Shutdown.halt0；jhsdb诊断未发现Java锁死，根因未确定。保留/tmp/yxi-install-sa.txt等诊断并停止该测试worker，未重发原安装。脚本新增180秒/10秒强制退出边界；之后fixture.ViNmP2完整复跑39秒正常退出，日志/tmp/yxi-plugin-install-ui-bounded/test.log，最终空状态截图已查看。该偶发Linux JVM退出问题仍需后续专项排查。
+- 最终全量136项中128通过、8环境测试跳过，Linux打包成功，日志/tmp/yxi-plugin-install-e2e-package.log；本机最终截图tmp/workbench-evidence/plugin-installed-verified.png。
