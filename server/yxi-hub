@@ -9,7 +9,7 @@
 #   yxi-hub context          给 Claude Code 的 SessionStart 钩子用（见下）
 #   yxi-hub say <名> "话" [本次消息UUID]  发给同组成员；固定UUID用于重试去重
 #   yxi-hub reply <消息ID> "话" [本次消息UUID]  回复原消息并保留关联
-#   yxi-hub all [<组名>] "话"  发给同组其他所有人（在多个组里时必须写组名）
+#   yxi-hub all <组名> "话" [批次UUID]  固定批次与成员消息ID，重试复用
 #
 # ⚠️ **只能发给同组的。** 这就是「组」和「所有会话」的区别 ——
 #    没有这条约束，分组只是个视觉分类，不是协作边界。
@@ -258,10 +258,43 @@ PY
       grp="$g"
     fi
     echo "$g" | grep -qxF "$grp" || { echo "你不在「$grp」组里。你的组：$(echo "$g" | paste -sd, -)"; exit 1; }
-    m="$(mates_by_group "$self" | awk -F'\t' -v g="$grp" '$1==g {print $2}' | tr '、' '\n')"
+    m="$(python3 - "$GROUPS_FILE" "$grp" "$self" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f: members = json.load(f)['groups'][sys.argv[2]]
+for member in dict.fromkeys(members):
+    if not isinstance(member, str) or any(ord(c) < 32 for c in member): raise ValueError('成员名称格式无效')
+    if member != sys.argv[3]: print(member)
+PY
+)"
     [ -n "$m" ] || { echo "「$grp」组里没别人"; exit 0; }
-    while read -r one; do [ -n "$one" ] && push "$one" "[同组 $grp · $self] $text" "$self"; done <<< "$m"
-    echo "已发给「$grp」组 $(echo "$m" | grep -c .) 个"
+    batch="${4:-}"
+    if [ -z "$batch" ]; then batch="$(python3 -c 'import uuid; print(uuid.uuid4())')"; fi
+    recipients="$(python3 - "$HOME/.yxi/hub-batches" "$batch" "$self" "$grp" "$text" "$m" <<'PY'
+import fcntl, json, os, pathlib, sys, uuid
+directory, batch, sender, group, body, raw = sys.argv[1:]
+namespace = uuid.UUID(batch)
+if str(namespace) != batch: raise ValueError('批次 ID 必须是标准小写 UUID')
+members = sorted(set(raw.splitlines()))
+request = {'sender': sender, 'group': group, 'text': body, 'members': members}
+root = pathlib.Path(directory); root.mkdir(parents=True, exist_ok=True, mode=0o700)
+fd = os.open(root / (batch + '.json'), os.O_RDWR | os.O_CREAT, 0o600)
+with os.fdopen(fd, 'r+', encoding='utf-8') as f:
+    fcntl.flock(f, fcntl.LOCK_EX)
+    previous = f.read()
+    if previous:
+        if json.loads(previous) != request: raise ValueError('群发批次的正文、成员或发起者已变化，请重新确认并使用新批次')
+    else:
+        json.dump(request, f, ensure_ascii=False)
+        f.flush(); os.fsync(f.fileno())
+for member in members:
+    print(member + '\t' + str(uuid.uuid5(namespace, sender + '\n' + group + '\n' + member)))
+PY
+)"
+    echo "群发批次：$batch（重试请复用此 ID）"
+    while IFS=$'\t' read -r one message_id; do
+      [ -n "$one" ] && push "$one" "[同组 $grp · $self] $text" "$self" "" "$message_id"
+    done <<< "$recipients"
+    echo "「$grp」组终端投递完成或已有完成记录；尚无成员处理回执"
     ;;
   *) sed -n '3,13p' "$0" | sed 's/^# \?//'; exit 1 ;;
 esac
