@@ -132,7 +132,7 @@ def execute(request, home=None, run=subprocess.run):
         return {'state': 'unsupported-config-home'}
     action = request.get('action')
     operation = request.get('operation', '')
-    if action not in ('prepare', 'set', 'status', 'restore', 'prepare-install', 'install', 'uninstall') or not re.fullmatch(r'[a-f0-9]{32}', operation):
+    if action not in ('prepare', 'set', 'status', 'restore', 'prepare-install', 'install', 'uninstall', 'update') or not re.fullmatch(r'[a-f0-9]{32}', operation):
         return {'state': 'invalid'}
     store = home / '.yxi'
     private_directory(store)
@@ -188,7 +188,7 @@ def execute(request, home=None, run=subprocess.run):
         if action == 'set' and type(desired) is not bool:
             return {'state': 'invalid'}
         identity = dict(plugin=plugin, scope=scope, directory=str(cwd), enabled=desired)
-        if action == 'uninstall': identity['kind'] = 'uninstall'
+        if action in ('uninstall', 'update'): identity['kind'] = action
         if source is not None: identity['restores'] = request['restores']
         if previous is not None:
             old = json.loads(previous)
@@ -210,11 +210,12 @@ def execute(request, home=None, run=subprocess.run):
         backup = store / (operation + '.before')
         write_file(backup, raw if raw is not None else b'')
         result = dict(state='started', operation=operation, target=identity, existed=raw is not None, before=digest)
-        if action == 'uninstall':
+        if action in ('uninstall', 'update'):
             registry = read_file(base / 'plugins/installed_plugins.json')
             write_file(store / (operation + '.registry-before'), registry)
             installed = json.loads(registry)['plugins'][plugin]
             target = next(p for p in installed if p.get('scope') == scope and (scope == 'user' or p.get('projectPath') == str(cwd)))
+            result['beforeVersion'] = target.get('version') if isinstance(target.get('version'), str) else ''
             result['packageHash'] = package_backup(target['installPath'], store / (operation + '.plugin-before.tar'))
             if snapshot()[2] != digest: return {'state': 'changed'}
         write_file(record, json.dumps(result).encode())
@@ -224,6 +225,14 @@ def execute(request, home=None, run=subprocess.run):
                     completed = run(['claude', 'plugin', 'uninstall', plugin, '--scope', scope, '--keep-data'], cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=out, stderr=err, timeout=30)
                 _, _, after_digest = snapshot(False)
                 result['state'] = 'uninstalled' if completed.returncode == 0 else 'unknown'
+            elif action == 'update':
+                with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+                    completed = run(['claude', 'plugin', 'update', plugin, '--scope', scope], cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=out, stderr=err, timeout=45)
+                _, _, after_digest = snapshot()
+                after_registry = json.loads(read_file(base / 'plugins/installed_plugins.json'))
+                updated = next(p for p in after_registry['plugins'][plugin] if p.get('scope') == scope and (scope == 'user' or p.get('projectPath') == str(cwd)))
+                result['afterVersion'] = updated.get('version') if isinstance(updated.get('version'), str) else ''
+                result['state'] = 'updated' if completed.returncode == 0 and os.path.isdir(updated.get('installPath', '')) else 'unknown'
             elif source is not None:
                 if snapshot()[2] != digest:
                     result['state'] = 'changed'

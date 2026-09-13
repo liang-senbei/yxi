@@ -427,3 +427,11 @@
 - 新增终态持久/查询失败保留检查；扩展原生测试为恢复后取消卸载、再次确认卸载，核对剩余配置、目标登记、插件tar副本及重读客户端记录。
 - 桌面测试与Linux打包通过（/tmp/yxi-uninstall-ui-build.log）；真实界面测试结果另记。Windows卸载、缺失目录清理、包恢复、升级和完整W03仍待完成。
 - 原生全流程已通过，日志/tmp/yxi-uninstall-ui-verified/test.log，fixture.oAB6jd。实际确认取消不改配置、确认后目标安装记录为空且Read权限保留、tar副本存在、重读末条uninstalled。已查看本机tmp/workbench-evidence/plugin-uninstall-confirm.png及plugin-uninstalled-verified.png。
+
+## 第四十三轮：插件升级执行与版本回执（2026-09-13）
+
+- 核对CLI update支持scope并要求新会话应用，新增update动作。沿用配置指纹检查和私有配置/登记/插件包副本，执行前备份失败不调用更新；不自动接受来源变化带来的安装命令授权。
+- 记录beforeVersion/afterVersion，不根据按钮点击猜测新版本；CLI退出成功且目标安装目录存在才返回updated，结果可按原ID查询/去重。未据此声明插件功能、依赖或登录正常。
+- 临时本地市场从1.0.0改到1.1.0并更新测试市场索引后，真实插件update通过；验证版本回执1.0.0→1.1.0、重复ID返回结果、旧包副本manifest仍为1.0.0，以及其他插件设置保留。随后原卸载/安装与启停/恢复测试通过，未升级生产插件。
+- 升级目标由CLI当前市场提供，当前未实现安装前展示精确目标版本/源码提交、市场并发变化固定、updated客户端终态/UI、包回滚及Windows专项；完整W03仍待推进。
+- 桌面测试与Linux打包通过，日志hk13 /tmp/yxi-plugin-update-build.log。

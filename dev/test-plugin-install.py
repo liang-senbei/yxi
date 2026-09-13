@@ -44,6 +44,22 @@ with tempfile.TemporaryDirectory(prefix='yxi-plugin-install-') as root:
     settings_path.write_text(json.dumps(settings))
     data = home / '.claude/plugins/data/sample@yxi-fixture'
     data.mkdir(parents=True); (data / 'keep.txt').write_text('retained data')
+    (plugin / '.claude-plugin/plugin.json').write_text('{"name":"sample","version":"1.1.0","description":"Updated local fixture"}')
+    definition = market / '.claude-plugin/marketplace.json'
+    value = json.loads(definition.read_text()); value['plugins'][0]['version'] = '1.1.0'
+    definition.write_text(json.dumps(value))
+    refresh = subprocess.run(['claude', 'plugin', 'marketplace', 'update', 'yxi-fixture'], cwd=root, capture_output=True, timeout=30)
+    assert refresh.returncode == 0, refresh.stderr.decode()
+    update_target = dict(action='prepare', operation='c'*32, plugin=entry['pluginId'], scope='user', directory=root)
+    prep = module.execute(update_target, root)
+    update = dict(update_target, action='update', fingerprint=prep['fingerprint'])
+    upgraded = module.execute(update, root)
+    assert upgraded['state'] == 'updated', upgraded
+    assert upgraded['beforeVersion'] == '1.0.0' and upgraded['afterVersion'] == '1.1.0', upgraded
+    assert module.execute(update, root)['state'] == 'updated'
+    with tarfile.open(home / '.yxi/plugin-operations' / ('c'*32 + '.plugin-before.tar')) as backup:
+        assert json.load(backup.extractfile('plugin/.claude-plugin/plugin.json'))['version'] == '1.0.0'
+    assert json.loads(settings_path.read_text())['enabledPlugins']['other@yxi-fixture'] is True
     remove_target = dict(action='prepare', operation='b'*32, plugin=entry['pluginId'], scope='user', directory=root)
     prep = module.execute(remove_target, root)
     remove = dict(remove_target, action='uninstall', fingerprint=prep['fingerprint'])
