@@ -34,6 +34,7 @@ import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -122,6 +123,12 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
     val fallbackDraft = remember(taskKey) { mutableStateOf(TextFieldValue()) }
     val draftHolder: androidx.compose.runtime.MutableState<TextFieldValue> = savedDraft ?: fallbackDraft
     var draft by draftHolder
+    var historyOpen by remember(taskKey) { mutableStateOf(false) }
+    if (historyOpen) PromptHistoryDialog(instructions, taskNavigationKey(conn.host, session), { historyOpen = false }) { text ->
+        val next = if (draft.text.isBlank()) text else draft.text.trimEnd() + "\n\n" + text
+        draft = TextFieldValue(next, selection = TextRange(next.length))
+        historyOpen = false
+    }
     var sendErr by remember(taskKey) { mutableStateOf<String?>(null) }
     var sending by remember(taskKey) { mutableStateOf(false) }
     var stick by remember(taskKey) { mutableStateOf(true) }              // 粘在底部：用户往上翻就停，点 ↓ 再粘上
@@ -407,6 +414,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
             onPaste = ::stagePasted,
             onApprove = ::approve, onReject = ::reject,
             onSend = ::send,
+            onHistory = { historyOpen = true },
         )
     }
 }
@@ -422,6 +430,7 @@ private fun Composer(
     ctx: Transcript.Ctx?, busy: Boolean, waiting: Boolean, hint: String,
     hasPending: Boolean, canSend: Boolean, canAct: Boolean,
     onAttach: () -> Unit, onPaste: () -> Unit, onApprove: () -> Unit, onReject: () -> Unit, onSend: () -> Unit,
+    onHistory: () -> Unit,
 ) {
     val t = Tokens.current
     var focused by remember { mutableStateOf(false) }
@@ -459,6 +468,7 @@ private fun Composer(
         )
         Row(Modifier.fillMaxWidth().padding(6.dp, 2.dp, 8.dp, 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             IconButton(onAttach, Modifier.size(30.dp)) { Icon(Icons.Outlined.AttachFile, "添加附件（截图可直接 Ctrl+V）", Modifier.size(16.dp), tint = t.textSecondary) }
+            IconButton(onHistory, Modifier.size(30.dp)) { Icon(Icons.Outlined.History, "输入历史", Modifier.size(16.dp), tint = t.textSecondary) }
             if (!canAct) Text("重新连接后可操作", fontSize = 11.sp, color = t.textMuted)
             Spacer(Modifier.weight(1f))
             ctx?.let { c ->
