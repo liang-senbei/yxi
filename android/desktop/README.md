@@ -155,7 +155,7 @@ Velopack 文档也说不签可能被当病毒。信誉是按二进制攒的，**
 1. **主机**：列表 / 新增（地址、端口、用户名、私钥文件或密码）/ 指纹确认 / 存 `%APPDATA%\Yxi\hosts.json`（私钥用系统凭据？先明文文件 + 0600，后接 DPAPI）
 2. **会话**：连上主机后列 `cc-*` tmux 会话（跟手机端 SessionsScreen 同一套命令），新建 / 接回 / 临时会话
 3. **对话**：转录尾随（`tail -F` + `Transcript` 解析）、工具卡（同名连续合并）、审批 / 选择器（`Prompt` 解析 + tmux send-keys）、发话（`Sender` 逻辑）、附件（SFTP 上传）
-4. **终端**：`tmux capture-pane -e` 轮询渲染（先做只读 + 输入行；完整终端仿真后做）
+4. **终端**：✅ 真终端 —— JediTerm（IntelliJ 终端同源）+ SSH PTY（1.2.0 上车）；不再是 `capture-pane` 轮询渲染
 5. **账号**：登录（Logto）、会员、额度 —— 手机端 `Account.kt` 的 HTTP 部分抽进 core
 6. **打包**：✅ Velopack 一键 Setup.exe + 应用内更新（本文档）；待办：`Updater.boot(args)` 接进 Main.kt、`UpdateBanner()` 放进侧栏、App 内「桌面版」入口、真 Windows 装一遍
 7. 之后：通知（托盘）、多窗口、快捷键、深色主题、音游（Compose Canvas 代码可直接复用）
