@@ -21,6 +21,7 @@ internal suspend fun deliverInstruction(conn: Conn, session: Session, queue: Ins
                 "__YXI_DELIVERY__:blocked" -> queue.notDelivered(started.id, started.revision, "任务或画面已变化，未投递；请核对后重试")
                 "__YXI_DELIVERY__:attachment" -> queue.notDelivered(started.id, started.revision, "附件不存在或无法读取，请重新上传")
                 "__YXI_DELIVERY__:terminal" -> queue.markUnknown(started.id, started.revision, "文本与回车已投递到终端，运行器接收尚待确认。请查看对话或终端后核对。")
+                "__YXI_DELIVERY__:reserved" -> queue.markUnknown(started.id, started.revision, "服务端已登记本指令，但没有完整写入记录；可能只写入了部分内容。请查看终端，不要重复发送。")
                 else -> queue.markUnknown(started.id, started.revision, "投递结果无法确认，请核对任务；不会自动重发")
             }
         } catch (e: Exception) {
