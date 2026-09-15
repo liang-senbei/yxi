@@ -7,4 +7,7 @@ dependencies {
     api(libs.kotlinx.coroutines.core)
     api(libs.jsch)
     api(libs.bouncycastle)
+    testImplementation(kotlin("test"))
 }
+
+tasks.test { useJUnitPlatform() }

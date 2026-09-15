@@ -463,7 +463,7 @@ object Lines {
     private const val ORIGINAL_ROOT = "# yxi original root: "
 
     /** Preserve displaced root assignments as comments so removing our blocks restores them. */
-    private fun shadowCodexRoot(body: String, keys: Set<String>): String {
+    internal fun shadowCodexRoot(body: String, keys: Set<String>): String {
         var root = true
         return body.lineSequence().joinToString("\n") { line ->
             val trimmed = line.trimStart()
@@ -488,7 +488,7 @@ object Lines {
      * 用字符串硬拼一个「合并」出来的文件迟早把人家的东西写坏。只认自己那两段标记，
      * 认不出来就当没有 —— 宁可少改，不能改坏。
      */
-    private fun stripBlocks(toml: String): String? {
+    internal fun stripBlocks(toml: String): String? {
         // ⚠️ **按整行认标记**，不是 indexOf：值里若出现同样的字（name 写成 `x # <<< yxi provider <<<`），
         //    indexOf 会在值中间截断，把 auth 段泄进「用户内容」区（安全审查实测）。
         //    配合 [tomlEscape]（值里不可能有换行），只有真正独占一行的才算标记。
@@ -517,7 +517,7 @@ object Lines {
      * 不转义的话 baseUrl 里一个 `"` 就能关掉字符串、往 `[model_providers.yxi]` 表里注入任意键
      * （安全审查用 tomllib 和 codex --strict-config 双双复现）。
      */
-    private fun tomlEscape(v: String): String = buildString(v.length + 8) {
+    internal fun tomlEscape(v: String): String = buildString(v.length + 8) {
         for (ch in v) when {
             ch == '"' -> append("\\\"")
             ch == '\\' -> append("\\\\")
@@ -626,7 +626,7 @@ object Lines {
      * ⚠️ **单遍扫描，不能用连串 replace**：先换 `\n` 再换 `\\` 的话，`\\n`（转义的反斜杠 + 字母 n）
      * 会被先当成换行吃掉（第二轮复核用 Python 转写复现）。
      */
-    private fun tomlUnescape(v: String): String =
+    internal fun tomlUnescape(v: String): String =
         Regex("""\\(u([0-9A-Fa-f]{4})|[nrt"\\])""").replace(v) { m ->
             val g = m.groupValues[1]
             when {
