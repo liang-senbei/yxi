@@ -226,6 +226,13 @@
 
 - **发版 1.2.0（2026-09-12，run 34683867397，head 517cfd6 绿）**：1.1.1 之后的全部——真终端（JediTerm PTY）、左下角账号行+版本号（设置弹窗也有版本）、登录固定 1455、ZCode/Codex 版式、手机同款皮肤（暖铜/参考款浅色）、ThinkingGlow、通知跳转。发布链路：bump → workflow_dispatch → 本机（老板 Windows）gh run download → Setup.exe --silent 真装 → current/Yxi.exe --smoke 打出 smoke ok → scp Releases/ 到 /var/www/yxi/desktop/ → 公网 feed=1.2.0、nupkg SHA256 逐字核过（9BAEAF32…1EB）、官网下载页的版本 chip 现取 feed 自动跟上。用户升级路径：1.1.1 的应用每 6 小时/启动 10 秒查 feed，弹横幅重启即升；1.1.0 及更早的受损安装直接重跑 Setup.exe。
 
+
+- **状态重盘点（2026-09-15，老板要求不沿用旧对话状态、以服务器为准）**。当前仓库是**两条线**：
+  · **main（权威发布线）**：Android 1.1.27/183（df9e04b，NetWatch 断网重连 + 工具卡合并 + core 拆分上车，全套 316 绿）+ Windows 1.2.0（517cfd6：真终端/账号行/登录 1455/暖铜皮肤/背景光/ZCode 版式/通知跳转），官网与更新 feed 均为 1.2.0。hk13 工作区唯一未提交改动仍是 `.github/workflows/desktop.yml` 的「真装真启动」步骤（workflow scope 阻着推不上去）。本轮补修 **eeda2ff**：漫游迁移复制失败仍删源的数据丢失 bug（PRD W01-A 点名），长度校验成功才删源；codex/windows-workbench 分支同代码，合并时需 cherry-pick。
+  · **codex/windows-workbench（工作台实施线，本地克隆 + 已推远端分支）**：从 main HEAD（df9e04b）拉出，**领先 127 个提交**，实施 `Yunxi/Yxi-Windows-PRD-v0.1.md`（v0.3 实施基线）的「跨主机 Agent 工作台」：工作台首页/任务树/延后线路切换中枢/网页预览与修改可见/文件 Markdown 右栏/指令账本/DPAPI 令牌/工单入口/协作上下文等，至第一百一十九轮。测试已按老板分工交给 yunxi 组四 Agent（固定提交 be45eb3 @ codex/windows-workbench-review，报告落 /root/src/workspace/yunxi/windows-test-reports/），**尚无回归结果**；多轮标记待回归/待 Windows 回归。本线已把 desktop/CI 升到 Java 21（Markdown 桌面库需要），且未合并回 main、未发版（PRD：不得在缺项状态下当完整工作台发布）。
+  · **需老板拍板（PRD §10，未决前不阻塞 M0/M1）**：① 运行器「Laize」的准确名称/命令；② 「三个月权益」的档位/资格/算法/叠加；③ 「官方分支」= Git 分支还是 Agent 协作模式（PRD 暂按协作模式）；④ 桌面继续排除娱乐是否成立。另：`gh auth refresh -s workflow` 补 workflow scope 后才能把 CI 安装启动检查推上去（M0 门禁项）。
+  · **M0 剩余**：完整登录真机验收（浏览器授权全程）、主机保存/重启恢复实机测（本机 %LOCALAPPDATA%/Yxi 现无 hosts.json——老板尚未在装好的 1.2.0 里加过主机，添加一台重启验证即可关闭该疑问）、README 旧描述修订、上述 CI 门禁。
+
 - **下载页挂上 Windows 版（2026-09-12，老板：「把 windows 的下载挂载到 yxi.keuury.com」）**：首页下载区在 Android 卡和 iPhone 灰卡之间加了 **Windows 卡**（同款样式：徽标/「现在可用」badge/chips/一键安装说明），按钮直链 /desktop/Yxi-win-Setup.exe；首屏幽灵按钮加「用 Windows？装桌面版」；区块小标题改成「Android 和 Windows 现在就能装」。版本号 chip 现取 /desktop/releases.win.json、大小 chip HEAD Setup.exe（和安卓侧 latest.json 的取法同款，发新版不用动页面）。注意：这个 landing 页**只在 hk13 /var/www/yxi/index.html**，不在仓库里（site/ 只有 privacy/terms）——改前备份 index.html.bak-win-20260912。
 
 
