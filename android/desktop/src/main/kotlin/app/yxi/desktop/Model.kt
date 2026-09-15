@@ -70,6 +70,8 @@ object Store {
      * 把老版本留在漫游目录里的几份搬到本地目录，**搬完删掉源文件**。
      * ⚠️ 删源不是洁癖：留着的那份 hosts.json 里有明文密码，还在继续跟着漫游同步 —— 不删等于没修。
      * ⚠️ 目标已存在就不覆盖（新目录里的是更近的），只删源。
+     * ⚠️ **复制成功才删源**（PRD W01-A）：copyTo 失败/写半截时源文件必须原样保留 ——
+     *    旧实现复制失败也照样删源，等于把用户唯一一份主机配置删没了。长度对得上才算复制成功。
      */
     private fun migrateRoaming(from: File, to: File) = runCatching {
         if (!from.isDirectory || from.canonicalFile == to.canonicalFile) return@runCatching
@@ -77,8 +79,9 @@ object Store {
             val src = File(from, name)
             if (!src.isFile) return@forEach
             val dst = File(to, name)
-            if (!dst.exists()) runCatching { src.copyTo(dst) }
-            runCatching { src.delete() }
+            val copied = if (dst.exists()) true   // 新目录里已有的更近，直接按已迁移处理
+            else runCatching { src.copyTo(dst).length() == src.length() }.getOrDefault(false)
+            if (copied) runCatching { src.delete() }   // 失败就留着源：宁可下次再迁，不能删用户配置
         }
         runCatching { from.delete() }   // 空了才删得掉，没空就留着，无所谓
     }
