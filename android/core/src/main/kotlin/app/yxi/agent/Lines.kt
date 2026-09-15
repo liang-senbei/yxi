@@ -616,7 +616,14 @@ object Lines {
         }
         // ⚠️ ConfigRemote.save 只校验 .json，**toml 它不校验**。所以这里绝不做「合并」，
         //    只做「挖掉自己那两段再拼回去」——用户的部分是原样搬运的，语法坏不了。
-        ConfigRemote.save(s, path, next.trimEnd() + "\n")
+        val saved = ConfigRemote.save(s, path, next.trimEnd() + "\n")
+        if (line == null && saved == null) {
+            // 回默认线且配置已写好，把钥匙文件一并删掉（正确性/安全自查 F-A）：config.toml 已不再引用它，
+            // 留一把明文钥匙在盘上没有理由。配置没写成（saved 非空）就不删，保持原样可回退；
+            // 之后切回任意 Codex 线路时 applyCodex 会用线路里的 apiKey 重写这个文件，删了不影响。
+            s.exec("rm -f " + Shell.q(keyPath(h)))
+        }
+        saved
     }
 
     private fun keyPath(home: String) = "$home/.yxi/codex-key"
