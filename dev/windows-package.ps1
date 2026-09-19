@@ -2,15 +2,17 @@
 # 与 CI（.github/workflows/desktop.yml）同参数的本地版；CI 跑不了/想本机快速出包时用。
 # ⚠️ 只在本脚本自己的 OutputDir 里产出，不安装、不发布、不碰已装的 Yxi 和任何生产配置。
 # 用法（pwsh 6+ 推荐，Windows PowerShell 5.1 也可）：
-#   pwsh -File dev/windows-package.ps1 -JarPath <Yxi-windows-x64-*.jar> -OutputDir <新的空目录> [-RunSmoke] [-SkipVpk]
+#   pwsh -File dev/windows-package.ps1 -JarPath <Yxi-windows-x64-*.jar> -OutputDir <新的空目录> [-VpkDllPath <vpk.dll>] [-RunSmoke] [-SkipVpk]
 # 输入清单：
 #   1) Windows uber jar（必须 -Pyxi.os=win 打出的那种，文件名 Yxi-windows-x64-<版本>.jar；
 #      名字来自 android/desktop/build.gradle.kts 的 packageVersion，脚本从这里取版本，不另设参数。
 #      例：be45eb3 构建的 Yxi-windows-x64-1.2.0.jar，SHA256 75255f5f4503eaa26bb0258bd9c11eccdf4a070cb8252ec2a4166aa78282a82f）
 #   2) 带 jpackage 的 JDK21+（缺省找 'C:\Program Files\Microsoft\jdk-21.0.7.6-hotspot'，同 windows-native-verify.ps1）
 #   3) icon.ico（缺省取仓库 android/desktop/icon.ico）
-#   4) -SkipVpk 不打 Setup 时可省：.NET SDK（dotnet）+ vpk 1.2.0（打 Setup 才要；
-#      vpk 装进 <OutputDir>\tools，不碰全局工具，卸载 = 删掉该目录）
+#   4) -SkipVpk 不打 Setup 时可省：打 Setup 要 .NET（二选一）：
+#      a) 有 SDK：vpk 1.2.0 自动装进 <OutputDir>\tools，不碰全局工具，卸载 = 删掉该目录
+#      b) 只有运行库没有 SDK：传 -VpkDllPath 指到官方 vpk 1.2.0 nupkg 解包的
+#         tools/net8.0/any/vpk.dll，用现有 dotnet 直接跑该 dll，不安装任何工具
 #   5) -RunSmoke 才跑 3 秒冒烟（默认不跑）；冒烟的 HOME/APPDATA/LOCALAPPDATA/user.home
 #      全部隔离到 <OutputDir>\smoke-profile，跑完还原环境变量，不读写真实用户状态
 # 产物：<OutputDir>\Yxi\（app-image）、<OutputDir>\Releases\（Setup.exe / nupkg / releases.win.json）、各 SHA256 清单
@@ -19,6 +21,7 @@ param(
     [Parameter(Mandatory=$true)][string]$OutputDir,
     [string]$JdkPath = 'C:\Program Files\Microsoft\jdk-21.0.7.6-hotspot',
     [string]$IconPath = '',
+    [string]$VpkDllPath = '',
     [switch]$RunSmoke,
     [switch]$SkipVpk
 )
@@ -95,13 +98,21 @@ if ($RunSmoke) {
 
 # 更完整的六项原生验证（host/credential/browser）继续走 dev/windows-native-verify.ps1，这里不重复。
 if (-not $SkipVpk) {
-    # vpk 装进输出目录私有 tools（--tool-path），绝不 -g 全局安装；卸载 = 删 <OutputDir>\tools
-    $toolsDir = Join-Path $out 'tools'
-    dotnet tool install --tool-path $toolsDir vpk --version 1.2.0
-    if ($LASTEXITCODE -ne 0) { throw 'vpk 安装失败（需要 .NET SDK）；只到 app-image 可加 -SkipVpk 重跑' }
-    $vpk = Join-Path $toolsDir 'vpk.exe'
-    & $vpk pack --packId Yxi --packVersion $cfgV --packDir $appImage --mainExe Yxi.exe --packTitle Yxi --packAuthors Yxi `
-        --icon $icon --noPortable --skipVeloAppCheck --outputDir (Join-Path $out 'Releases')
+    # 两台机器两种打法，pack 参数完全一致：
+    #   传了 -VpkDllPath：只有 .NET 运行库没有 SDK 的机器——用现有 dotnet 直接跑官方 nupkg 解包的 vpk.dll，不安装任何工具
+    #   没传：有 SDK——vpk 私有装进输出目录 tools（--tool-path），绝不 -g 全局安装；卸载 = 删 <OutputDir>\tools
+    $packArgs = @('pack','--packId','Yxi','--packVersion',$cfgV,'--packDir',$appImage,'--mainExe','Yxi.exe',
+        '--packTitle','Yxi','--packAuthors','Yxi','--icon',$icon,'--noPortable','--skipVeloAppCheck',
+        '--outputDir',(Join-Path $out 'Releases'))
+    if ($VpkDllPath) {
+        $vpkDll = (Resolve-Path -LiteralPath $VpkDllPath).Path
+        & dotnet $vpkDll @packArgs
+    } else {
+        $toolsDir = Join-Path $out 'tools'
+        dotnet tool install --tool-path $toolsDir vpk --version 1.2.0
+        if ($LASTEXITCODE -ne 0) { throw 'vpk 安装失败（需要 .NET SDK）；无 SDK 的机器改传 -VpkDllPath，只到 app-image 可加 -SkipVpk 重跑' }
+        & (Join-Path $toolsDir 'vpk.exe') @packArgs
+    }
     if ($LASTEXITCODE -ne 0) { throw 'vpk pack failed' }
     Get-ChildItem (Join-Path $out 'Releases') | ForEach-Object { Write-Output ("Releases/ " + $_.Name + " " + $_.Length) }
 }
