@@ -91,6 +91,8 @@ fun MePane(state: AppState) {
             Column(Modifier.widthIn(max = 640.dp).fillMaxWidth()) {
                 Text("我的", style = MaterialTheme.typography.titleLarge, color = t.textPrimary)
                 Spacer(Modifier.height(16.dp))
+                ConnectionIdentityCard(state)
+                Spacer(Modifier.height(16.dp))
 
                 val me = MeAuth.me
                 when {
@@ -131,6 +133,28 @@ fun MePane(state: AppState) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ConnectionIdentityCard(state: AppState) {
+    val t = Tokens.current
+    val conn = state.conn
+    val controller = state.codexWorkspace.controllers[state.codexSelectedTaskKey]
+    Card {
+        Text("账号与连接", style = MaterialTheme.typography.titleMedium, color = t.textPrimary)
+        Spacer(Modifier.height(10.dp))
+        Text("Yxi 账号 · " + if (MeAuth.signedIn) "已登录" else "未登录", style = MaterialTheme.typography.bodyMedium)
+        Text("用于会员、钱包与信箱。", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+        Spacer(Modifier.height(10.dp))
+        Text("服务器身份", style = MaterialTheme.typography.bodyMedium)
+        Text(if (conn == null) "尚未选择服务器" else "${conn.host.label} · ${conn.host.username}@${conn.host.hostname}:${conn.host.port}", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+        if (conn != null) Text(if (conn.ssh.isConnected) "SSH 已连接" else "SSH 未连接", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+        Spacer(Modifier.height(10.dp))
+        Text("Agent 提供方", style = MaterialTheme.typography.bodyMedium)
+        Text(controller?.configuredProvider?.takeIf { it.isNotBlank() }?.let { "当前 Codex 连接配置：$it" } ?: "由所选服务器的运行器配置管理", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+        Text("提供方认证状态尚未检查；Yxi 登录和 SSH 连接不代表模型账号已登录。", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+        if (conn != null) TextButton({ state.openRoutes() }) { Text("管理服务器线路") }
     }
 }
 
