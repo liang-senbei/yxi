@@ -61,6 +61,8 @@ private fun CodexConversationPane(state: AppState) {
     var creating by remember { mutableStateOf(false) }
     var directory by remember { mutableStateOf(state.session?.cwd.orEmpty()) }
     var title by remember { mutableStateOf("") }
+    var recoveryId by remember { mutableStateOf("") }
+    var recovering by remember { mutableStateOf(false) }
     var filePath by remember(state.codexSelectedTaskKey) { mutableStateOf("") }
     var fileEntry by remember(state.codexSelectedTaskKey) { mutableStateOf(false) }
     var showFiles by remember(state.codexSelectedTaskKey) { mutableStateOf(false) }
@@ -126,7 +128,8 @@ private fun CodexConversationPane(state: AppState) {
                 Text(conn?.host?.label ?: "请先从左侧选择服务器", color = Tokens.current.textMuted)
             }
             TextButton({ state.page = Page.Workspace }) { Text("返回工作区") }
-            Button({ creating = !creating }, enabled = conn?.ssh?.isConnected == true && !workspace.busy) { Text("新任务") }
+            TextButton({ recovering = !recovering; creating = false; recoveryId = workspace.recoveryThreadId }, enabled = conn?.ssh?.isConnected == true && !workspace.busy) { Text("恢复任务") }
+            Button({ creating = !creating; recovering = false }, enabled = conn?.ssh?.isConnected == true && !workspace.busy) { Text("新任务") }
         }
         if (workspace.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (workspace.registry.error.isNotBlank()) Text(workspace.registry.error, color = Tokens.current.danger)
@@ -134,11 +137,32 @@ private fun CodexConversationPane(state: AppState) {
         if (workspace.recoveryThreadId.isNotBlank()) SelectionContainer {
             Text("任务已在服务器创建，请保留恢复编号：${workspace.recoveryThreadId}")
         }
+        if (recovering && conn != null) {
+            OutlinedTextField(recoveryId, { recoveryId = it }, label = { Text("现有 Codex 任务编号") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            Text("从当前服务器恢复历史，不会新建对话或发送指令。", color = Tokens.current.textMuted, style = MaterialTheme.typography.bodySmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button({
+                    val target = conn
+                    val id = recoveryId
+                    act {
+                        val record = workspace.recover(target, id, "")
+                        workspace.open(target, record)
+                        if (state.conn === target) state.codexSelectedTaskKey = record.key
+                        recovering = false
+                    }
+                }, enabled = recoveryId.isNotBlank() && !workspace.busy) { Text("恢复") }
+                TextButton({ recovering = false }) { Text("取消") }
+            }
+        }
         if (creating && conn != null) {
             OutlinedTextField(title, { title = it }, label = { Text("任务名称") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(directory, { directory = it }, label = { Text("服务器项目目录") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton({ showFiles = !showFiles }) { Text(if (showFiles) "返回对话" else "项目文件") }
+                TextButton({
+                    runCatching { java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(java.awt.datatransfer.StringSelection(selected.threadId), null) }
+                        .onFailure { error = "任务编号复制失败：${it.message}" }
+                }) { Text("复制任务编号") }
                 Button({
                     val target = conn
                     val path = directory.trim()

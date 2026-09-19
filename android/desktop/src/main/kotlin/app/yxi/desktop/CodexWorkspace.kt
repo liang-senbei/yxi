@@ -125,6 +125,33 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File) :
         finally { busy = false }
     }
 
+    /** Import an existing server thread without creating a replacement or sending a turn. */
+    suspend fun recover(conn: Conn, threadId: String, title: String): CodexTaskRecord = operations.withLock {
+        registry.requireWritable()
+        val id = threadId.trim()
+        require(id.isNotBlank() && id.length <= 256 && id.none { it.isWhitespace() || it < ' ' }) { "请输入有效的任务编号" }
+        val hostKey = projectKey(conn.host, "/")
+        registry.records.firstOrNull { it.hostKey == hostKey && it.threadId == id }?.let { return@withLock it }
+        check(conn.ssh.isConnected) { "请先连接服务器" }
+        busy = true
+        val client = try { CodexAppServer.connect(conn.ssh) } catch (e: Exception) { busy = false; throw e }
+        try {
+            val thread = client.resumeThread(id).getJSONObject("result").getJSONObject("thread")
+            check(thread.getString("id") == id) { "恢复响应不属于原任务" }
+            val directory = thread.getString("cwd")
+            require(directory.startsWith('/') && directory.none { it < ' ' }) { "服务器返回的项目目录无效" }
+            val record = CodexTaskRecord(hostKey, id, directory,
+                title.trim().ifBlank { thread.optString("name").takeUnless { it == "null" }.orEmpty().ifBlank { directory.substringAfterLast('/').ifBlank { "恢复的任务" } } },
+                System.currentTimeMillis())
+            recoveryThreadId = id
+            registry.save(record)
+            recoveryThreadId = ""
+            attach(conn, record, client)
+            record
+        } catch (e: Exception) { client.close(); throw e }
+        finally { busy = false }
+    }
+
     private suspend fun attach(conn: Conn, record: CodexTaskRecord, client: CodexAppServer): CodexTaskController {
         val controller = CodexTaskController(record.key, record.threadId, client, queue)
         try { controller.reconcile() } catch (e: Exception) { controller.close(); throw e }
