@@ -1002,3 +1002,9 @@
 
 - 修复WorkspaceNavigation读取失败后仍允许重命名/置顶/归档写入的问题：读取原文件及备份均失败时保留错误并拒绝后续覆盖，不再用空内存状态覆盖旧整理记录。正常读取/备份恢复不受影响。
 - 协议Agent任务范围收紧为已有用例优先执行；恢复专项由logto承担，避免重复写整套Workspace测试。未跑本地测试，损坏记录后点击整理操作的检查留给验证清单。
+
+## 第一百四十轮：第二份Windows候选包
+
+- accfaf5的Windows目标jar由cc-yxi构建，本机传输完成；打包脚本生成app-image及Setup，未运行Smoke、未安装或发布。SHA256为8d37e4018f7440f983d4d56479bb476366997c33a81197fd7d88912446561d04。
+- 本机交付目录：父工作区artifacts/windows-accfaf5/package；Start-Yxi-Trial.cmd使用独立trial-profile。保留旧3152af0包。Setup未签名，新包未做Windows实机启动验证。
+- 通用协议30项有阶段性通过记录，但消息合并首轮失败原因仍待Agent最终说明；不将候选包或编译成功视为整份PRD完成。恢复专项4项范围见验证汇总。
