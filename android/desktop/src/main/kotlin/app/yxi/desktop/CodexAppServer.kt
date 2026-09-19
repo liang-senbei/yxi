@@ -50,6 +50,8 @@ internal class CodexAppServer internal constructor(private val shell: SshSession
 
     suspend fun authenticationSummary(): String {
         val result = request("account/read", JSONObject().put("refreshToken", false)).getJSONObject("result")
+        require(result.opt("requiresOpenaiAuth") is Boolean) { "运行器认证响应格式无法识别" }
+        require(!result.has("account") || result.isNull("account") || result.opt("account") is JSONObject) { "运行器认证响应格式无法识别" }
         return when (result.optJSONObject("account")?.optString("type")) {
             "chatgpt" -> "运行器已保存 ChatGPT 登录"
             "apiKey" -> "运行器使用 API Key 认证"
