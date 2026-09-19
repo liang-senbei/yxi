@@ -62,7 +62,12 @@ internal suspend fun runDeferredRoute(state: AppState, request: DeferredRoute) {
                 delay(2000)
                 if (state.deferredRoute !== request) return
                 val conn = request.conn
-                if (conn !in state.conns || !conn.ssh.isConnected) {
+                if (conn !in state.conns) {
+                    state.deferredRouteNotice = "${conn.host.label} 的连接已移除，等待切换已取消；未写入配置。"
+                    state.deferredRoute = null
+                    return
+                }
+                if (!conn.ssh.isConnected) {
                     request.status = "等待原服务器重新连接"
                     continue
                 }
