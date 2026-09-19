@@ -105,6 +105,29 @@ class DeferredRouteRunnerTest {
         state.deferredRoute = null
     }
 
+    /**
+     * a1fcdb8（D1 观察的落地）：主机被**移除**（而非掉线）→ 下一个 tick 内取消等待，
+     * 通知说明「未写入」，不再无限等待。仅 ssh 断开、conn 还在列表的行为由上一条用例守住。
+     */
+    @Test fun `removing the connection cancels the wait with a not written notice`() = runBlocking {
+        val state = AppState()
+        val conn = Conn(Host("h", "离线主机", "127.0.0.1", 1), FileHostKeys())  // 端口 1：连不上，也不需要连上
+        state.conns.add(conn)
+        val l = claudeLine("L1", "线A", "https://a.invalid/v1")
+
+        val request = DeferredRoute(conn, l, null, listOf(l))
+        state.deferredRoute = request
+        val job = launch { runDeferredRoute(state, request) }
+        await { request.status == "等待原服务器重新连接" }  // 先确认走的是「等重连」（conn 仍在列表）
+        state.conns.remove(conn)  // 用户删除主机
+        await(6000) { job.isCompleted }  // 两个 tick 内自行退出 = 不再等待
+        assertTrue(state.deferredRouteNotice.contains("连接已移除"), "应说明取消原因：${state.deferredRouteNotice}")
+        assertTrue(state.deferredRouteNotice.contains("未写入配置"), "应说明未写入：${state.deferredRouteNotice}")
+        assertNull(state.deferredRoute)
+        assertFalse(request.applying)
+        assertEquals("等待原服务器重新连接", request.status, "请求停在等待态，未进入写入")
+    }
+
     /** 其余分支需要能连、能写、能造 tmux 会话的隔离环境。 */
     @Test fun `deferred route over real ssh waits cancels recovers and writes`() = runBlocking {
         val fixture = System.getenv("YXI_ROUTE_FIXTURE")
