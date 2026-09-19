@@ -10,8 +10,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
-data class PendingWork(val files: List<String>, val drafts: Int, val feedback: Int, val operations: Int, val waitingRoutes: List<String> = emptyList()) {
-    val needsReview get() = files.isNotEmpty() || drafts > 0 || feedback > 0 || operations > 0 || waitingRoutes.isNotEmpty()
+data class PendingWork(val files: List<String>, val drafts: Int, val feedback: Int, val operations: Int, val waitingRoutes: List<String> = emptyList(), val codexTurns: Int = 0) {
+    val needsReview get() = files.isNotEmpty() || drafts > 0 || feedback > 0 || operations > 0 || waitingRoutes.isNotEmpty() || codexTurns > 0
     val canDiscard get() = operations == 0
 }
 
@@ -21,9 +21,10 @@ internal fun pendingWorkOf(documents: List<FileDocument>, drafts: List<String>, 
     documents.count { it.busy } + browsers.count { it.preparing || it.stylePending != null || it.capturing },
 )
 fun AppState.pendingWork() = pendingWorkOf(documents, chatDrafts.values.map { it.value.text }, browsers.values).let {
-    it.copy(operations = it.operations + instructions.entries.count { item -> item.status == InstructionStatus.Delivering } + support.running.size + pluginOperations.running.size + serviceControllers.values.count { service -> service.mutating } + (if (VoiceActivity.busy) 1 else 0) + (if (deferredRoute?.applying == true) 1 else 0),
+    it.copy(operations = it.operations + instructions.entries.count { item -> item.status == InstructionStatus.Delivering } + support.running.size + pluginOperations.running.size + serviceControllers.values.count { service -> service.mutating } + (if (VoiceActivity.busy) 1 else 0) + (if (deferredRoute?.applying == true) 1 else 0) + (if (codexWorkspace.busy) 1 else 0),
         drafts = it.drafts + support.editors.values.count { edit -> edit.dirty } + serviceEditors.values.count { edit -> edit.dirty } + (if (VoiceActivity.hasDraft) 1 else 0),
-        waitingRoutes = deferredRoute?.takeIf { request -> !request.applying }?.let { request -> listOf("${request.conn.host.label} · ${request.line.name}") }.orEmpty())
+        waitingRoutes = deferredRoute?.takeIf { request -> !request.applying }?.let { request -> listOf("${request.conn.host.label} · ${request.line.name}") }.orEmpty(),
+        codexTurns = codexWorkspace.controllers.values.count { controller -> controller.activeTurnId != null })
 }
 
 @Composable
@@ -39,8 +40,9 @@ fun ExitReviewDialog(work: PendingWork, onCancel: () -> Unit, onDiscard: () -> U
             if (work.drafts > 0) Text("${work.drafts} 处仍有未保存或未发送的输入", Modifier.padding(top = 8.dp))
             if (work.feedback > 0) Text("${work.feedback} 个网页预览有尚未加入对话的反馈", Modifier.padding(top = 8.dp))
             work.waitingRoutes.forEach { route -> Text("等待切换线路：$route；退出后不会继续执行。", Modifier.padding(top = 8.dp), color = Tokens.current.warning) }
+            if (work.codexTurns > 0) Text("${work.codexTurns} 个 Codex 任务轮次仍在进行。退出会断开连接，重新打开后需核对结果。", Modifier.padding(top = 8.dp), color = Tokens.current.warning)
             if (work.operations > 0) Text("仍有保存、投递或配置操作未完成，请等待结果后再退出。", Modifier.padding(top = 12.dp), color = Tokens.current.warning)
-            else Text(if (work.needsReview) "退出会丢弃这些本机编辑和草稿；服务器会话不会被停止。" else "当前没有待保存内容，可以退出。", Modifier.padding(top = 12.dp), style = MaterialTheme.typography.bodySmall)
+            else Text(if (work.codexTurns > 0) "已保存的指令和任务登记会保留；尚未保存的编辑和草稿将丢弃。" else if (work.needsReview) "退出会丢弃这些本机编辑和草稿；服务器会话不会被停止。" else "当前没有待保存内容，可以退出。", Modifier.padding(top = 12.dp), style = MaterialTheme.typography.bodySmall)
         } },
         confirmButton = { TextButton(onCancel) { Text("继续编辑") } },
         dismissButton = { TextButton(onDiscard, enabled = work.canDiscard) { Text(if (work.needsReview) "丢弃并退出" else "退出", color = Tokens.current.danger) } })

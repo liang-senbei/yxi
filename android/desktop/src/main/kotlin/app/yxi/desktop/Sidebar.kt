@@ -106,6 +106,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
         // 这台的指纹弹窗还挂着就按「取消」答掉，不然 jsch 的 connect 线程会一直等到超时
         keys.pending?.takeIf { it.host == keys.jschHost(h) }?.answer?.complete(false)
         val c = connOf(h) ?: return
+        state.codexWorkspace.disconnect(c)
         c.close(); state.conns.remove(c)
         if (state.conn === c) { state.rememberTaskView(); state.conn = null; state.session = null }
     }
