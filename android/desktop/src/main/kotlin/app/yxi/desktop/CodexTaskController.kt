@@ -35,6 +35,10 @@ internal class CodexTaskController(
     var selectedEffort by mutableStateOf<String?>(null); private set
     var modelsLoading by mutableStateOf(false); private set
     var modelError by mutableStateOf(""); private set
+    var reportedModel by mutableStateOf(""); private set
+    var reportedProvider by mutableStateOf(""); private set
+    var modelNotice by mutableStateOf(""); private set
+    private var modelReportRevision = 0L
     var ready by mutableStateOf(false); private set
     var sending by mutableStateOf(false); private set
     var activeTurnId by mutableStateOf<String?>(null); private set
@@ -62,6 +66,11 @@ internal class CodexTaskController(
                         note = "运行器正在等待处理请求"
                     }
                     when (method) {
+                        "model/rerouted" -> {
+                            modelReportRevision++
+                            reportedModel = params.getString("toModel")
+                            modelNotice = "运行器将本轮模型从 ${params.optString("fromModel")} 调整为 $reportedModel"
+                        }
                         "item/started", "item/completed" -> params.optJSONObject("item")?.let { recordItem(it) }
                         "item/agentMessage/delta" -> {
                             val id = params.getString("itemId")
@@ -92,6 +101,7 @@ internal class CodexTaskController(
     suspend fun reconcile(createdThread: JSONObject? = null) = mutation.withLock {
         ready = false
         val revision = eventRevision
+        val modelRevision = modelReportRevision
         // Fresh thread/start already returns the authoritative empty thread. CLI 0.153.4
         // rejects includeTurns immediately after start (list_turns is not supported yet).
         // Do not turn that unsupported history request into a failed creation.
@@ -104,6 +114,10 @@ internal class CodexTaskController(
             else JSONObject().put("result", JSONObject().put("thread", createdThread))
         val thread = response.getJSONObject("result").getJSONObject("thread")
         check(thread.getString("id") == threadId) { "运行器返回了不同任务" }
+        if (modelRevision == modelReportRevision) {
+            reportedModel = thread.optString("model").takeUnless { it == "null" }.orEmpty()
+            reportedProvider = thread.optString("modelProvider").takeUnless { it == "null" }.orEmpty()
+        }
         val turns = thread.getJSONArray("turns")
         val streamedIds = messages.map { it.id }.toSet()
         val historical = mutableListOf<CodexMessage>()

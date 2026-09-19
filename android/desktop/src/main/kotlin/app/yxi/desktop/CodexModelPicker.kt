@@ -48,6 +48,10 @@ internal fun CodexModelPicker(controller: CodexTaskController, onRoutes: () -> U
             TextButton(onRoutes) { Text("线路设置") }
         }
         if (controller.selectedModel != null) Text("用于之后发送的轮次；引导消息沿用当前轮次模型。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+        if (controller.reportedModel.isNotBlank()) Text(
+            "运行器最近报告：" + listOf(controller.reportedProvider, controller.reportedModel).filter { it.isNotBlank() }.joinToString(" · "),
+            style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+        if (controller.modelNotice.isNotBlank()) Text(controller.modelNotice, style = MaterialTheme.typography.bodySmall, color = Tokens.current.warning)
         if (controller.modelError.isNotBlank()) Text(controller.modelError, style = MaterialTheme.typography.bodySmall, color = Tokens.current.danger)
     }
 }
