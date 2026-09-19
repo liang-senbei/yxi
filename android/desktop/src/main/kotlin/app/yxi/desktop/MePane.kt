@@ -142,6 +142,9 @@ private fun ConnectionIdentityCard(state: AppState) {
     val conn = state.conn
     val task = conn?.let { state.codexWorkspace.tasks(it.host).firstOrNull { task -> task.key == state.codexSelectedTaskKey } }
     val controller = task?.let { state.codexWorkspace.controllers[it.key] }
+    val scope = rememberCoroutineScope()
+    var authSummary by remember(conn) { mutableStateOf("") }
+    var readingAuth by remember(conn) { mutableStateOf(false) }
     Card {
         Text("账号与连接", style = MaterialTheme.typography.titleMedium, color = t.textPrimary)
         Spacer(Modifier.height(10.dp))
@@ -154,7 +157,18 @@ private fun ConnectionIdentityCard(state: AppState) {
         Spacer(Modifier.height(10.dp))
         Text("Agent 提供方", style = MaterialTheme.typography.bodyMedium)
         Text(controller?.configuredProvider?.takeIf { it.isNotBlank() }?.let { "当前 Codex 连接配置：$it" } ?: "由所选服务器的运行器配置管理", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
-        Text("提供方认证状态尚未检查；Yxi 登录和 SSH 连接不代表模型账号已登录。", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+        Text(authSummary.ifBlank { "提供方认证状态尚未检查；Yxi 登录和 SSH 连接不代表模型账号已登录。" }, style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+        if (conn != null) TextButton({
+            readingAuth = true
+            scope.launch {
+                try {
+                    val result = CodexAppServer.connect(conn.ssh).use { it.authenticationSummary() }
+                    if (state.conn === conn) authSummary = "$result。此查询不验证模型请求是否可用。"
+                } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (_: Exception) { if (state.conn === conn) authSummary = "认证状态未读到，请检查服务器连接与 Codex 版本后重试。" }
+                finally { readingAuth = false }
+            }
+        }, enabled = conn.ssh.isConnected && !readingAuth) { Text(if (readingAuth) "正在查询…" else "查询 Codex 认证") }
         if (conn != null) TextButton({ state.openRoutes() }) { Text("管理服务器线路") }
     }
 }

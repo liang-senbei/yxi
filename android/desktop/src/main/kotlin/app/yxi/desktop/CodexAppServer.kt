@@ -48,6 +48,17 @@ internal class CodexAppServer internal constructor(private val shell: SshSession
         }
     }
 
+    suspend fun authenticationSummary(): String {
+        val result = request("account/read", JSONObject().put("refreshToken", false)).getJSONObject("result")
+        return when (result.optJSONObject("account")?.optString("type")) {
+            "chatgpt" -> "运行器已保存 ChatGPT 登录"
+            "apiKey" -> "运行器使用 API Key 认证"
+            "amazonBedrock" -> "运行器使用 Amazon Bedrock 认证"
+            null -> if (result.optBoolean("requiresOpenaiAuth", true)) "运行器尚未登录 OpenAI 账号" else "当前提供方不要求 OpenAI 登录"
+            else -> "运行器返回了暂不支持的认证类型"
+        }
+    }
+
     suspend fun request(method: String, params: JSONObject, timeoutMs: Long = 30000): JSONObject {
         check(!closed.get()) { "运行器连接已关闭" }
         val id = "yxi-" + UUID.randomUUID().toString()
