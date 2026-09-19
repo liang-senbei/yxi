@@ -6,6 +6,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.test.assertFailsWith
 
 /**
  * b2dc537 兑换码结果文案的解析核对（W07）：会员 / 余额券 / replay / revoked 四种结果 +
@@ -15,10 +16,10 @@ import kotlin.test.assertTrue
 class RedeemCodeTest {
     private fun msg(o: String) = redemptionMessage(JSONObject(o))
 
-    /** 会员码：没有服务端 msg、kind 不是 balance → 会员成功文案（{} 也是这个兜底）。 */
+    /** 会员结果可识别才显示成功；空回复必须留待核对。 */
     @Test fun `membership result`() {
         assertEquals("兑换成功，会员权益已更新。", msg("""{"kind":"membership"}"""))
-        assertEquals("兑换成功，会员权益已更新。", msg("{}"))
+        assertFailsWith<IllegalStateException> { msg("{}") }
     }
 
     /** 余额券：金额/余额取自 amountCents/balanceCents，格式交给 AccountApi.yuan（本地不写死）。 */
