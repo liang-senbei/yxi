@@ -1,11 +1,14 @@
 package app.yxi.desktop
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
@@ -31,12 +34,12 @@ fun SettingsDialog(state: AppState) {
         confirmButton = { TextButton({ state.showSettings = false }) { Text("完成") } },
         title = { Text("设置") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Section("常规")
                 SwitchRow("关闭窗口时留在托盘", Store.pref("closeToTray", "1") == "1") { Store.setPref("closeToTray", if (it) "1" else "0") }
                 SwitchRow("开机自启", autostart, enabled = isWindows) { autostart = it; setAutostart(it) }
                 SwitchRow("启动时重连上次主机", Store.pref("reconnectOnStart", "1") == "1") { Store.setPref("reconnectOnStart", if (it) "1" else "0") }
-                Section("外观")
+                Section("输入历史")
                 Choice("已结束输入正文保留", listOf("0" to "一直保留", "3" to "3天", "7" to "7天", "30" to "30天"), Store.pref("inputRetentionDays", "0")) { value ->
                     runCatching {
                         Store.setPref("inputRetentionDays", value)
@@ -46,6 +49,7 @@ fun SettingsDialog(state: AppState) {
                 }
                 Text("仅清理已结束记录的正文、附件引用和详细回执；保留去重标识，待发送/运行中/待核对及无时间的旧记录不清理。服务器对话不受影响。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 if (retentionError.isNotBlank()) Text(retentionError, color = Tokens.current.danger, style = MaterialTheme.typography.bodySmall)
+                Section("外观")
                 Choice("主题", listOf("system" to "跟随系统", "light" to "浅色", "dark" to "深色"), Store.pref("theme", "system")) { Store.setPref("theme", it) }
                 Section("通知")
                 Choice("轮次完成 / 需要你处理", listOf("always" to "始终", "unfocused" to "仅在未聚焦时", "never" to "从不"), Store.pref("notify", "unfocused")) { Store.setPref("notify", it) }
