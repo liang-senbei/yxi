@@ -888,3 +888,10 @@
 - 整合 logto 的线路 TOML 测试及默认线路钥匙清理（原提交88e4bef、7ffd10f），pilot 的 reserved 提示（f2777eb）。沿用各自报告，不在中枢重跑验证。
 - 修复 UI Agent 已复现 N3：按 porcelain XY 分别过滤已暂存/未暂存文件，未跟踪只在未暂存出现；切换范围清除旧选中项，刷新后不显示已离开范围的差异。
 - Windows 打包脚本14bdd0b仍缺显式版本参数、完整配置隔离和私有工具路径，未合入执行；交 cc-yxi 收尾。新集成版本回归继续委派 hk13 四位 Agent。
+
+## 第一百二十一轮：Windows 首包产物已生成（2026-09-19）
+
+- 应用固定源码3152af040da1b8316ecc8cbb009a8c3836c182a6，Windows JAR传输完成，SHA256 fecaf5f0d63237e5c973318d965d22e964a0a3eb3874e530c3a83a8caedff5db。
+- 本机使用JDK21 jpackage生成package/Yxi原生app-image，使用官方vpk1.2.0私有NuGet包net8版本生成Releases/Yxi-win-Setup.exe；无SDK环境无需全局安装工具。
+- 交付根目录：C:/Users/dfhzw/Documents/ChatGPT/Yunxi/artifacts/windows-3152af0/package。已附独立profile启动脚本、README和源码清单。未启动应用、未安装、未执行Windows回归、未签名/发布。
+- 首包不包含后续d43449e/ee677ae执行层变更，完整PRD仍未完成。后续验证继续由hk13 Agent负责并明确Windows环境限制。
