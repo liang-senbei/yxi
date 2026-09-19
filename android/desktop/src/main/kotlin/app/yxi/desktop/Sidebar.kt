@@ -51,6 +51,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -72,11 +74,14 @@ import java.util.UUID
 @Composable
 fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
     val t = Tokens.current
+    val scope = rememberCoroutineScope()
     var hosts by remember { mutableStateOf(Store.hosts()) }
     var editing by remember { mutableStateOf<Host?>(null) }
     var coloring by remember { mutableStateOf<Host?>(null) }
     var deleting by remember { mutableStateOf<Host?>(null) }
     var creatingOn by remember { mutableStateOf<Conn?>(null) }
+    var creatingFavorite by remember { mutableStateOf<FavoriteLaunch?>(null) }
+    var openingFavorite by remember { mutableStateOf(false) }
     var installingKey by remember { mutableStateOf<Host?>(null) }
     var note by remember { mutableStateOf("") }       // 不属于某条连接的错（Conn 都没建出来）
     var importing by remember { mutableStateOf<HostImportPlan?>(null) }
@@ -232,7 +237,11 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
                 val c = connOf(h)
                 val sessions = c?.sessions?.filter { f.isEmpty() || h.label.contains(f, true) || h.region.contains(f, true) || it.short.contains(f, true) || it.name.contains(f, true) || it.cwd.contains(f, true) || state.navigation.title(taskNavigationKey(h, it))?.contains(f, true) == true } ?: emptyList()
                 val hostMatch = f.isEmpty() || h.label.contains(f, ignoreCase = true) || h.region.contains(f, ignoreCase = true)
-                if (!hostMatch && sessions.isEmpty()) return@forEachIndexed   // 滤空的整组不画，省得滚动列表里全是空组
+                val favorites = if (state.navigation.mode == "全部") state.navigation.favorites(h).filter { favorite ->
+                    (hostMatch || favorite.title.contains(f, true) || favorite.directory.contains(f, true)) &&
+                        c?.sessions?.none { taskNavigationKey(h, it) == favorite.key } != false
+                } else emptyList()
+                if (!hostMatch && sessions.isEmpty() && favorites.isEmpty()) return@forEachIndexed
                 Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
                     Box(Modifier.width(3.dp).fillMaxHeight().background(h.tint(i)))   // 连接颜色条，整组都带着
                     Column(Modifier.weight(1f)) {
@@ -256,6 +265,31 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
                             ProjectTree(state, c, sessions, searching = f.isNotEmpty())
                             if (f.isEmpty() && c.status == Conn.Status.Connected && c.sessions.isEmpty())
                                 Text("这台机器上还没有会话", Modifier.padding(start = 24.dp, bottom = 6.dp), style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+                        }
+                        if (favorites.isNotEmpty()) Text("收藏 · 未启用", Modifier.padding(start = 18.dp, top = 8.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+                        favorites.forEach { favorite ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                TextButton({ if (c != null) {
+                                    openingFavorite = true
+                                    scope.launch {
+                                        try {
+                                            c.refresh()
+                                            check(c.ssh.isConnected) { "请先连接服务器" }
+                                            val live = c.sessions.firstOrNull { taskNavigationKey(h, it) == favorite.key }
+                                            if (live != null) state.select(c, live)
+                                            else { creatingFavorite = favorite; creatingOn = c }
+                                        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                                        catch (e: Exception) { note = e.message.orEmpty() }
+                                        finally { openingFavorite = false }
+                                    }
+                                } }, Modifier.weight(1f), enabled = c?.status == Conn.Status.Connected && !openingFavorite) {
+                                    Column {
+                                        Text(favorite.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(favorite.directory, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                }
+                                TextButton({ state.navigation.removeFavorite(favorite.key) }) { Text("×") }
+                            }
                         }
                     }
                 }
@@ -284,12 +318,17 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
             dismissButton = { TextButton({ deleting = null }) { Text("取消") } },
         )
     }
-    creatingOn?.let { c -> NewSessionDialog(c, onDismiss = { creatingOn = null }, onCodexConversation = { directory, prompt ->
+    creatingOn?.let { c -> NewSessionDialog(c, onDismiss = { creatingOn = null; creatingFavorite = null }, onCodexConversation = { directory, prompt ->
         creatingOn = null
+        creatingFavorite = null
         state.prepareCodexTask(c, directory, prompt)
-    }) { s ->
+    }, initialDirectory = creatingFavorite?.directory, initialAgent = creatingFavorite?.agent) { s ->
         val key = taskNavigationKey(c.host, s)
-        if (state.navigation.title(key) == null) state.navigation.rename(key, "新对话 · " + if (s.isCodex) "Codex" else "Claude Code")
+        if (state.navigation.title(key) == null) state.navigation.rename(key, creatingFavorite?.title ?: ("新对话 · " + if (s.isCodex) "Codex" else "Claude Code"))
+        creatingFavorite?.let { favorite ->
+            state.navigation.moveFavorite(favorite.key, key, c.host, s)
+        }
+        creatingFavorite = null
         creatingOn = null
         state.select(c, s)
     } }

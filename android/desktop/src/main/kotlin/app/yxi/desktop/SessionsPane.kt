@@ -92,13 +92,13 @@ fun SessionRow(s: Session, selected: Boolean, displayName: String? = null, onCli
  * 出错留在弹窗里显示，成了才关；成了把新会话交给 [onCreated]。
  */
 @Composable
-fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: String = "", groupContext: String = "", onCodexConversation: ((String, String) -> Unit)? = null, onCreated: (Session) -> Unit) {
+fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: String = "", groupContext: String = "", onCodexConversation: ((String, String) -> Unit)? = null, initialDirectory: String? = null, initialAgent: String? = null, onCreated: (Session) -> Unit) {
     val scope = rememberCoroutineScope()
     // 预填现有会话的父目录（工作区），只用补项目名；不写死路径，换台机器就不一样
-    var path by remember { mutableStateOf(Dirs.parentsOf(conn.sessions.map { it.cwd }).firstOrNull()?.let { "$it/" }.orEmpty()) }
+    var path by remember { mutableStateOf(initialDirectory ?: Dirs.parentsOf(conn.sessions.map { it.cwd }).firstOrNull()?.let { "$it/" }.orEmpty()) }
     var err by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    var agent by remember { mutableStateOf("claude") }
+    var agent by remember { mutableStateOf(initialAgent?.takeIf { it in listOf("claude", "codex") } ?: "claude") }
     var initialPrompt by remember { mutableStateOf(groupContext) }
     var isolatedWorktree by remember { mutableStateOf(false) }
     val requestId = remember(path, agent, initialPrompt, collaborationGroup, isolatedWorktree) { DesktopLaunchPlan.newRequestId() }
@@ -108,6 +108,7 @@ fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: Stri
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 WorkbenchTabs(listOf("Claude Code", "Codex"), if (agent == "codex") "Codex" else "Claude Code", { if (!busy) agent = if (it == "Codex") "codex" else "claude" })
+                if (initialDirectory != null) Text("从收藏目录启动新会话，不自动恢复旧对话或原协作组。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 Text("先检查运行器，再创建独立会话。目录不存在会创建；已有任务继续运行。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 OutlinedTextField(path, { path = it }, enabled = !busy, singleLine = true, label = { Text("服务器工作目录") }, placeholder = { Text("/opt/workspace/…") }, modifier = Modifier.fillMaxWidth())
                 Row(verticalAlignment = Alignment.CenterVertically) {

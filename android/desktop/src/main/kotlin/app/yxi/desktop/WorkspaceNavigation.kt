@@ -21,6 +21,7 @@ internal fun taskNavigationKey(host: Host, session: Session) = navigationKey(hos
 internal data class ProjectSection(val path: String, val sessions: List<Session>) {
     val label get() = path.substringAfterLast('/').ifBlank { if (path == "/") "/" else "未识别路径" }
 }
+internal data class FavoriteLaunch(val key: String, val title: String, val directory: String, val agent: String)
 internal fun projectSections(sessions: List<Session>): List<ProjectSection> = sessions.groupBy { normalizeProjectPath(it.cwd) }
     .map { (path, members) -> ProjectSection(path, members.sortedByDescending { it.lastActivity }) }
     .sortedWith(compareBy<ProjectSection> { it.label.lowercase() }.thenBy { it.path })
@@ -48,6 +49,34 @@ class WorkspaceNavigation(file: File) {
     fun pinOrder(key: String) = task(key).optInt("pin", Int.MAX_VALUE)
     fun archived(key: String) = task(key).optBoolean("archived", false)
     fun muted(key: String) = task(key).optBoolean("muted", false)
+    fun favorite(key: String) = task(key).optBoolean("favorite", false)
+    fun setFavorite(key: String, host: Host, session: Session, enabled: Boolean) = editTask(key) {
+        if (enabled) {
+            require(session.cwd.startsWith('/') && session.cwd.none { c -> c < ' ' }) { "收藏需要有效的服务器目录" }
+            it.put("favorite", true).put("favoriteHost", projectKey(host, "/"))
+                .put("favoritePath", session.cwd).put("favoriteAgent", if (session.isCodex) "codex" else "claude")
+                .put("favoriteTitle", title(key) ?: session.short)
+        } else it.put("favorite", false)
+    }
+    internal fun favorites(host: Host): List<FavoriteLaunch> {
+        val tasks = data.getJSONObject("tasks")
+        return tasks.keys().asSequence().mapNotNull { key ->
+            val item = tasks.getJSONObject(key)
+            if (!item.optBoolean("favorite") || item.optString("favoriteHost") != projectKey(host, "/")) null
+            else FavoriteLaunch(key, title(key) ?: item.optString("favoriteTitle"), item.optString("favoritePath"), item.optString("favoriteAgent"))
+                .takeIf { it.directory.startsWith('/') && it.agent in listOf("claude", "codex") }
+        }.sortedBy { it.title.lowercase() }.toList()
+    }
+    internal fun removeFavorite(key: String) = editTask(key) { it.put("favorite", false) }
+    internal fun moveFavorite(oldKey: String, newKey: String, host: Host, session: Session) = edit { root ->
+        require(session.cwd.startsWith('/') && session.cwd.none { it < ' ' })
+        val tasks = root.getJSONObject("tasks")
+        val item = tasks.optJSONObject(newKey) ?: JSONObject()
+        item.put("favorite", true).put("favoriteHost", projectKey(host, "/")).put("favoritePath", session.cwd)
+            .put("favoriteAgent", if (session.isCodex) "codex" else "claude").put("favoriteTitle", title(newKey) ?: session.short)
+        tasks.put(newKey, item)
+        if (oldKey != newKey) tasks.optJSONObject(oldKey)?.put("favorite", false)
+    }
     fun setMuted(key: String, value: Boolean) = editTask(key) { it.put("muted", value) }
     fun shouldNotify(key: String, onlyPinned: Boolean): Boolean {
         if (!readable || muted(key)) return false
