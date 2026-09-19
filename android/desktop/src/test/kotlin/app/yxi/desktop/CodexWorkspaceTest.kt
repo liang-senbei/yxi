@@ -16,6 +16,7 @@ class CodexWorkspaceTest {
 
     /** 真实登记文件 + 假运行器工厂；返回的清理函数关闭所有假进程。 */
     private fun workspace(dir: File, mode: String, threadId: String = "thr-1"): Pair<CodexWorkspace, () -> Unit> {
+        assumeFakeRunner()
         val runners = mutableListOf<FakeRunner>()
         val ws = CodexWorkspace(InstructionQueue(File(dir, "queue.json")), File(dir, "registry.json"))
         ws.clientFactory = { _ -> FakeRunner(mode, threadId).also { runners += it }.client }

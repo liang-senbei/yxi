@@ -14,6 +14,7 @@ class CodexTaskControllerTest {
         threadId: String = "thr-1",
         block: suspend (CodexTaskController, InstructionQueue, FakeRunner) -> Unit,
     ) {
+        assumeFakeRunner()
         val dir = Files.createTempDirectory("yxi-controller").toFile()
         try {
             FakeRunner(mode, threadId).use { runner ->

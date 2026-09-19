@@ -7,8 +7,19 @@ import com.jcraft.jsch.NullChannel
 import com.jcraft.jsch.UserInfo
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
+import org.junit.jupiter.api.Assumptions.assumeTrue
 import java.io.File
 import java.nio.file.Files
+
+/** 假 codex 需要 Python；不可用时按项目测试惯例 assumeTrue 跳过，不判失败。 */
+internal val fakeRunnerCommand: String? by lazy {
+    listOf("python3", "python").firstOrNull { command ->
+        runCatching { ProcessBuilder(command, "--version").start().waitFor() == 0 }.getOrDefault(false)
+    }
+}
+
+internal fun assumeFakeRunner() = assumeTrue(fakeRunnerCommand != null,
+    "Requires a local python3/python for the fake codex app-server fixture")
 
 /** 假 codex app-server 进程 + 进程管道桩替的 Shell；仅测试用，零模型/零网络/零登录。 */
 internal class FakeRunner(mode: String, threadId: String = "thr-1", otherThreadId: String = "thr-other") : AutoCloseable {
@@ -22,7 +33,8 @@ internal class FakeRunner(mode: String, threadId: String = "thr-1", otherThreadI
         val script = File(dir, "fake_codex.py")
         checkNotNull(FakeRunner::class.java.classLoader.getResourceAsStream("fake_codex.py")) { "缺少 fake_codex.py 资源" }
             .use { input -> script.outputStream().use { output -> input.copyTo(output) } }
-        val pb = ProcessBuilder("python3", script.absolutePath, "--mode", mode)
+        val pb = ProcessBuilder(checkNotNull(fakeRunnerCommand) { "假 codex 运行器需要 python3/python" },
+            script.absolutePath, "--mode", mode)
         pb.environment()["FAKE_LOG"] = log.absolutePath
         pb.environment()["FAKE_THREAD_ID"] = threadId
         pb.environment()["FAKE_OTHER_THREAD_ID"] = otherThreadId

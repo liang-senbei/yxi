@@ -8,6 +8,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
+import org.junit.jupiter.api.BeforeEach
 import kotlin.test.Test
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
@@ -15,6 +16,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 
 class CodexAppServerTest {
+
+    @BeforeEach
+    fun requireFakeRunner() { assumeFakeRunner() }
 
     @Test
     fun `out-of-order responses correlate by RPC id`() = runBlocking {
