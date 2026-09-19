@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Notifications and server approval requests remain raw events for the workspace controller.
  * Protocol: https://learn.chatgpt.com/docs/app-server
  */
-internal class CodexAppServer private constructor(private val shell: SshSession.Shell) : AutoCloseable {
+internal class CodexAppServer internal constructor(private val shell: SshSession.Shell) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val pending = ConcurrentHashMap<String, CompletableDeferred<JSONObject>>()
     private val serverRequests = ConcurrentHashMap<String, JSONObject>()

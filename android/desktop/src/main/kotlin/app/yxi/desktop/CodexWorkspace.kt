@@ -87,15 +87,18 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File) :
     private val operations = Mutex()
     var busy by mutableStateOf(false); private set
     var recoveryThreadId by mutableStateOf(""); private set
+    // 测试缝（机械改动，仅供离线协议测试注入假运行器；生产默认即真实实现）
+    internal var clientFactory: suspend (Conn) -> CodexAppServer = { CodexAppServer.connect(it.ssh) }
+    internal var connected: (Conn) -> Boolean = { it.ssh.isConnected }
 
     fun tasks(host: Host) = registry.records.filter { it.hostKey == projectKey(host, "/") }.sortedByDescending { it.createdAt }
 
     suspend fun create(conn: Conn, directory: String, title: String): CodexTaskRecord = operations.withLock {
         registry.requireWritable()
-        check(conn.ssh.isConnected) { "请先连接服务器" }
+        check(connected(conn)) { "请先连接服务器" }
         require(directory.startsWith('/') && directory.none { it < ' ' }) { "请输入服务器绝对目录" }
         busy = true; recoveryThreadId = ""
-        val client = try { CodexAppServer.connect(conn.ssh) } catch (e: Exception) { busy = false; throw e }
+        val client = try { clientFactory(conn) } catch (e: Exception) { busy = false; throw e }
         try {
             val thread = client.startThread(directory).getJSONObject("result").getJSONObject("thread")
             val id = thread.getString("id")
@@ -113,10 +116,10 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File) :
     suspend fun open(conn: Conn, record: CodexTaskRecord): CodexTaskController = operations.withLock {
         check(record.hostKey == projectKey(conn.host, "/")) { "任务不属于当前服务器配置" }
         controllers[record.key]?.takeIf { it.ready && owners[record.key] === conn }?.let { return@withLock it }
-        check(conn.ssh.isConnected) { "服务器未连接" }
+        check(connected(conn)) { "服务器未连接" }
         controllers.remove(record.key)?.close(); owners.remove(record.key)
         busy = true
-        val client = try { CodexAppServer.connect(conn.ssh) } catch (e: Exception) { busy = false; throw e }
+        val client = try { clientFactory(conn) } catch (e: Exception) { busy = false; throw e }
         try {
             val thread = client.resumeThread(record.threadId).getJSONObject("result").getJSONObject("thread")
             check(thread.getString("id") == record.threadId) { "恢复响应不属于原任务" }
