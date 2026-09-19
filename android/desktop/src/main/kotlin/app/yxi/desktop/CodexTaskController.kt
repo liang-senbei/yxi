@@ -104,6 +104,8 @@ internal class CodexTaskController(
         note = if (activeTurnId == null) "任务已就绪" else "当前轮次仍在进行"
     }
 
+    // JVM 签名避开属性 autoDispatch(private set) 的 setter（同为 setAutoDispatch(Z)V），Kotlin 调用侧不变
+    @JvmName("setAutoDispatchFlag")
     fun setAutoDispatch(enabled: Boolean) {
         autoDispatch = enabled && ready && !disposed
         if (autoDispatch) scheduleNext()
