@@ -51,10 +51,16 @@ internal fun DeferredRouteStatus(state: AppState) {
 @Composable
 internal fun DeferredRouteRunner(state: AppState) {
     val request = state.deferredRoute ?: return
-    LaunchedEffect(request.id) {
+    LaunchedEffect(request.id) { runDeferredRoute(state, request) }
+}
+
+/** Execution is separate from Compose; cancellation is checked before each polling cycle. */
+internal suspend fun runDeferredRoute(state: AppState, request: DeferredRoute) {
         try {
             while (true) {
+                if (state.deferredRoute !== request) return
                 delay(2000)
+                if (state.deferredRoute !== request) return
                 val conn = request.conn
                 if (conn !in state.conns || !conn.ssh.isConnected) {
                     request.status = "等待原服务器重新连接"
@@ -78,7 +84,7 @@ internal fun DeferredRouteRunner(state: AppState) {
                 // Reuse the same runtime configuration path as explicit application.
                 val current = Lines.list(conn.ssh) ?: error("无法读取线路清单，已取消等待")
                 check(routeCatalogEqual(current, request.catalog)) { "线路清单已改变，已取消等待；请重新选择" }
-                if (state.deferredRoute !== request) return@LaunchedEffect
+                if (state.deferredRoute !== request) return
                 request.applying = true
                 request.status = "正在写入配置"
                 withContext(NonCancellable) {
@@ -103,5 +109,4 @@ internal fun DeferredRouteRunner(state: AppState) {
             state.deferredRouteNotice = "${request.conn.host.label}：${e.message}"
             if (state.deferredRoute === request) state.deferredRoute = null
         }
-    }
 }
