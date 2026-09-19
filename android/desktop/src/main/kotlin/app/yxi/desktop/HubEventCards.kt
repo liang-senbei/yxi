@@ -11,7 +11,7 @@ import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
 private data class HubMessage(val id: String, val sender: String, val recipient: String, val body: String,
-    val stage: String, val time: String, val replyTo: String, val hasBody: Boolean, val recipientInstance: String)
+    val stage: String, val time: String, val replyTo: String, val hasBody: Boolean, val recipientInstance: String, val senderKind: String)
 
 @Composable
 internal fun HubEventCards(raw: String, query: String, requestReply: ((String, String, String) -> Unit)? = null, search: (String) -> Unit) {
@@ -28,7 +28,8 @@ internal fun HubEventCards(raw: String, query: String, requestReply: ((String, S
                 messages[id] = HubMessage(id, event.getString("sender"), event.getString("recipient"),
                     if (hasBody) event.optString("text") else old?.body.orEmpty(), event.getString("stage"),
                     event.optString("time"), event.optString("replyTo").ifBlank { old?.replyTo.orEmpty() }, hasBody || old?.hasBody == true,
-                    event.optString("recipientInstance").ifBlank { old?.recipientInstance.orEmpty() })
+                    event.optString("recipientInstance").ifBlank { old?.recipientInstance.orEmpty() },
+                    event.optString("senderKind").ifBlank { old?.senderKind ?: "agent" })
             }.onFailure { skipped++ }
         }
         messages.values.toList().asReversed() to skipped
@@ -43,6 +44,7 @@ internal fun HubEventCards(raw: String, query: String, requestReply: ((String, S
                 OutlinedCard(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("${message.sender} → ${message.recipient}", style = MaterialTheme.typography.titleSmall)
+                        if (message.senderKind == "user") Text("用户发送", style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
                         Text(when (message.stage) {
                             "attempting" -> "投递已开始 · 结果待确认"
                             "terminal-written" -> "终端已写入 · 尚无处理回执"
@@ -54,7 +56,7 @@ internal fun HubEventCards(raw: String, query: String, requestReply: ((String, S
                         SelectionContainer { Text(if (message.hasBody) message.body else "正文不在本次读取范围内", style = MaterialTheme.typography.bodySmall) }
                         if (message.replyTo.isNotBlank()) TextButton({ search(message.replyTo) }) { Text("查看原消息与回复") }
                         TextButton({ search(message.id) }) { Text("查看此消息的关联") }
-                        if (requestReply != null && message.recipientInstance.isNotBlank()) TextButton({ requestReply(message.id, message.recipient, message.recipientInstance) }) { Text("请接收 Agent 回复…") }
+                        if (requestReply != null && message.recipientInstance.isNotBlank() && message.senderKind != "user") TextButton({ requestReply(message.id, message.recipient, message.recipientInstance) }) { Text("请接收 Agent 回复…") }
                         SelectionContainer { Text(message.id, style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted) }
                     }
                 }

@@ -32,7 +32,7 @@ internal fun GroupUserMessageDialog(state: AppState, conn: Conn, target: Session
             scope.launch {
                 try {
                     check(current != null && target.runtimeId.isNotBlank()) { "原任务实例已变化" }
-                    val key = taskNavigationKey(conn.host, target)
+                    val key = "hub-user:" + taskNavigationKey(conn.host, target)
                     val entry = state.instructions.enqueue(key, text.trim(), id = id, assignmentGroup = group, assignmentHost = projectKey(conn.host, "/"))
                     state.instructions.beginDelivery(entry.id, entry.revision)
                     val args = listOf(group, target.name, target.runtimeId, text.trim(), id).joinToString(" ", transform = Shell::q)
@@ -42,8 +42,11 @@ internal fun GroupUserMessageDialog(state: AppState, conn: Conn, target: Session
                     state.instructions.confirmAccepted(id, latest.revision, "yxi-hub 已写入目标终端；尚无处理回执")
                     note = "已写入目标终端，尚无处理回执。消息编号：$id"
                 } catch (e: Exception) {
+                    state.instructions.entries.firstOrNull { it.id == id && it.status == InstructionStatus.Local }?.let {
+                        runCatching { state.instructions.cancel(id, it.revision) }
+                    }
                     state.instructions.entries.firstOrNull { it.id == id && it.status == InstructionStatus.Delivering }?.let {
-                        state.instructions.markUnknown(id, it.revision, "用户协作消息投递未确认，请核对原消息 $id")
+                        runCatching { state.instructions.markUnknown(id, it.revision, "用户协作消息投递未确认，请核对原消息 $id") }
                     }
                     note = "${e.message.orEmpty()}\n消息编号：$id"
                     if (e is kotlinx.coroutines.CancellationException) throw e
