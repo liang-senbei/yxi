@@ -10,6 +10,7 @@
 #   yxi-hub say <名> "话" [本次消息UUID]  发给同组成员；固定UUID用于重试去重
 #   yxi-hub reply <消息ID> "话" [本次消息UUID]  回复原消息并保留关联
 #   yxi-hub all <组名> "话" [批次UUID]  固定批次与成员消息ID，重试复用
+#   yxi-hub reply-user <原用户消息UUID> "话" [稳定新UUID]  回信给用户（只进收件记录，不进终端）
 #   yxi-hub pause|resume|status <组名>  控制该组后续消息投递
 #   yxi-hub limit <组名> <消息数> <分钟>  从现在起设定新预算
 #
@@ -154,6 +155,111 @@ with os.fdopen(fd, 'a+', encoding='utf-8') as f:
 PY
 }
 
+# Agent 回信给用户。用户没有 tmux 会话，所以这**不是**一次投递：
+# 只往 hub-events 里追加两条记录，桌面收信 UI 自己来读。
+#   yxi-hub reply-user <原用户消息UUID> "话" [稳定新UUID]
+#
+# ⚠️ 身份核对（缺一不可，都在事件日志锁内做）：
+#    1. 调用者必须在真实 tmux 会话里（self 非空），且它的任务实例
+#       要等于**原用户消息**的 recipientInstance —— 同名重建过的会话
+#       不再是原收件人，回信作废。
+#    2. 原消息必须 senderKind=user（用户发的话）。回信回 agent 的话
+#       请走 reply，别把 agent 互发的内容伪装成回信塞给用户。
+#
+# ⚠️ **只追加两条记录，不碰任何 tmux 目标、不发按键。**
+#    先 attempting（保留正文、带 contentHash），紧接着 user-inbox
+#    （= 回信记录已保存）。user-inbox 只表示记录落盘，**不代表用户已读**。
+#    两条都写在这**一次** flock 里，但各写一行、各自 fsync（沿用现有
+#    durability）—— 进程死在两行之间会留下只有 attempting 的回信，
+#    这时同 ID 重试一律拒绝（未知不重放），由人工核对收件后再定。
+#
+# ⚠️ 组成员 / 暂停 / 时间与消息预算 / 回复链 / 同 ID 内容去重
+#    全部沿用旧路径的那套判断（ recipient=用户 不在组名单里，
+#    所以组成员按「调用者仍在原消息的组里」判）。
+reply_event() {
+  python3 - "$HOME/.yxi/hub-events.jsonl" "$HOME/.yxi/hub-control.json" "$GROUPS_FILE" "$@" <<'PY'
+import datetime, fcntl, hashlib, json, os, pathlib, sys, uuid, time
+path, control_path, groups_path, original_id, body, message, sender, sender_instance = sys.argv[1:]
+if str(uuid.UUID(message)) != message: raise ValueError('回信 ID 必须是标准小写 UUID')
+if str(uuid.UUID(original_id)) != original_id: raise ValueError('原消息 ID 必须是标准小写 UUID')
+p = pathlib.Path(path)
+p.parent.mkdir(parents=True, exist_ok=True)
+content_hash = hashlib.sha256(body.strip().encode()).hexdigest()
+fd = os.open(p, os.O_RDWR | os.O_CREAT | os.O_APPEND, 0o600)
+with os.fdopen(fd, 'a+', encoding='utf-8') as f:
+    fcntl.flock(f, fcntl.LOCK_EX)
+    f.seek(0)
+    previous, events, original = [], [], None
+    for line in f:
+        if not line.strip(): continue
+        try: stored = json.loads(line)
+        except ValueError: raise ValueError('事件记录损坏，无法确认去重状态；请先核对日志')
+        events.append(stored)
+        if stored.get('id') == message: previous.append(stored)
+        if stored.get('id') == original_id and stored.get('stage') == 'attempting' and original is None:
+            original = stored
+    if original is None or original.get('senderKind') != 'user':
+        raise ValueError('原消息不是用户消息，不能回信')
+    if original.get('recipientInstance') != sender_instance:
+        raise ValueError('你已不是原消息的接收任务实例，拒绝回信；如需继续请用 say 另行说明')
+    def reply_text(group):
+        return '[回信 · %s · %s] %s' % (group, sender, body)
+    if previous:
+        first = next((e for e in previous if e.get('stage') == 'attempting'), None)
+        if first is None: raise ValueError('同一回信 ID 对应不同内容或缺少原始记录，拒绝重发')
+        same = first.get('text') == reply_text((original.get('groups') or [''])[0]) \
+            and first.get('replyTo') == original_id and first.get('sender') == sender \
+            and first.get('senderInstance') == sender_instance and first.get('recipient') == '用户' \
+            and first.get('recipientInstance') == original.get('senderInstance')
+        if not same: raise ValueError('同一回信 ID 对应不同内容或缺少原始记录，拒绝重发')
+        if previous[-1].get('stage') == 'user-inbox':
+            print('duplicate-inbox')
+            sys.exit(0)
+        raise ValueError('该回信已登记但收件记录未确认，拒绝自动重放；请先人工核对收件记录')
+    group = (original.get('groups') or [''])[0]
+    # 回复链沿用旧 reply 那套：循环检测、16 条上限、链内同文重复
+    starts = {e['id']: e for e in events if e.get('stage') == 'attempting'}
+    cursor, seen, repeated = original_id, set(), 0
+    while cursor:
+        if cursor in seen: raise ValueError('回复记录存在循环，已阻止新投递')
+        seen.add(cursor)
+        if len(seen) >= 16: raise ValueError('回复链达到 16 条上限，请先汇总并由用户决定后续工作')
+        parent = starts.get(cursor)
+        if parent is None: raise ValueError('回复链记录不完整，请人工核对后再继续')
+        if parent.get('contentHash') == content_hash: repeated += 1
+        if repeated >= 2: raise ValueError('同一回复链内容重复，已阻止第三次相同内容，请先检查协作记录')
+        cursor = parent.get('replyTo', '')
+    with open(groups_path) as source: groups = json.load(source)['groups']
+    if group not in groups or sender not in groups[group]:
+        raise ValueError('你已不在原协作组，拒绝回信：' + group)
+    control = json.loads(pathlib.Path(control_path).read_text()) if pathlib.Path(control_path).exists() else {}
+    settings = control.get(group, {})
+    if settings.get('paused'): raise ValueError('协作组已暂停：' + group)
+    if settings.get('deadline', 0) and time.time() >= settings['deadline']:
+        raise ValueError('协作时间预算已到期：' + group)
+    limit = settings.get('messageLimit', 0)
+    if limit:
+        used = len({e['id'] for e in events if e.get('stage') == 'attempting' and group in e.get('groups', []) and e.get('createdAt', 0) >= settings.get('budgetStartedAt', 0)})
+        if used >= limit: raise ValueError('协作消息预算已用完：' + group)
+    def event(stage):
+        item = {'version': 1, 'id': message, 'sender': sender, 'recipient': '用户',
+                'senderInstance': sender_instance, 'recipientInstance': original.get('senderInstance'),
+                'stage': stage, 'text': reply_text(group), 'replyTo': original_id,
+                'time': datetime.datetime.now(datetime.timezone.utc).isoformat()}
+        item['createdAt'] = time.time()
+        item['senderKind'] = 'agent'
+        item['recipientKind'] = 'user'
+        item['groups'] = [group]
+        if stage == 'attempting': item['contentHash'] = content_hash
+        return item
+    f.write(json.dumps(event('attempting'), ensure_ascii=False) + '\n')
+    f.flush(); os.fsync(f.fileno())
+    f.write(json.dumps(event('user-inbox'), ensure_ascii=False) + '\n')
+    f.flush(); os.fsync(f.fileno())
+    print('new')
+PY
+}
+
 check_group_delivery() {
   python3 - "$GROUPS_FILE" "$HOME/.yxi/hub-control.json" "$1" "$2" "${user_group:-}" <<'PY'
 import json, pathlib, sys
@@ -235,6 +341,23 @@ PY
     push "$3" "[用户消息 · $user_group${user_reply:+ · 回复 $user_reply}] $5" "用户" "$user_reply" "$6" "$5"
     echo "用户消息已写入目标终端，尚无处理回执"
     printf '__YXI_USER_MESSAGE__:%s\n' "$6"
+    ;;
+  reply-user)
+    [ -n "$self" ] || { echo "不在 tmux 里，认不出是谁在回信"; exit 1; }
+    [ "$#" -ge 3 ] && [ "$#" -le 4 ] || { echo '用法: yxi-hub reply-user <原用户消息UUID> <正文> [稳定新UUID]'; exit 1; }
+    original_id="$2"; body="$3"; message="${4:-}"
+    [ -n "$body" ] || exit 1
+    [ -n "$message" ] || message="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+    # 调用者自己的**真实**任务实例（=名字 精确匹配），回信资格靠它对上原消息的收件实例
+    sender_instance="$(tmux display-message -p -t "=$self:" '#{pid}:#{session_id}:#{session_created}')" || exit 1
+    [ -n "$sender_instance" ] || exit 1
+    outcome="$(reply_event "$original_id" "$body" "$message" "$self" "$sender_instance")" || exit 1
+    if [ "$outcome" = duplicate-inbox ]; then
+      echo "回信 $message 之前已保存到用户收件，本次未重复记录（不代表用户已读）"
+    else
+      echo "回信已保存到用户收件记录，等待用户查看（不代表用户已读）"
+    fi
+    printf '__YXI_USER_REPLY__:%s\n' "$message"
     ;;
   pause|resume|status|limit)
     group="${2:?请指定协作组名}"
@@ -442,5 +565,5 @@ PY
     done <<< "$recipients"
     echo "「$grp」组终端投递完成或已有完成记录；尚无成员处理回执"
     ;;
-  *) sed -n '3,13p' "$0" | sed 's/^# \?//'; exit 1 ;;
+  *) sed -n '3,14p' "$0" | sed 's/^# \?//'; exit 1 ;;
 esac
