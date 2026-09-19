@@ -11,10 +11,10 @@ import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
 private data class HubMessage(val id: String, val sender: String, val recipient: String, val body: String,
-    val stage: String, val time: String, val replyTo: String, val hasBody: Boolean, val recipientInstance: String, val senderKind: String)
+    val stage: String, val time: String, val replyTo: String, val hasBody: Boolean, val recipientInstance: String, val senderKind: String, val senderInstance: String)
 
 @Composable
-internal fun HubEventCards(raw: String, query: String, requestReply: ((String, String, String) -> Unit)? = null, search: (String) -> Unit) {
+internal fun HubEventCards(raw: String, query: String, requestReply: ((String, String, String) -> Unit)? = null, userReply: ((String, String, String) -> Unit)? = null, search: (String) -> Unit) {
     val parsed = remember(raw) {
         val messages = linkedMapOf<String, HubMessage>()
         var skipped = 0
@@ -29,7 +29,8 @@ internal fun HubEventCards(raw: String, query: String, requestReply: ((String, S
                     if (hasBody) event.optString("text") else old?.body.orEmpty(), event.getString("stage"),
                     event.optString("time"), event.optString("replyTo").ifBlank { old?.replyTo.orEmpty() }, hasBody || old?.hasBody == true,
                     event.optString("recipientInstance").ifBlank { old?.recipientInstance.orEmpty() },
-                    event.optString("senderKind").ifBlank { old?.senderKind ?: "agent" })
+                    event.optString("senderKind").ifBlank { old?.senderKind ?: "agent" },
+                    event.optString("senderInstance").ifBlank { old?.senderInstance.orEmpty() })
             }.onFailure { skipped++ }
         }
         messages.values.toList().asReversed() to skipped
@@ -45,6 +46,7 @@ internal fun HubEventCards(raw: String, query: String, requestReply: ((String, S
                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("${message.sender} → ${message.recipient}", style = MaterialTheme.typography.titleSmall)
                         if (message.senderKind == "user") Text("用户发送", style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
+                        if (userReply != null && message.senderKind == "agent" && message.senderInstance.isNotBlank()) TextButton({ userReply(message.id, message.sender, message.senderInstance) }) { Text("回复此 Agent…") }
                         Text(when (message.stage) {
                             "attempting" -> "投递已开始 · 结果待确认"
                             "terminal-written" -> "终端已写入 · 尚无处理回执"

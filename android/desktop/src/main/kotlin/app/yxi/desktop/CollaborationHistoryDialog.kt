@@ -22,6 +22,11 @@ internal fun CollaborationHistoryDialog(state: AppState, conn: Conn, group: Stri
     var revision by remember(conn) { mutableStateOf(0) }
     var structured by remember(conn) { mutableStateOf(true) }
     var replyTarget by remember(conn) { mutableStateOf<Pair<app.yxi.agent.Session, String>?>(null) }
+    var userReplyTarget by remember(conn) { mutableStateOf<Pair<app.yxi.agent.Session, String>?>(null) }
+    userReplyTarget?.let { (target, id) ->
+        GroupUserMessageDialog(state, conn, target, group, replyTo = id) { userReplyTarget = null; revision++ }
+        return
+    }
     replyTarget?.let { (target, messageId) ->
         MemberAssignmentDialog(state, conn, target, group, { replyTarget = null }, { replyTarget = null; onTaskOpened() },
             initialText = "请查看协作消息 $messageId，结合当前任务进展回复原发送者。使用 yxi-hub reply 保留原消息关联；如果原任务实例已变化，请说明情况，不要回复同名新任务。\n\n补充要求：")
@@ -84,6 +89,11 @@ print('__YXI_HUB_LOG__:' + json.dumps({'text': text, 'clipped': clipped}, ensure
                 if (target == null) error = "原接收任务不在当前组或实例已变化，请刷新后核对。"
                 else if (runCatching { java.util.UUID.fromString(id) }.isFailure) error = "原消息编号无效"
                 else replyTarget = target to id
+            }, userReply = { id, sender, instance ->
+                val target = conn.sessions.firstOrNull { it.name == sender && it.runtimeId == instance && it.name in members }
+                if (target == null) error = "原发送任务不在当前组或实例已变化，请刷新后核对。"
+                else if (runCatching { java.util.UUID.fromString(id) }.isFailure) error = "原消息编号无效"
+                else userReplyTarget = target to id
             }) { query = it }
             else SelectionContainer {
                 Text(shown.ifBlank { if (raw.isBlank()) "暂无协作记录" else "没有匹配内容" },
