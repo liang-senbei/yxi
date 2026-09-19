@@ -210,11 +210,29 @@ expected_recipient=""
 self="$(me)"
 
 case "${1:-who}" in
-  user-say)
-    [ "$#" -eq 6 ] || { echo '用法: yxi-hub user-say <组名> <完整任务名> <任务实例ID> <消息> <消息UUID>'; exit 1; }
+  user-say|user-reply)
+    if [ "$1" = user-reply ]; then [ "$#" -eq 7 ] || exit 1
+    else [ "$#" -eq 6 ] || { echo '用法: yxi-hub user-say <组名> <完整任务名> <任务实例ID> <消息> <消息UUID>'; exit 1; }; fi
     user_group="$2"; expected_recipient="$4"
     [ -n "$user_group" ] && [ -n "$3" ] && [ -n "$expected_recipient" ] && [ -n "$5" ] || exit 1
-    push "$3" "[用户消息 · $user_group] $5" "用户" "" "$6" "$5"
+    user_reply=""
+    if [ "$1" = user-reply ]; then
+      user_reply="$7"
+      python3 - "$HOME/.yxi/hub-events.jsonl" "$7" "$2" "$3" "$4" <<'PY'
+import json, sys, uuid
+path, reply, group, target, instance = sys.argv[1:]
+uuid.UUID(reply)
+found = False
+with open(path, encoding='utf-8') as stream:
+    for line in stream:
+        event = json.loads(line)
+        if event.get('id') == reply and event.get('stage') == 'attempting':
+            found = event.get('sender') == target and event.get('senderInstance') == instance and event.get('senderKind', 'agent') == 'agent' and group in event.get('groups', [])
+            break
+if not found: raise ValueError('原消息或原发送任务实例不匹配，拒绝回复')
+PY
+    fi
+    push "$3" "[用户消息 · $user_group${user_reply:+ · 回复 $user_reply}] $5" "用户" "$user_reply" "$6" "$5"
     echo "用户消息已写入目标终端，尚无处理回执"
     printf '__YXI_USER_MESSAGE__:%s\n' "$6"
     ;;
