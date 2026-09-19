@@ -154,7 +154,7 @@ object MeAuth {
 
     /** Match the explicit cancel action when the account page is closed mid-login. */
     fun cancelPendingSignIn() {
-        if (callbackServer != null || waitingBrowser) signOut()
+        if (!signedIn && (callbackServer != null || waitingBrowser)) signOut()
     }
 
     internal fun mailCounters(owner: String, result: JSONObject, generation: Long = sessionGeneration) = runCatching { sessions.guarded(generation) {

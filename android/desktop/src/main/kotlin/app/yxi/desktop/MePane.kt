@@ -67,6 +67,7 @@ private fun AccountContent(state: AppState) {
     var shopOpen by remember { mutableStateOf(false) }
     var loginRequest by remember { mutableStateOf(0L) }
     DisposableEffect(Unit) { onDispose { MeAuth.cancelPendingSignIn() } }
+    LaunchedEffect(state.showSettings) { if (state.showSettings) MeAuth.cancelPendingSignIn() }
 
     // 进页面拉一次:有令牌就顺手刷资料,没令牌就停在登录按钮上
     LaunchedEffect(state.accountLoginRequest) {
@@ -110,7 +111,7 @@ private fun AccountContent(state: AppState) {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Column(Modifier.widthIn(max = 640.dp).fillMaxWidth()) {
-                Text(state.meSection, style = MaterialTheme.typography.headlineSmall, color = t.textPrimary)
+                Text(if (MeAuth.signedIn) state.meSection else "登录 Yxi", style = MaterialTheme.typography.headlineSmall, color = t.textPrimary)
                 Spacer(Modifier.height(16.dp))
                 if (state.meSection == "账号与连接") ConnectionIdentityCard(state)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {

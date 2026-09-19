@@ -58,10 +58,7 @@ fun App(state: AppState) {
     val scope = rememberCoroutineScope()
     val defaultUris = LocalUriHandler.current
     val density = LocalDensity.current.density
-    if (state.showSettings) {
-        SettingsDialog(state)
-        return
-    }
+    NativeOverlay(state.showSettings)
     BoxWithConstraints(Modifier.fillMaxSize()) {
         // 窗口 < 700dp 自动收起侧栏（Claude 的 narrowViewportMaxWidth）；变宽只把自动收起的还回去，用户自己 Ctrl+B 关掉的不动
         val narrow = maxWidth < 700.dp
@@ -157,8 +154,12 @@ fun App(state: AppState) {
                 }
             }
         }
+        if (state.showSettings) androidx.compose.material3.Surface(Modifier.fillMaxSize(), color = Tokens.current.surface0) {
+            SettingsDialog(state)
+        }
     }
     if (state.showShortcuts) ShortcutsDialog(state)
     if (state.showTaskSwitcher) TaskSwitcherDialog(state)
     if (state.showCollaboration) state.conn?.let { conn -> CollaborationDialog(state, conn) { state.showCollaboration = false } }
 }
+
