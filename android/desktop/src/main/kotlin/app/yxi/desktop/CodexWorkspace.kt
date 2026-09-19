@@ -135,9 +135,9 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File) :
         require(id.isNotBlank() && id.length <= 256 && id.none { it.isWhitespace() || it < ' ' }) { "请输入有效的任务编号" }
         val hostKey = projectKey(conn.host, "/")
         registry.records.firstOrNull { it.hostKey == hostKey && it.threadId == id }?.let { return@withLock it }
-        check(conn.ssh.isConnected) { "请先连接服务器" }
+        check(connected(conn)) { "请先连接服务器" }
         busy = true
-        val client = try { CodexAppServer.connect(conn.ssh) } catch (e: Exception) { busy = false; throw e }
+        val client = try { clientFactory(conn) } catch (e: Exception) { busy = false; throw e }
         try {
             val thread = client.resumeThread(id).getJSONObject("result").getJSONObject("thread")
             check(thread.getString("id") == id) { "恢复响应不属于原任务" }

@@ -167,7 +167,8 @@ for raw in sys.stdin:
         continue
     if method == "thread/resume":
         resumed[0] = True
-        thread_reply(msg, [])
+        # 恢复回归（cc-logto_yxi）最小追加：resume 与 thread/start 一样携带服务器侧 cwd
+        reply(msg, {"thread": {"id": thread_id, "turns": [], "cwd": "/srv/demo"}})
         continue
     if method == "turn/steer":
         if mode == "steer-mismatch":
