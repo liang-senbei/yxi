@@ -24,6 +24,9 @@ internal class CodexTaskController(
     private val mutation = Mutex()
     private val terminalEvents = linkedMapOf<String, JSONObject>()
     val pendingRequests = mutableStateMapOf<String, JSONObject>()
+    private val answerDrafts = mutableMapOf<String, androidx.compose.runtime.snapshots.SnapshotStateMap<String, String>>()
+    fun answersFor(requestId: Any) = answerDrafts.getOrPut(idKey(requestId)) { mutableStateMapOf() }
+    private fun clearAnswers(requestId: Any) { answerDrafts.remove(idKey(requestId))?.clear() }
     val recentEvents = mutableStateListOf<JSONObject>()
     val messages = mutableStateListOf<CodexMessage>()
     var models by mutableStateOf<List<CodexModelOption>>(emptyList()); private set
@@ -47,7 +50,7 @@ internal class CodexTaskController(
                     val params = message.optJSONObject("params") ?: JSONObject()
                     val method = message.optString("method")
                     if (method == "serverRequest/resolved") {
-                        params.opt("requestId")?.let { pendingRequests.remove(idKey(it)) }
+                        params.opt("requestId")?.let { pendingRequests.remove(idKey(it)); clearAnswers(it) }
                     }
                     if (params.optString("threadId") != threadId) return@collect
                     eventRevision++
@@ -262,12 +265,14 @@ internal class CodexTaskController(
         check(ready && pendingRequests.containsKey(idKey(id))) { "请求已失效" }
         client.respond(id, result)
         pendingRequests.remove(idKey(id))
+        clearAnswers(id)
         note = "已提交答复，等待运行器继续"
     }
 
     override fun close() {
         disposed = true; autoDispatch = false; ready = false
         client.close(); scope.cancel(); pendingRequests.clear()
+        answerDrafts.values.forEach { it.clear() }; answerDrafts.clear()
     }
     private fun decodeMessage(item: JSONObject): CodexMessage? {
         val id = item.optString("id").takeIf { it.isNotBlank() } ?: return null

@@ -12,13 +12,13 @@ import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Answers exist only while this request is displayed; secret input never enters chat drafts. */
+/** Keep answers with the pending request across scrolling/panel switches, never on disk. */
 @Composable
 internal fun CodexQuestionForm(controller: CodexTaskController, request: JSONObject) {
     val params = request.optJSONObject("params") ?: JSONObject()
     val source = params.optJSONArray("questions") ?: JSONArray()
     val questions = (0 until source.length()).mapNotNull { source.optJSONObject(it) }
-    val answers = remember(request) { mutableStateMapOf<String, String>() }
+    val answers = controller.answersFor(request.get("id"))
     var sending by remember(request) { mutableStateOf(false) }
     var error by remember(request) { mutableStateOf("") }
     val scope = rememberCoroutineScope()
