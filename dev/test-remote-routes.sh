@@ -84,6 +84,9 @@ elif [ "${YXI_TEST_SERVICE_UI:-0}" = 1 ]; then
   YXI_SERVICE_UI_FIXTURE="$FIXTURE" ./gradlew :desktop:test --tests app.yxi.desktop.ServiceControlsFixtureTest --no-daemon
 elif [ "${YXI_TEST_BROWSER:-0}" = 1 ]; then
   YXI_ROUTE_FIXTURE="$FIXTURE" YXI_BROWSER_FIXTURE="$FIXTURE" ./gradlew :desktop:test --tests app.yxi.desktop.BrowserIntegrationTest --rerun --no-daemon
+elif [ "${YXI_TEST_DEFERRED:-0}" = 1 ]; then
+  # 0cb6030 延后线路切换执行层（runDeferredRoute）：断线/取消 + fixture 各阶段
+  YXI_ROUTE_FIXTURE="$FIXTURE" ./gradlew :desktop:test --tests app.yxi.desktop.DeferredRouteRunnerTest --rerun --no-daemon
 else
   YXI_ROUTE_FIXTURE="$FIXTURE" ./gradlew :desktop:test --tests app.yxi.desktop.RemoteRoutesTest --rerun --no-daemon
 fi
