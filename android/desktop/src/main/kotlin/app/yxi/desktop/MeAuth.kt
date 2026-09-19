@@ -142,6 +142,7 @@ object MeAuth {
     internal suspend fun accountRequest(owner: String, path: String, method: String, body: String?, generation: Long = sessionGeneration): Pair<Int, String> = withContext(Dispatchers.IO) {
         sessions.guarded(generation) { check(signedIn && me?.userId == owner) { "登录账号已变化，请重新进入账户页面" } }
         require((path == "/api/me/redeem" && method == "POST") || (path == "/api/shop/orders" && method == "GET") ||
+            (path == "/api/shop" && method == "GET") || (path == "/api/shop/buy" && method == "POST") ||
             (path == "/api/me/wallet" && method == "PATCH") ||
             listOf("/api/mail", "/api/support/tickets").any { path == it || path.startsWith("$it/") || path.startsWith("$it?") })
         val access = token(generation) ?: error("登录暂不可用，请检查连接或重新登录")
@@ -169,6 +170,10 @@ object MeAuth {
                 else if (result.isNull("autoRenewPriceCents")) null else result.getLong("autoRenewPriceCents"),
             balanceCents = if (result.has("balanceCents") && !result.isNull("balanceCents")) result.getLong("balanceCents") else current.balanceCents,
         )
+    }
+    internal fun walletBalanceUpdated(owner: String, balance: Long, generation: Long) = sessions.guarded(generation) {
+        val current = me?.takeIf { signedIn && it.userId == owner } ?: error("登录账号已变化")
+        me = current.copy(balanceCents = balance)
     }
 
     internal fun supportUnread(owner: String, count: Int, generation: Long = sessionGeneration) = runCatching { sessions.guarded(generation) {

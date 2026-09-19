@@ -57,14 +57,19 @@ fun MePane(state: AppState) {
     var mailOpen by remember { mutableStateOf(false) }
     var supportOpen by remember { mutableStateOf(false) }
     var walletOpen by remember { mutableStateOf(false) }
+    var shopOpen by remember { mutableStateOf(false) }
     var loginRequest by remember { mutableStateOf(0L) }
 
     // 进页面拉一次:有令牌就顺手刷资料,没令牌就停在登录按钮上
     LaunchedEffect(Unit) { MeAuth.load() }
     val owner = MeAuth.me?.userId
     val generation = MeAuth.sessionGeneration
+    if (shopOpen && MeAuth.signedIn && owner != null) {
+        androidx.compose.runtime.key(owner, generation) { ShopPane(owner, generation, state.shopPurchases) { shopOpen = false } }
+        return
+    }
     if (walletOpen && MeAuth.signedIn && owner != null) {
-        androidx.compose.runtime.key(owner, generation) { WalletPane(owner, generation) { walletOpen = false } }
+        androidx.compose.runtime.key(owner, generation) { WalletPane(owner, generation, onShop = { shopOpen = true }) { walletOpen = false } }
         return
     }
     if (supportOpen && MeAuth.signedIn && owner != null) {

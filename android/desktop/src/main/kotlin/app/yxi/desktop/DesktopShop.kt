@@ -14,6 +14,7 @@ internal data class PendingPurchase(val owner: String, val itemId: String, val r
 
 /** Store request identity, never voucher codes or credentials. An uncertain purchase keeps its ID. */
 internal class ShopPurchaseStore(file: File) {
+    val running = mutableStateMapOf<String, Boolean>()
     private val disk = DurableFile(file) { decode(it) }
     private var readable = true
     var pending by mutableStateOf<List<PendingPurchase>>(emptyList()); private set

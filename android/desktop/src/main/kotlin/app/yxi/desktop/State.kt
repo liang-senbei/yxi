@@ -70,6 +70,7 @@ class AppState {
         Notify.notify(title, "任务：" + (navigation.title(task.key) ?: task.title), taskKey = task.key)
     }
     internal val support = SupportWorkspace(java.io.File(Store.dir, "support-drafts.json"))
+    internal val shopPurchases = ShopPurchaseStore(java.io.File(Store.dir, "shop-purchases.json"))
     val documents = mutableStateListOf<FileDocument>()
     val documentSelection = androidx.compose.runtime.mutableStateMapOf<String, String>()
     val chatDrafts = mutableMapOf<String, androidx.compose.runtime.MutableState<androidx.compose.ui.text.input.TextFieldValue>>()

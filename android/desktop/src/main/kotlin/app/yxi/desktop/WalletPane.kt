@@ -23,7 +23,7 @@ internal fun parseWalletOrders(body: String): List<WalletOrder> {
 }
 
 @Composable
-internal fun WalletPane(owner: String, generation: Long, onBack: () -> Unit) {
+internal fun WalletPane(owner: String, generation: Long, onShop: () -> Unit, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     var orders by remember { mutableStateOf<List<WalletOrder>?>(null) }
     var busy by remember { mutableStateOf(false) }
@@ -85,6 +85,7 @@ internal fun WalletPane(owner: String, generation: Long, onBack: () -> Unit) {
         }
         if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
         if (notice.isNotBlank()) Text(notice, color = Tokens.current.textMuted)
+        Button(onShop, enabled = !busy) { Text("商城 · 购买兑换码") }
         Text("订单记录", style = MaterialTheme.typography.titleMedium)
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (orders?.isEmpty() == true) item { Text("还没有订单。", color = Tokens.current.textMuted) }
