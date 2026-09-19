@@ -24,7 +24,8 @@ internal class CodexTaskController(
     private val mutation = Mutex()
     private val terminalEvents = linkedMapOf<String, JSONObject>()
     val pendingRequests = mutableStateMapOf<String, JSONObject>()
-    private val answerDrafts = mutableMapOf<String, androidx.compose.runtime.snapshots.SnapshotStateMap<String, String>>()
+    private val answerDrafts = mutableStateMapOf<String, androidx.compose.runtime.snapshots.SnapshotStateMap<String, String>>()
+    val answerDraftCount get() = answerDrafts.values.count { answers -> answers.values.any { it.isNotBlank() } }
     fun answersFor(requestId: Any) = answerDrafts.getOrPut(idKey(requestId)) { mutableStateMapOf() }
     private fun clearAnswers(requestId: Any) { answerDrafts.remove(idKey(requestId))?.clear() }
     val recentEvents = mutableStateListOf<JSONObject>()
