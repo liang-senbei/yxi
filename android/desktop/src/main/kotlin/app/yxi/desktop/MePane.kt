@@ -140,7 +140,8 @@ fun MePane(state: AppState) {
 private fun ConnectionIdentityCard(state: AppState) {
     val t = Tokens.current
     val conn = state.conn
-    val controller = state.codexWorkspace.controllers[state.codexSelectedTaskKey]
+    val task = conn?.let { state.codexWorkspace.tasks(it.host).firstOrNull { task -> task.key == state.codexSelectedTaskKey } }
+    val controller = task?.let { state.codexWorkspace.controllers[it.key] }
     Card {
         Text("账号与连接", style = MaterialTheme.typography.titleMedium, color = t.textPrimary)
         Spacer(Modifier.height(10.dp))
