@@ -84,7 +84,7 @@ print('__YXI_HUB_LOG__:' + json.dumps({'text': text, 'clipped': clipped}, ensure
             if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
             if (truncated) Text("显示最近 256 KiB，开头可能是上一条消息的片段。", style = MaterialTheme.typography.labelSmall)
             if (structured && !busy && error.isBlank() && raw.isBlank()) Text("还没有带编号的消息记录。旧版协作服务的记录可切换到传统消息日志查看。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
-            if (structured) HubEventCards(raw, query, requestReply = { id, recipient, instance ->
+            if (structured) HubEventCards(raw, query, group = group, requestReply = { id, recipient, instance ->
                 val target = conn.sessions.firstOrNull { it.name == recipient && it.runtimeId == instance && it.name in members }
                 if (target == null) error = "原接收任务不在当前组或实例已变化，请刷新后核对。"
                 else if (runCatching { java.util.UUID.fromString(id) }.isFailure) error = "原消息编号无效"

@@ -11,11 +11,12 @@ import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
 private data class HubMessage(val id: String, val sender: String, val recipient: String, val body: String,
-    val stage: String, val time: String, val replyTo: String, val hasBody: Boolean, val recipientInstance: String, val senderKind: String, val senderInstance: String, val recipientKind: String)
+    val stage: String, val time: String, val replyTo: String, val hasBody: Boolean, val recipientInstance: String, val senderKind: String, val senderInstance: String, val recipientKind: String, val groups: List<String>)
 
 @Composable
-internal fun HubEventCards(raw: String, query: String, requestReply: ((String, String, String) -> Unit)? = null, userReply: ((String, String, String) -> Unit)? = null, search: (String) -> Unit) {
+internal fun HubEventCards(raw: String, query: String, group: String = "", requestReply: ((String, String, String) -> Unit)? = null, userReply: ((String, String, String) -> Unit)? = null, search: (String) -> Unit) {
     var inboxOnly by remember { mutableStateOf(false) }
+    var allGroups by remember(group) { mutableStateOf(false) }
     val parsed = remember(raw) {
         val messages = linkedMapOf<String, HubMessage>()
         var skipped = 0
@@ -32,18 +33,26 @@ internal fun HubEventCards(raw: String, query: String, requestReply: ((String, S
                     event.optString("recipientInstance").ifBlank { old?.recipientInstance.orEmpty() },
                     event.optString("senderKind").ifBlank { old?.senderKind ?: "agent" },
                     event.optString("senderInstance").ifBlank { old?.senderInstance.orEmpty() },
-                    event.optString("recipientKind").ifBlank { old?.recipientKind ?: "agent" })
+                    event.optString("recipientKind").ifBlank { old?.recipientKind ?: "agent" },
+                    event.optJSONArray("groups")?.let { array -> (0 until array.length()).map { array.getString(it) } } ?: old?.groups.orEmpty())
             }.onFailure { skipped++ }
         }
         messages.values.toList().asReversed() to skipped
     }
-    val messages = parsed.first.filter { message -> (!inboxOnly || message.recipientKind == "user") && (query.isBlank() ||
+    val scopedMessages = parsed.first.filter { group.isBlank() || allGroups || group in it.groups }
+    val messages = scopedMessages.filter { message -> (!inboxOnly || message.recipientKind == "user") && (query.isBlank() ||
         listOf(message.id, message.sender, message.recipient, message.body, message.replyTo).any { it.contains(query.trim(), ignoreCase = true) }) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(!inboxOnly, { inboxOnly = false }, label = { Text("全部消息") })
-            FilterChip(inboxOnly, { inboxOnly = true }, label = { Text("回给用户 · ${parsed.first.count { it.recipientKind == "user" }}") })
+            FilterChip(inboxOnly, { inboxOnly = true }, label = { Text("回给用户 · ${scopedMessages.count { it.recipientKind == "user" }}") })
         }
+        if (group.isNotBlank()) Row {
+            FilterChip(!allGroups, { allGroups = false }, label = { Text("当前组 · $group") })
+            Spacer(Modifier.width(8.dp))
+            FilterChip(allGroups, { allGroups = true }, label = { Text("服务器全部组") })
+        }
+        if (group.isNotBlank() && !allGroups && parsed.first.any { it.groups.isEmpty() }) Text("部分旧记录没有分组信息，可在服务器全部组中查看。", style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
         Text("${messages.size} 条消息" + if (parsed.second > 0) " · ${parsed.second} 行不完整或无法识别" else "", style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 380.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (messages.isEmpty()) item { Text(if (raw.isBlank()) "暂无协作消息" else "没有匹配的完整事件", color = Tokens.current.textMuted) }
