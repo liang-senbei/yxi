@@ -15,7 +15,9 @@ import androidx.compose.ui.unit.dp
 internal fun PromptHistoryDialog(queue: InstructionQueue, taskKey: String, hasDraft: Boolean, close: () -> Unit, choose: (String, Boolean) -> Unit) {
     var query by remember { mutableStateOf("") }
     var replacing by remember { mutableStateOf<String?>(null) }
-    val rows = queue.entries.asReversed().filter { it.taskKey == taskKey && it.text.isNotBlank() && it.text.contains(query, ignoreCase = true) }
+    val rows = queue.entries.asReversed().filter { it.taskKey == taskKey &&
+        (it.text.isNotBlank() || it.attachments.isNotEmpty()) &&
+        (it.text.contains(query, ignoreCase = true) || it.attachments.any { attachment -> attachment.name.contains(query, ignoreCase = true) }) }
     WorkbenchDialog(onDismissRequest = close, title = { Text("本任务输入历史") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("搜索之前的提示词") })
@@ -26,20 +28,27 @@ internal fun PromptHistoryDialog(queue: InstructionQueue, taskKey: String, hasDr
                     var expanded by remember(item.id) { mutableStateOf(false) }
                     OutlinedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
                         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            SelectionContainer { Text(item.text, maxLines = if (expanded) Int.MAX_VALUE else 5, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium) }
+                            SelectionContainer { Text(item.text.ifBlank { "仅附件输入" }, maxLines = if (expanded) Int.MAX_VALUE else 5, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium) }
                             TextButton({ expanded = !expanded }) { Text(if (expanded) "收起" else "查看全文") }
                             Text(when(item.status) {
                                 InstructionStatus.Local -> "本地待发送"
                                 InstructionStatus.Delivering -> "投递中"
                                 InstructionStatus.Unknown -> "结果待确认"
-                                InstructionStatus.Accepted -> "已确认"
+                                InstructionStatus.Accepted -> when (item.runtimeTurnState) {
+                                    RuntimeTurnState.None -> "已确认接收"
+                                    RuntimeTurnState.InProgress -> "本轮进行中"
+                                    RuntimeTurnState.Completed -> "本轮已完成"
+                                    RuntimeTurnState.Failed -> "本轮失败"
+                                    RuntimeTurnState.Interrupted -> "本轮已中断"
+                                }
                                 InstructionStatus.Cancelled -> "已撤回"
                                 InstructionStatus.Resolved -> "已人工处理"
                             }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            if (item.attachments.isNotEmpty()) Text("历史附件需重新添加，仅复用文字。", style = MaterialTheme.typography.bodySmall)
+                            if (item.detail.isNotBlank()) Text(item.detail, maxLines = if (expanded) Int.MAX_VALUE else 3, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+                            if (item.attachments.isNotEmpty()) Text(item.attachments.joinToString("、") { it.name } + "\n历史附件需重新添加，仅复用文字。", style = MaterialTheme.typography.bodySmall)
                             Row {
-                                TextButton({ choose(item.text, false) }) { Text("追加到输入框") }
-                                TextButton({ if (hasDraft) replacing = item.text else choose(item.text, true) }) { Text("替换草稿") }
+                                TextButton({ choose(item.text, false) }, enabled = item.text.isNotBlank()) { Text("追加到输入框") }
+                                TextButton({ if (hasDraft) replacing = item.text else choose(item.text, true) }, enabled = item.text.isNotBlank()) { Text("替换草稿") }
                             }
                         }
                     }

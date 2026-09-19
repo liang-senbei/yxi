@@ -104,13 +104,14 @@ internal class InstructionQueue(file: File) {
         current.copy(status = InstructionStatus.Delivering)
     }
 
-    @Synchronized fun completeRuntimeTurn(taskKey: String, turnId: String, outcome: RuntimeTurnState, receipt: String): Boolean {
+    @Synchronized fun completeRuntimeTurn(taskKey: String, turnId: String, outcome: RuntimeTurnState, receipt: String, failure: String = ""): Boolean {
         require(outcome in setOf(RuntimeTurnState.Completed, RuntimeTurnState.Failed, RuntimeTurnState.Interrupted))
         require(turnId.isNotBlank() && receipt.isNotBlank())
         val matching = entries.filter { it.taskKey == taskKey && it.runtimeTurnId == turnId &&
             it.status == InstructionStatus.Accepted && it.runtimeTurnState == RuntimeTurnState.InProgress }.map { it.id }.toSet()
         if (matching.isEmpty()) return false
         commit(entries.map { if (it.id in matching) it.copy(runtimeTurnState = outcome,
+            detail = when (outcome) { RuntimeTurnState.Failed -> failure.ifBlank { "运行器报告本轮失败" }; RuntimeTurnState.Interrupted -> "本轮已中断"; else -> it.detail },
             runtimeCompletion = receipt, revision = it.revision + 1) else it })
         return true
     }

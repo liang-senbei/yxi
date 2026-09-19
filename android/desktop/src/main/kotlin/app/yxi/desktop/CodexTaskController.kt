@@ -290,9 +290,12 @@ internal class CodexTaskController(
             else -> return
         }
         val id = turn.getString("id")
-        terminalEvents[id] = JSONObject().put("id", id).put("status", turn.getString("status"))
+        val failure = turn.optJSONObject("error")?.optString("message")?.take(2000).orEmpty()
+        terminalEvents[id] = JSONObject().put("id", id).put("status", turn.getString("status")).apply {
+            if (failure.isNotBlank()) put("error", JSONObject().put("message", failure))
+        }
         if (terminalEvents.size > 32) terminalEvents.remove(terminalEvents.keys.first())
-        queue.completeRuntimeTurn(taskKey, id, outcome, receipt)
+        queue.completeRuntimeTurn(taskKey, id, outcome, receipt, failure)
         if (activeTurnId == id) activeTurnId = null
         if (outcome != RuntimeTurnState.Completed) {
             autoDispatch = false
