@@ -238,7 +238,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                     items = emptyList(); ctx = null; status = "正在载入对话…"
                     needsMetadata = false
                 }
-                if ((entry?.view?.offset ?: 0) >= targetOffset) status = null
+                if ((entry?.view?.offset ?: 0L) >= targetOffset) status = null
                 catching {
                     TranscriptStream.streamFrom(ssh, f, pos).collect { line ->
                         if (line.isEmpty()) return@collect
