@@ -269,7 +269,7 @@ private fun CodexConversationPane(state: AppState) {
                     val supported = method == "item/commandExecution/requestApproval" || method == "item/fileChange/requestApproval"
                     OutlinedCard(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(if (supported) "需要你的批准" else "运行器需要进一步输入", style = MaterialTheme.typography.titleSmall)
+                            Text(if (supported) "需要你的批准" else if (method == "item/permissions/requestApproval") "额外权限申请" else "运行器需要进一步输入", style = MaterialTheme.typography.titleSmall)
                             val params = request.optJSONObject("params") ?: JSONObject()
                             val related = controller?.messages?.firstOrNull { it.id == params.optString("itemId") && it.kind != "message" }
                             if (related != null) CodexActivityCard(related, ::openTaskFile, initiallyExpanded = true)
@@ -286,6 +286,10 @@ private fun CodexConversationPane(state: AppState) {
                             if (supported && controller != null) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button({ act { controller.answerRequest(request.get("id"), JSONObject().put("decision", "accept")) } }, enabled = controller.ready) { Text("仅允许本次") }
                                 OutlinedButton({ act { controller.answerRequest(request.get("id"), JSONObject().put("decision", "decline")) } }, enabled = controller.ready) { Text("拒绝") }
+                            } else if (method == "item/permissions/requestApproval" && controller != null) {
+                                CodexPermissionRequest(params, controller.ready) { response ->
+                                    act { controller.answerRequest(request.get("id"), response) }
+                                }
                             } else if (method == "item/tool/requestUserInput" && controller != null) {
                                 CodexQuestionForm(controller, request)
                             } else Text("此类输入暂未接入，可中断当前轮次后调整任务。", color = Tokens.current.textMuted)
