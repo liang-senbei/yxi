@@ -12,7 +12,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $exe = (Resolve-Path -LiteralPath $ExePath).Path
 if ((Split-Path $exe -Leaf) -ne 'Yxi.exe') { throw "ExePath 应指到交付目录里的 Yxi.exe：$exe" }
-if ($ProfileName -match '[\\/]') { throw "ProfileName 只能是目录名，不能带路径分隔符：$ProfileName" }
+if ($ProfileName -notmatch '^[\p{L}\p{N}_-][\p{L}\p{N}_.-]{0,63}$') { throw 'ProfileName 必须是以字母、数字、下划线或短横线开头的目录名，最多 64 字符。' }
 # 交付目录 = Yxi 应用目录的上级（app-image 布局：<交付目录>\Yxi\Yxi.exe）
 $deliverRoot = Split-Path (Split-Path $exe -Parent) -Parent
 if ($deliverRoot -like ($env:ProgramFiles + '*')) { throw "这像已安装位置（$deliverRoot 在 Program Files 下）；本脚本只用于交付目录试用包，不碰已安装的 Yxi" }
