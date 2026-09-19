@@ -79,7 +79,7 @@ class DesktopLocalAsrTest {
                 listOf("-m", model.absolutePath, "-f", args[3], "-l", "auto", "-otxt", "-of", args[8], "-np"),
                 args, "argv 应逐项传递：$args")
             assertTrue(args[3].endsWith("audio.wav"), "音频输入应为临时 wav：$args")
-            assertTrue(args[7].endsWith("result"), "输出前缀应为临时 result：$args")
+            assertTrue(args[8].endsWith("result"), "输出前缀应为临时 result：$args")
         } finally { root.deleteRecursively() }
     }
 
