@@ -10,6 +10,7 @@ import org.json.JSONObject
 internal data class CodexMessage(val id: String, val author: String, val text: String,
     val kind: String = "message", val status: String = "", val paths: List<String> = emptyList())
 internal data class CodexModelOption(val model: String, val label: String, val efforts: List<String>, val defaultEffort: String)
+internal data class CodexGoalState(val objective: String, val status: String, val seconds: Long, val tokens: Long, val budget: Long?)
 
 /** One structured thread per controller. The owner must persist the threadId before exposing it.
  * User input stays in InstructionQueue; only correlated RPC replies can mark it accepted.
@@ -39,6 +40,10 @@ internal class CodexTaskController(
     var reportedProvider by mutableStateOf(""); private set
     var modelNotice by mutableStateOf(""); private set
     private var modelReportRevision = 0L
+    var goal by mutableStateOf<CodexGoalState?>(null); private set
+    var goalLoading by mutableStateOf(false); private set
+    var goalError by mutableStateOf(""); private set
+    private var goalRevision = 0L
     var ready by mutableStateOf(false); private set
     var sending by mutableStateOf(false); private set
     var activeTurnId by mutableStateOf<String?>(null); private set
@@ -66,6 +71,8 @@ internal class CodexTaskController(
                         note = "运行器正在等待处理请求"
                     }
                     when (method) {
+                        "thread/goal/updated" -> { goalRevision++; receiveGoal(params.optJSONObject("goal")) }
+                        "thread/goal/cleared" -> { goalRevision++; goal = null; goalError = "" }
                         "model/rerouted" -> {
                             modelReportRevision++
                             reportedModel = params.getString("toModel")
@@ -164,6 +171,30 @@ internal class CodexTaskController(
     }
 
     fun queueChanged() { scheduleNext() }
+
+    suspend fun refreshGoal() {
+        if (!ready || disposed || goalLoading) return
+        goalLoading = true
+        val revision = goalRevision
+        try {
+            val response = client.readGoal(threadId).getJSONObject("result")
+            if (revision == goalRevision) receiveGoal(response.optJSONObject("goal"))
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { goalError = "目标状态暂不可用：${e.message}" }
+        finally { goalLoading = false }
+    }
+
+    private fun receiveGoal(value: JSONObject?) {
+        try {
+            val next = value?.let {
+                check(it.getString("threadId") == threadId) { "目标不属于当前任务" }
+                CodexGoalState(it.getString("objective"), it.getString("status"),
+                    it.getLong("timeUsedSeconds"), it.getLong("tokensUsed"),
+                    if (it.isNull("tokenBudget")) null else it.getLong("tokenBudget"))
+            }
+            goal = next; goalError = ""
+        } catch (e: Exception) { goalError = "目标状态无法读取：${e.message}" }
+    }
 
     suspend fun refreshModels() {
         if (modelsLoading) return

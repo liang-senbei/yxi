@@ -100,6 +100,9 @@ internal class CodexAppServer internal constructor(private val shell: SshSession
     suspend fun readThread(threadId: String): JSONObject = request("thread/read",
         JSONObject().put("threadId", requiredId(threadId)).put("includeTurns", true))
 
+    suspend fun readGoal(threadId: String): JSONObject = request("thread/goal/get",
+        JSONObject().put("threadId", requiredId(threadId)))
+
     private fun shutdown(error: Throwable) {
         if (!closed.compareAndSet(false, true)) return
         shell.close() // Unblocks the blocking reader as well as stopping outbound writes.
