@@ -1,4 +1,6 @@
-# 下一版 Windows 试用说明
+# 历史 Windows 候选版试用说明
+
+此文对应已交付的早期候选包，后续1.3.0正式发布记录见 [windows-1.3.0-release.md](windows-1.3.0-release.md)。当前开发进度和未发布功能见 [windows-workbench-progress.md](windows-workbench-progress.md)，请勿把本页当成最新安装入口。
 
 状态：候选包已生成，源码为 `accfaf5`，协议功能基线为 `4281b22`。Windows运行目录和未签名Setup位于父工作区 `artifacts/windows-accfaf5/package`，独立启动入口为 `Start-Yxi-Trial.cmd`。新版尚未由中枢启动或完成实机验证。旧试用包 `3152af0` 原样保留，本页新增功能不能作为旧包的使用说明。
 
