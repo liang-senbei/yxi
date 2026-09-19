@@ -53,6 +53,11 @@ fun main(args: Array<String>) {
         val scope = rememberCoroutineScope()
         // 点通知跳会话（ZCode 同款）：按 hostId + 会话名选中，select 会把页面拉回工作区；叫回窗口归 Notify.clicked
         LaunchedEffect(Unit) {
+            Notify.taskAllowed = { key -> state.navigation.shouldNotify(key, Store.pref("notifyOnlyPinned", "0") == "1") }
+            Notify.openTask = { key ->
+                state.conns.firstNotNullOfOrNull { c -> c.sessions.firstOrNull { taskNavigationKey(c.host, it) == key }?.let { c to it } }
+                    ?.let { (c, task) -> state.select(c, task) }
+            }
             Notify.open = { hostId, name ->
                 val c = state.conns.firstOrNull { it.host.id == hostId }
                 val s = c?.sessions?.firstOrNull { it.name == name } ?: c?.sessions?.firstOrNull()

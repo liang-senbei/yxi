@@ -47,6 +47,14 @@ class WorkspaceNavigation(file: File) {
     fun pinned(key: String) = task(key).optInt("pin", 0) > 0
     fun pinOrder(key: String) = task(key).optInt("pin", Int.MAX_VALUE)
     fun archived(key: String) = task(key).optBoolean("archived", false)
+    fun muted(key: String) = task(key).optBoolean("muted", false)
+    fun setMuted(key: String, value: Boolean) = editTask(key) { it.put("muted", value) }
+    fun shouldNotify(key: String, onlyPinned: Boolean): Boolean {
+        if (!readable || muted(key)) return false
+        val tasks = data.getJSONObject("tasks")
+        val hasPins = tasks.keys().asSequence().any { tasks.getJSONObject(it).optInt("pin", 0) > 0 }
+        return !onlyPinned || !hasPins || pinned(key)
+    }
     fun collapsed(key: String, default: Boolean) = data.getJSONObject("projects").optJSONObject(key)?.optBoolean("collapsed", default) ?: default
     private fun edit(change: (JSONObject) -> Unit) {
         if (!readable) return // Do not replace unreadable pin/archive/title data with an empty fallback.

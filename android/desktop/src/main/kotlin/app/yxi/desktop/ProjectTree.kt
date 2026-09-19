@@ -47,6 +47,7 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
                     }
                     if (!stable) DropdownMenuItem(text = { Text("会话标识不可用，请刷新后整理") }, enabled = false, onClick = {})
                     item(if (nav.pinned(key)) "取消置顶" else "置顶") { nav.togglePin(key) }
+                    item(if (nav.muted(key)) "恢复任务通知" else "静音此任务") { nav.setMuted(key, !nav.muted(key)) }
                     if (nav.pinned(key)) {
                         item("置顶上移", pinKeys.indexOf(key) > 0) { nav.movePin(key, -1, pinKeys) }
                         item("置顶下移", pinKeys.indexOf(key) in 0 until pinKeys.lastIndex) { nav.movePin(key, 1, pinKeys) }

@@ -256,7 +256,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
         if (seen.fp != p.fingerprint) {
             seen.fp = p.fingerprint
             val what = a.body.lineSequence().firstOrNull { it.isNotBlank() } ?: p.title.ifBlank { p.options.joinToString(" / ") { it.label } }
-            Notify.notify("等待批准", "任务: ${session.short} · " + (a.tool?.let { "$it：" } ?: "") + what.take(70), conn.host.id, session.name)
+            Notify.notify("等待批准", "任务: ${session.short} · " + (a.tool?.let { "$it：" } ?: "") + what.take(70), conn.host.id, session.name, taskNavigationKey(conn.host, session))
         }
     }
 

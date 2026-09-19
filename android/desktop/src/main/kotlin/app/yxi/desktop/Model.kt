@@ -213,7 +213,7 @@ class Conn(val host: Host, hostKeys: HostKeys) {
                 val createdAt = task.runtimeId.substringAfterLast(':').toDoubleOrNull() ?: return@forEach
                 if (event.timestamp < createdAt) return@forEach
                 val preview = event.preview.replace(Regex("\\s+"), " ").trim().take(100)
-                Notify.notify("本轮处理结束", "任务: ${task.short}" + if (preview.isBlank()) "" else " · $preview", host.id, task.name)
+                Notify.notify("本轮处理结束", "任务: ${task.short}" + if (preview.isBlank()) "" else " · $preview", host.id, task.name, taskNavigationKey(host, task))
             }
         }
         // Establish an initial baseline silently; reconnects retain this connection's cursor.
@@ -226,7 +226,7 @@ class Conn(val host: Host, hostKeys: HostKeys) {
                 // 措辞照 ZCode（老板 09-12 截图）：标题=徽标文案（等待批准/需要用户输入），正文带任务名，可点跳会话。
                 // detail 可能带换行/emoji，压成一行再截（take 别把代理对截一半成乱码）
                 Notify.notify(s.badge().label, "任务: ${s.short}" +
-                    s.detail.replace(Regex("\\s+"), " ").trim().take(60).let { d -> if (d.isBlank()) "" else " · $d" }, host.id, s.name)
+                    s.detail.replace(Regex("\\s+"), " ").trim().take(60).let { d -> if (d.isBlank()) "" else " · $d" }, host.id, s.name, taskNavigationKey(host, s))
         }
         sessions = fresh
     }
