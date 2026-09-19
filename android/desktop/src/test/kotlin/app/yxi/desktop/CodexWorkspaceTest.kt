@@ -9,6 +9,9 @@ class CodexWorkspaceTest {
 
     private val runners = mutableListOf<FakeRunner>()
 
+    /** workspace() 最近一次构造的队列；产品字段为 private，测试经由同一实例断言。 */
+    private var lastQueue: InstructionQueue? = null
+
     private fun fixture(block: (File) -> Unit) {
         val dir = Files.createTempDirectory("yxi-workspace").toFile()
         try { block(dir) } finally { dir.deleteRecursively(); runners.clear() }
@@ -19,7 +22,9 @@ class CodexWorkspaceTest {
     /** 真实登记文件 + 假运行器工厂；返回的清理函数关闭所有假进程。 */
     private fun workspace(dir: File, mode: String, threadId: String = "thr-1"): Pair<CodexWorkspace, () -> Unit> {
         assumeFakeRunner()
-        val ws = CodexWorkspace(InstructionQueue(File(dir, "queue.json")), File(dir, "registry.json"))
+        val queue = InstructionQueue(File(dir, "queue.json"))
+        lastQueue = queue
+        val ws = CodexWorkspace(queue, File(dir, "registry.json"))
         ws.clientFactory = { _ -> FakeRunner(mode, threadId).also { runners += it }.client }
         ws.connected = { true }
         return ws to { runners.forEach { runCatching { it.close() } } }
@@ -152,7 +157,7 @@ class CodexWorkspaceTest {
             val c = conn()
             val record = runBlocking { ws.create(c, "/srv/demo", "标题") }
             val old = ws.controllers.getValue(record.key)
-            val kept = ws.queue.enqueue(record.key, "保留的草稿指令")
+            val kept = lastQueue!!.enqueue(record.key, "保留的草稿指令")
             runBlocking { ws.applyCurrentConfiguration(c, record) }
             val fresh = ws.controllers.getValue(record.key)
             assertTrue(fresh !== old, "应换上新控制器")
@@ -171,7 +176,7 @@ class CodexWorkspaceTest {
             assertEquals("gpt-fake", fresh.configuredModel)
             // 自动发送暂停；队列草稿键值原样保留
             assertFalse(fresh.autoDispatch, "应用线路后自动发送应暂停")
-            assertEquals(listOf(kept), ws.queue.entries.filter { it.taskKey == record.key })
+            assertEquals(listOf(kept), lastQueue!!.entries.filter { it.taskKey == record.key })
             assertFalse(ws.busy)
         } finally { cleanup() }
     }
