@@ -1030,3 +1030,9 @@
 - pilot用Codex CLI0.153.4、临时HOME/CODEX_HOME和空凭据执行元数据流程，发现thread/start返回idle、turns=[]，随后thread/read(includeTurns=true)却报-32601 list_turns is not supported yet；新进程resume后read成功。没有turn/start或模型请求。
 - 新建路径现在直接用thread/start权威返回的空闲、空历史快照初始化控制器，不追加这个不兼容的read；已有任务仍按恢复/读取核对。仅ID一致、idle、空turns且本地无指令时可使用新建快照。
 - accfaf5候选包包含旧路径，可能新建后提示读取历史失败；已登记任务可从任务列表再次连接恢复。修复尚未打入包，需下一候选版；不能因模拟30项通过忽略真实CLI错误。
+
+## 第一百四十五轮：修复候选包8035b87
+
+- cc-yxi构建8035b87成功；Git二进制增量补丁约1.1MB，本机对旧jar副本应用，重建SHA256与远端完整jar一致：3dccce6b0938d4757b29fd529a6ac291b7f4be638a8f1434dc8537e73cabf870。
+- Windows app-image和未签名Setup已生成，交付父工作区artifacts/windows-8035b87/package/Start-Yxi-Trial.cmd。独立配置，旧包保留；未执行Smoke、未启动应用或安装发布。
+- 新建空线程兼容修复已包含，定向检查仍在Agent侧；不宣称真实模型/Windows全部验收完成。
