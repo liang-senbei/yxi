@@ -121,7 +121,7 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File,
         busy = true
         val client = try { clientFactory(conn) } catch (e: Exception) { busy = false; throw e }
         try {
-            val thread = client.resumeThread(record.threadId).getJSONObject("result").getJSONObject("thread")
+            val thread = resumeExistingThread(client, record.threadId)
             check(thread.getString("id") == record.threadId) { "恢复响应不属于原任务" }
             attach(conn, record, client)
         } catch (e: Exception) { client.close(); throw e }
@@ -139,7 +139,7 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File,
         busy = true
         val client = try { clientFactory(conn) } catch (e: Exception) { busy = false; throw e }
         try {
-            val thread = client.resumeThread(id).getJSONObject("result").getJSONObject("thread")
+            val thread = resumeExistingThread(client, id)
             check(thread.getString("id") == id) { "恢复响应不属于原任务" }
             val directory = thread.getString("cwd")
             require(directory.startsWith('/') && directory.none { it < ' ' }) { "服务器返回的项目目录无效" }
@@ -153,6 +153,17 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File,
             record
         } catch (e: Exception) { client.close(); throw e }
         finally { busy = false }
+    }
+
+    private suspend fun resumeExistingThread(client: CodexAppServer, id: String): JSONObject {
+        try {
+            return client.resumeThread(id).getJSONObject("result").getJSONObject("thread")
+        } catch (e: Exception) {
+            if (e.message?.contains("no rollout found", ignoreCase = true) == true) {
+                throw IllegalStateException("服务器没有找到此任务的历史文件。尚未发送过内容的新任务，关闭后可能无法恢复；也请确认连接的是原服务器和账号。任务编号：$id。可保留此记录，手动新建任务后再使用原草稿。", e)
+            }
+            throw e
+        }
     }
 
     private suspend fun attach(conn: Conn, record: CodexTaskRecord, client: CodexAppServer, createdThread: JSONObject? = null): CodexTaskController {
