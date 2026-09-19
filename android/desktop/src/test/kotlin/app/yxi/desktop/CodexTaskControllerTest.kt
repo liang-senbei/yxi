@@ -244,10 +244,46 @@ class CodexTaskControllerTest {
     }
 
     @Test
+    fun `ordinary attachments serialize as non-embedded text references`() = withController("seq-auto") { controller, queue, runner ->
+        controller.reconcile()
+        val plain = queue.enqueue("task", "", listOf(InstructionAttachment("数据.txt", "/srv/数据.txt")))
+        val mixed = queue.enqueue("task", "看图和文件", listOf(
+            InstructionAttachment("demo.png", "/srv/demo.png"),
+            InstructionAttachment("数据.txt", "/srv/数据.txt")))
+        controller.setAutoDispatch(true)
+        poll { queue.entries.count { it.runtimeTurnState == RuntimeTurnState.Completed } == 2 }
+        val inputs = turnStarts(runner)
+        assertEquals(2, inputs.size)
+        // 仅普通附件：单一 text 输入携带名称+绝对路径引用，明示非内嵌，不出现 localImage
+        assertEquals(1, inputs[0].length())
+        assertEquals("text", inputs[0].getJSONObject(0).getString("type"))
+        val reference = inputs[0].getJSONObject(0).getString("text")
+        assertTrue(reference.contains("未内嵌"), "应标明非内嵌：$reference")
+        val cited = JSONObject(reference.substringAfterLast('\n'))
+        assertEquals("数据.txt", cited.getString("name"))
+        assertEquals("/srv/数据.txt", cited.getString("path"))
+        // 图文混合：用户文本、图片 localImage、文件引用按附件顺序各一项
+        assertEquals(3, inputs[1].length())
+        assertEquals("text", inputs[1].getJSONObject(0).getString("type"))
+        assertEquals("看图和文件", inputs[1].getJSONObject(0).getString("text"))
+        assertEquals("localImage", inputs[1].getJSONObject(1).getString("type"))
+        assertEquals("/srv/demo.png", inputs[1].getJSONObject(1).getString("path"))
+        assertEquals("text", inputs[1].getJSONObject(2).getString("type"))
+        val citedMixed = JSONObject(inputs[1].getJSONObject(2).getString("text").substringAfterLast('\n'))
+        assertEquals("数据.txt", citedMixed.getString("name"))
+        assertEquals("/srv/数据.txt", citedMixed.getString("path"))
+    }
+
+    @Test
     fun `invalid attachment is rejected before delivery and stays Local`() = withController("new-thread") { controller, queue, runner ->
         controller.reconcile()
-        // 普通文件现已支持；相对路径仍须在投递前拒绝，指令保留 Local。
-        val bad = queue.enqueue("task", "带附件", listOf(InstructionAttachment("a.txt", "relative/a.txt")))
+        // 普通文件现已支持；相对路径在队列层就被拒，指令根本不入列
+        assertFailsWith<IllegalArgumentException> {
+            queue.enqueue("task", "带附件", listOf(InstructionAttachment("a.txt", "relative/a.txt")))
+        }
+        assertTrue(queue.entries.isEmpty())
+        // 队列放行（仅禁 NUL）、Codex 输入层拒绝的控制字符路径：投递前校验失败，指令保留 Local
+        val bad = queue.enqueue("task", "带附件", listOf(InstructionAttachment("a.txt", "/srv/a\nb.txt")))
         controller.setAutoDispatch(true)
         poll { !controller.autoDispatch }
         assertEquals(InstructionStatus.Local, queue.entries.single { it.id == bad.id }.status, "非法附件不得进入投递状态")
