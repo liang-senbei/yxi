@@ -61,8 +61,15 @@ private fun CodexConversationPane(state: AppState) {
     var creating by remember { mutableStateOf(false) }
     var directory by remember { mutableStateOf(state.session?.cwd.orEmpty()) }
     var title by remember { mutableStateOf("") }
+    var initialDraft by remember { mutableStateOf("") }
     var recoveryId by remember { mutableStateOf("") }
     var recovering by remember { mutableStateOf(false) }
+    LaunchedEffect(state.codexCreateRequest) {
+        state.codexCreateRequest?.let { (path, prompt) ->
+            directory = path; initialDraft = prompt; creating = true; recovering = false
+            state.codexCreateRequest = null
+        }
+    }
     var filePath by remember(state.codexSelectedTaskKey) { mutableStateOf("") }
     var fileEntry by remember(state.codexSelectedTaskKey) { mutableStateOf(false) }
     var showFiles by remember(state.codexSelectedTaskKey) { mutableStateOf(false) }
@@ -162,15 +169,19 @@ private fun CodexConversationPane(state: AppState) {
                     val target = conn
                     val path = directory.trim()
                     val name = title
+                    val prompt = initialDraft
                     act {
                         val record = workspace.create(target, path, name)
+                        if (prompt.isNotBlank()) state.appendCodexQuote(record, prompt)
                         state.codexSelectedTaskKey = record.key
+                        initialDraft = ""
                         creating = false
                     }
                 }, enabled = !workspace.busy && directory.startsWith('/')) { Text("创建任务") }
                 TextButton({ creating = false }) { Text("取消") }
             }
             Text("使用所选服务器的 Codex 登录和模型配置。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+            if (initialDraft.isNotBlank()) OutlinedTextField(initialDraft, { initialDraft = it }, label = { Text("创建后的提示词草稿") }, modifier = Modifier.fillMaxWidth(), maxLines = 4)
         }
         CodexTaskPicker(state, tasks, workspace.busy) { task ->
             state.codexSelectedTaskKey = task.key

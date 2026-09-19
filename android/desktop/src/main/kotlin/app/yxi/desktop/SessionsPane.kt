@@ -92,7 +92,7 @@ fun SessionRow(s: Session, selected: Boolean, displayName: String? = null, onCli
  * 出错留在弹窗里显示，成了才关；成了把新会话交给 [onCreated]。
  */
 @Composable
-fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: String = "", groupContext: String = "", onCreated: (Session) -> Unit) {
+fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: String = "", groupContext: String = "", onCodexConversation: ((String, String) -> Unit)? = null, onCreated: (Session) -> Unit) {
     val scope = rememberCoroutineScope()
     // 预填现有会话的父目录（工作区），只用补项目名；不写死路径，换台机器就不一样
     var path by remember { mutableStateOf(Dirs.parentsOf(conn.sessions.map { it.cwd }).firstOrNull()?.let { "$it/" }.orEmpty()) }
@@ -119,6 +119,11 @@ fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: Stri
                     label = { Text("启动提示词（可留空）") }, placeholder = { Text("描述目标、分工及需要遵守的项目约定") }, modifier = Modifier.fillMaxWidth())
                 if (initialPrompt.isNotBlank()) Text("创建后会把这段内容直接交给运行器，可能立即开始工作。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 Text("运行器沿用服务器的登录与权限设置。创建会话不代表模型请求已经成功。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                if (agent == "codex" && onCodexConversation != null && collaborationGroup.isBlank()) {
+                    TextButton({ onCodexConversation(path, initialPrompt) }, enabled = !busy && !isolatedWorktree) { Text("在对话工作台继续") }
+                    Text(if (isolatedWorktree) "对话工作台暂需使用已存在的目录；独立工作树可通过下方终端入口创建。" else "支持排队、引导和侧栏预览；提示词先进入草稿，由你确认发送。",
+                        style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                }
                 if (collaborationGroup.isNotBlank()) Text("创建前加入「$collaborationGroup」；启动失败可能留下未在线成员，可在组编辑中移除。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 if (err.isNotBlank()) Text(err, style = MaterialTheme.typography.bodySmall, color = Tokens.current.danger)
             }
