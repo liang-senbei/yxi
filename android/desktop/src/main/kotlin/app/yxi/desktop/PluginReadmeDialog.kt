@@ -35,7 +35,29 @@ def read(path):
     with path.open('rb') as f:
         data = f.read(131073)
     return data[:131072].decode('utf-8', errors='replace'), len(data) > 131072
-result = {'description': '', 'readme': '', 'file': '', 'truncated': False}
+result = {'description': '', 'readme': '', 'file': '', 'truncated': False, 'capabilities': {}, 'metadataIncomplete': False}
+def read_json(path):
+    if not path.is_file(): return {}
+    try:
+        text, clipped = read(path)
+        value = json.loads(text) if not clipped else None
+        if not isinstance(value, dict): raise ValueError('invalid metadata')
+        return value
+    except (OSError, ValueError):
+        result['metadataIncomplete'] = True
+        return {}
+def names(label, values):
+    values = sorted(set(str(value) for value in values))
+    if values: result['capabilities'][label] = values[:30]
+    if len(values) > 30: result['metadataIncomplete'] = True
+for label, folder in [('命令', 'commands'), ('Agent', 'agents')]:
+    names(label, [p.stem for p in (root / folder).glob('*.md') if p.is_file()])
+names('技能', [p.parent.name for p in (root / 'skills').glob('*/SKILL.md') if p.is_file()])
+hooks = read_json(root / 'hooks' / 'hooks.json').get('hooks', {})
+if isinstance(hooks, dict): names('钩子事件', hooks.keys())
+mcp = read_json(root / '.mcp.json')
+servers = mcp.get('mcpServers', mcp)
+if isinstance(servers, dict): names('MCP 服务', servers.keys())
 manifest = root / '.claude-plugin' / 'plugin.json'
 if manifest.is_file():
     text, truncated = read(manifest)
@@ -67,6 +89,16 @@ print('__YXI_PLUGIN_DOC__:' + json.dumps(result, ensure_ascii=False))
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
             content?.let { doc ->
+                val capabilities = doc.optJSONObject("capabilities")
+                if (capabilities != null && capabilities.length() > 0) {
+                    Text("安装包入口", style = MaterialTheme.typography.titleSmall)
+                    capabilities.keys().asSequence().sorted().forEach { label ->
+                        val entries = capabilities.getJSONArray(label)
+                        Text("$label · " + (0 until entries.length()).joinToString("、") { entries.getString(it) }, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Text("来自标准目录和配置文件；当前任务是否加载、获授权需以运行器状态为准。自定义入口请参阅说明。", style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
+                }
+                if (doc.optBoolean("metadataIncomplete")) Text("部分入口未能读取或已截取，请参阅完整说明。", style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
                 OutlinedTextField(request, { request = it; added = false }, modifier = Modifier.fillMaxWidth(), maxLines = 3,
                     label = { Text("希望 Agent 如何使用这个插件") }, placeholder = { Text("例如：用这个插件处理当前项目的文档。") })
                 TextButton({
