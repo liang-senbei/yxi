@@ -183,8 +183,17 @@ object MeAuth {
     suspend fun refresh(): String? = withContext(Dispatchers.IO) {
         val generation = sessionGeneration
         try {
-        val tk = token(generation) ?: return@withContext "登录暂不可用，请检查连接或重新登录"
-        val (c, body) = AccountApi.req("${AccountApi.API}/api/me", "GET", tk, null)
+        var tk = token(generation) ?: return@withContext "登录暂不可用，请检查连接或重新登录"
+        var response = AccountApi.req("${AccountApi.API}/api/me", "GET", tk, null)
+        if (response.first == 401) {
+            tk = token(generation, rejectedAccess = tk) ?: return@withContext "登录暂不可用，请检查连接或重新登录"
+            response = AccountApi.req("${AccountApi.API}/api/me", "GET", tk, null)
+            if (response.first == 401) {
+                rejectAccess(generation, tk)
+                return@withContext "服务器未接受登录，请重新登录"
+            }
+        }
+        val (c, body) = response
         if (c !in 200..299) return@withContext AccountApi.httpErr(c, body)
         val profile = runCatching { AccountApi.parseMe(JSONObject(body)) }.getOrElse { return@withContext "读不懂服务器的回复" }
         sessions.guarded(generation) { check(signedIn); me = profile }
@@ -201,11 +210,14 @@ object MeAuth {
      * 而且**同一时刻只能有一个线程在续** —— 两个线程同时进来会互相拿旧的重用。
      */
     @Synchronized
-    private fun token(generation: Long): String? {
+    private fun token(generation: Long, rejectedAccess: String? = null): String? {
         val o = sessions.read(generation)
         val acc = o.optString("access").takeIf { it.isNotEmpty() }
-        if (acc != null && System.currentTimeMillis() < o.optLong("exp") - 60_000L) return acc
-        val rt = o.optString("refresh").takeIf { it.isNotEmpty() } ?: return acc
+        if (acc != null && acc != rejectedAccess && System.currentTimeMillis() < o.optLong("exp") - 60_000L) return acc
+        val rt = o.optString("refresh").takeIf { it.isNotEmpty() } ?: run {
+            if (rejectedAccess != null) rejectAccess(generation, rejectedAccess)
+            return if (rejectedAccess == null) acc else null
+        }
         val (c, body) = AccountApi.form(
             "${AccountApi.AUTH}/oidc/token",
             mapOf("grant_type" to "refresh_token", "refresh_token" to rt,
@@ -229,6 +241,16 @@ object MeAuth {
             return null
         }
         return sessions.read(generation).optString("access").takeIf { it.isNotEmpty() }
+    }
+
+    @Synchronized
+    private fun rejectAccess(generation: Long, rejectedAccess: String) {
+        sessions.guarded(generation) {
+            if (sessions.read(generation).optString("access") == rejectedAccess) {
+                signOut()
+                signedOutWhy = listOf("服务器未接受登录，请重新登录", signedOutWhy).filter { it.isNotBlank() }.joinToString("；")
+            }
+        }
     }
 
 
