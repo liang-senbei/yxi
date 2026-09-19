@@ -42,3 +42,9 @@
 - 语音录音→识别链路（无麦克风与 yxi-asr 服务；仅静态审查通过）。
 - BrowserPane 网页交互 E2E（查找/视口/主题/自动刷新；两轮时间盒未执行，静态审查 S9 通过）。
 - 任务视图 `previewExpanded` 展开状态维度（需网页预览展开场景；主视图 + 文件侧栏两维度已验证）。
+
+## Codex批次编译（2026-09-19）
+
+构建Agent cc-yxi报告功能冻结头4281b22的Windows目标`:desktop:compileKotlin`为BUILD SUCCESSFUL（EXIT=0，0错误）。范围仅为编译，未生成新版Windows安装包，不代表协议、UI或真实模型全流程通过。pilot协议模拟和logto恢复路径检查仍在进行。
+
+交付使用说明见 [下一版试用说明](windows-next-trial-guide.md)，当前已交付试用包仍为3152af0。
