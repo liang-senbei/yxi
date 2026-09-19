@@ -141,7 +141,8 @@ object MeAuth {
     /** 拉一次 `/api/me`。@return 出错原因,成功 null。 */
     internal suspend fun accountRequest(owner: String, path: String, method: String, body: String?, generation: Long = sessionGeneration): Pair<Int, String> = withContext(Dispatchers.IO) {
         sessions.guarded(generation) { check(signedIn && me?.userId == owner) { "登录账号已变化，请重新进入账户页面" } }
-        require(listOf("/api/mail", "/api/support/tickets").any { path == it || path.startsWith("$it/") || path.startsWith("$it?") })
+        require((path == "/api/me/redeem" && method == "POST") ||
+            listOf("/api/mail", "/api/support/tickets").any { path == it || path.startsWith("$it/") || path.startsWith("$it?") })
         val access = token(generation) ?: error("登录暂不可用，请检查连接或重新登录")
         sessions.guarded(generation) { check(signedIn && me?.userId == owner) { "登录账号已变化" } }
         val result = AccountApi.req(AccountApi.API + path, method, access, body)

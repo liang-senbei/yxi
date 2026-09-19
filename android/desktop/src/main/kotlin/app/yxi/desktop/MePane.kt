@@ -114,6 +114,10 @@ fun MePane(state: AppState) {
                         },
                         onSignOut = { MeAuth.signOut(); err = "" })
                 }
+                if (MeAuth.signedIn && owner != null) androidx.compose.runtime.key(owner, generation) {
+                    Spacer(Modifier.height(16.dp))
+                    RedeemCodeCard(owner, generation)
+                }
             }
         }
     }
