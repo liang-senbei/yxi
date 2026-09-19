@@ -56,12 +56,17 @@ fun MePane(state: AppState) {
     var busy by remember { mutableStateOf(false) }
     var mailOpen by remember { mutableStateOf(false) }
     var supportOpen by remember { mutableStateOf(false) }
+    var walletOpen by remember { mutableStateOf(false) }
     var loginRequest by remember { mutableStateOf(0L) }
 
     // 进页面拉一次:有令牌就顺手刷资料,没令牌就停在登录按钮上
     LaunchedEffect(Unit) { MeAuth.load() }
     val owner = MeAuth.me?.userId
     val generation = MeAuth.sessionGeneration
+    if (walletOpen && MeAuth.signedIn && owner != null) {
+        androidx.compose.runtime.key(owner, generation) { WalletPane(owner, generation) { walletOpen = false } }
+        return
+    }
     if (supportOpen && MeAuth.signedIn && owner != null) {
         val api = remember(owner, generation) { app.yxi.agent.SupportApi { path, method, body -> MeAuth.accountRequest(owner, path, method, body, generation) } }
         androidx.compose.runtime.key(owner, generation) { SupportPane(owner, api, state.support, onBack = { supportOpen = false }, onUnread = { MeAuth.supportUnread(owner, it, generation) }) }
@@ -116,6 +121,7 @@ fun MePane(state: AppState) {
                 }
                 if (MeAuth.signedIn && owner != null) androidx.compose.runtime.key(owner, generation) {
                     Spacer(Modifier.height(16.dp))
+                    TextButton({ walletOpen = true }) { Text("钱包与订单") }
                     RedeemCodeCard(owner, generation)
                 }
             }
