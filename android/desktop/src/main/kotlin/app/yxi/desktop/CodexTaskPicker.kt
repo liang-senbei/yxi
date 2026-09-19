@@ -15,12 +15,23 @@ internal fun CodexTaskPicker(state: AppState, tasks: List<CodexTaskRecord>, busy
     val navigation = state.navigation
     var query by remember { mutableStateOf("") }
     var showArchived by remember { mutableStateOf(false) }
+    var attentionOnly by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf<String?>(null) }
     var rename by remember { mutableStateOf<CodexTaskRecord?>(null) }
     var name by remember { mutableStateOf("") }
     NativeOverlay(menu != null)
+    fun taskStatus(task: CodexTaskRecord): String {
+        val controller = state.codexWorkspace.controllers[task.key]
+        return when {
+            controller?.pendingRequests?.isNotEmpty() == true -> "等待答复"
+            state.instructions.entries.any { it.taskKey == task.key && it.status == InstructionStatus.Unknown } -> "待核对"
+            controller?.activeTurnId != null -> "运行中"
+            state.instructions.entries.any { it.taskKey == task.key && it.status == InstructionStatus.Local } -> "有排队指令"
+            else -> ""
+        }
+    }
     val visible = tasks.filter { task ->
-        navigation.archived(task.key) == showArchived && (query.isBlank() ||
+        navigation.archived(task.key) == showArchived && (!attentionOnly || taskStatus(task) in listOf("等待答复", "待核对")) && (query.isBlank() ||
             (navigation.title(task.key) ?: task.title).contains(query, true) || task.directory.contains(query, true))
     }.sortedWith(compareBy<CodexTaskRecord> { !navigation.pinned(it.key) }
         .thenBy { navigation.pinOrder(it.key) }.thenByDescending { it.createdAt })
@@ -28,14 +39,19 @@ internal fun CodexTaskPicker(state: AppState, tasks: List<CodexTaskRecord>, busy
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(query, { query = it }, Modifier.weight(1f), singleLine = true, placeholder = { Text("搜索任务或项目路径") })
             FilterChip(showArchived, { showArchived = !showArchived }, label = { Text("已归档") }, modifier = Modifier.padding(start = 8.dp))
+            FilterChip(attentionOnly, { attentionOnly = !attentionOnly }, label = { Text("待处理") }, modifier = Modifier.padding(start = 6.dp))
         }
         if (navigation.error.isNotBlank()) Text(navigation.error, color = Tokens.current.danger, style = MaterialTheme.typography.bodySmall)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             visible.forEach { task ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     FilterChip(state.codexSelectedTaskKey == task.key, { onSelect(task) }, enabled = !busy,
-                        label = { Text((if (navigation.pinned(task.key)) "★ " else "") + (navigation.title(task.key) ?: task.title),
-                            Modifier.widthIn(max = 220.dp), maxLines = 1, overflow = TextOverflow.Ellipsis) })
+                        label = { Column {
+                            Text((if (navigation.pinned(task.key)) "★ " else "") + (navigation.title(task.key) ?: task.title),
+                                Modifier.widthIn(max = 220.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            val status = taskStatus(task)
+                            if (status.isNotBlank()) Text(status, style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
+                        } })
                     Box {
                         TextButton({ menu = task.key }) { Text("⋯") }
                         DropdownMenu(menu == task.key, { menu = null }) {
