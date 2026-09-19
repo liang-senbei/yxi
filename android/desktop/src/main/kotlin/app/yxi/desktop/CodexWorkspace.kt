@@ -65,16 +65,15 @@ internal class CodexTaskRegistry(file: File) {
 internal class CodexWorkspace(private val queue: InstructionQueue, file: File) : AutoCloseable {
     private val uploadScope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
     val attachments = mutableStateMapOf<String, androidx.compose.runtime.snapshots.SnapshotStateList<DraftAttach>>()
-    fun stageImage(conn: Conn, task: CodexTaskRecord, image: DraftAttach) {
+    fun stageAttachment(conn: Conn, task: CodexTaskRecord, image: DraftAttach) {
         check(task.hostKey == projectKey(conn.host, "/")) { "附件目标服务器已改变" }
-        require(image.name.substringAfterLast('.', "").lowercase() in setOf("png", "jpg", "jpeg", "webp")) { "请选择 PNG、JPEG 或 WebP 图片" }
         val drafts = attachments.getOrPut(task.key) { mutableStateListOf() }
-        require(drafts.size < 10) { "一次最多添加10张图片" }
+        require(drafts.size < 10) { "一次最多添加10个附件" }
         drafts.add(image)
         image.state = DraftState.Uploading(0, image.size)
         Attach.launchUpload(conn, "codex-" + task.key.removePrefix("codex:"), image, uploadScope)
     }
-    fun retryImage(conn: Conn, task: CodexTaskRecord, image: DraftAttach) {
+    fun retryAttachment(conn: Conn, task: CodexTaskRecord, image: DraftAttach) {
         check(task.hostKey == projectKey(conn.host, "/") && attachments[task.key]?.contains(image) == true)
         check(image.state is DraftState.Failed)
         image.cancelled.set(false)

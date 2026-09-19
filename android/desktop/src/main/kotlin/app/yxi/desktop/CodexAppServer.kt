@@ -122,8 +122,13 @@ internal class CodexAppServer internal constructor(private val shell: SshSession
             if (text.isNotBlank()) input.put(JSONObject().put("type", "text").put("text", text))
             attachments.forEach { attachment ->
                 require(attachment.remotePath.startsWith('/') && attachment.remotePath.none { it < ' ' }) { "附件路径无效" }
-                require(attachment.remotePath.substringAfterLast('.', "").lowercase() in setOf("png", "jpg", "jpeg", "webp")) { "此通道暂支持 PNG、JPEG 和 WebP 图片" }
-                input.put(JSONObject().put("type", "localImage").put("path", attachment.remotePath))
+                if (attachment.remotePath.substringAfterLast('.', "").lowercase() in setOf("png", "jpg", "jpeg", "webp")) {
+                    input.put(JSONObject().put("type", "localImage").put("path", attachment.remotePath))
+                } else {
+                    val reference = JSONObject().put("name", attachment.name).put("path", attachment.remotePath)
+                    input.put(JSONObject().put("type", "text").put("text",
+                        "用户上传的服务器文件（内容未内嵌，请按任务需要使用文件工具读取）：\n$reference"))
+                }
             }
             return input
         }

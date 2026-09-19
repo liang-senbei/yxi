@@ -246,13 +246,13 @@ class CodexTaskControllerTest {
     @Test
     fun `invalid attachment is rejected before delivery and stays Local`() = withController("new-thread") { controller, queue, runner ->
         controller.reconcile()
-        // 扩展名不在 PNG/JPEG/WebP：投递前校验失败，指令保留 Local
-        val bad = queue.enqueue("task", "带附件", listOf(InstructionAttachment("a.txt", "/srv/a.txt")))
+        // 普通文件现已支持；相对路径仍须在投递前拒绝，指令保留 Local。
+        val bad = queue.enqueue("task", "带附件", listOf(InstructionAttachment("a.txt", "relative/a.txt")))
         controller.setAutoDispatch(true)
         poll { !controller.autoDispatch }
         assertEquals(InstructionStatus.Local, queue.entries.single { it.id == bad.id }.status, "非法附件不得进入投递状态")
         assertEquals(0, turnStarts(runner).size)
-        assertTrue(controller.note.contains("PNG"), "实际 note：${controller.note}")
+        assertTrue(controller.note.contains("路径"), "实际 note：${controller.note}")
         // 空文本且无附件：队列层就直接拒绝，根本不入列
         assertFailsWith<IllegalArgumentException> { queue.enqueue("task", "") }
         assertTrue(queue.entries.none { it.text.isBlank() })
