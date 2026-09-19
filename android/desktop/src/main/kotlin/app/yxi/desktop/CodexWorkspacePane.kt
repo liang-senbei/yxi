@@ -101,18 +101,26 @@ private fun CodexConversationPane(state: AppState) {
     var observedOffset by remember(selected?.key) { mutableStateOf(0) }
     // Mouse wheel and scrollbar navigation must also disable following, not only touch dragging.
     LaunchedEffect(conversationScroll, selected?.key) {
-        snapshotFlow { Triple(conversationScroll.firstVisibleItemIndex, conversationScroll.firstVisibleItemScrollOffset, conversationScroll.isScrollInProgress) }
-            .collect { (index, offset, scrolling) ->
+        snapshotFlow { Triple(conversationScroll.firstVisibleItemIndex to conversationScroll.firstVisibleItemScrollOffset,
+            conversationScroll.isScrollInProgress, conversationScroll.canScrollForward) }
+            .collect { (position, scrolling, canScrollForward) ->
+                val (index, offset) = position
                 if (scrolling && (index < observedIndex || index == observedIndex && offset < observedOffset)) followLatest = false
-                if (scrolling && !conversationScroll.canScrollForward) followLatest = true
+                if (!canScrollForward && !dragging && conversationScroll.layoutInfo.totalItemsCount > 0) followLatest = true
                 observedIndex = index; observedOffset = offset
             }
     }
     LaunchedEffect(dragging) { if (dragging) followLatest = false }
     val messages = controller?.messages?.toList().orEmpty()
     val requests = controller?.pendingRequests?.values?.toList().orEmpty()
+    suspend fun scrollToLatest() {
+        // Scroll beyond the one-pixel footer so layout clamps to the real content end,
+        // including variable-height Markdown and expanded activity cards.
+        conversationScroll.scrollToItem(messages.size + requests.size,
+            conversationScroll.layoutInfo.viewportSize.height.coerceAtLeast(1))
+    }
     LaunchedEffect(selected?.key, messages.lastOrNull(), messages.size, requests.size, followLatest, showFiles, showChanges) {
-        if (followLatest && !dragging && !showFiles && !showChanges) conversationScroll.scrollToItem(messages.size + requests.size)
+        if (followLatest && !dragging && !showFiles && !showChanges) scrollToLatest()
     }
     fun openTaskFile(path: String) {
         val target = conn ?: return
@@ -285,8 +293,8 @@ private fun CodexConversationPane(state: AppState) {
                 }
                 item(key = "latest") { Spacer(Modifier.height(1.dp)) }
             }
-            if (!showFiles && !showChanges && !followLatest) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                TextButton({ followLatest = true }) { Text("回到最新消息 ↓") }
+            if (!showFiles && !showChanges && (!followLatest || conversationScroll.canScrollForward) && (messages.isNotEmpty() || requests.isNotEmpty())) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                TextButton({ followLatest = true; scope.launch { scrollToLatest() } }) { Text("回到最新消息 ↓") }
             }
             if (controller != null) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(controller.autoDispatch, { controller.setAutoDispatch(it) }, enabled = controller.ready)
