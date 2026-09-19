@@ -40,6 +40,12 @@ internal class CodexTaskController(
     var modelError by mutableStateOf(""); private set
     var reportedModel by mutableStateOf(""); private set
     var reportedProvider by mutableStateOf(""); private set
+    var configuredProvider by mutableStateOf(""); private set
+    var configuredModel by mutableStateOf(""); private set
+    internal fun recordSessionConfiguration(result: JSONObject) {
+        configuredProvider = result.optString("modelProvider").takeUnless { it == "null" }.orEmpty()
+        configuredModel = result.optString("model").takeUnless { it == "null" }.orEmpty()
+    }
     var modelNotice by mutableStateOf(""); private set
     private var modelReportRevision = 0L
     var goal by mutableStateOf<CodexGoalState?>(null); private set

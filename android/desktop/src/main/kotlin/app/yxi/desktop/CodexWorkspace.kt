@@ -100,14 +100,15 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File,
         busy = true; recoveryThreadId = ""
         val client = try { clientFactory(conn) } catch (e: Exception) { busy = false; throw e }
         try {
-            val thread = client.startThread(directory).getJSONObject("result").getJSONObject("thread")
+            val result = client.startThread(directory).getJSONObject("result")
+            val thread = result.getJSONObject("thread")
             val id = thread.getString("id")
             recoveryThreadId = id // Retain the server ID if local metadata cannot be written.
             val record = CodexTaskRecord(projectKey(conn.host, "/"), id, thread.optString("cwd").ifBlank { directory },
                 title.trim().ifBlank { directory.substringAfterLast('/').ifBlank { "新任务" } }, System.currentTimeMillis())
             registry.save(record)
             recoveryThreadId = ""
-            attach(conn, record, client, thread.takeIf { it.optJSONArray("turns")?.length() == 0 && it.optJSONObject("status")?.optString("type") == "idle" })
+            attach(conn, record, client, thread.takeIf { it.optJSONArray("turns")?.length() == 0 && it.optJSONObject("status")?.optString("type") == "idle" }).recordSessionConfiguration(result)
             record
         } catch (e: Exception) { client.close(); throw e }
         finally { busy = false }
@@ -121,9 +122,10 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File,
         busy = true
         val client = try { clientFactory(conn) } catch (e: Exception) { busy = false; throw e }
         try {
-            val thread = resumeExistingThread(client, record.threadId)
+            val result = resumeExistingThread(client, record.threadId)
+            val thread = result.getJSONObject("thread")
             check(thread.getString("id") == record.threadId) { "恢复响应不属于原任务" }
-            attach(conn, record, client)
+            attach(conn, record, client).also { it.recordSessionConfiguration(result) }
         } catch (e: Exception) { client.close(); throw e }
         finally { busy = false }
     }
@@ -139,7 +141,8 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File,
         busy = true
         val client = try { clientFactory(conn) } catch (e: Exception) { busy = false; throw e }
         try {
-            val thread = resumeExistingThread(client, id)
+            val result = resumeExistingThread(client, id)
+            val thread = result.getJSONObject("thread")
             check(thread.getString("id") == id) { "恢复响应不属于原任务" }
             val directory = thread.getString("cwd")
             require(directory.startsWith('/') && directory.none { it < ' ' }) { "服务器返回的项目目录无效" }
@@ -149,7 +152,7 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File,
             recoveryThreadId = id
             registry.save(record)
             recoveryThreadId = ""
-            attach(conn, record, client)
+            attach(conn, record, client).recordSessionConfiguration(result)
             record
         } catch (e: Exception) { client.close(); throw e }
         finally { busy = false }
@@ -157,7 +160,7 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File,
 
     private suspend fun resumeExistingThread(client: CodexAppServer, id: String): JSONObject {
         try {
-            return client.resumeThread(id).getJSONObject("result").getJSONObject("thread")
+            return client.resumeThread(id).getJSONObject("result")
         } catch (e: Exception) {
             if (e.message?.contains("no rollout found", ignoreCase = true) == true) {
                 throw IllegalStateException("服务器没有找到此任务的历史文件。尚未发送过内容的新任务，关闭后可能无法恢复；也请确认连接的是原服务器和账号。任务编号：$id。可保留此记录，手动新建任务后再使用原草稿。", e)
