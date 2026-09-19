@@ -106,6 +106,15 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
         if (state.deferredRouteNotice.isNotBlank()) Text(state.deferredRouteNotice, Modifier.padding(bottom = 12.dp), style = MaterialTheme.typography.bodySmall)
         WorkbenchTabs(listOf("Claude Code", "Codex"), if (engine == Lines.CODEX) "Codex" else "Claude Code", { if (!busy) { engine = if (it == "Codex") Lines.CODEX else Lines.CLAUDE; projectScope = false } })
         if (engine == Lines.CODEX) {
+            val existingTask = state.codexWorkspace.tasks(conn.host).firstOrNull { it.key == state.codexSelectedTaskKey }
+            if (existingTask != null) OutlinedCard(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("继续原对话 · ${existingTask.title}", style = MaterialTheme.typography.titleSmall)
+                    Text(existingTask.directory, style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+                    Text("保存并应用线路后，回到对话点击“在此对话应用当前服务器线路”。", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+                    TextButton({ state.page = Page.Codex }, enabled = !busy && state.deferredRoute == null) { Text("返回原对话") }
+                }
+            }
             TextButton({
                 val task = state.codexWorkspace.tasks(conn.host).firstOrNull { it.key == state.codexSelectedTaskKey }
                 state.prepareCodexTask(conn, task?.directory ?: cwd.orEmpty())
