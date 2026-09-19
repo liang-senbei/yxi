@@ -168,6 +168,8 @@ private fun CodexConversationPane(state: AppState) {
                 key(selected.key) { FilesPane(conn, selected.key, selected.directory, ::openTaskFile) }
             } else LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 items(controller?.messages?.toList().orEmpty(), key = { it.id }) { message ->
+                    if (message.kind != "message") CodexActivityCard(message, ::openTaskFile)
+                    else
                     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                         Text(message.author, color = Tokens.current.textMuted, style = MaterialTheme.typography.labelMedium)
                         CompositionLocalProvider(LocalUriHandler provides taskUris) {
@@ -184,6 +186,8 @@ private fun CodexConversationPane(state: AppState) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(if (supported) "需要你的批准" else "运行器需要进一步输入", style = MaterialTheme.typography.titleSmall)
                             val params = request.optJSONObject("params") ?: JSONObject()
+                            val related = controller?.messages?.firstOrNull { it.id == params.optString("itemId") && it.kind != "message" }
+                            if (related != null) CodexActivityCard(related, ::openTaskFile, initiallyExpanded = true)
                             val description = buildString {
                                 if (method == "item/fileChange/requestApproval") append("允许运行器修改文件\n")
                                 params.optString("command").takeIf { it.isNotBlank() && it != "null" }?.let { append(it).append('\n') }

@@ -7,7 +7,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.swing.Swing
 import org.json.JSONObject
 
-internal data class CodexMessage(val id: String, val author: String, val text: String)
+internal data class CodexMessage(val id: String, val author: String, val text: String,
+    val kind: String = "message", val status: String = "", val paths: List<String> = emptyList())
 
 /** One structured thread per controller. The owner must persist the threadId before exposing it.
  * User input stays in InstructionQueue; only correlated RPC replies can mark it accepted.
@@ -56,6 +57,11 @@ internal class CodexTaskController(
                             val id = params.getString("itemId")
                             val previous = messages.firstOrNull { it.id == id }
                             putMessage(CodexMessage(id, "Codex", previous?.text.orEmpty() + params.getString("delta")))
+                        }
+                        "item/commandExecution/outputDelta", "item/fileChange/outputDelta" -> {
+                            val id = params.getString("itemId")
+                            val previous = messages.firstOrNull { it.id == id }
+                            if (previous != null) putMessage(previous.copy(text = limitedOutput(previous.text + params.optString("delta"))))
                         }
                         "turn/started" -> activeTurnId = params.getJSONObject("turn").getString("id")
                         "turn/completed" -> {
@@ -220,6 +226,18 @@ internal class CodexTaskController(
                 }.joinToString("\n")
                 CodexMessage(id, "你", text)
             }
+            "commandExecution" -> {
+                val output = item.optString("aggregatedOutput").takeUnless { it == "null" }.orEmpty()
+                val exit = if (item.has("exitCode") && !item.isNull("exitCode")) "\n退出码：${item.getInt("exitCode")}" else ""
+                CodexMessage(id, "执行命令", item.optString("command") + "\n目录：" + item.optString("cwd") +
+                    "\n" + limitedOutput(output) + exit, "command", item.optString("status"))
+            }
+            "fileChange" -> {
+                val changes = item.optJSONArray("changes")
+                val files = if (changes == null) emptyList() else (0 until changes.length()).mapNotNull { changes.optJSONObject(it) }
+                CodexMessage(id, "文件改动", files.joinToString("\n\n") { it.optString("path") + "\n" + it.optString("diff") },
+                    "files", item.optString("status"), files.map { it.optString("path") }.filter { it.isNotBlank() })
+            }
             else -> null
         }
     }
@@ -228,5 +246,6 @@ internal class CodexTaskController(
         val index = messages.indexOfFirst { it.id == message.id }
         if (index < 0) messages.add(message) else messages[index] = message
     }
+    private fun limitedOutput(text: String) = if (text.length <= 65536) text else "[输出较长，仅显示末尾]\n" + text.takeLast(65536)
     private fun idKey(id: Any) = JSONObject().put("id", id).toString()
 }
