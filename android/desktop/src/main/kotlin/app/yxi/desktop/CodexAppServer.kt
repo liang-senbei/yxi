@@ -10,6 +10,8 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
+internal data class CodexResumeOverrides(val provider: String?, val model: String?, val effort: String?)
+
 /** Codex app-server stdio over SSH. RPC IDs correlate responses; they are NOT idempotency keys.
  * Callers must persist their outbox before sending and never retry an uncertain write automatically.
  * Notifications and server approval requests remain raw events for the workspace controller.
@@ -81,7 +83,21 @@ internal class CodexAppServer internal constructor(private val shell: SshSession
         return request("thread/start", JSONObject().put("cwd", directory))
     }
 
-    suspend fun resumeThread(threadId: String) = request("thread/resume", JSONObject().put("threadId", requiredId(threadId)))
+    suspend fun resumeThread(threadId: String, overrides: CodexResumeOverrides? = null) = request("thread/resume",
+        JSONObject().put("threadId", requiredId(threadId)).apply {
+            overrides?.provider?.let { put("modelProvider", it) }
+            overrides?.model?.let { put("model", it) }
+            overrides?.effort?.let { put("config", JSONObject().put("model_reasoning_effort", it)) }
+        })
+
+    suspend fun readResumeOverrides(directory: String): CodexResumeOverrides {
+        require(directory.startsWith('/') && directory.none { it < ' ' }) { "项目目录无效" }
+        val config = request("config/read", JSONObject().put("cwd", directory).put("includeLayers", false))
+            .getJSONObject("result").getJSONObject("config")
+        fun value(key: String) = config.optString(key).takeIf { it.isNotBlank() && it != "null" }
+        // Only return non-secret effective fields; never log or persist the full config response.
+        return CodexResumeOverrides(value("model_provider"), value("model"), value("model_reasoning_effort"))
+    }
 
     suspend fun startTurn(threadId: String, text: String, attachments: List<InstructionAttachment> = emptyList(), model: String? = null, effort: String? = null): JSONObject = request("turn/start",
         JSONObject().put("threadId", requiredId(threadId)).put("input", userInput(text, attachments)).apply {
