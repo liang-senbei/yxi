@@ -352,7 +352,7 @@ private fun CodexConversationPane(state: AppState) {
                 } catch (e: Exception) { error = e.message.orEmpty() }
             }
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                TextButton({ voiceOpen = true }, enabled = conn?.ssh?.isConnected == true) { Text("语音输入") }
+                TextButton({ voiceOpen = true }, enabled = conn != null) { Text("语音输入") }
                 TextButton({ historyOpen = true }) { Text("历史提示词") }
                 TextButton({ if (conn != null) {
                     Attach.pickFiles().forEach { file ->

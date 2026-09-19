@@ -1,9 +1,13 @@
 package app.yxi.desktop
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.*
 
@@ -28,6 +32,15 @@ internal fun VoiceInputDialog(conn: Conn, close: () -> Unit, useText: (String) -
     var devicesRevision by remember { mutableStateOf(0) }
     var setupOpen by remember { mutableStateOf(false) }
     var pendingAudio by remember { mutableStateOf<ByteArray?>(null) }
+    val windows = remember { System.getProperty("os.name").startsWith("Windows") }
+    var systemVoice by remember { mutableStateOf(false) }
+    val editorFocus = remember { FocusRequester() }
+    LaunchedEffect(systemVoice, editorShown) {
+        if (systemVoice && editorShown) {
+            withFrameNanos { }
+            runCatching { editorFocus.requestFocus() }
+        }
+    }
     NativeOverlay(deviceMenu)
     LaunchedEffect(devicesRevision) {
         microphones = withContext(Dispatchers.IO) { runCatching { DesktopRecorder.microphones() }.getOrDefault(emptyList()) }
@@ -72,7 +85,16 @@ internal fun VoiceInputDialog(conn: Conn, close: () -> Unit, useText: (String) -
         }
     }
     WorkbenchDialog(onDismissRequest = close, title = { Text("语音输入") }, text = {
-        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.fillMaxWidth().heightIn(max = 460.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (windows) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val canSwitch = !checking && !recording && !transcribing && pendingAudio == null
+                FilterChip(!systemVoice, { systemVoice = false }, enabled = canSwitch, label = { Text("服务器识别") })
+                FilterChip(systemVoice, { systemVoice = true; editorShown = true }, enabled = canSwitch, label = { Text("Windows 语音") })
+            }
+            if (systemVoice) {
+                Text("点击下方文本框，按 Win + H 开始系统语音输入。", style = MaterialTheme.typography.titleSmall)
+                Text("使用 Windows 在线语音服务，需要网络和系统麦克风权限，不经所选 SSH 服务器。文字先进入编辑框，不自动发送给 Agent。结束前请在系统语音面板停止听写。", style = MaterialTheme.typography.bodySmall)
+            } else {
             Text("识别服务器：${conn.host.label} · ${conn.host.hostname}", style = MaterialTheme.typography.titleSmall)
             Text("录音通过SSH发送到此服务器的 yxi-asr 识别，文字先供你编辑，不自动发送给Agent。", style = MaterialTheme.typography.bodySmall)
             TextButton({ setupOpen = true }, enabled = !checking && !recording && !transcribing) { Text("服务器尚未安装？查看安装步骤") }
@@ -109,8 +131,9 @@ internal fun VoiceInputDialog(conn: Conn, close: () -> Unit, useText: (String) -
                     finally { checking = false }
                 } }) { Text(if (text.isBlank()) "开始录音" else "继续录音并追加") }
             }
+            }
             if (editorShown || text.isNotBlank()) {
-                OutlinedTextField(text, { text = it; copied = false; clearedText = "" }, Modifier.fillMaxWidth(), label = { Text("识别文字，可编辑") }, minLines = 3, maxLines = 8)
+                OutlinedTextField(text, { text = it; copied = false; clearedText = "" }, Modifier.fillMaxWidth().focusRequester(editorFocus), label = { Text("识别文字，可编辑") }, minLines = 3, maxLines = 8)
                 Row {
                     TextButton({
                         runCatching { java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(java.awt.datatransfer.StringSelection(text), null); copied = true }
