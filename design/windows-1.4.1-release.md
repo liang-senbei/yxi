@@ -14,3 +14,6 @@ Codex 恢复时找不到历史文件，会说明可能原因并保留任务编�
 
 构建已启动：GitHub Actions 35448869719，冻结提交 676f3f766bc2347e408ed84a080f9e119b914162，分支 codex/windows-release-1.4.1。当前运行中，尚无通过或发布结论。
 
+
+定向检查：cc-yxi_entertainment 对 cb9ec4f 编译成功，并以真实 WorkspaceNavigation 类检查名称/折叠持久化、主机隔离、空名恢复及长度限制，通过。该证据覆盖导航数据层；不代表后续新增入口或 Windows GUI 已验。最终冻结提交由正在运行的 Windows CI 编译。
+
