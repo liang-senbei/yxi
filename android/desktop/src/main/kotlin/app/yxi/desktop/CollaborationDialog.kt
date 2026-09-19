@@ -43,7 +43,7 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
         return
     }
     if (history) {
-        CollaborationHistoryDialog(state, conn, selected, table?.groups?.get(selected).orEmpty()) { history = false }
+        CollaborationHistoryDialog(state, conn, selected, table?.groups?.get(selected).orEmpty(), onTaskOpened = close) { history = false }
         return
     }
     if (editing && table != null) {

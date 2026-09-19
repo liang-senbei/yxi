@@ -13,7 +13,7 @@ import kotlinx.coroutines.CancellationException
 import org.json.JSONObject
 
 @Composable
-internal fun CollaborationHistoryDialog(state: AppState, conn: Conn, group: String, members: List<String>, close: () -> Unit) {
+internal fun CollaborationHistoryDialog(state: AppState, conn: Conn, group: String, members: List<String>, onTaskOpened: () -> Unit, close: () -> Unit) {
     var raw by remember(conn) { mutableStateOf("") }
     var truncated by remember(conn) { mutableStateOf(false) }
     var busy by remember(conn) { mutableStateOf(true) }
@@ -23,7 +23,7 @@ internal fun CollaborationHistoryDialog(state: AppState, conn: Conn, group: Stri
     var structured by remember(conn) { mutableStateOf(true) }
     var replyTarget by remember(conn) { mutableStateOf<Pair<app.yxi.agent.Session, String>?>(null) }
     replyTarget?.let { (target, messageId) ->
-        MemberAssignmentDialog(state, conn, target, group, { replyTarget = null }, { replyTarget = null; close() },
+        MemberAssignmentDialog(state, conn, target, group, { replyTarget = null }, { replyTarget = null; onTaskOpened() },
             initialText = "请查看协作消息 $messageId，结合当前任务进展回复原发送者。使用 yxi-hub reply 保留原消息关联；如果原任务实例已变化，请说明情况，不要回复同名新任务。\n\n补充要求：")
         return
     }
