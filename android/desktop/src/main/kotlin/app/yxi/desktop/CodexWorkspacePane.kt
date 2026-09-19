@@ -81,6 +81,7 @@ private fun CodexConversationPane(state: AppState) {
     var filePath by remember(state.codexSelectedTaskKey) { mutableStateOf("") }
     var fileEntry by remember(state.codexSelectedTaskKey) { mutableStateOf(false) }
     var showFiles by remember(state.codexSelectedTaskKey) { mutableStateOf(false) }
+    var showChanges by remember(state.codexSelectedTaskKey) { mutableStateOf(false) }
     fun act(block: suspend () -> Unit) {
         scope.launch {
             error = ""
@@ -110,8 +111,8 @@ private fun CodexConversationPane(state: AppState) {
     LaunchedEffect(dragging) { if (dragging) followLatest = false }
     val messages = controller?.messages?.toList().orEmpty()
     val requests = controller?.pendingRequests?.values?.toList().orEmpty()
-    LaunchedEffect(selected?.key, messages.lastOrNull(), messages.size, requests.size, followLatest, showFiles) {
-        if (followLatest && !dragging && !showFiles) conversationScroll.scrollToItem(messages.size + requests.size)
+    LaunchedEffect(selected?.key, messages.lastOrNull(), messages.size, requests.size, followLatest, showFiles, showChanges) {
+        if (followLatest && !dragging && !showFiles && !showChanges) conversationScroll.scrollToItem(messages.size + requests.size)
     }
     fun openTaskFile(path: String) {
         val target = conn ?: return
@@ -203,7 +204,8 @@ private fun CodexConversationPane(state: AppState) {
         } else {
             Text(selected.directory, style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton({ showFiles = !showFiles }) { Text(if (showFiles) "返回对话" else "项目文件") }
+                TextButton({ showFiles = !showFiles; showChanges = false }) { Text(if (showFiles) "返回对话" else "项目文件") }
+                TextButton({ showChanges = !showChanges; showFiles = false }) { Text(if (showChanges) "返回对话" else "Git 改动") }
                 TextButton({
                     runCatching { java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(java.awt.datatransfer.StringSelection(selected.threadId), null) }
                         .onFailure { error = "任务编号复制失败：${it.message}" }
@@ -233,6 +235,13 @@ private fun CodexConversationPane(state: AppState) {
             }
             if (showFiles && conn != null) Box(Modifier.weight(1f).fillMaxWidth()) {
                 key(selected.key) { FilesPane(conn, selected.key, selected.directory, ::openTaskFile) }
+            } else if (showChanges && conn != null) Box(Modifier.weight(1f).fillMaxWidth()) {
+                key(selected.key) {
+                    GitChangesPane(conn, selected.directory, ::openTaskFile) { quote ->
+                        state.appendCodexQuote(selected, quote)
+                        showChanges = false
+                    }
+                }
             } else LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = conversationScroll, verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 items(messages, key = { "message:" + it.id }) { message ->
                     if (message.kind != "message") CodexActivityCard(message, ::openTaskFile)
@@ -276,7 +285,7 @@ private fun CodexConversationPane(state: AppState) {
                 }
                 item(key = "latest") { Spacer(Modifier.height(1.dp)) }
             }
-            if (!showFiles && !followLatest) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+            if (!showFiles && !showChanges && !followLatest) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                 TextButton({ followLatest = true }) { Text("回到最新消息 ↓") }
             }
             if (controller != null) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
