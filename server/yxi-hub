@@ -295,7 +295,12 @@ push() {
     echo "目标任务实例已变化，未继续写入" >&2
     return 1
   fi
-  if ! tmux send-keys -t "$pane" -l "[协作消息 $message] $text"; then
+  local delivery_text="$text"
+  if [ -n "${user_group:-}" ]; then
+    delivery_text+=$'\n\n'
+    delivery_text+="回复用户请使用：yxi-hub reply-user $message \"回复内容\" [稳定新UUID]。回信会进入桌面协作收件记录；需要重试时复用同一新UUID。"
+  fi
+  if ! tmux send-keys -t "$pane" -l "[协作消息 $message] $delivery_text"; then
     record_event "$message" "$sender" "$target" write-unknown "" "$reply" || true
     return 1
   fi
