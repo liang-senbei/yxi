@@ -108,7 +108,7 @@ fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: Stri
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 WorkbenchTabs(listOf("Claude Code", "Codex"), if (agent == "codex") "Codex" else "Claude Code", { if (!busy) agent = if (it == "Codex") "codex" else "claude" })
-                if (initialDirectory != null) Text("从收藏目录启动新会话，不自动恢复旧对话或原协作组。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                if (initialDirectory != null) Text("已填入所选目录，可在创建前调整。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 Text("先检查运行器，再创建独立会话。目录不存在会创建；已有任务继续运行。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 OutlinedTextField(path, { path = it }, enabled = !busy, singleLine = true, label = { Text("服务器工作目录") }, placeholder = { Text("/opt/workspace/…") }, modifier = Modifier.fillMaxWidth())
                 Row(verticalAlignment = Alignment.CenterVertically) {

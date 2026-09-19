@@ -8,6 +8,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -24,7 +25,18 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
     val nav = state.navigation
     val t = Tokens.current
     var projectGroups by remember(conn) { mutableStateOf(false) }
+    var creatingDirectory by remember(conn) { mutableStateOf<String?>(null) }
     if (projectGroups) CollaborationDialog(state, conn) { projectGroups = false }
+    creatingDirectory?.let { directory ->
+        NewSessionDialog(conn, onDismiss = { creatingDirectory = null }, initialDirectory = directory,
+            onCodexConversation = { path, prompt ->
+                creatingDirectory = null
+                state.prepareCodexTask(conn, path, prompt)
+            }) { session ->
+            creatingDirectory = null
+            state.select(conn, session)
+        }
+    }
     val visible = sessions.filter { nav.visible(taskNavigationKey(conn.host, it), it.state) }
     val pinned = if (nav.mode == "归档") emptyList() else visible.filter { nav.pinned(taskNavigationKey(conn.host, it)) }.sortedBy { nav.pinOrder(taskNavigationKey(conn.host, it)) }
     val pinKeys = pinned.map { taskNavigationKey(conn.host, it) }
@@ -98,6 +110,9 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
                     if (sections.count { it.label == group.label } > 1) Text(group.path, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = t.textMuted)
                 }
                 Text(group.sessions.size.toString(), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+                IconButton({ creatingDirectory = group.path }, Modifier.size(28.dp)) {
+                    Icon(Icons.Outlined.Add, "在项目中新建任务", Modifier.size(16.dp), tint = t.textMuted)
+                }
                 Box {
                     IconButton({ projectMenu = true }, Modifier.size(28.dp)) {
                         Icon(Icons.Default.MoreHoriz, "项目操作", Modifier.size(16.dp), tint = t.textMuted)
@@ -112,6 +127,10 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
                             }
                         }
                         HorizontalDivider()
+                        DropdownMenuItem(text = { Text("新建任务") }, onClick = {
+                            projectMenu = false
+                            creatingDirectory = group.path
+                        })
                         DropdownMenuItem(text = { Text("编辑项目") }, onClick = {
                             projectMenu = false
                             editingProject = true
