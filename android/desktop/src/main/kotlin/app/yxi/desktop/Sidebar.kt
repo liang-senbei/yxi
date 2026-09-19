@@ -286,10 +286,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
     }
     creatingOn?.let { c -> NewSessionDialog(c, onDismiss = { creatingOn = null }, onCodexConversation = { directory, prompt ->
         creatingOn = null
-        state.select(c, null)
-        state.codexSelectedTaskKey = null
-        state.codexCreateRequest = directory to prompt
-        state.page = Page.Codex
+        state.prepareCodexTask(c, directory, prompt)
     }) { s ->
         val key = taskNavigationKey(c.host, s)
         if (state.navigation.title(key) == null) state.navigation.rename(key, "新对话 · " + if (s.isCodex) "Codex" else "Claude Code")

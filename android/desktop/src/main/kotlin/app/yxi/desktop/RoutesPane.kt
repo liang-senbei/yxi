@@ -105,6 +105,13 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
         }
         if (state.deferredRouteNotice.isNotBlank()) Text(state.deferredRouteNotice, Modifier.padding(bottom = 12.dp), style = MaterialTheme.typography.bodySmall)
         WorkbenchTabs(listOf("Claude Code", "Codex"), if (engine == Lines.CODEX) "Codex" else "Claude Code", { if (!busy) { engine = if (it == "Codex") Lines.CODEX else Lines.CLAUDE; projectScope = false } })
+        if (engine == Lines.CODEX) {
+            TextButton({
+                val task = state.codexWorkspace.tasks(conn.host).firstOrNull { it.key == state.codexSelectedTaskKey }
+                state.prepareCodexTask(conn, task?.directory ?: cwd.orEmpty())
+            }, enabled = !busy && conn.ssh.isConnected && state.deferredRoute == null) { Text("用当前服务器配置新建 Codex 任务") }
+            Text("先应用并核对配置，再创建新任务。原任务和草稿保留；新任务不会自动继承原对话内容。", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+        }
         if (engine == Lines.CLAUDE && cwd != null) Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(projectScope, { projectScope = it }, enabled = !busy)
             Text("仅配置当前项目 · $cwd", style = MaterialTheme.typography.bodySmall)

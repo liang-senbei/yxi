@@ -26,6 +26,12 @@ class AppState {
     internal var codexCreateRequest by mutableStateOf<Pair<String, String>?>(null)
     internal var routesOrigin by mutableStateOf(Page.Workspace)
     internal fun openRoutes() { routesOrigin = if (page == Page.Routes) routesOrigin else page; page = Page.Routes }
+    internal fun prepareCodexTask(c: Conn, directory: String, prompt: String = "") {
+        select(c, null)
+        codexSelectedTaskKey = null
+        codexCreateRequest = directory to prompt
+        page = Page.Codex
+    }
     internal fun codexRouteBusy(c: Conn): Boolean {
         val keys = codexWorkspace.tasks(c.host).map { it.key }.toSet()
         return codexWorkspace.controllers.any { (key, controller) -> key in keys &&
