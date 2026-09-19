@@ -87,10 +87,6 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
             confirmButton = { TextButton({ nav.rename(key, title); if (nav.error.isBlank()) renaming = false }) { Text("保存") } },
             dismissButton = { TextButton({ renaming = false }) { Text("取消") } })
     }
-    if (pinned.isNotEmpty()) {
-        Text("置顶", Modifier.padding(start = 18.dp, top = 14.dp, bottom = 4.dp), color = t.textMuted, style = MaterialTheme.typography.labelSmall)
-        pinned.forEach { task(it) }
-    }
     if (!conn.groupsLoaded) {
         Text(conn.groupsError.ifBlank { "正在读取服务器分组…" }, Modifier.padding(16.dp), color = t.textMuted)
         if (conn.groupsError.isNotBlank()) {
@@ -126,7 +122,7 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
                 }
             }
         }
-        if (!closed) members.forEach { task(it) }
+        if (!closed) members.sortedBy { s -> val k = taskNavigationKey(conn.host, s); if (nav.pinned(k)) nav.pinOrder(k) else Int.MAX_VALUE }.forEach { task(it) }
     }
     if (conn.groupsError.isNotBlank()) Text(conn.groupsError, color = t.warning, style = MaterialTheme.typography.bodySmall)
     return
