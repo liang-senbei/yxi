@@ -18,7 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 
 @Composable
-internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliver: Boolean, onDeliver: (QueuedInstruction) -> Unit, onQuery: (suspend (QueuedInstruction) -> String)? = null) {
+internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliver: Boolean, onDeliver: (QueuedInstruction) -> Unit, onQuery: (suspend (QueuedInstruction) -> String)? = null, compactUnknown: Boolean = false) {
     val t = Tokens.current
     val active = queue.entries.filter { it.taskKey == taskKey && (it.runtimeTurnState == RuntimeTurnState.InProgress || it.status !in setOf(InstructionStatus.Accepted, InstructionStatus.Cancelled, InstructionStatus.Resolved)) }
     var expanded by remember(taskKey) { mutableStateOf(false) }
@@ -31,6 +31,10 @@ internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliv
     var menuId by remember(taskKey) { mutableStateOf<String?>(null) }
     var withdrawn by remember(taskKey) { mutableStateOf<Pair<QueuedInstruction, Long>?>(null) }
     NativeOverlay(menuId != null)
+    if (compactUnknown && active.isNotEmpty() && active.all { it.status == InstructionStatus.Unknown } && !expanded && queue.error.isBlank()) {
+        TextButton({ expanded = true }, Modifier.padding(horizontal = 12.dp)) { Text("投递记录 · ${active.size}", style = MaterialTheme.typography.labelSmall, color = t.textMuted) }
+        return
+    }
     fun act(block: () -> Unit) { error = ""; runCatching(block).onFailure { error = it.message.orEmpty() } }
     if (queue.error.isNotEmpty()) Text(queue.error, color = t.danger, modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
     if (error.isNotBlank() && editing == null) Text(error, color = t.danger, modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
@@ -45,7 +49,7 @@ internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliv
         .background(t.surface1, RoundedCornerShape(12.dp)).border(0.5.dp, t.border, RoundedCornerShape(12.dp))) {
         Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("指令 · ${active.size}", style = MaterialTheme.typography.labelMedium, color = t.textMuted, modifier = Modifier.weight(1f))
-            if (active.size > 3) TextButton({ expanded = !expanded }) { Text(if (expanded) "收起" else "展开全部") }
+            if (active.size > 3 || compactUnknown) TextButton({ expanded = !expanded }) { Text(if (expanded) "收起" else "展开全部") }
         }
         androidx.compose.foundation.lazy.LazyColumn {
             items(if (expanded) active.size else minOf(3, active.size), key = { active[it].id }) { index ->

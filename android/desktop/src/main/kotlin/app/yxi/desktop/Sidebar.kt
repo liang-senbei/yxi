@@ -235,7 +235,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
             hosts.forEachIndexed { i, h ->
                 if (state.hostScope.isNotEmpty() && state.hostScope != h.id) return@forEachIndexed
                 val c = connOf(h)
-                val sessions = c?.sessions?.filter { f.isEmpty() || h.label.contains(f, true) || h.region.contains(f, true) || it.short.contains(f, true) || it.name.contains(f, true) || it.cwd.contains(f, true) || state.navigation.title(taskNavigationKey(h, it))?.contains(f, true) == true || state.navigation.projectTitle(projectKey(h, it.cwd))?.contains(f, true) == true } ?: emptyList()
+                val sessions = c?.sessions?.filter { f.isEmpty() || h.label.contains(f, true) || h.region.contains(f, true) || it.short.contains(f, true) || it.name.contains(f, true) || it.cwd.contains(f, true) || state.navigation.title(taskNavigationKey(h, it))?.contains(f, true) == true || state.navigation.projectTitle(projectKey(h, it.cwd))?.contains(f, true) == true || c.projectGroups.of(it.name).any { group -> group.contains(f, true) } } ?: emptyList()
                 val hostMatch = f.isEmpty() || h.label.contains(f, ignoreCase = true) || h.region.contains(f, ignoreCase = true)
                 val favorites = if (state.navigation.mode == "全部") state.navigation.favorites(h).filter { favorite ->
                     (hostMatch || favorite.title.contains(f, true) || favorite.directory.contains(f, true)) &&
@@ -396,10 +396,7 @@ private fun StatusDot(st: Conn.Status) {
         Conn.Status.Failed -> t.danger
         Conn.Status.Idle -> t.textMuted.copy(alpha = 0.5f)
     }
-    val alpha = if (st == Conn.Status.Reconnecting)
-        rememberInfiniteTransition().animateFloat(1f, 0.15f, infiniteRepeatable(tween(600), RepeatMode.Reverse)).value
-    else 1f
-    Box(Modifier.size(8.dp).background(color.copy(alpha = color.alpha * alpha), CircleShape))
+    Box(Modifier.size(8.dp).background(color, CircleShape))
 }
 
 /**
@@ -480,3 +477,4 @@ private fun NavItem(icon: androidx.compose.ui.graphics.vector.ImageVector, label
         Text(label, style = MaterialTheme.typography.bodyMedium, color = fg)
     }
 }
+

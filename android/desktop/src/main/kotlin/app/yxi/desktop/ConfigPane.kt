@@ -84,6 +84,7 @@ fun ConfigPane(state: AppState) {
         Column(Modifier.width(300.dp).fillMaxHeight().verticalScroll(rememberScrollState())) {
             TextButton({ showPlugins = !showPlugins; showCatalog = false }) { Text(if (showPlugins) "返回配置浏览" else "主机插件 · 查看状态") }
             TextButton({ showCatalog = true; showPlugins = false }) { Text("浏览插件目录") }
+            TextButton({ state.openRoutes() }) { Text("模型与第三方线路") }
             Text(
                 conn.host.label,
                 Modifier.padding(14.dp, 10.dp, 14.dp, 4.dp),

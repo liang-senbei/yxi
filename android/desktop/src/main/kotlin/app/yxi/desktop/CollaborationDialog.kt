@@ -14,12 +14,12 @@ import kotlinx.coroutines.CancellationException
 import org.json.JSONObject
 
 @Composable
-fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
+fun CollaborationDialog(state: AppState, conn: Conn, initialGroup: String = "", close: () -> Unit) {
     var table by remember(conn) { mutableStateOf<Groups.Table?>(null) }
     var error by remember(conn) { mutableStateOf("") }
     var busy by remember(conn) { mutableStateOf(true) }
     var revision by remember(conn) { mutableStateOf(0) }
-    var selected by remember(conn) { mutableStateOf("") }
+    var selected by remember(conn) { mutableStateOf(initialGroup) }
     var section by remember(conn) { mutableStateOf("成员") }
     var editing by remember(conn) { mutableStateOf(false) }
     var editingName by remember(conn) { mutableStateOf<String?>(null) }

@@ -25,10 +25,12 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
     val nav = state.navigation
     val t = Tokens.current
     var projectGroups by remember(conn) { mutableStateOf(false) }
+    var selectedGroup by remember(conn) { mutableStateOf("") }
+    var creatingGroup by remember(conn) { mutableStateOf("") }
     var creatingDirectory by remember(conn) { mutableStateOf<String?>(null) }
-    if (projectGroups) CollaborationDialog(state, conn) { projectGroups = false }
+    if (projectGroups) CollaborationDialog(state, conn, initialGroup = selectedGroup) { projectGroups = false }
     creatingDirectory?.let { directory ->
-        NewSessionDialog(conn, onDismiss = { creatingDirectory = null }, initialDirectory = directory,
+        NewSessionDialog(conn, onDismiss = { creatingDirectory = null; creatingGroup = "" }, initialDirectory = directory, collaborationGroup = creatingGroup,
             onCodexConversation = { path, prompt ->
                 creatingDirectory = null
                 state.prepareCodexTask(conn, path, prompt)
@@ -89,74 +91,40 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
         Text("置顶", Modifier.padding(start = 18.dp, top = 14.dp, bottom = 4.dp), color = t.textMuted, style = MaterialTheme.typography.labelSmall)
         pinned.forEach { task(it) }
     }
-    val sections = projectSections(visible.filterNot { it in pinned })
-    if (sections.isNotEmpty()) Text(if (nav.mode == "归档") "已归档项目任务" else "项目", Modifier.padding(start = 18.dp, top = 14.dp, bottom = 4.dp), color = t.textMuted, style = MaterialTheme.typography.labelSmall)
-    sections.forEach { group ->
-        val key = projectKey(conn.host, group.path)
-        var projectMenu by remember(key) { mutableStateOf(false) }
-        var editingProject by remember(key) { mutableStateOf(false) }
-        var projectTitle by remember(key, editingProject) { mutableStateOf(nav.projectTitle(key) ?: group.label) }
-        val displayTitle = nav.projectTitle(key) ?: group.label
-        NativeOverlay(projectMenu)
-        val projectTasks = conn.sessions.filter { normalizeProjectPath(it.cwd) == group.path }
-        val hasSelected = state.conn === conn && group.sessions.any { it.name == state.session?.name }
-        val closed = !searching && nav.collapsed(key, default = !hasSelected)
-        Column {
-            Row(Modifier.fillMaxWidth().clickable { nav.setCollapsed(key, !closed) }.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(if (closed) Icons.Default.ChevronRight else Icons.Default.ExpandMore, if (closed) "展开项目" else "收起项目", Modifier.size(15.dp), tint = t.textMuted)
-                Icon(Icons.Outlined.Folder, null, Modifier.padding(horizontal = 6.dp).size(16.dp), tint = t.textSecondary)
-                Column(Modifier.weight(1f)) {
-                    Text(displayTitle, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                    if (sections.count { (nav.projectTitle(projectKey(conn.host, it.path)) ?: it.label) == displayTitle } > 1) Text(group.path, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = t.textMuted)
-                }
-                Text(group.sessions.size.toString(), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
-                IconButton({ creatingDirectory = group.path }, Modifier.size(28.dp)) {
-                    Icon(Icons.Outlined.Add, "在项目中新建任务", Modifier.size(16.dp), tint = t.textMuted)
-                }
-                Box {
-                    IconButton({ projectMenu = true }, Modifier.size(28.dp)) {
-                        Icon(Icons.Default.MoreHoriz, "项目操作", Modifier.size(16.dp), tint = t.textMuted)
+    if (!conn.groupsLoaded) {
+        Text(conn.groupsError.ifBlank { "正在读取服务器分组…" }, Modifier.padding(16.dp), color = t.textMuted)
+        return
+    }
+    val groupedNames = conn.projectGroups.groups.values.flatten().toSet()
+    val groupRows = conn.projectGroups.groups.entries.map { it.key to visible.filter { s -> s.name in it.value } } +
+        listOf("" to visible.filter { it.name !in groupedNames })
+    Text("项目分组", Modifier.padding(16.dp, 8.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+    groupRows.forEach { (name, members) ->
+        if ((searching || name.isEmpty()) && members.isEmpty()) return@forEach
+        val groupKey = "server-group:" + projectKey(conn.host, "/") + ":" + name
+        val closed = !searching && nav.collapsed(groupKey, false)
+        var menu by remember(groupKey) { mutableStateOf(false) }
+        NativeOverlay(menu)
+        Row(Modifier.fillMaxWidth().clickable { nav.setCollapsed(groupKey, !closed) }.padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(if (closed) Icons.Default.ChevronRight else Icons.Default.ExpandMore, "展开分组", Modifier.size(16.dp), tint = t.textMuted)
+            Icon(Icons.Outlined.Folder, null, Modifier.padding(horizontal = 6.dp).size(16.dp), tint = t.textSecondary)
+            Text(name.ifEmpty { "未分组" }, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(members.size.toString(), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+            IconButton({ creatingGroup = name; creatingDirectory = members.firstOrNull()?.cwd.orEmpty() }, Modifier.size(28.dp)) { Icon(Icons.Outlined.Add, "在组内新建 Agent", Modifier.size(16.dp)) }
+            Box {
+                IconButton({ menu = true }, Modifier.size(28.dp)) { Icon(Icons.Default.MoreHoriz, "分组操作", Modifier.size(16.dp)) }
+                DropdownMenu(menu, { menu = false }) {
+                    Text(conn.host.label + " · " + name.ifEmpty { "未分组" }, Modifier.padding(16.dp, 8.dp), style = MaterialTheme.typography.titleSmall)
+                    members.map { it.cwd }.distinct().filter { it.isNotBlank() }.forEach { path ->
+                        DropdownMenuItem(text = { Text(path) }, onClick = { runCatching { java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(java.awt.datatransfer.StringSelection(path), null) }; menu = false })
                     }
-                    DropdownMenu(projectMenu, { projectMenu = false }, modifier = Modifier.widthIn(min = 240.dp, max = 360.dp)) {
-                        Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(displayTitle, style = MaterialTheme.typography.titleSmall)
-                            Text("${projectTasks.size} 个任务 · ${projectTasks.count { it.state == SessionState.Working }} 个运行中", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
-                            Text(conn.host.label, style = MaterialTheme.typography.labelSmall, color = t.textMuted)
-                            androidx.compose.foundation.text.selection.SelectionContainer {
-                                Text(group.path, style = MaterialTheme.typography.bodySmall)
-                            }
-                        }
-                        HorizontalDivider()
-                        DropdownMenuItem(text = { Text("新建任务") }, onClick = {
-                            projectMenu = false
-                            creatingDirectory = group.path
-                        })
-                        DropdownMenuItem(text = { Text("编辑项目") }, onClick = {
-                            projectMenu = false
-                            editingProject = true
-                        })
-                        DropdownMenuItem(text = { Text("复制项目路径") }, onClick = {
-                            projectMenu = false
-                            runCatching { java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(java.awt.datatransfer.StringSelection(group.path), null) }
-                        })
-                        DropdownMenuItem(text = { Text("协作组与组规…") }, onClick = {
-                            projectMenu = false
-                            projectGroups = true
-                        })
-                    }
+                    DropdownMenuItem(text = { Text("编辑分组与组规") }, onClick = { selectedGroup = name; projectGroups = true; menu = false })
                 }
             }
-            if (!closed) group.sessions.forEach { task(it) }
         }
-        if (editingProject) WorkbenchDialog(onDismissRequest = { editingProject = false }, title = { Text("编辑项目") },
-            text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(projectTitle, { projectTitle = it }, singleLine = true, label = { Text("项目显示名称") })
-                Text(group.path, style = MaterialTheme.typography.bodySmall, color = t.textMuted)
-                Text("名称保存在本机，留空恢复目录名。项目路径来自任务的工作目录。", style = MaterialTheme.typography.bodySmall)
-                if (nav.error.isNotBlank()) Text(nav.error, color = t.danger)
-            } },
-            confirmButton = { TextButton({ nav.renameProject(key, projectTitle); if (nav.error.isBlank()) editingProject = false }) { Text("保存") } },
-            dismissButton = { TextButton({ editingProject = false }) { Text("取消") } })
+        if (!closed) members.forEach { task(it) }
     }
-    if (visible.isEmpty() && conn.sessions.isNotEmpty()) Text("当前筛选下没有任务", Modifier.padding(18.dp, 10.dp), style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+    if (conn.groupsError.isNotBlank()) Text(conn.groupsError, color = t.warning, style = MaterialTheme.typography.bodySmall)
+    return
 }
+

@@ -170,6 +170,10 @@ class Conn(val host: Host, hostKeys: HostKeys) {
     /** 指纹变了：不重连，等用户在侧栏点「我确认过了，删除旧指纹」 */
     var keyChanged by mutableStateOf(false)
     var sessions by mutableStateOf<List<Session>>(emptyList())
+    var projectGroups by mutableStateOf(app.yxi.agent.Groups.Table()); private set
+    var groupsLoaded by mutableStateOf(false); private set
+    var groupsError by mutableStateOf(""); private set
+    private var lastGroupsRead = 0L
     // 自己一个 scope，不挂在 Composable 的 LaunchedEffect 上：侧栏收起（Ctrl+B）时 Sidebar 整个不在组合里，
     // 挂那儿的循环会跟着停 —— 收着侧栏就既不刷新也不重连。Swing 线程上写状态，跟界面同一条线。
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
@@ -206,6 +210,15 @@ class Conn(val host: Host, hostKeys: HostKeys) {
         if (!ssh.isConnected) return
         val snapshot = catching { SessionProbe.snapshotFull(ssh) }.getOrElse { ssh.disconnect(); return }
         val fresh = snapshot.sessions
+        if (System.currentTimeMillis() - lastGroupsRead > 15_000) {
+            lastGroupsRead = System.currentTimeMillis()
+            try {
+                val raw = ssh.exec("if [ -f \"\$HOME/.yxi/groups.json\" ]; then cat \"\$HOME/.yxi/groups.json\"; else printf '%s' '{\"groups\":{}}'; fi")
+                require(org.json.JSONObject(raw).optJSONObject("groups") != null)
+                projectGroups = app.yxi.agent.Groups.parse(raw); groupsLoaded = true; groupsError = ""
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (_: Exception) { groupsError = "分组读取失败，可在主机菜单中刷新" }
+        }
         val cursor = completionCursor
         if (cursor != null) {
             snapshot.completions.filter { it.timestamp > cursor }.sortedBy { it.timestamp }.forEach { event ->

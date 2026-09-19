@@ -37,6 +37,7 @@ import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -108,7 +109,7 @@ import org.jetbrains.skia.Image as SkiaImage
  * · composer = 一张圆角卡片：无边框输入区 + 底部功能行（+ 附件 / 审批态 / 模型·强度·模式·上下文 chips / 圆形发送）。
  */
 @Composable
-internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQueue, savedDraft: androidx.compose.runtime.MutableState<TextFieldValue>? = null, displayName: String? = null) {
+internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQueue, savedDraft: androidx.compose.runtime.MutableState<TextFieldValue>? = null, displayName: String? = null, onRoutes: () -> Unit = {}, onTerminal: () -> Unit = {}) {
     val taskKey = taskNavigationKey(conn.host, session)
     val ssh = conn.ssh
     val t = Tokens.current
@@ -146,6 +147,26 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
     val listState = remember(taskKey) { LazyListState() }
     val seen = remember(taskKey) { Seen() }
     val focus = remember { FocusRequester() }
+    var editingMessage by remember(taskKey) { mutableStateOf<String?>(null) }
+    editingMessage?.let { original ->
+        WorkbenchDialog(onDismissRequest = { editingMessage = null }, title = { Text("编辑这条消息") },
+            text = { Column {
+                Text(original.take(600), style = MaterialTheme.typography.bodySmall)
+                Text("载入输入框会替换当前草稿，作为新消息编辑。需要回到旧轮次时，在 Claude 原生选择器中选择对应消息及恢复范围。双 Esc 要求终端输入为空；若终端有未发送文字，会先清到 Claude 输入历史，可用上箭头找回。", style = MaterialTheme.typography.bodySmall)
+            } },
+            confirmButton = { TextButton({ draft = TextFieldValue(original, selection = TextRange(original.length)); editingMessage = null; focus.requestFocus() }) { Text("载入输入框编辑") } },
+            dismissButton = { TextButton({
+                scope.launch {
+                    try {
+                        val target = "=" + session.name + ":"
+                        val q = app.yxi.ssh.Shell::q
+                        val script = "test \"\$(tmux display-message -p -t ${q(target)} '#{pid}:#{session_id}:#{session_created}')\" = ${q(session.runtimeId)} && tmux send-keys -t ${q(target)} Escape && sleep 0.15 && tmux send-keys -t ${q(target)} Escape && printf '__YXI_REWIND_OPEN__'"
+                        check(ssh.exec(script).contains("__YXI_REWIND_OPEN__")) { "无法打开原任务的回退选择器" }
+                        editingMessage = null; onTerminal()
+                    } catch (e: Exception) { sendErr = e.message }
+                }
+            }, enabled = !session.isCodex && !live.busy && pending == null && session.runtimeId.isNotBlank()) { Text("打开 Claude 回退选择器") } })
+    }
     val staged = remember(taskKey) { mutableStateListOf<DraftAttach>() }
 
     // Durable queued attachments may outlive the old three-day staging sweep.
@@ -401,7 +422,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                         is ChatRow.Group -> GroupCard(row.calls, open = row.key in openGroups) {
                             if (row.key in openGroups) openGroups.remove(row.key) else openGroups.add(row.key)
                         }
-                        is ChatRow.One -> ItemView(conn, row.item)
+                        is ChatRow.One -> ItemView(conn, row.item) { editingMessage = it }
                     }
                 }
             }
@@ -441,7 +462,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
             }
         }
         InstructionStrip(instructions, taskNavigationKey(conn.host, session), !sending && !live.busy && pending == null && ssh.isConnected, ::deliver,
-            onQuery = { queryInstructionDelivery(conn, session, it) })
+            onQuery = { queryInstructionDelivery(conn, session, it) }, compactUnknown = true)
         Composer(
             draft, { draft = it }, focus,
             ctx = ctx,
@@ -460,6 +481,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
             onHistory = { historyOpen = true },
             onSearch = { searchOpen = true },
             onVoice = { voiceOpen = true },
+            onRoutes = onRoutes,
         )
     }
 }
@@ -479,6 +501,7 @@ private fun Composer(
     onHistory: () -> Unit,
     onSearch: () -> Unit,
     onVoice: () -> Unit,
+    onRoutes: () -> Unit,
 ) {
     val t = Tokens.current
     var focused by remember { mutableStateOf(false) }
@@ -516,8 +539,8 @@ private fun Composer(
         )
         ctx?.let { c ->
             androidx.compose.foundation.layout.FlowRow(Modifier.fillMaxWidth().padding(14.dp, 2.dp, 14.dp, 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Chip(modelShort(c.model))
-                effortLabel(c.effort)?.let { Chip(it, color = t.accent) }
+                Chip(modelShort(c.model), onClick = onRoutes)
+                Chip(effortLabel(c.effort) ?: "思考强度", color = t.accent, onClick = onRoutes)
                 if (c.mode == "plan") Chip("计划模式", color = t.warning)
                 if (c.tokens > 0) Chip("上下文 " + kShort(c.tokens))
             }
@@ -587,9 +610,9 @@ private fun BusyLine(status: String?) {
 
 /** composer 右下的小 chips（模型 / 强度 / 模式 / 上下文）。 */
 @Composable
-private fun Chip(text: String, color: Color? = null) {
+private fun Chip(text: String, color: Color? = null, onClick: (() -> Unit)? = null) {
     val t = Tokens.current
-    Box(Modifier.clip(RoundedCornerShape(50)).background(t.border).padding(horizontal = 8.dp, vertical = 3.dp)) {
+    Box(Modifier.clip(RoundedCornerShape(50)).background(t.border).then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier).padding(horizontal = 8.dp, vertical = 3.dp)) {
         Text(text, fontSize = 11.sp, color = color ?: t.textSecondary, maxLines = 1)
     }
 }
@@ -627,9 +650,9 @@ private suspend fun waitChange(before: String, timeoutMs: Long = 4_000, get: () 
 // ── 条目渲染 ──
 
 @Composable
-private fun ItemView(conn: Conn, item: ChatItem) = when (item) {
-    is ChatItem.UserText -> UserBubble(conn, item.text, queued = false)
-    is ChatItem.Queued -> UserBubble(conn, item.text, queued = true)
+private fun ItemView(conn: Conn, item: ChatItem, onEdit: (String) -> Unit) = when (item) {
+    is ChatItem.UserText -> UserBubble(conn, item.text, queued = false, onEdit = { onEdit(item.text) })
+    is ChatItem.Queued -> UserBubble(conn, item.text, queued = true, onEdit = { onEdit(item.text) })
     is ChatItem.AssistantText -> MessageRow(item.markdown, user = false) { AssistantBody(item.markdown) }
     is ChatItem.Thinking -> Fold("✳ 思考过程", item.text)
     is ChatItem.ToolCall -> ToolCard(item)
@@ -640,12 +663,13 @@ private fun ItemView(conn: Conn, item: ChatItem) = when (item) {
 
 /** 一条消息 + 悬停才浮现的「复制」（Claude 的 MessageActions）。按钮常驻只改透明度，免得布局跳。 */
 @Composable
-private fun MessageRow(copyText: String, user: Boolean, content: @Composable () -> Unit) {
+private fun MessageRow(copyText: String, user: Boolean, onEdit: (() -> Unit)? = null, content: @Composable () -> Unit) {
     val src = remember { MutableInteractionSource() }
     val hovered by src.collectIsHoveredAsState()
     Row(Modifier.fillMaxWidth().hoverable(src), horizontalArrangement = if (user) Arrangement.End else Arrangement.Start, verticalAlignment = Alignment.Top) {
         if (!user) Box(Modifier.weight(1f)) { content() }
         CopyButton(copyText, Modifier.alpha(if (hovered) 1f else 0f))
+        if (onEdit != null) IconButton(onEdit, Modifier.size(28.dp).alpha(if (hovered) 1f else 0f)) { Icon(Icons.Outlined.Edit, "编辑消息", Modifier.size(15.dp), tint = Tokens.current.textMuted) }
         if (user) content()
     }
 }
@@ -665,10 +689,10 @@ private fun CopyButton(text: String, modifier: Modifier = Modifier) {
  * 跟手机端同一套协议：图片拉回来真显示，附件显示名字、点一下复制路径。
  */
 @Composable
-private fun UserBubble(conn: Conn, text: String, queued: Boolean) {
+private fun UserBubble(conn: Conn, text: String, queued: Boolean, onEdit: () -> Unit) {
     val t = Tokens.current
     val (refs, body) = remember(text) { Attachments.parseRefs(text) }
-    MessageRow(text, user = true) {
+    MessageRow(text, user = true, onEdit = onEdit) {
         Column(
             Modifier.widthIn(max = 640.dp).background(if (queued) t.surface1 else t.userBubble, RoundedCornerShape(Radius)).padding(14.dp, 9.dp),
             verticalArrangement = if (refs.isEmpty()) Arrangement.spacedBy(0.dp) else Arrangement.spacedBy(6.dp),
