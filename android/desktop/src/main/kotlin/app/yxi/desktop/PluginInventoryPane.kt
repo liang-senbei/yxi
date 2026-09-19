@@ -44,7 +44,7 @@ internal fun PluginInventoryPane(state: AppState, conn: Conn) {
     LaunchedEffect(last?.status) { if (last?.status in setOf("configured", "restored", "installed", "uninstalled", "updated", "package-restored")) revision++ }
     Column(Modifier.fillMaxSize()) {
         if (last != null) Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(when (last.status) { "package-restored" -> "插件包已恢复：${last.afterVersion.ifBlank { "版本未知" }} · 请在新会话验证"; "updated" -> "更新结果：${last.beforeVersion.ifBlank { "未知" }} → ${last.afterVersion.ifBlank { "未知" }} · 请在新会话验证"; "uninstalled" -> "插件已卸载 · 持久数据和操作副本已保留"; "installed" -> "插件已安装并被运行器识别 · 请在新会话测试"; "configured" -> "插件设置已更新 · 请在新会话验证加载"; "restored" -> "已恢复操作前设置 · 请在新会话验证加载"; "rejected" -> "变更未执行，配置可能已变化或副本不可用"; "sending" -> "插件操作中…"; else -> "插件操作待确认，请查询原操作" }, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+            Text(when (last.status) { "reviewed" -> "原操作已人工核对，请刷新插件列表查看实际状态"; "package-restored" -> "插件包已恢复：${last.afterVersion.ifBlank { "版本未知" }} · 请在新会话验证"; "updated" -> "更新结果：${last.beforeVersion.ifBlank { "未知" }} → ${last.afterVersion.ifBlank { "未知" }} · 请在新会话验证"; "uninstalled" -> "插件已卸载 · 持久数据和操作副本已保留"; "installed" -> "插件已安装并被运行器识别 · 请在新会话测试"; "configured" -> "插件设置已更新 · 请在新会话验证加载"; "restored" -> "已恢复操作前设置 · 请在新会话验证加载"; "rejected" -> "变更未执行，配置可能已变化或副本不可用"; "sending" -> "插件操作中…"; else -> "插件操作待确认，请查询原操作" }, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
             TextButton({ historyOpen = true }) { Text("操作记录") }
             if (last.status == "configured") TextButton({
                 prepared = JSONObject(last.request).put("action", "restore").put("restores", last.id).put("operation", UUID.randomUUID().toString().replace("-", ""))
@@ -155,3 +155,4 @@ internal fun PluginInventoryContent(host: String, snapshot: PluginInventory?, er
         }
     }
 }
+

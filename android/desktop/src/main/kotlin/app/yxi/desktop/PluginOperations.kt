@@ -43,8 +43,8 @@ internal class PluginOperations(file: File) {
         return entry
     }
     internal fun finish(id: String, state: String, beforeVersion: String? = null, afterVersion: String? = null) {
-        val status = when (state) { "configured", "restored", "installed", "uninstalled", "updated", "package-restored" -> state; "changed", "invalid", "invalid-directory", "unsupported-config-home", "unsupported-linked-config", "restore-unavailable", "catalog-changed", "already-installed" -> "rejected"; else -> "unknown" }
-        save(entries.map { if (it.id == id && !(status == "unknown" && it.status in setOf("configured", "restored", "installed", "uninstalled", "updated", "package-restored", "rejected"))) it.copy(status = status, beforeVersion = beforeVersion?.take(200) ?: it.beforeVersion, afterVersion = afterVersion?.take(200) ?: it.afterVersion) else it })
+        val status = when (state) { "configured", "restored", "installed", "uninstalled", "updated", "package-restored", "reviewed" -> state; "changed", "invalid", "invalid-directory", "unsupported-config-home", "unsupported-linked-config", "restore-unavailable", "catalog-changed", "already-installed" -> "rejected"; else -> "unknown" }
+        save(entries.map { if (it.id == id && !(status == "unknown" && it.status in setOf("configured", "restored", "installed", "uninstalled", "updated", "package-restored", "reviewed", "rejected"))) it.copy(status = status, beforeVersion = beforeVersion?.take(200) ?: it.beforeVersion, afterVersion = afterVersion?.take(200) ?: it.afterVersion) else it })
     }
     fun submit(conn: Conn, request: JSONObject) {
         val entry = begin(projectKey(conn.host, "/"), request)
@@ -54,6 +54,11 @@ internal class PluginOperations(file: File) {
         check(entry.host == projectKey(conn.host, "/"))
         if (entry.id in running) return
         perform(conn, entry, JSONObject().put("action", "status").put("operation", entry.id))
+    }
+    fun review(conn: Conn, entry: PluginOperationEntry) {
+        check(entry.host == projectKey(conn.host, "/"))
+        if (entry.id in running || entries.none { it.id == entry.id && it.status == "unknown" }) return
+        perform(conn, entry, JSONObject().put("action", "review").put("operation", entry.id))
     }
     private fun perform(conn: Conn, entry: PluginOperationEntry, request: JSONObject) {
         running.add(entry.id)
@@ -72,9 +77,10 @@ internal class PluginOperations(file: File) {
                 PluginOperationEntry(o.getString("host"), o.getString("id"), o.getString("request"), o.getString("status"), o.optString("beforeVersion").take(200), o.optString("afterVersion").take(200)).also { e ->
                     require(Regex("[a-f0-9]{32}").matches(e.id))
                     require(JSONObject(e.request).getString("operation") == e.id)
-                    require(e.status in setOf("sending", "unknown", "configured", "restored", "installed", "uninstalled", "updated", "package-restored", "rejected"))
+                    require(e.status in setOf("sending", "unknown", "configured", "restored", "installed", "uninstalled", "updated", "package-restored", "reviewed", "rejected"))
                 }
             }.also { require(it.map { e -> e.id }.distinct().size == it.size) }
         }
     }
 }
+
