@@ -382,16 +382,18 @@ class CodexTaskControllerTest {
         // 空历史：提示直接新建，避免关闭后无法恢复（真实 CLI 空线程限制）
         val empty = assertFailsWith<IllegalStateException> { controller.closeForConfigurationChange() }
         assertEquals("尚无历史的任务请直接新建，以免关闭后无法恢复", empty.message)
-        // 状态待确认（Delivering/Unknown）一律先核对再应用
+        // 状态待确认（Delivering/Unknown）一律先核对再应用；每次变更后 revision 递增，须取当前值
         val item = queue.enqueue("task", "第一条")
         queue.beginDelivery(item.id, item.revision)
         val delivering = assertFailsWith<IllegalStateException> { controller.closeForConfigurationChange() }
         assertEquals("请先核对状态待确认的指令", delivering.message)
-        queue.markUnknown(item.id, item.revision, "断线")
+        val deliveringEntry = queue.entries.single { it.id == item.id }
+        queue.markUnknown(item.id, deliveringEntry.revision, "断线")
         val unknown = assertFailsWith<IllegalStateException> { controller.closeForConfigurationChange() }
         assertEquals("请先核对状态待确认的指令", unknown.message)
         // 核对后（Accepted）不再阻塞队列门，继续落到空历史判断
-        queue.confirmAccepted(item.id, item.revision, "回执")
+        val unknownEntry = queue.entries.single { it.id == item.id }
+        queue.confirmAccepted(item.id, unknownEntry.revision, "回执")
         val after = assertFailsWith<IllegalStateException> { controller.closeForConfigurationChange() }
         assertEquals("尚无历史的任务请直接新建，以免关闭后无法恢复", after.message)
     }
