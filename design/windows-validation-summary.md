@@ -84,3 +84,9 @@ UI Agent说明双任务隔离场景未真正建立：假运行器按进程计数
 pilot在隔离HOME/CODEX_HOME、空凭据的Codex CLI0.153.4上执行thread/goal/get，新线程无目标返回goal:null，确认读取接口可用；无模型请求。ThreadGoal字段、六种状态及updated/cleared通知形状与当前解析一致。
 
 set/clear存在于请求schema并返回状态，但schema中没有轮次载荷不足以证明它们只存元数据，也不足以证明active会自动执行。当前不对自动执行语义下结论，界面保持只读目标显示。非空目标通知实流与控制操作未验证。
+
+## 官方目标接口说明补充（2026-09-19）
+
+官方文档 https://learn.chatgpt.com/docs/app-server 的Manage a thread goal说明：目标正文非空且最多4000字符；新正文会替换目标并重置统计，省略objective可更新状态/预算并保留统计。后续状态控制适配必须省略objective，避免暂停/继续被当作新建目标。
+
+该说明仍未承诺active自动启动或持续驱动轮次，不能据此添加假持续执行。当前保持只读目标条。cc-yxi已回报f335048主源与测试源一次编译通过（8秒、0错误），包括阅读状态、目标读取、输入历史和本轮权限组件；无打包或发布。
