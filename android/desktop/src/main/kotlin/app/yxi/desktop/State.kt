@@ -23,6 +23,19 @@ enum class Page { Workspace, Config, Me, Routes, Codex }
 
 class AppState {
     internal var codexSelectedTaskKey by mutableStateOf<String?>(null)
+    internal fun appendCodexQuote(task: CodexTaskRecord, quote: String) {
+        val draft = chatDrafts.getOrPut(task.key) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue()) }
+        val text = draft.value.text.let { it + if (it.isBlank()) "" else "\n\n" } + quote + "\n"
+        draft.value = androidx.compose.ui.text.input.TextFieldValue(text, androidx.compose.ui.text.TextRange(text.length))
+    }
+    internal suspend fun openCodexDocument(c: Conn, task: CodexTaskRecord, path: String) {
+        check(task.hostKey == projectKey(c.host, "/")) { "任务不属于当前服务器" }
+        val sftp = c.ssh.openSftp()
+        val canonical = try { sftp.realpath(if (path.startsWith('/')) path else task.directory.trimEnd('/') + "/" + path) } finally { sftp.close() }
+        if (documents.none { it.hostId == c.host.id && it.task == task.key && it.runtimeId == task.key && it.path == canonical })
+            documents += FileDocument(c.host.id, task.key, canonical, DocumentEndpoint.of(c.host), task.key)
+        documentSelection[task.key] = canonical
+    }
     val browsers = mutableMapOf<String, BrowserPreview>()
     var browserPanelOpen by mutableStateOf(false)
     val navigation = WorkspaceNavigation(java.io.File(Store.dir, "workspace.json"))

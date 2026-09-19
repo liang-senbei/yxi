@@ -33,11 +33,19 @@ import java.util.Date
 
 @Composable
 fun DocumentPane(state: AppState, conn: Conn, session: app.yxi.agent.Session) {
-    val task = session.name
-    val selectionKey = taskNavigationKey(conn.host, session)
+    DocumentPane(state, conn, taskNavigationKey(conn.host, session), { it.matchesTask(session) }, { path ->
+        val current = conn.sessions.firstOrNull { it.runtimeId == session.runtimeId && it.name == session.name }
+            ?: error("任务已不在服务器上")
+        state.openDocument(conn, current, path)
+    }, { quote -> state.appendDocumentQuote(conn.host, session, quote) })
+}
+
+@Composable
+internal fun DocumentPane(state: AppState, conn: Conn, selectionKey: String, matchesTask: (FileDocument) -> Boolean,
+    openFile: suspend (String) -> Unit, onQuote: (String) -> Unit) {
     val t = Tokens.current
     val scope = rememberCoroutineScope()
-    val docs = state.documents.filter { it.hostId == conn.host.id && it.matchesTask(session) }
+    val docs = state.documents.filter { it.hostId == conn.host.id && matchesTask(it) }
     val selected = docs.firstOrNull { it.path == state.documentSelection[selectionKey] } ?: docs.lastOrNull()
     var closing by remember { mutableStateOf<FileDocument?>(null) }
     fun close(doc: FileDocument) { state.documents.remove(doc) }
@@ -69,8 +77,7 @@ fun DocumentPane(state: AppState, conn: Conn, session: app.yxi.agent.Session) {
                         scope.launch {
                             try {
                                 selected.checkEndpoint(conn.host)
-                                val current = conn.sessions.firstOrNull { selected.matchesTask(it) } ?: error("任务已不在服务器上")
-                                state.openDocument(conn, current, path)
+                                openFile(path)
                             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
                             catch (e: Exception) { selected.error = "链接无法打开：${e.message}" }
                         }
@@ -78,7 +85,7 @@ fun DocumentPane(state: AppState, conn: Conn, session: app.yxi.agent.Session) {
                 }
             }
             CompositionLocalProvider(LocalUriHandler provides handler) {
-                DocumentBody(conn, selected) { quote -> state.appendDocumentQuote(conn.host, session, quote) }
+                DocumentBody(conn, selected, onQuote)
             }
         }
     }

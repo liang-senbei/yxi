@@ -16,11 +16,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun PreviewServiceControls(state: AppState, conn: Conn, session: Session, configure: Boolean, previewPreparing: Boolean, addressEdited: Boolean, onConfigured: () -> Unit, onPreview: (String) -> Unit) {
-    val project = projectKey(conn.host, session.cwd)
+internal fun PreviewServiceControls(state: AppState, conn: Conn, directory: String, configure: Boolean, previewPreparing: Boolean, addressEdited: Boolean, onConfigured: () -> Unit, onPreview: (String) -> Unit) {
+    val project = projectKey(conn.host, directory)
     val settings = state.projectServices.get(project)
     val probePath = settings?.queryPath ?: "/"
-    val controller = state.serviceControllers.getOrPut(project) { PreviewServiceController(project, session.cwd) }
+    val controller = state.serviceControllers.getOrPut(project) { PreviewServiceController(project, directory) }
     val scope = rememberCoroutineScope()
     var error by remember(project) { mutableStateOf("") }
     var logs by remember(project) { mutableStateOf(false) }
@@ -105,7 +105,7 @@ internal fun PreviewServiceControls(state: AppState, conn: Conn, session: Sessio
     if (state.projectServices.error.isNotBlank()) Text(state.projectServices.error, Modifier.padding(horizontal = 12.dp), color = Tokens.current.danger, style = MaterialTheme.typography.bodySmall)
     if (configure) {
         val defaultPort = state.projectPreviews.address(project)?.let { runCatching { PreviewAddress.parse(it).remotePort }.getOrNull() } ?: 3000
-        val edit = remember { state.serviceEditors.getOrPut(project) { ServiceEditor(project, session.cwd, settings, defaultPort) } }
+        val edit = remember { state.serviceEditors.getOrPut(project) { ServiceEditor(project, directory, settings, defaultPort) } }
         var formError by remember(edit) { mutableStateOf("") }
         fun dismiss() { state.serviceEditors.remove(edit.project); onConfigured() }
         WorkbenchDialog(onDismissRequest = ::dismiss, title = { Text("项目开发服务") }, text = {

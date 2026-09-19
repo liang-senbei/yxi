@@ -19,12 +19,40 @@ import org.json.JSONObject
 
 @Composable
 internal fun CodexWorkspacePane(state: AppState) {
+    val conn = state.conn
+    val task = conn?.let { state.codexWorkspace.tasks(it.host).firstOrNull { task -> task.key == state.codexSelectedTaskKey } }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val panel = conn != null && task != null && (state.filePanelOpen || state.browserPanelOpen)
+        val compact = maxWidth < 850.dp || state.previewExpanded
+        val panelWidth = state.filePanelWidth.coerceAtMost((maxWidth.value - 350).coerceAtLeast(340f)).dp
+        Row(Modifier.fillMaxSize()) {
+            if (!panel || !compact) Box(Modifier.weight(1f).fillMaxHeight()) { CodexConversationPane(state) }
+            if (panel && conn != null && task != null) {
+                VerticalDivider()
+                Box(if (compact) Modifier.fillMaxSize() else Modifier.width(panelWidth).fillMaxHeight()) {
+                    key(task.key, state.browserPanelOpen) {
+                        if (state.browserPanelOpen) BrowserPane(state, conn, task.key, task.directory) { state.appendCodexQuote(task, it) }
+                        else DocumentPane(state, conn, task.key,
+                            { it.task == task.key && it.runtimeId == task.key },
+                            { state.openCodexDocument(conn, task, it) },
+                            { state.appendCodexQuote(task, it) })
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CodexConversationPane(state: AppState) {
     val workspace = state.codexWorkspace
     val scope = rememberCoroutineScope()
     var error by remember { mutableStateOf("") }
     var creating by remember { mutableStateOf(false) }
     var directory by remember { mutableStateOf(state.session?.cwd.orEmpty()) }
     var title by remember { mutableStateOf("") }
+    var filePath by remember(state.codexSelectedTaskKey) { mutableStateOf("") }
+    var fileEntry by remember(state.codexSelectedTaskKey) { mutableStateOf(false) }
     fun act(block: suspend () -> Unit) {
         scope.launch {
             error = ""
@@ -85,6 +113,24 @@ internal fun CodexWorkspacePane(state: AppState) {
             }
         } else {
             Text(selected.directory, style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton({ fileEntry = !fileEntry }) { Text("打开文件") }
+                TextButton({ state.browserPanelOpen = true; state.filePanelOpen = false }) { Text("网页预览") }
+                if (state.documents.any { it.task == selected.key }) TextButton({ state.filePanelOpen = true; state.browserPanelOpen = false }) { Text("文件侧栏") }
+            }
+            if (fileEntry && conn != null) Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(filePath, { filePath = it }, modifier = Modifier.weight(1f), singleLine = true,
+                    placeholder = { Text("文件路径，如 README.md") })
+                TextButton({
+                    val path = filePath.trim()
+                    act {
+                        state.openCodexDocument(conn, selected, path)
+                        if (state.codexSelectedTaskKey == selected.key && state.conn === conn) {
+                            state.filePanelOpen = true; state.browserPanelOpen = false; fileEntry = false
+                        }
+                    }
+                }, enabled = filePath.isNotBlank()) { Text("打开") }
+            }
             if (controller == null || !controller.ready) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(controller?.note ?: "连接后恢复对话", Modifier.weight(1f))

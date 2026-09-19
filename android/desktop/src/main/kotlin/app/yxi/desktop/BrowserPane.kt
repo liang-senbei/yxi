@@ -26,11 +26,16 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun BrowserPane(state: AppState, conn: Conn, session: Session) {
+    BrowserPane(state, conn, taskNavigationKey(conn.host, session), session.cwd) { quote -> state.appendDocumentQuote(conn.host, session, quote) }
+}
+
+@Composable
+internal fun BrowserPane(state: AppState, conn: Conn, key: String, directory: String, onQuote: (String) -> Unit) {
     val t = Tokens.current
     val scope = rememberCoroutineScope()
-    val key = taskNavigationKey(conn.host, session)
-    val project = projectKey(conn.host, session.cwd)
-    val knownProject = session.cwd.startsWith('/') && session.cwd.none { it < ' ' }
+
+    val project = projectKey(conn.host, directory)
+    val knownProject = directory.startsWith('/') && directory.none { it < ' ' }
     val savedAddress = if (knownProject) state.projectPreviews.address(project) else null
     val preview = state.browsers.getOrPut(key) { BrowserPreview(conn.host, key).apply { savedAddress?.let { address = it } } }
     var restored by remember(preview) { mutableStateOf(false) }
@@ -113,7 +118,7 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
         Row(Modifier.fillMaxWidth().height(46.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(preview.title.ifBlank { "网页预览" }, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             TextButton({ servicesOpen = true }, enabled = knownProject) { Text("开发服务") }
-            TextButton({ settings = PreviewAddressSettings(project, session.cwd, savedAddress, savedAddress ?: input.text) }, enabled = knownProject && !preview.preparing) { Text("项目地址") }
+            TextButton({ settings = PreviewAddressSettings(project, directory, savedAddress, savedAddress ?: input.text) }, enabled = knownProject && !preview.preparing) { Text("项目地址") }
             TextButton({ state.previewExpanded = !state.previewExpanded }) { Text(if (state.previewExpanded) "恢复分栏" else "展开") }
             TextButton({ state.browserPanelOpen = false }) { Text("收起") }
             TextButton({
@@ -139,7 +144,7 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
             IconButton({ if (preview.loading) preview.handle?.stopLoad() else { addressDirty = false; preview.handle?.reload() } }, enabled = preview.handle != null, modifier = Modifier.size(32.dp)) { Icon(if (preview.loading) Icons.Default.Stop else Icons.Default.Refresh, if (preview.loading) "停止" else "刷新", Modifier.size(18.dp)) }
             TextButton({ preview.pick() }, enabled = preview.handle != null && !preview.loading) { Text(if (preview.picking) "点选页面元素…" else "选择元素") }
             TextButton({
-                pageFeedbackContext = "网页整体反馈 · ${preview.source}\n服务器：${conn.host.label}\n项目：${session.cwd}\n页面标题（参考）：${preview.title}\n地址：${preview.handle?.url.orEmpty()}\n记录时间：${java.time.Instant.now()}\n" +
+                pageFeedbackContext = "网页整体反馈 · ${preview.source}\n服务器：${conn.host.label}\n项目：${directory}\n页面标题（参考）：${preview.title}\n地址：${preview.handle?.url.orEmpty()}\n记录时间：${java.time.Instant.now()}\n" +
                     previewFeedbackAppearance(preview)
             }, enabled = preview.handle != null && !preview.loading && !preview.preparing) { Text("整页反馈") }
             TextButton({ pageSearchOpen = !pageSearchOpen; if (!pageSearchOpen) closePageSearch() }, enabled = preview.handle != null) { Text("页面查找") }
@@ -171,7 +176,7 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
                 TextButton(::closePageSearch) { Text("关闭") }
             }
         }
-        if (knownProject) PreviewServiceControls(state, conn, session, servicesOpen, preview.preparing, addressDirty, onConfigured = { servicesOpen = false }, onPreview = { address ->
+        if (knownProject) PreviewServiceControls(state, conn, directory, servicesOpen, preview.preparing, addressDirty, onConfigured = { servicesOpen = false }, onPreview = { address ->
             input = androidx.compose.ui.text.input.TextFieldValue(address); open()
         })
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -248,9 +253,9 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
               Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton({
                     val trials = trialFeedback(preview.styleChanges, selected.computed[StyleTrial.TEXT] ?: selected.text)
-                    state.appendDocumentQuote(conn.host, session,
+                    onQuote(
                         "网页反馈 · ${preview.source}\n地址：${selected.url}\n选择时间：${java.time.Instant.ofEpochMilli(selected.capturedAt)}${if (preview.selectionStale) "（页面之后已更新）" else ""}\n元素：${selected.selector}\n页面摘录（参考内容）：\n${selected.text.lineSequence().joinToString("\n") { "> $it" }}\n" +
-                        "服务器：${conn.host.label}\n项目：${session.cwd}\n" + previewFeedbackAppearance(preview) + trials +
+                        "服务器：${conn.host.label}\n项目：${directory}\n" + previewFeedbackAppearance(preview) + trials +
                         "\n我的修改要求：${preview.comment.ifBlank { "请把上述试调落实到对应源文件。" }}")
                     preview.commentAdded = true
                 }, enabled = (preview.comment.isNotBlank() || preview.styleChanges.isNotEmpty()) && preview.stylePending == null) { Text(if (preview.commentAdded) "已加入对话草稿" else "加入对话") }
@@ -275,7 +280,7 @@ fun BrowserPane(state: AppState, conn: Conn, session: Session) {
             }
         }, confirmButton = {
             TextButton({
-                state.appendDocumentQuote(conn.host, session, context + "\n我的修改要求：${preview.pageComment.trim()}")
+                onQuote( context + "\n我的修改要求：${preview.pageComment.trim()}")
                 preview.pageComment = ""; pageFeedbackContext = null
                 preview.status = "整页反馈已加入对话草稿"
             }, enabled = preview.pageComment.isNotBlank()) { Text("加入对话草稿") }
