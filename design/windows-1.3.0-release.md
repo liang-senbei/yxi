@@ -1,13 +1,18 @@
 # Yxi Windows 1.3.0 发布记录
 
-状态：发布中，尚未更新官网渠道。
+状态：已于2026-09-19 19:48（北京时间）发布到官网更新渠道，公网回读确认1.3.0，安装包HTTP200。
 
 - 冻结源码：`5426c28acb94a1d8e83b7e5650d379a9237c887e`
 - 发布分支：`codex/windows-release-1.3.0`
 - Windows流水线：<https://github.com/liang-senbei/yxi/actions/runs/35440483403>
-- 当前官网版本：1.2.0（本轮已读取公开更新清单）
+- 当前官网版本：1.3.0（本轮已读取公开更新清单）
 - 发布位置：hk13 `/var/www/yxi/desktop/`
 - 旧版备份：hk13 `/var/www/yxi/desktop-rollback-1.2.0-20260919`（构建Agent已准备）
+- CI结果：Windows构建、安装启动及工作流全部步骤成功。
+- 完整包SHA256：`7C8A44A7A5DE80B43DE02DC650AA6AFE8DED2D548E3DBFBB56D57C878AF6A226`，320970730字节。
+- 安装包SHA256：`5c7e605e72a34ec06b60d09ac2942e74d0e5aa571b76b9985873fdb5d0093ff3`，325492714字节。
+- 安装地址：<https://yxi.keuury.com/desktop/Yxi-win-Setup.exe>
+- 发布结果：hk13 `/root/src/workspace/yunxi/windows-release/1.3.0-run35440483403/deployment-result.json`。
 
 ## 本版内容
 
