@@ -22,6 +22,20 @@ import app.yxi.agent.MailApi
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
+internal fun mailRetentionHint(mail: AccountApi.Mail, now: Long = System.currentTimeMillis()): Pair<String, Boolean>? {
+    val until = mail.expiresAt?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() } ?: return null
+    val days = kotlin.math.ceil((until - now) / 86_400_000.0).toLong().coerceAtLeast(0)
+    val code = mail.attachments.any { it.kind == "code" }
+    val message = (if (days == 0L) "邮件已到保留期限" else "邮件还保留 $days 天") + when {
+        code && mail.claimable -> "；请领取附件并保存兑换码。"
+        code -> "；请提前保存兑换码，邮件清理后不再显示。"
+        mail.claimable -> "；还有附件待领取。"
+        mail.claimedAt != null -> "；清理邮件不会撤销已经领取的权益。"
+        else -> "。"
+    }
+    return message to (days <= 3 && (code || mail.claimable))
+}
+
 @Composable
 internal fun MailPane(owner: String, api: MailApi, onBack: () -> Unit, onCounters: (JSONObject) -> Unit) {
     val t = Tokens.current
@@ -34,13 +48,20 @@ internal fun MailPane(owner: String, api: MailApi, onBack: () -> Unit, onCounter
     var error by remember(owner) { mutableStateOf("") }
     var notice by remember(owner) { mutableStateOf("") }
     var deleting by remember(owner) { mutableStateOf<AccountApi.Mail?>(null) }
+    var filter by remember(owner) { mutableStateOf("全部") }
+    var unreadTotal by remember(owner) { mutableStateOf<Int?>(null) }
+    fun counters(value: JSONObject) {
+        if (value.has("unread") && !value.isNull("unread")) unreadTotal = value.optInt("unread").coerceAtLeast(0)
+        onCounters(value)
+    }
+    val shown = rows.filter { mail -> when (filter) { "未读" -> mail.unread || mail.id == selected?.id; "已读" -> !mail.unread; else -> true } }
     suspend fun load(more: Boolean) {
         val page = api.list(if (more) cursor else null)
         check(!more || page.next == null || page.next != cursor) { "下一页游标没有更新，请刷新后重试" }
         rows = (if (more) rows + page.items else page.items).distinctBy { it.id }
         cursor = page.next
         loaded = true
-        onCounters(JSONObject().apply { page.unread?.let { put("unread", it) }; page.unclaimed?.let { put("unclaimed", it) } })
+        counters(JSONObject().apply { page.unread?.let { put("unread", it) }; page.unclaimed?.let { put("unclaimed", it) } })
         selected = selected?.let { old -> rows.firstOrNull { it.id == old.id } }
     }
     fun work(block: suspend () -> Unit) {
@@ -63,18 +84,25 @@ internal fun MailPane(owner: String, api: MailApi, onBack: () -> Unit, onCounter
         }
         if (error.isNotBlank()) Text(error, color = t.danger, style = MaterialTheme.typography.bodySmall)
         if (notice.isNotBlank()) Text(notice, color = t.success, style = MaterialTheme.typography.bodySmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("全部", "未读", "已读").forEach { value ->
+                FilterChip(filter == value, { filter = value; selected = null }, enabled = !busy,
+                    label = { Text(value + if (value == "未读" && unreadTotal != null) " $unreadTotal" else "") })
+            }
+        }
+        if (filter != "全部" && cursor != null) Text("筛选当前已加载的邮件；可继续加载更早的邮件。未读数量为服务器总数。", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
             val wide = maxWidth >= 780.dp
             Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                 if (wide || selected == null) Column(if (wide) Modifier.width(280.dp).fillMaxHeight() else Modifier.fillMaxSize()) {
-                    if (loaded && rows.isEmpty()) Text("信箱里还没有邮件", color = t.textMuted, modifier = Modifier.padding(16.dp))
+                    if (loaded && shown.isEmpty()) Text(if (rows.isEmpty()) "信箱里还没有邮件" else if (cursor != null) "已加载邮件中没有匹配项" else "没有匹配的邮件", color = t.textMuted, modifier = Modifier.padding(16.dp))
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        items(rows, key = { it.id }) { mail ->
+                        items(shown, key = { it.id }) { mail ->
                             Column(Modifier.fillMaxWidth().background(if (selected?.id == mail.id) t.selected else t.surface2, RoundedCornerShape(10.dp))
                                 .border(0.5.dp, t.border, RoundedCornerShape(10.dp)).clickable(enabled = !busy) {
                                     selected = mail
                                     if (mail.unread) work {
-                                        onCounters(api.read(mail.id))
+                                        counters(api.read(mail.id))
                                         val read = mail.copy(readAt = java.time.Instant.now().toString())
                                         rows = rows.map { if (it.id == mail.id) read else it }; selected = read
                                     }
@@ -82,6 +110,7 @@ internal fun MailPane(owner: String, api: MailApi, onBack: () -> Unit, onCounter
                                 Text(mail.title, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = if (mail.unread) FontWeight.SemiBold else FontWeight.Normal, color = t.textPrimary)
                                 Text(mail.fromName.ifBlank { "Yxi" }, style = MaterialTheme.typography.labelSmall, color = t.textMuted)
                                 if (mail.unread || mail.claimable) Text(listOfNotNull(if (mail.unread) "未读" else null, if (mail.claimable) "有附件待领取" else null).joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = t.accent)
+                                mailRetentionHint(mail)?.takeIf { it.second }?.let { Text(it.first, style = MaterialTheme.typography.labelSmall, color = t.warning) }
                             }
                         }
                         item { if (cursor != null) TextButton({ work { load(true) } }, enabled = !busy) { Text("加载更早的邮件") } }
@@ -97,6 +126,7 @@ internal fun MailPane(owner: String, api: MailApi, onBack: () -> Unit, onCounter
                         HorizontalDivider(color = t.border)
                         SelectionContainer { Text(mail.body, color = t.textPrimary, style = MaterialTheme.typography.bodyLarge) }
                         mail.expiresAt?.let { Text("保留至 $it", style = MaterialTheme.typography.bodySmall, color = t.textMuted) }
+                        mailRetentionHint(mail)?.let { Text(it.first, style = MaterialTheme.typography.bodySmall, color = if (it.second) t.warning else t.textMuted) }
                         if (mail.attachments.isNotEmpty()) Text("随信附件", style = MaterialTheme.typography.titleSmall, color = t.textPrimary)
                         mail.attachments.forEach { attachment ->
                             Column(Modifier.fillMaxWidth().background(t.surface1, RoundedCornerShape(8.dp)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -116,8 +146,8 @@ internal fun MailPane(owner: String, api: MailApi, onBack: () -> Unit, onCounter
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             if (mail.claimable) Button({ work {
-                                val result = api.claim(mail.id); onCounters(result)
-                                val claimed = mail.copy(claimedAt = java.time.Instant.now().toString())
+                                val result = api.claim(mail.id); counters(result)
+                                val claimed = mail.copy(claimedAt = java.time.Instant.now().toString(), readAt = mail.readAt ?: java.time.Instant.now().toString())
                                 rows = rows.map { if (it.id == mail.id) claimed else it }; selected = claimed
                                 notice = if (result.optBoolean("replay")) "此前已领取，本次没有重复发放" else "领取已确认"
                             } }, enabled = !busy) { Text("领取附件") }
@@ -134,6 +164,6 @@ internal fun MailPane(owner: String, api: MailApi, onBack: () -> Unit, onCounter
         Text("${mail.title}\n请先保存需要的内容和兑换码。")
         if (error.isNotBlank()) Text(error, color = t.danger, style = MaterialTheme.typography.bodySmall)
     } }, confirmButton = {
-        TextButton({ work { onCounters(api.delete(mail.id)); rows = rows.filterNot { it.id == mail.id }; selected = null; deleting = null } }, enabled = !busy) { Text("删除") }
+        TextButton({ work { counters(api.delete(mail.id)); rows = rows.filterNot { it.id == mail.id }; selected = null; deleting = null } }, enabled = !busy) { Text("删除") }
     }, dismissButton = { TextButton({ deleting = null }, enabled = !busy) { Text("保留") } }) }
 }
