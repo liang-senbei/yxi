@@ -119,11 +119,11 @@ class DesktopLocalAsrTest {
                 poll { File(script.parentFile, "pid.txt").isFile } // 假进程已启动
                 job.cancel()
                 job.join()
+                // 取消以 CancellationException 结束（不等 5 分钟超时），且 finally 仍执行清理
+                assertIs<CancellationException>(failure)
+                val pid = File(script.parentFile, "pid.txt").readText().trim().toLong()
+                poll { !ProcessHandle.of(pid).map { handle -> handle.isAlive() }.orElse(false) }
             }
-            // 取消以 CancellationException 结束（不等 5 分钟超时），且 finally 仍执行清理
-            assertIs<CancellationException>(failure)
-            val pid = File(script.parentFile, "pid.txt").readText().trim().toLong()
-            poll { !ProcessHandle.of(pid).map { handle -> handle.isAlive() }.orElse(false) }
             assertTrue(wav.all { it == 0.toByte() }, "取消后录音缓冲也应清零")
             assertEquals(emptyList(), leakedDirs(before), "取消后临时目录也应清理")
         } finally { root.deleteRecursively() }
