@@ -13,6 +13,10 @@ import java.util.Locale
 
 internal fun redemptionMessage(result: JSONObject): String {
     val server = result.optString("msg").takeIf { it.isNotBlank() && it != "null" }
+    check(result.optBoolean("revoked") || result.optBoolean("replay") || server != null ||
+        result.optString("kind") in setOf("membership", "balance") || result.has("tier")) {
+        "服务器没有返回可识别的兑换结果"
+    }
     return when {
         result.optBoolean("revoked") -> server ?: "这张码此前的兑换已被撤销，不能再次兑换。"
         result.optBoolean("replay") -> server ?: "这张码已经兑换过，本次没有重复增加权益。"
@@ -57,7 +61,7 @@ internal fun RedeemCodeCard(owner: String, generation: Long) {
                         if (MeAuth.sessionGeneration == generation && MeAuth.me?.userId == owner && refreshError != null)
                             message += "\n兑换结果已收到，账户资料暂未刷新，可稍后点击刷新。"
                     } catch (e: CancellationException) { throw e }
-                    catch (e: Exception) { message = (e.message ?: "兑换结果未确认") + "；如网络中断，请刷新账户核对后再重试。" }
+                    catch (e: Exception) { message = (e.message ?: "兑换结果未确认") + "；请先刷新账户资料核对，再决定是否重试。" }
                     finally { busy = false }
                 }
             }, enabled = valid && !busy && MeAuth.signedIn && MeAuth.sessionGeneration == generation) {
