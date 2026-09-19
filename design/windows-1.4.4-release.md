@@ -13,3 +13,5 @@
 使用说明：[协作消息操作](windows-collaboration-messages.md)。
 
 构建准备已委派 cc-yxi：冻结 32a4128，目标分支 codex/windows-release-1.4.4，尚未取得运行编号。用户发送UI静态接线和编译通过（ef95d30）；最终回复入口与服务器回复边界检查仍进行中，发布前收齐。
+
+正式构建运行中：35452932851，冻结32a41289dc7fde4b3afb0b1c884bc3c16485af74。官网1.4.3备份已完成：/var/www/yxi/desktop-rollback-1.4.3-before-1.4.4。尚未发布1.4.4或升级生产协作脚本。
