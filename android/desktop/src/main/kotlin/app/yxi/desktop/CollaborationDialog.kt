@@ -38,6 +38,11 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
     if (setup) { HubSetupDialog(conn.host) { setup = false }; return }
     var assignment by remember(conn) { mutableStateOf<Pair<String, app.yxi.agent.Session>?>(null) }
     var assignmentText by remember(conn) { mutableStateOf("") }
+    var userMessage by remember(conn) { mutableStateOf<Pair<String, app.yxi.agent.Session>?>(null) }
+    userMessage?.let { (group, target) ->
+        GroupUserMessageDialog(state, conn, target, group) { userMessage = null }
+        return
+    }
     assignment?.let { (group, target) ->
         MemberAssignmentDialog(state, conn, target, group, { assignment = null }, close, initialText = assignmentText)
         return
@@ -144,6 +149,7 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
                                     Text(session.cwd, style = MaterialTheme.typography.bodySmall)
                                     TextButton({ state.select(conn, session); close() }) { Text("打开成员任务") }
                                     TextButton({ assignmentText = ""; assignment = selected to session }) { Text("指派任务") }
+                                    TextButton({ userMessage = selected to session }) { Text("发消息") }
                                 }
                             }
                         }

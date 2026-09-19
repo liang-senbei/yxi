@@ -216,6 +216,7 @@ case "${1:-who}" in
     [ -n "$user_group" ] && [ -n "$3" ] && [ -n "$expected_recipient" ] && [ -n "$5" ] || exit 1
     push "$3" "[用户消息 · $user_group] $5" "用户" "" "$6" "$5"
     echo "用户消息已写入目标终端，尚无处理回执"
+    printf '__YXI_USER_MESSAGE__:%s\n' "$6"
     ;;
   pause|resume|status|limit)
     group="${2:?请指定协作组名}"
