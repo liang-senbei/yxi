@@ -106,7 +106,9 @@ internal suspend fun runDeferredRoute(state: AppState, request: DeferredRoute) {
             }
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) {
-            state.deferredRouteNotice = "${request.conn.host.label}：${e.message}"
-            if (state.deferredRoute === request) state.deferredRoute = null
+            if (state.deferredRoute === request) {
+                state.deferredRouteNotice = "${request.conn.host.label}：${e.message}"
+                state.deferredRoute = null
+            }
         }
 }
