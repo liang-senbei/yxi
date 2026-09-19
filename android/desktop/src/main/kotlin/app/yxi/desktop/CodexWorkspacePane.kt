@@ -158,11 +158,6 @@ private fun CodexConversationPane(state: AppState) {
             OutlinedTextField(title, { title = it }, label = { Text("任务名称") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(directory, { directory = it }, label = { Text("服务器项目目录") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton({ showFiles = !showFiles }) { Text(if (showFiles) "返回对话" else "项目文件") }
-                TextButton({
-                    runCatching { java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(java.awt.datatransfer.StringSelection(selected.threadId), null) }
-                        .onFailure { error = "任务编号复制失败：${it.message}" }
-                }) { Text("复制任务编号") }
                 Button({
                     val target = conn
                     val path = directory.trim()
@@ -177,13 +172,9 @@ private fun CodexConversationPane(state: AppState) {
             }
             Text("使用所选服务器的 Codex 登录和模型配置。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
         }
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            tasks.forEach { task ->
-                FilterChip(selected = selected?.key == task.key, onClick = {
-                    state.codexSelectedTaskKey = task.key
-                    if (conn != null) act { workspace.open(conn, task) }
-                }, enabled = !workspace.busy, label = { Text(task.title, maxLines = 1, overflow = TextOverflow.Ellipsis) })
-            }
+        CodexTaskPicker(state, tasks, workspace.busy) { task ->
+            state.codexSelectedTaskKey = task.key
+            if (conn != null) act { workspace.open(conn, task) }
         }
         if (selected == null) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -191,7 +182,12 @@ private fun CodexConversationPane(state: AppState) {
             }
         } else {
             Text(selected.directory, style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton({ showFiles = !showFiles }) { Text(if (showFiles) "返回对话" else "项目文件") }
+                TextButton({
+                    runCatching { java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(java.awt.datatransfer.StringSelection(selected.threadId), null) }
+                        .onFailure { error = "任务编号复制失败：${it.message}" }
+                }) { Text("复制任务编号") }
                 TextButton({ fileEntry = !fileEntry }) { Text("打开文件") }
                 TextButton({ state.browserPanelOpen = true; state.filePanelOpen = false }) { Text("网页预览") }
                 if (state.documents.any { it.task == selected.key }) TextButton({ state.filePanelOpen = true; state.browserPanelOpen = false }) { Text("文件侧栏") }
