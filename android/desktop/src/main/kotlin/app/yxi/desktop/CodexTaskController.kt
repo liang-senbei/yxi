@@ -9,6 +9,7 @@ import org.json.JSONObject
 
 internal data class CodexMessage(val id: String, val author: String, val text: String,
     val kind: String = "message", val status: String = "", val paths: List<String> = emptyList())
+internal data class CodexModelOption(val model: String, val label: String, val efforts: List<String>, val defaultEffort: String)
 
 /** One structured thread per controller. The owner must persist the threadId before exposing it.
  * User input stays in InstructionQueue; only correlated RPC replies can mark it accepted.
@@ -25,6 +26,11 @@ internal class CodexTaskController(
     val pendingRequests = mutableStateMapOf<String, JSONObject>()
     val recentEvents = mutableStateListOf<JSONObject>()
     val messages = mutableStateListOf<CodexMessage>()
+    var models by mutableStateOf<List<CodexModelOption>>(emptyList()); private set
+    var selectedModel by mutableStateOf<String?>(null); private set
+    var selectedEffort by mutableStateOf<String?>(null); private set
+    var modelsLoading by mutableStateOf(false); private set
+    var modelError by mutableStateOf(""); private set
     var ready by mutableStateOf(false); private set
     var sending by mutableStateOf(false); private set
     var activeTurnId by mutableStateOf<String?>(null); private set
@@ -132,6 +138,44 @@ internal class CodexTaskController(
 
     fun queueChanged() { scheduleNext() }
 
+    suspend fun refreshModels() {
+        if (modelsLoading) return
+        modelsLoading = true; modelError = ""
+        try {
+            val next = mutableListOf<CodexModelOption>()
+            val seen = mutableSetOf<String>()
+            var cursor: String? = null
+            do {
+                val result = client.listModels(cursor).getJSONObject("result")
+                val data = result.getJSONArray("data")
+                for (index in 0 until data.length()) {
+                    val item = data.getJSONObject(index)
+                    if (item.optBoolean("hidden")) continue
+                    val efforts = item.optJSONArray("supportedReasoningEfforts")
+                    next.add(CodexModelOption(item.getString("model"), item.getString("displayName"),
+                        if (efforts == null) emptyList() else (0 until efforts.length()).map { efforts.getJSONObject(it).getString("reasoningEffort") },
+                        item.optString("defaultReasoningEffort")))
+                }
+                cursor = result.optString("nextCursor").takeIf { it.isNotBlank() && it != "null" }
+                check(cursor == null || seen.add(cursor)) { "模型列表分页异常" }
+            } while (cursor != null)
+            models = next.distinctBy { it.model }
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { modelError = "模型列表读取失败：${e.message}" }
+        finally { modelsLoading = false }
+    }
+
+    fun chooseModel(model: String?) {
+        val option = model?.let { id -> models.firstOrNull { it.model == id } ?: error("模型不在服务器列表中") }
+        selectedModel = option?.model
+        selectedEffort = option?.let { entry -> entry.defaultEffort.takeIf { it in entry.efforts } }
+    }
+
+    fun chooseEffort(effort: String) {
+        check(models.firstOrNull { it.model == selectedModel }?.efforts?.contains(effort) == true) { "该模型不支持此思考强度" }
+        selectedEffort = effort
+    }
+
     suspend fun sendNext(expectedId: String? = null) = mutation.withLock {
         check(ready && !disposed) { "请先连接并核对运行器状态" }
         check(activeTurnId == null && pendingRequests.isEmpty()) { "当前轮次或审批尚未结束" }
@@ -150,11 +194,13 @@ internal class CodexTaskController(
 
     private suspend fun submit(item: QueuedInstruction, steeringTurn: String?) {
         CodexAppServer.userInput(item.text, item.attachments) // Validate before changing durable delivery state.
+        val model = selectedModel
+        val effort = selectedEffort
         val started = if (steeringTurn == null) queue.beginDelivery(item.id, item.revision)
             else queue.beginSteering(item.id, item.revision, steeringTurn)
         sending = true
         try {
-            val response = if (steeringTurn == null) client.startTurn(threadId, item.text, item.attachments)
+            val response = if (steeringTurn == null) client.startTurn(threadId, item.text, item.attachments, model, effort)
                 else client.steer(threadId, steeringTurn, item.text, item.attachments)
             val result = response.getJSONObject("result")
             val turnId = if (steeringTurn == null) result.getJSONObject("turn").getString("id") else result.getString("turnId")

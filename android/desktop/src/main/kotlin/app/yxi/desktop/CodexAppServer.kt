@@ -83,8 +83,13 @@ internal class CodexAppServer private constructor(private val shell: SshSession.
 
     suspend fun resumeThread(threadId: String) = request("thread/resume", JSONObject().put("threadId", requiredId(threadId)))
 
-    suspend fun startTurn(threadId: String, text: String, attachments: List<InstructionAttachment> = emptyList()): JSONObject = request("turn/start",
-        JSONObject().put("threadId", requiredId(threadId)).put("input", userInput(text, attachments)))
+    suspend fun startTurn(threadId: String, text: String, attachments: List<InstructionAttachment> = emptyList(), model: String? = null, effort: String? = null): JSONObject = request("turn/start",
+        JSONObject().put("threadId", requiredId(threadId)).put("input", userInput(text, attachments)).apply {
+            model?.let { put("model", it) }; effort?.let { put("effort", it) }
+        })
+
+    suspend fun listModels(cursor: String? = null): JSONObject = request("model/list",
+        JSONObject().put("limit", 100).put("includeHidden", false).apply { cursor?.let { put("cursor", it) } })
 
     suspend fun steer(threadId: String, turnId: String, text: String, attachments: List<InstructionAttachment> = emptyList()): JSONObject = request("turn/steer",
         JSONObject().put("threadId", requiredId(threadId)).put("expectedTurnId", requiredId(turnId)).put("input", userInput(text, attachments)))
