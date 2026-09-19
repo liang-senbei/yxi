@@ -20,6 +20,7 @@ internal data class QueuedInstruction(
     val assignmentGroup: String = "", val assignmentHost: String = "", val sourceTask: String = "",
     val runtimeTurnId: String = "", val runtimeTurnState: RuntimeTurnState = RuntimeTurnState.None,
     val runtimeCompletion: String = "",
+    val updatedAtMillis: Long = 0, val contentPurged: Boolean = false, val contentDigest: String = "",
 )
 
 /** Durable outbox, not a claim about a runner's remote queue. Network adapters must
@@ -32,6 +33,7 @@ internal class InstructionQueue(file: File) {
     var error by mutableStateOf("")
         private set
     private var readable = true
+    private var pendingBackupCleanup = false
 
     init {
         try {
@@ -41,6 +43,7 @@ internal class InstructionQueue(file: File) {
                 it.copy(status = InstructionStatus.Unknown, revision = it.revision + 1, detail = "应用退出时投递尚未确认，请核对任务记录") else it }
             if (recovered != loaded) disk.write(encode(recovered))
             entries = recovered
+            pendingBackupCleanup = recovered.any { it.contentPurged }
             if (fromBackup) error = "指令记录已从备份恢复，请核对任务状态"
         } catch (e: Exception) { readable = false; error = "无法读取指令记录，已保留原文件：${e.message}" }
     }
@@ -52,9 +55,10 @@ internal class InstructionQueue(file: File) {
     }
 
     @Synchronized fun enqueue(taskKey: String, text: String, attachments: List<InstructionAttachment> = emptyList(), id: String = UUID.randomUUID().toString(), assignmentGroup: String = "", assignmentHost: String = "", sourceTask: String = ""): QueuedInstruction {
-        val item = QueuedInstruction(id, taskKey, text, attachments.toList(), assignmentGroup = assignmentGroup, assignmentHost = assignmentHost, sourceTask = sourceTask)
+        val item = QueuedInstruction(id, taskKey, text, attachments.toList(), assignmentGroup = assignmentGroup, assignmentHost = assignmentHost, sourceTask = sourceTask, updatedAtMillis = System.currentTimeMillis())
         entries.firstOrNull { it.id == id }?.let {
-            check(it.taskKey == taskKey && it.text == text && it.attachments == attachments && it.assignmentGroup == assignmentGroup && it.assignmentHost == assignmentHost && it.sourceTask == sourceTask) { "同一指令标识对应不同内容" }
+            val sameContent = if (it.contentPurged) it.contentDigest == fingerprint(text, attachments) else it.text == text && it.attachments == attachments
+            check(it.taskKey == taskKey && sameContent && it.assignmentGroup == assignmentGroup && it.assignmentHost == assignmentHost && it.sourceTask == sourceTask) { "同一指令标识对应不同内容" }
             return it
         }
         commit(entries + item)
@@ -64,7 +68,8 @@ internal class InstructionQueue(file: File) {
     @Synchronized private fun change(id: String, revision: Long, allowed: Set<InstructionStatus>, transform: (QueuedInstruction) -> QueuedInstruction): QueuedInstruction {
         val current = entries.single { it.id == id }
         check(current.revision == revision && current.status in allowed) { "指令状态已变化，请刷新后重试" }
-        val next = transform(current).copy(revision = current.revision + 1)
+        check(!current.contentPurged) { "正文已按保留设置清理，不能恢复或重新投递" }
+        val next = transform(current).copy(revision = current.revision + 1, updatedAtMillis = System.currentTimeMillis())
         commit(entries.map { if (it.id == id) next else it })
         return next
     }
@@ -112,7 +117,7 @@ internal class InstructionQueue(file: File) {
         if (matching.isEmpty()) return false
         commit(entries.map { if (it.id in matching) it.copy(runtimeTurnState = outcome,
             detail = when (outcome) { RuntimeTurnState.Failed -> failure.ifBlank { "运行器报告本轮失败" }; RuntimeTurnState.Interrupted -> "本轮已中断"; else -> it.detail },
-            runtimeCompletion = receipt, revision = it.revision + 1) else it })
+            runtimeCompletion = receipt, revision = it.revision + 1, updatedAtMillis = System.currentTimeMillis()) else it })
         return true
     }
     @Synchronized fun moveBefore(id: String, revision: Long, beforeId: String) {
@@ -133,10 +138,37 @@ internal class InstructionQueue(file: File) {
         commit(next)
     }
 
+    @Synchronized fun pruneCompleted(days: Int, now: Long = System.currentTimeMillis()): Int {
+        require(days in setOf(0, 3, 7, 30))
+        if (days == 0) return 0
+        val cutoff = now - days * 86_400_000L
+        val next = entries.map { item ->
+            if (!item.contentPurged && terminal(item) && item.updatedAtMillis in 1L..cutoff) item.copy(
+                text = "", attachments = emptyList(), detail = "", deliveryObservation = "", runtimeCompletion = "",
+                contentPurged = true, contentDigest = fingerprint(item.text, item.attachments), revision = item.revision + 1)
+            else item
+        }
+        val removed = next.count { it.contentPurged } - entries.count { it.contentPurged }
+        if (removed > 0) {
+            commit(next)
+            pendingBackupCleanup = true
+        }
+        if (pendingBackupCleanup) {
+            try { disk.write(encode(entries)); pendingBackupCleanup = false } // Rotate the ordinary backup too.
+            catch (e: Exception) { error = "主记录已清理，但常规备份更新失败：${e.message}"; throw e }
+        }
+        return removed
+    }
+
     companion object {
+        private fun terminal(item: QueuedInstruction) = item.status in setOf(InstructionStatus.Cancelled, InstructionStatus.Resolved) ||
+            (item.status == InstructionStatus.Accepted && item.runtimeTurnState in setOf(RuntimeTurnState.Completed, RuntimeTurnState.Failed, RuntimeTurnState.Interrupted))
+        private fun fingerprint(text: String, attachments: List<InstructionAttachment>) = contentHash(JSONArray().put(text)
+            .put(JSONArray(attachments.map { JSONArray().put(it.name).put(it.remotePath) })).toString().toByteArray())
         private fun encode(items: List<QueuedInstruction>) = JSONObject().put("version", 1).put("items", JSONArray(items.map { item ->
             JSONObject().put("id", item.id).put("taskKey", item.taskKey).put("text", item.text).put("status", item.status.name)
                 .put("revision", item.revision).put("detail", item.detail)
+                .put("updatedAtMillis", item.updatedAtMillis).put("contentPurged", item.contentPurged).put("contentDigest", item.contentDigest)
                 .put("deliveryObservation", item.deliveryObservation).put("deliveryObservedAt", item.deliveryObservedAt)
                 .put("assignmentGroup", item.assignmentGroup).put("assignmentHost", item.assignmentHost).put("sourceTask", item.sourceTask)
                 .put("runtimeTurnId", item.runtimeTurnId).put("runtimeTurnState", item.runtimeTurnState.name).put("runtimeCompletion", item.runtimeCompletion)
@@ -154,11 +186,14 @@ internal class InstructionQueue(file: File) {
                     InstructionStatus.valueOf(item.getString("status")), item.getLong("revision"), item.getString("detail"),
                     item.optString("deliveryObservation", ""), item.optLong("deliveryObservedAt", 0),
                     item.optString("assignmentGroup", ""), item.optString("assignmentHost", ""), item.optString("sourceTask", ""),
-                    item.optString("runtimeTurnId", ""), RuntimeTurnState.valueOf(item.optString("runtimeTurnState", "None")), item.optString("runtimeCompletion", ""))
+                    item.optString("runtimeTurnId", ""), RuntimeTurnState.valueOf(item.optString("runtimeTurnState", "None")), item.optString("runtimeCompletion", ""),
+                    item.optLong("updatedAtMillis", 0), item.optBoolean("contentPurged", false), item.optString("contentDigest", ""))
                     .also { q ->
                         require(q.id.isNotBlank() && q.taskKey.isNotBlank() && q.revision >= 0)
                         require(q.runtimeTurnState == RuntimeTurnState.None || (q.runtimeTurnId.isNotBlank() && q.status == InstructionStatus.Accepted))
-                        require(q.text.isNotBlank() || q.attachments.isNotEmpty())
+                        require(q.updatedAtMillis >= 0)
+                        if (q.contentPurged) require(terminal(q) && q.text.isEmpty() && q.attachments.isEmpty() && Regex("[a-f0-9]{64}").matches(q.contentDigest))
+                        else require(q.text.isNotBlank() || q.attachments.isNotEmpty())
                         require(q.attachments.all { it.name.isNotBlank() && it.remotePath.startsWith('/') && '\u0000' !in it.remotePath })
                     }
             }

@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun SettingsDialog(state: AppState) {
     var autostart by remember { mutableStateOf(autostartEnabled()) }
+    var retentionError by remember { mutableStateOf("") }
     WorkbenchDialog(
         onDismissRequest = { state.showSettings = false },
         confirmButton = { TextButton({ state.showSettings = false }) { Text("完成") } },
@@ -36,6 +37,15 @@ fun SettingsDialog(state: AppState) {
                 SwitchRow("开机自启", autostart, enabled = isWindows) { autostart = it; setAutostart(it) }
                 SwitchRow("启动时重连上次主机", Store.pref("reconnectOnStart", "1") == "1") { Store.setPref("reconnectOnStart", if (it) "1" else "0") }
                 Section("外观")
+                Choice("已结束输入正文保留", listOf("0" to "一直保留", "3" to "3天", "7" to "7天", "30" to "30天"), Store.pref("inputRetentionDays", "0")) { value ->
+                    runCatching {
+                        Store.setPref("inputRetentionDays", value)
+                        state.instructions.pruneCompleted(value.toInt())
+                        retentionError = ""
+                    }.onFailure { retentionError = it.message.orEmpty() }
+                }
+                Text("仅清理已结束记录的正文、附件引用和详细回执；保留去重标识，待发送/运行中/待核对及无时间的旧记录不清理。服务器对话不受影响。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                if (retentionError.isNotBlank()) Text(retentionError, color = Tokens.current.danger, style = MaterialTheme.typography.bodySmall)
                 Choice("主题", listOf("system" to "跟随系统", "light" to "浅色", "dark" to "深色"), Store.pref("theme", "system")) { Store.setPref("theme", it) }
                 Section("通知")
                 Choice("轮次完成 / 需要你处理", listOf("always" to "始终", "unfocused" to "仅在未聚焦时", "never" to "从不"), Store.pref("notify", "unfocused")) { Store.setPref("notify", it) }

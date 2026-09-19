@@ -47,6 +47,13 @@ import androidx.compose.ui.unit.dp
  */
 @Composable
 fun App(state: AppState) {
+    LaunchedEffect(state) {
+        while (true) {
+            runCatching { state.instructions.pruneCompleted(Store.pref("inputRetentionDays", "0").toIntOrNull() ?: 0) }
+                .onFailure { state.workspaceError = "历史清理未完成：${it.message}" }
+            kotlinx.coroutines.delay(60 * 60 * 1000L)
+        }
+    }
     DeferredRouteRunner(state)
     val scope = rememberCoroutineScope()
     val defaultUris = LocalUriHandler.current
