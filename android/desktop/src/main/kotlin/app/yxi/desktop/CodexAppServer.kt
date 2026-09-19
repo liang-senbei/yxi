@@ -138,7 +138,7 @@ exec "${'$'}bin" app-server
             val client = CodexAppServer(shell)
             try {
                 client.request("initialize", JSONObject().put("clientInfo", JSONObject()
-                    .put("name", "yxi_desktop").put("title", "Yxi").put("version", "1.2.0")))
+                    .put("name", "yxi_desktop").put("title", "Yxi").put("version", System.getProperty("jpackage.app-version", "dev"))))
                 check(withTimeout(10000) { shell.write(JSONObject().put("method", "initialized").put("params", JSONObject()).toString() + "\n") }) {
                     "运行器初始化确认未写入"
                 }
