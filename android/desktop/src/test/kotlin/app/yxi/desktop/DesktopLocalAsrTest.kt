@@ -1,5 +1,6 @@
 package app.yxi.desktop
 
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.io.ByteArrayInputStream
@@ -46,11 +47,12 @@ class DesktopLocalAsrTest {
         printf '  你好离线识别\n\n' > "${'$'}prefix.txt"
     """.trimIndent() + "\n"
 
-    private fun poll(timeoutMs: Long = 5000, condition: () -> Boolean) {
+    /** 挂起式轮询：不能阻塞 runBlocking 事件循环，否则 launch 的协程无法启动。 */
+    private suspend fun poll(timeoutMs: Long = 5000, condition: () -> Boolean) {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (!condition()) {
             check(System.currentTimeMillis() < deadline) { "等待超时" }
-            Thread.sleep(50)
+            delay(50)
         }
     }
 
@@ -74,7 +76,7 @@ class DesktopLocalAsrTest {
             // 空格路径作为单一 argv 逐项传入，无 shell 拆词；固定参数顺序完整
             val args = File(script.parentFile, "args.txt").readLines()
             assertEquals(
-                listOf("-m", model.absolutePath, "-f", args[3], "-l", "auto", "-otxt", "-of", args[7], "-np"),
+                listOf("-m", model.absolutePath, "-f", args[3], "-l", "auto", "-otxt", "-of", args[8], "-np"),
                 args, "argv 应逐项传递：$args")
             assertTrue(args[3].endsWith("audio.wav"), "音频输入应为临时 wav：$args")
             assertTrue(args[7].endsWith("result"), "输出前缀应为临时 result：$args")
