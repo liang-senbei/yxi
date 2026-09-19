@@ -11,3 +11,5 @@
 第三方线路表单可填写端点、密钥/令牌、模型、强度及Haiku/Sonnet/Opus映射。参考CC Switch交互，未复制其代码/资产；MIT许可说明见windows-feedback-20260920.md。
 
 包含未发布1.4.5的Agent回信收件功能。编译由hk13 Agent集中执行，投递状态变更交定向检查；不在生产会话上测试回退或切模型。剩余手动验收另列，不宣称全部PRD完成。
+
+已发布到官网：CI35456527655成功，产物10587909329共903210913字节。公开更新清单回读1.4.6，版本安装链接HTTP200。更新包321339036字节，SHA256 6B14ED09BDD1CEF389A30CAEF40EE697BC577B579542A73544BD4169BBBB5223；安装包SHA256 2eeae3fce5557d3ebbbfea0788ee916c2779984dc640785dfd8ebe44d9fdb9b5。备份/var/www/yxi/desktop-rollback-1.4.4-before-1.4.6。头像和分类设置页在冻结之后，未包含于本包。
