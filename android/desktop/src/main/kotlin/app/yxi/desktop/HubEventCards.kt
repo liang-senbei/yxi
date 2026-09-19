@@ -42,7 +42,7 @@ internal fun HubEventCards(raw: String, query: String, requestReply: ((String, S
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(!inboxOnly, { inboxOnly = false }, label = { Text("全部消息") })
-            FilterChip(inboxOnly, { inboxOnly = true }, label = { Text("回给用户") })
+            FilterChip(inboxOnly, { inboxOnly = true }, label = { Text("回给用户 · ${parsed.first.count { it.recipientKind == "user" }}") })
         }
         Text("${messages.size} 条消息" + if (parsed.second > 0) " · ${parsed.second} 行不完整或无法识别" else "", style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 380.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -63,8 +63,8 @@ internal fun HubEventCards(raw: String, query: String, requestReply: ((String, S
                         }, style = MaterialTheme.typography.labelMedium, color = Tokens.current.textMuted)
                         Text(message.time, style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
                         SelectionContainer { Text(if (message.hasBody) message.body else "正文不在本次读取范围内", style = MaterialTheme.typography.bodySmall) }
-                        if (message.replyTo.isNotBlank()) TextButton({ search(message.replyTo) }) { Text("查看原消息与回复") }
-                        TextButton({ search(message.id) }) { Text("查看此消息的关联") }
+                        if (message.replyTo.isNotBlank()) TextButton({ inboxOnly = false; search(message.replyTo) }) { Text("查看原消息与回复") }
+                        TextButton({ inboxOnly = false; search(message.id) }) { Text("查看此消息的关联") }
                         if (requestReply != null && message.recipientInstance.isNotBlank() && message.senderKind != "user" && message.recipientKind != "user") TextButton({ requestReply(message.id, message.recipient, message.recipientInstance) }) { Text("请接收 Agent 回复…") }
                         SelectionContainer { Text(message.id, style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted) }
                     }
