@@ -2,6 +2,8 @@
 
 ## Windows 工作台 PRD 实施中（2026-09-13，独立分支）
 
+2026-09-19 用户已打开首个试用版并反馈「我感觉可以的这个效果」：保留当前视觉与布局方向，后续以补齐中枢功能和安卓生产力缺口为主；这不是全部功能或Windows专项验收通过。测试/常规修复仍交hk13四位Agent，中枢不重复跑全量验证。
+
 2026-09-19 首个Windows试用包已在 artifacts/windows-3152af0/package 生成：独立试用启动入口 Start-Yxi-Trial.cmd；安装器 Releases/Yxi-win-Setup.exe。应用源码固定3152af0，未运行Windows测试、未安装或发布。完整PRD仍有缺口，不标完成。
 
 Agent 恢复记录：默认 tmux 服务消失后，通过包含本轮委派消息的原 JSONL 确认身份，已按原 Claude session ID 恢复 cc-yxi=d29bc184-fa59-4739-a979-95e5c9726810、cc-yxi_pilot=2606d6ea-9dad-4302-9ed2-6f73a60cf6a4、cc-yxi_entertainment=ef44d54b-cb1a-4a90-b3e5-37b882204ebf、cc-logto_yxi=ae953850-6bfe-41d0-993d-4e6f2ce5c14f。使用正常权限模式；四个窗口均显示恢复提示后的思考状态。要求复用现有构建进程、先整理报告，所有测试 tmux 使用专用 socket，禁止影响默认服务。原服务消失原因尚未确认。新增 0cb6030/66c3f5b 延后线路回归任务已随恢复提示交给 logto 侧。
