@@ -144,6 +144,7 @@ private fun ConnectionIdentityCard(state: AppState) {
     val controller = task?.let { state.codexWorkspace.controllers[it.key] }
     val scope = rememberCoroutineScope()
     var authSummary by remember(conn) { mutableStateOf("") }
+    var claudeSummary by remember(conn) { mutableStateOf("") }
     var readingAuth by remember(conn) { mutableStateOf(false) }
     Card {
         Text("账号与连接", style = MaterialTheme.typography.titleMedium, color = t.textPrimary)
@@ -169,6 +170,18 @@ private fun ConnectionIdentityCard(state: AppState) {
                 finally { readingAuth = false }
             }
         }, enabled = conn.ssh.isConnected && !readingAuth) { Text(if (readingAuth) "正在查询…" else "查询 Codex 认证") }
+        if (claudeSummary.isNotBlank()) Text(claudeSummary, style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+        if (conn != null) TextButton({
+            readingAuth = true
+            scope.launch {
+                try {
+                    val result = ProviderIdentity.claude(conn)
+                    if (state.conn === conn) claudeSummary = "$result。独立任务的环境配置可能不同。"
+                } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (_: Exception) { if (state.conn === conn) claudeSummary = "认证状态未读到，请检查 Claude 版本和服务器连接后重试。" }
+                finally { readingAuth = false }
+            }
+        }, enabled = conn.ssh.isConnected && !readingAuth) { Text("查询 Claude 认证") }
         if (conn != null) TextButton({ state.openRoutes() }) { Text("管理服务器线路") }
     }
 }
