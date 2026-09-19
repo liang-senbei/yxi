@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -20,6 +21,8 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import com.mikepenz.markdown.m3.Markdown
 
@@ -246,17 +249,55 @@ private fun CodexConversationPane(state: AppState) {
                 canDeliver = controller?.ready == true && !controller.sending && controller.activeTurnId == null && controller.pendingRequests.isEmpty(),
                 onDeliver = { instruction -> if (controller != null) act { controller.sendNext(instruction.id) } })
             val draft = state.chatDrafts.getOrPut(selected.key) { mutableStateOf(TextFieldValue()) }
+            val attachments = workspace.attachments[selected.key]
+            val allUploaded = attachments.orEmpty().all { it.state is DraftState.Done }
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                TextButton({ if (conn != null) {
+                    Attach.pickFiles().forEach { file ->
+                        runCatching { workspace.stageImage(conn, selected, Attach.fromFile(file)) }.onFailure { error = it.message.orEmpty() }
+                    }
+                } }, enabled = conn?.ssh?.isConnected == true) { Text("添加图片") }
+                TextButton({ if (conn != null && Attach.pasteBusy.compareAndSet(false, true)) act {
+                    try {
+                        val image = Attach.clipboardImage() ?: throw IllegalStateException("剪贴板中没有图片")
+                        val bytes = withContext(Dispatchers.Default) { Attach.pngBytes(image) }
+                        workspace.stageImage(conn, selected, Attach.fromPastedImage(bytes))
+                    } finally { Attach.pasteBusy.set(false) }
+                } }, enabled = conn?.ssh?.isConnected == true && !Attach.pasteBusy.get()) { Text("粘贴图片") }
+            }
+            if (!attachments.isNullOrEmpty()) Column(Modifier.heightIn(max = 140.dp).verticalScroll(rememberScrollState())) {
+                attachments.toList().forEach { attachment ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        val status = when (val upload = attachment.state) {
+                            DraftState.Waiting -> "等待上传"
+                            is DraftState.Uploading -> "上传 ${upload.percent}%"
+                            is DraftState.Done -> "已上传"
+                            is DraftState.Failed -> upload.msg
+                        }
+                        Text(attachment.name + " · " + status, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                        if (attachment.state is DraftState.Failed && conn != null) TextButton({
+                            runCatching { workspace.retryImage(conn, selected, attachment) }.onFailure { error = it.message.orEmpty() }
+                        }) { Text("重试") }
+                        TextButton({ attachment.cancelled.set(true); attachments.remove(attachment) }) { Text("移除") }
+                    }
+                }
+            }
             OutlinedTextField(draft.value, { draft.value = it }, modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp),
                 placeholder = { Text("描述任务，或补充下一步要求…") })
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 Button({
                     try {
-                        state.instructions.enqueue(selected.key, draft.value.text)
+                        check(allUploaded) { "请等待图片上传完成，或移除失败图片" }
+                        val images = attachments.orEmpty().map { attachment ->
+                            InstructionAttachment(attachment.name, (attachment.state as DraftState.Done).staged.remotePath)
+                        }
+                        state.instructions.enqueue(selected.key, draft.value.text, images)
                         draft.value = TextFieldValue()
+                        attachments?.clear()
                         controller?.queueChanged()
                         error = ""
                     } catch (e: Exception) { error = e.message.orEmpty() }
-                }, enabled = draft.value.text.isNotBlank()) { Text(if (controller?.autoDispatch == true) "发送到队列" else "加入队列") }
+                }, enabled = allUploaded && (draft.value.text.isNotBlank() || !attachments.isNullOrEmpty())) { Text(if (controller?.autoDispatch == true) "发送到队列" else "加入队列") }
             }
         }
     }

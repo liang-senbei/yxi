@@ -149,14 +149,13 @@ internal class CodexTaskController(
     }
 
     private suspend fun submit(item: QueuedInstruction, steeringTurn: String?) {
-        // Images need the runtime's image-input schema, not a silently downgraded path-only message.
-        require(item.attachments.isEmpty()) { "结构化通道附件适配尚未接入，请保留此指令" }
+        CodexAppServer.userInput(item.text, item.attachments) // Validate before changing durable delivery state.
         val started = if (steeringTurn == null) queue.beginDelivery(item.id, item.revision)
             else queue.beginSteering(item.id, item.revision, steeringTurn)
         sending = true
         try {
-            val response = if (steeringTurn == null) client.startTurn(threadId, item.text)
-                else client.steer(threadId, steeringTurn, item.text)
+            val response = if (steeringTurn == null) client.startTurn(threadId, item.text, item.attachments)
+                else client.steer(threadId, steeringTurn, item.text, item.attachments)
             val result = response.getJSONObject("result")
             val turnId = if (steeringTurn == null) result.getJSONObject("turn").getString("id") else result.getString("turnId")
             check(steeringTurn == null || steeringTurn == turnId) { "引导响应不属于目标轮次" }
@@ -222,7 +221,12 @@ internal class CodexTaskController(
             "userMessage" -> {
                 val content = item.optJSONArray("content")
                 val text = if (content == null) "" else (0 until content.length()).mapNotNull { index ->
-                    content.optJSONObject(index)?.takeIf { it.optString("type") == "text" }?.optString("text")
+                    content.optJSONObject(index)?.let { part -> when (part.optString("type")) {
+                        "text" -> part.optString("text")
+                        "localImage" -> "[图片] ${part.optString("path")}"
+                        "image" -> "[图片]"
+                        else -> null
+                    } }
                 }.joinToString("\n")
                 CodexMessage(id, "你", text)
             }

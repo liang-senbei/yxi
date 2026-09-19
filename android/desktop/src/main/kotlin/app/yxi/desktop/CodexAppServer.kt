@@ -83,11 +83,11 @@ internal class CodexAppServer private constructor(private val shell: SshSession.
 
     suspend fun resumeThread(threadId: String) = request("thread/resume", JSONObject().put("threadId", requiredId(threadId)))
 
-    suspend fun startTurn(threadId: String, text: String): JSONObject = request("turn/start",
-        JSONObject().put("threadId", requiredId(threadId)).put("input", textInput(text)))
+    suspend fun startTurn(threadId: String, text: String, attachments: List<InstructionAttachment> = emptyList()): JSONObject = request("turn/start",
+        JSONObject().put("threadId", requiredId(threadId)).put("input", userInput(text, attachments)))
 
-    suspend fun steer(threadId: String, turnId: String, text: String): JSONObject = request("turn/steer",
-        JSONObject().put("threadId", requiredId(threadId)).put("expectedTurnId", requiredId(turnId)).put("input", textInput(text)))
+    suspend fun steer(threadId: String, turnId: String, text: String, attachments: List<InstructionAttachment> = emptyList()): JSONObject = request("turn/steer",
+        JSONObject().put("threadId", requiredId(threadId)).put("expectedTurnId", requiredId(turnId)).put("input", userInput(text, attachments)))
 
     suspend fun interrupt(threadId: String, turnId: String): JSONObject = request("turn/interrupt",
         JSONObject().put("threadId", requiredId(threadId)).put("turnId", requiredId(turnId)))
@@ -111,9 +111,16 @@ internal class CodexAppServer private constructor(private val shell: SshSession.
     companion object {
         private fun idKey(id: Any) = JSONObject().put("id", id).toString()
         private fun requiredId(id: String) = id.also { require(it.isNotBlank()) { "缺少运行器任务或轮次 ID" } }
-        private fun textInput(text: String): JSONArray {
-            require(text.isNotBlank()) { "输入不能为空" }
-            return JSONArray().put(JSONObject().put("type", "text").put("text", text))
+        internal fun userInput(text: String, attachments: List<InstructionAttachment>): JSONArray {
+            require(text.isNotBlank() || attachments.isNotEmpty()) { "输入不能为空" }
+            val input = JSONArray()
+            if (text.isNotBlank()) input.put(JSONObject().put("type", "text").put("text", text))
+            attachments.forEach { attachment ->
+                require(attachment.remotePath.startsWith('/') && attachment.remotePath.none { it < ' ' }) { "附件路径无效" }
+                require(attachment.remotePath.substringAfterLast('.', "").lowercase() in setOf("png", "jpg", "jpeg", "webp")) { "此通道暂支持 PNG、JPEG 和 WebP 图片" }
+                input.put(JSONObject().put("type", "localImage").put("path", attachment.remotePath))
+            }
+            return input
         }
 
         suspend fun connect(ssh: SshSession): CodexAppServer {

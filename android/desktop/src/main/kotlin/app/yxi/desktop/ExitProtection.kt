@@ -22,7 +22,7 @@ internal fun pendingWorkOf(documents: List<FileDocument>, drafts: List<String>, 
 )
 fun AppState.pendingWork() = pendingWorkOf(documents, chatDrafts.values.map { it.value.text }, browsers.values).let {
     it.copy(operations = it.operations + instructions.entries.count { item -> item.status == InstructionStatus.Delivering } + support.running.size + pluginOperations.running.size + serviceControllers.values.count { service -> service.mutating } + (if (VoiceActivity.busy) 1 else 0) + (if (deferredRoute?.applying == true) 1 else 0) + (if (codexWorkspace.busy) 1 else 0),
-        drafts = it.drafts + support.editors.values.count { edit -> edit.dirty } + serviceEditors.values.count { edit -> edit.dirty } + (if (VoiceActivity.hasDraft) 1 else 0),
+        drafts = it.drafts + support.editors.values.count { edit -> edit.dirty } + serviceEditors.values.count { edit -> edit.dirty } + (if (VoiceActivity.hasDraft) 1 else 0) + codexWorkspace.attachments.values.count { images -> images.isNotEmpty() },
         waitingRoutes = deferredRoute?.takeIf { request -> !request.applying }?.let { request -> listOf("${request.conn.host.label} · ${request.line.name}") }.orEmpty(),
         codexTurns = codexWorkspace.controllers.values.count { controller -> controller.activeTurnId != null })
 }
