@@ -16,9 +16,15 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Assumptions.assumeTrue
 
 /** 假 CLI + 合成 WAV：参数含空格、输出读取/清理、取消终止进程。零真实录音/模型/下载，不触达 5 分钟超时。 */
 class DesktopLocalAsrTest {
+    @BeforeEach fun requireShellFixture() {
+        assumeTrue(!System.getProperty("os.name").startsWith("Windows") && File("/bin/sh").canExecute(),
+            "Uses a POSIX fake CLI; native Windows recognition is a separate manual check")
+    }
     private val tmpdir = File(System.getProperty("java.io.tmpdir"))
 
     /** 合成 16kHz 单声道 16-bit WAV，格式与产品目标一致，免转换路径。 */
@@ -107,7 +113,7 @@ class DesktopLocalAsrTest {
         val before = existingDirs()
         try {
             val script = fakeCli(root, "whisper-cli",
-                "echo ${'$'}${'$'} > \"${'$'}(dirname \"${'$'}0\")/pid.txt\"\nsleep 30\n")
+                "echo ${'$'}${'$'} > \"${'$'}(dirname \"${'$'}0\")/pid.txt\"\nexec sleep 30\n")
             val model = File(root, "weights.bin").apply { writeText("weights") }
             val wav = wavBytes()
             var failure: Throwable? = null
