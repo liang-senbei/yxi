@@ -17,3 +17,5 @@
 正式构建运行中：35452932851，冻结32a41289dc7fde4b3afb0b1c884bc3c16485af74。官网1.4.3备份已完成：/var/www/yxi/desktop-rollback-1.4.3-before-1.4.4。尚未发布1.4.4或升级生产协作脚本。
 
 服务端定向检查已通过：user-say 40项、user-reply 27项，隔离tmux/临时HOME，无生产消息。hk13原脚本确认匹配历史提交f8a298f，无额外改动；已备份/root/.local/bin/yxi-hub.before-1.4.4并原子安装冻结32a4128配套脚本，SHA256 a09c775740b7633eea21f5584ca2ca2269cb064eaf0a1a606eabadcf00662fe8。未重启Agent或发送业务消息。Windows官网安装包仍为1.4.3，待CI完成。
+
+CI35452932851已成功。Yxi-windows产物10586738964，903108569字节，已启动向hk13发布暂存目录传输；进程2078904。正式网站尚未切换，更新清单仍应为1.4.3。
