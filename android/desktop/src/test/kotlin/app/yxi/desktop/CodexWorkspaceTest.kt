@@ -109,6 +109,43 @@ class CodexWorkspaceTest {
     }
 
     @Test
+    fun `create records connection configuration from the top-level result`() = fixture { dir ->
+        val (ws, cleanup) = workspace(dir, "create-ok")
+        try {
+            val record = runBlocking { ws.create(conn(), "/srv/demo", "标题") }
+            val controller = ws.controllers.getValue(record.key)
+            // 6b362f6：start 顶层配置进 configured 字段，与线程元数据（prov-recorded）分层
+            assertEquals("prov-live", controller.configuredProvider, "应取顶层 modelProvider 而非线程元数据")
+            assertEquals("gpt-fake", controller.configuredModel, "应取顶层 model 而非线程元数据")
+            // 元数据仍只进 reported 字段，两条线互不混淆
+            assertEquals("prov-recorded", controller.reportedProvider)
+            assertEquals("gpt-recorded", controller.reportedModel)
+        } finally { cleanup() }
+    }
+
+    @Test
+    fun `resume records configuration and history reconcile keeps it`() = fixture { dir ->
+        val (first, cleanup1) = workspace(dir, "create-ok")
+        try {
+            runBlocking { first.create(conn(), "/srv/demo", "标题") }
+            first.close()
+            val (reopened, cleanup2) = workspace(dir, "create-ok")
+            try {
+                val controller = runBlocking { reopened.open(conn(), reopened.registry.records.single()) }
+                // 恢复接线：resume 顶层配置同样进 configured
+                assertEquals("prov-live", controller.configuredProvider)
+                assertEquals("gpt-fake", controller.configuredModel)
+                // 历史 reconcile 只改 reported，不得覆盖 configured
+                runBlocking { controller.reconcile() }
+                assertEquals("prov-live", controller.configuredProvider, "历史读取不得覆盖 configuredProvider")
+                assertEquals("gpt-fake", controller.configuredModel, "历史读取不得覆盖 configuredModel")
+                assertEquals("prov-recorded", controller.reportedProvider, "线程元数据应落到 reported")
+                assertEquals("gpt-recorded", controller.reportedModel)
+            } finally { cleanup2() }
+        } finally { cleanup1() }
+    }
+
+    @Test
     fun `create initializes from the start snapshot without reading history`() = fixture { dir ->
         val (ws, cleanup) = workspace(dir, "create-snapshot")
         try {

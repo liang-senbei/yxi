@@ -64,7 +64,9 @@ def reply(req, result):
 
 
 def thread_reply(req, turns):
-    reply(req, {"thread": {"id": thread_id, "turns": turns}})
+    # 线程元数据与顶层配置分层：真实 CLI 0.153.4 记录的层级形状
+    reply(req, {"thread": {"id": thread_id, "modelProvider": "prov-recorded",
+                           "model": "gpt-recorded", "turns": turns}})
 
 
 def item(item_id, item_type, **fields):
@@ -161,15 +163,18 @@ for raw in sys.stdin:
     if method == "thread/start":
         if mode == "create-snapshot":
             # Real CLI 0.153.4 shape: rich thread, idle, empty history
-            reply(msg, {"thread": {"id": thread_id, "cwd": "/srv/demo", "turns": [],
+            reply(msg, {"modelProvider": "prov-live", "model": "gpt-fake",
+                        "thread": {"id": thread_id, "cwd": "/srv/demo", "turns": [],
                                    "status": {"type": "idle"}}})
         else:
-            reply(msg, {"thread": {"id": thread_id, "cwd": "/srv/demo"}})
+            reply(msg, {"modelProvider": "prov-live", "model": "gpt-fake",
+                        "thread": {"id": thread_id, "cwd": "/srv/demo"}})
         continue
     if method == "thread/resume":
         resumed[0] = True
         # 恢复回归（cc-logto_yxi）最小追加：resume 与 thread/start 一样携带服务器侧 cwd
-        reply(msg, {"thread": {"id": thread_id, "turns": [], "cwd": "/srv/demo"}})
+        reply(msg, {"modelProvider": "prov-live", "model": "gpt-fake",
+                    "thread": {"id": thread_id, "turns": [], "cwd": "/srv/demo"}})
         continue
     if method == "turn/steer":
         if mode == "steer-mismatch":
