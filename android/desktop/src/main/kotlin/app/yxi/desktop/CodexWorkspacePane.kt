@@ -7,7 +7,6 @@ import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
@@ -94,9 +93,11 @@ private fun CodexConversationPane(state: AppState) {
     val tasks = conn?.let { workspace.tasks(it.host) }.orEmpty()
     val selected = tasks.firstOrNull { it.key == state.codexSelectedTaskKey }
     val controller = selected?.let { workspace.controllers[it.key] }
-    val conversationScroll = rememberLazyListState()
+    val emptyView = remember { CodexConversationView() }
+    val view = selected?.let { state.codexConversationViews.getOrPut(it.key) { CodexConversationView() } } ?: emptyView
+    val conversationScroll = view.scroll
     val dragging by conversationScroll.interactionSource.collectIsDraggedAsState()
-    var followLatest by remember(selected?.key) { mutableStateOf(true) }
+    var followLatest by view.followLatest
     var observedIndex by remember(selected?.key) { mutableStateOf(0) }
     var observedOffset by remember(selected?.key) { mutableStateOf(0) }
     // Mouse wheel and scrollbar navigation must also disable following, not only touch dragging.

@@ -21,7 +21,13 @@ import app.yxi.agent.SessionState
  */
 enum class Page { Workspace, Config, Me, Routes, Codex }
 
+internal class CodexConversationView {
+    val scroll = androidx.compose.foundation.lazy.LazyListState()
+    val followLatest = mutableStateOf(true)
+}
+
 class AppState {
+    internal val codexConversationViews = mutableMapOf<String, CodexConversationView>()
     internal var codexSelectedTaskKey by mutableStateOf<String?>(null)
     internal var codexCreateRequest by mutableStateOf<Pair<String, String>?>(null)
     internal var routesOrigin by mutableStateOf(Page.Workspace)
