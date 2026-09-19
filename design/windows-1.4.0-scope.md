@@ -1,9 +1,14 @@
 # Windows 1.4.0 待交付范围
 
-状态：已冻结版本并启动正式Windows构建，尚未发布。1.3.0发布记录保持独立，本页不代表官网已升级。
+状态：2026-09-19 21:59（北京时间）已发布到官网更新渠道。正式Windows流水线全部成功，公网清单回读为1.4.0，安装包HTTP200。
 
 冻结源码：`d8b343ac64c9bf0387378031ac6818ab6579b563`。
 流水线：<https://github.com/liang-senbei/yxi/actions/runs/35446691527>。
+
+安装地址：<https://yxi.keuury.com/desktop/Yxi-win-Setup.exe?v=1.4.0>。
+完整包SHA256：`1EB1C1505C3EA3F2CD8F09380A92AA7C14961F7458E43FB47630183768CD1557`（321219760字节）。
+安装包SHA256：`aefd9c43c0a8f577b83a12c794ebb34e6868fa86098c123f34e8617c41ebac70`（325741744字节）。
+回滚备份：hk13 `/var/www/yxi/desktop-rollback-1.3.0-20260919`；未删除新旧版本包。
 
 ## 本批已实现
 
