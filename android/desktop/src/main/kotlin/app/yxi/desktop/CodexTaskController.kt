@@ -20,10 +20,12 @@ internal class CodexTaskController(
     val threadId: String,
     private val client: CodexAppServer,
     private val queue: InstructionQueue,
+    private val onNotice: (String) -> Unit = {},
 ) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
     private val mutation = Mutex()
     private val terminalEvents = linkedMapOf<String, JSONObject>()
+    private val notifiedTurns = linkedSetOf<String>()
     val pendingRequests = mutableStateMapOf<String, JSONObject>()
     private val answerDrafts = mutableStateMapOf<String, androidx.compose.runtime.snapshots.SnapshotStateMap<String, String>>()
     val answerDraftCount get() = answerDrafts.values.count { answers -> answers.values.any { it.isNotBlank() } }
@@ -67,8 +69,10 @@ internal class CodexTaskController(
                     recentEvents.add(message)
                     if (recentEvents.size > 200) recentEvents.removeAt(0)
                     if (message.has("id") && !message.isNull("id")) {
+                        val newlyPending = !pendingRequests.containsKey(idKey(message.get("id")))
                         pendingRequests[idKey(message.get("id"))] = message
                         note = "运行器正在等待处理请求"
+                        if (newlyPending) runCatching { onNotice("需要你处理") }
                     }
                     when (method) {
                         "thread/goal/updated" -> { goalRevision++; receiveGoal(params.optJSONObject("goal")) }
@@ -93,6 +97,16 @@ internal class CodexTaskController(
                         "turn/completed" -> {
                             val turn = params.getJSONObject("turn")
                             finish(turn, message.toString())
+                            val title = when (turn.optString("status")) {
+                                "completed" -> "本轮处理结束"
+                                "failed" -> "本轮失败"
+                                "interrupted" -> "本轮已中断"
+                                else -> null
+                            }
+                            if (title != null && notifiedTurns.add(turn.getString("id"))) {
+                                if (notifiedTurns.size > 64) notifiedTurns.remove(notifiedTurns.first())
+                                runCatching { onNotice(title) }
+                            }
                             scheduleNext()
                         }
                         "thread/closed" -> { ready = false; autoDispatch = false; note = "运行器任务已关闭，请重新连接核对" }

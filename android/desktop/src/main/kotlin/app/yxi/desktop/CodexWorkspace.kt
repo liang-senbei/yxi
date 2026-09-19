@@ -62,7 +62,8 @@ internal class CodexTaskRegistry(file: File) {
     }
 }
 
-internal class CodexWorkspace(private val queue: InstructionQueue, file: File) : AutoCloseable {
+internal class CodexWorkspace(private val queue: InstructionQueue, file: File,
+    private val onNotice: (CodexTaskRecord, String) -> Unit = { _, _ -> }) : AutoCloseable {
     private val uploadScope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
     val attachments = mutableStateMapOf<String, androidx.compose.runtime.snapshots.SnapshotStateList<DraftAttach>>()
     fun stageAttachment(conn: Conn, task: CodexTaskRecord, image: DraftAttach) {
@@ -155,7 +156,7 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File) :
     }
 
     private suspend fun attach(conn: Conn, record: CodexTaskRecord, client: CodexAppServer, createdThread: JSONObject? = null): CodexTaskController {
-        val controller = CodexTaskController(record.key, record.threadId, client, queue)
+        val controller = CodexTaskController(record.key, record.threadId, client, queue) { title -> onNotice(record, title) }
         try { controller.reconcile(createdThread) } catch (e: Exception) { controller.close(); throw e }
         controllers[record.key] = controller; owners[record.key] = conn
         return controller

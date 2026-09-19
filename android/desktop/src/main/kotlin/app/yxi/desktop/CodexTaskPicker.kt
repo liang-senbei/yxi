@@ -57,6 +57,7 @@ internal fun CodexTaskPicker(state: AppState, tasks: List<CodexTaskRecord>, busy
                         DropdownMenu(menu == task.key, { menu = null }) {
                             DropdownMenuItem(text = { Text("重命名") }, onClick = { name = navigation.title(task.key) ?: task.title; rename = task; menu = null })
                             DropdownMenuItem(text = { Text(if (navigation.pinned(task.key)) "取消置顶" else "置顶") }, onClick = { navigation.togglePin(task.key); menu = null })
+                            DropdownMenuItem(text = { Text(if (navigation.muted(task.key)) "恢复任务通知" else "静音此任务") }, onClick = { navigation.setMuted(task.key, !navigation.muted(task.key)); menu = null })
                             DropdownMenuItem(text = { Text(if (showArchived) "恢复到任务列表" else "归档到本机列表") }, onClick = {
                                 navigation.setArchived(task.key, !showArchived); menu = null
                             })

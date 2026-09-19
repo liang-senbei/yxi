@@ -66,7 +66,9 @@ class AppState {
     internal val serviceEditors = mutableMapOf<String, ServiceEditor>()
     internal val pluginOperations = PluginOperations(java.io.File(Store.dir, "plugin-operations.json"))
     internal val instructions = InstructionQueue(java.io.File(Store.dir, "instructions.json"))
-    internal val codexWorkspace = CodexWorkspace(instructions, java.io.File(Store.dir, "codex-tasks.json"))
+    internal val codexWorkspace = CodexWorkspace(instructions, java.io.File(Store.dir, "codex-tasks.json")) { task, title ->
+        Notify.notify(title, "任务：" + (navigation.title(task.key) ?: task.title), taskKey = task.key)
+    }
     internal val support = SupportWorkspace(java.io.File(Store.dir, "support-drafts.json"))
     val documents = mutableStateListOf<FileDocument>()
     val documentSelection = androidx.compose.runtime.mutableStateMapOf<String, String>()
