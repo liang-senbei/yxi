@@ -34,6 +34,9 @@ internal fun VoiceInputDialog(conn: Conn, close: () -> Unit, useText: (String) -
     var pendingAudio by remember { mutableStateOf<ByteArray?>(null) }
     val windows = remember { System.getProperty("os.name").startsWith("Windows") }
     var systemVoice by remember { mutableStateOf(false) }
+    var localVoice by remember { mutableStateOf(false) }
+    var localProgram by remember { mutableStateOf(Store.pref("localAsrProgram", "")) }
+    var localModel by remember { mutableStateOf(Store.pref("localAsrModel", "")) }
     val editorFocus = remember { FocusRequester() }
     LaunchedEffect(systemVoice, editorShown) {
         if (systemVoice && editorShown) {
@@ -49,8 +52,10 @@ internal fun VoiceInputDialog(conn: Conn, close: () -> Unit, useText: (String) -
     DisposableEffect(Unit) { onDispose { recorder.cancel(); pendingAudio?.fill(0); VoiceActivity.busy = false; VoiceActivity.hasDraft = false } }
     suspend fun recognizePending() {
         val audio = pendingAudio ?: return
-        check(conn.ssh.isConnected) { "请重新连接服务器，再重试识别" }
-        val result = DesktopAsr.transcribe(conn.ssh, directory, audio.copyOf())
+        val result = if (localVoice) DesktopLocalAsr.transcribe(localProgram, localModel, audio.copyOf()) else {
+            check(conn.ssh.isConnected) { "请重新连接服务器，再重试识别" }
+            DesktopAsr.transcribe(conn.ssh, directory, audio.copyOf())
+        }
         text = if (text.isBlank()) result else text.trimEnd() + "\n" + result
         editorShown = true; copied = false; clearedText = ""
         audio.fill(0); pendingAudio = null
@@ -86,18 +91,25 @@ internal fun VoiceInputDialog(conn: Conn, close: () -> Unit, useText: (String) -
     }
     WorkbenchDialog(onDismissRequest = close, title = { Text("语音输入") }, text = {
         Column(Modifier.fillMaxWidth().heightIn(max = 460.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (windows) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val canSwitch = !checking && !recording && !transcribing && pendingAudio == null
-                FilterChip(!systemVoice, { systemVoice = false }, enabled = canSwitch, label = { Text("服务器识别") })
-                FilterChip(systemVoice, { systemVoice = true; editorShown = true }, enabled = canSwitch, label = { Text("Windows 语音") })
+                FilterChip(!systemVoice && !localVoice, { systemVoice = false; localVoice = false }, enabled = canSwitch, label = { Text("服务器") })
+                FilterChip(localVoice, { localVoice = true; systemVoice = false }, enabled = canSwitch, label = { Text("本机离线") })
+                if (windows) FilterChip(systemVoice, { systemVoice = true; localVoice = false; editorShown = true }, enabled = canSwitch, label = { Text("Windows 语音") })
             }
             if (systemVoice) {
                 Text("点击下方文本框，按 Win + H 开始系统语音输入。", style = MaterialTheme.typography.titleSmall)
                 Text("使用 Windows 在线语音服务，需要网络和系统麦克风权限，不经所选 SSH 服务器。文字先进入编辑框，不自动发送给 Agent。结束前请在系统语音面板停止听写。", style = MaterialTheme.typography.bodySmall)
             } else {
+            if (localVoice) {
+                Text("由本机 whisper.cpp 识别，Yxi 不上传录音。需自行准备运行程序和支持所需语言的模型。", style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(localProgram, { localProgram = it }, Modifier.fillMaxWidth(), singleLine = true, enabled = !checking && !recording && !transcribing, label = { Text("whisper-cli 程序路径") })
+                OutlinedTextField(localModel, { localModel = it }, Modifier.fillMaxWidth(), singleLine = true, enabled = !checking && !recording && !transcribing, label = { Text("模型文件路径") })
+            } else {
             Text("识别服务器：${conn.host.label} · ${conn.host.hostname}", style = MaterialTheme.typography.titleSmall)
             Text("录音通过SSH发送到此服务器的 yxi-asr 识别，文字先供你编辑，不自动发送给Agent。", style = MaterialTheme.typography.bodySmall)
             TextButton({ setupOpen = true }, enabled = !checking && !recording && !transcribing) { Text("服务器尚未安装？查看安装步骤") }
+            }
             Row {
                 Box(Modifier.weight(1f)) {
                     OutlinedButton({ deviceMenu = true }, enabled = !checking && !recording && !transcribing) { Text(microphone.ifBlank { "系统默认麦克风" }, maxLines = 2) }
@@ -122,8 +134,13 @@ internal fun VoiceInputDialog(conn: Conn, close: () -> Unit, useText: (String) -
                 else OutlinedButton({ scope.launch {
                     checking = true; error = ""
                     try {
-                        check(conn.ssh.isConnected) { "请先连接要使用的服务器" }
-                        directory = DesktopAsr.prepare(conn.ssh)
+                        if (localVoice) {
+                            withContext(Dispatchers.IO) { DesktopLocalAsr.validate(localProgram, localModel) }
+                            Store.setPref("localAsrProgram", localProgram); Store.setPref("localAsrModel", localModel)
+                        } else {
+                            check(conn.ssh.isConnected) { "请先连接要使用的服务器" }
+                            directory = DesktopAsr.prepare(conn.ssh)
+                        }
                         withContext(Dispatchers.IO) { recorder.start(microphone) }
                         recording = true
                     } catch (e: CancellationException) { throw e }
