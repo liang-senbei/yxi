@@ -48,3 +48,9 @@
 构建Agent cc-yxi报告功能冻结头4281b22的Windows目标`:desktop:compileKotlin`为BUILD SUCCESSFUL（EXIT=0，0错误）。范围仅为编译，未生成新版Windows安装包，不代表协议、UI或真实模型全流程通过。pilot协议模拟和logto恢复路径检查仍在进行。
 
 交付使用说明见 [下一版试用说明](windows-next-trial-guide.md)，当前已交付试用包仍为3152af0。
+
+## Codex恢复专项（2026-09-19）
+
+cc-logto_yxi提交586fe48：CodexWorkspaceRecoverTest 4通过/0失败，本地进程模拟运行器，无真实模型/网络/登录。覆盖成功恢复并登记（无thread/start或turn/start）、同主机重复登记、无效输入ID拒绝、同ID跨主机不复用。依赖pilot测试适配155f926；本次仅审阅报告与适配差异，待与pilot通用测试一并合入。服务器返回错误ID/cwd、Windows恢复UI不在通过范围。
+
+pilot通用协议首轮30项有7项失败，仍在区分测试预期与实际缺陷，不能据恢复专项推断整体通过。候选accfaf5构建成功，传输仍在进行。
