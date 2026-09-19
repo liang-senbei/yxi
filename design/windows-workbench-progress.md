@@ -895,3 +895,8 @@
 - 本机使用JDK21 jpackage生成package/Yxi原生app-image，使用官方vpk1.2.0私有NuGet包net8版本生成Releases/Yxi-win-Setup.exe；无SDK环境无需全局安装工具。
 - 交付根目录：C:/Users/dfhzw/Documents/ChatGPT/Yunxi/artifacts/windows-3152af0/package。已附独立profile启动脚本、README和源码清单。未启动应用、未安装、未执行Windows回归、未签名/发布。
 - 首包不包含后续d43449e/ee677ae执行层变更，完整PRD仍未完成。后续验证继续由hk13 Agent负责并明确Windows环境限制。
+
+## 第一百二十二轮：整合延后线路回归
+
+- 整合 logto 的a71d67d为3480a84，包含状态/退出保护测试、直接suspend执行层测试与隔离SSH六阶段。Agent报告5项状态测试、1项纯执行测试及fixture运行2项全部通过；中枢未重跑。
+- 实际运行器输入态门和Windows UI仍未验证；首包3152af0不包含d43449e/ee677ae。完整PRD仍未完成，运行器回执与自动队列继续实施。
