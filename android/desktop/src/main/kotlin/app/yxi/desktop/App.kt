@@ -66,6 +66,7 @@ fun App(state: AppState) {
                     Page.Config -> ConfigPane(state)
                     Page.Me -> MePane(state)
                     Page.Routes -> RoutesPane(state)
+                    Page.Codex -> CodexWorkspacePane(state)
                     Page.Workspace -> {
                         val conn = state.conn; val sess = state.session
                         if (conn == null || sess == null) {
@@ -102,6 +103,7 @@ fun App(state: AppState) {
                                     TextButton({ taskMenu.value = true }) { Text("更多") }
                                     DropdownMenu(taskMenu.value, { taskMenu.value = false }) {
                                         DropdownMenuItem(text = { Text("模型与线路") }, onClick = { taskMenu.value = false; state.page = Page.Routes })
+                                        DropdownMenuItem(text = { Text("Codex 任务") }, onClick = { taskMenu.value = false; state.page = Page.Codex })
                                         DropdownMenuItem(text = { Text("协作组") }, onClick = { taskMenu.value = false; state.showCollaboration = true })
                                         DropdownMenuItem(text = { Text("切换任务 · Ctrl+K") }, onClick = { taskMenu.value = false; state.showTaskSwitcher = true })
                                         DropdownMenuItem(text = { Text("键盘快捷键") }, onClick = { taskMenu.value = false; state.showShortcuts = true })

@@ -415,6 +415,7 @@ private fun AccountRow(state: AppState) {
         DropdownMenuItem(text = { Text("使用情况") }, onClick = { menu = false; state.page = Page.Me })
         DropdownMenuItem(text = { Text("配置") }, onClick = { menu = false; state.page = Page.Config })
         DropdownMenuItem(text = { Text("模型与线路") }, onClick = { menu = false; state.page = Page.Routes })
+        DropdownMenuItem(text = { Text("Codex 任务") }, onClick = { menu = false; state.page = Page.Codex })
         DropdownMenuItem(text = { Text("设置…  Ctrl+,") }, onClick = { menu = false; state.showSettings = true })
         if (signedIn) DropdownMenuItem(text = { Text("退出登录", color = t.danger) }, onClick = { menu = false; MeAuth.signOut() })
         else DropdownMenuItem(text = { Text("登录") }, onClick = { menu = false; state.page = Page.Me })

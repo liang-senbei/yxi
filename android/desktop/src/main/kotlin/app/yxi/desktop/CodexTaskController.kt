@@ -7,6 +7,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.swing.Swing
 import org.json.JSONObject
 
+internal data class CodexMessage(val id: String, val author: String, val text: String)
+
 /** One structured thread per controller. The owner must persist the threadId before exposing it.
  * User input stays in InstructionQueue; only correlated RPC replies can mark it accepted.
  */
@@ -21,6 +23,7 @@ internal class CodexTaskController(
     private val terminalEvents = linkedMapOf<String, JSONObject>()
     val pendingRequests = mutableStateMapOf<String, JSONObject>()
     val recentEvents = mutableStateListOf<JSONObject>()
+    val messages = mutableStateListOf<CodexMessage>()
     var ready by mutableStateOf(false); private set
     var sending by mutableStateOf(false); private set
     var activeTurnId by mutableStateOf<String?>(null); private set
@@ -48,6 +51,12 @@ internal class CodexTaskController(
                         note = "运行器正在等待处理请求"
                     }
                     when (method) {
+                        "item/started", "item/completed" -> params.optJSONObject("item")?.let { recordItem(it) }
+                        "item/agentMessage/delta" -> {
+                            val id = params.getString("itemId")
+                            val previous = messages.firstOrNull { it.id == id }
+                            putMessage(CodexMessage(id, "Codex", previous?.text.orEmpty() + params.getString("delta")))
+                        }
                         "turn/started" -> activeTurnId = params.getJSONObject("turn").getString("id")
                         "turn/completed" -> {
                             val turn = params.getJSONObject("turn")
@@ -71,12 +80,24 @@ internal class CodexTaskController(
         val thread = response.getJSONObject("result").getJSONObject("thread")
         check(thread.getString("id") == threadId) { "运行器返回了不同任务" }
         val turns = thread.getJSONArray("turns")
+        val streamedIds = messages.map { it.id }.toSet()
+        val historical = mutableListOf<CodexMessage>()
         var running: String? = null
         for (index in 0 until turns.length()) {
             val turn = turns.getJSONObject(index)
+            val items = turn.optJSONArray("items")
+            if (items != null) for (itemIndex in 0 until items.length()) {
+                decodeMessage(items.getJSONObject(itemIndex))?.let { historical.add(it) }
+            }
             if (turn.optString("status") == "inProgress") running = turn.getString("id")
             else finish(turn, response.toString())
         }
+        val live = messages.toList()
+        messages.clear()
+        messages.addAll(historical.map { old ->
+            if (revision != eventRevision && old.id in streamedIds) live.first { it.id == old.id } else old
+        })
+        messages.addAll(live.filter { item -> historical.none { it.id == item.id } })
         // Never replace a more recent streaming state with an older read response.
         if (revision == eventRevision) activeTurnId = running
         ready = true
@@ -103,10 +124,11 @@ internal class CodexTaskController(
 
     fun queueChanged() { scheduleNext() }
 
-    suspend fun sendNext() = mutation.withLock {
+    suspend fun sendNext(expectedId: String? = null) = mutation.withLock {
         check(ready && !disposed) { "请先连接并核对运行器状态" }
         check(activeTurnId == null && pendingRequests.isEmpty()) { "当前轮次或审批尚未结束" }
         val item = firstPending() ?: return@withLock
+        check(expectedId == null || item.id == expectedId) { "队列顺序已改变，请重新选择" }
         check(item.status == InstructionStatus.Local) { "前一条指令尚未确认，不能自动重发或跳过" }
         submit(item, null)
     }
@@ -184,6 +206,25 @@ internal class CodexTaskController(
     override fun close() {
         disposed = true; autoDispatch = false; ready = false
         client.close(); scope.cancel(); pendingRequests.clear()
+    }
+    private fun decodeMessage(item: JSONObject): CodexMessage? {
+        val id = item.optString("id").takeIf { it.isNotBlank() } ?: return null
+        return when (item.optString("type")) {
+            "agentMessage" -> CodexMessage(id, "Codex", item.optString("text"))
+            "userMessage" -> {
+                val content = item.optJSONArray("content")
+                val text = if (content == null) "" else (0 until content.length()).mapNotNull { index ->
+                    content.optJSONObject(index)?.takeIf { it.optString("type") == "text" }?.optString("text")
+                }.joinToString("\n")
+                CodexMessage(id, "你", text)
+            }
+            else -> null
+        }
+    }
+    private fun recordItem(item: JSONObject) { decodeMessage(item)?.let(::putMessage) }
+    private fun putMessage(message: CodexMessage) {
+        val index = messages.indexOfFirst { it.id == message.id }
+        if (index < 0) messages.add(message) else messages[index] = message
     }
     private fun idKey(id: Any) = JSONObject().put("id", id).toString()
 }
