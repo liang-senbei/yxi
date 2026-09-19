@@ -13,12 +13,12 @@ import kotlinx.coroutines.CancellationException
 import org.json.JSONObject
 
 @Composable
-internal fun CollaborationHistoryDialog(state: AppState, conn: Conn, group: String, members: List<String>, onTaskOpened: () -> Unit, close: () -> Unit) {
+internal fun CollaborationHistoryDialog(state: AppState, conn: Conn, group: String, members: List<String>, onTaskOpened: () -> Unit, initialQuery: String = "", close: () -> Unit) {
     var raw by remember(conn) { mutableStateOf("") }
     var truncated by remember(conn) { mutableStateOf(false) }
     var busy by remember(conn) { mutableStateOf(true) }
     var error by remember(conn) { mutableStateOf("") }
-    var query by remember(conn) { mutableStateOf("") }
+    var query by remember(conn) { mutableStateOf(initialQuery) }
     var revision by remember(conn) { mutableStateOf(0) }
     var structured by remember(conn) { mutableStateOf(true) }
     var replyTarget by remember(conn) { mutableStateOf<Pair<app.yxi.agent.Session, String>?>(null) }

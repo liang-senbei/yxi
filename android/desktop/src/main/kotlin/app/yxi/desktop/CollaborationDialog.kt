@@ -25,6 +25,20 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
     var editingName by remember(conn) { mutableStateOf<String?>(null) }
     var removing by remember(conn) { mutableStateOf(false) }
     var history by remember(conn) { mutableStateOf(false) }
+    var historyQuery by remember(conn) { mutableStateOf("") }
+    var reviewingMessage by remember(conn) { mutableStateOf<String?>(null) }
+    reviewingMessage?.let { id ->
+        WorkbenchDialog(onDismissRequest = { reviewingMessage = null }, title = { Text("确认已核对消息") },
+            text = { Text("请先查看投递记录和目标任务，确认消息是否已收到。继续只会将本地记录标为人工已核对，不会重新发送，也不会认定 Agent 已处理。\n消息编号：$id") },
+            confirmButton = { TextButton({
+                runCatching {
+                    val item = state.instructions.entries.first { it.id == id }
+                    state.instructions.resolveManually(id, item.revision)
+                }.onFailure { error = it.message.orEmpty() }
+                reviewingMessage = null
+            }) { Text("已核对") } }, dismissButton = { TextButton({ reviewingMessage = null }) { Text("返回") } })
+        return
+    }
     var setup by remember(conn) { mutableStateOf(false) }
     var creatingMember by remember(conn) { mutableStateOf(false) }
     if (creatingMember && table != null) {
@@ -48,7 +62,7 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
         return
     }
     if (history) {
-        CollaborationHistoryDialog(state, conn, selected, table?.groups?.get(selected).orEmpty(), onTaskOpened = close) { history = false }
+        CollaborationHistoryDialog(state, conn, selected, table?.groups?.get(selected).orEmpty(), onTaskOpened = close, initialQuery = historyQuery) { history = false }
         return
     }
     if (editing && table != null) {
@@ -69,7 +83,7 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
     WorkbenchDialog(onDismissRequest = close, title = { Text("协作组 · ${conn.host.label}") }, text = {
         Column(Modifier.widthIn(max = 640.dp).heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("服务器上的分组与组规", style = MaterialTheme.typography.labelMedium, color = Tokens.current.textMuted)
-            TextButton({ history = true }) { Text("查看协作记录") }
+            TextButton({ historyQuery = ""; history = true }) { Text("查看协作记录") }
             TextButton({ setup = true }) { Text("安装或升级协作服务") }
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
@@ -118,19 +132,24 @@ fun CollaborationDialog(state: AppState, conn: Conn, close: () -> Unit) {
                     if (section == "指派" && assignments.isNotEmpty()) {
                         Text("本机指派记录 · ${assignments.size}", style = MaterialTheme.typography.titleSmall)
                         assignments.asReversed().forEach { item ->
-                            val target = conn.sessions.firstOrNull { taskNavigationKey(conn.host, it) == item.taskKey }
+                            val userMessage = item.taskKey.startsWith("hub-user:")
+                            val target = conn.sessions.firstOrNull { taskNavigationKey(conn.host, it) == item.taskKey.removePrefix("hub-user:") }
                             OutlinedCard(Modifier.fillMaxWidth()) {
                                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Text(when (item.status) {
                                         InstructionStatus.Local -> "本地待发送"
                                         InstructionStatus.Delivering -> "投递中"
                                         InstructionStatus.Unknown -> "投递状态待确认"
-                                        InstructionStatus.Accepted -> "运行器已接收"
+                                        InstructionStatus.Accepted -> if (userMessage) "终端已写入 · 尚无处理回执" else "运行器已接收"
                                         InstructionStatus.Cancelled -> "已撤回"
                                         InstructionStatus.Resolved -> "已人工核对"
                                     }, style = MaterialTheme.typography.labelMedium)
                                     Text(item.text.substringAfter("用户要求：\n", item.text), maxLines = 3, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
                                     Text("指派 ID：${item.id}", style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
+                                    if (userMessage) {
+                                        TextButton({ historyQuery = item.id; history = true }) { Text("查看投递记录") }
+                                        if (item.status == InstructionStatus.Unknown) TextButton({ reviewingMessage = item.id }) { Text("人工核对…") }
+                                    }
                                     if (target != null) TextButton({ state.select(conn, target); state.tab = 0; close() }) { Text("查看 ${target.short}") }
                                     else Text("目标任务当前不可见，记录仍保留", style = MaterialTheme.typography.labelSmall)
                                 }
