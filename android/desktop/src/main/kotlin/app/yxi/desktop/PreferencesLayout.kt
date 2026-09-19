@@ -16,8 +16,10 @@ internal fun PreferencesLayout(title: String, sections: List<String>, selected: 
     var search by remember(title) { mutableStateOf("") }
     val t = Tokens.current
     BoxWithConstraints(Modifier.fillMaxSize().background(t.surface0)) {
+        // maxWidth 需在嵌套 Row/Column 作用域外读出，隐式接收者规则不允许内层直接调用
+        val maxW = maxWidth
         Row(Modifier.fillMaxSize()) {
-            Column(Modifier.width(if (maxWidth < 720.dp) 176.dp else 224.dp).fillMaxHeight().background(t.surface1).padding(12.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(Modifier.width(if (maxW < 720.dp) 176.dp else 224.dp).fillMaxHeight().background(t.surface1).padding(12.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 TextButton(back) { Text("← 返回应用") }
                 OutlinedTextField(search, { search = it }, placeholder = { Text("搜索分类") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Text(title, Modifier.padding(10.dp, 14.dp), style = MaterialTheme.typography.labelMedium, color = t.textMuted)
