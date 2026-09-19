@@ -142,6 +142,17 @@ for raw in sys.stdin:
         continue
     if mode == "die-on-turn-start" and method == "turn/start":
         os._exit(0)
+    if mode == "resume-die" and method == "thread/resume":
+        os._exit(0)
+
+    if method == "config/read":
+        # 6b362f6/673b0ea：目录有效配置（cfg-* 与 resume 顶层 prov-live/gpt-fake 区分两路接线）
+        if mode == "config-die":
+            send({"id": msg["id"], "error": {"code": -32603, "message": "候选配置读取失败"}})
+        else:
+            reply(msg, {"config": {"model_provider": "cfg-provider", "model": "cfg-model",
+                                   "model_reasoning_effort": "cfg-effort"}})
+        continue
 
     if method == "thread/read":
         reads[0] += 1

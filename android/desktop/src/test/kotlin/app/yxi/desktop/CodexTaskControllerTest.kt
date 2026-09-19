@@ -374,4 +374,35 @@ class CodexTaskControllerTest {
             assertEquals(listOf("需要你处理"), notices, "答复后不得再回调：$notices")
         }
     }
+
+    @Test
+    fun `configuration change rejects empty history and unconfirmed deliveries`() = withController("new-thread") { controller, queue, _ ->
+        controller.reconcile()
+        assertTrue(controller.ready)
+        // 空历史：提示直接新建，避免关闭后无法恢复（真实 CLI 空线程限制）
+        val empty = assertFailsWith<IllegalStateException> { controller.closeForConfigurationChange() }
+        assertEquals("尚无历史的任务请直接新建，以免关闭后无法恢复", empty.message)
+        // 状态待确认（Delivering/Unknown）一律先核对再应用
+        val item = queue.enqueue("task", "第一条")
+        queue.beginDelivery(item.id, item.revision)
+        val delivering = assertFailsWith<IllegalStateException> { controller.closeForConfigurationChange() }
+        assertEquals("请先核对状态待确认的指令", delivering.message)
+        queue.markUnknown(item.id, item.revision, "断线")
+        val unknown = assertFailsWith<IllegalStateException> { controller.closeForConfigurationChange() }
+        assertEquals("请先核对状态待确认的指令", unknown.message)
+        // 核对后（Accepted）不再阻塞队列门，继续落到空历史判断
+        queue.confirmAccepted(item.id, item.revision, "回执")
+        val after = assertFailsWith<IllegalStateException> { controller.closeForConfigurationChange() }
+        assertEquals("尚无历史的任务请直接新建，以免关闭后无法恢复", after.message)
+    }
+
+    @Test
+    fun `configuration change waits for pending approvals`() = withController("approval") { controller, _, _ ->
+        controller.reconcile()
+        poll { controller.pendingRequests.size == 1 }
+        // 审批未处理：忙态阻止，不得关闭重连
+        val busy = assertFailsWith<IllegalStateException> { controller.closeForConfigurationChange() }
+        assertEquals("请等待当前轮次和审批结束后再应用线路", busy.message)
+        assertTrue(controller.pendingRequests.isNotEmpty(), "被拒后待审批应原样保留")
+    }
 }

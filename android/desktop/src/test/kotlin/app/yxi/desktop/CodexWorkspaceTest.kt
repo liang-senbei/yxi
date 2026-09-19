@@ -146,6 +146,83 @@ class CodexWorkspaceTest {
     }
 
     @Test
+    fun `apply reads candidate config first then resumes same thread with overrides`() = fixture { dir ->
+        val (ws, cleanup) = workspace(dir, "read-interleave")
+        try {
+            val c = conn()
+            val record = runBlocking { ws.create(c, "/srv/demo", "标题") }
+            val old = ws.controllers.getValue(record.key)
+            val kept = ws.queue.enqueue(record.key, "保留的草稿指令")
+            runBlocking { ws.applyCurrentConfiguration(c, record) }
+            val fresh = ws.controllers.getValue(record.key)
+            assertTrue(fresh !== old, "应换上新控制器")
+            assertTrue(fresh.ready, "实际 note：${fresh.note}")
+            // 候选连接先读目录有效配置，再带覆盖参数恢复同一线程
+            val candidate = runners.last()
+            val methods = candidate.inboundJson().map { it.optString("method") }
+            assertTrue("config/read" in methods, "候选连接应读取有效配置：$methods")
+            val resume = candidate.inboundJson().last { it.optString("method") == "thread/resume" }
+            assertEquals("thr-1", resume.getJSONObject("params").getString("threadId"))
+            assertEquals("cfg-provider", resume.getJSONObject("params").getString("modelProvider"))
+            assertEquals("cfg-model", resume.getJSONObject("params").getString("model"))
+            assertEquals("cfg-effort", resume.getJSONObject("params").getJSONObject("config").getString("model_reasoning_effort"))
+            // 顶层配置优先：configured 来自恢复响应顶层，而非 config/read 或线程元数据
+            assertEquals("prov-live", fresh.configuredProvider)
+            assertEquals("gpt-fake", fresh.configuredModel)
+            // 自动发送暂停；队列草稿键值原样保留
+            assertFalse(fresh.autoDispatch, "应用线路后自动发送应暂停")
+            assertEquals(listOf(kept), ws.queue.entries.filter { it.taskKey == record.key })
+            assertFalse(ws.busy)
+        } finally { cleanup() }
+    }
+
+    @Test
+    fun `config read failure keeps the original connection usable`() = fixture { dir ->
+        val (ws, cleanup) = workspace(dir, "read-interleave")
+        try {
+            var calls = 0
+            ws.clientFactory = { conn ->
+                calls += 1
+                FakeRunner(if (calls == 1) "read-interleave" else "config-die", "thr-1").also { runners += it }.client
+            }
+            val c = conn()
+            val record = runBlocking { ws.create(c, "/srv/demo", "标题") }
+            val old = ws.controllers.getValue(record.key)
+            val failure = runCatching { runBlocking { ws.applyCurrentConfiguration(c, record) } }.exceptionOrNull()
+            assertNotNull(failure, "配置读取失败必须让应用中止")
+            assertFalse(failure.message!!.contains("线路应用未完成"), "未关闭原连接前失败应透传原始错误：${failure.message}")
+            // 673b0ea 核心：原对话原样可用
+            assertTrue(ws.controllers.getValue(record.key) === old, "原控制器不得被移除")
+            assertTrue(old.ready, "原连接应保持可用")
+            assertFalse(ws.busy)
+        } finally { cleanup() }
+    }
+
+    @Test
+    fun `resume failure after close points to the reconnect entry`() = fixture { dir ->
+        val (ws, cleanup) = workspace(dir, "read-interleave")
+        try {
+            var calls = 0
+            ws.clientFactory = { conn ->
+                calls += 1
+                FakeRunner(if (calls == 1) "read-interleave" else "resume-die", "thr-1").also { runners += it }.client
+            }
+            val c = conn()
+            val record = runBlocking { ws.create(c, "/srv/demo", "标题") }
+            val failure = assertFailsWith<IllegalStateException> { runBlocking { ws.applyCurrentConfiguration(c, record) } }
+            // d7145b0：关闭后失败的提示必须指向「连接任务」入口并声明保留
+            assertTrue(failure.message!!.contains("连接任务"), "实际提示：${failure.message}")
+            assertTrue(failure.message!!.contains("已保留"), "实际提示：${failure.message}")
+            assertTrue(ws.controllers.isEmpty(), "旧连接已关闭：不应残留半开控制器")
+            assertEquals(listOf(record), ws.registry.records, "登记应保留供重新连接")
+            // 失败恢复：重新连接任务可正常打开
+            ws.clientFactory = { conn -> FakeRunner("read-interleave", "thr-1").also { runners += it }.client }
+            val recovered = runBlocking { ws.open(conn(), record) }
+            assertTrue(recovered.ready, "失败后应可重新连接任务：${recovered.note}")
+        } finally { cleanup() }
+    }
+
+    @Test
     fun `create initializes from the start snapshot without reading history`() = fixture { dir ->
         val (ws, cleanup) = workspace(dir, "create-snapshot")
         try {
