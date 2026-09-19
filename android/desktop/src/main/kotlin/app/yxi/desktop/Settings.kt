@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
@@ -29,42 +31,53 @@ import androidx.compose.ui.unit.dp
 fun SettingsDialog(state: AppState) {
     var autostart by remember { mutableStateOf(autostartEnabled()) }
     var retentionError by remember { mutableStateOf("") }
-    WorkbenchDialog(
-        onDismissRequest = { state.showSettings = false },
-        confirmButton = { TextButton({ state.showSettings = false }) { Text("完成") } },
-        title = { Text("设置") },
-        text = {
-            Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Section("常规")
-                SwitchRow("关闭窗口时留在托盘", Store.pref("closeToTray", "1") == "1") { Store.setPref("closeToTray", if (it) "1" else "0") }
-                SwitchRow("开机自启", autostart, enabled = isWindows) { autostart = it; setAutostart(it) }
-                SwitchRow("启动时重连上次主机", Store.pref("reconnectOnStart", "1") == "1") { Store.setPref("reconnectOnStart", if (it) "1" else "0") }
-                Section("输入历史")
-                Choice("已结束输入正文保留", listOf("0" to "一直保留", "3" to "3天", "7" to "7天", "30" to "30天"), Store.pref("inputRetentionDays", "0")) { value ->
-                    runCatching {
-                        Store.setPref("inputRetentionDays", value)
-                        state.instructions.pruneCompleted(value.toInt())
-                        retentionError = ""
-                    }.onFailure { retentionError = it.message.orEmpty() }
+    val sections = listOf("常规", "外观", "通知", "输入历史", "账号", "模型与线路", "服务器配置与插件", "快捷键", "关于")
+    PreferencesLayout("设置", sections, state.settingsSection, { section ->
+        when (section) {
+            "账号" -> { state.showSettings = false; state.meSection = "个人资料"; state.page = Page.Me }
+            "模型与线路" -> { state.showSettings = false; state.openRoutes() }
+            "服务器配置与插件" -> { state.showSettings = false; state.page = Page.Config }
+            "快捷键" -> { state.showSettings = false; state.showShortcuts = true }
+            else -> state.settingsSection = section
+        }
+    }, { state.showSettings = false }) {
+        androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.TopCenter) {
+            Column(Modifier.widthIn(max = 820.dp).fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                Text(state.settingsSection, style = MaterialTheme.typography.headlineSmall)
+                androidx.compose.material3.OutlinedCard(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        when (state.settingsSection) {
+                            "常规" -> {
+                                SwitchRow("关闭窗口时留在托盘", Store.pref("closeToTray", "1") == "1") { Store.setPref("closeToTray", if (it) "1" else "0") }
+                                SwitchRow("开机自启", autostart, enabled = isWindows) { autostart = it; setAutostart(it) }
+                                SwitchRow("启动时重连上次主机", Store.pref("reconnectOnStart", "1") == "1") { Store.setPref("reconnectOnStart", if (it) "1" else "0") }
+                            }
+                            "外观" -> {
+                                Choice("主题", listOf("system" to "跟随系统", "light" to "浅色", "dark" to "深色"), Store.pref("theme", "system")) { Store.setPref("theme", it) }
+                                Text("聊天背景使用固定状态色，无循环波纹或闪烁。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                            }
+                            "通知" -> {
+                                Choice("轮次完成 / 需要你处理", listOf("always" to "始终", "unfocused" to "仅在未聚焦时", "never" to "从不"), Store.pref("notify", "unfocused")) { Store.setPref("notify", it) }
+                                SwitchRow("只提醒置顶任务（没有置顶时提醒全部）", Store.pref("notifyOnlyPinned", "0") == "1") { Store.setPref("notifyOnlyPinned", if (it) "1" else "0") }
+                            }
+                            "输入历史" -> {
+                                Choice("已结束输入正文保留", listOf("0" to "一直保留", "3" to "3天", "7" to "7天", "30" to "30天"), Store.pref("inputRetentionDays", "0")) { value ->
+                                    runCatching { Store.setPref("inputRetentionDays", value); state.instructions.pruneCompleted(value.toInt()); retentionError = "" }.onFailure { retentionError = it.message.orEmpty() }
+                                }
+                                Text("仅清理已结束的本机输入正文，保留去重记录；服务器对话不受影响。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                                if (retentionError.isNotBlank()) Text(retentionError, color = Tokens.current.danger)
+                            }
+                            else -> {
+                                Text("Yxi " + (Updater.version.takeIf { it != "dev" }?.let { "v$it" } ?: "开发版"), style = MaterialTheme.typography.titleLarge)
+                                Text("Windows 工作台 · 主机、分组与 Agent", style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                    }
                 }
-                Text("仅清理已结束记录的正文、附件引用和详细回执；保留去重标识，待发送/运行中/待核对及无时间的旧记录不清理。服务器对话不受影响。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
-                if (retentionError.isNotBlank()) Text(retentionError, color = Tokens.current.danger, style = MaterialTheme.typography.bodySmall)
-                Section("外观")
-                Choice("主题", listOf("system" to "跟随系统", "light" to "浅色", "dark" to "深色"), Store.pref("theme", "system")) { Store.setPref("theme", it) }
-                Section("通知")
-                Choice("轮次完成 / 需要你处理", listOf("always" to "始终", "unfocused" to "仅在未聚焦时", "never" to "从不"), Store.pref("notify", "unfocused")) { Store.setPref("notify", it) }
-                SwitchRow("只提醒置顶任务（没有置顶时提醒全部）", Store.pref("notifyOnlyPinned", "0") == "1") { Store.setPref("notifyOnlyPinned", if (it) "1" else "0") }
-                Text("轮次结束提醒需要服务器的 yxi-hook 事件；首次连接不补弹历史。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
-                // 版本号（老板 09-12：设置里要有）。`java -jar` 跑没有 jpackage 属性，显示「开发版」
-                Text(
-                    "Yxi " + (Updater.version.takeIf { it != "dev" }?.let { "v$it" } ?: "开发版"),
-                    Modifier.padding(top = 4.dp), style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted,
-                )
             }
-        },
-    )
+        }
+    }
 }
-
 @Composable
 private fun Section(title: String) = Text(title, Modifier.padding(top = 8.dp), color = Tokens.current.textMuted, style = MaterialTheme.typography.labelMedium)
 
@@ -130,3 +143,4 @@ private fun setAutostart(on: Boolean) {
         f.delete()
     }
 }
+

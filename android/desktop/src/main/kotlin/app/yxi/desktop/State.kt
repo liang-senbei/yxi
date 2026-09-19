@@ -119,6 +119,15 @@ class AppState {
      * 恰好等于刚才 Ctrl+N 加到的那个值，`== seen` 成立，弹窗就不弹了。 */
     internal var newSessionSeen by mutableStateOf(0)
     var showSettings by mutableStateOf(false)              // Ctrl+,
+    var settingsSection by mutableStateOf("常规")
+    var meSection by mutableStateOf("个人资料")
+    var accountLoginRequest by mutableStateOf(0)
+    var accountLoginHandled by mutableStateOf(0)
+    var accountForceLogin by mutableStateOf(false)
+    fun requestAccountLogin(force: Boolean) {
+        accountForceLogin = force; accountLoginRequest++
+        showSettings = false; meSection = "个人资料"; page = Page.Me
+    }
     var showShortcuts by mutableStateOf(false)             // Ctrl+/
     var showTaskSwitcher by mutableStateOf(false)          // Ctrl+K
     var showCollaboration by mutableStateOf(false)

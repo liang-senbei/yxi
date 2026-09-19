@@ -50,6 +50,12 @@ import kotlinx.coroutines.launch
  */
 @Composable
 fun MePane(state: AppState) {
+    PreferencesLayout("我的", listOf("个人资料", "账号与连接", "钱包与订单", "商城", "兑换码", "信箱", "工单"), state.meSection,
+        { state.meSection = it }, { state.page = Page.Workspace }) { AccountContent(state) }
+}
+
+@Composable
+private fun AccountContent(state: AppState) {
     val t = Tokens.current
     val scope = rememberCoroutineScope()
     var err by remember { mutableStateOf("") }
@@ -61,25 +67,38 @@ fun MePane(state: AppState) {
     var loginRequest by remember { mutableStateOf(0L) }
 
     // 进页面拉一次:有令牌就顺手刷资料,没令牌就停在登录按钮上
-    LaunchedEffect(Unit) { MeAuth.load() }
+    LaunchedEffect(state.accountLoginRequest) {
+        if (state.accountLoginRequest > state.accountLoginHandled) {
+            state.accountLoginHandled = state.accountLoginRequest
+            busy = true; err = ""
+            try { err = MeAuth.signIn(forceLogin = state.accountForceLogin).orEmpty() }
+            finally { busy = false }
+        } else MeAuth.load()
+    }
+    LaunchedEffect(state.meSection) {
+        mailOpen = state.meSection == "信箱"
+        supportOpen = state.meSection == "工单"
+        walletOpen = state.meSection == "钱包与订单"
+        shopOpen = state.meSection == "商城"
+    }
     val owner = MeAuth.me?.userId
     val generation = MeAuth.sessionGeneration
     if (shopOpen && MeAuth.signedIn && owner != null) {
-        androidx.compose.runtime.key(owner, generation) { ShopPane(owner, generation, state.shopPurchases) { shopOpen = false } }
+        androidx.compose.runtime.key(owner, generation) { ShopPane(owner, generation, state.shopPurchases) { shopOpen = false; state.meSection = "个人资料" } }
         return
     }
     if (walletOpen && MeAuth.signedIn && owner != null) {
-        androidx.compose.runtime.key(owner, generation) { WalletPane(owner, generation, onShop = { shopOpen = true }) { walletOpen = false } }
+        androidx.compose.runtime.key(owner, generation) { WalletPane(owner, generation, onShop = { state.meSection = "商城" }) { walletOpen = false; state.meSection = "个人资料" } }
         return
     }
     if (supportOpen && MeAuth.signedIn && owner != null) {
         val api = remember(owner, generation) { app.yxi.agent.SupportApi { path, method, body -> MeAuth.accountRequest(owner, path, method, body, generation) } }
-        androidx.compose.runtime.key(owner, generation) { SupportPane(owner, api, state.support, onBack = { supportOpen = false }, onUnread = { MeAuth.supportUnread(owner, it, generation) }) }
+        androidx.compose.runtime.key(owner, generation) { SupportPane(owner, api, state.support, onBack = { supportOpen = false; state.meSection = "个人资料" }, onUnread = { MeAuth.supportUnread(owner, it, generation) }) }
         return
     }
     if (mailOpen && MeAuth.signedIn && owner != null) {
         val api = remember(owner, generation) { app.yxi.agent.MailApi { path, method, body -> MeAuth.accountRequest(owner, path, method, body, generation) } }
-        androidx.compose.runtime.key(owner, generation) { MailPane(owner, api, onBack = { mailOpen = false; scope.launch { err = MeAuth.refresh().orEmpty() } }, onCounters = { MeAuth.mailCounters(owner, it, generation) }) }
+        androidx.compose.runtime.key(owner, generation) { MailPane(owner, api, onBack = { mailOpen = false; state.meSection = "个人资料"; scope.launch { err = MeAuth.refresh().orEmpty() } }, onCounters = { MeAuth.mailCounters(owner, it, generation) }) }
         return
     }
 
@@ -89,9 +108,13 @@ fun MePane(state: AppState) {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Column(Modifier.widthIn(max = 640.dp).fillMaxWidth()) {
-                Text("我的", style = MaterialTheme.typography.titleLarge, color = t.textPrimary)
+                Text(state.meSection, style = MaterialTheme.typography.headlineSmall, color = t.textPrimary)
                 Spacer(Modifier.height(16.dp))
-                ConnectionIdentityCard(state)
+                if (state.meSection == "账号与连接") ConnectionIdentityCard(state)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    TextButton({ state.requestAccountLogin(true) }, enabled = !busy && !MeAuth.waitingBrowser) { Text(if (MeAuth.signedIn) "切换账号" else "浏览器登录") }
+                    if (MeAuth.signedIn) TextButton({ MeAuth.signOut() }, enabled = !busy) { Text("退出登录") }
+                }
                 Spacer(Modifier.height(16.dp))
 
                 val me = MeAuth.me
@@ -107,7 +130,7 @@ fun MePane(state: AppState) {
                         scope.launch {
                             busy = true; err = ""
                             try {
-                                val problem = MeAuth.signIn().orEmpty()
+                                val problem = MeAuth.signIn(forceLogin = true).orEmpty()
                                 if (request == loginRequest) err = problem
                             } finally { if (request == loginRequest) busy = false }
                         }
@@ -120,15 +143,14 @@ fun MePane(state: AppState) {
                             TextButton({ MeAuth.signOut(); err = "" }) { Text("返回登录") }
                         }
                     }
-                    else -> SignedIn(me, busy, err, onMail = { mailOpen = true }, onSupport = { supportOpen = true },
+                    state.meSection == "个人资料" -> SignedIn(me, busy, err, onMail = { state.meSection = "信箱" }, onSupport = { state.meSection = "工单" },
                         onRefresh = {
                             scope.launch { busy = true; err = MeAuth.refresh().orEmpty(); busy = false }
                         },
                         onSignOut = { MeAuth.signOut(); err = "" })
                 }
-                if (MeAuth.signedIn && owner != null) androidx.compose.runtime.key(owner, generation) {
+                if (MeAuth.signedIn && owner != null && state.meSection == "兑换码") androidx.compose.runtime.key(owner, generation) {
                     Spacer(Modifier.height(16.dp))
-                    TextButton({ walletOpen = true }) { Text("钱包与订单") }
                     RedeemCodeCard(owner, generation)
                 }
             }

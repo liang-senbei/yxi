@@ -30,6 +30,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Logout
+import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Spacer
@@ -449,15 +451,20 @@ private fun AccountRow(state: AppState) {
         Text(ver, fontSize = 10.sp, color = t.textMuted)
     }
     DropdownMenu(menu, { menu = false }) {
-        DropdownMenuItem(text = { Text("Yxi $ver", style = MaterialTheme.typography.labelSmall, color = t.textMuted) }, onClick = {}, enabled = false)
+        DropdownMenuItem(text = { Column {
+            Text(name, style = MaterialTheme.typography.titleSmall, color = t.textPrimary)
+            Text(listOfNotNull(tier, "Yxi $ver").joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+        } }, onClick = {}, enabled = false)
         HorizontalDivider(color = t.border)
-        DropdownMenuItem(text = { Text("使用情况") }, onClick = { menu = false; state.page = Page.Me })
-        DropdownMenuItem(text = { Text("配置") }, onClick = { menu = false; state.page = Page.Config })
+        DropdownMenuItem(text = { Text("我的 · 账号与使用情况") }, leadingIcon = { Icon(Icons.Default.Person, null, Modifier.size(18.dp)) }, onClick = { menu = false; state.meSection = "个人资料"; state.page = Page.Me })
+        DropdownMenuItem(text = { Text("设置") }, trailingIcon = { Text("Ctrl+,", style = MaterialTheme.typography.labelSmall, color = t.textMuted) }, leadingIcon = { Icon(Icons.Default.Tune, null, Modifier.size(18.dp)) }, onClick = { menu = false; state.showSettings = true })
+        HorizontalDivider(color = t.border)
+        DropdownMenuItem(text = { Text("服务器配置与插件") }, onClick = { menu = false; state.page = Page.Config })
         DropdownMenuItem(text = { Text("模型与线路") }, onClick = { menu = false; state.openRoutes() })
         DropdownMenuItem(text = { Text("Codex 任务") }, onClick = { menu = false; state.page = Page.Codex })
-        DropdownMenuItem(text = { Text("设置…  Ctrl+,") }, onClick = { menu = false; state.showSettings = true })
-        if (signedIn) DropdownMenuItem(text = { Text("退出登录", color = t.danger) }, onClick = { menu = false; MeAuth.signOut() })
-        else DropdownMenuItem(text = { Text("登录") }, onClick = { menu = false; state.page = Page.Me })
+        HorizontalDivider(color = t.border)
+        DropdownMenuItem(text = { Text(if (signedIn) "切换账号…" else "浏览器登录…") }, leadingIcon = { Icon(Icons.Outlined.SwapHoriz, null, Modifier.size(18.dp)) }, enabled = !MeAuth.waitingBrowser, onClick = { menu = false; state.requestAccountLogin(true) })
+        if (signedIn) DropdownMenuItem(text = { Text("退出登录", color = t.danger) }, leadingIcon = { Icon(Icons.Outlined.Logout, null, Modifier.size(18.dp), tint = t.danger) }, onClick = { menu = false; MeAuth.signOut() })
     }
 }
 

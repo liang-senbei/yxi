@@ -58,6 +58,10 @@ fun App(state: AppState) {
     val scope = rememberCoroutineScope()
     val defaultUris = LocalUriHandler.current
     val density = LocalDensity.current.density
+    if (state.showSettings) {
+        SettingsDialog(state)
+        return
+    }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         // 窗口 < 700dp 自动收起侧栏（Claude 的 narrowViewportMaxWidth）；变宽只把自动收起的还回去，用户自己 Ctrl+B 关掉的不动
         val narrow = maxWidth < 700.dp
@@ -66,7 +70,7 @@ fun App(state: AppState) {
         LaunchedEffect(state.newSessionRequest) { if (state.newSessionRequest > 0 && !state.sidebarOpen) state.sidebarOpen = true }
         LaunchedEffect(narrow) { if (narrow) { wasOpen.value = state.sidebarOpen; state.sidebarOpen = false } else if (wasOpen.value) state.sidebarOpen = true }
         Row(Modifier.fillMaxSize()) {
-            if (state.sidebarOpen) { Sidebar(state, Modifier.width(288.dp).fillMaxHeight()); VerticalDivider() }
+            if (state.sidebarOpen && state.page != Page.Me) { Sidebar(state, Modifier.width(288.dp).fillMaxHeight()); VerticalDivider() }
             Column(Modifier.fillMaxSize()) {
                 // 整页入口（左栏底部的「配置」「我的」）盖住工作区；再点一次那个入口就回来
                 when (state.page) {
@@ -154,7 +158,6 @@ fun App(state: AppState) {
             }
         }
     }
-    if (state.showSettings) SettingsDialog(state)
     if (state.showShortcuts) ShortcutsDialog(state)
     if (state.showTaskSwitcher) TaskSwitcherDialog(state)
     if (state.showCollaboration) state.conn?.let { conn -> CollaborationDialog(state, conn) { state.showCollaboration = false } }

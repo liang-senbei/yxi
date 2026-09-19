@@ -76,7 +76,7 @@ object MeAuth {
      * 走一遍登录。**挂起到浏览器那边回来为止**(或者超时/用户关掉窗口)。
      * @return 出错原因;成功返回 null。
      */
-    suspend fun signIn(): String? = withContext(Dispatchers.IO) {
+    suspend fun signIn(forceLogin: Boolean = false): String? = withContext(Dispatchers.IO) {
         val verifier = AccountApi.randomUrlSafe(32)
         val state = AccountApi.randomUrlSafe(8)
         // 固定 1455（照 Codex 的做法）：Logto 的 redirect_uri 必须精确匹配，随机端口永远注册不上
@@ -95,7 +95,7 @@ object MeAuth {
             "response_type" to "code",
             "scope" to AccountApi.SCOPES,
             "state" to state,
-            "prompt" to "consent",
+            "prompt" to if (forceLogin) "login consent" else "consent",
             "code_challenge" to AccountApi.challengeOf(verifier),
             "code_challenge_method" to "S256",
         ).entries.joinToString("&") { enc(it.key) + "=" + enc(it.value) }
