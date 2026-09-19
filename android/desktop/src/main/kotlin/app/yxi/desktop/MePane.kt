@@ -21,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -65,6 +66,7 @@ private fun AccountContent(state: AppState) {
     var walletOpen by remember { mutableStateOf(false) }
     var shopOpen by remember { mutableStateOf(false) }
     var loginRequest by remember { mutableStateOf(0L) }
+    DisposableEffect(Unit) { onDispose { MeAuth.cancelPendingSignIn() } }
 
     // 进页面拉一次:有令牌就顺手刷资料,没令牌就停在登录按钮上
     LaunchedEffect(state.accountLoginRequest) {

@@ -152,6 +152,11 @@ object MeAuth {
         result
     }
 
+    /** Match the explicit cancel action when the account page is closed mid-login. */
+    fun cancelPendingSignIn() {
+        if (callbackServer != null || waitingBrowser) signOut()
+    }
+
     internal fun mailCounters(owner: String, result: JSONObject, generation: Long = sessionGeneration) = runCatching { sessions.guarded(generation) {
         val current = me?.takeIf { signedIn && it.userId == owner } ?: return@guarded
         me = current.copy(
