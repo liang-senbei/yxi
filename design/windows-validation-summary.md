@@ -90,3 +90,9 @@ set/clear存在于请求schema并返回状态，但schema中没有轮次载荷�
 官方文档 https://learn.chatgpt.com/docs/app-server 的Manage a thread goal说明：目标正文非空且最多4000字符；新正文会替换目标并重置统计，省略objective可更新状态/预算并保留统计。后续状态控制适配必须省略objective，避免暂停/继续被当作新建目标。
 
 该说明仍未承诺active自动启动或持续驱动轮次，不能据此添加假持续执行。当前保持只读目标条。cc-yxi已回报f335048主源与测试源一次编译通过（8秒、0错误），包括阅读状态、目标读取、输入历史和本轮权限组件；无打包或发布。
+
+## 本轮权限请求协议核对（2026-09-19）
+
+cc-logto_yxi对f335048做静态协议核对：允许响应复制请求的network/fileSystem并固定scope=turn，拒绝响应permissions={}，两者与CLI导出schema一致；请求ID沿既有respond关联，不自动应答，已处理ID不会重复答复。未发现需要生产代码修复的协议问题。
+
+该结论以请求遵循服务端schema为前提；entries内部形状未做客户端逐字段校验，UI原样展示、回复原样复制。没有运行真实权限授予或生产命令，也不将静态核对写成完整交互验收。
