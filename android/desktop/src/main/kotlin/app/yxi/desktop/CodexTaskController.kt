@@ -1,0 +1,189 @@
+package app.yxi.desktop
+
+import androidx.compose.runtime.*
+import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.swing.Swing
+import org.json.JSONObject
+
+/** One structured thread per controller. The owner must persist the threadId before exposing it.
+ * User input stays in InstructionQueue; only correlated RPC replies can mark it accepted.
+ */
+internal class CodexTaskController(
+    val taskKey: String,
+    val threadId: String,
+    private val client: CodexAppServer,
+    private val queue: InstructionQueue,
+) : AutoCloseable {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
+    private val mutation = Mutex()
+    private val terminalEvents = linkedMapOf<String, JSONObject>()
+    val pendingRequests = mutableStateMapOf<String, JSONObject>()
+    val recentEvents = mutableStateListOf<JSONObject>()
+    var ready by mutableStateOf(false); private set
+    var sending by mutableStateOf(false); private set
+    var activeTurnId by mutableStateOf<String?>(null); private set
+    var autoDispatch by mutableStateOf(false); private set
+    var note by mutableStateOf("正在核对运行器任务状态"); private set
+    private var disposed = false
+    private var eventRevision = 0L
+
+    init {
+        require(taskKey.isNotBlank() && threadId.isNotBlank())
+        scope.launch {
+            try {
+                client.events.collect { message ->
+                    val params = message.optJSONObject("params") ?: JSONObject()
+                    val method = message.optString("method")
+                    if (method == "serverRequest/resolved") {
+                        params.opt("requestId")?.let { pendingRequests.remove(idKey(it)) }
+                    }
+                    if (params.optString("threadId") != threadId) return@collect
+                    eventRevision++
+                    recentEvents.add(message)
+                    if (recentEvents.size > 200) recentEvents.removeAt(0)
+                    if (message.has("id") && !message.isNull("id")) {
+                        pendingRequests[idKey(message.get("id"))] = message
+                        note = "运行器正在等待处理请求"
+                    }
+                    when (method) {
+                        "turn/started" -> activeTurnId = params.getJSONObject("turn").getString("id")
+                        "turn/completed" -> {
+                            val turn = params.getJSONObject("turn")
+                            finish(turn, message.toString())
+                            scheduleNext()
+                        }
+                        "thread/closed" -> { ready = false; autoDispatch = false; note = "运行器任务已关闭，请重新连接核对" }
+                    }
+                }
+                ready = false; autoDispatch = false
+                if (!disposed) note = "运行器连接已结束，未确认指令不会自动重发"
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { ready = false; autoDispatch = false; client.close(); note = "运行器状态未确认：${e.message}" }
+        }
+    }
+
+    suspend fun reconcile() = mutation.withLock {
+        ready = false
+        val revision = eventRevision
+        val response = client.readThread(threadId)
+        val thread = response.getJSONObject("result").getJSONObject("thread")
+        check(thread.getString("id") == threadId) { "运行器返回了不同任务" }
+        val turns = thread.getJSONArray("turns")
+        var running: String? = null
+        for (index in 0 until turns.length()) {
+            val turn = turns.getJSONObject(index)
+            if (turn.optString("status") == "inProgress") running = turn.getString("id")
+            else finish(turn, response.toString())
+        }
+        // Never replace a more recent streaming state with an older read response.
+        if (revision == eventRevision) activeTurnId = running
+        ready = true
+        note = if (activeTurnId == null) "任务已就绪" else "当前轮次仍在进行"
+    }
+
+    fun setAutoDispatch(enabled: Boolean) {
+        autoDispatch = enabled && ready && !disposed
+        if (autoDispatch) scheduleNext()
+    }
+
+    private fun firstPending() = queue.entries.firstOrNull { it.taskKey == taskKey &&
+        it.status !in setOf(InstructionStatus.Accepted, InstructionStatus.Cancelled, InstructionStatus.Resolved) }
+
+    private fun scheduleNext() {
+        if (!autoDispatch || !ready || disposed || sending || activeTurnId != null || pendingRequests.isNotEmpty()) return
+        if (firstPending()?.status != InstructionStatus.Local) return
+        scope.launch {
+            try { sendNext() }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { autoDispatch = false; note = e.message.orEmpty() }
+        }
+    }
+
+    fun queueChanged() { scheduleNext() }
+
+    suspend fun sendNext() = mutation.withLock {
+        check(ready && !disposed) { "请先连接并核对运行器状态" }
+        check(activeTurnId == null && pendingRequests.isEmpty()) { "当前轮次或审批尚未结束" }
+        val item = firstPending() ?: return@withLock
+        check(item.status == InstructionStatus.Local) { "前一条指令尚未确认，不能自动重发或跳过" }
+        submit(item, null)
+    }
+
+    suspend fun steerNext() = mutation.withLock {
+        check(ready && !disposed && pendingRequests.isEmpty()) { "运行器尚未就绪或存在待处理审批" }
+        val turnId = activeTurnId ?: error("没有可引导的活动轮次")
+        val item = firstPending() ?: error("没有本地待发送指令")
+        submit(item, turnId)
+    }
+
+    private suspend fun submit(item: QueuedInstruction, steeringTurn: String?) {
+        // Images need the runtime's image-input schema, not a silently downgraded path-only message.
+        require(item.attachments.isEmpty()) { "结构化通道附件适配尚未接入，请保留此指令" }
+        val started = if (steeringTurn == null) queue.beginDelivery(item.id, item.revision)
+            else queue.beginSteering(item.id, item.revision, steeringTurn)
+        sending = true
+        try {
+            val response = if (steeringTurn == null) client.startTurn(threadId, item.text)
+                else client.steer(threadId, steeringTurn, item.text)
+            val result = response.getJSONObject("result")
+            val turnId = if (steeringTurn == null) result.getJSONObject("turn").getString("id") else result.getString("turnId")
+            check(steeringTurn == null || steeringTurn == turnId) { "引导响应不属于目标轮次" }
+            queue.confirmRuntimeAccepted(started.id, started.revision, turnId, response.toString())
+            activeTurnId = turnId
+            terminalEvents[turnId]?.let { finish(it, it.toString()) }
+            if (steeringTurn == null) finish(result.getJSONObject("turn"), response.toString())
+            if (activeTurnId != null) note = "运行器已接收"
+        } catch (e: Exception) {
+            autoDispatch = false
+            // Even an RPC failure is conservatively retained until the controller can reconcile it.
+            withContext(NonCancellable) {
+                val current = queue.entries.firstOrNull { it.id == started.id }
+                if (current?.status == InstructionStatus.Delivering)
+                    queue.markUnknown(current.id, current.revision, "运行器响应未确认：${e.message}；不会自动重发")
+            }
+            note = "指令状态待确认，请核对后再继续"
+            throw e
+        } finally { sending = false }
+        scheduleNext()
+    }
+
+    private fun finish(turn: JSONObject, receipt: String) {
+        val outcome = when (turn.optString("status")) {
+            "completed" -> RuntimeTurnState.Completed
+            "failed" -> RuntimeTurnState.Failed
+            "interrupted" -> RuntimeTurnState.Interrupted
+            else -> return
+        }
+        val id = turn.getString("id")
+        terminalEvents[id] = JSONObject().put("id", id).put("status", turn.getString("status"))
+        if (terminalEvents.size > 32) terminalEvents.remove(terminalEvents.keys.first())
+        queue.completeRuntimeTurn(taskKey, id, outcome, receipt)
+        if (activeTurnId == id) activeTurnId = null
+        if (outcome != RuntimeTurnState.Completed) {
+            autoDispatch = false
+            note = if (outcome == RuntimeTurnState.Failed) "本轮失败，自动派发已暂停" else "本轮已中断，自动派发已暂停"
+        } else note = "轮次已结束"
+    }
+
+    suspend fun interrupt() {
+        autoDispatch = false
+        val id = activeTurnId ?: return
+        client.interrupt(threadId, id)
+        note = "已请求中断，等待运行器结束事件"
+    }
+
+    suspend fun answerRequest(id: Any, result: JSONObject) {
+        check(ready && pendingRequests.containsKey(idKey(id))) { "请求已失效" }
+        client.respond(id, result)
+        pendingRequests.remove(idKey(id))
+        note = "已提交答复，等待运行器继续"
+    }
+
+    override fun close() {
+        disposed = true; autoDispatch = false; ready = false
+        client.close(); scope.cancel(); pendingRequests.clear()
+    }
+    private fun idKey(id: Any) = JSONObject().put("id", id).toString()
+}
