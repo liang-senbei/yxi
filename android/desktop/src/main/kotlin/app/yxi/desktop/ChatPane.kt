@@ -482,6 +482,18 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
             onSearch = { searchOpen = true },
             onVoice = { voiceOpen = true },
             onRoutes = onRoutes,
+            onQuickPicker = {
+                if (session.isCodex) onRoutes() else scope.launch {
+                    try {
+                        check(!live.busy && pending == null && !keyBusy) { "请等当前轮次或审批结束后切换模型" }
+                        val q = app.yxi.ssh.Shell::q
+                        val target = "=" + session.name + ":"
+                        val script = "pane=\$(tmux display-message -p -t ${q(target)} '#{pane_id}') && test \"\$(tmux display-message -p -t \"\$pane\" '#{pid}:#{session_id}:#{session_created}')\" = ${q(session.runtimeId)} && tmux send-keys -t \"\$pane\" M-p && printf '__YXI_MODEL_PICKER__'"
+                        check(session.runtimeId.isNotBlank() && ssh.exec(script).contains("__YXI_MODEL_PICKER__")) { "无法打开当前任务的模型选择器" }
+                        onTerminal()
+                    } catch (e: Exception) { sendErr = e.message }
+                }
+            },
         )
     }
 }
@@ -502,6 +514,7 @@ private fun Composer(
     onSearch: () -> Unit,
     onVoice: () -> Unit,
     onRoutes: () -> Unit,
+    onQuickPicker: () -> Unit,
 ) {
     val t = Tokens.current
     var focused by remember { mutableStateOf(false) }
@@ -539,8 +552,9 @@ private fun Composer(
         )
         ctx?.let { c ->
             androidx.compose.foundation.layout.FlowRow(Modifier.fillMaxWidth().padding(14.dp, 2.dp, 14.dp, 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Chip(modelShort(c.model), onClick = onRoutes)
-                Chip(effortLabel(c.effort) ?: "思考强度", color = t.accent, onClick = onRoutes)
+                Chip(modelShort(c.model), onClick = onQuickPicker)
+                Chip(effortLabel(c.effort) ?: "思考强度", color = t.accent, onClick = onQuickPicker)
+                Chip("线路", onClick = onRoutes)
                 if (c.mode == "plan") Chip("计划模式", color = t.warning)
                 if (c.tokens > 0) Chip("上下文 " + kShort(c.tokens))
             }
