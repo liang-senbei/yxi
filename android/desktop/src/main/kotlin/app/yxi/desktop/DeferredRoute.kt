@@ -73,6 +73,10 @@ internal suspend fun runDeferredRoute(state: AppState, request: DeferredRoute) {
                 }
                 conn.refresh()
                 if (!conn.ssh.isConnected) continue
+                if (request.line.isCodex && state.codexRouteBusy(conn)) {
+                    request.status = "等待 Codex 对话轮次、审批或未确认投递处理完成"
+                    continue
+                }
                 val affected = conn.sessions.filter { it.isCodex == request.line.isCodex && (request.directory == null || it.cwd == request.directory) }
                 if (affected.any { it.state in setOf(SessionState.Working, SessionState.NeedsYou) }) {
                     request.status = "等待生成或待处理交互结束"
@@ -90,6 +94,7 @@ internal suspend fun runDeferredRoute(state: AppState, request: DeferredRoute) {
                 val current = Lines.list(conn.ssh) ?: error("无法读取线路清单，已取消等待")
                 check(routeCatalogEqual(current, request.catalog)) { "线路清单已改变，已取消等待；请重新选择" }
                 if (state.deferredRoute !== request) return
+                if (request.line.isCodex && state.codexRouteBusy(conn)) continue
                 request.applying = true
                 request.status = "正在写入配置"
                 withContext(NonCancellable) {

@@ -1036,3 +1036,9 @@
 - cc-yxi构建8035b87成功；Git二进制增量补丁约1.1MB，本机对旧jar副本应用，重建SHA256与远端完整jar一致：3dccce6b0938d4757b29fd529a6ac291b7f4be638a8f1434dc8537e73cabf870。
 - Windows app-image和未签名Setup已生成，交付父工作区artifacts/windows-8035b87/package/Start-Yxi-Trial.cmd。独立配置，旧包保留；未执行Smoke、未启动应用或安装发布。
 - 新建空线程兼容修复已包含，定向检查仍在Agent侧；不宣称真实模型/Windows全部验收完成。
+
+## 第一百四十六轮：线路页纳入Codex对话影响范围
+
+- 从Codex任务进入线路页默认选择Codex，并可返回原入口；修复之前可能显示Claude配置、返回终端工作区的问题。
+- 配置确认列出同主机的已登记Codex对话，明确暂停自动队列及需重新打开核对生效。直接应用和延后应用均把活动轮次/审批/未确认投递纳入等待条件，不仅看tmux会话。
+- 仍不宣称运行中provider热切换或旧thread提供方已改变；真实生效需后续适配/核对。本轮未运行测试，定向检查交Agent；未重打8035b87候选包。

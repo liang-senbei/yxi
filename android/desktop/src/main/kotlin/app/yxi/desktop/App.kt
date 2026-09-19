@@ -102,7 +102,7 @@ fun App(state: AppState) {
                                 Box {
                                     TextButton({ taskMenu.value = true }) { Text("更多") }
                                     DropdownMenu(taskMenu.value, { taskMenu.value = false }) {
-                                        DropdownMenuItem(text = { Text("模型与线路") }, onClick = { taskMenu.value = false; state.page = Page.Routes })
+                                        DropdownMenuItem(text = { Text("模型与线路") }, onClick = { taskMenu.value = false; state.openRoutes() })
                                         DropdownMenuItem(text = { Text("Codex 任务") }, onClick = { taskMenu.value = false; state.page = Page.Codex })
                                         DropdownMenuItem(text = { Text("协作组") }, onClick = { taskMenu.value = false; state.showCollaboration = true })
                                         DropdownMenuItem(text = { Text("切换任务 · Ctrl+K") }, onClick = { taskMenu.value = false; state.showTaskSwitcher = true })

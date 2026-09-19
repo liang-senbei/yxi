@@ -299,7 +299,7 @@ private fun CodexConversationPane(state: AppState) {
                 canDeliver = controller?.ready == true && !controller.sending && controller.activeTurnId == null && controller.pendingRequests.isEmpty(),
                 onDeliver = { instruction -> if (controller != null) act { controller.sendNext(instruction.id) } })
             val draft = state.chatDrafts.getOrPut(selected.key) { mutableStateOf(TextFieldValue()) }
-            if (controller != null) CodexModelPicker(controller) { state.page = Page.Routes }
+            if (controller != null) CodexModelPicker(controller) { state.openRoutes() }
             var voiceOpen by remember(selected.key) { mutableStateOf(false) }
             var historyOpen by remember(selected.key) { mutableStateOf(false) }
             if (voiceOpen && conn != null) VoiceInputDialog(conn, { voiceOpen = false }) { text ->

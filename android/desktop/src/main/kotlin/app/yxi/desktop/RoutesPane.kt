@@ -27,7 +27,7 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
     val t = Tokens.current
     val scope = rememberCoroutineScope()
     var lines by remember { mutableStateOf<List<Lines.Line>?>(null) }
-    var engine by remember { mutableStateOf(if (state.session?.isCodex == true) Lines.CODEX else Lines.CLAUDE) }
+    var engine by remember { mutableStateOf(if (state.routesOrigin == Page.Codex || state.session?.isCodex == true) Lines.CODEX else Lines.CLAUDE) }
     var active by remember { mutableStateOf<Lines.Active?>(null) }
     var codex by remember { mutableStateOf<Lines.CodexNow?>(null) }
     var busy by remember { mutableStateOf(false) }
@@ -64,6 +64,10 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
         val catalog = lines.orEmpty().toList()
         act {
         check(conn.status == Conn.Status.Connected) { "主机未连接，未修改配置" }
+        if (targetEngine == Lines.CODEX) {
+            state.codexWorkspace.tasks(conn.host).forEach { state.codexWorkspace.controllers[it.key]?.setAutoDispatch(false) }
+            check(!state.codexRouteBusy(conn)) { "该服务器的 Codex 对话仍有活动轮次、审批或未确认投递，请处理后再应用。" }
+        }
         conn.refresh()
         check(conn.sessions.none { it.state == app.yxi.agent.SessionState.Working && it.isCodex == (targetEngine == Lines.CODEX) && (targetScope == null || it.cwd == targetScope) }) { "目标范围内仍有 Agent 正在工作，请等本轮结束后再应用配置。" }
         val result = if (targetEngine == Lines.CODEX) {
@@ -86,7 +90,7 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
                 Text("模型与线路", style = MaterialTheme.typography.titleLarge)
                 Text(conn.host.label + " · " + conn.host.username + "@" + conn.host.hostname, color = t.textMuted, style = MaterialTheme.typography.bodySmall)
             }
-            TextButton({ state.page = Page.Workspace }) { Text("返回对话") }
+            TextButton({ state.page = state.routesOrigin }) { Text("返回") }
             Button({ editor = Lines.Line(Lines.newId(), "", agent = engine) }, enabled = lines != null && !busy) { Text("新增线路") }
         }
         Spacer(Modifier.height(22.dp))
@@ -172,7 +176,10 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
             Text("目标：${conn.host.label}\n范围：${chosenScope ?: "服务器用户级"}\n" + if (chosenScope == null) "可能影响同一用户下的其他 Agent。正在执行的请求不会被当作已完成切换；需要重开的会话会明确提示。" else "该项目下的其他 Agent 也可能受影响。")
             Text("运行器：${if (engine == Lines.CODEX) "Codex" else "Claude Code"}\n模型：${applying?.let(::routeModel)?.ifBlank { "运行器默认值" } ?: "运行器默认值"}", style = MaterialTheme.typography.bodySmall)
             val affected = conn.sessions.filter { it.isCodex == (engine == Lines.CODEX) && (chosenScope == null || it.cwd == chosenScope) }
-            Text("当前已知范围内任务 · ${affected.size}", style = MaterialTheme.typography.labelMedium)
+            val managed = if (engine == Lines.CODEX) state.codexWorkspace.tasks(conn.host) else emptyList()
+            Text("当前已知范围内任务 · ${affected.size + managed.size}", style = MaterialTheme.typography.labelMedium)
+            if (managed.isNotEmpty()) Text("应用配置会暂停这些 Codex 对话的自动队列。已打开的运行器不代表已切换线路，仍需重新打开任务并核对。", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+            managed.forEach { task -> Text((state.navigation.title(task.key) ?: task.title) + "\n" + task.directory, style = MaterialTheme.typography.bodySmall, color = t.textMuted) }
             affected.forEach { task ->
                 Text((state.navigation.title(taskNavigationKey(conn.host, task)) ?: task.short) +
                     (if (task.state == app.yxi.agent.SessionState.Working) " · 运行中，需等待本轮结束" else "") + "\n${task.cwd}",
@@ -183,6 +190,7 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
         confirmButton = { Column {
             TextButton({ applyRoute(applying) }, enabled = !busy && state.deferredRoute == null) { Text("确认应用") }
             applying?.let { line -> TextButton({
+                if (line.isCodex) state.codexWorkspace.tasks(conn.host).forEach { state.codexWorkspace.controllers[it.key]?.setAutoDispatch(false) }
                 state.deferredRoute = DeferredRoute(conn, line, chosenScope, lines.orEmpty())
                 state.deferredRouteNotice = ""; applying = null
             }, enabled = !busy && lines != null && state.deferredRoute == null) { Text("等待任务空闲后应用") } }

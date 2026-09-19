@@ -24,6 +24,14 @@ enum class Page { Workspace, Config, Me, Routes, Codex }
 class AppState {
     internal var codexSelectedTaskKey by mutableStateOf<String?>(null)
     internal var codexCreateRequest by mutableStateOf<Pair<String, String>?>(null)
+    internal var routesOrigin by mutableStateOf(Page.Workspace)
+    internal fun openRoutes() { routesOrigin = if (page == Page.Routes) routesOrigin else page; page = Page.Routes }
+    internal fun codexRouteBusy(c: Conn): Boolean {
+        val keys = codexWorkspace.tasks(c.host).map { it.key }.toSet()
+        return codexWorkspace.controllers.any { (key, controller) -> key in keys &&
+            (controller.activeTurnId != null || controller.sending || controller.pendingRequests.isNotEmpty()) } ||
+            instructions.entries.any { it.taskKey in keys && (it.status in setOf(InstructionStatus.Delivering, InstructionStatus.Unknown) || it.runtimeTurnState == RuntimeTurnState.InProgress) }
+    }
     internal fun appendCodexQuote(task: CodexTaskRecord, quote: String) {
         val draft = chatDrafts.getOrPut(task.key) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue()) }
         val text = draft.value.text.let { it + if (it.isBlank()) "" else "\n\n" } + quote + "\n"
