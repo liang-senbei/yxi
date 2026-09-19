@@ -114,8 +114,9 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
     val t = Tokens.current
     val scope = rememberCoroutineScope()
     // 按端点和运行实例记忆；看板刷新不重置，同名会话重建不能继承旧状态。
-    var items by remember(taskKey) { mutableStateOf<List<ChatItem>>(emptyList()) }
-    var ctx by remember(taskKey) { mutableStateOf<Transcript.Ctx?>(null) }
+    val warmTranscript = remember(taskKey) { if (session.runtimeId.isNotBlank()) DesktopTranscriptMemory.get(taskKey)?.view else null }
+    var items by remember(taskKey) { mutableStateOf(warmTranscript?.items.orEmpty()) }
+    var ctx by remember(taskKey) { mutableStateOf(warmTranscript?.context) }
     var status by remember(taskKey) { mutableStateOf<String?>(null) }
     var pending by remember(taskKey) { mutableStateOf<Pending?>(null) }
     var approval by remember(taskKey) { mutableStateOf<Pair<String, Approval>?>(null) }   // 指纹 → 抓屏认出的工具名 / 命令
@@ -179,57 +180,80 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
     // 历史灌完（字节数够了）之前不上屏，免得看它从旧滚到新（手机端 #261 的教训）。
     // 断线：流断了不清屏，等连接回来从记下的字节位置接着尾随；转录文件换了（重开 / --resume）才整个重灌。
     LaunchedEffect(taskKey, ssh) {
-        status = "正在载入对话…"
-        var file: String? = null
-        var inc = Transcript.Incremental()
-        var pos = 0L               // 下一次从这个字节接着尾随（收到就记，别等解析 —— 断在两者之间会重放一批）
-        var expect = 0L
-        var eaten = 0L
-        var caughtUp = false
-        var idle = 0
+        val cacheEnabled = session.runtimeId.isNotBlank()
+        var entry = if (cacheEnabled) DesktopTranscriptMemory.get(taskKey) else null
+        var lease = entry?.let { withContext(Dispatchers.Default) { it.claim().first } } ?: 0L
+        var file = entry?.file
+        var pos = entry?.view?.offset ?: 0L
+        var targetOffset = pos
+        var needsMetadata = true
+        entry?.view?.let { items = it.items; ctx = it.context }
+        status = if (entry == null) "正在载入对话…" else "显示缓存，正在同步新增内容…"
         val buf = ArrayList<String>()
         var bufBytes = 0L
         val lock = Any()
-        launch {
+        data class Batch(val entry: DesktopTranscriptMemory.Entry?, val lease: Long, val lines: List<String>, val bytes: Long)
+        try {
+            launch {
+                while (true) {
+                    delay(300)
+                    val batch = synchronized(lock) {
+                        Batch(entry, lease, buf.toList(), bufBytes).also { buf.clear(); bufBytes = 0L }
+                    }
+                    if (batch.lines.isEmpty()) continue
+                    val committed = withContext(Dispatchers.Default) {
+                        batch.entry?.append(batch.lease, batch.lines, batch.bytes)
+                    } ?: continue
+                    if (batch.entry === entry && batch.lease == lease && committed.offset >= targetOffset) {
+                        items = committed.items; ctx = committed.context
+                        if (ssh.isConnected) status = null
+                    }
+                }
+            }
             while (true) {
-                delay(300)
-                val (batch, bytes) = synchronized(lock) { (buf.toList() to bufBytes).also { buf.clear(); bufBytes = 0L } }
-                if (batch.isNotEmpty()) {
-                    idle = 0
-                    val snap = withContext(Dispatchers.Default) { inc.add(batch.asSequence()); inc.snapshot() }
-                    eaten += bytes
-                    if (eaten >= expect) caughtUp = true
-                    if (caughtUp) { items = snap; ctx = inc.ctx; status = null }
-                } else if (!caughtUp && expect == 0L && ++idle >= 10) {
-                    // 不知道要灌多少时才按「3 秒没动静」放行
-                    caughtUp = true; items = withContext(Dispatchers.Default) { inc.snapshot() }; ctx = inc.ctx; status = null
+                if (!ssh.isConnected) {
+                    if (file != null) status = "连接断了 —— 显示缓存，接上后自动续上"
+                    delay(1_000); continue
                 }
-            }
-        }
-        while (true) {
-            if (!ssh.isConnected) { if (file != null) status = "连接断了 —— 接上后自动续上"; delay(1_000); continue }
-            // 会话名必须传：转录按 sessionId 找，会话里 cd 过一次按目录就找不到了
-            val f = TranscriptStream.latestFor(ssh, session.cwd, session.name)
-            if (f == null) { status = "这个会话里没找到 Claude Code 的转录（${session.cwd}）"; delay(5_000); continue }
-            if (f != file) {
-                // 拿不到就等着重试，绝不退回 0（那等于把几百 MB 的整份转录重放）
-                val ts = TranscriptStream.tailStart(ssh, f, 400)
-                if (ts == null) { status = "连接还没稳，正在重试…"; delay(2_000); continue }
-                file = f; inc = Transcript.Incremental(); pos = ts.second
-                expect = ts.first - ts.second; eaten = 0L; idle = 0; caughtUp = expect <= 0L
-            }
-            if (caughtUp) status = null   // 续上了：把「流断了」那条撤掉；首灌那条要等灌完才撤
-            catching {
-                TranscriptStream.streamFrom(ssh, f, pos).collect { line ->
-                    if (line.isEmpty()) return@collect   // follow() 每 20 秒的心跳空行，不在文件里，不算字节
-                    synchronized(lock) { buf += line; val n = line.toByteArray().size + 1L; bufBytes += n; pos += n }
+                val f = TranscriptStream.latestFor(ssh, session.cwd, session.name)
+                if (f == null) { status = "未找到当前转录，保留已载入内容（${session.cwd}）"; delay(5_000); continue }
+                if (f == file && needsMetadata) {
+                    val size = ssh.exec("wc -c < ${app.yxi.ssh.Shell.q(f)} 2>/dev/null").trim().toLongOrNull()
+                    if (size == null) { status = "无法核对转录位置，正在重试…"; delay(2_000); continue }
+                    if (size < pos) file = null else targetOffset = size
+                    needsMetadata = false
                 }
+                if (f != file) {
+                    val ts = TranscriptStream.tailStart(ssh, f, 400)
+                    if (ts == null) { status = "连接还没稳，正在重试…"; delay(2_000); continue }
+                    val previous = entry; val previousLease = lease
+                    withContext(Dispatchers.Default) { previous?.release(previousLease) }
+                    val fresh = DesktopTranscriptMemory.Entry(f, ts.second)
+                    val freshLease = fresh.claim().first
+                    synchronized(lock) {
+                        buf.clear(); bufBytes = 0L
+                        entry = fresh; lease = freshLease; file = f; pos = ts.second; targetOffset = ts.first
+                    }
+                    if (cacheEnabled) DesktopTranscriptMemory.put(taskKey, fresh)
+                    items = emptyList(); ctx = null; status = "正在载入对话…"
+                    needsMetadata = false
+                }
+                if ((entry?.view?.offset ?: 0) >= targetOffset) status = null
+                catching {
+                    TranscriptStream.streamFrom(ssh, f, pos).collect { line ->
+                        if (line.isEmpty()) return@collect
+                        synchronized(lock) { buf += line; val n = line.toByteArray().size + 1L; bufBytes += n; pos += n }
+                    }
+                }
+                needsMetadata = true
+                status = "转录流断了 —— 接上后自动续上"
+                delay(2_000)
             }
-            status = "转录流断了 —— 连接可能掉了，接上后自动续上"
-            delay(2_000)
+        } finally {
+            val previous = entry; val previousLease = lease
+            withContext(NonCancellable + Dispatchers.Default) { previous?.release(previousLease) }
         }
     }
-
     // 「等你选 / 在忙」只有屏幕知道（tool_use 要等工具跑完才落转录）：推流优先，断了退回轮询，连接回来再试推流
     LaunchedEffect(taskKey, ssh) {
         fun apply(p: Pending?, l: Live) {
