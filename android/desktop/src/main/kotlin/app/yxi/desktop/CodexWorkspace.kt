@@ -10,6 +10,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.swing.Swing
 
 internal data class CodexTaskRecord(
@@ -137,15 +138,22 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File,
         busy = true
         try {
             val client = clientFactory(conn)
+            var originalClosed = false
             try {
                 val overrides = client.readResumeOverrides(record.directory)
                 previous.closeForConfigurationChange()
+                originalClosed = true
                 controllers.remove(record.key); owners.remove(record.key)
                 val result = client.resumeThread(record.threadId, overrides).getJSONObject("result")
                 val thread = result.getJSONObject("thread")
                 check(thread.getString("id") == record.threadId && normalizeProjectPath(thread.getString("cwd")) == normalizeProjectPath(record.directory)) { "恢复响应与原任务不一致" }
                 attach(conn, record, client).also { it.recordSessionConfiguration(result) }
-            } catch (e: Exception) { client.close(); throw e }
+            } catch (e: Exception) {
+                client.close()
+                if (e is CancellationException) throw e
+                if (originalClosed) throw IllegalStateException("线路应用未完成，原任务编号、草稿和队列已保留。请点击“连接任务”重新读取历史，确认连接配置后再发送。原因：${e.message}", e)
+                throw e
+            }
         } finally { busy = false }
     }
 
