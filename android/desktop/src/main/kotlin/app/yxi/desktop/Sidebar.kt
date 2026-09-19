@@ -235,7 +235,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
             hosts.forEachIndexed { i, h ->
                 if (state.hostScope.isNotEmpty() && state.hostScope != h.id) return@forEachIndexed
                 val c = connOf(h)
-                val sessions = c?.sessions?.filter { f.isEmpty() || h.label.contains(f, true) || h.region.contains(f, true) || it.short.contains(f, true) || it.name.contains(f, true) || it.cwd.contains(f, true) || state.navigation.title(taskNavigationKey(h, it))?.contains(f, true) == true } ?: emptyList()
+                val sessions = c?.sessions?.filter { f.isEmpty() || h.label.contains(f, true) || h.region.contains(f, true) || it.short.contains(f, true) || it.name.contains(f, true) || it.cwd.contains(f, true) || state.navigation.title(taskNavigationKey(h, it))?.contains(f, true) == true || state.navigation.projectTitle(projectKey(h, it.cwd))?.contains(f, true) == true } ?: emptyList()
                 val hostMatch = f.isEmpty() || h.label.contains(f, ignoreCase = true) || h.region.contains(f, ignoreCase = true)
                 val favorites = if (state.navigation.mode == "全部") state.navigation.favorites(h).filter { favorite ->
                     (hostMatch || favorite.title.contains(f, true) || favorite.directory.contains(f, true)) &&

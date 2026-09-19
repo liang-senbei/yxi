@@ -98,7 +98,7 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
         var projectTitle by remember(key, editingProject) { mutableStateOf(nav.projectTitle(key) ?: group.label) }
         val displayTitle = nav.projectTitle(key) ?: group.label
         NativeOverlay(projectMenu)
-        val projectTasks = sessions.filter { normalizeProjectPath(it.cwd) == group.path }
+        val projectTasks = conn.sessions.filter { normalizeProjectPath(it.cwd) == group.path }
         val hasSelected = state.conn === conn && group.sessions.any { it.name == state.session?.name }
         val closed = !searching && nav.collapsed(key, default = !hasSelected)
         Column {
@@ -107,7 +107,7 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
                 Icon(Icons.Outlined.Folder, null, Modifier.padding(horizontal = 6.dp).size(16.dp), tint = t.textSecondary)
                 Column(Modifier.weight(1f)) {
                     Text(displayTitle, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                    if (sections.count { it.label == group.label } > 1) Text(group.path, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+                    if (sections.count { (nav.projectTitle(projectKey(conn.host, it.path)) ?: it.label) == displayTitle } > 1) Text(group.path, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = t.textMuted)
                 }
                 Text(group.sessions.size.toString(), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
                 IconButton({ creatingDirectory = group.path }, Modifier.size(28.dp)) {
