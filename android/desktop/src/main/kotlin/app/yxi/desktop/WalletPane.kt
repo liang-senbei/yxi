@@ -46,6 +46,22 @@ internal fun WalletPane(owner: String, generation: Long, onBack: () -> Unit) {
         }
     }
     LaunchedEffect(owner, generation) { refresh() }
+    fun setRenewal(enabled: Boolean) {
+        if (busy) return
+        busy = true; error = ""; notice = ""
+        scope.launch {
+            try {
+                val (status, body) = MeAuth.accountRequest(owner, "/api/me/wallet", "PATCH",
+                    JSONObject().put("autoRenew", enabled).toString(), generation)
+                check(status in 200..299) { AccountApi.httpErr(status, body) }
+                val result = JSONObject(body)
+                MeAuth.walletUpdated(owner, result, generation)
+                notice = if (result.getBoolean("autoRenew")) "自动续费已开启。" else "自动续费已关闭。"
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { error = "续费设置未确认：${e.message}。请刷新核对，系统不会自动重试。" }
+            finally { busy = false }
+        }
+    }
     val me = MeAuth.me?.takeIf { it.userId == owner && MeAuth.sessionGeneration == generation }
     Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -58,8 +74,13 @@ internal fun WalletPane(owner: String, generation: Long, onBack: () -> Unit) {
                 Text(AccountApi.yuan(me.balanceCents), style = MaterialTheme.typography.headlineMedium,
                     color = if (me.balanceCents < 0) Tokens.current.danger else MaterialTheme.colorScheme.primary)
                 Text("余额通过余额券兑换获得。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
-                Text("自动续费：" + if (me.autoRenew) "已开启" else "未开启", style = MaterialTheme.typography.bodySmall)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("自动续费", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    Switch(me.autoRenew, ::setRenewal, enabled = !busy && (me.autoRenew || me.autoRenewPriceCents != null))
+                }
+                Text("开启后，会员到期时会按服务器续费规则从余额扣款。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 me.autoRenewPriceCents?.let { Text("服务器当前续费价格：${AccountApi.yuan(it)}", style = MaterialTheme.typography.bodySmall) }
+                    ?: Text("当前档位暂无可用续费报价。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
             }
         }
         if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
