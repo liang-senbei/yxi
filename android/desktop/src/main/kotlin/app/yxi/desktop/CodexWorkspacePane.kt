@@ -314,6 +314,13 @@ private fun CodexConversationPane(state: AppState) {
             if (controller != null) CodexGoalStrip(controller)
             val draft = state.chatDrafts.getOrPut(selected.key) { mutableStateOf(TextFieldValue()) }
             if (controller != null) CodexModelPicker(controller) { state.openRoutes() }
+            if (controller != null && conn != null) {
+                TextButton({ act { workspace.applyCurrentConfiguration(conn, selected) } },
+                    enabled = !workspace.busy && controller.ready && !controller.sending && controller.activeTurnId == null && controller.pendingRequests.isEmpty()) {
+                    Text(if (workspace.busy) "正在连接…" else "在此对话应用当前服务器线路")
+                }
+                Text("应用时重新连接并保留历史、草稿和队列；自动发送暂停，成功后可手动恢复。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+            }
             var voiceOpen by remember(selected.key) { mutableStateOf(false) }
             var historyOpen by remember(selected.key) { mutableStateOf(false) }
             if (voiceOpen && conn != null) VoiceInputDialog(conn, { voiceOpen = false }) { text ->

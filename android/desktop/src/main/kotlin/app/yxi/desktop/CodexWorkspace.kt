@@ -130,6 +130,25 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File,
         finally { busy = false }
     }
 
+    suspend fun applyCurrentConfiguration(conn: Conn, record: CodexTaskRecord): CodexTaskController = operations.withLock {
+        check(record.hostKey == projectKey(conn.host, "/") && connected(conn)) { "请连接任务原服务器" }
+        val previous = controllers[record.key]
+        check(previous != null && owners[record.key] === conn) { "请先打开原任务" }
+        busy = true
+        try {
+            previous.closeForConfigurationChange()
+            controllers.remove(record.key); owners.remove(record.key)
+            val client = clientFactory(conn)
+            try {
+                val overrides = client.readResumeOverrides(record.directory)
+                val result = client.resumeThread(record.threadId, overrides).getJSONObject("result")
+                val thread = result.getJSONObject("thread")
+                check(thread.getString("id") == record.threadId && normalizeProjectPath(thread.getString("cwd")) == normalizeProjectPath(record.directory)) { "恢复响应与原任务不一致" }
+                attach(conn, record, client).also { it.recordSessionConfiguration(result) }
+            } catch (e: Exception) { client.close(); throw e }
+        } finally { busy = false }
+    }
+
     /** Import an existing server thread without creating a replacement or sending a turn. */
     suspend fun recover(conn: Conn, threadId: String, title: String): CodexTaskRecord = operations.withLock {
         registry.requireWritable()

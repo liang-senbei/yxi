@@ -338,6 +338,16 @@ internal class CodexTaskController(
         note = "已提交答复，等待运行器继续"
     }
 
+    internal suspend fun closeForConfigurationChange() = mutation.withLock {
+        check(ready && !disposed && !sending && activeTurnId == null && pendingRequests.isEmpty() && answerDraftCount == 0) { "请等待当前轮次和审批结束后再应用线路" }
+        check(queue.entries.none { it.taskKey == taskKey && it.status in setOf(InstructionStatus.Delivering, InstructionStatus.Unknown) }) { "请先核对状态待确认的指令" }
+        autoDispatch = false
+        val thread = client.readThread(threadId).getJSONObject("result").getJSONObject("thread")
+        check(thread.getString("id") == threadId && thread.getJSONArray("turns").length() > 0) { "尚无历史的任务请直接新建，以免关闭后无法恢复" }
+        check(thread.getJSONArray("turns").let { turns -> (0 until turns.length()).none { turns.getJSONObject(it).optString("status") == "inProgress" } } && activeTurnId == null && pendingRequests.isEmpty()) { "当前任务仍在运行，请稍后应用线路" }
+        close()
+    }
+
     override fun close() {
         disposed = true; autoDispatch = false; ready = false
         client.close(); scope.cancel(); pendingRequests.clear()
