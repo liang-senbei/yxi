@@ -85,6 +85,16 @@ class WorkspaceNavigation(file: File) {
         return !onlyPinned || !hasPins || pinned(key)
     }
     fun collapsed(key: String, default: Boolean) = data.getJSONObject("projects").optJSONObject(key)?.optBoolean("collapsed", default) ?: default
+    fun projectTitle(key: String): String? = data.getJSONObject("projects").optJSONObject(key)?.optString("title")?.takeIf { it.isNotBlank() }
+    fun renameProject(key: String, title: String) = editProject(key) {
+        require(title.trim().length <= 160) { "显示名称最多160个字符" }
+        if (title.isBlank()) it.remove("title") else it.put("title", title.trim())
+    }
+    private fun editProject(key: String, change: (JSONObject) -> Unit) = edit { root ->
+        val projects = root.getJSONObject("projects")
+        val item = projects.optJSONObject(key) ?: JSONObject()
+        change(item); projects.put(key, item)
+    }
     private fun edit(change: (JSONObject) -> Unit) {
         if (!readable) return // Do not replace unreadable pin/archive/title data with an empty fallback.
         runCatching {
@@ -115,7 +125,7 @@ class WorkspaceNavigation(file: File) {
         edit { root -> val tasks = root.getJSONObject("tasks"); tasks.getJSONObject(key).put("pin", second); tasks.getJSONObject(order[other]).put("pin", first) }
     }
     fun setCollapsed(key: String, value: Boolean) {
-        if (collapsed(key, !value) != value) edit { it.getJSONObject("projects").put(key, JSONObject().put("collapsed", value)) }
+        if (collapsed(key, !value) != value) editProject(key) { it.put("collapsed", value) }
     }
     private fun Int?.orEmptyRank() = this ?: 0
     fun visible(key: String, state: SessionState): Boolean = when (mode) {
