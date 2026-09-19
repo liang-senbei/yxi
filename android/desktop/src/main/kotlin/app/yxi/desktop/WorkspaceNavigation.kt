@@ -36,9 +36,10 @@ class WorkspaceNavigation(file: File) {
     private var data by mutableStateOf(JSONObject().put("version", 1).put("tasks", JSONObject()).put("projects", JSONObject()))
     var error by mutableStateOf("")
         private set
+    private var readable = true
     init {
         runCatching { disk.read()?.let { data = JSONObject(it) }; if (disk.recovered) error = "任务整理记录已从备份恢复" }
-            .onFailure { error = "任务整理记录无法读取，原文件已保留：${it.message}" }
+            .onFailure { readable = false; error = "任务整理记录无法读取，原文件已保留：${it.message}" }
     }
     val mode get() = data.optString("mode", "全部").takeIf { it in listOf("全部", "待处理", "归档") } ?: "全部"
     private fun task(key: String) = data.getJSONObject("tasks").optJSONObject(key) ?: JSONObject()
@@ -48,6 +49,7 @@ class WorkspaceNavigation(file: File) {
     fun archived(key: String) = task(key).optBoolean("archived", false)
     fun collapsed(key: String, default: Boolean) = data.getJSONObject("projects").optJSONObject(key)?.optBoolean("collapsed", default) ?: default
     private fun edit(change: (JSONObject) -> Unit) {
+        if (!readable) return // Do not replace unreadable pin/archive/title data with an empty fallback.
         runCatching {
             val next = JSONObject(data.toString()); change(next); disk.write(next.toString(2)); data = next; error = ""
         }.onFailure { error = "整理操作未保存：${it.message}" }
