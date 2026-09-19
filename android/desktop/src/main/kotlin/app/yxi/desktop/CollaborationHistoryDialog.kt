@@ -13,7 +13,7 @@ import kotlinx.coroutines.CancellationException
 import org.json.JSONObject
 
 @Composable
-internal fun CollaborationHistoryDialog(conn: Conn, close: () -> Unit) {
+internal fun CollaborationHistoryDialog(state: AppState, conn: Conn, group: String, members: List<String>, close: () -> Unit) {
     var raw by remember(conn) { mutableStateOf("") }
     var truncated by remember(conn) { mutableStateOf(false) }
     var busy by remember(conn) { mutableStateOf(true) }
@@ -21,6 +21,12 @@ internal fun CollaborationHistoryDialog(conn: Conn, close: () -> Unit) {
     var query by remember(conn) { mutableStateOf("") }
     var revision by remember(conn) { mutableStateOf(0) }
     var structured by remember(conn) { mutableStateOf(false) }
+    var replyTarget by remember(conn) { mutableStateOf<Pair<app.yxi.agent.Session, String>?>(null) }
+    replyTarget?.let { (target, messageId) ->
+        MemberAssignmentDialog(state, conn, target, group, { replyTarget = null }, { replyTarget = null; close() },
+            initialText = "请查看协作消息 $messageId，结合当前任务进展回复原发送者。使用 yxi-hub reply 保留原消息关联；如果原任务实例已变化，请说明情况，不要回复同名新任务。\n\n补充要求：")
+        return
+    }
     LaunchedEffect(conn, revision, structured) {
         busy = true; error = ""; raw = ""; truncated = false
         try {
@@ -72,7 +78,12 @@ print('__YXI_HUB_LOG__:' + json.dumps({'text': text, 'clipped': clipped}, ensure
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
             if (truncated) Text("显示最近 256 KiB，开头可能是上一条消息的片段。", style = MaterialTheme.typography.labelSmall)
-            if (structured) HubEventCards(raw, query) { query = it }
+            if (structured) HubEventCards(raw, query, requestReply = { id, recipient, instance ->
+                val target = conn.sessions.firstOrNull { it.name == recipient && it.runtimeId == instance && it.name in members }
+                if (target == null) error = "原接收任务不在当前组或实例已变化，请刷新后核对。"
+                else if (runCatching { java.util.UUID.fromString(id) }.isFailure) error = "原消息编号无效"
+                else replyTarget = target to id
+            }) { query = it }
             else SelectionContainer {
                 Text(shown.ifBlank { if (raw.isBlank()) "暂无协作记录" else "没有匹配内容" },
                     modifier = Modifier.fillMaxWidth().heightIn(max = 380.dp).verticalScroll(rememberScrollState()), style = MaterialTheme.typography.bodySmall)

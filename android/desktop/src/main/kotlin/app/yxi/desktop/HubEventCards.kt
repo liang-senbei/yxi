@@ -11,10 +11,10 @@ import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
 private data class HubMessage(val id: String, val sender: String, val recipient: String, val body: String,
-    val stage: String, val time: String, val replyTo: String, val hasBody: Boolean)
+    val stage: String, val time: String, val replyTo: String, val hasBody: Boolean, val recipientInstance: String)
 
 @Composable
-internal fun HubEventCards(raw: String, query: String, search: (String) -> Unit) {
+internal fun HubEventCards(raw: String, query: String, requestReply: ((String, String, String) -> Unit)? = null, search: (String) -> Unit) {
     val parsed = remember(raw) {
         val messages = linkedMapOf<String, HubMessage>()
         var skipped = 0
@@ -27,7 +27,8 @@ internal fun HubEventCards(raw: String, query: String, search: (String) -> Unit)
                 val hasBody = event.getString("stage") == "attempting"
                 messages[id] = HubMessage(id, event.getString("sender"), event.getString("recipient"),
                     if (hasBody) event.optString("text") else old?.body.orEmpty(), event.getString("stage"),
-                    event.optString("time"), event.optString("replyTo").ifBlank { old?.replyTo.orEmpty() }, hasBody || old?.hasBody == true)
+                    event.optString("time"), event.optString("replyTo").ifBlank { old?.replyTo.orEmpty() }, hasBody || old?.hasBody == true,
+                    event.optString("recipientInstance").ifBlank { old?.recipientInstance.orEmpty() })
             }.onFailure { skipped++ }
         }
         messages.values.toList().asReversed() to skipped
@@ -53,6 +54,7 @@ internal fun HubEventCards(raw: String, query: String, search: (String) -> Unit)
                         SelectionContainer { Text(if (message.hasBody) message.body else "正文不在本次读取范围内", style = MaterialTheme.typography.bodySmall) }
                         if (message.replyTo.isNotBlank()) TextButton({ search(message.replyTo) }) { Text("查看原消息与回复") }
                         TextButton({ search(message.id) }) { Text("查看此消息的关联") }
+                        if (requestReply != null && message.recipientInstance.isNotBlank()) TextButton({ requestReply(message.id, message.recipient, message.recipientInstance) }) { Text("请接收 Agent 回复…") }
                         SelectionContainer { Text(message.id, style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted) }
                     }
                 }
