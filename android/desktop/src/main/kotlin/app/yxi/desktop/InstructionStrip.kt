@@ -20,7 +20,7 @@ import kotlinx.coroutines.CancellationException
 @Composable
 internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliver: Boolean, onDeliver: (QueuedInstruction) -> Unit, onQuery: (suspend (QueuedInstruction) -> String)? = null, compactUnknown: Boolean = false) {
     val t = Tokens.current
-    val active = queue.entries.filter { it.taskKey == taskKey && (it.runtimeTurnState == RuntimeTurnState.InProgress || it.status !in setOf(InstructionStatus.Accepted, InstructionStatus.Cancelled, InstructionStatus.Resolved)) }
+    val active = queue.entries.filter { it.taskKey == taskKey && (it.runtimeTurnState == RuntimeTurnState.InProgress || it.status !in setOf(InstructionStatus.Sent, InstructionStatus.Accepted, InstructionStatus.Cancelled, InstructionStatus.Resolved)) }
     var expanded by remember(taskKey) { mutableStateOf(false) }
     var editing by remember(taskKey) { mutableStateOf<QueuedInstruction?>(null) }
     var text by remember(taskKey) { mutableStateOf("") }
@@ -131,3 +131,4 @@ internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliv
         }, dismissButton = { TextButton({ editing = null }) { Text("关闭") } })
     }
 }
+

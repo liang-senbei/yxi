@@ -8,7 +8,7 @@ import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 
-internal enum class InstructionStatus { Local, Delivering, Unknown, Accepted, Cancelled, Resolved }
+internal enum class InstructionStatus { Local, Delivering, Unknown, Sent, Accepted, Cancelled, Resolved }
 internal enum class RuntimeTurnState { None, InProgress, Completed, Failed, Interrupted }
 internal data class InstructionAttachment(val name: String, val remotePath: String)
 internal data class QueuedInstruction(
@@ -80,10 +80,13 @@ internal class InstructionQueue(file: File) {
     }
     fun beginDelivery(id: String, revision: Long) = change(id, revision, setOf(InstructionStatus.Local)) { current ->
         check(entries.none { it.taskKey == current.taskKey && it.runtimeTurnState == RuntimeTurnState.InProgress }) { "上一轮尚未结束，指令继续等待" }
-        check(entries.firstOrNull { it.taskKey == current.taskKey && it.status !in setOf(InstructionStatus.Cancelled, InstructionStatus.Accepted, InstructionStatus.Resolved) }?.id == id) { "请先处理前面的指令" }
+        check(entries.firstOrNull { it.taskKey == current.taskKey && it.status !in setOf(InstructionStatus.Cancelled, InstructionStatus.Sent, InstructionStatus.Accepted, InstructionStatus.Resolved) }?.id == id) { "请先处理前面的指令" }
         current.copy(status = InstructionStatus.Delivering)
     }
     fun markUnknown(id: String, revision: Long, detail: String) = change(id, revision, setOf(InstructionStatus.Delivering)) { it.copy(status = InstructionStatus.Unknown, detail = detail) }
+    fun confirmTerminalWrite(id: String, revision: Long) = change(id, revision, setOf(InstructionStatus.Delivering, InstructionStatus.Unknown)) {
+        it.copy(status = InstructionStatus.Sent, detail = "已投递到终端；回复以实际对话为准")
+    }
     fun notDelivered(id: String, revision: Long, reason: String) = change(id, revision, setOf(InstructionStatus.Delivering)) { it.copy(status = InstructionStatus.Local, detail = reason) }
     fun resolveManually(id: String, revision: Long) = change(id, revision, setOf(InstructionStatus.Unknown)) { it.copy(status = InstructionStatus.Resolved, detail = "用户已人工核对；未自动确认运行器接收") }
     fun recordDeliveryObservation(id: String, revision: Long, observation: String) = change(id, revision, setOf(InstructionStatus.Unknown)) {
@@ -105,7 +108,7 @@ internal class InstructionQueue(file: File) {
     /** Explicit steering may join a known in-flight turn, but never jump over an uncertain delivery. */
     fun beginSteering(id: String, revision: Long, turnId: String) = change(id, revision, setOf(InstructionStatus.Local)) { current ->
         check(entries.any { it.taskKey == current.taskKey && it.runtimeTurnId == turnId && it.runtimeTurnState == RuntimeTurnState.InProgress }) { "目标轮次已变化，不能引导" }
-        check(entries.firstOrNull { it.taskKey == current.taskKey && it.status !in setOf(InstructionStatus.Cancelled, InstructionStatus.Accepted, InstructionStatus.Resolved) }?.id == id) { "请先处理前面的指令" }
+        check(entries.firstOrNull { it.taskKey == current.taskKey && it.status !in setOf(InstructionStatus.Cancelled, InstructionStatus.Sent, InstructionStatus.Accepted, InstructionStatus.Resolved) }?.id == id) { "请先处理前面的指令" }
         current.copy(status = InstructionStatus.Delivering)
     }
 
@@ -202,3 +205,4 @@ internal class InstructionQueue(file: File) {
         }
     }
 }
+

@@ -41,6 +41,7 @@ internal fun PromptHistoryDialog(queue: InstructionQueue, taskKey: String, hasDr
                                     RuntimeTurnState.Failed -> "本轮失败"
                                     RuntimeTurnState.Interrupted -> "本轮已中断"
                                 }
+                                InstructionStatus.Sent -> "已投递到终端"
                                 InstructionStatus.Cancelled -> "已撤回"
                                 InstructionStatus.Resolved -> "已人工处理"
                             }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

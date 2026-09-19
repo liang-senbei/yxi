@@ -114,6 +114,13 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
     val ssh = conn.ssh
     val t = Tokens.current
     val scope = rememberCoroutineScope()
+    LaunchedEffect(taskKey, conn.status) {
+        if (conn.ssh.isConnected) instructions.entries.filter { it.taskKey == taskKey && it.status == InstructionStatus.Unknown }.take(20).forEach { item ->
+            try { reconcileTerminalInstruction(conn, session, instructions, item) }
+            catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (_: Exception) { /* Leave genuinely uncertain delivery unchanged. */ }
+        }
+    }
     // 按端点和运行实例记忆；看板刷新不重置，同名会话重建不能继承旧状态。
     val warmTranscript = remember(taskKey) { if (session.runtimeId.isNotBlank()) DesktopTranscriptMemory.get(taskKey)?.view else null }
     var items by remember(taskKey) { mutableStateOf(warmTranscript?.items.orEmpty()) }
@@ -370,7 +377,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
         try {
             val item = instructions.enqueue(taskNavigationKey(conn.host, session), text, attachments)
             draft = TextFieldValue(); Attach.removeDone(staged); sendErr = null
-            val first = instructions.entries.firstOrNull { it.taskKey == item.taskKey && it.status !in setOf(InstructionStatus.Accepted, InstructionStatus.Cancelled, InstructionStatus.Resolved) }
+            val first = instructions.entries.firstOrNull { it.taskKey == item.taskKey && it.status !in setOf(InstructionStatus.Sent, InstructionStatus.Accepted, InstructionStatus.Cancelled, InstructionStatus.Resolved) }
             if (!live.busy && pending == null && ssh.isConnected && first?.id == item.id) deliver(item)
         } catch (e: Exception) { sendErr = "指令未保存，输入已保留：${e.message}" }
     }
@@ -887,3 +894,4 @@ private fun summary(c: ChatItem.ToolCall): String {
     }
     return raw.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty().trim()
 }
+

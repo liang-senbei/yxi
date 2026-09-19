@@ -20,7 +20,7 @@ internal suspend fun deliverInstruction(conn: Conn, session: Session, queue: Ins
             when (raw.lineSequence().lastOrNull { it.startsWith("__YXI_DELIVERY__:") }) {
                 "__YXI_DELIVERY__:blocked" -> queue.notDelivered(started.id, started.revision, "任务或画面已变化，未投递；请核对后重试")
                 "__YXI_DELIVERY__:attachment" -> queue.notDelivered(started.id, started.revision, "附件不存在或无法读取，请重新上传")
-                "__YXI_DELIVERY__:terminal" -> queue.markUnknown(started.id, started.revision, "文本与回车已投递到终端，运行器接收尚待确认。请查看对话或终端后核对。")
+                "__YXI_DELIVERY__:terminal" -> queue.confirmTerminalWrite(started.id, started.revision)
                 "__YXI_DELIVERY__:reserved" -> queue.markUnknown(started.id, started.revision, "服务端已登记本指令，但没有完整写入记录；可能只写入了部分内容。请查看终端，不要重复发送。")
                 else -> queue.markUnknown(started.id, started.revision, "投递结果无法确认，请核对任务；不会自动重发")
             }
@@ -65,10 +65,10 @@ echo '__YXI_DELIVERY__:terminal'
 private fun deliveryJournalKey(session: Session, item: QueuedInstruction): String =
     contentHash((session.runtimeId + "\n" + item.taskKey + "\n" + item.id).toByteArray())
 
-internal suspend fun queryInstructionDelivery(conn: Conn, session: Session, item: QueuedInstruction): String {
+private suspend fun readInstructionDeliveryRecord(conn: Conn, session: Session, item: QueuedInstruction): String {
     check(item.taskKey == taskNavigationKey(conn.host, session)) { "任务身份已变化" }
     val key = deliveryJournalKey(session, item)
-    val result = conn.ssh.exec("""
+    return conn.ssh.exec("""
 record="${'$'}HOME/.yxi/instruction-deliveries/$key"
 if [ -f "${'$'}record/terminal" ]; then
     echo '__YXI_RECORD__:terminal'
@@ -76,6 +76,18 @@ if [ -f "${'$'}record/terminal" ]; then
 elif [ -d "${'$'}record" ]; then echo '__YXI_RECORD__:reserved'
 else echo '__YXI_RECORD__:missing'; fi
 """.trimIndent())
+}
+
+internal suspend fun reconcileTerminalInstruction(conn: Conn, session: Session, queue: InstructionQueue, item: QueuedInstruction) {
+    val result = readInstructionDeliveryRecord(conn, session, item)
+    if (result.lineSequence().any { it == "__YXI_RECORD__:terminal" }) {
+        val current = queue.entries.firstOrNull { it.id == item.id && it.status == InstructionStatus.Unknown } ?: return
+        queue.confirmTerminalWrite(current.id, current.revision)
+    }
+}
+
+internal suspend fun queryInstructionDelivery(conn: Conn, session: Session, item: QueuedInstruction): String {
+    val result = readInstructionDeliveryRecord(conn, session, item)
     return when {
         result.lineSequence().any { it == "__YXI_RECORD__:terminal" } -> "服务端记录：终端文字与回车已写入。运行器接收和执行仍需查看对话确认。\n" + result.lineSequence().filterNot { it.startsWith("__YXI_RECORD__:") }.joinToString("\n").take(100)
         result.lineSequence().any { it == "__YXI_RECORD__:reserved" } -> "服务端已登记本指令，但没有完整写入记录；可能只写入了部分内容。请查看终端，不要重复发送。"

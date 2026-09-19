@@ -178,7 +178,7 @@ internal class CodexTaskController(
     }
 
     private fun firstPending() = queue.entries.firstOrNull { it.taskKey == taskKey &&
-        it.status !in setOf(InstructionStatus.Accepted, InstructionStatus.Cancelled, InstructionStatus.Resolved) }
+        it.status !in setOf(InstructionStatus.Sent, InstructionStatus.Accepted, InstructionStatus.Cancelled, InstructionStatus.Resolved) }
 
     private fun scheduleNext() {
         if (!autoDispatch || !ready || disposed || sending || activeTurnId != null || pendingRequests.isNotEmpty()) return
@@ -392,3 +392,4 @@ internal class CodexTaskController(
     private fun limitedOutput(text: String) = if (text.length <= 65536) text else "[输出较长，仅显示末尾]\n" + text.takeLast(65536)
     private fun idKey(id: Any) = JSONObject().put("id", id).toString()
 }
+

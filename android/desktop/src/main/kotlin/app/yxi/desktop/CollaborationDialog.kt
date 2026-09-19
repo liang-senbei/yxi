@@ -141,6 +141,7 @@ fun CollaborationDialog(state: AppState, conn: Conn, initialGroup: String = "", 
                                         InstructionStatus.Delivering -> "投递中"
                                         InstructionStatus.Unknown -> "投递状态待确认"
                                         InstructionStatus.Accepted -> if (userMessage) "终端已写入 · 尚无处理回执" else "运行器已接收"
+                                        InstructionStatus.Sent -> "已投递到终端"
                                         InstructionStatus.Cancelled -> "已撤回"
                                         InstructionStatus.Resolved -> "已人工核对"
                                     }, style = MaterialTheme.typography.labelMedium)

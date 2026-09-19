@@ -237,6 +237,10 @@ private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend
     var secret by remember { mutableStateOf(original.apiKey) }
     var authToken by remember { mutableStateOf(original.token) }
     var model by remember { mutableStateOf(routeModel(original)) }
+    var mappingsOpen by remember { mutableStateOf(false) }
+    val mappings = remember { mutableStateMapOf<String, String>().apply {
+        listOf("HAIKU", "SONNET", "OPUS").forEach { alias -> put(alias, original.extraEnv().optString("ANTHROPIC_DEFAULT_${alias}_MODEL")) }
+    } }
     var memo by remember { mutableStateOf(original.note) }
     val effortKey = if (original.isCodex) "model_reasoning_effort" else "effortLevel"
     var effort by remember { mutableStateOf(original.extra.optString(effortKey)) }
@@ -249,6 +253,15 @@ private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend
             OutlinedTextField(secret, { secret = it }, label = { Text("API 密钥") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
             if (!original.isCodex) OutlinedTextField(authToken, { authToken = it }, label = { Text("Auth token（按提供方要求填写）") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
             OutlinedTextField(model, { model = it }, label = { Text("模型 ID（可留空）") }, singleLine = true)
+            if (!original.isCodex) {
+                TextButton({ mappingsOpen = !mappingsOpen }) { Text(if (mappingsOpen) "收起模型映射" else "模型映射 · Haiku / Sonnet / Opus") }
+                if (mappingsOpen) {
+                    Text("把 Claude 的模型档位映射到此线路的模型 ID，例如 glm-5.3-flash。留空使用运行器默认。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                    listOf("HAIKU", "SONNET", "OPUS").forEach { alias ->
+                        OutlinedTextField(mappings[alias].orEmpty(), { mappings[alias] = it }, label = { Text("$alias 对应模型") }, singleLine = true)
+                    }
+                }
+            }
             run {
                 OutlinedTextField(effort, { effort = it }, label = { Text("推理强度（可留空）") }, singleLine = true)
                 Text("按运行器与模型支持的值填写；更改后可能需要重开会话。留空移除此线路的强度设置。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
@@ -262,6 +275,15 @@ private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend
             try {
                 require(effort.none { it < ' ' }) { "推理强度不能包含控制字符" }
                 val edited = editedRoute(original, name, url, secret, model, authToken).copy(note = memo.trim())
+                if (!original.isCodex) {
+                    val env = edited.extra.optJSONObject("env") ?: org.json.JSONObject()
+                    mappings.forEach { (alias, value) ->
+                        require(value.none { it < ' ' }) { "模型映射不能包含控制字符" }
+                        val key = "ANTHROPIC_DEFAULT_${alias}_MODEL"
+                        if (value.isBlank()) env.remove(key) else env.put(key, value.trim())
+                    }
+                    if (env.length() == 0) edited.extra.remove("env") else edited.extra.put("env", env)
+                }
                 if (effort.isBlank()) edited.extra.remove(effortKey) else edited.extra.put(effortKey, effort.trim())
                 onSave(edited)
             }
