@@ -30,7 +30,7 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
     var creatingDirectory by remember(conn) { mutableStateOf<String?>(null) }
     if (projectGroups) CollaborationDialog(state, conn, initialGroup = selectedGroup) { projectGroups = false }
     creatingDirectory?.let { directory ->
-        NewSessionDialog(conn, onDismiss = { creatingDirectory = null; creatingGroup = "" }, initialDirectory = directory, collaborationGroup = creatingGroup,
+        NewSessionDialog(conn, onDismiss = { creatingDirectory = null; creatingGroup = "" }, initialDirectory = directory.takeIf { it.isNotBlank() }, collaborationGroup = creatingGroup,
             onCodexConversation = { path, prompt ->
                 creatingDirectory = null
                 state.prepareCodexTask(conn, path, prompt)
@@ -93,6 +93,10 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
     }
     if (!conn.groupsLoaded) {
         Text(conn.groupsError.ifBlank { "正在读取服务器分组…" }, Modifier.padding(16.dp), color = t.textMuted)
+        if (conn.groupsError.isNotBlank()) {
+            Text("暂列出全部 Agent，分组恢复后自动整理", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+            visible.forEach { task(it) }
+        }
         return
     }
     val groupedNames = conn.projectGroups.groups.values.flatten().toSet()

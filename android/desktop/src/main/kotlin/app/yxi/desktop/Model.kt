@@ -217,7 +217,7 @@ class Conn(val host: Host, hostKeys: HostKeys) {
                 require(org.json.JSONObject(raw).optJSONObject("groups") != null)
                 projectGroups = app.yxi.agent.Groups.parse(raw); groupsLoaded = true; groupsError = ""
             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
-            catch (_: Exception) { groupsError = "分组读取失败，可在主机菜单中刷新" }
+            catch (_: Exception) { lastGroupsRead = 0L; groupsError = "分组读取失败，可在主机菜单中刷新" }
         }
         val cursor = completionCursor
         if (cursor != null) {
