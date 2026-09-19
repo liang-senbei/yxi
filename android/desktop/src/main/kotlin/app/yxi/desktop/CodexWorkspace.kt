@@ -107,7 +107,7 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File) :
                 title.trim().ifBlank { directory.substringAfterLast('/').ifBlank { "新任务" } }, System.currentTimeMillis())
             registry.save(record)
             recoveryThreadId = ""
-            attach(conn, record, client)
+            attach(conn, record, client, thread.takeIf { it.optJSONArray("turns")?.length() == 0 && it.optJSONObject("status")?.optString("type") == "idle" })
             record
         } catch (e: Exception) { client.close(); throw e }
         finally { busy = false }
@@ -155,9 +155,9 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File) :
         finally { busy = false }
     }
 
-    private suspend fun attach(conn: Conn, record: CodexTaskRecord, client: CodexAppServer): CodexTaskController {
+    private suspend fun attach(conn: Conn, record: CodexTaskRecord, client: CodexAppServer, createdThread: JSONObject? = null): CodexTaskController {
         val controller = CodexTaskController(record.key, record.threadId, client, queue)
-        try { controller.reconcile() } catch (e: Exception) { controller.close(); throw e }
+        try { controller.reconcile(createdThread) } catch (e: Exception) { controller.close(); throw e }
         controllers[record.key] = controller; owners[record.key] = conn
         return controller
     }

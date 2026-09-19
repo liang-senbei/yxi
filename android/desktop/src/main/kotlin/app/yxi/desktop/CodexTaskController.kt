@@ -85,10 +85,19 @@ internal class CodexTaskController(
         }
     }
 
-    suspend fun reconcile() = mutation.withLock {
+    suspend fun reconcile(createdThread: JSONObject? = null) = mutation.withLock {
         ready = false
         val revision = eventRevision
-        val response = client.readThread(threadId)
+        // Fresh thread/start already returns the authoritative empty thread. CLI 0.153.4
+        // rejects includeTurns immediately after start (list_turns is not supported yet).
+        // Do not turn that unsupported history request into a failed creation.
+        if (createdThread != null) {
+            check(createdThread.getString("id") == threadId && createdThread.getJSONArray("turns").length() == 0 &&
+                createdThread.getJSONObject("status").getString("type") == "idle") { "新建任务初始状态未确认" }
+            check(queue.entries.none { it.taskKey == taskKey }) { "已有指令的任务必须读取历史核对" }
+        }
+        val response = if (createdThread == null) client.readThread(threadId)
+            else JSONObject().put("result", JSONObject().put("thread", createdThread))
         val thread = response.getJSONObject("result").getJSONObject("thread")
         check(thread.getString("id") == threadId) { "运行器返回了不同任务" }
         val turns = thread.getJSONArray("turns")

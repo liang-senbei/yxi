@@ -1024,3 +1024,9 @@
 
 - 任务列表显示等待答复、投递待核对、运行中及本地排队状态，新增“待处理”筛选便于找到审批/未知投递任务；状态来自实际控制器和持久队列，不从屏幕文字猜测。
 - 同时委派pilot在隔离空配置下用实际Codex命令检查新建空线程的read/resume兼容性，仅握手与线程元数据，不发送模型请求；补足模拟测试不能证明的兼容性边界。
+
+## 第一百四十四轮：真实CLI新建空线程兼容修复
+
+- pilot用Codex CLI0.153.4、临时HOME/CODEX_HOME和空凭据执行元数据流程，发现thread/start返回idle、turns=[]，随后thread/read(includeTurns=true)却报-32601 list_turns is not supported yet；新进程resume后read成功。没有turn/start或模型请求。
+- 新建路径现在直接用thread/start权威返回的空闲、空历史快照初始化控制器，不追加这个不兼容的read；已有任务仍按恢复/读取核对。仅ID一致、idle、空turns且本地无指令时可使用新建快照。
+- accfaf5候选包包含旧路径，可能新建后提示读取历史失败；已登记任务可从任务列表再次连接恢复。修复尚未打入包，需下一候选版；不能因模拟30项通过忽略真实CLI错误。
