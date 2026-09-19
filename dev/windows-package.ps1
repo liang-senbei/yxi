@@ -34,8 +34,10 @@ if (-not (Test-Path -LiteralPath $jpackage)) { throw "jpackage 不在 $jpackage 
 # 版本只认 jar 文件名（= build.gradle.kts packageVersion），顺带挡住把 Linux jar 拖上 Windows 的手误
 if ($jar -notmatch 'Yxi-windows-x64-(?<v>.+)\.jar$') { throw "文件名不是 Yxi-windows-x64-<版本>.jar：$jar（Windows 包要 -Pyxi.os=win 打）" }
 $v = $Matches.v
-# 包里真有 Windows 的 Skia 原生库才继续（jar 巨大，先查这个最便宜的错）
-$skiko = & (Join-Path $JdkPath 'bin/jar.exe') tf $jar | Select-String -Pattern '^org/jetbrains/skiko/skiko-windows-x64\.dll$'
+# 包里真有 Windows 的 Skia 原生库才继续（jar 巨大，先查这个最便宜的错）。
+# 位置实测在 uber jar 根（Compose 打包把 skiko 原生库提到根目录，带 .sha256 伴生文件），
+# 不在 org/jetbrains/skiko/ 下——按实际条目匹配，别"修"回包路径。
+$skiko = & (Join-Path $JdkPath 'bin/jar.exe') tf $jar | Select-String -Pattern '^skiko-windows-x64\.dll$'
 if (-not $skiko) { throw "$jar 里没有 skiko-windows-x64.dll —— 这是 Linux/mac 的 jar，重打：./gradlew -Pyxi.os=win :desktop:packageUberJarForCurrentOS" }
 
 New-Item -ItemType Directory -Path $out | Out-Null
