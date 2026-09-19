@@ -81,7 +81,10 @@ print('__YXI_GIT__:' + json.dumps({'root': root, 'files': files, 'diff': text, '
             Text("Git 改动", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
             TextButton({ revision++ }, enabled = !busy) { Text("刷新") }
         }
-        WorkbenchTabs(listOf("未暂存", "已暂存"), if (staged) "已暂存" else "未暂存", { staged = it == "已暂存" })
+        WorkbenchTabs(listOf("未暂存", "已暂存"), if (staged) "已暂存" else "未暂存", {
+            val next = it == "已暂存"
+            if (staged != next) { staged = next; file = "" }
+        })
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
         snapshot?.let { data ->
@@ -89,15 +92,19 @@ print('__YXI_GIT__:' + json.dumps({'root': root, 'files': files, 'diff': text, '
             SelectionContainer {
                 Text("${data.optString("branch").ifBlank { "分离 HEAD" }} · ${data.optString("head").take(12).ifBlank { "尚无提交" }}", style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
             }
-            val files = data.getJSONArray("files")
+            val entries = data.getJSONArray("files")
+            val files = (0 until entries.length()).map { entries.getJSONObject(it) }.filter { entry ->
+                val code = entry.getString("code")
+                if (staged) code.getOrNull(0)?.let { it != ' ' && it != '?' } == true
+                else code == "??" || code.getOrNull(1)?.let { it != ' ' && it != '?' } == true
+            }
             Column(Modifier.fillMaxWidth().heightIn(max = 180.dp).verticalScroll(rememberScrollState())) {
-                if (files.length() == 0) Text("当前没有工作区改动", style = MaterialTheme.typography.bodySmall)
-                for (index in 0 until files.length()) {
-                    val entry = files.getJSONObject(index)
+                if (files.isEmpty()) Text(if (staged) "没有已暂存改动" else "没有未暂存改动", style = MaterialTheme.typography.bodySmall)
+                for (entry in files) {
                     TextButton({ file = entry.getString("path") }) { Text("${entry.getString("code")}  ${entry.getString("path")}") }
                 }
             }
-            if (file.isNotBlank()) {
+            if (file.isNotBlank() && files.any { it.getString("path") == file }) {
                 TextButton({ openFile(data.getString("root").trimEnd('/') + "/" + file) }) { Text("打开文件 · $file") }
                 if (data.optBoolean("clipped")) Text("差异较长，显示前 256 KiB", style = MaterialTheme.typography.labelSmall)
                 val diff = data.getString("diff")
