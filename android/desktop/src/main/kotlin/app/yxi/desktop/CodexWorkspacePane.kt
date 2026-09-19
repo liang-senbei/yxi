@@ -3,6 +3,8 @@ package app.yxi.desktop
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -17,6 +19,7 @@ import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collect
 import org.json.JSONObject
 import com.mikepenz.markdown.m3.Markdown
 
@@ -69,6 +72,26 @@ private fun CodexConversationPane(state: AppState) {
     val tasks = conn?.let { workspace.tasks(it.host) }.orEmpty()
     val selected = tasks.firstOrNull { it.key == state.codexSelectedTaskKey }
     val controller = selected?.let { workspace.controllers[it.key] }
+    val conversationScroll = rememberLazyListState()
+    val dragging by conversationScroll.interactionSource.collectIsDraggedAsState()
+    var followLatest by remember(selected?.key) { mutableStateOf(true) }
+    var observedIndex by remember(selected?.key) { mutableStateOf(0) }
+    var observedOffset by remember(selected?.key) { mutableStateOf(0) }
+    // Mouse wheel and scrollbar navigation must also disable following, not only touch dragging.
+    LaunchedEffect(conversationScroll, selected?.key) {
+        snapshotFlow { Triple(conversationScroll.firstVisibleItemIndex, conversationScroll.firstVisibleItemScrollOffset, conversationScroll.isScrollInProgress) }
+            .collect { (index, offset, scrolling) ->
+                if (scrolling && (index < observedIndex || index == observedIndex && offset < observedOffset)) followLatest = false
+                if (scrolling && !conversationScroll.canScrollForward) followLatest = true
+                observedIndex = index; observedOffset = offset
+            }
+    }
+    LaunchedEffect(dragging) { if (dragging) followLatest = false }
+    val messages = controller?.messages?.toList().orEmpty()
+    val requests = controller?.pendingRequests?.values?.toList().orEmpty()
+    LaunchedEffect(selected?.key, messages.lastOrNull(), messages.size, requests.size, followLatest, showFiles) {
+        if (followLatest && !dragging && !showFiles) conversationScroll.scrollToItem(messages.size + requests.size)
+    }
     fun openTaskFile(path: String) {
         val target = conn ?: return
         val task = selected ?: return
@@ -166,8 +189,8 @@ private fun CodexConversationPane(state: AppState) {
             }
             if (showFiles && conn != null) Box(Modifier.weight(1f).fillMaxWidth()) {
                 key(selected.key) { FilesPane(conn, selected.key, selected.directory, ::openTaskFile) }
-            } else LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                items(controller?.messages?.toList().orEmpty(), key = { it.id }) { message ->
+            } else LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = conversationScroll, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                items(messages, key = { "message:" + it.id }) { message ->
                     if (message.kind != "message") CodexActivityCard(message, ::openTaskFile)
                     else
                     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -179,7 +202,7 @@ private fun CodexConversationPane(state: AppState) {
                         }
                     }
                 }
-                items(controller?.pendingRequests?.values?.toList().orEmpty(), key = { it.get("id").toString() }) { request ->
+                items(requests, key = { "request:" + it.get("id").toString() }) { request ->
                     val method = request.optString("method")
                     val supported = method == "item/commandExecution/requestApproval" || method == "item/fileChange/requestApproval"
                     OutlinedCard(Modifier.fillMaxWidth()) {
@@ -207,6 +230,10 @@ private fun CodexConversationPane(state: AppState) {
                         }
                     }
                 }
+                item(key = "latest") { Spacer(Modifier.height(1.dp)) }
+            }
+            if (!showFiles && !followLatest) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                TextButton({ followLatest = true }) { Text("回到最新消息 ↓") }
             }
             if (controller != null) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(controller.autoDispatch, { controller.setAutoDispatch(it) }, enabled = controller.ready)
