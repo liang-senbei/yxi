@@ -9,6 +9,7 @@ import java.io.File
 import java.util.UUID
 
 internal enum class InstructionStatus { Local, Delivering, Unknown, Accepted, Cancelled, Resolved }
+internal enum class RuntimeTurnState { None, InProgress, Completed, Failed, Interrupted }
 internal data class InstructionAttachment(val name: String, val remotePath: String)
 internal data class QueuedInstruction(
     val id: String, val taskKey: String, val text: String,
@@ -17,6 +18,8 @@ internal data class QueuedInstruction(
     val revision: Long = 0, val detail: String = "",
     val deliveryObservation: String = "", val deliveryObservedAt: Long = 0,
     val assignmentGroup: String = "", val assignmentHost: String = "", val sourceTask: String = "",
+    val runtimeTurnId: String = "", val runtimeTurnState: RuntimeTurnState = RuntimeTurnState.None,
+    val runtimeCompletion: String = "",
 )
 
 /** Durable outbox, not a claim about a runner's remote queue. Network adapters must
@@ -71,6 +74,7 @@ internal class InstructionQueue(file: File) {
         it.copy(status = InstructionStatus.Local, detail = "已撤销本地撤回，等待发送")
     }
     fun beginDelivery(id: String, revision: Long) = change(id, revision, setOf(InstructionStatus.Local)) { current ->
+        check(entries.none { it.taskKey == current.taskKey && it.runtimeTurnState == RuntimeTurnState.InProgress }) { "上一轮尚未结束，指令继续等待" }
         check(entries.firstOrNull { it.taskKey == current.taskKey && it.status !in setOf(InstructionStatus.Cancelled, InstructionStatus.Accepted, InstructionStatus.Resolved) }?.id == id) { "请先处理前面的指令" }
         current.copy(status = InstructionStatus.Delivering)
     }
@@ -83,6 +87,32 @@ internal class InstructionQueue(file: File) {
     fun confirmAccepted(id: String, revision: Long, receipt: String) = change(id, revision, setOf(InstructionStatus.Delivering, InstructionStatus.Unknown)) {
         require(receipt.isNotBlank()) { "缺少运行器接收凭据" }
         it.copy(status = InstructionStatus.Accepted, detail = receipt)
+    }
+
+    /** Call only with a correlated runtime turn response, never a terminal-write acknowledgement. */
+    fun confirmRuntimeAccepted(id: String, revision: Long, turnId: String, receipt: String) =
+        change(id, revision, setOf(InstructionStatus.Delivering, InstructionStatus.Unknown)) {
+            require(turnId.isNotBlank() && receipt.isNotBlank()) { "缺少运行器轮次 ID 或接收凭据" }
+            it.copy(status = InstructionStatus.Accepted, detail = receipt, runtimeTurnId = turnId,
+                runtimeTurnState = RuntimeTurnState.InProgress)
+        }
+
+    /** Explicit steering may join a known in-flight turn, but never jump over an uncertain delivery. */
+    fun beginSteering(id: String, revision: Long, turnId: String) = change(id, revision, setOf(InstructionStatus.Local)) { current ->
+        check(entries.any { it.taskKey == current.taskKey && it.runtimeTurnId == turnId && it.runtimeTurnState == RuntimeTurnState.InProgress }) { "目标轮次已变化，不能引导" }
+        check(entries.firstOrNull { it.taskKey == current.taskKey && it.status !in setOf(InstructionStatus.Cancelled, InstructionStatus.Accepted, InstructionStatus.Resolved) }?.id == id) { "请先处理前面的指令" }
+        current.copy(status = InstructionStatus.Delivering)
+    }
+
+    @Synchronized fun completeRuntimeTurn(taskKey: String, turnId: String, outcome: RuntimeTurnState, receipt: String): Boolean {
+        require(outcome in setOf(RuntimeTurnState.Completed, RuntimeTurnState.Failed, RuntimeTurnState.Interrupted))
+        require(turnId.isNotBlank() && receipt.isNotBlank())
+        val matching = entries.filter { it.taskKey == taskKey && it.runtimeTurnId == turnId &&
+            it.status == InstructionStatus.Accepted && it.runtimeTurnState == RuntimeTurnState.InProgress }.map { it.id }.toSet()
+        if (matching.isEmpty()) return false
+        commit(entries.map { if (it.id in matching) it.copy(runtimeTurnState = outcome,
+            runtimeCompletion = receipt, revision = it.revision + 1) else it })
+        return true
     }
     @Synchronized fun moveBefore(id: String, revision: Long, beforeId: String) {
         val current = entries.single { it.id == id }
@@ -108,6 +138,7 @@ internal class InstructionQueue(file: File) {
                 .put("revision", item.revision).put("detail", item.detail)
                 .put("deliveryObservation", item.deliveryObservation).put("deliveryObservedAt", item.deliveryObservedAt)
                 .put("assignmentGroup", item.assignmentGroup).put("assignmentHost", item.assignmentHost).put("sourceTask", item.sourceTask)
+                .put("runtimeTurnId", item.runtimeTurnId).put("runtimeTurnState", item.runtimeTurnState.name).put("runtimeCompletion", item.runtimeCompletion)
                 .put("attachments", JSONArray(item.attachments.map { JSONObject().put("name", it.name).put("remotePath", it.remotePath) }))
         })).toString(2)
         private fun decode(raw: String): List<QueuedInstruction> {
@@ -121,9 +152,11 @@ internal class InstructionQueue(file: File) {
                     (0 until attachments.length()).map { attachments.getJSONObject(it).let { a -> InstructionAttachment(a.getString("name"), a.getString("remotePath")) } },
                     InstructionStatus.valueOf(item.getString("status")), item.getLong("revision"), item.getString("detail"),
                     item.optString("deliveryObservation", ""), item.optLong("deliveryObservedAt", 0),
-                    item.optString("assignmentGroup", ""), item.optString("assignmentHost", ""), item.optString("sourceTask", ""))
+                    item.optString("assignmentGroup", ""), item.optString("assignmentHost", ""), item.optString("sourceTask", ""),
+                    item.optString("runtimeTurnId", ""), RuntimeTurnState.valueOf(item.optString("runtimeTurnState", "None")), item.optString("runtimeCompletion", ""))
                     .also { q ->
                         require(q.id.isNotBlank() && q.taskKey.isNotBlank() && q.revision >= 0)
+                        require(q.runtimeTurnState == RuntimeTurnState.None || (q.runtimeTurnId.isNotBlank() && q.status == InstructionStatus.Accepted))
                         require(q.text.isNotBlank() || q.attachments.isNotEmpty())
                         require(q.attachments.all { it.name.isNotBlank() && it.remotePath.startsWith('/') && '\u0000' !in it.remotePath })
                     }

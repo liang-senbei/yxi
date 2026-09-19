@@ -20,7 +20,7 @@ import kotlinx.coroutines.CancellationException
 @Composable
 internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliver: Boolean, onDeliver: (QueuedInstruction) -> Unit, onQuery: (suspend (QueuedInstruction) -> String)? = null) {
     val t = Tokens.current
-    val active = queue.entries.filter { it.taskKey == taskKey && it.status !in setOf(InstructionStatus.Accepted, InstructionStatus.Cancelled, InstructionStatus.Resolved) }
+    val active = queue.entries.filter { it.taskKey == taskKey && (it.runtimeTurnState == RuntimeTurnState.InProgress || it.status !in setOf(InstructionStatus.Accepted, InstructionStatus.Cancelled, InstructionStatus.Resolved)) }
     var expanded by remember(taskKey) { mutableStateOf(false) }
     var editing by remember(taskKey) { mutableStateOf<QueuedInstruction?>(null) }
     var text by remember(taskKey) { mutableStateOf("") }
@@ -44,7 +44,7 @@ internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliv
     if (active.isNotEmpty()) Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp).heightIn(max = 220.dp)
         .background(t.surface1, RoundedCornerShape(12.dp)).border(0.5.dp, t.border, RoundedCornerShape(12.dp))) {
         Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("待处理 · ${active.size}", style = MaterialTheme.typography.labelMedium, color = t.textMuted, modifier = Modifier.weight(1f))
+            Text("指令 · ${active.size}", style = MaterialTheme.typography.labelMedium, color = t.textMuted, modifier = Modifier.weight(1f))
             if (active.size > 3) TextButton({ expanded = !expanded }) { Text(if (expanded) "收起" else "展开全部") }
         }
         androidx.compose.foundation.lazy.LazyColumn {
@@ -54,7 +54,7 @@ internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliv
                 Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f).clickable { editing = item; text = item.text; error = "" }.padding(vertical = 6.dp)) {
                         Text(item.text.ifBlank { "${item.attachments.size} 个附件" }, maxLines = 1, overflow = TextOverflow.Ellipsis, color = t.textPrimary, style = MaterialTheme.typography.bodyMedium)
-                        Text(when(item.status) { InstructionStatus.Local -> "本地待发送"; InstructionStatus.Delivering -> "投递中"; else -> "状态待确认" } + if (item.attachments.isEmpty()) "" else " · ${item.attachments.size} 个附件", color = t.textMuted, style = MaterialTheme.typography.labelSmall)
+                        Text(when(item.status) { InstructionStatus.Local -> "本地待发送"; InstructionStatus.Delivering -> "投递中"; InstructionStatus.Accepted -> "运行器已接收 · 本轮进行中"; else -> "状态待确认" } + if (item.attachments.isEmpty()) "" else " · ${item.attachments.size} 个附件", color = t.textMuted, style = MaterialTheme.typography.labelSmall)
                     }
                     if (item.status == InstructionStatus.Local && index == 0) TextButton({ onDeliver(item) }, enabled = canDeliver) { Text("发送") }
                     TextButton({ editing = item; text = item.text; error = "" }) { Text(if (item.status == InstructionStatus.Local) "编辑" else "核对") }
