@@ -1,6 +1,10 @@
 package app.yxi.desktop
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -17,6 +21,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.input.key.*
 import kotlinx.coroutines.CancellationException
@@ -29,6 +34,7 @@ import com.mikepenz.markdown.m3.Markdown
 
 @Composable
 internal fun CodexWorkspacePane(state: AppState) {
+    val density = LocalDensity.current.density
     val conn = state.conn
     val task = conn?.let { state.codexWorkspace.tasks(it.host).firstOrNull { task -> task.key == state.codexSelectedTaskKey } }
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -38,7 +44,9 @@ internal fun CodexWorkspacePane(state: AppState) {
         Row(Modifier.fillMaxSize()) {
             if (!panel || !compact) Box(Modifier.weight(1f).fillMaxHeight()) { CodexConversationPane(state) }
             if (panel && conn != null && task != null) {
-                VerticalDivider()
+                if (!compact) Box(Modifier.width(6.dp).fillMaxHeight().background(Tokens.current.border).draggable(
+                    rememberDraggableState { delta -> state.filePanelWidth = (state.filePanelWidth - delta / density).coerceIn(340f, 900f) },
+                    Orientation.Horizontal, onDragStopped = { state.savePreviewWidth() }))
                 Box(if (compact) Modifier.fillMaxSize() else Modifier.width(panelWidth).fillMaxHeight()) {
                     key(task.key, state.browserPanelOpen) {
                         if (state.browserPanelOpen) BrowserPane(state, conn, task.key, task.directory) { state.appendCodexQuote(task, it) }
@@ -141,6 +149,7 @@ private fun CodexConversationPane(state: AppState) {
         if (workspace.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (workspace.registry.error.isNotBlank()) Text(workspace.registry.error, color = Tokens.current.danger)
         if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
+        if (state.workspaceError.isNotBlank()) Text(state.workspaceError, color = Tokens.current.danger)
         if (workspace.recoveryThreadId.isNotBlank()) SelectionContainer {
             Text("任务已在服务器创建，请保留恢复编号：${workspace.recoveryThreadId}")
         }
