@@ -64,12 +64,17 @@ import java.util.Locale
  */
 @Composable
 fun FilesPane(conn: Conn, sess: Session, onOpen: ((String) -> Unit)? = null) {
+    FilesPane(conn, taskNavigationKey(conn.host, sess), sess.cwd, onOpen)
+}
+
+@Composable
+internal fun FilesPane(conn: Conn, taskKey: String, directory: String, onOpen: ((String) -> Unit)? = null) {
     val t = Tokens.current
     val scope = rememberCoroutineScope()
 
     // 一条 SFTP 通道跟着这个连接走；换主机就换一条，离开这一屏就关掉（通道不关会一直占着服务器的 fd）
     var sftp by remember(conn) { mutableStateOf<Sftp?>(null) }
-    var path by remember(conn, sess.name) { mutableStateOf(sess.cwd.ifBlank { "." }) }
+    var path by remember(conn, taskKey) { mutableStateOf(directory.ifBlank { "." }) }
     var entries by remember(conn) { mutableStateOf<List<Sftp.Entry>>(emptyList()) }
     var busy by remember(conn) { mutableStateOf(true) }
     var note by remember(conn) { mutableStateOf("") }
@@ -94,7 +99,7 @@ fun FilesPane(conn: Conn, sess: Session, onOpen: ((String) -> Unit)? = null) {
         busy = false
     }
 
-    LaunchedEffect(conn, sess.name) { load(path) }
+    LaunchedEffect(conn, taskKey) { load(path) }
 
     // ⚠️ **预览要盖在列表上，得有个 Box 收着。** 原来 `preview?.let { … }` 跟 Column 平级发射，
     //    父布局（App 里那个 fillMaxSize 的 Column）把它排到了已经占满高度的列表**下面** ——

@@ -12,10 +12,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import com.mikepenz.markdown.m3.Markdown
 
 @Composable
 internal fun CodexWorkspacePane(state: AppState) {
@@ -53,6 +56,7 @@ private fun CodexConversationPane(state: AppState) {
     var title by remember { mutableStateOf("") }
     var filePath by remember(state.codexSelectedTaskKey) { mutableStateOf("") }
     var fileEntry by remember(state.codexSelectedTaskKey) { mutableStateOf(false) }
+    var showFiles by remember(state.codexSelectedTaskKey) { mutableStateOf(false) }
     fun act(block: suspend () -> Unit) {
         scope.launch {
             error = ""
@@ -65,6 +69,28 @@ private fun CodexConversationPane(state: AppState) {
     val tasks = conn?.let { workspace.tasks(it.host) }.orEmpty()
     val selected = tasks.firstOrNull { it.key == state.codexSelectedTaskKey }
     val controller = selected?.let { workspace.controllers[it.key] }
+    fun openTaskFile(path: String) {
+        val target = conn ?: return
+        val task = selected ?: return
+        act {
+            state.openCodexDocument(target, task, path)
+            if (state.conn === target && state.codexSelectedTaskKey == task.key) {
+                state.filePanelOpen = true; state.browserPanelOpen = false
+            }
+        }
+    }
+    val externalUris = LocalUriHandler.current
+    val taskUris = object : UriHandler {
+        override fun openUri(uri: String) {
+            val parsed = runCatching { java.net.URI(uri) }.getOrNull()
+            when {
+                parsed == null -> error = "无法识别链接"
+                parsed.scheme in listOf("http", "https", "mailto") -> runCatching { externalUris.openUri(uri) }.onFailure { error = it.message.orEmpty() }
+                parsed.scheme == null && !parsed.path.isNullOrBlank() -> openTaskFile(parsed.path)
+                else -> error = "暂不支持此链接，请从文件列表打开"
+            }
+        }
+    }
     LaunchedEffect(controller, state.instructions.entries.toList()) { controller?.queueChanged() }
     Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -85,6 +111,7 @@ private fun CodexConversationPane(state: AppState) {
             OutlinedTextField(title, { title = it }, label = { Text("任务名称") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(directory, { directory = it }, label = { Text("服务器项目目录") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton({ showFiles = !showFiles }) { Text(if (showFiles) "返回对话" else "项目文件") }
                 Button({
                     val target = conn
                     val path = directory.trim()
@@ -137,11 +164,17 @@ private fun CodexConversationPane(state: AppState) {
                     TextButton({ if (conn != null) act { workspace.open(conn, selected) } }, enabled = !workspace.busy && conn?.ssh?.isConnected == true) { Text("连接任务") }
                 }
             }
-            LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            if (showFiles && conn != null) Box(Modifier.weight(1f).fillMaxWidth()) {
+                key(selected.key) { FilesPane(conn, selected.key, selected.directory, ::openTaskFile) }
+            } else LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 items(controller?.messages?.toList().orEmpty(), key = { it.id }) { message ->
                     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                         Text(message.author, color = Tokens.current.textMuted, style = MaterialTheme.typography.labelMedium)
-                        SelectionContainer { Text(message.text) }
+                        CompositionLocalProvider(LocalUriHandler provides taskUris) {
+                            SelectionContainer {
+                                if (message.author == "Codex") Markdown(message.text) else Text(message.text)
+                            }
+                        }
                     }
                 }
                 items(controller?.pendingRequests?.values?.toList().orEmpty(), key = { it.get("id").toString() }) { request ->
@@ -164,6 +197,8 @@ private fun CodexConversationPane(state: AppState) {
                             if (supported && controller != null) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button({ act { controller.answerRequest(request.get("id"), JSONObject().put("decision", "accept")) } }, enabled = controller.ready) { Text("仅允许本次") }
                                 OutlinedButton({ act { controller.answerRequest(request.get("id"), JSONObject().put("decision", "decline")) } }, enabled = controller.ready) { Text("拒绝") }
+                            } else if (method == "item/tool/requestUserInput" && controller != null) {
+                                CodexQuestionForm(controller, request)
                             } else Text("此类输入暂未接入，可中断当前轮次后调整任务。", color = Tokens.current.textMuted)
                         }
                     }
