@@ -72,11 +72,11 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
         check(conn.sessions.none { it.state == app.yxi.agent.SessionState.Working && it.isCodex == (targetEngine == Lines.CODEX) && (targetScope == null || it.cwd == targetScope) }) { "目标范围内仍有 Agent 正在工作，请等本轮结束后再应用配置。" }
         val result = if (targetEngine == Lines.CODEX) {
             Lines.applyCodex(conn.ssh, line)?.let { error(it) }
-            "配置已写入；Codex 需要重开会话后才能生效。尚未验证模型请求。"
+            "配置已写入；已有历史的 Codex 对话可回到对话页点击“在此对话应用当前服务器线路”，或新建任务使用。尚未验证模型请求。"
         } else {
             val changed = Lines.apply(conn.ssh, line, targetScope, catalog)
             changed.err?.let { error(it) }
-            if (changed.restart.isNotEmpty()) "配置已写入；${changed.restart.joinToString()} 需要重开会话后生效。尚未验证模型请求。"
+            if (changed.restart.isNotEmpty()) "配置已写入；${changed.restart.joinToString()} 需要重新连接后生效。Codex 对话可回到对话页应用当前服务器线路。尚未验证模型请求。"
             else "配置已写入，后续请求的生效情况仍需验证。"
         }
         reload(targetScope)

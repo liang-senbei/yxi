@@ -136,11 +136,11 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File,
         check(previous != null && owners[record.key] === conn) { "请先打开原任务" }
         busy = true
         try {
-            previous.closeForConfigurationChange()
-            controllers.remove(record.key); owners.remove(record.key)
             val client = clientFactory(conn)
             try {
                 val overrides = client.readResumeOverrides(record.directory)
+                previous.closeForConfigurationChange()
+                controllers.remove(record.key); owners.remove(record.key)
                 val result = client.resumeThread(record.threadId, overrides).getJSONObject("result")
                 val thread = result.getJSONObject("thread")
                 check(thread.getString("id") == record.threadId && normalizeProjectPath(thread.getString("cwd")) == normalizeProjectPath(record.directory)) { "恢复响应与原任务不一致" }
