@@ -18,6 +18,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.input.key.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
@@ -249,21 +250,52 @@ private fun CodexConversationPane(state: AppState) {
                 canDeliver = controller?.ready == true && !controller.sending && controller.activeTurnId == null && controller.pendingRequests.isEmpty(),
                 onDeliver = { instruction -> if (controller != null) act { controller.sendNext(instruction.id) } })
             val draft = state.chatDrafts.getOrPut(selected.key) { mutableStateOf(TextFieldValue()) }
+            var voiceOpen by remember(selected.key) { mutableStateOf(false) }
+            var historyOpen by remember(selected.key) { mutableStateOf(false) }
+            if (voiceOpen && conn != null) VoiceInputDialog(conn, { voiceOpen = false }) { text ->
+                state.appendCodexQuote(selected, text)
+                voiceOpen = false
+            }
+            if (historyOpen) PromptHistoryDialog(state.instructions, selected.key, draft.value.text.isNotBlank(), { historyOpen = false }) { text, replace ->
+                if (replace) draft.value = TextFieldValue(text, androidx.compose.ui.text.TextRange(text.length))
+                else state.appendCodexQuote(selected, text)
+                historyOpen = false
+            }
             val attachments = workspace.attachments[selected.key]
             val allUploaded = attachments.orEmpty().all { it.state is DraftState.Done }
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                TextButton({ if (conn != null) {
-                    Attach.pickFiles().forEach { file ->
-                        runCatching { workspace.stageImage(conn, selected, Attach.fromFile(file)) }.onFailure { error = it.message.orEmpty() }
-                    }
-                } }, enabled = conn?.ssh?.isConnected == true) { Text("添加图片") }
-                TextButton({ if (conn != null && Attach.pasteBusy.compareAndSet(false, true)) act {
+            fun pasteImage() {
+                if (conn == null || !conn.ssh.isConnected || !Attach.pasteBusy.compareAndSet(false, true)) return
+                act {
                     try {
                         val image = Attach.clipboardImage() ?: throw IllegalStateException("剪贴板中没有图片")
                         val bytes = withContext(Dispatchers.Default) { Attach.pngBytes(image) }
                         workspace.stageImage(conn, selected, Attach.fromPastedImage(bytes))
                     } finally { Attach.pasteBusy.set(false) }
-                } }, enabled = conn?.ssh?.isConnected == true && !Attach.pasteBusy.get()) { Text("粘贴图片") }
+                }
+            }
+            fun enqueueDraft() {
+                try {
+                    check(allUploaded) { "请等待图片上传完成，或移除失败图片" }
+                    if (draft.value.text.isBlank() && attachments.isNullOrEmpty()) return
+                    val images = attachments.orEmpty().map { attachment ->
+                        InstructionAttachment(attachment.name, (attachment.state as DraftState.Done).staged.remotePath)
+                    }
+                    state.instructions.enqueue(selected.key, draft.value.text, images)
+                    draft.value = TextFieldValue()
+                    attachments?.clear()
+                    controller?.queueChanged()
+                    error = ""
+                } catch (e: Exception) { error = e.message.orEmpty() }
+            }
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                TextButton({ voiceOpen = true }, enabled = conn?.ssh?.isConnected == true) { Text("语音输入") }
+                TextButton({ historyOpen = true }) { Text("历史提示词") }
+                TextButton({ if (conn != null) {
+                    Attach.pickFiles().forEach { file ->
+                        runCatching { workspace.stageImage(conn, selected, Attach.fromFile(file)) }.onFailure { error = it.message.orEmpty() }
+                    }
+                } }, enabled = conn?.ssh?.isConnected == true) { Text("添加图片") }
+                TextButton(::pasteImage, enabled = conn?.ssh?.isConnected == true && !Attach.pasteBusy.get()) { Text("粘贴图片") }
             }
             if (!attachments.isNullOrEmpty()) Column(Modifier.heightIn(max = 140.dp).verticalScroll(rememberScrollState())) {
                 attachments.toList().forEach { attachment ->
@@ -282,22 +314,18 @@ private fun CodexConversationPane(state: AppState) {
                     }
                 }
             }
-            OutlinedTextField(draft.value, { draft.value = it }, modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp),
+            OutlinedTextField(draft.value, { draft.value = it }, modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp).onPreviewKeyEvent { event ->
+                when {
+                    event.type != KeyEventType.KeyDown -> false
+                    event.isCtrlPressed && event.key == Key.V && Attach.hasClipboardImage() -> { pasteImage(); true }
+                    event.isCtrlPressed && event.key == Key.Enter && draft.value.composition == null -> { enqueueDraft(); true }
+                    else -> false
+                }
+            },
                 placeholder = { Text("描述任务，或补充下一步要求…") })
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                Button({
-                    try {
-                        check(allUploaded) { "请等待图片上传完成，或移除失败图片" }
-                        val images = attachments.orEmpty().map { attachment ->
-                            InstructionAttachment(attachment.name, (attachment.state as DraftState.Done).staged.remotePath)
-                        }
-                        state.instructions.enqueue(selected.key, draft.value.text, images)
-                        draft.value = TextFieldValue()
-                        attachments?.clear()
-                        controller?.queueChanged()
-                        error = ""
-                    } catch (e: Exception) { error = e.message.orEmpty() }
-                }, enabled = allUploaded && (draft.value.text.isNotBlank() || !attachments.isNullOrEmpty())) { Text(if (controller?.autoDispatch == true) "发送到队列" else "加入队列") }
+                Text("Ctrl+Enter 加入队列", Modifier.padding(10.dp), style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                Button(::enqueueDraft, enabled = allUploaded && (draft.value.text.isNotBlank() || !attachments.isNullOrEmpty())) { Text(if (controller?.autoDispatch == true) "发送到队列" else "加入队列") }
             }
         }
     }
