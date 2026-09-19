@@ -233,8 +233,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
     // 「等你选 / 在忙」只有屏幕知道（tool_use 要等工具跑完才落转录）：推流优先，断了退回轮询，连接回来再试推流
     LaunchedEffect(taskKey, ssh) {
         fun apply(p: Pending?, l: Live) {
-            // 一轮结束 = 从忙变成等输入、且没有在等审批；只在这一下发，状态不变不重发。措辞照 ZCode：任务已完成 / 任务: 名字
-            if (seen.busy && !l.busy && p == null) Notify.notify("任务已完成", "任务: ${session.short}", conn.host.id, session.name)
+            // 轮次结束通知由 Conn 的服务器事件统一触发，避免只打开当前对话才有提醒。
             seen.busy = l.busy
             pending = p; live = l
             if (awaitFp != null && p?.fingerprint != awaitFp) { awaitFp = null; keyBusy = false }   // 动作生效了就解锁

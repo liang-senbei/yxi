@@ -173,6 +173,7 @@ class Conn(val host: Host, hostKeys: HostKeys) {
     // 自己一个 scope，不挂在 Composable 的 LaunchedEffect 上：侧栏收起（Ctrl+B）时 Sidebar 整个不在组合里，
     // 挂那儿的循环会跟着停 —— 收着侧栏就既不刷新也不重连。Swing 线程上写状态，跟界面同一条线。
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
+    private var completionCursor: Double? = null
 
     // finally 里再断一次：close() 撞上正在握手的 connect() 时，jsch 会在 IO 线程上把握手做完再把 session 装上，
     // 那条连接就没人管了（心跳线程一直活到进程退出）。协程被取消后从这里补一刀。
@@ -203,7 +204,20 @@ class Conn(val host: Host, hostKeys: HostKeys) {
     /** 抓一次会话列表。抓不全 = 连接八成半死（exec 在 core 里不抛只返回空），掐掉让 [loop] 走重连。 */
     suspend fun refresh() {
         if (!ssh.isConnected) return
-        val fresh = catching { SessionProbe.snapshot(ssh) }.getOrElse { ssh.disconnect(); return }
+        val snapshot = catching { SessionProbe.snapshotFull(ssh) }.getOrElse { ssh.disconnect(); return }
+        val fresh = snapshot.sessions
+        val cursor = completionCursor
+        if (cursor != null) {
+            snapshot.completions.filter { it.timestamp > cursor }.sortedBy { it.timestamp }.forEach { event ->
+                val task = fresh.firstOrNull { it.name == event.session } ?: return@forEach
+                val createdAt = task.runtimeId.substringAfterLast(':').toDoubleOrNull() ?: return@forEach
+                if (event.timestamp < createdAt) return@forEach
+                val preview = event.preview.replace(Regex("\\s+"), " ").trim().take(100)
+                Notify.notify("本轮处理结束", "任务: ${task.short}" + if (preview.isBlank()) "" else " · $preview", host.id, task.name)
+            }
+        }
+        // Establish an initial baseline silently; reconnects retain this connection's cursor.
+        completionCursor = maxOf(cursor ?: 0.0, snapshot.completions.maxOfOrNull { it.timestamp } ?: 0.0)
         // 刚变成「等你」的会话发一条桌面通知，只在变化那一刻发一次。看的是「之前不是等你」而不是「之前在运行」：
         // 5 秒一轮询，发完话它 3 秒内就来问权限的话，中间那个「运行中」根本抓不到。
         val was = sessions.associateBy { it.name }

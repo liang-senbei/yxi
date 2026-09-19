@@ -39,6 +39,7 @@ fun SettingsDialog(state: AppState) {
                 Choice("主题", listOf("system" to "跟随系统", "light" to "浅色", "dark" to "深色"), Store.pref("theme", "system")) { Store.setPref("theme", it) }
                 Section("通知")
                 Choice("轮次完成 / 需要你处理", listOf("always" to "始终", "unfocused" to "仅在未聚焦时", "never" to "从不"), Store.pref("notify", "unfocused")) { Store.setPref("notify", it) }
+                Text("轮次结束提醒需要服务器的 yxi-hook 事件；首次连接不补弹历史。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 // 版本号（老板 09-12：设置里要有）。`java -jar` 跑没有 jpackage 属性，显示「开发版」
                 Text(
                     "Yxi " + (Updater.version.takeIf { it != "dev" }?.let { "v$it" } ?: "开发版"),

@@ -111,11 +111,14 @@ object SessionProbe {
     """.trimIndent()
 
     /** 一次抓取拿到的全部东西：会话 + 分组表。 */
+    data class CompletionEvent(val session: String, val timestamp: Double, val preview: String)
+
     data class Snap(
         val sessions: List<Session>,
         val groups: Groups.Table,
         /** 这台机器上装了什么（`tmux` / `claude` / `codex` 的子集）。看板据此画「一键装机」。 */
         val tools: Set<String> = emptySet(),
+        val completions: List<CompletionEvent> = emptyList(),
     )
 
     /**
@@ -197,12 +200,16 @@ object SessionProbe {
         // ⚠️ 只取**每个会话最后一条**：events.jsonl 是追加写的流水，
         // 前面那些是历史，拿来当「此刻卡在哪」会是陈年旧事。
         val evPreview = HashMap<String, String>()
+        val completions = mutableListOf<CompletionEvent>()
         extract(out, "ev").lineSequence().filter { it.isNotBlank() }.forEach { line ->
             runCatching {
                 val o = JSONObject(line)
                 val name = o.optString("session")
                 val pv = o.optString("preview").ifEmpty { o.optString("arg") }
                 if (name.isNotEmpty() && pv.isNotEmpty()) evPreview[name] = pv
+                val ts = o.optDouble("ts", 0.0)
+                if (o.optString("kind") == "done" && app.yxi.ssh.Shell.safeName(name) && ts.isFinite() && ts > 0)
+                    completions += CompletionEvent(name, ts, pv.take(300))
             }
         }
 
@@ -250,6 +257,7 @@ object SessionProbe {
             Groups.parse(extract(out, "gp")),
             tools = extract(out, "tool").lineSequence()
                 .map { it.trim().substringAfterLast('/') }.filter { it.isNotEmpty() }.toSet(),
+            completions = completions.distinctBy { it.session to it.timestamp },
         )
     }
 
