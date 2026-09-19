@@ -50,4 +50,17 @@ class WorkspaceNavigationTest {
         nav.togglePin("a")
         assertTrue(nav.error.isNotEmpty()); assertFalse(nav.pinned("a")); assertEquals("broken", f.readText())
     }
+    @Test fun `notification filter pins fallback and single task mute`() = fixture { nav, _ ->
+        // 无置顶回退：勾选只置顶但当前无任何置顶时，全部放行
+        assertTrue(nav.shouldNotify("a", true)); assertTrue(nav.shouldNotify("b", true))
+        // 只置顶：出现置顶后仅置顶任务放行；未勾选时不过滤
+        nav.togglePin("b")
+        assertFalse(nav.shouldNotify("a", true)); assertTrue(nav.shouldNotify("b", true))
+        assertTrue(nav.shouldNotify("a", false)); assertTrue(nav.shouldNotify("b", false))
+        // 单任务静音：无论置顶与开关一律静音，取消后恢复
+        nav.setMuted("b", true)
+        assertFalse(nav.shouldNotify("b", true)); assertFalse(nav.shouldNotify("b", false))
+        nav.setMuted("b", false)
+        assertTrue(nav.shouldNotify("b", true)); assertFalse(nav.shouldNotify("a", true))
+    }
 }

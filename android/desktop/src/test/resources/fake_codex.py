@@ -15,6 +15,7 @@ Modes:
   init-error        answers initialize with a JSON-RPC error (code 402)
   noreply           answers initialize only, never answers later requests
   seq-auto          thread/read = empty thread; each turn/start replies turn-N then completes it
+  complete-twice    like seq-auto but one turn; turn/completed for that turn id is emitted twice
   completed-first   like seq-auto but turn/completed notification precedes the turn reply
   die-on-turn-start thread/read ok; exits the moment a turn/start arrives
   foreign-completion turn/start replies turn-1; then a turn/completed for the OTHER thread
@@ -195,6 +196,14 @@ for raw in sys.stdin:
         if mode == "seq-auto":
             turn_id = next_turn()
             reply(msg, {"turn": {"id": turn_id, "status": "inProgress"}})
+            notify("turn/completed", {"threadId": thread_id,
+                                      "turn": {"id": turn_id, "status": "completed"}})
+            continue
+        if mode == "complete-twice":
+            turn_id = next_turn()
+            reply(msg, {"turn": {"id": turn_id, "status": "inProgress"}})
+            notify("turn/completed", {"threadId": thread_id,
+                                      "turn": {"id": turn_id, "status": "completed"}})
             notify("turn/completed", {"threadId": thread_id,
                                       "turn": {"id": turn_id, "status": "completed"}})
             continue

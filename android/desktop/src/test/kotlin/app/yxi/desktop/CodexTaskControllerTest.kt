@@ -12,6 +12,7 @@ class CodexTaskControllerTest {
     private fun withController(
         mode: String,
         threadId: String = "thr-1",
+        notices: MutableList<String>? = null,
         block: suspend (CodexTaskController, InstructionQueue, FakeRunner) -> Unit,
     ) {
         assumeFakeRunner()
@@ -20,7 +21,8 @@ class CodexTaskControllerTest {
             FakeRunner(mode, threadId).use { runner ->
                 handshake(runner)
                 val queue = InstructionQueue(File(dir, "queue.json"))
-                val controller = CodexTaskController("task", threadId, runner.client, queue)
+                val controller = CodexTaskController("task", threadId, runner.client, queue,
+                    onNotice = { title -> notices?.add(title) })
                 try { runBlocking { block(controller, queue, runner) } } finally { controller.close() }
             }
         } finally { dir.deleteRecursively() }
@@ -323,5 +325,53 @@ class CodexTaskControllerTest {
         // 以上全程零 thread/read：任何分支退回读取都会出现在运行器日志里
         assertTrue(runner.inboundJson().none { it.optString("method") == "thread/read" },
             "快照路径不得发起 thread/read")
+    }
+
+    @Test
+    fun `completions notify in real time and history reads do not backfill`() {
+        val notices = mutableListOf<String>()
+        withController("read-interleave", notices = notices) { controller, queue, _ ->
+            // 历史快照含已完成 t0：读取不得补发完成回调
+            controller.reconcile()
+            Thread.sleep(200)
+            assertEquals(emptyList(), notices, "历史读取不得补发完成回调：$notices")
+            val live = queue.enqueue("task", "第一条")
+            controller.setAutoDispatch(true)
+            poll { queue.entries.single { it.id == live.id }.runtimeTurnState == RuntimeTurnState.Completed }
+            // 实时完成回调恰好一条
+            assertEquals(listOf("本轮处理结束"), notices, "实时完成应回调一次：$notices")
+            // 再次读取：快照含 t0 与已完成 t1，仍不得补发或重复
+            controller.reconcile()
+            Thread.sleep(200)
+            assertEquals(listOf("本轮处理结束"), notices, "快照不得补发或重复完成回调：$notices")
+        }
+    }
+
+    @Test
+    fun `duplicate completion events for one turn notify once`() {
+        val notices = mutableListOf<String>()
+        withController("complete-twice", notices = notices) { controller, queue, _ ->
+            queue.enqueue("task", "第一条")
+            controller.reconcile()
+            controller.setAutoDispatch(true)
+            poll { queue.entries.single().runtimeTurnState == RuntimeTurnState.Completed }
+            Thread.sleep(200)
+            assertEquals(listOf("本轮处理结束"), notices, "同轮重复完成事件不得重复回调：$notices")
+        }
+    }
+
+    @Test
+    fun `new pending request notifies exactly once`() {
+        val notices = mutableListOf<String>()
+        withController("approval", notices = notices) { controller, _, _ ->
+            controller.reconcile()
+            poll { controller.pendingRequests.size == 1 }
+            Thread.sleep(200)
+            assertEquals(listOf("需要你处理"), notices, "新待处理请求应恰好回调一次：$notices")
+            controller.answerRequest("srv-77", JSONObject().put("decision", "accept"))
+            poll { controller.pendingRequests.isEmpty() }
+            Thread.sleep(200)
+            assertEquals(listOf("需要你处理"), notices, "答复后不得再回调：$notices")
+        }
     }
 }
