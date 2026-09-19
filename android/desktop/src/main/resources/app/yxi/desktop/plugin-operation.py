@@ -249,7 +249,7 @@ def execute(request, home=None, run=subprocess.run):
         return {'state': 'unsupported-config-home'}
     action = request.get('action')
     operation = request.get('operation', '')
-    if action not in ('prepare', 'set', 'status', 'restore', 'prepare-install', 'install', 'uninstall', 'update', 'rollback') or not re.fullmatch(r'[a-f0-9]{32}', operation):
+    if action not in ('prepare', 'set', 'status', 'review', 'restore', 'prepare-install', 'install', 'uninstall', 'update', 'rollback') or not re.fullmatch(r'[a-f0-9]{32}', operation):
         return {'state': 'invalid'}
     store = home / '.yxi'
     private_directory(store)
@@ -261,6 +261,16 @@ def execute(request, home=None, run=subprocess.run):
         try: fcntl.flock(lockfd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError: return {'state': 'busy'}
         previous = read_file(record)
+        if action == 'review':
+            result = json.loads(previous) if previous else {'state': 'missing'}
+            if result.get('state') in ('started', 'unknown', 'unconfirmed', 'missing'):
+                result['previousState'] = result['state']
+                result['state'] = 'reviewed'
+                result['manuallyReviewed'] = True
+                # Keep a tombstone even when no receipt exists, so a delayed original
+                # request cannot execute after the user has cleared the uncertainty.
+                write_file(record, json.dumps(result).encode())
+            return result
         if action == 'status':
             if previous is None: return {'state': 'missing'}
             result = json.loads(previous)
