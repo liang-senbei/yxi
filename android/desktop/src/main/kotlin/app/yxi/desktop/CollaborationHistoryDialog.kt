@@ -21,6 +21,8 @@ internal fun CollaborationHistoryDialog(state: AppState, conn: Conn, group: Stri
     var query by remember(conn) { mutableStateOf(initialQuery) }
     var revision by remember(conn) { mutableStateOf(0) }
     var structured by remember(conn) { mutableStateOf(true) }
+    var autoRefresh by remember(conn) { mutableStateOf(true) }
+    var loadedMode by remember(conn) { mutableStateOf<Boolean?>(null) }
     var replyTarget by remember(conn) { mutableStateOf<Pair<app.yxi.agent.Session, String>?>(null) }
     var userReplyTarget by remember(conn) { mutableStateOf<Pair<app.yxi.agent.Session, String>?>(null) }
     userReplyTarget?.let { (target, id) ->
@@ -32,8 +34,15 @@ internal fun CollaborationHistoryDialog(state: AppState, conn: Conn, group: Stri
             initialText = "请查看协作消息 $messageId，结合当前任务进展回复原发送者。使用 yxi-hub reply 保留原消息关联；如果原任务实例已变化，请说明情况，不要回复同名新任务。\n\n补充要求：")
         return
     }
+    LaunchedEffect(conn, structured, autoRefresh) {
+        while (autoRefresh) {
+            kotlinx.coroutines.delay(10_000)
+            if (!busy && conn.ssh.isConnected) revision++
+        }
+    }
     LaunchedEffect(conn, revision, structured) {
-        busy = true; error = ""; raw = ""; truncated = false
+        busy = true; error = ""
+        if (loadedMode != structured) { raw = ""; truncated = false }
         try {
             val script = """
 import pathlib, json
@@ -51,7 +60,7 @@ print('__YXI_HUB_LOG__:' + json.dumps({'text': text, 'clipped': clipped}, ensure
             val result = conn.ssh.exec("python3 -c " + Shell.q(script))
             val record = result.lineSequence().lastOrNull { it.startsWith("__YXI_HUB_LOG__:") } ?: error("服务器未返回协作日志")
             val json = JSONObject(record.removePrefix("__YXI_HUB_LOG__:"))
-            raw = json.getString("text"); truncated = json.getBoolean("clipped")
+            raw = json.getString("text"); truncated = json.getBoolean("clipped"); loadedMode = structured
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { error = e.message.orEmpty() }
         finally { busy = false }
@@ -80,6 +89,10 @@ print('__YXI_HUB_LOG__:' + json.dumps({'text': text, 'clipped': clipped}, ensure
             }
             Text(if (structured) "需服务器安装新版 yxi-hub。attempting 为开始投递，terminal-written 为终端写入，unknown 为结果待确认；均不是 Agent 处理回执。" else "服务器 hub.log 原始记录；终端投递不代表 Agent 已处理。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
             OutlinedTextField(query, { query = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("搜索成员、组名或消息文字") })
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Checkbox(autoRefresh, { autoRefresh = it })
+                Text("自动刷新（10 秒）", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+            }
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
             if (truncated) Text("显示最近 256 KiB，开头可能是上一条消息的片段。", style = MaterialTheme.typography.labelSmall)
