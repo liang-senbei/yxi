@@ -257,4 +257,35 @@ class CodexTaskControllerTest {
         assertFailsWith<IllegalArgumentException> { queue.enqueue("task", "") }
         assertTrue(queue.entries.none { it.text.isBlank() })
     }
+
+    @Test
+    fun `snapshot reconciliation validates identity state and queue without reading`() = withController("new-thread") { controller, queue, runner ->
+        fun snapshot(id: String = "thr-1", turns: String = "[]", status: String = "idle") = JSONObject()
+            .put("id", id).put("cwd", "/srv/demo")
+            .put("turns", JSONArray(turns))
+            .put("status", JSONObject().put("type", status))
+
+        // 合法 idle+空轮次快照：直接信任，不追加 thread/read
+        controller.reconcile(snapshot())
+        assertTrue(controller.ready)
+        assertTrue(controller.messages.isEmpty())
+
+        // 错误ID / 非空轮次 / 非idle：快照一律不接受
+        val bad = listOf(snapshot(id = "thr-other"),
+            snapshot(turns = """[{"id":"t0","status":"completed"}]"""),
+            snapshot(status = "active"))
+        for (candidate in bad) {
+            val error = assertFailsWith<IllegalStateException> { controller.reconcile(candidate) }
+            assertEquals("新建任务初始状态未确认", error.message)
+        }
+
+        // 队列已有指令时必须改走历史核对，快照同样不被信任
+        queue.enqueue("task", "第一条")
+        val guarded = assertFailsWith<IllegalStateException> { controller.reconcile(snapshot()) }
+        assertEquals("已有指令的任务必须读取历史核对", guarded.message)
+
+        // 以上全程零 thread/read：任何分支退回读取都会出现在运行器日志里
+        assertTrue(runner.inboundJson().none { it.optString("method") == "thread/read" },
+            "快照路径不得发起 thread/read")
+    }
 }

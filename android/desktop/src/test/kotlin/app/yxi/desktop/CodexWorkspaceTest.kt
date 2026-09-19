@@ -7,9 +7,11 @@ import kotlin.test.*
 
 class CodexWorkspaceTest {
 
+    private val runners = mutableListOf<FakeRunner>()
+
     private fun fixture(block: (File) -> Unit) {
         val dir = Files.createTempDirectory("yxi-workspace").toFile()
-        try { block(dir) } finally { dir.deleteRecursively() }
+        try { block(dir) } finally { dir.deleteRecursively(); runners.clear() }
     }
 
     private fun conn() = Conn(Host("h1", "别名", "srv.example"), NoHostKeys)
@@ -17,7 +19,6 @@ class CodexWorkspaceTest {
     /** 真实登记文件 + 假运行器工厂；返回的清理函数关闭所有假进程。 */
     private fun workspace(dir: File, mode: String, threadId: String = "thr-1"): Pair<CodexWorkspace, () -> Unit> {
         assumeFakeRunner()
-        val runners = mutableListOf<FakeRunner>()
         val ws = CodexWorkspace(InstructionQueue(File(dir, "queue.json")), File(dir, "registry.json"))
         ws.clientFactory = { _ -> FakeRunner(mode, threadId).also { runners += it }.client }
         ws.connected = { true }
@@ -104,6 +105,45 @@ class CodexWorkspaceTest {
             assertEquals("thr-1", ws.recoveryThreadId)
             assertFalse(ws.busy)
             assertTrue(ws.registry.error.contains("未保存"), "实际 error：${ws.registry.error}")
+        } finally { cleanup() }
+    }
+
+    @Test
+    fun `create initializes from the start snapshot without reading history`() = fixture { dir ->
+        val (ws, cleanup) = workspace(dir, "create-snapshot")
+        try {
+            val c = conn()
+            val record = runBlocking { ws.create(c, "/srv/demo", "标题") }
+            assertEquals("thr-1", record.threadId)
+            assertEquals("", ws.recoveryThreadId)
+            val controller = ws.controllers.getValue(record.key)
+            assertTrue(controller.ready, "实际 note：${controller.note}")
+            assertTrue(controller.messages.isEmpty())
+            // 新建路径信任 thread/start 的 idle+空轮次快照：全程不得发起 thread/read
+            // （该模式里 resume 前的 read 必然回 -32601，真走了读取这里就会失败）
+            val methods = runners.flatMap { it.inboundJson() }.map { it.optString("method") }
+            assertTrue("thread/start" in methods, "实际 RPC：$methods")
+            assertTrue("thread/read" !in methods, "新建后不得读取历史：$methods")
+        } finally { cleanup() }
+    }
+
+    @Test
+    fun `reopen after snapshot creation still resumes and reads history`() = fixture { dir ->
+        val (first, cleanup1) = workspace(dir, "create-snapshot")
+        try {
+            runBlocking { first.create(conn(), "/srv/demo", "标题") }
+            first.close()
+        } finally { cleanup1(); runners.clear() } // 只核对恢复进程的 RPC
+        val (ws, cleanup) = workspace(dir, "create-snapshot")
+        try {
+            val stored = ws.registry.records.single()
+            val controller = runBlocking { ws.open(conn(), stored) }
+            assertTrue(controller.ready, "实际 note：${controller.note}")
+            // 原恢复路径不变：resume 之后仍要读取并核对历史
+            assertEquals(listOf("msg-h0", "msg-h1"), controller.messages.map { it.id })
+            val methods = runners.flatMap { it.inboundJson() }.map { it.optString("method") }
+            assertTrue("thread/resume" in methods, "恢复必须走 resume：$methods")
+            assertTrue("thread/read" in methods, "恢复必须读取历史：$methods")
         } finally { cleanup() }
     }
 }

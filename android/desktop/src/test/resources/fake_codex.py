@@ -26,6 +26,8 @@ Modes:
   new-thread        thread/read always returns an empty turns list
   models            model/list serves two pages (m-a, hidden m-h, then m-b via cursor)
   create-ok         default branches already answer thread/start, resume and read
+  create-snapshot   thread/start replies the real idle empty-thread shape; thread/read fails
+                    with -32601 until a resume happens, then returns history (CLI 0.153.4)
 """
 import json
 import os
@@ -36,6 +38,7 @@ log_path = os.environ.get("FAKE_LOG")
 thread_id = os.environ.get("FAKE_THREAD_ID", "thr-1")
 other_thread = os.environ.get("FAKE_OTHER_THREAD_ID", "thr-other")
 reads = [0]
+resumed = [False]
 
 
 def record(line, outbound=False):
@@ -139,7 +142,13 @@ for raw in sys.stdin:
 
     if method == "thread/read":
         reads[0] += 1
-        if mode == "new-thread":
+        if mode == "create-snapshot" and not resumed[0]:
+            # Real CLI 0.153.4: includeTurns read right after start is rejected
+            send({"id": msg["id"], "error": {"code": -32601, "message": "list_turns is not supported yet"}})
+            continue
+        if mode == "create-snapshot":
+            thread_reply(msg, [turn("t0", "completed", HISTORY_ITEMS)])
+        elif mode == "new-thread":
             thread_reply(msg, [])
         elif mode == "read-interleave" and reads[0] >= 2:
             thread_reply(msg, FULL_SNAPSHOT)
@@ -149,9 +158,15 @@ for raw in sys.stdin:
             thread_reply(msg, [])
         continue
     if method == "thread/start":
-        reply(msg, {"thread": {"id": thread_id, "cwd": "/srv/demo"}})
+        if mode == "create-snapshot":
+            # Real CLI 0.153.4 shape: rich thread, idle, empty history
+            reply(msg, {"thread": {"id": thread_id, "cwd": "/srv/demo", "turns": [],
+                                   "status": {"type": "idle"}}})
+        else:
+            reply(msg, {"thread": {"id": thread_id, "cwd": "/srv/demo"}})
         continue
     if method == "thread/resume":
+        resumed[0] = True
         thread_reply(msg, [])
         continue
     if method == "turn/steer":
