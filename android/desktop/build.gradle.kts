@@ -92,7 +92,7 @@ compose.desktop {
             //    完整 JDK 跑 uber jar，永远验不出来，只有精简后的 jpackage runtime 会炸（老板真机抓的）。
             includeAllModules = true
             packageName = "Yxi"
-            packageVersion = "1.4.7"   // 也是 Velopack 的 packVersion（CI 从 app-image 的 Yxi.cfg 读）和运行时的 jpackage.app-version
+            packageVersion = "1.4.8"   // 也是 Velopack 的 packVersion（CI 从 app-image 的 Yxi.cfg 读）和运行时的 jpackage.app-version
             vendor = "Yxi"
             windows { menu = true; shortcut = true; iconFile.set(project.file("icon.ico")); upgradeUuid = "3f6a9d2c-7b1e-4c0a-9a3d-8e2f5b1c4d7a" }
         }
