@@ -67,6 +67,9 @@ internal fun AndroidEmulatorPanel(open: Boolean, close: () -> Unit) {
             if (!windows) Text("请在 Windows 电脑上使用本地 Android 模拟器。")
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (windows && environment?.missing?.contains("sdkmanager") == true) AndroidSetupCard { refresh++ }
+            if (windows && environment?.sdkRoot == java.io.File(Store.dir, "android-sdk").absolutePath &&
+                environment?.missing?.contains("sdkmanager") == false &&
+                environment?.missing?.any { it == "emulator" || it == "adb" } == true) AndroidComponentsCard { refresh++ }
             environment?.let { env ->
                 if (env.sdkRoot != null) Text("SDK · ${env.sdkRoot}", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 env.tools.firstOrNull { it.name == "emulator" }?.let { executable ->
