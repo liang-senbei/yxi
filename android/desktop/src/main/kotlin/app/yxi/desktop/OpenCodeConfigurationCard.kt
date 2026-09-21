@@ -6,6 +6,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Save
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.CheckCircle
 import app.yxi.agent.OpenCodeRouteConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -47,8 +54,11 @@ internal fun OpenCodeConfigurationCard(conn: Conn) {
         OutlinedCard(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Code, null, Modifier.padding(end = 10.dp).size(20.dp), tint = Tokens.current.textSecondary)
                     Text("OpenCode · 服务器默认模型", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                    TextButton({ act { load() } }, enabled = !busy) { Text("刷新") }
+                    TextButton({ act { load() } }, enabled = !busy) {
+                        Icon(Icons.Outlined.Refresh, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("刷新")
+                    }
                 }
                 Text("会话和项目可以使用各自的模型设置。", color = Tokens.current.textMuted)
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -59,9 +69,13 @@ internal fun OpenCodeConfigurationCard(conn: Conn) {
                     supportingText = { Text("填写实际模型标识，例如供应商 ID/模型 ID。") })
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Box {
-                        OutlinedButton({ menu = true }, enabled = !busy && choices.isNotEmpty()) { Text("选择已配置模型") }
+                        OutlinedButton({ menu = true }, enabled = !busy && choices.isNotEmpty()) {
+                            Text("选择已配置模型"); Spacer(Modifier.width(6.dp)); Icon(Icons.Outlined.ExpandMore, null, Modifier.size(18.dp))
+                        }
                         DropdownMenu(menu, { menu = false }, Modifier.heightIn(max = 320.dp)) {
-                            choices.forEach { id -> DropdownMenuItem(text = { Text(id) }, onClick = { model = id; menu = false }) }
+                            choices.forEach { id -> DropdownMenuItem(text = { Text(id) },
+                                leadingIcon = { Icon(if (model == id) Icons.Outlined.CheckCircle else Icons.Outlined.Code, null, Modifier.size(18.dp)) },
+                                onClick = { model = id; menu = false }) }
                         }
                     }
                     Button(onClick = {
@@ -76,7 +90,9 @@ internal fun OpenCodeConfigurationCard(conn: Conn) {
                             notice = "默认模型已保存。现有会话可能仍使用其单独设置。"
                         }
                     }, enabled = !busy && current != null && current.parseError == null && !current.bothExist &&
-                        OpenCodeRouteConfig.MODEL.matches(model.trim()) && model.trim() != current.selectedModel) { Text("保存默认模型") }
+                        OpenCodeRouteConfig.MODEL.matches(model.trim()) && model.trim() != current.selectedModel) {
+                        Icon(Icons.Outlined.Save, null, Modifier.size(17.dp)); Spacer(Modifier.width(6.dp)); Text("保存默认模型")
+                    }
                 }
                 if (notice.isNotBlank()) Text(notice, color = Tokens.current.textSecondary)
             }
@@ -87,7 +103,18 @@ internal fun OpenCodeConfigurationCard(conn: Conn) {
             current.providers.forEach { provider ->
                 OutlinedCard(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(provider.name?.takeIf { it.isNotBlank() } ?: provider.id, style = MaterialTheme.typography.titleSmall)
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Surface(shape = RoundedCornerShape(10.dp), color = Tokens.current.surface2, modifier = Modifier.size(38.dp)) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text((provider.name?.takeIf { it.isNotBlank() } ?: provider.id).take(1).uppercase(), style = MaterialTheme.typography.titleMedium)
+                                }
+                            }
+                            Text(provider.name?.takeIf { it.isNotBlank() } ?: provider.id, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+                            if (current.selectedModel?.substringBefore('/') == provider.id) {
+                                Icon(Icons.Outlined.CheckCircle, null, Modifier.size(16.dp), tint = Tokens.current.success)
+                                Text("当前默认", color = Tokens.current.success, style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
                         Text("${provider.id} · ${provider.modelIds.size} 个已配置模型", color = Tokens.current.textMuted)
                         if (provider.apiKeyFingerprint != null) Text("凭据已填写", color = Tokens.current.textSecondary)
                     }
