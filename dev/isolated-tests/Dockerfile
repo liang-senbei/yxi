@@ -9,6 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && (printf 'root:'; head -c 32 /dev/urandom | base64) | chpasswd
 ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
 ENV GRADLE_USER_HOME=/root/.gradle
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
 WORKDIR /workspace
 COPY . /workspace
 RUN cd android && bash gradlew -Pyxi.desktopOnly=true :desktop:testClasses :desktop:cacheIsolatedRuntime \
