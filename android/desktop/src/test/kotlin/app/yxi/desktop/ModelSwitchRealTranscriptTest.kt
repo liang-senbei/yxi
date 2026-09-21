@@ -112,12 +112,12 @@ class ModelSwitchRealTranscriptTest {
         val entry = DesktopTranscriptMemory.Entry(file.absolutePath, 0)
         val taskKey = "msw-real|model-phase"
         DesktopTranscriptMemory.put(taskKey, entry)
+        val dir = Files.createTempDirectory("yxi-msw-store").toFile()
         try {
             val (lease, _) = entry.claim()
             entry.append(lease, fx.lines.subList(0, baseline + 1), fx.offsets[baseline + 1])
             val baselineOffset = entry.view.offset
 
-            val dir = Files.createTempDirectory("yxi-msw-store").toFile()
             val storeFile = dir.resolve("changes.json")
             val store = ModelChangeStore(storeFile)
             val terminal = Terminal()
