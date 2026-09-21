@@ -113,7 +113,20 @@ internal class RewindController(private val conn: Conn, private val gate: Rewind
      */
     // ⚠️ internal：参数带 root 的 internal RewindTarget（public 会编译不过）；
     //    调用方 ChatPane 就在同模块里，不受影响。
-    internal suspend fun rewind(sessionName: String, plan: Rewind.Plan, inspected: RewindTarget? = null): Report =
+    internal suspend fun rewind(sessionName: String, plan: Rewind.Plan, inspected: RewindTarget? = null): Report {
+        val prepared = prepare(sessionName, plan, inspected)
+        val capture = prepared.capture
+        if (prepared.ticket == null || capture == null) return prepared
+        // The durable task gate now owns exclusion. Other tasks on this host may proceed.
+        val outcome = try {
+            val out = runRewindCommand(conn.ssh, Rewind.command(capture.exe, requireNotNull(prepared.cwd), capture, plan))
+            if (out.isBlank()) Rewind.Outcome.Failed("exec") else Rewind.parse(out)
+        } catch (e: CancellationException) { throw e }
+        catch (_: Exception) { Rewind.Outcome.Failed("exec") }
+        return prepared.copy(outcome = outcome)
+    }
+
+    private suspend fun prepare(sessionName: String, plan: Rewind.Plan, inspected: RewindTarget?): Report =
         delivery.withLock {
             Rewind.validate(plan)?.let {
                 return@withLock Report(Rewind.Outcome.Failed(it), capture = null)
@@ -193,9 +206,7 @@ internal class RewindController(private val conn: Conn, private val gate: Rewind
             // ── 执行：print 截断轮 —— 同一会话 cwd、原 model/effort、真 binary、timeout 有上界、零绕过。
             //    ⚠️ 从这里到 Report 之间被取消（CancellationException 原样上抛）票也**不清**：
             //    它已经持久化在 gate 里，重启后照旧阻塞，等 UI 核实或恢复。
-            val out = conn.ssh.exec(Rewind.command(cap.exe, s.cwd, cap, plan))
-            val outcome = if (out.isBlank()) Rewind.Outcome.Failed("exec") else Rewind.parse(out)
-            Report(outcome, capture = cap, unpreserved = cap.others, runtimeId = s.runtimeId, cwd = s.cwd,
+            Report(null, capture = cap, unpreserved = cap.others, runtimeId = s.runtimeId, cwd = s.cwd,
                 ticket = ticket)
         }
 
