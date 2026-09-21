@@ -263,18 +263,20 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                     needsMetadata = false
                 }
                 if (f != file) {
-                    val ts = TranscriptBranchStart.inspect(ssh, f, 400)
+                    val ts = TranscriptBranchStart.load(ssh, f, 400)
                     if (ts == null) { status = "连接还没稳，正在重试…"; delay(2_000); continue }
                     val previous = entry; val previousLease = lease
                     withContext(Dispatchers.Default) { previous?.release(previousLease) }
-                    val fresh = DesktopTranscriptMemory.Entry(f, ts.second)
+                    val start = if (ts.lines != null) ts.size else ts.start
+                    val fresh = DesktopTranscriptMemory.Entry(f, start)
                     val freshLease = fresh.claim().first
+                    val initial = withContext(Dispatchers.Default) { fresh.append(freshLease, ts.lines.orEmpty(), 0) }!!
                     synchronized(lock) {
                         buf.clear(); bufBytes = 0L
-                        entry = fresh; lease = freshLease; file = f; pos = ts.second; targetOffset = ts.first
+                        entry = fresh; lease = freshLease; file = f; pos = start; targetOffset = ts.size
                     }
                     if (cacheEnabled) DesktopTranscriptMemory.put(taskKey, fresh)
-                    items = emptyList(); ctx = null; status = "正在载入对话…"
+                    items = initial.items; ctx = initial.context; status = if (ts.lines == null) "正在载入对话…" else null
                     needsMetadata = false
                 }
                 if ((entry?.view?.offset ?: 0L) >= targetOffset) status = null
