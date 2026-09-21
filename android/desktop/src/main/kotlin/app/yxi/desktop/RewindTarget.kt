@@ -28,6 +28,7 @@ internal object RewindTargets {
 import json,os,sys
 path,target=sys.argv[1:]
 nodes={}; leaf=None
+injected=('teammate-message','agent-message','cross-session-message','task-notification','system-reminder','local-command-caveat','local-command-stdout','command-name')
 with open(path,'rb') as f:
  st=os.fstat(f.fileno()); size=st.st_size
  while f.tell()<size:
@@ -42,10 +43,11 @@ with open(path,'rb') as f:
   if kind not in ('user','assistant','system','progress','attachment'): continue
   message=item.get('message')
   content=message.get('content') if isinstance(message,dict) else None
-  text=isinstance(content,str) and bool(content.strip())
+  texts=[content] if isinstance(content,str) else []
   if isinstance(content,list):
-   text=any(isinstance(b,dict) and b.get('type')=='text' and bool(str(b.get('text','')).strip()) for b in content)
-   if any(isinstance(b,dict) and b.get('type')=='tool_result' for b in content): text=False
+   texts=[b.get('text') for b in content if isinstance(b,dict) and b.get('type')=='text' and isinstance(b.get('text'),str)]
+   if any(isinstance(b,dict) and b.get('type')=='tool_result' for b in content): texts=[]
+  text=any(t.strip() and not any('<'+tag in t for tag in injected) for t in texts)
   human=kind=='user' and not item.get('isMeta',False) and text
   nodes[uid]=(parent,kind,human)
   if kind in ('user','assistant'): leaf=uid

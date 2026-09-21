@@ -495,6 +495,8 @@ object Transcript {
         return null
     }
 
+    internal fun isInjectedText(text: String): Boolean = injectedOf(text) != null
+
     /**
      * ⚠️ **`isMeta` 的消息不是用户打的，绝不能画成用户气泡。**
      *

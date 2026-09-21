@@ -21,8 +21,10 @@ internal class TranscriptBranch {
         val known = id != null && parents.containsKey(id)
         val content = d.optJSONObject("message")?.opt("content")
         val human = type == "user" && !d.optBoolean("isMeta", false) &&
-            (content is String || (content is org.json.JSONArray &&
-                (0 until content.length()).any { content.optJSONObject(it)?.optString("type") == "text" } &&
+            ((content is String && content.isNotBlank() && !Transcript.isInjectedText(content)) || (content is org.json.JSONArray &&
+                (0 until content.length()).any { index -> content.optJSONObject(index)?.let {
+                    it.optString("type") == "text" && it.optString("text").isNotBlank() && !Transcript.isInjectedText(it.optString("text"))
+                } == true } &&
                 (0 until content.length()).none { content.optJSONObject(it)?.optString("type") == "tool_result" }))
         val chain = when {
             !linked || known || !human -> null
