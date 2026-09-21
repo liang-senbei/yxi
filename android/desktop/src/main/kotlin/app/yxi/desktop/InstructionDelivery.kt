@@ -9,6 +9,7 @@ import kotlinx.coroutines.sync.withLock
 /** A terminal transport, deliberately not advertised as runtime steering or an
  * accepted-message receipt. Exactly one literal text write and one Enter. */
 internal suspend fun deliverInstruction(conn: Conn, session: Session, queue: InstructionQueue, item: QueuedInstruction, automatic: Boolean = false) = conn.instructionDeliveryMutex.withLock {
+    check(!RewindDelivery.gate.blocked(item.taskKey)) { "历史回退尚未确认，指令保留在本地" }
     check(conn.ssh.isConnected) { "服务器未连接，指令保留在本地" }
     check(item.taskKey == taskNavigationKey(conn.host, session)) { "任务身份已变化" }
     check(session.runtimeId !in conn.terminalAwaiting) { "上一条正在接续，请等待本轮结束" }
