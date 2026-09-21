@@ -29,7 +29,17 @@ if test "$mode" = build; then
     test "$available" -ge 4194304 || { echo 'At least 4 GiB free disk is required before building.' >&2; exit 2; }
     mkdir "$run_root/context"
     git -C "$repo" archive HEAD | tar -x -C "$run_root/context"
-    docker_local build --builder default --platform linux/amd64 -f "$run_root/context/dev/isolated-tests/Dockerfile" \
+    dockerfile="$run_root/context/dev/isolated-tests/Dockerfile"
+    build_args=()
+    if test -n "${YXI_TEST_BASE_IMAGE_REVISION:-}"; then
+        [[ "$YXI_TEST_BASE_IMAGE_REVISION" =~ ^[a-f0-9]{40}$ ]]
+        base_image="yxi-isolated-tests:$YXI_TEST_BASE_IMAGE_REVISION"
+        test "$(docker_local image inspect --format '{{ index .Config.Labels "org.yxi.test-isolation" }}' "$base_image")" = 1
+        test "$(docker_local image inspect --format '{{ index .Config.Labels "org.yxi.source-revision" }}' "$base_image")" = "$YXI_TEST_BASE_IMAGE_REVISION"
+        dockerfile="$run_root/context/dev/isolated-tests/Dockerfile.incremental"
+        build_args=(--build-arg "BASE_IMAGE=$base_image" --network none)
+    fi
+    docker_local build --builder default --platform linux/amd64 -f "$dockerfile" "${build_args[@]}" \
         --build-arg "SOURCE_REVISION=$revision" -t "$image" "$run_root/context"
     docker_local image inspect "$image" > "$run_root/image.json"
     echo "Built $image; evidence: $run_root"
