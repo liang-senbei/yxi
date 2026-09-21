@@ -151,6 +151,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
     }
     var sendErr by remember(taskKey) { mutableStateOf<String?>(null) }
     var sending by remember(taskKey) { mutableStateOf(false) }
+    var rewindChecking by remember(taskKey) { mutableStateOf(false) }
     var stick by remember(taskKey) { mutableStateOf(true) }              // 粘在底部：用户往上翻就停，点 ↓ 再粘上
     val openGroups = remember(taskKey) { mutableStateListOf<String>() }
     val listState = remember(taskKey) { LazyListState() }
@@ -473,6 +474,17 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
         if (p != null) ApprovalCard(p, a, busy = !canAct || rewindBlocked, onKey = { sendKey(it, p.fingerprint) }, onSubmit = { submit(p) })
         if (rewindBlocked) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("回退尚未确认，发送已暂停。输入和排队消息已保留。", Modifier.weight(1f), color = t.warning, fontSize = 12.sp)
+            if (RewindDelivery.gate.pending(taskKey)?.verification != null) TextButton({
+                rewindChecking = true; sendErr = null
+                scope.launch {
+                    try { recheckRewindRecovery(conn, session) }
+                    catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                    catch (e: Exception) { sendErr = e.message ?: "恢复状态无法确认" }
+                    finally { rewindChecking = false }
+                }
+            }, enabled = !rewindChecking && conn.ssh.isConnected) {
+                Text(if (rewindChecking) "正在核对…" else "重新检查")
+            }
             TextButton(onTerminal) { Text("查看终端") }
         }
         sendErr?.let { Note(it, t.danger) }
