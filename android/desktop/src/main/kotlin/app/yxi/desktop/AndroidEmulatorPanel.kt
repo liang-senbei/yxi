@@ -31,6 +31,8 @@ internal fun AndroidEmulatorPanel(open: Boolean, close: () -> Unit) {
     var apkPath by remember { mutableStateOf("") }
     var packageName by remember { mutableStateOf("") }
     var deviceBusy by remember { mutableStateOf(false) }
+    var checkingAcceleration by remember { mutableStateOf(false) }
+    var acceleration by remember { mutableStateOf<AndroidAcceleration.Result?>(null) }
     val windows = remember { System.getProperty("os.name").startsWith("Windows", true) }
     DisposableEffect(Unit) { onDispose { launcher?.stopAll() } }
     LaunchedEffect(open, refresh) {
@@ -67,6 +69,19 @@ internal fun AndroidEmulatorPanel(open: Boolean, close: () -> Unit) {
             if (windows && environment?.missing?.contains("sdkmanager") == true) AndroidSetupCard { refresh++ }
             environment?.let { env ->
                 if (env.sdkRoot != null) Text("SDK · ${env.sdkRoot}", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                env.tools.firstOrNull { it.name == "emulator" }?.let { executable ->
+                    TextButton({
+                        checkingAcceleration = true
+                        scope.launch {
+                            try { acceleration = AndroidAcceleration.inspect(executable.path) }
+                            finally { checkingAcceleration = false }
+                        }
+                    }, enabled = !checkingAcceleration && !busy) { Text(if (checkingAcceleration) "正在检查虚拟化…" else "检查运行环境") }
+                    acceleration?.let { result ->
+                        Text(if (result.ready) "硬件加速可用" else "硬件加速尚未就绪", color = if (result.ready) Tokens.current.success else Tokens.current.warning)
+                        Text(result.detail, style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                    }
+                }
                 if (env.avds.isEmpty() && !busy) Text("没有找到虚拟设备。需要准备 Android SDK、系统镜像并创建虚拟设备后才能运行。")
                 env.avds.forEach { name ->
                     OutlinedCard(Modifier.fillMaxWidth()) {
