@@ -109,6 +109,17 @@ object Store {
         }
     }
     val knownHostsFile = File(dir, "known_hosts")
+    private fun migratedHostKey(host: Host): Host {
+        if (host.keyPath.isBlank() || !System.getProperty("os.name").startsWith("Windows")) return host
+        val legacyRoot = System.getenv("LOCALAPPDATA")?.let { File(it, "Yxi") } ?: return host
+        val old = File(legacyRoot, "id_ed25519")
+        val next = File(dir, "id_ed25519")
+        return runCatching {
+            if (old.canonicalFile != next.canonicalFile && File(host.keyPath).canonicalFile == old.canonicalFile &&
+                old.isFile && next.isFile && java.nio.file.Files.mismatch(old.toPath(), next.toPath()) == -1L)
+                host.copy(keyPath = next.absolutePath) else host
+        }.getOrDefault(host)
+    }
     internal fun hostRecoveryNeeded() = runCatching { hostData.needsRecovery() }.getOrDefault(false)
     internal fun hostRecoveryCopies() = hostData.recoveryCopies()
     internal fun recoverHosts(copy: HostRecoveryCopy): List<Host> {
@@ -120,7 +131,11 @@ object Store {
     fun hosts(): List<Host> = runCatching {
         val text = hostData.read() ?: return@runCatching emptyList()
         if (hostData.recovered) warning = "服务器配置已从备份恢复；损坏的原文件已保留。"
-        JSONArray(text).let { a -> (0 until a.length()).map { a.getJSONObject(it).toHost() } }
+        val loaded = JSONArray(text).let { a -> (0 until a.length()).map { a.getJSONObject(it).toHost() } }
+        val migrated = loaded.map(::migratedHostKey)
+        if (loaded != migrated) runCatching { save(migrated) }
+            .onFailure { warning = "密钥路径已切换，但配置保存未完成：${it.message}" }
+        migrated
     }.onFailure { warning = "无法读取服务器配置，原文件已保留：${it.message}" }.getOrDefault(emptyList())
 
     fun save(hosts: List<Host>) {
