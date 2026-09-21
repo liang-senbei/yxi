@@ -57,7 +57,7 @@ internal fun ConfigurationHeader(state: AppState, conn: Conn, engine: String, bu
                 TextButton({ state.page = Page.ConfigFiles }, enabled = !busy) {
                     Icon(Icons.Outlined.Description, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("配置文件")
                 }
-                FilledTonalButton(add, enabled = !busy && catalogReady && engine in listOf(Lines.CLAUDE, Lines.CODEX)) {
+                FilledTonalButton(add, enabled = !busy && catalogReady && engine in listOf(Lines.CLAUDE, Lines.CODEX, "opencode")) {
                     Icon(Icons.Outlined.Add, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("添加")
                 }
             }

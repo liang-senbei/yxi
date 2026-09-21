@@ -13,18 +13,21 @@ import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.foundation.clickable
 import app.yxi.agent.OpenCodeRouteConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun OpenCodeConfigurationCard(conn: Conn) {
+internal fun OpenCodeConfigurationCard(conn: Conn, requestAdd: Boolean = false, consumeAdd: () -> Unit = {}) {
     val scope = rememberCoroutineScope()
     var status by remember(conn) { mutableStateOf<OpenCodeRouteConfig.Status?>(null) }
     var model by remember(conn) { mutableStateOf("") }
     var busy by remember(conn) { mutableStateOf(false) }
     var menu by remember(conn) { mutableStateOf(false) }
     var notice by remember(conn) { mutableStateOf("") }
+    var editor by remember(conn) { mutableStateOf<OpenCodeEditorSession?>(null) }
     suspend fun load() {
         val directory = conn.ssh.exec("printf '%s' \"\${XDG_CONFIG_HOME:-\$HOME/.config}/opencode\"").trim()
         check(directory.startsWith('/') && directory.none { it < ' ' }) { "无法确认配置目录" }
@@ -47,6 +50,30 @@ internal fun OpenCodeConfigurationCard(conn: Conn) {
         finally { busy = false }
     }
     val current = status
+    LaunchedEffect(requestAdd, busy, current) {
+        if (requestAdd && !busy) {
+            if (current != null && current.parseError == null && !current.bothExist) editor = OpenCodeEditorSession(null, current)
+            else notice = "请先读取并确认 OpenCode 配置后再添加供应商。"
+            consumeAdd()
+        }
+    }
+    editor?.let { editing ->
+        OpenCodeProviderForm(editing.provider, conn.host.label, close = { editor = null }) { patch ->
+            if (editing.provider == null) check(editing.before.providers.none { it.id == patch.id }) { "此供应商 ID 已存在，请返回列表编辑。" }
+            OpenCodeRouteConfig.applyProvider(conn.ssh, editing.before.dir, patch, editing.before)?.let { error(it) }
+            val checked = OpenCodeRouteConfig.status(conn.ssh, editing.before.dir)
+            check(checked.parseError == null && !checked.bothExist) { "保存后的配置需要核对，请刷新查看。" }
+            val provider = checked.providers.singleOrNull { it.id == patch.id } ?: error("未读回供应商，保存结果尚未确认。")
+            patch.name?.let { check(provider.name.orEmpty() == it.ifBlank { "" }) { "名称回读不一致" } }
+            patch.npm?.let { check(provider.npm.orEmpty() == it) { "SDK 包回读不一致" } }
+            patch.baseURL?.let { check(provider.baseURL.orEmpty() == it) { "请求地址回读不一致" } }
+            patch.apiKey?.let { check(provider.apiKeyFingerprint == OpenCodeRouteConfig.fingerprint(it)) { "凭据保存结果尚未确认" } }
+            check(provider.modelIds.containsAll(patch.ensureModelIds)) { "模型登记结果尚未确认" }
+            status = checked; model = checked.selectedModel.orEmpty(); editor = null
+            notice = "供应商配置已保存。"
+        }
+        return
+    }
     val choices = current?.providers.orEmpty().flatMap { provider ->
         provider.modelIds.map { "${provider.id}/$it" }
     }.distinct().sorted()
@@ -99,9 +126,11 @@ internal fun OpenCodeConfigurationCard(conn: Conn) {
         }
         if (current != null) {
             Text("已配置的供应商", style = MaterialTheme.typography.titleSmall)
-            if (current.providers.isEmpty()) Text("尚无自定义供应商。新增供应商和凭据编辑尚未接入。", color = Tokens.current.textMuted)
+            if (current.providers.isEmpty()) Text("还没有自定义供应商，点击右上角添加。", color = Tokens.current.textMuted)
             current.providers.forEach { provider ->
-                OutlinedCard(Modifier.fillMaxWidth()) {
+                OutlinedCard(Modifier.fillMaxWidth().clickable(enabled = !busy && current.parseError == null && !current.bothExist) {
+                    editor = OpenCodeEditorSession(provider, current)
+                }) {
                     Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             Surface(shape = RoundedCornerShape(10.dp), color = Tokens.current.surface2, modifier = Modifier.size(38.dp)) {
@@ -114,6 +143,7 @@ internal fun OpenCodeConfigurationCard(conn: Conn) {
                                 Icon(Icons.Outlined.CheckCircle, null, Modifier.size(16.dp), tint = Tokens.current.success)
                                 Text("当前默认", color = Tokens.current.success, style = MaterialTheme.typography.labelMedium)
                             }
+                            Icon(Icons.Outlined.Edit, "编辑供应商", Modifier.size(18.dp), tint = Tokens.current.textMuted)
                         }
                         Text("${provider.id} · ${provider.modelIds.size} 个已配置模型", color = Tokens.current.textMuted)
                         provider.baseURL?.takeIf { it.isNotBlank() }?.let { endpoint ->
@@ -132,3 +162,5 @@ internal fun OpenCodeConfigurationCard(conn: Conn) {
         }
     }
 }
+
+private data class OpenCodeEditorSession(val provider: OpenCodeRouteConfig.Provider?, val before: OpenCodeRouteConfig.Status)

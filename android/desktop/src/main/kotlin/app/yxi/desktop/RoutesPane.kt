@@ -54,6 +54,7 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
     var deleting by remember { mutableStateOf<Lines.Line?>(null) }
     var projectScope by remember { mutableStateOf(false) }
     var search by remember { mutableStateOf("") }
+    var openCodeAdd by remember { mutableStateOf(false) }
     val cwd = state.session?.cwd?.takeIf { state.conn === conn && it.startsWith('/') }
     val chosenScope = if (engine == Lines.CLAUDE && projectScope) cwd else null
     suspend fun reload(scopePath: String? = chosenScope) {
@@ -113,8 +114,8 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
         return
     }
     Column(Modifier.fillMaxSize().background(t.surface0).verticalScroll(rememberScrollState()).padding(28.dp)) {
-        ConfigurationHeader(state, conn, engine, busy, lines != null, { engine = it; projectScope = false }) {
-            editor = Lines.Line(Lines.newId(), "", agent = engine)
+        ConfigurationHeader(state, conn, engine, busy, lines != null || engine == "opencode", { engine = it; projectScope = false; openCodeAdd = false }) {
+            if (engine == "opencode") openCodeAdd = true else editor = Lines.Line(Lines.newId(), "", agent = engine)
         }
         Spacer(Modifier.height(22.dp))
         if (engine == "gemini") {
@@ -122,7 +123,7 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
             return@Column
         }
         if (engine == "opencode") {
-            OpenCodeConfigurationCard(conn)
+            OpenCodeConfigurationCard(conn, openCodeAdd) { openCodeAdd = false }
             return@Column
         }
         if (engine !in listOf(Lines.CLAUDE, Lines.CODEX)) {
