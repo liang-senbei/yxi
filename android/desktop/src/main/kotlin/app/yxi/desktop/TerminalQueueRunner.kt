@@ -22,6 +22,7 @@ internal fun TerminalQueueRunner(state: AppState) {
                     if (first?.status != InstructionStatus.Local && session.runtimeId !in conn.terminalAwaiting && session.runtimeId !in conn.modelChanges && state.modelSwitches.active(key) == null) continue
                     try {
                         if (session.runtimeId in conn.modelChanges || state.modelSwitches.active(key) != null) {
+                            val beforeRevision = state.modelSwitches.latest(key)?.revision
                             conn.instructionDeliveryMutex.withLock {
                                 // 持久化切换协议：菜单意图入库后走 Pending→Delivering→SentAwaitEvidence/AwaitConfirm 闭环。
                                 // store 以 taskNavigationKey 为键（host+session，跨主机不撞）；
@@ -30,6 +31,9 @@ internal fun TerminalQueueRunner(state: AppState) {
                                 val accepted = modelSwitch.step({ conn.ssh.exec(it) }, key, session.runtimeId, session.name, intent)
                                 if (intent != null && accepted && conn.modelChanges[session.runtimeId] === intent) conn.modelChanges.remove(session.runtimeId)
                             }
+                            // A CLI command may still be redrawing after its write marker arrives.
+                            // Never deliver a prompt in that same scheduler pass; probe afresh next time.
+                            if (state.modelSwitches.latest(key)?.revision != beforeRevision) continue
                             // ⚠️ SentAwaitEvidence（已发送、等转录新回执）是唯一不堵普通消息的状态：
                             //    落下去走正常队列路径，新配置下下一条照发，不等下一回复。
                             //    其余状态一律 continue，不可绕过 —— Pending 发送在即、Delivering 投递不明、
