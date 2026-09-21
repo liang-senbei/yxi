@@ -158,9 +158,20 @@ object Transcript {
         // ⚠️ 最后那个 lambda 不能省。`onCtx` 有默认值 `{}`，漏了它**编译照样通过**，
         // 只是 [ctx] 永远是 null —— 界面上表现为「上下文那一格永远不出现」，不报错。
         private val carry = Carry()
+        private val branch = TranscriptBranch()
 
-        fun add(lines: Sequence<String>) =
-            parseInto(lines, out, calls, queued, said, ctx, carry) { ctx = it }
+        fun add(lines: Sequence<String>) {
+            for (line in lines) {
+                val replacement = branch.append(line)
+                if (replacement != null) {
+                    out.clear(); calls.clear(); queued.clear(); said.clear()
+                    ctx = null; carry.mode = ""; carry.ponytail = ""
+                    parseInto(replacement.asSequence(), out, calls, queued, said, ctx, carry) { ctx = it }
+                } else {
+                    parseInto(sequenceOf(line), out, calls, queued, said, ctx, carry) { ctx = it }
+                }
+            }
+        }
 
         /** 当前快照。排队的挂在最后 —— 它们还没进对话，位置就在「此刻」。 */
         fun snapshot(): List<ChatItem> {
