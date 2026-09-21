@@ -14,7 +14,7 @@ import java.io.File
  *    · AwaitConfirm 终端弹了确认框，等用户自己回车 —— 堵，绝不代按；
  *    · Unknown 发送不明/被拒/新证据不符 —— 堵，不自动重发。
  *  → Applied（发送基线之后的新转录回执确认生效）。 */
-internal enum class ModelChangeStatus { Pending, Delivering, SentAwaitEvidence, AwaitConfirm, Unknown, Applied }
+internal enum class ModelChangeStatus { Pending, Delivering, SentAwaitEvidence, AwaitConfirm, Unknown, Applied, Dismissed }
 
 internal data class ModelSwitchRequest(
     /** 稳定键 = taskNavigationKey（host+session），与指令队列同源：仅用 runtimeId 会在跨主机时撞。 */
@@ -91,6 +91,13 @@ internal class ModelChangeStore(file: File) {
     }
 
     fun active(taskKey: String) = entries.firstOrNull { it.taskKey == taskKey && it.active }
+    fun latest(taskKey: String) = entries.firstOrNull { it.taskKey == taskKey }
+    fun blocksQueue(taskKey: String) = latest(taskKey)?.status in setOf(
+        ModelChangeStatus.Pending, ModelChangeStatus.Delivering, ModelChangeStatus.AwaitConfirm, ModelChangeStatus.Unknown)
+    @Synchronized fun dismiss(taskKey: String, revision: Long) = edit(taskKey, revision,
+        setOf(ModelChangeStatus.Pending, ModelChangeStatus.Unknown, ModelChangeStatus.SentAwaitEvidence)) {
+        it.copy(status = ModelChangeStatus.Dismissed, detail = "已停止跟踪此次切换，不重新发送命令")
+    }
 
     /** 菜单意图入库。发送中/等确认框时不接收（返回 false，调用方保留意图下轮再试）；
      * SentAwaitEvidence 是「已发送待证据」，新意图可以直接顶掉。 */

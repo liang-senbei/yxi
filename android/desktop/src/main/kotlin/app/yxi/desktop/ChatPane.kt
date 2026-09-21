@@ -109,7 +109,7 @@ import org.jetbrains.skia.Image as SkiaImage
  * · composer = 一张圆角卡片：无边框输入区 + 底部功能行（+ 附件 / 审批态 / 模型·强度·模式·上下文 chips / 圆形发送）。
  */
 @Composable
-internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQueue, savedDraft: androidx.compose.runtime.MutableState<TextFieldValue>? = null, displayName: String? = null, onRoutes: () -> Unit = {}, onTerminal: () -> Unit = {}) {
+internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQueue, savedDraft: androidx.compose.runtime.MutableState<TextFieldValue>? = null, displayName: String? = null, onRoutes: () -> Unit = {}, onTerminal: () -> Unit = {}, modelSwitches: ModelChangeStore? = null) {
     val taskKey = taskNavigationKey(conn.host, session)
     val ssh = conn.ssh
     val t = Tokens.current
@@ -362,7 +362,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
         if (sending) return
         sending = true; sendErr = null
         scope.launch {
-            try { deliverInstruction(conn, session, instructions, item) }
+            try { check(modelSwitches?.blocksQueue(taskKey) != true) { "请先在模型菜单中处理切换状态" }; deliverInstruction(conn, session, instructions, item) }
             catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (e: Exception) { sendErr = e.message.orEmpty() }
             finally { sending = false }
@@ -517,7 +517,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
             onSearch = { searchOpen = true },
             onVoice = { voiceOpen = true },
             onRoutes = onRoutes,
-            modelControl = { if (session.isCodex) TextButton(onRoutes) { Text("模型与思考 ⌄") } else ConversationModelMenu(conn, session, ctx?.model.orEmpty(), ctx?.effort.orEmpty(), onRoutes) },
+            modelControl = { if (session.isCodex) TextButton(onRoutes) { Text("模型与思考 ⌄") } else ConversationModelMenu(conn, session, ctx?.model.orEmpty(), ctx?.effort.orEmpty(), onRoutes, modelSwitches, onTerminal) },
         )
     }
 }

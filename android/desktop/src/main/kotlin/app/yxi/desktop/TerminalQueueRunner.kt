@@ -19,7 +19,7 @@ internal fun TerminalQueueRunner(state: AppState) {
                     if (session.runtimeId.isBlank()) continue
                     val key = taskNavigationKey(conn.host, session)
                     val first = state.instructions.entries.firstOrNull { it.taskKey == key && it.status in setOf(InstructionStatus.Local, InstructionStatus.Delivering, InstructionStatus.Unknown) }
-                    if (first?.status != InstructionStatus.Local && session.runtimeId !in conn.terminalAwaiting && session.runtimeId !in conn.modelChanges && state.modelSwitches.active(session.runtimeId) == null) continue
+                    if (first?.status != InstructionStatus.Local && session.runtimeId !in conn.terminalAwaiting && session.runtimeId !in conn.modelChanges && state.modelSwitches.active(key) == null) continue
                     try {
                         if (session.runtimeId in conn.modelChanges || state.modelSwitches.active(key) != null) {
                             conn.instructionDeliveryMutex.withLock {
@@ -28,14 +28,14 @@ internal fun TerminalQueueRunner(state: AppState) {
                                 // Delivering/AwaitConfirm 在途时不接收新意图（false = 意图留在 conn.modelChanges 下轮再试）。
                                 val intent = conn.modelChanges[session.runtimeId]
                                 val accepted = modelSwitch.step({ conn.ssh.exec(it) }, key, session.runtimeId, session.name, intent)
-                                if (intent != null && accepted) conn.modelChanges.remove(session.runtimeId)
+                                if (intent != null && accepted && conn.modelChanges[session.runtimeId] === intent) conn.modelChanges.remove(session.runtimeId)
                             }
                             // ⚠️ SentAwaitEvidence（已发送、等转录新回执）是唯一不堵普通消息的状态：
                             //    落下去走正常队列路径，新配置下下一条照发，不等下一回复。
                             //    其余状态一律 continue，不可绕过 —— Pending 发送在即、Delivering 投递不明、
                             //    AwaitConfirm 确认框等用户回车（绝不代按）、Unknown 人工核对（不自动重发）。
-                            if (state.modelSwitches.active(key)?.status != ModelChangeStatus.SentAwaitEvidence) continue
                         }
+                        if (state.modelSwitches.blocksQueue(key)) continue
                         val ready = conn.instructionDeliveryMutex.withLock {
                             val (pending, live) = SessionProbe.snapshot(conn.ssh, session.name)
                             val barrier = conn.terminalAwaiting[session.runtimeId]
