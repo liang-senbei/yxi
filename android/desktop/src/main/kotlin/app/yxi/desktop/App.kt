@@ -74,6 +74,7 @@ fun App(state: AppState) {
                 // 整页入口（左栏底部的「配置」「我的」）盖住工作区；再点一次那个入口就回来
                 when (state.page) {
                     Page.Config -> ConfigPane(state)
+                    Page.Plugins -> PluginsPane(state)
                     Page.Me -> MePane(state)
                     Page.Routes -> RoutesPane(state)
                     Page.Codex -> CodexWorkspacePane(state)

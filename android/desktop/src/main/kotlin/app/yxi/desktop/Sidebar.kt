@@ -1,5 +1,5 @@
 package app.yxi.desktop
-import androidx.compose.material.icons.outlined.PhoneAndroid
+import androidx.compose.material.icons.outlined.Extension
 
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -231,11 +231,8 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
             Text("切换任务", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = t.textPrimary)
             Text("Ctrl+K", style = MaterialTheme.typography.labelSmall, color = t.textMuted)
         }
-        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp).clip(RoundedCornerShape(8.dp)).clickable { state.showAndroidEmulator = true }.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Icon(Icons.Outlined.PhoneAndroid, null, Modifier.size(18.dp), tint = t.textSecondary)
-            Text("Android 模拟器", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = t.textPrimary)
-            Text("本机", style = MaterialTheme.typography.labelSmall, color = t.textMuted)
-        }
+        NavItem(Icons.Outlined.Extension, "插件", state.page == Page.Plugins, Modifier.fillMaxWidth().padding(horizontal = 10.dp)) { state.page = Page.Plugins }
+        NavItem(Icons.Default.Tune, "配置", state.page == Page.Config, Modifier.fillMaxWidth().padding(horizontal = 10.dp)) { state.page = Page.Config }
         // 会话过滤（ZCode 的搜索框 / Codex 的过滤）：按会话名 / 主机名滤，主机全不匹配就整组藏掉
         if (searchVisible) Row(
             Modifier.fillMaxWidth().padding(10.dp, 2.dp, 10.dp, 6.dp).clip(RoundedCornerShape(8.dp)).background(t.border),
@@ -449,15 +446,6 @@ private fun StatusDot(st: Conn.Status) {
 private fun BottomNav(state: AppState) {
     val t = Tokens.current
     HorizontalDivider(color = t.border)
-    Row(Modifier.fillMaxWidth().padding(6.dp, 4.dp)) {
-        NavItem(Icons.Default.Tune, "配置", state.page == Page.Config, Modifier.weight(1f)) {
-            // 再点一次回工作区 —— 整页入口没有「返回」按钮，点亮的那个自己就是开关
-            state.page = if (state.page == Page.Config) Page.Workspace else Page.Config
-        }
-        NavItem(Icons.Default.Person, "我的", state.page == Page.Me, Modifier.weight(1f)) {
-            state.page = if (state.page == Page.Me) Page.Workspace else Page.Me
-        }
-    }
     AccountRow(state)
 }
 
