@@ -84,14 +84,26 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
         note = result; applying = null; resetting = false
         }
     }
+    editor?.let { original -> RouteForm(original, onClose = { editor = null }) { edited ->
+        val before = lines ?: error("清单未读取，不能覆盖")
+        val latest = Lines.list(conn.ssh) ?: error("无法确认服务器最新清单")
+        check(routeCatalogEqual(before, latest)) { "线路清单已被其他人修改，请关闭编辑后刷新" }
+        val updated = if (before.any { it.id == edited.id }) before.map { if (it.id == edited.id) edited else it } else before + edited
+        Lines.saveList(conn.ssh, updated, expected = before)?.let { error(it) }
+        val checked = Lines.list(conn.ssh) ?: error("保存结果未确认，请刷新核对")
+        check(routeCatalogEqual(updated, checked)) { "保存后的线路清单不匹配" }
+        lines = checked; editor = null; note = "线路已保存。点击应用配置后才会修改运行器设置。"
+    }
+        return
+    }
     Column(Modifier.fillMaxSize().background(t.surface0).verticalScroll(rememberScrollState()).padding(28.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("模型与线路", style = MaterialTheme.typography.titleLarge)
+                Text("供应商与模型", style = MaterialTheme.typography.titleLarge)
                 Text(conn.host.label + " · " + conn.host.username + "@" + conn.host.hostname, color = t.textMuted, style = MaterialTheme.typography.bodySmall)
             }
             TextButton({ state.page = state.routesOrigin }) { Text("返回") }
-            Button({ editor = Lines.Line(Lines.newId(), "", agent = engine) }, enabled = lines != null && !busy) { Text("新增线路") }
+            Button({ editor = Lines.Line(Lines.newId(), "", agent = engine) }, enabled = lines != null && !busy) { Text("＋ 添加供应商") }
         }
         Spacer(Modifier.height(22.dp))
         state.deferredRoute?.let { request ->
@@ -176,16 +188,6 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
         }
         TextButton({ note = ""; resetting = true }, enabled = !busy && lines != null) { Text("恢复运行器默认线路…") }
     }
-    editor?.let { original -> RouteForm(original, onClose = { editor = null }) { edited ->
-        val before = lines ?: error("清单未读取，不能覆盖")
-        val latest = Lines.list(conn.ssh) ?: error("无法确认服务器最新清单")
-        check(routeCatalogEqual(before, latest)) { "线路清单已被其他人修改，请关闭编辑后刷新" }
-        val updated = if (before.any { it.id == edited.id }) before.map { if (it.id == edited.id) edited else it } else before + edited
-        Lines.saveList(conn.ssh, updated, expected = before)?.let { error(it) }
-        val checked = Lines.list(conn.ssh) ?: error("保存结果未确认，请刷新核对")
-        check(routeCatalogEqual(updated, checked)) { "保存后的线路清单不匹配" }
-        lines = checked; editor = null; note = "线路已保存。点击应用配置后才会修改运行器设置。"
-    } }
     if (applying != null || resetting) WorkbenchDialog(onDismissRequest = { if (!busy) { applying = null; resetting = false } },
         title = { Text(if (resetting) "恢复默认线路？" else "应用 ${applying!!.name}？") },
         text = { Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -230,6 +232,7 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
 }
 
 @Composable
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend (Lines.Line) -> Unit) {
     val scope = rememberCoroutineScope()
     var name by remember { mutableStateOf(original.name) }
@@ -246,8 +249,30 @@ private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend
     var effort by remember { mutableStateOf(original.extra.optString(effortKey)) }
     var error by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    WorkbenchDialog(onDismissRequest = { if (!busy) onClose() }, title = { Text("${if (original.isCodex) "Codex" else "Claude Code"} 线路") },
-        text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    var presetSearch by remember { mutableStateOf("") }
+    var presetExtra by remember { mutableStateOf(org.json.JSONObject(original.extra.toString())) }
+    var advancedOpen by remember { mutableStateOf(false) }
+    var advanced by remember { mutableStateOf(original.extra.toString(2)) }
+    ProviderEditorPage(onDismissRequest = { if (!busy) onClose() }, title = { Text("${if (original.name.isBlank()) "添加" else "编辑"}供应商 · ${if (original.isCodex) "Codex" else "Claude Code"}", style = MaterialTheme.typography.titleLarge) },
+        text = { Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text("选择供应商模板", style = MaterialTheme.typography.titleMedium)
+            OutlinedTextField(presetSearch, { presetSearch = it }, singleLine = true, label = { Text("搜索模板") }, modifier = Modifier.fillMaxWidth())
+            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                app.yxi.agent.LinePresets.forAgent(original.agent).filter { it.name.contains(presetSearch, true) }.forEach { preset ->
+                    SuggestionChip(onClick = {
+                        name = preset.name; url = preset.baseUrl
+                        presetExtra = org.json.JSONObject(original.extra.toString())
+                        if (!original.isCodex) {
+                            presetExtra.put("env", preset.envJson())
+                            model = preset.env["ANTHROPIC_MODEL"].orEmpty()
+                            mappings.keys.toList().forEach { alias -> mappings[alias] = preset.env["ANTHROPIC_DEFAULT_${alias}_MODEL"].orEmpty() }
+                        } else model = preset.model
+                        advanced = presetExtra.toString(2)
+                    }, label = { Text(preset.name) }, enabled = !busy)
+                }
+            }
+            Text("模板仅预填，可自行修改端点和模型；密钥由你填写。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+            HorizontalDivider()
             OutlinedTextField(name, { name = it }, label = { Text("线路名称") }, singleLine = true)
             OutlinedTextField(url, { url = it }, label = { Text("服务端点 Base URL") }, singleLine = true)
             OutlinedTextField(secret, { secret = it }, label = { Text("API 密钥") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
@@ -267,6 +292,13 @@ private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend
                 Text("按运行器与模型支持的值填写；更改后可能需要重开会话。留空移除此线路的强度设置。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
             }
             OutlinedTextField(memo, { memo = it }, label = { Text("备注（例如用途、套餐或模型区别）") }, maxLines = 3)
+            if (!original.isCodex) {
+                TextButton({ advancedOpen = !advancedOpen }) { Text(if (advancedOpen) "收起高级配置 JSON" else "高级配置 JSON") }
+                if (advancedOpen) {
+                    Text("填写额外的 settings 配置。上方端点、密钥、模型映射和强度字段优先；不支持的键会明确提示。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                    OutlinedTextField(advanced, { advanced = it }, label = { Text("额外配置 JSON") }, modifier = Modifier.fillMaxWidth().heightIn(min = 180.dp), maxLines = 14)
+                }
+            }
             Text("模型 ID 由该线路提供方定义。保存不代表接口、密钥或模型已验证。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
             if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
         } },
@@ -274,7 +306,13 @@ private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend
             busy = true; error = ""
             try {
                 require(effort.none { it < ' ' }) { "推理强度不能包含控制字符" }
-                val edited = editedRoute(original, name, url, secret, model, authToken).copy(note = memo.trim())
+                val extra = if (!original.isCodex) org.json.JSONObject(advanced) else presetExtra
+                if (!original.isCodex) {
+                    val rejected = Lines.rejectedKeys(extra)
+                    require(rejected.isEmpty()) { "不支持的配置项：${rejected.joinToString()}" }
+                    require(extra.optJSONObject("env")?.let { env -> listOf("ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY").none { env.has(it) } } != false) { "端点和密钥请填写上方独立字段" }
+                }
+                val edited = editedRoute(original.copy(extra = extra), name, url, secret, model, authToken).copy(note = memo.trim())
                 if (!original.isCodex) {
                     val env = edited.extra.optJSONObject("env") ?: org.json.JSONObject()
                     mappings.forEach { (alias, value) ->
@@ -293,3 +331,5 @@ private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend
         } }, enabled = !busy) { Text(if (busy) "保存中…" else "保存线路") } },
         dismissButton = { TextButton(onClose, enabled = !busy) { Text("取消") } })
 }
+
+
