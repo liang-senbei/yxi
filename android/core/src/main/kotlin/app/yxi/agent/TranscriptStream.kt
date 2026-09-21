@@ -140,7 +140,14 @@ with open(sys.argv[1], 'rb') as f:
         follow(ssh, "tail -n $backlog -f '$file'")
 
     private fun follow(ssh: SshSession, cmd: String): Flow<String> = flow { coroutineScope {
-        val shell = ssh.openExecStream(SshSession.follow(cmd))
+        // Transcript offsets must count file bytes only. The generic follow wrapper
+        // injects newline heartbeats and stays alive after its child exits, which
+        // corrupts offsets/partial JSON and prevents the bounded stream reopening.
+        val shell = ssh.openExecStream(
+            "( $cmd ) & __p=\$!; " +
+                "trap 'kill \$__p 2>/dev/null' EXIT; " +
+                "trap 'exit' PIPE HUP TERM INT; wait \$__p"
+        )
         // ⚠️ **取消协程不会打断阻塞在 readLine() 上的线程** —— 它不是挂起点。
         // 不主动关通道的话，`finally` 永远轮不到执行，线程和远端进程一起挂着。
         val closer = launch(Dispatchers.IO, start = CoroutineStart.UNDISPATCHED) {
