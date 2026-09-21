@@ -295,15 +295,17 @@ private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend
             OutlinedTextField(url, { url = it }, label = { Text("请求地址 Base URL") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(secret, { secret = it }, label = { Text("API Key") }, singleLine = true, modifier = Modifier.fillMaxWidth(), visualTransformation = if (showSecret) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(), trailingIcon = { TextButton({ showSecret = !showSecret }) { Text(if (showSecret) "隐藏" else "显示") } })
             if (!original.isCodex) OutlinedTextField(authToken, { authToken = it }, label = { Text("Auth token（按提供方要求填写）") }, singleLine = true, modifier = Modifier.fillMaxWidth(), visualTransformation = if (showSecret) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation())
-            OutlinedTextField(model, { model = it }, label = { Text("模型 ID（可留空）") }, singleLine = true)
+            if (original.isCodex) OutlinedTextField(model, { model = it }, label = { Text("模型 ID（可留空）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            else ProviderModelField("默认 / 兜底模型（可留空）", model) { model = it }
             if (!original.isCodex) {
                 TextButton({ mappingsOpen = !mappingsOpen }) { Text(if (mappingsOpen) "收起模型映射" else "模型映射 · 主模型与子 Agent") }
                 if (mappingsOpen) {
                     Text("把 Claude 的模型档位映射到此线路的模型 ID，例如 glm-5.3-flash。留空使用运行器默认。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                     listOf("HAIKU", "SONNET", "OPUS", "FABLE").forEach { alias ->
-                        OutlinedTextField(mappings[alias].orEmpty(), { mappings[alias] = it }, label = { Text("$alias 对应模型") }, singleLine = true)
+                        ProviderModelField("$alias 对应模型", mappings[alias].orEmpty()) { mappings[alias] = it }
                     }
-                    OutlinedTextField(subagentModel, { subagentModel = it }, label = { Text("子 Agent 模型（可选）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    ProviderModelField("子 Agent 模型（可选）", subagentModel) { subagentModel = it }
+                    Text("1M 会添加运行器的 [1m] 标记；需要供应商支持，不会自动扩展模型能力或转换第三方协议。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 }
             }
             run {
