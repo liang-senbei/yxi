@@ -19,11 +19,56 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.yxi.agent.Session
 import app.yxi.agent.SessionState
+import kotlinx.coroutines.launch
 
 @Composable
-fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching: Boolean) {
+fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching: Boolean, query: String = "") {
     val nav = state.navigation
     val t = Tokens.current
+    val scope = rememberCoroutineScope()
+    var openError by remember(conn) { mutableStateOf("") }
+    val codexTasks = state.codexWorkspace.tasks(conn.host).filter { record ->
+        val controller = state.codexWorkspace.controllers[record.key]
+        nav.visible(record.key, if (controller?.pendingRequests?.isNotEmpty() == true) SessionState.NeedsYou
+            else if (controller?.activeTurnId != null) SessionState.Working else SessionState.Idle) &&
+            listOf(nav.title(record.key).orEmpty(), record.title, record.directory, conn.host.label).any { it.contains(query, true) }
+    }
+    @Composable fun codexTask(record: CodexTaskRecord) {
+        var menu by remember(record.key) { mutableStateOf(false) }
+        NativeOverlay(menu)
+        val selected = state.page == Page.Codex && state.codexSelectedTaskKey == record.key && state.conn === conn
+        val controller = state.codexWorkspace.controllers[record.key]
+        Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 4.dp).background(if (selected) t.surface3 else androidx.compose.ui.graphics.Color.Transparent), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f).clickable {
+                state.select(conn, null); state.codexSelectedTaskKey = record.key; state.page = Page.Codex
+                if (controller == null && conn.ssh.isConnected) scope.launch {
+                    try { state.codexWorkspace.open(conn, record); openError = "" }
+                    catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                    catch (e: Exception) { openError = e.message.orEmpty() }
+                }
+            }.padding(vertical = 8.dp)) {
+                Text(nav.title(record.key) ?: record.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+                Text("Codex · " + when {
+                    controller?.pendingRequests?.isNotEmpty() == true -> "需要你处理"
+                    controller?.activeTurnId != null -> "正在运行"
+                    controller?.ready == true -> "空闲"
+                    else -> "未连接"
+                }, style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+            }
+            Box {
+                IconButton({ menu = true }, Modifier.size(26.dp)) { Icon(Icons.Default.MoreHoriz, "会话操作", Modifier.size(16.dp)) }
+                DropdownMenu(menu, { menu = false }) {
+                    DropdownMenuItem(text = { Text(if (nav.pinned(record.key)) "取消置顶" else "置顶") }, onClick = { nav.togglePin(record.key); menu = false })
+                    DropdownMenuItem(text = { Text(if (nav.favorite(record.key)) "取消收藏" else "收藏") }, onClick = { nav.setCodexFavorite(record, !nav.favorite(record.key)); menu = false })
+                    HorizontalDivider()
+                    Text("移到项目分组", Modifier.padding(12.dp), style = MaterialTheme.typography.labelMedium)
+                    (conn.projectGroups.groups.keys.toList() + "").forEach { group ->
+                        DropdownMenuItem(text = { Text(group.ifBlank { "未分组" }) }, onClick = { nav.setGroup(record.key, group); menu = false })
+                    }
+                }
+            }
+        }
+    }
     var projectGroups by remember(conn) { mutableStateOf(false) }
     var selectedGroup by remember(conn) { mutableStateOf("") }
     var creatingGroup by remember(conn) { mutableStateOf("") }
@@ -33,7 +78,8 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
         NewSessionDialog(conn, onDismiss = { creatingDirectory = null; creatingGroup = "" }, initialDirectory = directory.takeIf { it.isNotBlank() }, collaborationGroup = creatingGroup,
             onCodexConversation = { path, prompt ->
                 creatingDirectory = null
-                state.prepareCodexTask(conn, path, prompt)
+                state.prepareCodexTask(conn, path, prompt, creatingGroup)
+                creatingGroup = ""
             }) { session ->
             creatingDirectory = null
             state.select(conn, session)
@@ -92,6 +138,7 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
         if (conn.groupsError.isNotBlank()) {
             Text("暂列出全部 Agent，分组恢复后自动整理", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
             visible.forEach { task(it) }
+            codexTasks.forEach { codexTask(it) }
         }
         return
     }
@@ -100,7 +147,11 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
         listOf("" to visible.filter { it.name !in groupedNames })
     Text("项目分组", Modifier.padding(16.dp, 8.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
     groupRows.forEach { (name, members) ->
-        if ((searching || name.isEmpty()) && members.isEmpty()) return@forEach
+        val managedMembers = codexTasks.filter { record ->
+            val group = nav.group(record.key).takeIf { it in conn.projectGroups.groups.keys }.orEmpty()
+            group == name
+        }
+        if ((searching || name.isEmpty()) && members.isEmpty() && managedMembers.isEmpty()) return@forEach
         val groupKey = "server-group:" + projectKey(conn.host, "/") + ":" + name
         val closed = !searching && nav.collapsed(groupKey, false)
         var menu by remember(groupKey) { mutableStateOf(false) }
@@ -109,7 +160,7 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
             Icon(if (closed) Icons.Default.ChevronRight else Icons.Default.ExpandMore, "展开分组", Modifier.size(16.dp), tint = t.textMuted)
             Icon(Icons.Outlined.Folder, null, Modifier.padding(horizontal = 6.dp).size(16.dp), tint = t.textSecondary)
             Text(name.ifEmpty { "未分组" }, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(members.size.toString(), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+            Text((members.size + managedMembers.size).toString(), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
             IconButton({ creatingGroup = name; creatingDirectory = members.firstOrNull()?.cwd.orEmpty() }, Modifier.size(28.dp)) { Icon(Icons.Outlined.Add, "在组内新建 Agent", Modifier.size(16.dp)) }
             Box {
                 IconButton({ menu = true }, Modifier.size(28.dp)) { Icon(Icons.Default.MoreHoriz, "分组操作", Modifier.size(16.dp)) }
@@ -123,8 +174,10 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
             }
         }
         if (!closed) members.sortedBy { s -> val k = taskNavigationKey(conn.host, s); if (nav.pinned(k)) nav.pinOrder(k) else Int.MAX_VALUE }.forEach { task(it) }
+        if (!closed) managedMembers.sortedBy { nav.pinOrder(it.key) }.forEach { codexTask(it) }
     }
     if (conn.groupsError.isNotBlank()) Text(conn.groupsError, color = t.warning, style = MaterialTheme.typography.bodySmall)
+    if (openError.isNotBlank()) Text(openError, color = t.warning, style = MaterialTheme.typography.bodySmall)
     return
 }
 

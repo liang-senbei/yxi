@@ -50,6 +50,8 @@ class WorkspaceNavigation(file: File) {
     fun archived(key: String) = task(key).optBoolean("archived", false)
     fun muted(key: String) = task(key).optBoolean("muted", false)
     fun favorite(key: String) = task(key).optBoolean("favorite", false)
+    internal fun group(key: String) = task(key).optString("group", "")
+    internal fun setGroup(key: String, group: String) = editTask(key) { it.put("group", group) }
     /** Codex retains its thread identity in the registry; a favorite reopens that thread. */
     internal fun setCodexFavorite(task: CodexTaskRecord, enabled: Boolean) = editTask(task.key) {
         it.put("favorite", enabled)

@@ -35,13 +35,15 @@ class AppState {
     internal val codexConversationViews = mutableMapOf<String, CodexConversationView>()
     internal var codexSelectedTaskKey by mutableStateOf<String?>(null)
     internal var codexCreateRequest by mutableStateOf<Pair<String, String>?>(null)
+    internal var codexCreateGroup by mutableStateOf("")
     internal var routesOrigin by mutableStateOf(Page.Workspace)
     internal fun openRoutes() {
         routesOrigin = if (page == Page.Routes) routesOrigin else page
         if (page != Page.ConfigFiles) configurationHostId = conn?.host?.id.orEmpty()
         page = Page.Routes
     }
-    internal fun prepareCodexTask(c: Conn, directory: String, prompt: String = "") {
+    internal fun prepareCodexTask(c: Conn, directory: String, prompt: String = "", group: String = "") {
+        codexCreateGroup = group
         select(c, null)
         codexSelectedTaskKey = null
         codexCreateRequest = directory to prompt

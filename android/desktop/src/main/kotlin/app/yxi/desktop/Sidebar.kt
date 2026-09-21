@@ -300,7 +300,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
                         }
                         // 断线重连中列表照旧摆着（服务器上的会话还在），不清；搜索时只画滤剩下的
                         if (c != null) {
-                            ProjectTree(state, c, sessions, searching = f.isNotEmpty())
+                            ProjectTree(state, c, sessions, searching = f.isNotEmpty(), query = f)
                             if (f.isEmpty() && c.status == Conn.Status.Connected && c.sessions.isEmpty())
                                 Text("这台机器上还没有会话", Modifier.padding(start = 24.dp, bottom = 6.dp), style = MaterialTheme.typography.bodySmall, color = t.textMuted)
                         }

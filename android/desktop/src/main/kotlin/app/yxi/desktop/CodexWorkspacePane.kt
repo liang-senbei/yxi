@@ -191,11 +191,14 @@ private fun CodexConversationPane(state: AppState) {
                     val path = directory.trim()
                     val name = title
                     val prompt = initialDraft
+                    val group = state.codexCreateGroup
                     act {
                         val record = workspace.create(target, path, name)
+                        if (group.isNotBlank()) state.navigation.setGroup(record.key, group)
                         if (prompt.isNotBlank()) state.appendCodexQuote(record, prompt)
                         state.codexSelectedTaskKey = record.key
                         initialDraft = ""
+                        state.codexCreateGroup = ""
                         creating = false
                     }
                 }, enabled = !workspace.busy && directory.startsWith('/')) { Text("创建任务") }
