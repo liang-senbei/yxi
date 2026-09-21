@@ -17,7 +17,7 @@ import kotlinx.coroutines.launch
 /** Server-side route settings: configuration confirmation is deliberately separate from request verification. */
 @Composable
 fun RoutesPane(state: AppState) {
-    val conn = state.conn
+    val conn = state.configurationConnection()
     if (conn == null) { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("先连接需要配置的主机") }; return }
     key(conn) { BoundRoutesPane(state, conn) }
 }
@@ -39,7 +39,7 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
     var deleting by remember { mutableStateOf<Lines.Line?>(null) }
     var projectScope by remember { mutableStateOf(false) }
     var search by remember { mutableStateOf("") }
-    val cwd = state.session?.cwd?.takeIf { it.startsWith('/') }
+    val cwd = state.session?.cwd?.takeIf { state.conn === conn && it.startsWith('/') }
     val chosenScope = if (engine == Lines.CLAUDE && projectScope) cwd else null
     suspend fun reload(scopePath: String? = chosenScope) {
         lines = Lines.list(conn.ssh)
@@ -98,15 +98,19 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
         return
     }
     Column(Modifier.fillMaxSize().background(t.surface0).verticalScroll(rememberScrollState()).padding(28.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("供应商与模型", style = MaterialTheme.typography.titleLarge)
-                Text(conn.host.label + " · " + conn.host.username + "@" + conn.host.hostname, color = t.textMuted, style = MaterialTheme.typography.bodySmall)
-            }
-            TextButton({ state.page = state.routesOrigin }) { Text("返回") }
-            Button({ editor = Lines.Line(Lines.newId(), "", agent = engine) }, enabled = lines != null && !busy) { Text("＋ 添加供应商") }
+        ConfigurationHeader(state, conn, engine, busy, lines != null, { engine = it; projectScope = false }) {
+            editor = Lines.Line(Lines.newId(), "", agent = engine)
         }
         Spacer(Modifier.height(22.dp))
+        if (engine !in listOf(Lines.CLAUDE, Lines.CODEX)) {
+            OutlinedCard(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("${configurationEngines.firstOrNull { it.first == engine }?.second ?: engine} 配置", style = MaterialTheme.typography.titleLarge)
+                    Text("该运行器的配置适配尚未完成，暂不能添加或应用供应商。", color = t.textMuted)
+                }
+            }
+            return@Column
+        }
         state.deferredRoute?.let { request ->
             OutlinedCard(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -117,7 +121,6 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
             }
         }
         if (state.deferredRouteNotice.isNotBlank()) Text(state.deferredRouteNotice, Modifier.padding(bottom = 12.dp), style = MaterialTheme.typography.bodySmall)
-        WorkbenchTabs(listOf("Claude Code", "Codex"), if (engine == Lines.CODEX) "Codex" else "Claude Code", { if (!busy) { engine = if (it == "Codex") Lines.CODEX else Lines.CLAUDE; projectScope = false } })
         if (engine == Lines.CODEX) {
             val existingTask = state.codexWorkspace.tasks(conn.host).firstOrNull { it.key == state.codexSelectedTaskKey }
             if (existingTask != null) OutlinedCard(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
@@ -142,7 +145,7 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
         Surface(Modifier.fillMaxWidth().padding(top = 18.dp), shape = RoundedCornerShape(16.dp), color = t.surface1) {
             Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("配置回读 · 尚未验证请求", style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+                    Text("当前保存的配置", style = MaterialTheme.typography.labelSmall, color = t.textMuted)
                     Text(current?.name ?: "未匹配到已保存的线路", style = MaterialTheme.typography.titleMedium)
                     Text(if (chosenScope != null) "项目配置可能覆盖服务器默认值" else "服务器用户级配置；可能影响该用户的其他任务", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
                 }
@@ -164,7 +167,7 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
             else -> visibleLines.forEach { line ->
                 Surface(Modifier.fillMaxWidth().padding(bottom = 10.dp), shape = RoundedCornerShape(14.dp), color = t.surface2,
                     border = BorderStroke(0.5.dp, t.border)) {
-                    Column(Modifier.padding(18.dp)) {
+                    Column(Modifier.clickable(enabled = !busy) { editor = line }.padding(18.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Surface(Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = t.surface1, border = BorderStroke(0.5.dp, t.border)) {
                                 Box(contentAlignment = Alignment.Center) { Text(line.name.take(2).uppercase(), style = MaterialTheme.typography.labelLarge, color = t.textSecondary) }
