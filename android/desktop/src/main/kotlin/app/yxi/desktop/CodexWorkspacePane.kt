@@ -324,7 +324,6 @@ private fun CodexConversationPane(state: AppState) {
                 onSteer = { instruction -> if (controller != null) act { controller.steerNext(instruction.id) } })
             if (controller != null) CodexGoalStrip(controller)
             val draft = state.chatDrafts.getOrPut(selected.key) { mutableStateOf(TextFieldValue()) }
-            if (controller != null) CodexModelPicker(controller) { state.openRoutes() }
             if (controller != null && conn != null) {
                 TextButton({ act { workspace.applyCurrentConfiguration(conn, selected) } },
                     enabled = !workspace.busy && controller.ready && !controller.sending && controller.activeTurnId == null && controller.pendingRequests.isEmpty()) {
@@ -409,6 +408,8 @@ private fun CodexConversationPane(state: AppState) {
                 placeholder = { Text("描述任务，或补充下一步要求…") })
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 Text("Ctrl+Enter 加入队列", Modifier.padding(10.dp), style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                Spacer(Modifier.weight(1f))
+                if (controller != null) CodexModelPicker(controller) { state.openRoutes() }
                 Button(::enqueueDraft, enabled = allUploaded && (draft.value.text.isNotBlank() || !attachments.isNullOrEmpty())) { Text(if (controller?.autoDispatch == true) "发送到队列" else "加入队列") }
             }
         }
