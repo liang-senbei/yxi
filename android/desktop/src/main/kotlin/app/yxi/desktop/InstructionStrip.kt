@@ -29,7 +29,6 @@ internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliv
     var querying by remember(taskKey) { mutableStateOf(false) }
     var queryResult by remember(taskKey, editing?.id) { mutableStateOf("") }
     var menuId by remember(taskKey) { mutableStateOf<String?>(null) }
-    var withdrawn by remember(taskKey) { mutableStateOf<Pair<QueuedInstruction, Long>?>(null) }
     NativeOverlay(menuId != null)
     if (compactUnknown && active.isNotEmpty() && active.all { it.status == InstructionStatus.Unknown } && !expanded && queue.error.isBlank()) {
         TextButton({ expanded = true }, Modifier.padding(horizontal = 12.dp)) { Text("投递记录 · ${active.size}", style = MaterialTheme.typography.labelSmall, color = t.textMuted) }
@@ -38,13 +37,6 @@ internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliv
     fun act(block: () -> Unit) { error = ""; runCatching(block).onFailure { error = it.message.orEmpty() } }
     if (queue.error.isNotEmpty()) Text(queue.error, color = t.danger, modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
     if (error.isNotBlank() && editing == null) Text(error, color = t.danger, modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
-    withdrawn?.let { (item, revision) ->
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("已撤回待发送指令", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = t.textMuted)
-            TextButton({ act { queue.restoreCancelled(item.id, revision); withdrawn = null } }) { Text("撤销") }
-            TextButton({ withdrawn = null }) { Text("关闭") }
-        }
-    }
     if (active.isNotEmpty()) Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp).heightIn(max = 220.dp)
         .background(t.surface1, RoundedCornerShape(12.dp)).border(0.5.dp, t.border, RoundedCornerShape(12.dp))) {
         Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -64,8 +56,7 @@ internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliv
                     if (!automatic && item.status == InstructionStatus.Local && index == 0) TextButton({ onDeliver(item) }, enabled = canDeliver) { Text("发送") }
                     TextButton({ editing = item; text = item.text; error = "" }) { Text(if (item.status == InstructionStatus.Local) "编辑" else "核对") }
                     if (item.status == InstructionStatus.Local) IconButton({ act {
-                        val cancelled = queue.cancel(item.id, item.revision)
-                        withdrawn = item to cancelled.revision
+                        queue.cancel(item.id, item.revision)
                     } }, Modifier.size(32.dp)) { Icon(Icons.Outlined.DeleteOutline, "撤回指令", Modifier.size(16.dp), tint = t.textMuted) }
                     Box {
                         IconButton({ menuId = item.id }, Modifier.size(32.dp)) { Icon(Icons.Outlined.MoreHoriz, "更多指令操作", Modifier.size(16.dp), tint = t.textMuted) }
@@ -100,8 +91,7 @@ internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliv
                 }
                 if (local) Row {
                     TextButton({ act {
-                        val cancelled = queue.cancel(original.id, original.revision)
-                        withdrawn = original to cancelled.revision
+                        queue.cancel(original.id, original.revision)
                         editing = null
                     } }) { Text("撤回") }
                     val previous = active.takeWhile { it.id != original.id }.lastOrNull { it.status == InstructionStatus.Local }
