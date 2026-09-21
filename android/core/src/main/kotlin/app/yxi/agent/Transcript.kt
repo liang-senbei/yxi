@@ -14,7 +14,7 @@ import org.json.JSONObject
 sealed interface ChatItem {
     val key: String
 
-    data class UserText(override val key: String, val text: String) : ChatItem
+    data class UserText(override val key: String, val text: String, val sourceUuid: String? = null) : ChatItem
     data class AssistantText(override val key: String, val markdown: String) : ChatItem
     /** 默认折叠——实测一个会话里 128 条，全展开会把内容淹掉 */
     data class Thinking(override val key: String, val text: String) : ChatItem
@@ -507,7 +507,9 @@ object Transcript {
                 out += ChatItem.Injected(key, t("系统消息"), null, t)
                 return
             }
-            out += ChatItem.UserText(key, t)
+            // UI keys can include a content-block suffix; preserve the actual message UUID separately.
+            val sourceUuid = uuid.takeIf { Regex("[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}").matches(it) }
+            out += ChatItem.UserText(key, t, sourceUuid)
             said += t.trim()     // 出队判据要用（#76）
         }
         when (val c = msg.opt("content")) {

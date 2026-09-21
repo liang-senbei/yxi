@@ -688,11 +688,11 @@ private suspend fun waitChange(before: String, timeoutMs: Long = 4_000, get: () 
 }
 
 // ── 条目渲染 ──
-private data class MessageEditTarget(val key: String, val text: String, val queued: Boolean = false)
+private data class MessageEditTarget(val key: String, val text: String, val queued: Boolean = false, val sourceUuid: String? = null)
 
 @Composable
 private fun ItemView(conn: Conn, item: ChatItem, onEdit: (MessageEditTarget) -> Unit) = when (item) {
-    is ChatItem.UserText -> UserBubble(conn, item.text, queued = false, onEdit = { onEdit(MessageEditTarget(item.key, item.text)) })
+    is ChatItem.UserText -> UserBubble(conn, item.text, queued = false, onEdit = { onEdit(MessageEditTarget(item.key, item.text, sourceUuid = item.sourceUuid)) })
     is ChatItem.Queued -> UserBubble(conn, item.text, queued = true, onEdit = { onEdit(MessageEditTarget(item.key, item.text, queued = true)) })
     is ChatItem.AssistantText -> MessageRow(item.markdown, user = false) { AssistantBody(item.markdown) }
     is ChatItem.Thinking -> Fold("✳ 思考过程", item.text)
