@@ -7,7 +7,9 @@ from verify_container import verify
 class ContainerBoundaryTest(unittest.TestCase):
     def setUp(self):
         self.results = str(pathlib.Path("fixture-results").resolve())
+        self.image = "sha256:" + "1" * 64
         self.safe = {
+            "Image": self.image, "State": {"Status": "created", "Running": False},
             "Config": {"Labels": {"org.yxi.isolated-test": "run-1"}},
             "HostConfig": {
                 "NetworkMode": "none", "PidMode": "", "IpcMode": "private",
@@ -19,27 +21,37 @@ class ContainerBoundaryTest(unittest.TestCase):
         }
 
     def test_expected_boundary(self):
-        verify(self.safe, "run-1", self.results)
+        verify(self.safe, "run-1", self.results, self.image)
 
     def test_host_namespaces_and_privileges_rejected(self):
         for field, value in [("NetworkMode", "host"), ("PidMode", "host"), ("IpcMode", "host"),
-                             ("Privileged", True), ("CapAdd", ["SYS_ADMIN"]), ("PidsLimit", -1)]:
+                             ("Privileged", True), ("RestartPolicy", {"Name": "always"}), ("CapAdd", ["SYS_ADMIN"]), ("PidsLimit", -1)]:
             with self.subTest(field=field):
                 candidate = copy.deepcopy(self.safe)
                 candidate["HostConfig"][field] = value
                 with self.assertRaises(ValueError):
-                    verify(candidate, "run-1", self.results)
+                    verify(candidate, "run-1", self.results, self.image)
 
     def test_host_home_or_socket_mount_rejected(self):
         for source in ["/root", "/tmp", "/var/run/docker.sock"]:
             candidate = copy.deepcopy(self.safe)
             candidate["Mounts"].append({"Type": "bind", "Source": source, "Destination": "/host", "RW": True})
             with self.assertRaises(ValueError):
-                verify(candidate, "run-1", self.results)
+                verify(candidate, "run-1", self.results, self.image)
 
     def test_wrong_owner_rejected(self):
         with self.assertRaises(ValueError):
-            verify(self.safe, "different-run", self.results)
+            verify(self.safe, "different-run", self.results, self.image)
+
+    def test_started_container_rejected(self):
+        candidate = copy.deepcopy(self.safe)
+        candidate["State"] = {"Status": "running", "Running": True}
+        with self.assertRaises(ValueError):
+            verify(candidate, "run-1", self.results, self.image)
+
+    def test_wrong_image_rejected(self):
+        with self.assertRaises(ValueError):
+            verify(self.safe, "run-1", self.results, "sha256:" + "2" * 64)
 
 
 if __name__ == "__main__":

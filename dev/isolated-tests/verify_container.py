@@ -9,8 +9,11 @@ def check(condition, message="Unsafe container configuration"):
         raise ValueError(message)
 
 
-def verify(container, run_id, results, native=None):
+def verify(container, run_id, results, image_id, native=None):
     config = container["HostConfig"]
+    check(container["Image"] == image_id, "Unexpected image")
+    check(container["State"]["Status"] == "created" and not container["State"]["Running"], "Container already started")
+    check(config.get("RestartPolicy", {}).get("Name", "no") in ("", "no"))
     check(container["Config"].get("Labels", {}).get("org.yxi.isolated-test") == run_id)
     check(config["NetworkMode"] == "none")
     check(config.get("PidMode", "") == "")
@@ -37,8 +40,8 @@ def verify(container, run_id, results, native=None):
 
 
 if __name__ == "__main__":
-    inspect, run_id, results, *native = sys.argv[1:]
+    inspect, run_id, results, image_id, *native = sys.argv[1:]
     items = json.loads(pathlib.Path(inspect).read_text())
     check(len(items) == 1)
-    verify(items[0], run_id, results, native[0] if native else None)
+    verify(items[0], run_id, results, image_id, native[0] if native else None)
     print("Container isolation configuration verified; no test has started yet")

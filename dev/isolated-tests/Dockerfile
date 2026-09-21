@@ -14,5 +14,6 @@ COPY . /workspace
 RUN cd android && bash gradlew -Pyxi.desktopOnly=true :desktop:testClasses :desktop:cacheIsolatedRuntime \
     -I /workspace/dev/isolated-tests/cache.init.gradle --no-daemon --max-workers=1 \
     -Dorg.gradle.jvmargs=-Xmx1536m -Pkotlin.compiler.execution.strategy=in-process
-LABEL org.yxi.test-isolation="1"
+ARG SOURCE_REVISION
+LABEL org.yxi.test-isolation="1" org.yxi.source-revision=$SOURCE_REVISION
 ENTRYPOINT ["bash", "/workspace/dev/isolated-tests/entrypoint.sh"]

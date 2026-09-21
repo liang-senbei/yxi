@@ -24,7 +24,7 @@ if test "$mode" = build; then
     mkdir "$run_root/context"
     git -C "$repo" archive HEAD | tar -x -C "$run_root/context"
     docker_local build --platform linux/amd64 -f "$run_root/context/dev/isolated-tests/Dockerfile" \
-        -t "$image" "$run_root/context"
+        --build-arg "SOURCE_REVISION=$revision" -t "$image" "$run_root/context"
     docker_local image inspect "$image" > "$run_root/image.json"
     echo "Built $image; evidence: $run_root"
     exit 0
@@ -41,6 +41,8 @@ if test -n "$native"; then
     mounts+=(--mount "type=bind,src=$native,dst=/opt/native/claude,readonly")
 fi
 test "$(docker_local image inspect --format '{{ index .Config.Labels "org.yxi.test-isolation" }}' "$image")" = 1
+test "$(docker_local image inspect --format '{{ index .Config.Labels "org.yxi.source-revision" }}' "$image")" = "$revision"
+image_id=$(docker_local image inspect --format '{{.Id}}' "$image")
 mkdir "$run_root/results"
 run_id=$(python3 -c 'import uuid;print(uuid.uuid4())')
 container_id=
@@ -59,9 +61,9 @@ container_id=$(docker_local create --platform linux/amd64 --network none --ipc p
     --env CLAUDE_CONFIG_DIR=/sandbox/home/.claude \
     --env CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 --env DISABLE_TELEMETRY=1 --env DISABLE_AUTOUPDATER=1 \
     --env YXI_TEST_NATIVE_CLAUDE=/opt/native/claude \
-    --mount "type=bind,src=$run_root/results,dst=/results" "${mounts[@]}" "$image" "$test_class")
+    --mount "type=bind,src=$run_root/results,dst=/results" "${mounts[@]}" "$image_id" "$test_class")
 docker_local inspect "$container_id" > "$run_root/container.json"
-verify_args=("$run_root/container.json" "$run_id" "$run_root/results")
+verify_args=("$run_root/container.json" "$run_id" "$run_root/results" "$image_id")
 if test -n "$native"; then verify_args+=("$native"); fi
 python3 "$repo/dev/isolated-tests/verify_container.py" "${verify_args[@]}"
 # A timeout must also remove the labelled container, not just disconnect its client.
