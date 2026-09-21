@@ -154,8 +154,8 @@ private fun CodexConversationPane(state: AppState) {
                 Text(selected?.let { state.navigation.title(it.key) ?: it.title } ?: "新建 Agent", style = MaterialTheme.typography.titleLarge)
                 Text(conn?.host?.label?.let { "$it · 运行器 Codex" } ?: "请先从左侧选择服务器", color = Tokens.current.textMuted, style = MaterialTheme.typography.bodySmall)
             }
-            TextButton({ recovering = !recovering; creating = false; recoveryId = workspace.recoveryThreadId }, enabled = conn?.ssh?.isConnected == true && !workspace.busy) { Text("恢复任务") }
-            Button({ creating = !creating; recovering = false }, enabled = conn?.ssh?.isConnected == true && !workspace.busy) { Text("新任务") }
+            TextButton({ state.codexCreateGroup = ""; recovering = !recovering; creating = false; recoveryId = workspace.recoveryThreadId }, enabled = conn?.ssh?.isConnected == true && !workspace.busy) { Text("恢复任务") }
+            Button({ state.codexCreateGroup = ""; creating = !creating; recovering = false }, enabled = conn?.ssh?.isConnected == true && !workspace.busy) { Text("新任务") }
         }
         if (workspace.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (workspace.registry.error.isNotBlank()) Text(workspace.registry.error, color = Tokens.current.danger)
@@ -201,7 +201,7 @@ private fun CodexConversationPane(state: AppState) {
                         creating = false
                     }
                 }, enabled = !workspace.busy && directory.startsWith('/')) { Text("创建任务") }
-                TextButton({ creating = false }) { Text("取消") }
+                TextButton({ creating = false; state.codexCreateGroup = "" }) { Text("取消") }
             }
             Text("使用所选服务器的 Codex 登录和模型配置。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
             if (initialDraft.isNotBlank()) OutlinedTextField(initialDraft, { initialDraft = it }, label = { Text("创建后的提示词草稿") }, modifier = Modifier.fillMaxWidth(), maxLines = 4)
