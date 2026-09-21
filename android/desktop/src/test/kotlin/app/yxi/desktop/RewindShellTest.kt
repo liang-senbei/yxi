@@ -224,9 +224,9 @@ class RewindShellTest {
         assertNull(Rewind.parseExit(out))
         assertTrue("__YXI_REWIND_ID__:exit-sent" in out)
         val log = readLog()
-        assertTrue("SENDKEYS -t cc-test Escape" in log)
-        assertTrue("SENDKEYS -t cc-test -l -- /exit" in log)
-        assertTrue("SENDKEYS -t cc-test Enter" in log)
+        assertTrue("SENDKEYS -t %42 Escape" in log)
+        assertTrue("SENDKEYS -t %42 -l -- /exit" in log)
+        assertTrue("SENDKEYS -t %42 Enter" in log)
     }
 
     @Test
