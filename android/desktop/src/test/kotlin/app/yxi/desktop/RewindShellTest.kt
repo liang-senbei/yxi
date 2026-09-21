@@ -10,6 +10,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.condition.EnabledOnOs
+import org.junit.jupiter.api.condition.OS
 
 /**
  * 生成的命令要在**真 bash 里跑得过且不出事**（老板令）：假 tmux（按参数回数据、
@@ -23,6 +25,7 @@ import kotlin.test.assertTrue
  *  3. send-keys 失败绝不报 sent（`&&` 逐级链）；
  *  4. `/exit` 前身份核对不过，一个键都不发。
  */
+@EnabledOnOs(OS.LINUX) // These are remote Linux /proc commands, not Windows client commands.
 class RewindShellTest {
 
     private val root = Files.createTempDirectory("yxi-rltest")
