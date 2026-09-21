@@ -107,7 +107,7 @@ object Lines {
      */
     private val ENV_ALLOW_PREFIX = listOf("ANTHROPIC_", "ENABLE_", "DISABLE_")
     private val ENV_ALLOW_EXACT = setOf(
-        "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "CLAUDE_CODE_MAX_OUTPUT_TOKENS", "MAX_THINKING_TOKENS", "API_TIMEOUT_MS",
+        "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "CLAUDE_CODE_MAX_OUTPUT_TOKENS", "CLAUDE_CODE_SUBAGENT_MODEL", "MAX_THINKING_TOKENS", "API_TIMEOUT_MS",
     )
     fun envAllowed(k: String) = k in ENV_ALLOW_EXACT || ENV_ALLOW_PREFIX.any { k.startsWith(it) }
     fun topAllowed(k: String) = k in TOP_ALLOW

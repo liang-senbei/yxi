@@ -250,8 +250,9 @@ private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend
     var model by remember { mutableStateOf(routeModel(original)) }
     var mappingsOpen by remember { mutableStateOf(false) }
     val mappings = remember { mutableStateMapOf<String, String>().apply {
-        listOf("HAIKU", "SONNET", "OPUS").forEach { alias -> put(alias, original.extraEnv().optString("ANTHROPIC_DEFAULT_${alias}_MODEL")) }
+        listOf("HAIKU", "SONNET", "OPUS", "FABLE").forEach { alias -> put(alias, original.extraEnv().optString("ANTHROPIC_DEFAULT_${alias}_MODEL")) }
     } }
+    var subagentModel by remember { mutableStateOf(original.extraEnv().optString("CLAUDE_CODE_SUBAGENT_MODEL")) }
     var memo by remember { mutableStateOf(original.note) }
     val effortKey = if (original.isCodex) "model_reasoning_effort" else "effortLevel"
     var effort by remember { mutableStateOf(original.extra.optString(effortKey)) }
@@ -270,6 +271,7 @@ private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend
                     name = ""; url = ""; website = ""; model = ""; secret = ""; authToken = ""
                     presetExtra = org.json.JSONObject(); advanced = "{}"
                     mappings.keys.toList().forEach { mappings[it] = "" }
+                    subagentModel = ""
                 }, label = { Text("自定义供应商") }, enabled = !busy)
                 app.yxi.agent.LinePresets.forAgent(original.agent).filter { it.name.contains(presetSearch, true) }.forEach { preset ->
                     SuggestionChip(onClick = {
@@ -280,6 +282,7 @@ private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend
                             presetExtra.put("env", preset.envJson())
                             model = preset.env["ANTHROPIC_MODEL"].orEmpty()
                             mappings.keys.toList().forEach { alias -> mappings[alias] = preset.env["ANTHROPIC_DEFAULT_${alias}_MODEL"].orEmpty() }
+                            subagentModel = preset.env["CLAUDE_CODE_SUBAGENT_MODEL"].orEmpty()
                         } else model = preset.model
                         advanced = presetExtra.toString(2)
                     }, label = { Text(preset.name) }, enabled = !busy)
@@ -294,12 +297,13 @@ private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend
             if (!original.isCodex) OutlinedTextField(authToken, { authToken = it }, label = { Text("Auth token（按提供方要求填写）") }, singleLine = true, modifier = Modifier.fillMaxWidth(), visualTransformation = if (showSecret) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation())
             OutlinedTextField(model, { model = it }, label = { Text("模型 ID（可留空）") }, singleLine = true)
             if (!original.isCodex) {
-                TextButton({ mappingsOpen = !mappingsOpen }) { Text(if (mappingsOpen) "收起模型映射" else "模型映射 · Haiku / Sonnet / Opus") }
+                TextButton({ mappingsOpen = !mappingsOpen }) { Text(if (mappingsOpen) "收起模型映射" else "模型映射 · 主模型与子 Agent") }
                 if (mappingsOpen) {
                     Text("把 Claude 的模型档位映射到此线路的模型 ID，例如 glm-5.3-flash。留空使用运行器默认。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
-                    listOf("HAIKU", "SONNET", "OPUS").forEach { alias ->
+                    listOf("HAIKU", "SONNET", "OPUS", "FABLE").forEach { alias ->
                         OutlinedTextField(mappings[alias].orEmpty(), { mappings[alias] = it }, label = { Text("$alias 对应模型") }, singleLine = true)
                     }
+                    OutlinedTextField(subagentModel, { subagentModel = it }, label = { Text("子 Agent 模型（可选）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 }
             }
             run {
@@ -339,6 +343,8 @@ private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend
                         val key = "ANTHROPIC_DEFAULT_${alias}_MODEL"
                         if (value.isBlank()) env.remove(key) else env.put(key, value.trim())
                     }
+                    require(subagentModel.none { it < ' ' }) { "子 Agent 模型不能包含控制字符" }
+                    if (subagentModel.isBlank()) env.remove("CLAUDE_CODE_SUBAGENT_MODEL") else env.put("CLAUDE_CODE_SUBAGENT_MODEL", subagentModel.trim())
                     if (env.length() == 0) edited.extra.remove("env") else edited.extra.put("env", env)
                 }
                 if (effort.isBlank()) edited.extra.remove(effortKey) else edited.extra.put(effortKey, effort.trim())
