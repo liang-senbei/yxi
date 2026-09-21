@@ -357,8 +357,10 @@ private fun CodexConversationPane(state: AppState) {
                 try {
                     check(allUploaded) { "请等待附件上传完成，或移除失败附件" }
                     if (draft.value.text.isBlank() && attachments.isNullOrEmpty()) return
-                    val images = attachments.orEmpty().map { attachment ->
-                        InstructionAttachment(attachment.name, (attachment.state as DraftState.Done).staged.remotePath)
+                    val stagedAttachments = attachments?.toList().orEmpty()
+                    val labels = attachmentLabels(stagedAttachments)
+                    val images = stagedAttachments.mapIndexed { index, attachment ->
+                        InstructionAttachment(labels[index] + "." + attachment.name.substringAfterLast('.', "bin"), (attachment.state as DraftState.Done).staged.remotePath)
                     }
                     state.instructions.enqueue(selected.key, draft.value.text, images)
                     draft.value = TextFieldValue()
@@ -377,27 +379,15 @@ private fun CodexConversationPane(state: AppState) {
                 } }, enabled = conn?.ssh?.isConnected == true) { Text("添加附件") }
                 TextButton(::pasteImage, enabled = conn?.ssh?.isConnected == true && !Attach.pasteBusy.get()) { Text("粘贴图片") }
             }
-            if (!attachments.isNullOrEmpty()) Column(Modifier.heightIn(max = 140.dp).verticalScroll(rememberScrollState())) {
-                Text("PNG、JPEG、WebP 作为图片发送；其他附件提供服务器文件路径，由 Agent 按权限读取。",
-                    style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
-                attachments.toList().forEach { attachment ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        val status = when (val upload = attachment.state) {
-                            DraftState.Waiting -> "等待上传"
-                            is DraftState.Uploading -> "上传 ${upload.percent}%"
-                            is DraftState.Done -> "已上传"
-                            is DraftState.Failed -> upload.msg
-                        }
-                        Text(attachment.name + " · " + status, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-                        if (attachment.state is DraftState.Failed && conn != null) TextButton({
-                            runCatching { workspace.retryAttachment(conn, selected, attachment) }.onFailure { error = it.message.orEmpty() }
-                        }) { Text("重试") }
-                        TextButton({ attachment.cancelled.set(true); attachments.remove(attachment) }) { Text("移除") }
-                    }
-                }
+            DraftAttachmentTray(attachments?.toList().orEmpty()) { attachment ->
+                draft.value = draftAfterAttachmentRemoval(draft.value, attachments?.toList().orEmpty(), attachment)
+                attachment.cancelled.set(true); attachments?.remove(attachment)
             }
+            val mentions = rememberAttachmentMentions(attachments?.toList().orEmpty(), draft.value) { draft.value = it }
+            AttachmentMentionList(mentions)
             OutlinedTextField(draft.value, { draft.value = it }, modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp).onPreviewKeyEvent { event ->
                 when {
+                    mentions.handle(event) -> true
                     event.type != KeyEventType.KeyDown -> false
                     event.isCtrlPressed && event.key == Key.V && Attach.hasClipboardImage() -> { pasteImage(); true }
                     event.isCtrlPressed && event.key == Key.Enter && draft.value.composition == null -> { enqueueDraft(); true }

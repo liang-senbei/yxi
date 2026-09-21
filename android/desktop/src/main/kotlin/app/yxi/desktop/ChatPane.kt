@@ -382,7 +382,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
         val text = draft.text.trim()
         // 发送 = 暂存头（[图片1] 路径 的映射）+ 正文。
         // ⚠️ 附件还在传就不发——映射只含 Done 的，发出去 Claude 读到的路径不全（键盘 Enter 也要过这道门）。
-        if (staged.any { it.state is DraftState.Waiting || it.state is DraftState.Uploading }) return
+        if (staged.any { it.state !is DraftState.Done }) return
         val attachments = Attachments.renumber(staged.mapNotNull { (it.state as? DraftState.Done)?.staged }).map { InstructionAttachment(it.display, it.remotePath) }
         if ((text.isBlank() && attachments.isEmpty()) || sending) return
         try {
@@ -460,28 +460,9 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
         val a = approval?.takeIf { it.first == p?.fingerprint }?.second ?: Approval(null, "")   // 抓屏还没回来就先只有标题
         if (p != null) ApprovalCard(p, a, busy = !canAct, onKey = { sendKey(it, p.fingerprint) }, onSubmit = { submit(p) })
         sendErr?.let { Note(it, t.danger) }
-        // 暂存 chips：传着的看进度，失败的看原因；✕ 移除（传着的会顺手取消）
-        if (staged.isNotEmpty()) Column(Modifier.fillMaxWidth().padding(12.dp, 4.dp, 12.dp, 0.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            staged.forEach { a2 ->
-                val st = a2.state
-                Row(
-                    Modifier.fillMaxWidth().background(t.surface1, RoundedCornerShape(Radius)).padding(8.dp, 5.dp),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Icon(if (a2.isImage) Icons.Outlined.Image else Icons.Outlined.AttachFile, null, Modifier.size(14.dp), tint = t.textMuted)
-                    Text(a2.display, style = CodeStyle, color = t.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                    when (st) {
-                        is DraftState.Waiting -> Text("等待上传", fontSize = 11.sp, color = t.textMuted)
-                        is DraftState.Uploading -> Text("${st.percent}%", fontSize = 11.sp, color = t.accent)
-                        is DraftState.Done -> Text("好了", fontSize = 11.sp, color = t.success)
-                        is DraftState.Failed -> Text(st.msg, fontSize = 11.sp, color = t.danger, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                    IconButton(
-                        { a2.cancelled.set(true); staged.remove(a2) },
-                        Modifier.size(20.dp),
-                    ) { Icon(Icons.Default.Close, "移除", Modifier.size(12.dp), tint = t.textMuted) }
-                }
-            }
+        DraftAttachmentTray(staged.toList()) { attachment ->
+            draft = draftAfterAttachmentRemoval(draft, staged.toList(), attachment)
+            attachment.cancelled.set(true); staged.remove(attachment)
         }
         InstructionStrip(instructions, taskNavigationKey(conn.host, session), !sending && !live.busy && pending == null && ssh.isConnected, ::deliver,
             onQuery = { queryInstructionDelivery(conn, session, it) }, compactUnknown = true,
@@ -509,6 +490,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                 }
             })
         Composer(
+            attachments = staged.toList(),
             draft, { draft = it }, focus,
             ctx = ctx,
             busy = live.busy, waiting = pending != null,
@@ -517,7 +499,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                 else -> "跟它说点什么… Enter 发送，Shift+Enter 换行；截图直接 Ctrl+V"
             },
             hasPending = pending != null,
-            canSend = (draft.text.isNotBlank() || hasDone) && !sending && !uploading,
+            canSend = (draft.text.isNotBlank() || hasDone) && !sending && staged.all { it.state is DraftState.Done },
             canAct = canAct,
             onAttach = { Attach.pickFiles().forEach { stage(it) } },
             onPaste = ::stagePasted,
@@ -540,6 +522,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
 @Composable
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 private fun Composer(
+    attachments: List<DraftAttach>,
     draft: TextFieldValue, onDraft: (TextFieldValue) -> Unit, focus: FocusRequester,
     ctx: Transcript.Ctx?, busy: Boolean, waiting: Boolean, hint: String,
     hasPending: Boolean, canSend: Boolean, canAct: Boolean,
@@ -551,6 +534,7 @@ private fun Composer(
     modelControl: @Composable () -> Unit,
 ) {
     val t = Tokens.current
+    val mentions = rememberAttachmentMentions(attachments, draft, onDraft)
     var focused by remember { mutableStateOf(false) }
     // 手机端 glowBrush 同源：输入卡的底也是同一套色相在流（淡），等你拍板时定在琥珀
     val glow = glowBrush(busy, waiting)
@@ -561,6 +545,7 @@ private fun Composer(
             .background(glow)
             .border(if (focused) 1.5.dp else 1.dp, if (focused) t.accent.copy(alpha = 0.6f) else t.border, RoundedCornerShape(RadiusComposer)),
     ) {
+        AttachmentMentionList(mentions)
         BasicTextField(
             value = draft, onValueChange = onDraft,
             textStyle = BodyStyle.copy(color = t.textPrimary), cursorBrush = SolidColor(t.accent),
@@ -571,6 +556,7 @@ private fun Composer(
                 .onPreviewKeyEvent { e ->
                     val enter = e.key == Key.Enter || e.key == Key.NumPadEnter
                     when {
+                        mentions.handle(e) -> true
                         e.type != KeyEventType.KeyDown || draft.composition != null -> false   // 中文输入法正在组词时 Enter / Esc 归输入法
                         // 剪贴板里有图 = 粘贴图片（预检是便宜的 isDataFlavorAvailable，不解码）；贴着的时候按键重复不重入
                         e.isCtrlPressed && e.key == Key.V && Attach.hasClipboardImage() && !Attach.pasteBusy.get() -> { onPaste(); true }
