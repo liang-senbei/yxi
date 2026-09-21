@@ -5,16 +5,16 @@ import app.yxi.agent.Session
 import kotlinx.coroutines.sync.withLock
 
 /** Recheck persisted evidence without sending a prompt or restarting any process. */
-internal suspend fun recheckRewindRecovery(conn: Conn, session: Session) {
+internal suspend fun recheckRewindRecovery(conn: Conn, session: Session, gate: RewindDeliveryGate = RewindDelivery.gate) {
     check(conn.ssh.isConnected) { "请先重新连接服务器" }
     val key = taskNavigationKey(conn.host, session)
-    val ticket = RewindDelivery.gate.pending(key) ?: error("没有可核对的回退记录")
+    val ticket = gate.pending(key) ?: error("没有可核对的回退记录")
     val query = ticket.verification ?: error("这次回退尚未进入恢复确认阶段")
     check(query.sessionName == session.name && query.runtimeId == session.runtimeId) { "会话实例已变化，发送仍暂停" }
     val result = RewindLiveVerification.parse(runRewindCommand(conn.ssh, RewindLiveVerification.command(query)))
     when (result) {
         is RewindLiveVerification.Result.Ok -> conn.instructionDeliveryMutex.withLock {
-            RewindDelivery.gate.finishVerified(ticket)
+            gate.finishVerified(ticket)
         }
         is RewindLiveVerification.Result.Failed -> error(rewindRecoveryMessage(result.code))
     }
