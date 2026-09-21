@@ -6,7 +6,7 @@ case "$mode" in build|run) ;; *) printf 'Usage: bash %s build | run app.yxi.…T
 test -x /usr/bin/docker
 test -S /var/run/docker.sock
 docker_local() {
-    env -u DOCKER_CONTEXT -u DOCKER_HOST -u DOCKER_TLS_VERIFY -u DOCKER_CERT_PATH \
+    env -u DOCKER_CONTEXT -u DOCKER_HOST -u DOCKER_TLS_VERIFY -u DOCKER_CERT_PATH -u BUILDX_BUILDER \
         /usr/bin/docker --host unix:///var/run/docker.sock "$@"
 }
 test -z "$(git -C "$repo" status --porcelain)" || { echo 'Use a clean committed source snapshot.' >&2; exit 2; }
@@ -23,7 +23,7 @@ if test "$mode" = build; then
     test "$available" -ge 4194304 || { echo 'At least 4 GiB free disk is required before building.' >&2; exit 2; }
     mkdir "$run_root/context"
     git -C "$repo" archive HEAD | tar -x -C "$run_root/context"
-    docker_local build --platform linux/amd64 -f "$run_root/context/dev/isolated-tests/Dockerfile" \
+    docker_local build --builder default --platform linux/amd64 -f "$run_root/context/dev/isolated-tests/Dockerfile" \
         --build-arg "SOURCE_REVISION=$revision" -t "$image" "$run_root/context"
     docker_local image inspect "$image" > "$run_root/image.json"
     echo "Built $image; evidence: $run_root"
