@@ -331,6 +331,15 @@ class AndroidSdkBootstrap(
         }
 
         /**
+         * 许可 hash 的唯一算法来源：License.getLicenseHash() 就是
+         * `Hashing.sha1().hashBytes(getValue().getBytes(UTF_8))`——对**未 trim** 的
+         * 解析文本原值取 SHA-1 的 UTF-8 字节，十六进制小写。
+         */
+        internal fun sha1Hex(s: String): String =
+            MessageDigest.getInstance("SHA-1").digest(s.toByteArray(Charsets.UTF_8))
+                .joinToString("") { "%02x".format(it) }
+
+        /**
          * 轻量解析官方仓库 XML：namespaceAware（子元素无前缀、根带 sdk: 前缀，
          * 按 localName 匹配）+ XXE 防护。inspect 与许可全文解析共用这一个实现。
          */
@@ -357,7 +366,9 @@ class AndroidSdkBootstrap(
             val list = doc.getElementsByTagNameNS("*", "license")
             for (i in 0 until list.length) {
                 val el = list.item(i) as Element
-                el.getAttribute("id").takeIf { it.isNotBlank() }?.let { licenseTexts[it] = el.textContent.trim() }
+                // 文本保持解析原值**不 trim**：hash 对原值才算得对（License.getLicenseHash 对
+                // getValue() 原文取 sha1，官方文本本身以 \n 收尾）；trim 只该发生在展示层
+                el.getAttribute("id").takeIf { it.isNotBlank() }?.let { licenseTexts[it] = el.textContent }
             }
             val docs = linkedMapOf<String, AndroidSdkComponentInstaller.LicenseDoc>()
             val missing = mutableListOf<String>()
@@ -377,7 +388,7 @@ class AndroidSdkBootstrap(
                     continue
                 }
                 refs.forEach { ref ->
-                    licenseTexts[ref]?.let { docs.putIfAbsent(ref, AndroidSdkComponentInstaller.LicenseDoc(ref, it)) }
+                    licenseTexts[ref]?.let { docs.putIfAbsent(ref, AndroidSdkComponentInstaller.LicenseDoc(ref, it, sha1Hex(it))) }
                 }
             }
             return AndroidSdkComponentInstaller.LicenseTexts(docs = docs.values.toList(), missing = missing)
