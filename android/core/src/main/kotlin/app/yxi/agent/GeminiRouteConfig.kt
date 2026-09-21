@@ -68,6 +68,7 @@ object GeminiRouteConfig {
     /** 写入前校验；baseUrl 只收不带用户信息的 http(s) URL（空串 = 显式清空，放行）。 */
     fun validate(patch: Patch) {
         patch.baseUrl?.let {
+            safeValue(KEY_BASE, it)
             if (it.isNotEmpty()) {
                 val uri = runCatching { URI(it) }
                     .getOrElse { throw IllegalArgumentException("baseUrl 不是合法 URI：${it.message?.take(60)}") }
@@ -104,12 +105,12 @@ object GeminiRouteConfig {
             if (key != null && updates.containsKey(key)) {
                 hit += key
                 out.append(m.groups[1]!!.value).append(m.groups[2]?.value.orEmpty())
-                    .append(key).append('=').append(updates[key]!!)
+                    .append(key).append("='").append(updates[key]!!).append('\'')
             } else out.append(line)
         }
         for ((k, v) in updates) if (k !in hit) {
             if (out.isNotEmpty() && !out.endsWith("\n")) out.append('\n')
-            out.append(k).append('=').append(v).append('\n')
+            out.append(k).append("='").append(v).append("'\n")
         }
         return out.toString()
     }
@@ -156,8 +157,12 @@ object GeminiRouteConfig {
     // ---------- 远端层（协议同 RemoteAtomicJson：SFTP 传内容，argv 只传 hash） ----------
 
     suspend fun status(ssh: SshSession, geminiDir: String): Status {
-        val env = runCatching { RemoteAtomicJson.read(ssh, "$geminiDir/.env") }.getOrNull()
-        val settings = runCatching { RemoteAtomicJson.read(ssh, "$geminiDir/settings.json") }.getOrNull()
+        val env = try { RemoteAtomicJson.read(ssh, "$geminiDir/.env") }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { error("无法读取 Gemini 环境配置") }
+        val settings = try { RemoteAtomicJson.read(ssh, "$geminiDir/settings.json") }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { null }
         val kv = parseEnv(env?.text)
         var authType: String? = null
         var sModel: String? = null
