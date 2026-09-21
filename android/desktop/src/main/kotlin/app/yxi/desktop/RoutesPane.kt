@@ -166,6 +166,10 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
                     border = BorderStroke(0.5.dp, t.border)) {
                     Column(Modifier.padding(18.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = t.surface1, border = BorderStroke(0.5.dp, t.border)) {
+                                Box(contentAlignment = Alignment.Center) { Text(line.name.take(2).uppercase(), style = MaterialTheme.typography.labelLarge, color = t.textSecondary) }
+                            }
+                            Spacer(Modifier.width(14.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(line.name, style = MaterialTheme.typography.titleMedium)
                                 Text(line.baseUrl, color = t.textMuted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -242,6 +246,7 @@ private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend
     var url by remember { mutableStateOf(original.baseUrl) }
     var secret by remember { mutableStateOf(original.apiKey) }
     var authToken by remember { mutableStateOf(original.token) }
+    var showSecret by remember { mutableStateOf(false) }
     var model by remember { mutableStateOf(routeModel(original)) }
     var mappingsOpen by remember { mutableStateOf(false) }
     val mappings = remember { mutableStateMapOf<String, String>().apply {
@@ -276,11 +281,11 @@ private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend
             }
             Text("模板仅预填，可自行修改端点和模型；密钥由你填写。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
             HorizontalDivider()
-            OutlinedTextField(name, { name = it }, label = { Text("线路名称") }, singleLine = true)
+            OutlinedTextField(name, { name = it }, label = { Text("供应商名称") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(website, { website = it }, label = { Text("官网链接（可选）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(url, { url = it }, label = { Text("服务端点 Base URL") }, singleLine = true)
-            OutlinedTextField(secret, { secret = it }, label = { Text("API 密钥") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
-            if (!original.isCodex) OutlinedTextField(authToken, { authToken = it }, label = { Text("Auth token（按提供方要求填写）") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+            OutlinedTextField(url, { url = it }, label = { Text("请求地址 Base URL") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(secret, { secret = it }, label = { Text("API Key") }, singleLine = true, modifier = Modifier.fillMaxWidth(), visualTransformation = if (showSecret) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(), trailingIcon = { TextButton({ showSecret = !showSecret }) { Text(if (showSecret) "隐藏" else "显示") } })
+            if (!original.isCodex) OutlinedTextField(authToken, { authToken = it }, label = { Text("Auth token（按提供方要求填写）") }, singleLine = true, modifier = Modifier.fillMaxWidth(), visualTransformation = if (showSecret) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation())
             OutlinedTextField(model, { model = it }, label = { Text("模型 ID（可留空）") }, singleLine = true)
             if (!original.isCodex) {
                 TextButton({ mappingsOpen = !mappingsOpen }) { Text(if (mappingsOpen) "收起模型映射" else "模型映射 · Haiku / Sonnet / Opus") }
