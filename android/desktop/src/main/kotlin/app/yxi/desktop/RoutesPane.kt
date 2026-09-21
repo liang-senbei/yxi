@@ -117,6 +117,10 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
             editor = Lines.Line(Lines.newId(), "", agent = engine)
         }
         Spacer(Modifier.height(22.dp))
+        if (engine == "gemini") {
+            GeminiConfigurationCard(conn)
+            return@Column
+        }
         if (engine !in listOf(Lines.CLAUDE, Lines.CODEX)) {
             OutlinedCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
