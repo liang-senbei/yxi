@@ -397,7 +397,7 @@ object Transcript {
             }
             else -> return null
         }
-        if ("Set model to" !in text) return null
+        if (!text.trimStart().startsWith("<local-command-stdout>Set model to ")) return null
         // ⚠️ **在原文上匹配，别先 [clean]。** 别名形式 `claude-opus-5[1m]` 里的 `[1m`
         // 跟 ANSI 加粗序列长得一模一样，先清一遍会把它吃掉 → 显示成 `claude-opus-5]`。
         // 所以只在取出来的名字上摘掉首尾那对加粗标记（ESC 有无都兼容）。
@@ -411,7 +411,8 @@ object Transcript {
         //    ⚠️ 对 `claude-opus-5[1m]` 无害：`[1m` 不在开头、`[22m` 不在结尾。
         var r = raw
         repeat(4) { r = r.trim().trim('`').removePrefix("[1m").removeSuffix("[22m").removeSuffix("(default)") }
-        return r.trim().takeIf { it.isNotBlank() }?.take(40)
+        // Third-party identifiers can exceed 40 characters; truncation makes readback never match.
+        return r.trim().takeIf { it.isNotBlank() && it.length <= 512 && it.none { c -> c < ' ' } }
     }
 
     /** CLI effort receipts can arrive before another assistant turn is generated. */
