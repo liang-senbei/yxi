@@ -100,7 +100,7 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
         note = result; applying = null; resetting = false
         }
     }
-    editor?.let { original -> RouteForm(original, onClose = { editor = null }) { edited ->
+    editor?.let { original -> RouteForm(original, conn.host.label, onClose = { editor = null }) { edited ->
         val before = lines ?: error("清单未读取，不能覆盖")
         val latest = Lines.list(conn.ssh) ?: error("无法确认服务器最新清单")
         check(routeCatalogEqual(before, latest)) { "线路清单已被其他人修改，请关闭编辑后刷新" }
@@ -268,7 +268,7 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
 
 @Composable
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend (Lines.Line) -> Unit) {
+private fun RouteForm(original: Lines.Line, hostLabel: String, onClose: () -> Unit, onSave: suspend (Lines.Line) -> Unit) {
     val scope = rememberCoroutineScope()
     var name by remember { mutableStateOf(original.name) }
     var website by remember { mutableStateOf(original.website) }
@@ -288,13 +288,18 @@ private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend
     var error by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var presetSearch by remember { mutableStateOf("") }
+    var presetsExpanded by remember { mutableStateOf(false) }
+    var templatesOpen by remember { mutableStateOf(original.name.isBlank()) }
     var presetExtra by remember { mutableStateOf(org.json.JSONObject(original.extra.toString())) }
     var advancedOpen by remember { mutableStateOf(false) }
     var advanced by remember { mutableStateOf(original.extra.toString(2)) }
     ProviderEditorPage(onDismissRequest = { if (!busy) onClose() }, title = { Text("${if (original.name.isBlank()) "添加" else "编辑"}供应商 · ${if (original.isCodex) "Codex" else "Claude Code"}", style = MaterialTheme.typography.titleLarge) },
         text = { Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text("选择供应商模板", style = MaterialTheme.typography.titleMedium)
+            Text("配置服务器 · $hostLabel", style = MaterialTheme.typography.bodyMedium, color = Tokens.current.textMuted)
+            TextButton({ templatesOpen = !templatesOpen }) { Text(if (templatesOpen) "收起供应商模板" else "选择供应商模板") }
+            if (templatesOpen) {
             OutlinedTextField(presetSearch, { presetSearch = it }, singleLine = true, label = { Text("搜索模板") }, modifier = Modifier.fillMaxWidth())
+            val matchingPresets = app.yxi.agent.LinePresets.forAgent(original.agent).filter { it.name.contains(presetSearch, true) }
             androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 SuggestionChip(onClick = {
                     name = ""; url = ""; website = ""; model = ""; secret = ""; authToken = ""
@@ -302,7 +307,7 @@ private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend
                     mappings.keys.toList().forEach { mappings[it] = "" }
                     subagentModel = ""
                 }, label = { Text("自定义供应商") }, enabled = !busy)
-                app.yxi.agent.LinePresets.forAgent(original.agent).filter { it.name.contains(presetSearch, true) }.forEach { preset ->
+                (if (presetsExpanded || presetSearch.isNotBlank()) matchingPresets else matchingPresets.take(12)).forEach { preset ->
                     SuggestionChip(onClick = {
                         name = preset.name; url = preset.baseUrl
                         website = ""; secret = ""; authToken = ""
@@ -316,6 +321,11 @@ private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend
                         advanced = presetExtra.toString(2)
                     }, label = { Text(preset.name) }, enabled = !busy)
                 }
+            }
+            if (presetSearch.isBlank() && matchingPresets.size > 12) TextButton({ presetsExpanded = !presetsExpanded }) {
+                Text(if (presetsExpanded) "收起模板" else "查看全部 ${matchingPresets.size} 个模板")
+            }
+            if (matchingPresets.isEmpty()) Text("没有匹配的模板，可以使用自定义供应商。", color = Tokens.current.textMuted)
             }
             Text("模板仅预填，可自行修改端点和模型；切换模板会清空密钥，避免将上一供应商凭据带到新地址。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
             HorizontalDivider()
