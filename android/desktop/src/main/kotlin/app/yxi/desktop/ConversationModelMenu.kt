@@ -22,6 +22,7 @@ internal fun ConversationModelMenu(conn: Conn, session: Session, currentModel: S
     val labels = listOf("轻度", "中等", "高", "更高", "最高")
     val pending = conn.modelChanges[session.runtimeId]
     NativeOverlay(menu)
+    if (pending != null) Text("待应用 · 当前轮次结束后切换", style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
     Box {
         TextButton({
             menu = true
