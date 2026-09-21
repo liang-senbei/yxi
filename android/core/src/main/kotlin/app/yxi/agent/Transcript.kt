@@ -171,7 +171,7 @@ object Transcript {
             //    现在按**内容**编号：同样的话出现第几次。出队只会影响它后面同内容的那几条，
             //    不同内容的一律不受牵连 —— 而重复排同一句话本来就少见。
             val seen = HashMap<Int, Int>()
-            return out + queued.asSequence()
+            val items = out + queued.asSequence()
                 .filter { it.isNotBlank() }              // 老格式的空占位不显示
                 .filterNot { it.trim() in said }
                 .map { t ->
@@ -187,11 +187,15 @@ object Transcript {
                     else ChatItem.Injected(k, inj.first + t(" · 排队中"), inj.second, t)
                 }
                 .toList()
-                // ⚠️ **兜住重复 key。** 重连时 `LaunchedEffect(sessionName, ssh)` 会换键重启，
-                //    Compose 只 cancel 不 join —— 旧那轮的刷新协程可能再喂一批进**同一个**
-                //    解析器（entry 是 ChatMemory 里的全局对象），同一行就解了两遍。
-                //    LazyColumn 遇到重复 key 是**直接抛**，不是画错 —— 宁可多这一趟去重。
-                .distinctBy { it.key }
+            // ⚠️⚠️ **去重必须罩住整张快照（out + queued），同 key 后到的是「更新」不是「重复」**
+            //    （换值不换位，update-wins）。之前那趟 distinctBy 挂在链尾 `.toList()` 上，
+            //    **只罩住了 queued，`out` 根本没进去重** —— 重连重喂同一行时 LazyColumn
+            //    直接抛重复 key，对话页冻结在旧内容（终端却还在往下走，老板 2026-09-21 报的
+            //    「缓存滞留」）。LinkedHashMap put 对已存在的 key 换值但**保位**：时间线位置
+            //    留在首现处，文本取最新；完全相同的重复行结果不变，也不多丢任何条目。
+            val updateWins = LinkedHashMap<String, ChatItem>(items.size)
+            for (item in items) updateWins[item.key] = item
+            return updateWins.values.toList()
         }
 
         /** 已经吃进去多少行 —— 上层拿它决定从哪儿接着喂。 */
