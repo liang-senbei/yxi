@@ -1,0 +1,137 @@
+package app.yxi.desktop
+
+import app.yxi.ssh.HostConfig
+import app.yxi.ssh.HostKeys
+import app.yxi.ssh.SshSession
+import com.jcraft.jsch.HostKey
+import com.jcraft.jsch.HostKeyRepository
+import com.jcraft.jsch.UserInfo
+import kotlinx.coroutines.runBlocking
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
+import org.junit.jupiter.api.condition.EnabledOnOs
+import org.junit.jupiter.api.condition.OS
+import java.io.File
+import java.net.InetSocketAddress
+import java.net.ServerSocket
+import java.net.Socket
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.attribute.PosixFilePermissions
+import java.util.Base64
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
+/** Runs only through dev/isolated-tests/run.sh; no host socket, HOME or credentials are used. */
+@EnabledOnOs(OS.LINUX)
+@EnabledIfEnvironmentVariable(named = "YXI_ISOLATED_TEST_RUN", matches = "[0-9a-f-]{36}")
+class IsolatedSshTransportTest {
+    @Test fun `pinned SSH transport reads and writes only the isolated HOME`() {
+        check(File("/.dockerenv").isFile)
+        check(File("/sys/class/net").list()?.toSet() == setOf("lo"))
+        check(System.getenv("HOME") == "/sandbox/home")
+        check(System.getenv("CLAUDE_CONFIG_DIR") == "/sandbox/home/.claude")
+        val root = Files.createTempDirectory(Path.of("/sandbox/tmp"), "ssh-transport-").toFile()
+        Files.setPosixFilePermissions(root.toPath(), PosixFilePermissions.fromString("rwx------"))
+        val home = root.resolve("home").apply { mkdir() }
+        val log = root.resolve("sshd.log")
+        var server: Process? = null
+        var ssh: SshSession? = null
+        val executor = Executors.newSingleThreadExecutor { runnable -> Thread(runnable, "isolated-ssh-client").apply { isDaemon = true } }
+        fun command(vararg args: String) {
+            val process = ProcessBuilder(*args).redirectErrorStream(true).redirectOutput(root.resolve("setup.log")).start()
+            try {
+                check(process.waitFor(15, TimeUnit.SECONDS) && process.exitValue() == 0) { "Fixture setup failed" }
+            } finally { if (process.isAlive) process.destroyForcibly() }
+        }
+        try {
+            command("/usr/bin/ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", root.resolve("host").path)
+            command("/usr/bin/ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", root.resolve("client").path)
+            val force = root.resolve("command").apply {
+                writeText("#!/bin/sh\nexec /usr/bin/env -i HOME='${home.path}' CLAUDE_CONFIG_DIR='${home.path}/.claude' PATH=/usr/bin:/bin LANG=C.UTF-8 /bin/sh -c \"\$SSH_ORIGINAL_COMMAND\"\n")
+                setExecutable(true, true)
+            }
+            val port = ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress()).use { it.localPort }
+            val config = root.resolve("sshd_config").apply { writeText("""
+                ListenAddress 127.0.0.1
+                Port $port
+                HostKey ${root.resolve("host").path}
+                PidFile ${root.resolve("sshd.pid").path}
+                AuthorizedKeysFile ${root.resolve("client.pub").path}
+                PubkeyAuthentication yes
+                PasswordAuthentication no
+                KbdInteractiveAuthentication no
+                PermitRootLogin prohibit-password
+                StrictModes yes
+                UsePAM no
+                AllowTcpForwarding no
+                AllowAgentForwarding no
+                X11Forwarding no
+                PermitTunnel no
+                ForceCommand ${force.path}
+                LogLevel VERBOSE
+            """.trimIndent() + "\n") }
+            val listener = ProcessBuilder("/usr/sbin/sshd", "-D", "-e", "-f", config.path)
+                .redirectErrorStream(true).redirectOutput(log).start()
+            server = listener
+            var ready = false
+            repeat(50) {
+                if (!ready && listener.isAlive) {
+                    ready = runCatching { Socket().use { it.connect(InetSocketAddress("127.0.0.1", port), 100) }; true }.getOrDefault(false)
+                    if (!ready) Thread.sleep(100)
+                }
+            }
+            assertTrue(ready && listener.isAlive, "Private sshd failed to start: ${log.readText().takeLast(2000)}")
+            val expected = root.resolve("host.pub").readText().trim().split(' ')[1]
+            val client = SshSession(HostConfig("container", "127.0.0.1", port, "root",
+                HostConfig.Auth.PrivateKey(root.resolve("client").readText())), pinnedKeys(expected))
+            ssh = client
+            val request = executor.submit<String> {
+                runBlocking {
+                    println("isolated-ssh: connecting")
+                    client.connect()
+                    println("isolated-ssh: connected")
+                    client.exec("printf '%s\\n' \"\$HOME\"; printf '%s' '中文🙂' > \"\$HOME/probe.txt\"; cat \"\$HOME/probe.txt\"")
+                }
+            }
+            val output = request.get(25, TimeUnit.SECONDS)
+            assertEquals("${home.path}\n中文🙂", output)
+            assertEquals("中文🙂", home.resolve("probe.txt").readText())
+        } finally {
+            server?.toHandle()?.descendants()?.use { children -> children.forEach { it.destroyForcibly() } }
+            server?.destroyForcibly()
+            ssh?.disconnect()
+            executor.shutdownNow()
+            if (log.exists()) {
+                println("isolated-sshd: ${log.readText().takeLast(2000)}")
+                log.copyTo(File("/results/isolated-sshd.log"), overwrite = true)
+            }
+            // Leave the fixture within the disposable container for diagnosis; no global cleanup commands.
+        }
+    }
+
+    private fun pinnedKeys(expected: String) = object : HostKeys {
+        override var changedDetected = false
+        override fun check(host: String?, key: ByteArray?): Int {
+            val matches = key != null && Base64.getEncoder().encodeToString(key) == expected
+            changedDetected = !matches
+            return if (matches) HostKeyRepository.OK else HostKeyRepository.CHANGED
+        }
+        override fun add(key: HostKey?, ui: UserInfo?) = Unit
+        override fun remove(host: String?, type: String?) = Unit
+        override fun remove(host: String?, type: String?, key: ByteArray?) = Unit
+        override fun getKnownHostsRepositoryID() = "container-pinned-key"
+        override fun getHostKey(): Array<HostKey> = emptyArray()
+        override fun getHostKey(host: String?, type: String?): Array<HostKey> = emptyArray()
+        override fun userInfo() = object : UserInfo {
+            override fun getPassphrase(): String? = null
+            override fun getPassword(): String? = null
+            override fun promptPassword(message: String?) = false
+            override fun promptPassphrase(message: String?) = false
+            override fun promptYesNo(message: String?) = false
+            override fun showMessage(message: String?) = Unit
+        }
+    }
+}
