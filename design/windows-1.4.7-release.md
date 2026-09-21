@@ -18,3 +18,5 @@ CI35457551827已成功，Windows安装启动检查通过。Yxi-windows产物1058
 
 
 发布最终对账：cc-yxi已在服务器空间恢复后代完成续传和发布。本轮只读核对，未重复执行发布脚本。产物903288177字节；更新包321364543字节，SHA256 489C849C3D717A9B9A7F68A312AE1400173C04AA40FF1B0F442FF0253E6AE4F7；Setup SHA256 d736d7ce2756ba6fce3248678c07f558cf44cb12c20d41ccded00ef276e796fb。官网feed已回读，安装链接HTTP200。备份1.4.6保留。实际浏览器不同账号登录与Windows页面体验仍按用户手动验收，不以发布成功代替功能全验。
+
+服务器配套补齐：hk13原脚本仍为1.4.4哈希a09c7757；已确认无漂移后备份/root/.local/bin/yxi-hub.before-1.4.7，并原子安装bf0a613配套脚本，SHA256 df1458e85cfe03c5fd8eab5b3461830766c1ebd2af5d52eef0e4db47429a1fba。包含reply-user及用户消息回信指引。未重启Agent、未发送生产消息。
