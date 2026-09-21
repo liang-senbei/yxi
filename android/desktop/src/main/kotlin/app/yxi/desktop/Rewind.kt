@@ -132,7 +132,7 @@ class RewindController(private val conn: Conn) {
 
             // ── 结构核对：source jsonl 在、anchor/target 字段级精确匹配（父子关系 + type=user +
             //    非 isMeta）。UI 传来的 sourceUuid 哪怕来自旧转录/另一会话，这里也对不上而拒绝。
-            Rewind.parseVerify(conn.ssh.exec(Rewind.verifyCommand(s.cwd, plan, inspected?.file)))?.let {
+            Rewind.parseVerify(conn.ssh.exec(Rewind.verifyCommand(s.cwd, plan, inspected?.file, inspected?.size, inspected?.modifiedNs)))?.let {
                 return@withLock Report(Rewind.Outcome.Failed(it), capture = null, runtimeId = s.runtimeId, cwd = s.cwd)
             }
 

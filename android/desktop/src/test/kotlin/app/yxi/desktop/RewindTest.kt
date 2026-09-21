@@ -110,14 +110,11 @@ class RewindTest {
         assertTrue("sed 's/[^A-Za-z0-9]/-/g'" in cmd)
         assertTrue("printf %s '$cwd'" in cmd)
         assertTrue("/$sid.jsonl" in cmd)
-        // anchor / target 都是「"uuid":"<值>"」整字段匹配，不是正文 grep
-        assertTrue("\"uuid\":\"$anchor\"" in cmd)
-        assertTrue("\"uuid\":\"$target\"" in cmd)
-        // 父子关系、user 类型、非 isMeta、行序，一个不少
-        assertTrue("\"parentUuid\":\"$anchor\"" in cmd)
-        assertTrue("\"isMeta\":true" in cmd)
-        assertTrue("\"type\":\"user\"" in cmd)
-        assertTrue(" -lt " in cmd)
+        assertTrue("python3 -c" in cmd)
+        assertTrue("'$anchor' '$target'" in cmd)
+        assertTrue("json.loads" in cmd)
+        assertTrue("grep -nF" !in cmd)
+
     }
 
     @Test

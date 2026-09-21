@@ -457,26 +457,52 @@ object Rewind {
      *
      * @param cwd 会话工作目录（[app.yxi.agent.SessionProbe.Session.cwd]，会话列表现成的）
      */
-    fun verifyCommand(cwd: String, p: Plan, sourceFile: String? = null): String {
+    fun verifyCommand(cwd: String, p: Plan, sourceFile: String? = null,
+        expectedSize: Long? = null, expectedModifiedNs: String? = null): String {
+        require(validate(p) == null)
         require(sourceFile == null || (sourceFile.startsWith("/") && sourceFile.endsWith("/${p.sessionId}.jsonl") && '\u0000' !in sourceFile))
+        require(expectedSize == null || expectedSize >= 0)
+        require(expectedModifiedNs == null || expectedModifiedNs.matches(Regex("[0-9]+")))
         val c = q(cwd.trimEnd('/').ifBlank { "/" })
-        val sid = q(p.sessionId)
-        val a = q(p.anchorUuid)
-        val d = q(p.targetUuid)
         val source = if (sourceFile != null) "f='${q(sourceFile)}'; " else
-            "enc=\$(printf %s '$c' | sed 's/[^A-Za-z0-9]/-/g'); f=\"\$HOME/.claude/projects/\$enc/$sid.jsonl\"; "
-        return source +
-            "[ -f \"\$f\" ] || { echo \"$CHECK_TAG:missing-session\"; exit 0; }; " +
-            "an=\$(grep -nF -m1 '\"uuid\":\"$a\"' \"\$f\" | cut -d: -f1); " +
-            "[ -n \"\$an\" ] || { echo \"$CHECK_TAG:no-anchor\"; exit 0; }; " +
-            "dn=\$(grep -nF -m1 '\"uuid\":\"$d\"' \"\$f\" | cut -d: -f1); " +
-            "[ -n \"\$dn\" ] || { echo \"$CHECK_TAG:no-target\"; exit 0; }; " +
-            "[ \"\$an\" -lt \"\$dn\" ] || { echo \"$CHECK_TAG:order\"; exit 0; }; " +
-            "ln=\$(sed -n \"\${dn}p\" \"\$f\"); " +
-            "case \"\$ln\" in *'\"parentUuid\":\"$a\"'*) ;; *) echo \"$CHECK_TAG:not-child\"; exit 0;; esac; " +
-            "case \"\$ln\" in *'\"isMeta\":true'*) echo \"$CHECK_TAG:meta\"; exit 0;; esac; " +
-            "case \"\$ln\" in *'\"type\":\"user\"'*) echo \"$CHECK_TAG:ok\";; *) echo \"$CHECK_TAG:not-user\";; esac"
+            "enc=\$(printf %s '$c' | sed 's/[^A-Za-z0-9]/-/g'); f=\"\$HOME/.claude/projects/\$enc/${p.sessionId}.jsonl\"; "
+        return source + "python3 -c '${q(verificationScript)}' \"\$f\" '${q(p.anchorUuid)}' '${q(p.targetUuid)}' " +
+            "'${expectedSize ?: ""}' '${expectedModifiedNs.orEmpty()}'"
     }
+
+    internal val verificationScript = """
+import json,os,sys
+path,anchor,target,wanted_size,wanted_time=sys.argv[1:]
+def stop(code):
+ print('__YXI_REWIND_CHK__:'+code); sys.exit(0)
+try: f=open(path,'rb')
+except OSError: stop('missing-session')
+with f:
+ st=os.fstat(f.fileno())
+ if wanted_size and st.st_size!=int(wanted_size): stop('stale')
+ if wanted_time and st.st_mtime_ns!=int(wanted_time): stop('stale')
+ found_anchor=None; found_target=None; target_data=None
+ while f.tell()<st.st_size:
+  offset=f.tell(); raw=f.readline(st.st_size-offset)
+  if not raw.endswith(b'\n'): break
+  try: d=json.loads(raw)
+  except (ValueError,UnicodeDecodeError): continue
+  if not isinstance(d,dict) or d.get('isSidechain'): continue
+  uid=d.get('uuid')
+  if uid==anchor and found_anchor is None: found_anchor=offset
+  if uid==target:
+   if found_target is None: found_target=offset
+   target_data=d
+ end=os.fstat(f.fileno())
+ if end.st_size!=st.st_size or end.st_mtime_ns!=st.st_mtime_ns: stop('stale')
+if found_anchor is None: stop('no-anchor')
+if found_target is None: stop('no-target')
+if found_anchor>=found_target: stop('order')
+if target_data.get('parentUuid')!=anchor: stop('not-child')
+if target_data.get('isMeta'): stop('meta')
+if target_data.get('type')!='user': stop('not-user')
+stop('ok')
+""".trimIndent()
 
     /**
      * 认 [verifyCommand] 的输出。认不出来一律失败（fail-closed，同 [parse]）。
