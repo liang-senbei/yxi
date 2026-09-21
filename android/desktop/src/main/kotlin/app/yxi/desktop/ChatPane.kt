@@ -205,7 +205,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
     }
 
     // 转录：找到这个会话的 jsonl，从最后 400 行的字节起点 tail -f，攒 300ms 一批增量解析。
-    // 历史灌完（字节数够了）之前不上屏，免得看它从旧滚到新（手机端 #261 的教训）。
+    // 每批立即显示，避免较大的历史回填阻挡新增回复；底部 anchor 保持最新内容可见。
     // 断线：流断了不清屏，等连接回来从记下的字节位置接着尾随；转录文件换了（重开 / --resume）才整个重灌。
     LaunchedEffect(taskKey, ssh) {
         val cacheEnabled = session.runtimeId.isNotBlank()

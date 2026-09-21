@@ -16,7 +16,7 @@ import kotlinx.coroutines.CoroutineStart
  * ⚠️ **读转录文件，不刮终端屏幕。** 终端里 TUI 会重绘、有 spinner、会折行，
  * 刮屏必然脆；转录是结构化的、权威的（PRD 附录 D.1）。
  *
- * ⚠️ **服务器上不需要装任何东西** —— `ls` 和 `tail` 是系统自带的。
+ * 使用服务器现有的 Python 3、GNU tail/stat/timeout；不启动额外常驻服务。
  */
 object TranscriptStream {
 
