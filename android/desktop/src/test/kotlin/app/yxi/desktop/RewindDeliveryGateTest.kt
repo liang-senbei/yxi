@@ -5,8 +5,32 @@ import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
+import kotlin.test.assertEquals
+import app.yxi.agent.RewindLiveVerification
 
 class RewindDeliveryGateTest {
+    @Test fun `resume verification survives restart and stale tickets cannot clear it`() {
+        val dir = Files.createTempDirectory("yxi-rewind-verification").toFile()
+        try {
+            val file = dir.resolve("gate.json")
+            val gate = RewindDeliveryGate(file)
+            val target = RewindDeliveryGate.Target("11111111-1111-4111-8111-111111111111",
+                "22222222-2222-4222-8222-222222222222", "33333333-3333-4333-8333-333333333333")
+            val initial = gate.begin("host/task", "1:\$2:3", target)
+            val query = RewindLiveVerification.Query("cc-demo", initial.runtimeId, "%1", "/opt/claude", "123",
+                target.sessionId, target.anchorUuid, target.messageUuid, "/tmp/${target.sessionId}.jsonl", 1234.5)
+            assertFailsWith<IllegalArgumentException> { gate.prepareVerification(initial, query.copy(runtimeId = "1:\$3:4")) }
+            assertEquals(initial, gate.pending(initial.taskKey))
+            val prepared = gate.prepareVerification(initial, query)
+            val restarted = RewindDeliveryGate(file)
+            assertEquals(prepared, restarted.pending(initial.taskKey))
+            assertTrue(restarted.blocked(initial.taskKey))
+            assertFailsWith<IllegalStateException> { restarted.finishVerified(initial) }
+            restarted.finishVerified(prepared)
+            assertFalse(restarted.blocked(initial.taskKey))
+        } finally { dir.deleteRecursively() }
+    }
+
     @Test fun `interrupted rewind stays blocked after restart and only exact ticket clears it`() {
         val dir = Files.createTempDirectory("yxi-rewind-gate").toFile()
         try {
