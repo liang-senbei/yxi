@@ -74,6 +74,8 @@ internal fun AndroidEmulatorPanel(open: Boolean, close: () -> Unit) {
                         checkingAcceleration = true
                         scope.launch {
                             try { acceleration = AndroidAcceleration.inspect(executable.path) }
+                            catch (e: CancellationException) { throw e }
+                            catch (e: Exception) { acceleration = AndroidAcceleration.Result(false, "检查未完成：${e.message.orEmpty()}") }
                             finally { checkingAcceleration = false }
                         }
                     }, enabled = !checkingAcceleration && !busy) { Text(if (checkingAcceleration) "正在检查虚拟化…" else "检查运行环境") }
