@@ -457,13 +457,15 @@ object Rewind {
      *
      * @param cwd 会话工作目录（[app.yxi.agent.SessionProbe.Session.cwd]，会话列表现成的）
      */
-    fun verifyCommand(cwd: String, p: Plan): String {
+    fun verifyCommand(cwd: String, p: Plan, sourceFile: String? = null): String {
+        require(sourceFile == null || (sourceFile.startsWith("/") && sourceFile.endsWith("/${p.sessionId}.jsonl") && '\u0000' !in sourceFile))
         val c = q(cwd.trimEnd('/').ifBlank { "/" })
         val sid = q(p.sessionId)
         val a = q(p.anchorUuid)
         val d = q(p.targetUuid)
-        return "enc=\$(printf %s '$c' | sed 's/[^A-Za-z0-9]/-/g'); " +
-            "f=\"\$HOME/.claude/projects/\$enc/$sid.jsonl\"; " +
+        val source = if (sourceFile != null) "f='${q(sourceFile)}'; " else
+            "enc=\$(printf %s '$c' | sed 's/[^A-Za-z0-9]/-/g'); f=\"\$HOME/.claude/projects/\$enc/$sid.jsonl\"; "
+        return source +
             "[ -f \"\$f\" ] || { echo \"$CHECK_TAG:missing-session\"; exit 0; }; " +
             "an=\$(grep -nF -m1 '\"uuid\":\"$a\"' \"\$f\" | cut -d: -f1); " +
             "[ -n \"\$an\" ] || { echo \"$CHECK_TAG:no-anchor\"; exit 0; }; " +
