@@ -334,12 +334,12 @@ object Transcript {
                     // 顶栏那个模型名来自「最后一条 assistant 消息」的 model —— 切换不会改写旧消息，
                     // 所以不认这一步的话，用户切了模型还看见旧名字，会以为没切成（用户报过）。
                     // `/model` 的回执落在命令输出里（`Set model to …`），照它覆盖。
-                    modelSwitchOf(msg)?.let { name -> lastCtx?.let { old ->
-                        lastCtx = old.copy(model = name); onCtx(lastCtx!!)
-                    } }
-                    effortSwitchOf(msg)?.let { effort -> lastCtx?.let { old ->
-                        lastCtx = old.copy(effort = effort); onCtx(lastCtx!!)
-                    } }
+                    modelSwitchOf(msg)?.let { name ->
+                        lastCtx = (lastCtx ?: Ctx(0, "")).copy(model = name); onCtx(lastCtx!!)
+                    }
+                    effortSwitchOf(msg)?.let { effort ->
+                        lastCtx = (lastCtx ?: Ctx(0, "")).copy(effort = effort); onCtx(lastCtx!!)
+                    }
                 }
                 "assistant" -> {
                     // ⚠️ 顺路取，不额外跑一趟服务器 —— 这些行本来就在手上

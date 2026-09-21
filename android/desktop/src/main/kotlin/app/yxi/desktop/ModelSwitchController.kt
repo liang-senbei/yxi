@@ -102,11 +102,19 @@ internal class ModelChangeStore(file: File) {
     /** 菜单意图入库。发送中/等确认框时不接收（返回 false，调用方保留意图下轮再试）；
      * SentAwaitEvidence 是「已发送待证据」，新意图可以直接顶掉。 */
     @Synchronized fun propose(taskKey: String, runtimeId: String, model: String?, effort: String?): Boolean {
-        if (model.isNullOrBlank() && effort.isNullOrBlank()) return false
+        val requestedModel = model?.trim()?.takeIf { it.isNotBlank() }
+        val requestedEffort = effort?.trim()?.takeIf { it.isNotBlank() }
+        if (requestedModel == null && requestedEffort == null) return false
+        require(requestedModel == null || (requestedModel.length <= 512 && requestedModel.none { it <= ' ' || it == '\u007f' })) {
+            "模型名称包含不支持的空白或控制字符，未发送"
+        }
+        require(requestedEffort == null || requestedEffort in setOf("none", "minimal", "low", "medium", "high", "xhigh", "max")) {
+            "无法识别思考强度，未发送"
+        }
         val existing = entries.firstOrNull { it.taskKey == taskKey }
         if (existing != null && existing.status in setOf(ModelChangeStatus.Delivering, ModelChangeStatus.AwaitConfirm)) return false
         commit(entries.filter { it.taskKey != taskKey } + ModelSwitchRequest(
-            taskKey, runtimeId, model?.trim(), effort?.trim(), revision = (existing?.revision ?: 0L) + 1))
+            taskKey, runtimeId, requestedModel, requestedEffort, revision = (existing?.revision ?: 0L) + 1))
         return true
     }
 
