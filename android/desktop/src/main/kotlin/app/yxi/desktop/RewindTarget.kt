@@ -33,18 +33,25 @@ with open(path,'rb') as f:
   if not isinstance(uid,str) or not (parent is None or isinstance(parent,str)): continue
   kind=item.get('type')
   if kind not in ('user','assistant','system','progress','attachment'): continue
-  nodes[uid]=(parent,kind,bool(item.get('isMeta',False)))
+  message=item.get('message')
+  content=message.get('content') if isinstance(message,dict) else None
+  text=isinstance(content,str) and bool(content.strip())
+  if isinstance(content,list):
+   text=any(isinstance(b,dict) and b.get('type')=='text' and bool(str(b.get('text','')).strip()) for b in content)
+   if any(isinstance(b,dict) and b.get('type')=='tool_result' for b in content): text=False
+  human=kind=='user' and not item.get('isMeta',False) and text
+  nodes[uid]=(parent,kind,human)
   if kind in ('user','assistant'): leaf=uid
   if len(nodes)>500000: raise ValueError('History too large')
  end=os.fstat(f.fileno())
  if end.st_size!=size or end.st_mtime_ns!=st.st_mtime_ns: raise ValueError('History changed')
-if target not in nodes or nodes[target][1]!='user' or nodes[target][2]: raise ValueError('Not a user message')
+if target not in nodes or not nodes[target][2]: raise ValueError('Not a user message')
 seen=set(); later=0; cursor=leaf
 while cursor is not None and cursor!=target:
  if cursor in seen or cursor not in nodes: raise ValueError('Message is not on current branch')
  seen.add(cursor)
- parent,kind,meta=nodes[cursor]
- if kind=='user' and not meta: later+=1
+ parent,kind,human=nodes[cursor]
+ if human: later+=1
  cursor=parent
 if cursor!=target: raise ValueError('Message is not on current branch')
 parent=nodes[target][0]
