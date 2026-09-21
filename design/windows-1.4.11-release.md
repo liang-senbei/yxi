@@ -1,6 +1,10 @@
 # Windows 1.4.11 交互候选
 
-状态：候选准备，未发布官网；官网当前为1.4.10。不是完整PRD已交付的声明。
+状态：已发布官网，公开feed返回1.4.11，Setup链接HTTP200。不是完整PRD已交付的声明。
+
+发布证据：CI35640436282成功；产物10658376470，905217561字节传输完成。更新包322007610字节，SHA256 1C7AAACCC5968467F2030AC508391DCFFB7D89D306B2C6841F53C5C67DAAB27B；Setup SHA256 a381bd3101052a5126a30c1f08760d3ec8477ec7a76c0ab57d8444399ca5f9af。1.4.10回滚备份保留在`/var/www/yxi/desktop-rollback-1.4.10-before-1.4.11`。线上release-notes.json已同步该版本详细说明。
+
+发布前测试勘误：原合入8949a17的测试源存在dir作用域编译错误，先前4/4结果来自包含未同步修正的工作树。root4383d79修正后，在精确4383d79干净工作树上重编重跑4/4通过（XML更新时间2026-09-21 18:59:08 UTC）。冻结生产代码不受该测试源错误影响。WebP关闭资源后的像素读回双用例通过。Windows完整UI/真实第三方端点及中文像素级复刻仍未全面验收。
 
 冻结提交5d9fa2e60503e9baed27949d968b284e59dfcbc6，分支codex/windows-release-1.4.11，Windows构建https://github.com/liang-senbei/yxi/actions/runs/35640436282 。该run已确认运行中，不因观察超时重新触发。后续开发提交不自动进入此候选。
 
