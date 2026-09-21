@@ -303,7 +303,10 @@ private fun CodexConversationPane(state: AppState) {
                 TextButton({ followLatest = true; scope.launch { scrollToLatest() } }) { Text("回到最新消息 ↓") }
             }
             if (controller != null) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(controller.autoDispatch, { controller.setAutoDispatch(it) }, enabled = controller.ready)
+                Checkbox(controller.autoDispatch, {
+                    QueuePreferences.setEnabled(selected.key, it)
+                    controller.setAutoDispatch(QueuePreferences.enabled(selected.key))
+                }, enabled = controller.ready)
                 Text("自动逐轮发送", style = MaterialTheme.typography.bodySmall)
                 TextButton({ act { controller.steerNext() } }, enabled = controller.ready && !controller.sending && controller.activeTurnId != null && controller.pendingRequests.isEmpty()) { Text("用下一条引导") }
                 TextButton({ act { controller.interrupt() } }, enabled = controller.ready && controller.activeTurnId != null) { Text("中断") }
@@ -313,6 +316,10 @@ private fun CodexConversationPane(state: AppState) {
                 canDeliver = controller?.ready == true && !controller.sending && controller.activeTurnId == null && controller.pendingRequests.isEmpty(),
                 onDeliver = { instruction -> if (controller != null) act { controller.sendNext(instruction.id) } },
                 automatic = controller?.autoDispatch == true,
+                onAutomaticChange = if (controller == null) null else { enabled ->
+                    QueuePreferences.setEnabled(selected.key, enabled)
+                    controller.setAutoDispatch(QueuePreferences.enabled(selected.key))
+                },
                 canSteer = controller?.ready == true && !controller.sending && controller.activeTurnId != null && controller.pendingRequests.isEmpty(),
                 onSteer = { instruction -> if (controller != null) act { controller.steerNext(instruction.id) } })
             if (controller != null) CodexGoalStrip(controller)

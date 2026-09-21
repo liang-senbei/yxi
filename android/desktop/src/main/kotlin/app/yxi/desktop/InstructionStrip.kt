@@ -18,7 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 
 @Composable
-internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliver: Boolean, onDeliver: (QueuedInstruction) -> Unit, onQuery: (suspend (QueuedInstruction) -> String)? = null, compactUnknown: Boolean = false, automatic: Boolean = false, canSteer: Boolean = false, onSteer: ((QueuedInstruction) -> Unit)? = null) {
+internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliver: Boolean, onDeliver: (QueuedInstruction) -> Unit, onQuery: (suspend (QueuedInstruction) -> String)? = null, compactUnknown: Boolean = false, automatic: Boolean = false, canSteer: Boolean = false, onSteer: ((QueuedInstruction) -> Unit)? = null, onAutomaticChange: ((Boolean) -> Unit)? = null) {
     val t = Tokens.current
     val active = queue.entries.filter { it.taskKey == taskKey && (it.runtimeTurnState == RuntimeTurnState.InProgress || it.status !in setOf(InstructionStatus.Sent, InstructionStatus.Accepted, InstructionStatus.Cancelled, InstructionStatus.Resolved)) }
     var expanded by remember(taskKey) { mutableStateOf(false) }
@@ -61,7 +61,11 @@ internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliv
                     Box {
                         IconButton({ menuId = item.id }, Modifier.size(32.dp)) { Icon(Icons.Outlined.MoreHoriz, "更多指令操作", Modifier.size(16.dp), tint = t.textMuted) }
                         DropdownMenu(menuId == item.id, { menuId = null }) {
-                            DropdownMenuItem(text = { Text("查看完整内容") }, onClick = { menuId = null; editing = item; text = item.text; error = "" })
+                            DropdownMenuItem(text = { Text(if (item.status == InstructionStatus.Local) "编辑消息" else "查看完整内容") }, onClick = { menuId = null; editing = item; text = item.text; error = "" })
+                            if (onAutomaticChange != null) DropdownMenuItem(
+                                text = { Text(if (automatic) "关闭自动排队" else "开启自动排队") },
+                                onClick = { menuId = null; act { onAutomaticChange(!automatic) } },
+                            )
                             if (item.status == InstructionStatus.Local) {
                                 val localItems = active.filter { it.status == InstructionStatus.Local }
                                 val position = localItems.indexOfFirst { it.id == item.id }

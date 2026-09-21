@@ -200,7 +200,7 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File,
         val controller = CodexTaskController(record.key, record.threadId, client, queue) { title -> onNotice(record, title) }
         try { controller.reconcile(createdThread) } catch (e: Exception) { controller.close(); throw e }
         controllers[record.key] = controller; owners[record.key] = conn
-        controller.setAutoDispatch(autoRun)
+        controller.setAutoDispatch(autoRun && QueuePreferences.enabled(record.key))
         return controller
     }
 

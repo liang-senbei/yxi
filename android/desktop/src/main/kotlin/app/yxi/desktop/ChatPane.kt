@@ -474,7 +474,9 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
             }
         }
         InstructionStrip(instructions, taskNavigationKey(conn.host, session), !sending && !live.busy && pending == null && ssh.isConnected, ::deliver,
-            onQuery = { queryInstructionDelivery(conn, session, it) }, compactUnknown = true, automatic = true,
+            onQuery = { queryInstructionDelivery(conn, session, it) }, compactUnknown = true,
+            automatic = QueuePreferences.enabled(taskKey),
+            onAutomaticChange = { QueuePreferences.setEnabled(taskKey, it) },
             canSteer = !session.isCodex && live.busy && pending == null && !sending && !keyBusy,
             onSteer = { item ->
                 keyBusy = true

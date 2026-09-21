@@ -184,7 +184,7 @@ internal class CodexTaskController(
         if (!autoDispatch || !ready || disposed || sending || activeTurnId != null || pendingRequests.isNotEmpty()) return
         if (firstPending()?.status != InstructionStatus.Local) return
         scope.launch {
-            try { sendNext() }
+            try { sendNext(automatic = true) }
             catch (e: CancellationException) { throw e }
             catch (e: Exception) { autoDispatch = false; note = e.message.orEmpty() }
         }
@@ -254,7 +254,8 @@ internal class CodexTaskController(
         selectedEffort = effort
     }
 
-    suspend fun sendNext(expectedId: String? = null) = mutation.withLock {
+    suspend fun sendNext(expectedId: String? = null, automatic: Boolean = false) = mutation.withLock {
+        if (automatic && !autoDispatch) return@withLock
         check(ready && !disposed) { "请先连接并核对运行器状态" }
         check(activeTurnId == null && pendingRequests.isEmpty()) { "当前轮次或审批尚未结束" }
         val item = firstPending() ?: return@withLock

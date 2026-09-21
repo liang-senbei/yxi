@@ -51,7 +51,7 @@ internal fun TerminalQueueRunner(state: AppState) {
                         if (!ready) continue
                         if (first?.status != InstructionStatus.Local || state.instructions.error.isNotBlank()) continue
                         // The adapter rechecks identity, empty prompt and screen immediately before writing.
-                        deliverInstruction(conn, session, state.instructions, first)
+                        if (QueuePreferences.enabled(key)) deliverInstruction(conn, session, state.instructions, first, automatic = true)
                     } catch (e: CancellationException) { throw e }
                     catch (_: Exception) { /* Keep local/unknown state; never replay an uncertain write. */ }
                 }
