@@ -180,6 +180,7 @@ class AndroidSdkComponentInstaller(
         packages: List<String>,
         acceptedLicenseIds: Set<String>,
         isCancelled: () -> Boolean = { false },
+        reviewedLicenseHashes: Map<String, String> = emptyMap(),
     ): Outcome {
         if (packages.isEmpty()) return Outcome(reason = "没有选择要安装的组件")
         packages.firstOrNull { !PACKAGE_SPEC.matches(it) }?.let {
@@ -200,10 +201,14 @@ class AndroidSdkComponentInstaller(
         val lt = licenseTexts(packages)
         if (!lt.ok) return Outcome(reason = lt.reason)
         val referenced = lt.docs.associateBy { it.id }
+        if (lt.missing.isNotEmpty()) return Outcome(reason = "尚未取得这些组件的许可信息：${lt.missing.joinToString()}，未安装")
         val unknown = acceptedLicenseIds.filter { it !in referenced }
         if (unknown.isNotEmpty()) {
             return Outcome(reason = "勾选的许可不在所选组件的许可清单里（不存在或与所选组件无关）：${unknown.first().take(40)}")
         }
+        if (acceptedLicenseIds.any { reviewedLicenseHashes[it] != referenced[it]?.hash })
+            return Outcome(reason = "许可内容未确认或已变化，请重新阅读并确认后再安装")
+        if (isCancelled()) return Outcome(reason = "已取消，未写入许可记录")
 
         // 接受记录：<sdkRoot>/licenses/<id>，多行 hash 追加（License.setAccepted 的 "%n%s" 格式）
         File(sdkRoot, "licenses").mkdirs()
