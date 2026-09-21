@@ -275,11 +275,13 @@ internal class ModelSwitchController(
         if (evidence == null || evidence.file != entry.baselineFile || evidence.offset <= entry.baselineOffset) return
         if (entry.model != null) {
             val now = evidence.model
+            if (now.isBlank()) return // A new record without a model is not a rejection receipt.
             if (now == entry.evidenceModel) return // 发送后没有新的模型回执
             if (ModelSwitchProtocol.sameModel(entry.model, now)) store.phaseDone(entry.taskKey, entry.revision, modelPhase = true)
             else store.markUnknown(entry.taskKey, entry.revision, "转录新回执 model=$now 与请求 ${entry.model} 不符；不会自动重发")
         } else {
             val now = evidence.effort
+            if (now.isBlank()) return // Some assistant records omit effort; do not block the queue for missing data.
             if (now == entry.evidenceEffort) return // 发送后没有新的 effort 回执（要等下一条 assistant 消息落转录）
             if (ModelSwitchProtocol.sameEffort(requireNotNull(entry.effort), now)) store.phaseDone(entry.taskKey, entry.revision, modelPhase = false)
             else store.markUnknown(entry.taskKey, entry.revision, "转录新回执 effort=$now 与请求 ${entry.effort} 不符；不会自动重发")
