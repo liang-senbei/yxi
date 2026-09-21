@@ -24,12 +24,18 @@ class TranscriptBranchStartInspectionTest {
     private class Run(val code: Int, val out: String, val err: String)
 
     private fun inspect(path: String, count: Int): Run {
-        val p = ProcessBuilder("python3", "-c", TranscriptBranchStart.script, path, count.toString()).start()
-        val out = p.inputStream.bufferedReader().readText()
-        val err = p.errorStream.bufferedReader().readText()
-        check(p.waitFor(15, TimeUnit.SECONDS)) { "start 脚本超时" }
-        p.destroyForcibly()
-        return Run(p.exitValue(), out, err)
+        val stdout = Files.createTempFile("yxi-branch-start", ".out").toFile()
+        val stderr = Files.createTempFile("yxi-branch-start", ".err").toFile()
+        val python = if (System.getProperty("os.name").startsWith("Windows")) "python" else "python3"
+        val p = ProcessBuilder(python, "-c", TranscriptBranchStart.script, path, count.toString())
+            .redirectOutput(stdout).redirectError(stderr).start()
+        try {
+            check(p.waitFor(15, TimeUnit.SECONDS)) { "start 脚本超时" }
+            return Run(p.exitValue(), stdout.readText(), stderr.readText())
+        } finally {
+            if (p.isAlive) { p.destroyForcibly(); p.waitFor(5, TimeUnit.SECONDS) }
+            stdout.delete(); stderr.delete()
+        }
     }
 
     private fun user(id: String, parent: String?, text: String = "t-$id"): String =
