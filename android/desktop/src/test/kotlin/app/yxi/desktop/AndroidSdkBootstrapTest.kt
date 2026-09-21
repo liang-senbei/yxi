@@ -250,7 +250,7 @@ class AndroidSdkBootstrapTest {
         val b = AndroidSdkBootstrap(sdkRoot = root, stagingDir = staging, download = fakeDownload(zip))
         val r = b.install(manifest(zip, sizeBytes = zip.size - 10L))
         assertFalse(r.ok)
-        assertTrue(r.reason!!.contains("超出清单大小"))
+        assertTrue(r.reason!!.contains("清单不一致"))   // aab4168 起改为严格相等，文案同步
         assertFalse(root.resolve("cmdline-tools/latest").exists())
         assertTrue(staging.listFiles().isNullOrEmpty(), "超大的下载内容不能留在暂存目录")
     }
@@ -280,6 +280,84 @@ class AndroidSdkBootstrapTest {
         assertFalse(root.resolve("cmdline-tools/latest").exists())
         assertFalse(File(staging, "evil.txt").exists())   // `..` 出界目标不得存在
         assertTrue(staging.listFiles().isNullOrEmpty())
+    }
+
+    @Test
+    fun `inspect honours cancellation between phases and never fetches after cancel`() {
+        val b = AndroidSdkBootstrap(fetchXml = { error("取消后不应再取清单") })
+        val r = b.inspect(isCancelled = { true })
+        assertFalse(r.ok)
+        assertTrue(r.reason!!.contains("取消"))
+        assertNull(r.manifest)
+    }
+
+    @Test
+    fun `inspect finds the windows package in the real official xml subtree`() {
+        // 子树取自 dl.google.com/android/repository/repository2-3.xml 原文（verbatim，
+        // 2026-09 抓取）：根带 sdk: 前缀、子元素无前缀、checksum 用 type="sha1"、
+        // url 是相对路径。许可全文 17KB 不进测试，只保留引用与开头数行。
+        val xml = """<?xml version="1.0"?>
+<sdk:sdk-repository xmlns:sdk="http://schemas.android.com/sdk/android/repo/repository2/03" xmlns:common="http://schemas.android.com/repository/android/common/02" xmlns:sdk-common="http://schemas.android.com/sdk/android/repo/common/03" xmlns:generic="http://schemas.android.com/repository/android/generic/02" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <sdk:license id="android-sdk-license" type="text">Terms and Conditions
+
+This is the Android Software Development Kit License Agreement
+（官方全文 17KB 截略——解析只取 textContent 与 id 引用）</sdk:license>
+  <remotePackage path="cmdline-tools;latest">
+    <type-details xsi:type="generic:genericDetailsType"/>
+    <revision>
+      <major>23</major>
+      <minor>0</minor>
+    </revision>
+    <display-name>Android SDK Command-line Tools (latest)</display-name>
+    <uses-license ref="android-sdk-license"/>
+    <channelRef ref="channel-0"/>
+    <archives>
+      <archive>
+        <complete>
+          <size>181052239</size>
+          <checksum type="sha1">e025545c62a8e64c7559119566a569fb1dec5f60</checksum>
+          <url>commandlinetools-linux-16111833_latest.zip</url>
+        </complete>
+        <host-os>linux</host-os>
+      </archive>
+      <archive>
+        <complete>
+          <size>155582504</size>
+          <checksum type="sha1">112cf9618794a997ff273537d55bee02c22abffe</checksum>
+          <url>commandlinetools-mac_x86_64-16111833_latest.zip</url>
+        </complete>
+        <host-os>macosx</host-os>
+        <host-arch>x64</host-arch>
+      </archive>
+      <archive>
+        <complete>
+          <size>155384151</size>
+          <checksum type="sha1">ad03dc49bfacfd52c110b14104ea548b8a07e830</checksum>
+          <url>commandlinetools-mac_arm64-16111833_latest.zip</url>
+        </complete>
+        <host-os>macosx</host-os>
+        <host-arch>aarch64</host-arch>
+      </archive>
+      <archive>
+        <complete>
+          <size>154957218</size>
+          <checksum type="sha1">57d04f2d75eb8e8fffc5000a987e5de4b5a63e9d</checksum>
+          <url>commandlinetools-win-16111833_latest.zip</url>
+        </complete>
+        <host-os>windows</host-os>
+      </archive>
+    </archives>
+  </remotePackage>
+</sdk:sdk-repository>"""
+        val r = AndroidSdkBootstrap(fetchXml = { xml }).inspect()
+        assertTrue(r.ok, r.reason)
+        val m = r.manifest!!
+        assertEquals("latest", m.version)
+        assertEquals(AndroidSdkBootstrap.REPO_BASE + "commandlinetools-win-16111833_latest.zip", m.url)
+        assertEquals(154957218L, m.sizeBytes)
+        assertEquals("SHA-1", m.checksumAlgorithm)
+        assertEquals("57d04f2d75eb8e8fffc5000a987e5de4b5a63e9d", m.checksum)
+        assertTrue(m.licenses.single().startsWith("Terms and Conditions"))
     }
 
     @Test

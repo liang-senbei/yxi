@@ -32,7 +32,9 @@ internal fun AndroidSetupCard(onInstalled: () -> Unit) {
                 busy = true; notice = ""
                 scope.launch {
                     try {
-                        val result = withContext(Dispatchers.IO) { installer.inspect() }
+                        // 取消接线进探测：inspect 在阶段边界轮询这个 flag，
+                        // 探测期的取消按钮不再是只能置 flag 的摆设
+                        val result = withContext(Dispatchers.IO) { installer.inspect(isCancelled = { cancel.get() }) }
                         manifest = result.manifest; notice = result.reason.orEmpty(); accepted = false
                     } catch (e: CancellationException) { throw e }
                     catch (e: Exception) { notice = e.message.orEmpty() }

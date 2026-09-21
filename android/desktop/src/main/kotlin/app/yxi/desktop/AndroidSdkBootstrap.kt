@@ -71,13 +71,19 @@ class AndroidSdkBootstrap(
     /** 安装目标：`<sdkRoot>/cmdline-tools/latest`（官方布局）。已存在就不覆盖。 */
     val targetDir: File get() = File(File(sdkRoot, "cmdline-tools"), "latest")
 
-    /** 拉官方仓库清单，动态挑出 Windows 稳定通道的 command-line tools 包。 */
-    fun inspect(repoUrl: String = REPO_URL): InspectOutcome {
+    /**
+     * 拉官方仓库清单，动态挑出 Windows 稳定通道的 command-line tools 包。
+     * [isCancelled] 在每个阶段边界（取清单前/取回后/解析后）轮询——探测此前不感知
+     * 取消，UI 曾在探测期展示一个只能置 flag 的假取消按钮。
+     */
+    fun inspect(repoUrl: String = REPO_URL, isCancelled: () -> Boolean = { false }): InspectOutcome {
+        if (isCancelled()) return InspectOutcome(reason = "已取消")
         val xml = try {
             fetchXml(repoUrl)
         } catch (e: Exception) {
             return InspectOutcome(reason = "获取仓库清单失败：${e.message?.take(120)}")
         }
+        if (isCancelled()) return InspectOutcome(reason = "已取消（清单已取回，未解析）")
         val doc = try {
             val factory = DocumentBuilderFactory.newInstance().apply {
                 setNamespaceAware(true)   // 官方 XML 标签带 sdk: 前缀，按 localName 匹配
@@ -89,6 +95,7 @@ class AndroidSdkBootstrap(
         } catch (e: Exception) {
             return InspectOutcome(reason = "仓库清单解析失败：${e.message?.take(120)}")
         }
+        if (isCancelled()) return InspectOutcome(reason = "已取消（清单已解析，未选包）")
 
         fun each(name: String, block: (Element) -> Unit) {
             val list = doc.getElementsByTagNameNS("*", name)
