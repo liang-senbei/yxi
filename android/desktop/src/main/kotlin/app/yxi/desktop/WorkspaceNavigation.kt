@@ -50,6 +50,10 @@ class WorkspaceNavigation(file: File) {
     fun archived(key: String) = task(key).optBoolean("archived", false)
     fun muted(key: String) = task(key).optBoolean("muted", false)
     fun favorite(key: String) = task(key).optBoolean("favorite", false)
+    /** Codex retains its thread identity in the registry; a favorite reopens that thread. */
+    internal fun setCodexFavorite(task: CodexTaskRecord, enabled: Boolean) = editTask(task.key) {
+        it.put("favorite", enabled)
+    }
     fun setFavorite(key: String, host: Host, session: Session, enabled: Boolean) = editTask(key) {
         if (enabled) {
             require(session.cwd.startsWith('/') && session.cwd.none { c -> c < ' ' }) { "收藏需要有效的服务器目录" }
