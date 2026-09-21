@@ -33,4 +33,16 @@ class RewindDeliveryGateTest {
             assertFailsWith<IllegalStateException> { gate.begin("any-task", "runtime") }
         } finally { dir.deleteRecursively() }
     }
+
+    @Test fun `old empty backup never clears uncertain state even across two restarts`() {
+        val dir = Files.createTempDirectory("yxi-rewind-gate-backup").toFile()
+        try {
+            val file = dir.resolve("gate.json").apply { writeText("broken") }
+            dir.resolve("gate.json.bak").writeText("[]")
+            repeat(2) { assertTrue(RewindDeliveryGate(file).blocked("any-task")) }
+            assertTrue(file.readText() == "broken")
+            file.delete()
+            repeat(2) { assertTrue(RewindDeliveryGate(file).blocked("any-task")) }
+        } finally { dir.deleteRecursively() }
+    }
 }

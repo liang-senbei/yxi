@@ -11,7 +11,13 @@ internal class RewindDeliveryGate(file: File) {
     private val disk = DurableFile(file) { decode(it) }
     private var readable = true
     private var tickets: List<Ticket> = try {
-        disk.read()?.let(::decode).orEmpty().also { if (disk.recovered) readable = false }
+        // Never restore an older empty backup: it can predate an in-flight rewind.
+        // In particular, do not rewrite the primary while reading; otherwise the
+        // second application restart could mistake a restored empty file for safety.
+        if (file.isFile) decode(file.readText()) else {
+            check(!file.exists() && !File(file.parentFile, file.name + ".bak").exists())
+            emptyList()
+        }
     } catch (_: Exception) { readable = false; emptyList() }
 
     @Synchronized fun blocked(taskKey: String): Boolean = !readable || tickets.any { it.taskKey == taskKey }
