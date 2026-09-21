@@ -15,13 +15,14 @@ import kotlin.test.assertTrue
 
 /**
  * AndroidSdkBootstrap 定向测试：仓库清单用假 XML 字符串注入、下载用假字节注入，
- * **零真网络、零真下载**；zip 在测试里现做（官方包同款顶层 cmdline-tools/），
- * 覆盖坏校验 / Zip Slip / 取消 / 不覆盖已有目标这些分支。
+ * **零真网络、零真下载**；zip 在测试里现做（官方包同款顶层 cmdline-tools/）。
+ * 清单元数据按真实仓库口径：command-line tools 的 checksum 是 **sha1**（algorithm
+ * 属性），老清单是 type 属性 + sha256——两种都覆盖，另覆盖坏长度/坏算法被跳过。
  */
 class AndroidSdkBootstrapTest {
 
-    private fun sha256(bytes: ByteArray) =
-        MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+    private fun digest(bytes: ByteArray, algo: String = "SHA-1") =
+        MessageDigest.getInstance(algo).digest(bytes).joinToString("") { "%02x".format(it) }
 
     /** 现做一个迷你 command-line tools zip（顶层目录 cmdline-tools/，和官方包一致）。 */
     private fun toolsZip(vararg extra: Pair<String, ByteArray>): ByteArray {
@@ -67,18 +68,25 @@ class AndroidSdkBootstrapTest {
             reason
         }
 
-    private fun manifest(zip: ByteArray, sha: String = sha256(zip)) = AndroidSdkBootstrap.Manifest(
+    private fun manifest(
+        zip: ByteArray,
+        algo: String = "SHA-1",
+        sha: String = digest(zip, algo),
+        sizeBytes: Long = zip.size.toLong(),
+        url: String = AndroidSdkBootstrap.REPO_BASE + "commandlinetools-win-13114758_latest.zip",
+    ) = AndroidSdkBootstrap.Manifest(
         version = "latest",
-        url = AndroidSdkBootstrap.REPO_BASE + "commandlinetools-win-13114758_latest.zip",
-        sizeBytes = zip.size.toLong(),
-        sha256 = sha,
+        url = url,
+        sizeBytes = sizeBytes,
+        checksumAlgorithm = algo,
+        checksum = sha,
         licenses = listOf("仅供展示的许可全文"),
     )
 
     // ── inspect：仓库清单解析 ────────────────────────────────────────────────
 
     @Test
-    fun `inspect picks stable windows commandlinetools and surfaces license text`() {
+    fun `inspect picks stable windows commandlinetools with sha1 metadata and license text`() {
         val xml = """<?xml version="1.0"?>
 <sdk:sdk-repository xmlns:sdk="http://schemas.android.com/sdk/android/repo/repository2/3">
   <sdk:license id="android-sdk-license" type="bean">许可全文在这里，只展示。</sdk:license>
@@ -87,7 +95,7 @@ class AndroidSdkBootstrapTest {
     <sdk:channelRef ref="channel-0"/>
     <sdk:archives><sdk:archive>
       <sdk:complete><sdk:url>commandlinetools-win-11076708_19.0.zip</sdk:url><sdk:size>111</sdk:size>
-        <sdk:checksum type="sha256">${"ab".repeat(32)}</sdk:checksum></sdk:complete>
+        <sdk:checksum type="sha256">${"cd".repeat(32)}</sdk:checksum></sdk:complete>
       <sdk:host-os>windows</sdk:host-os>
     </sdk:archive></sdk:archives>
     <sdk:uses-license ref="android-sdk-license"/>
@@ -97,12 +105,12 @@ class AndroidSdkBootstrapTest {
     <sdk:archives>
       <sdk:archive>
         <sdk:complete><sdk:url>commandlinetools-win-13114758_latest.zip</sdk:url><sdk:size>152092487</sdk:size>
-          <sdk:checksum type="sha256">${"cd".repeat(32)}</sdk:checksum></sdk:complete>
+          <sdk:checksum algorithm="sha1">${"ab".repeat(20)}</sdk:checksum></sdk:complete>
         <sdk:host-os>windows</sdk:host-os>
       </sdk:archive>
       <sdk:archive>
         <sdk:complete><sdk:url>commandlinetools-linux-13114758_latest.zip</sdk:url><sdk:size>100</sdk:size>
-          <sdk:checksum type="sha256">${"ee".repeat(32)}</sdk:checksum></sdk:complete>
+          <sdk:checksum algorithm="sha1">${"ef".repeat(20)}</sdk:checksum></sdk:complete>
         <sdk:host-os>linux</sdk:host-os>
       </sdk:archive>
     </sdk:archives>
@@ -112,7 +120,7 @@ class AndroidSdkBootstrapTest {
     <sdk:channelRef ref="channel-1"/>
     <sdk:archives><sdk:archive>
       <sdk:complete><sdk:url>commandlinetools-win-preview.zip</sdk:url><sdk:size>100</sdk:size>
-        <sdk:checksum type="sha256">${"ff".repeat(32)}</sdk:checksum></sdk:complete>
+        <sdk:checksum algorithm="sha1">${"ab".repeat(20)}</sdk:checksum></sdk:complete>
       <sdk:host-os>windows</sdk:host-os>
     </sdk:archive></sdk:archives>
   </sdk:remotePackage>
@@ -125,19 +133,20 @@ class AndroidSdkBootstrapTest {
         assertEquals("latest", m.version)   // latest 别名优先于 19.0；channel-1 的 21.0 不进候选
         assertEquals(AndroidSdkBootstrap.REPO_BASE + "commandlinetools-win-13114758_latest.zip", m.url)  // 相对 url 拼回基址
         assertEquals(152092487L, m.sizeBytes)
-        assertEquals("cd".repeat(32), m.sha256)
+        assertEquals("SHA-1", m.checksumAlgorithm)   // 官方真实口径：algorithm 属性 + sha1
+        assertEquals("ab".repeat(20), m.checksum)
         assertEquals(listOf("许可全文在这里，只展示。"), m.licenses)
     }
 
     @Test
-    fun `inspect falls back to highest stable version when no latest alias`() {
+    fun `inspect falls back to highest stable version reading legacy type attr sha256`() {
         val xml = """<sdk:sdk-repository xmlns:sdk="http://schemas.android.com/sdk/android/repo/repository2/3">
           <sdk:channel id="channel-0"/>
           <sdk:remotePackage path="cmdline-tools;19.0">
             <sdk:channelRef ref="channel-0"/>
             <sdk:archives><sdk:archive>
               <sdk:complete><sdk:url>commandlinetools-win-11076708_19.0.zip</sdk:url><sdk:size>111</sdk:size>
-                <sdk:checksum type="sha256">${"ab".repeat(32)}</sdk:checksum></sdk:complete>
+                <sdk:checksum type="sha256">${"cd".repeat(32)}</sdk:checksum></sdk:complete>
               <sdk:host-os>windows</sdk:host-os>
             </sdk:archive></sdk:archives>
           </sdk:remotePackage>
@@ -145,7 +154,28 @@ class AndroidSdkBootstrapTest {
         val r = AndroidSdkBootstrap(fetchXml = { xml }).inspect()
         assertTrue(r.ok, r.reason)
         assertEquals("19.0", r.manifest!!.version)
+        assertEquals("SHA-256", r.manifest!!.checksumAlgorithm)
         assertEquals(AndroidSdkBootstrap.REPO_BASE + "commandlinetools-win-11076708_19.0.zip", r.manifest!!.url)
+    }
+
+    @Test
+    fun `inspect skips candidates whose checksum length or algorithm is bogus`() {
+        val xml = """<sdk:sdk-repository xmlns:sdk="http://schemas.android.com/sdk/android/repo/repository2/3">
+          <sdk:channel id="channel-0"/>
+          <sdk:remotePackage path="cmdline-tools;latest">
+            <sdk:channelRef ref="channel-0"/>
+            <sdk:archives><sdk:archive>
+              <sdk:complete><sdk:url>commandlinetools-win-x.zip</sdk:url><sdk:size>1</sdk:size>
+                <sdk:checksum algorithm="sha1">${"ab".repeat(32)}</sdk:checksum></sdk:complete>
+              <sdk:host-os>windows</sdk:host-os>
+            </sdk:archive></sdk:archives>
+          </sdk:remotePackage>
+        </sdk:sdk-repository>"""
+        // sha1 名义但 64 位十六进制：长度对不上 = 元数据不可信，候选必须被跳过
+        val r = AndroidSdkBootstrap(fetchXml = { xml }).inspect()
+        assertFalse(r.ok)
+        assertTrue(r.reason!!.contains("没有 Windows 稳定版"))
+        assertNull(r.manifest)
     }
 
     @Test
@@ -159,7 +189,7 @@ class AndroidSdkBootstrapTest {
         assertNull(ugly.manifest)
     }
 
-    // ── install：下载 → 校验 → 解压 → 安装 ──────────────────────────────────
+    // ── install：下载 → 校验 → 解压 → 原子发布 ─────────────────────────────
 
     @Test
     fun `install refuses to overwrite existing target and never downloads`() {
@@ -180,7 +210,24 @@ class AndroidSdkBootstrapTest {
     }
 
     @Test
-    fun `install downloads verifies extracts and lands at cmdline-tools latest with staging cleaned`() {
+    fun `install refuses non official url before touching anything`() {
+        val root = Files.createTempDirectory("yxi-sdk").toFile()
+        val staging = Files.createTempDirectory("yxi-stage").toFile()
+        var downloads = 0
+        val b = AndroidSdkBootstrap(
+            sdkRoot = root,
+            stagingDir = staging,
+            download = { _, _, _, _, _ -> downloads++; null },
+        )
+        val r = b.install(manifest(ByteArray(0), url = "http://evil.example/tools.zip"))
+        assertFalse(r.ok)
+        assertTrue(r.reason!!.contains("官方"))
+        assertEquals(0, downloads)
+        assertTrue(staging.listFiles().isNullOrEmpty())
+    }
+
+    @Test
+    fun `install downloads verifies sha1 extracts and lands at cmdline-tools latest with staging cleaned`() {
         val zip = toolsZip()
         val root = Files.createTempDirectory("yxi-sdk").toFile()
         val staging = Files.createTempDirectory("yxi-stage").toFile()
@@ -196,14 +243,27 @@ class AndroidSdkBootstrapTest {
     }
 
     @Test
+    fun `install rejects downloaded bytes exceeding manifest size and cleans staging`() {
+        val zip = toolsZip()
+        val root = Files.createTempDirectory("yxi-sdk").toFile()
+        val staging = Files.createTempDirectory("yxi-stage").toFile()
+        val b = AndroidSdkBootstrap(sdkRoot = root, stagingDir = staging, download = fakeDownload(zip))
+        val r = b.install(manifest(zip, sizeBytes = zip.size - 10L))
+        assertFalse(r.ok)
+        assertTrue(r.reason!!.contains("超出清单大小"))
+        assertFalse(root.resolve("cmdline-tools/latest").exists())
+        assertTrue(staging.listFiles().isNullOrEmpty(), "超大的下载内容不能留在暂存目录")
+    }
+
+    @Test
     fun `install rejects checksum mismatch cleans staging and leaves target absent`() {
         val zip = toolsZip()
         val root = Files.createTempDirectory("yxi-sdk").toFile()
         val staging = Files.createTempDirectory("yxi-stage").toFile()
         val b = AndroidSdkBootstrap(sdkRoot = root, stagingDir = staging, download = fakeDownload(zip))
-        val r = b.install(manifest(zip, sha = "deadbeef".repeat(8)))
+        val r = b.install(manifest(zip, sha = "deadbeef".repeat(5)))
         assertFalse(r.ok)
-        assertTrue(r.reason!!.contains("校验"))
+        assertTrue(r.reason!!.contains("校验不符"))
         assertFalse(root.resolve("cmdline-tools/latest").exists())
         assertTrue(staging.listFiles().isNullOrEmpty(), "坏包不能留在暂存目录")
     }

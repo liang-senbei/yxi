@@ -5,7 +5,10 @@ import java.io.IOException
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.FileAlreadyExistsException
 import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.zip.ZipInputStream
 import javax.xml.XMLConstants
@@ -18,15 +21,20 @@ import org.w3c.dom.Element
  *
  * 两步，都由 root UI 显式发起：
  * 1. [inspect]：拉官方仓库清单（repository2-3.xml），动态找出 Windows 稳定通道的
- *    command-line tools 包，返回版本 / 下载地址 / 大小 / sha256 / 许可证全文——
- *    供 root 展示给用户确认，**这里不做任何改动**；
- * 2. [install]：下载到 Yxi 暂存目录 → sha256 校验 → 安全解压（拦 Zip Slip）→
- *    挪到 `<sdkRoot>/cmdline-tools/latest`。目标已存在就不覆盖。
+ *    command-line tools 包，返回版本 / 下载地址 / 大小 / 校验值 / 许可证全文——
+ *    供 root 展示给用户确认，**这里不做任何改动**。校验算法按清单元数据
+ *    （checksum 的 algorithm/type 属性）认 **SHA-1 / SHA-256**——官方这个包实际
+ *    给的就是 sha1，只认 sha256 会找不到真实包；十六进制长度一并核对。
+ * 2. [install]：下载到 Yxi 暂存目录（实际大小不得超过清单）→ 按元数据校验 →
+ *    安全解压（拦 Zip Slip）→ **同卷原子 rename 发布**到
+ *    `<sdkRoot>/cmdline-tools/latest`。目标已存在就不覆盖；发布不做覆盖 copy
+ *    兜底——copy 会盖掉竞态里别人先放的目录，rename 要么成要么整体不动。
  *
  * ⚠️ **边界**：只装 command-line tools 这一个包，不装平台/镜像、不建 AVD；
  * **绝不代表用户接受许可、绝不调用 sdkmanager**（许可证文本仅供展示）；
  * 不写系统环境变量（ANDROID_HOME 指路是后续的事）。下载有超时/进度/取消，
- * 失败一律清掉半成品并留可解释错误——半截安装比没有更糟。
+ * 失败清的**只可能是本次暂存根里的东西**（删除前验证 canonical 位置），
+ * 目标目录任何情况下不动。
  */
 class AndroidSdkBootstrap(
     /** Yxi 自有 SDK 根，默认在 Yxi 数据目录下，不碰系统标准路径。 */
@@ -44,7 +52,10 @@ class AndroidSdkBootstrap(
         val version: String,
         val url: String,
         val sizeBytes: Long,
-        val sha256: String,
+        /** 校验算法（SHA-1 / SHA-256），按官方清单元数据归一化。 */
+        val checksumAlgorithm: String,
+        /** 校验值（小写十六进制）。 */
+        val checksum: String,
         /** 许可证全文，仅展示。本模块绝不代表用户接受许可。 */
         val licenses: List<String>,
     )
@@ -92,7 +103,10 @@ class AndroidSdkBootstrap(
             el.getAttribute("id").takeIf { it.isNotBlank() }?.let { licenseTexts[it] = el.textContent.trim() }
         }
 
-        data class Cand(val version: String, val url: String, val size: Long, val sha: String, val licenseRefs: List<String>)
+        data class Cand(
+            val version: String, val url: String, val size: Long,
+            val algorithm: String, val checksum: String, val licenseRefs: List<String>,
+        )
         val cands = mutableListOf<Cand>()
         each("remotePackage") { pkg ->
             val path = pkg.getAttribute("path")
@@ -104,14 +118,20 @@ class AndroidSdkBootstrap(
                 ?: return@each
             val complete = archive.children("complete").firstOrNull() ?: return@each
             val relUrl = complete.children("url").firstOrNull()?.textContent?.trim() ?: return@each
-            val sha = complete.children("checksum").firstOrNull()
-                ?.takeIf { it.getAttribute("type").equals("sha256", true) }?.textContent?.trim() ?: return@each
+            // 算法按元数据认：官方字段是 algorithm，老清单用 type，两个都接；
+            // 只认 SHA-1/SHA-256，且十六进制长度必须对得上，对不上当元数据不可信跳过
+            val checksumEl = complete.children("checksum").firstOrNull() ?: return@each
+            val algorithm = normalizeAlgorithm(checksumEl.getAttribute("algorithm").ifBlank { checksumEl.getAttribute("type") })
+                ?: return@each
+            val hex = checksumEl.textContent.trim()
+            if (hex.length != if (algorithm == "SHA-1") 40 else 64) return@each
             cands += Cand(
                 version = path.substringAfter(';'),
                 // 官方清单里的 url 是相对路径，拼回仓库基址
                 url = if (relUrl.startsWith("http")) relUrl else REPO_BASE + relUrl,
                 size = complete.children("size").firstOrNull()?.textContent?.trim()?.toLongOrNull() ?: -1L,
-                sha = sha.lowercase(),
+                algorithm = algorithm,
+                checksum = hex.lowercase(),
                 licenseRefs = pkg.children("uses-license").mapNotNull { it.getAttribute("ref").takeIf { r -> r.isNotBlank() } },
             )
         }
@@ -120,87 +140,123 @@ class AndroidSdkBootstrap(
             ?: cands.maxByOrNull { it.version.split('.').joinToString(".") { p -> "%08d".format(p.toIntOrNull() ?: 0) } }
             ?: return InspectOutcome(reason = "仓库清单里没有 Windows 稳定版 command-line tools")
         return InspectOutcome(
-            Manifest(cand.version, cand.url, cand.size, cand.sha, cand.licenseRefs.mapNotNull { licenseTexts[it] }),
+            Manifest(cand.version, cand.url, cand.size, cand.algorithm, cand.checksum, cand.licenseRefs.mapNotNull { licenseTexts[it] }),
         )
     }
 
     /**
-     * 下载 → 校验 → 安全解压 → 装到 `<sdkRoot>/cmdline-tools/latest`。
-     * 任何一步失败都清掉半成品并返回可解释错误；目标已存在直接拒绝，不覆盖。
+     * 下载 → 校验 → 安全解压 → 原子发布到 `<sdkRoot>/cmdline-tools/latest`。
+     * 任何一步失败都清**本次暂存**并返回可解释错误；目标已存在直接拒绝，
+     * 任何失败路径都不碰目标目录。
      */
     fun install(
         manifest: Manifest,
         onProgress: (Long, Long) -> Unit = { _, _ -> },
         isCancelled: () -> Boolean = { false },
     ): InstallOutcome {
+        // 只从官方 HTTPS 源下载——manifest 会在 UI 展示后回传，防中途被换成别的地址
+        if (!manifest.url.startsWith(REPO_BASE)) {
+            return InstallOutcome(reason = "下载源不是官方仓库（$REPO_BASE），拒绝")
+        }
         val target = targetDir
         if (target.exists()) {
             return InstallOutcome(reason = "目标已存在（${target.path}），不覆盖 —— 已装好的 command-line tools 保持原样")
         }
         stagingDir.mkdirs()
-        val zip = File(stagingDir, "commandlinetools-win-${manifest.version}.zip")
-        val extractDir = File(stagingDir, "extract-${System.currentTimeMillis()}")
+        // 每次安装用独立的 zip 与解压目录，并发互不踩
+        val stamp = System.currentTimeMillis()
+        val zip = File(stagingDir, "commandlinetools-win-${manifest.version}-$stamp.zip")
+        val extractDir = File(stagingDir, "extract-$stamp")
 
-        // 1) 下载（超时/进度/取消都在下载器里；失败清半截文件）
+        // 1) 下载（超时/进度/取消/超清单大小都在下载器里；失败清半截文件）
         val reason = download(manifest.url, zip, manifest.sizeBytes, onProgress, isCancelled)
         if (reason != null) {
-            zip.delete()
+            deleteStaged(zip)
             return InstallOutcome(reason = reason)
         }
 
-        // 2) sha256 校验：对不上就删，绝不让坏包进 SDK 根
-        val actual = try {
-            zip.inputStream().use { sha256Hex(it) }
-        } catch (e: Exception) {
-            zip.delete()
-            return InstallOutcome(reason = "读取下载内容失败：${e.message?.take(120)}")
-        }
-        if (!actual.equals(manifest.sha256, ignoreCase = true)) {
-            zip.delete()
-            return InstallOutcome(reason = "校验不符：期望 ${manifest.sha256.take(12)}…，实际 ${actual.take(12)}…（坏包已删除）")
+        // 2) 实际大小不得超过清单声明（清单给可信大小时）
+        if (manifest.sizeBytes > 0 && zip.length() > manifest.sizeBytes) {
+            deleteStaged(zip)
+            return InstallOutcome(reason = "下载内容（${zip.length()} 字节）超出清单大小（${manifest.sizeBytes}），已删除")
         }
 
-        // 3) 安全解压到暂存目录（Zip Slip 拦截 + 解压总量上限）
+        // 3) 校验（SHA-1/SHA-256 按清单元数据）：对不上就删，绝不让坏包进 SDK 根
+        val actual = try {
+            zip.inputStream().use { digestHex(it, manifest.checksumAlgorithm) }
+        } catch (e: Exception) {
+            deleteStaged(zip)
+            return InstallOutcome(reason = "读取下载内容失败：${e.message?.take(120)}")
+        }
+        if (!actual.equals(manifest.checksum, ignoreCase = true)) {
+            deleteStaged(zip)
+            return InstallOutcome(
+                reason = "校验不符（${manifest.checksumAlgorithm}）：期望 ${manifest.checksum.take(12)}…，实际 ${actual.take(12)}…（坏包已删除）",
+            )
+        }
+
+        // 4) 安全解压到暂存目录（Zip Slip 拦截 + 解压总量上限 + 可取消）
         val extractError = try {
             unzipSafely(zip, extractDir, isCancelled)
         } catch (e: Exception) {
             "解压失败：${e.message?.take(120)}"
         }
         if (extractError != null) {
-            zip.delete(); extractDir.deleteRecursively()
+            deleteStaged(zip); deleteStaged(extractDir)
             return InstallOutcome(reason = extractError)
         }
 
-        // 4) 官方 zip 顶层就是 cmdline-tools/，挪到 <sdkRoot>/cmdline-tools/latest
+        // 5) 官方 zip 顶层就是 cmdline-tools/，同卷原子发布到 <sdkRoot>/cmdline-tools/latest
         val inner = File(extractDir, "cmdline-tools")
         if (!inner.isDirectory) {
-            cleanup(zip, extractDir)
+            deleteStaged(zip); deleteStaged(extractDir)
             return InstallOutcome(reason = "压缩包结构不符：顶层没有 cmdline-tools 目录")
         }
         if (target.exists()) {
-            cleanup(zip, extractDir)
+            deleteStaged(zip); deleteStaged(extractDir)
             return InstallOutcome(reason = "目标已出现（${target.path}），不覆盖 —— 请确认后再试")
         }
         target.parentFile.mkdirs()
-        try {
-            moveDir(inner, target)
-        } catch (e: Exception) {
-            target.deleteRecursively()   // 回滚半截安装
-            cleanup(zip, extractDir)
-            return InstallOutcome(reason = "安装失败：${e.message?.take(120)}（已回滚，目标不留半成品）")
-        }
-        cleanup(zip, extractDir)
-        return InstallOutcome(installed = true)
+        val publishError = publish(inner, target)
+        deleteStaged(zip); deleteStaged(extractDir)
+        return if (publishError == null) InstallOutcome(installed = true) else InstallOutcome(reason = publishError)
     }
 
     // ── 内部 ─────────────────────────────────────────────────────────────────
 
-    private fun cleanup(vararg files: File) {
-        files.forEach { if (it.isDirectory) it.deleteRecursively() else it.delete() }
+    /**
+     * 删除只允许发生在暂存根内：canonical 不在 stagingDir 里的一律不动。
+     * 防的是路径拼接/符号链接把删除指到暂存外——尤其绝不能顺着失败路径删到目标目录。
+     */
+    private fun deleteStaged(f: File) {
+        val root = stagingDir.canonicalPath + File.separator
+        val p = try {
+            f.canonicalPath
+        } catch (_: Exception) {
+            return
+        }
+        if (!p.startsWith(root)) return
+        if (f.isDirectory) f.deleteRecursively() else f.delete()
     }
 
-    private fun sha256Hex(input: InputStream): String {
-        val md = MessageDigest.getInstance("SHA-256")
+    /**
+     * 原子发布：同卷唯一暂存目录 rename 上位。**不做覆盖 copy 兜底**——
+     * copy overwrite 会盖掉竞态里别人先放的目录；ATOMIC_MOVE 失败时源还留在
+     * 暂存里、目标一个字节不动，由调用方只清暂存。
+     */
+    private fun publish(src: File, dst: File): String? = try {
+        Files.move(src.toPath(), dst.toPath(), StandardCopyOption.ATOMIC_MOVE)
+        null
+    } catch (_: FileAlreadyExistsException) {
+        "目标已出现（可能被并发安装抢先）——未覆盖、未删除，请确认后再试"
+    } catch (_: AtomicMoveNotSupportedException) {
+        "暂存目录与 SDK 根不在同一卷，无法原子发布（请把两者配在同一盘后重试）"
+    } catch (e: IOException) {
+        "安装失败：${e.message?.take(120)}（目标未改动）"
+    }
+
+    private fun digestHex(input: InputStream, algorithm: String): String {
+        val md = MessageDigest.getInstance(algorithm)
         val buf = ByteArray(64 * 1024)
         while (true) {
             val n = input.read(buf)
@@ -250,31 +306,22 @@ class AndroidSdkBootstrap(
         return null
     }
 
-    /** 同卷直接 move；跨卷（暂存和 SDK 根被配到不同盘）退回复制+删源。 */
-    private fun moveDir(src: File, dst: File) {
-        try {
-            Files.move(src.toPath(), dst.toPath())
-            return
-        } catch (_: IOException) {
-            // 跨卷等情况走复制兜底
-        }
-        dst.mkdirs()
-        src.walkTopDown().forEach { f ->
-            val t = File(dst, f.relativeTo(src).path)
-            if (f.isDirectory) t.mkdirs() else f.copyTo(t, overwrite = true)
-        }
-        src.deleteRecursively()
-    }
-
     companion object {
         /** Google 官方 SDK 仓库清单（稳定/预览通道都在里面）。 */
         const val REPO_URL = "https://dl.google.com/android/repository/repository2-3.xml"
-        /** 清单里的下载 url 是相对路径，拼回这个基址。 */
+        /** 清单里的下载 url 是相对路径，拼回这个基址；install 也只认这个前缀。 */
         const val REPO_BASE = "https://dl.google.com/android/repository/"
         private const val STABLE_CHANNEL = "channel-0"
 
         /** command-line tools 解开 ~500MB；超过 2GB 一定是异常包，zip 炸弹不解。 */
         const val MAX_EXTRACT_BYTES = 2L * 1024 * 1024 * 1024
+
+        /** 清单里的算法名归一化；只认 SHA-1/SHA-256（官方 command-line tools 实际给的是 sha1）。 */
+        internal fun normalizeAlgorithm(raw: String): String? = when (raw.lowercase().replace("-", "")) {
+            "sha1" -> "SHA-1"
+            "sha256" -> "SHA-256"
+            else -> null
+        }
 
         private fun fetchXmlNative(url: String): String {
             val c = (URL(url).openConnection() as HttpURLConnection).apply {
@@ -289,7 +336,8 @@ class AndroidSdkBootstrap(
         }
 
         /**
-         * 真下载：连接 10s / 单次读 30s 超时，进度每 64KB 回调一次，循环里轮询取消。
+         * 真下载：连接 10s / 单次读 30s 超时，进度每 64KB 回调一次，循环里轮询取消；
+         * 实际字节数一旦超过清单声明立即中止。
          * 返回 null = 成功；非 null = 可解释错误（半截文件由调用方清理）。
          */
         private fun downloadNative(
@@ -315,7 +363,8 @@ class AndroidSdkBootstrap(
                             if (n < 0) break
                             out.write(buf, 0, n)
                             written += n
-                            onProgress(written, if (total > 0) total else c.contentLengthLong)
+                            if (total > 0 && written > total) return "下载内容超出清单大小（$total 字节），已中止"
+                            onProgress(written, total)
                         }
                     }
                 }
