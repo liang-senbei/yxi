@@ -11,6 +11,7 @@ import kotlinx.coroutines.sync.withLock
 @Composable
 internal fun TerminalQueueRunner(state: AppState) {
     LaunchedEffect(state) {
+        val modelSwitch = ModelSwitchController(state.modelSwitches)
         while (true) {
             for (conn in state.conns.toList()) {
                 if (!conn.ssh.isConnected || state.deferredRoute?.conn === conn) continue
@@ -18,22 +19,15 @@ internal fun TerminalQueueRunner(state: AppState) {
                     if (session.runtimeId.isBlank()) continue
                     val key = taskNavigationKey(conn.host, session)
                     val first = state.instructions.entries.firstOrNull { it.taskKey == key && it.status in setOf(InstructionStatus.Local, InstructionStatus.Delivering, InstructionStatus.Unknown) }
-                    if (first?.status != InstructionStatus.Local && session.runtimeId !in conn.terminalAwaiting && session.runtimeId !in conn.modelChanges) continue
+                    if (first?.status != InstructionStatus.Local && session.runtimeId !in conn.terminalAwaiting && session.runtimeId !in conn.modelChanges && state.modelSwitches.active(session.runtimeId) == null) continue
                     try {
-                        if (session.runtimeId in conn.modelChanges) {
+                        if (session.runtimeId in conn.modelChanges || state.modelSwitches.active(session.runtimeId) != null) {
                             conn.instructionDeliveryMutex.withLock {
-                                val target = "=" + session.name + ":"
-                                val q = app.yxi.ssh.Shell::q
-                                val screen = conn.ssh.exec("tmux capture-pane -p -t ${q(target)}")
-                                if (app.yxi.agent.Model.borrowable(screen) && app.yxi.agent.Prompt.parse(screen) == null) {
-                                    val change = conn.modelChanges[session.runtimeId] ?: return@withLock
-                                    val command = if (change.model != null) "/model ${change.model}" else "/effort ${change.effort}"
-                                    require(command.none { it < ' ' })
-                                    val result = conn.ssh.exec("pane=\$(tmux display-message -p -t ${q(target)} '#{pane_id}') && test \"\$(tmux display-message -p -t \"\$pane\" '#{pid}:#{session_id}:#{session_created}')\" = ${q(session.runtimeId)} && test \"\$(tmux capture-pane -p -t \"\$pane\")\" = ${q(screen.trimEnd('\n'))} && tmux send-keys -t \"\$pane\" -l ${q(command)} && sleep 0.3 && tmux send-keys -t \"\$pane\" Enter && printf '__YXI_MODEL_REQUEST__'")
-                                    conn.modelChanges.remove(session.runtimeId)
-                                    if (result.contains("__YXI_MODEL_REQUEST__") && change.model != null && change.effort != null)
-                                        conn.modelChanges[session.runtimeId] = change.copy(model = null)
-                                }
+                                // 持久化切换协议：菜单意图入库后走 Pending→Delivering→回读/AwaitConfirm 闭环；
+                                // store 在途时不接收新意图（返回 false 保留在 conn.modelChanges 下轮再试）。
+                                val intent = conn.modelChanges[session.runtimeId]
+                                val accepted = modelSwitch.step({ conn.ssh.exec(it) }, session.runtimeId, session.name, intent)
+                                if (intent != null && accepted) conn.modelChanges.remove(session.runtimeId)
                             }
                             continue
                         }
