@@ -1,4 +1,5 @@
 package app.yxi.desktop
+import androidx.compose.material.icons.outlined.PhoneAndroid
 
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -229,6 +230,11 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
             Icon(Icons.Outlined.SwapHoriz, null, Modifier.size(18.dp), tint = t.textSecondary)
             Text("切换任务", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = t.textPrimary)
             Text("Ctrl+K", style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+        }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp).clip(RoundedCornerShape(8.dp)).clickable { state.showAndroidEmulator = true }.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Icon(Icons.Outlined.PhoneAndroid, null, Modifier.size(18.dp), tint = t.textSecondary)
+            Text("Android 模拟器", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = t.textPrimary)
+            Text("本机", style = MaterialTheme.typography.labelSmall, color = t.textMuted)
         }
         // 会话过滤（ZCode 的搜索框 / Codex 的过滤）：按会话名 / 主机名滤，主机全不匹配就整组藏掉
         if (searchVisible) Row(

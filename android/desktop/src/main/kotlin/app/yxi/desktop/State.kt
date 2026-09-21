@@ -27,6 +27,7 @@ internal class CodexConversationView {
 }
 
 class AppState {
+    var showAndroidEmulator by mutableStateOf(false)
     internal val codexConversationViews = mutableMapOf<String, CodexConversationView>()
     internal var codexSelectedTaskKey by mutableStateOf<String?>(null)
     internal var codexCreateRequest by mutableStateOf<Pair<String, String>?>(null)
