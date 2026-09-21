@@ -23,14 +23,18 @@ internal fun TerminalQueueRunner(state: AppState) {
                     try {
                         if (session.runtimeId in conn.modelChanges || state.modelSwitches.active(key) != null) {
                             conn.instructionDeliveryMutex.withLock {
-                                // 持久化切换协议：菜单意图入库后走 Pending→Delivering→转录回执/AwaitConfirm 闭环；
-                                // store 以 taskNavigationKey 为键（host+session，跨主机不撞），
-                                // 在途时不接收新意图（返回 false 保留在 conn.modelChanges 下轮再试）。
+                                // 持久化切换协议：菜单意图入库后走 Pending→Delivering→SentAwaitEvidence/AwaitConfirm 闭环。
+                                // store 以 taskNavigationKey 为键（host+session，跨主机不撞）；
+                                // Delivering/AwaitConfirm 在途时不接收新意图（false = 意图留在 conn.modelChanges 下轮再试）。
                                 val intent = conn.modelChanges[session.runtimeId]
                                 val accepted = modelSwitch.step({ conn.ssh.exec(it) }, key, session.runtimeId, session.name, intent)
                                 if (intent != null && accepted) conn.modelChanges.remove(session.runtimeId)
                             }
-                            continue
+                            // ⚠️ SentAwaitEvidence（已发送、等转录新回执）是唯一不堵普通消息的状态：
+                            //    落下去走正常队列路径，新配置下下一条照发，不等下一回复。
+                            //    其余状态一律 continue，不可绕过 —— Pending 发送在即、Delivering 投递不明、
+                            //    AwaitConfirm 确认框等用户回车（绝不代按）、Unknown 人工核对（不自动重发）。
+                            if (state.modelSwitches.active(key)?.status != ModelChangeStatus.SentAwaitEvidence) continue
                         }
                         val ready = conn.instructionDeliveryMutex.withLock {
                             val (pending, live) = SessionProbe.snapshot(conn.ssh, session.name)

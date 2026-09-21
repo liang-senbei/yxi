@@ -8,10 +8,13 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-/** 模型/强度切换意图的状态：Pending 待发 → Delivering 已发待核实 → AwaitConfirm 等用户在终端确认
- * （「Switch model?」弹框绝不能替用户回车）→ Applied（会话转录证据确认生效）/ Unknown（结果不明或被拒，
- * 不自动重发，等用户重新应用）。 */
-internal enum class ModelChangeStatus { Pending, Delivering, AwaitConfirm, Unknown, Applied }
+/** 模型/强度切换意图的状态：
+ *  Pending 待发 → Delivering 已落盘待发送结果 → （发送成功）
+ *    · SentAwaitEvidence 已发送、等本会话转录**新**回执 —— 不堵普通消息，新配置下下一条照发；
+ *    · AwaitConfirm 终端弹了确认框，等用户自己回车 —— 堵，绝不代按；
+ *    · Unknown 发送不明/被拒/新证据不符 —— 堵，不自动重发。
+ *  → Applied（发送基线之后的新转录回执确认生效）。 */
+internal enum class ModelChangeStatus { Pending, Delivering, SentAwaitEvidence, AwaitConfirm, Unknown, Applied }
 
 internal data class ModelSwitchRequest(
     /** 稳定键 = taskNavigationKey（host+session），与指令队列同源：仅用 runtimeId 会在跨主机时撞。 */
@@ -20,10 +23,26 @@ internal data class ModelSwitchRequest(
     val runtimeId: String,
     val model: String?, val effort: String?,
     val status: ModelChangeStatus = ModelChangeStatus.Pending,
-    val detail: String = "", val revision: Long = 0, val readbackTries: Int = 0,
+    val detail: String = "", val revision: Long = 0,
+    /** 发送基线：只认此后新增的转录证据。 */
+    val baselineFile: String = "", val baselineOffset: Long = -1L,
+    val evidenceModel: String = "", val evidenceEffort: String = "",
+    val screenHadRejection: Boolean = false, val screenHadDialog: Boolean = false,
 ) {
-    val active get() = status in setOf(ModelChangeStatus.Pending, ModelChangeStatus.Delivering, ModelChangeStatus.AwaitConfirm)
+    val active get() = status in setOf(ModelChangeStatus.Pending, ModelChangeStatus.Delivering,
+        ModelChangeStatus.SentAwaitEvidence, ModelChangeStatus.AwaitConfirm)
 }
+
+/** 发送时点采下的证据基线：Ctx 旧值与请求相同也**绝不**判成功（那是历史缓存不是新回执）。 */
+internal data class ModelEvidenceBaseline(
+    val file: String, val offset: Long,
+    val model: String, val effort: String,
+    val screenHadRejection: Boolean, val screenHadDialog: Boolean,
+)
+
+/** 证据读取面：转录文件 + 已解析字节偏移 + 会话 Ctx 的 model/effort。
+ *  与 [DesktopTranscriptMemory] 同一条链（Entry.file / view.offset / view.context）。 */
+internal data class ModelEvidenceView(val file: String, val offset: Long, val model: String, val effort: String)
 
 /** 切换协议的纯判定，全部可单测。[app.yxi.agent.Model.canonical] 只用于显示；
  * 这里发送与比对一律原样。⚠️ 比对只做 trim+小写：**保留 `[1m]` 这类上下文后缀** ——
@@ -45,7 +64,7 @@ internal object ModelSwitchProtocol {
         effective.isNotBlank() && requested.trim().lowercase() == effective.trim().lowercase()
 }
 
-/** 持久切换意图（每 taskKey 一条）。提交前先落盘 Pending，发送前落盘 Delivering，
+/** 持久切换意图（每 taskKey 一条）。提交前先落盘 Pending，发送前连基线一起落盘 Delivering，
  * 重启时在途一律转 Unknown —— 与 [InstructionQueue] 同一套「不明即保守」语义。 */
 internal class ModelChangeStore(file: File) {
     private val disk = DurableFile(file) { decode(it) }
@@ -60,7 +79,7 @@ internal class ModelChangeStore(file: File) {
             val loaded = disk.read()?.let(::decode).orEmpty()
             val fromBackup = disk.recovered
             val recovered = loaded.map {
-                if (it.status in setOf(ModelChangeStatus.Delivering, ModelChangeStatus.AwaitConfirm) || (fromBackup && it.status == ModelChangeStatus.Pending))
+                if (it.status in setOf(ModelChangeStatus.Delivering, ModelChangeStatus.SentAwaitEvidence, ModelChangeStatus.AwaitConfirm) || (fromBackup && it.status == ModelChangeStatus.Pending))
                     it.copy(status = ModelChangeStatus.Unknown, revision = it.revision + 1,
                         detail = "应用退出时切换结果未确认，请在终端核对后重新应用")
                 else it
@@ -73,7 +92,8 @@ internal class ModelChangeStore(file: File) {
 
     fun active(taskKey: String) = entries.firstOrNull { it.taskKey == taskKey && it.active }
 
-    /** 菜单意图入库。在途（Delivering/AwaitConfirm）时不接收 —— 返回 false，调用方保留意图下轮再试。 */
+    /** 菜单意图入库。发送中/等确认框时不接收（返回 false，调用方保留意图下轮再试）；
+     * SentAwaitEvidence 是「已发送待证据」，新意图可以直接顶掉。 */
     @Synchronized fun propose(taskKey: String, runtimeId: String, model: String?, effort: String?): Boolean {
         if (model.isNullOrBlank() && effort.isNullOrBlank()) return false
         val existing = entries.firstOrNull { it.taskKey == taskKey }
@@ -83,43 +103,36 @@ internal class ModelChangeStore(file: File) {
         return true
     }
 
-    /** Pending → Delivering（先落盘再发键），返回落盘后的条目供发送使用。 */
-    @Synchronized fun beginSend(taskKey: String): ModelSwitchRequest {
+    /** Pending → Delivering，发送基线一并落盘（先落盘再 IO）。 */
+    @Synchronized fun beginSend(taskKey: String, baseline: ModelEvidenceBaseline): ModelSwitchRequest {
         val current = entries.single { it.taskKey == taskKey && it.status == ModelChangeStatus.Pending }
-        return commitOne(current) { it.copy(status = ModelChangeStatus.Delivering) }
+        return commitOne(current) {
+            it.copy(status = ModelChangeStatus.Delivering, baselineFile = baseline.file,
+                baselineOffset = baseline.offset, evidenceModel = baseline.model,
+                evidenceEffort = baseline.effort, screenHadRejection = baseline.screenHadRejection,
+                screenHadDialog = baseline.screenHadDialog)
+        }
     }
+
+    /** 发送成功且发送后屏面无新弹框/拒绝：转入「已发送待证据」。 */
+    @Synchronized fun markAwaitEvidence(taskKey: String, revision: Long) = edit(taskKey, revision,
+        setOf(ModelChangeStatus.Delivering)) { it.copy(status = ModelChangeStatus.SentAwaitEvidence) }
 
     @Synchronized fun markAwaitConfirm(taskKey: String, revision: Long) = edit(taskKey, revision,
         setOf(ModelChangeStatus.Delivering)) { it.copy(status = ModelChangeStatus.AwaitConfirm) }
 
-    /** model 段证据确认：还有 effort 段就回到 Pending 等下一条命令，否则收口 Applied；
-     * effort 段确认即 Applied（相位由「model 字段是否还在」唯一决定）。 */
+    /** 当前段新证据确认：model 段过了还有 effort 段就回 Pending 等下一条命令，否则 Applied。 */
     @Synchronized fun phaseDone(taskKey: String, revision: Long, modelPhase: Boolean) = edit(taskKey, revision,
-        setOf(ModelChangeStatus.Delivering, ModelChangeStatus.AwaitConfirm)) {
+        setOf(ModelChangeStatus.Delivering, ModelChangeStatus.SentAwaitEvidence, ModelChangeStatus.AwaitConfirm)) {
         when {
             modelPhase && it.effort != null -> it.copy(model = null, status = ModelChangeStatus.Pending)
             else -> it.copy(model = null, effort = null, status = ModelChangeStatus.Applied,
-                detail = "已生效（本会话转录回执确认）")
+                detail = "已生效（发送后本会话转录新回执确认）")
         }
-    }
-
-    /** 证据未确认计一次；满 3 次转 Unknown（detail 带实况），返回是否已转 Unknown。 */
-    @Synchronized fun readbackRetry(taskKey: String, revision: Long, actual: String): Boolean {
-        val current = entries.single { it.taskKey == taskKey && it.revision == revision }
-        val tries = current.readbackTries + 1
-        if (tries < 3) {
-            edit(taskKey, revision, setOf(ModelChangeStatus.Delivering, ModelChangeStatus.AwaitConfirm)) {
-                it.copy(readbackTries = tries) }
-            return false
-        }
-        edit(taskKey, revision, setOf(ModelChangeStatus.Delivering, ModelChangeStatus.AwaitConfirm)) {
-            it.copy(status = ModelChangeStatus.Unknown,
-                detail = "本会话转录未见生效回执（$actual）；不会自动重发，请在终端核对后重新应用") }
-        return true
     }
 
     @Synchronized fun markUnknown(taskKey: String, revision: Long, detail: String) = edit(taskKey, revision,
-        setOf(ModelChangeStatus.Delivering, ModelChangeStatus.AwaitConfirm)) {
+        setOf(ModelChangeStatus.Delivering, ModelChangeStatus.SentAwaitEvidence, ModelChangeStatus.AwaitConfirm)) {
         it.copy(status = ModelChangeStatus.Unknown, detail = detail) }
 
     private fun edit(taskKey: String, revision: Long, allowed: Set<ModelChangeStatus>,
@@ -145,7 +158,10 @@ internal class ModelChangeStore(file: File) {
         private fun encode(items: List<ModelSwitchRequest>) = JSONObject().put("version", 1).put("items",
             JSONArray(items.map { JSONObject().put("taskKey", it.taskKey).put("runtimeId", it.runtimeId)
                 .put("model", it.model ?: "").put("effort", it.effort ?: "").put("status", it.status.name)
-                .put("detail", it.detail).put("revision", it.revision).put("readbackTries", it.readbackTries) })).toString(2)
+                .put("detail", it.detail).put("revision", it.revision)
+                .put("baselineFile", it.baselineFile).put("baselineOffset", it.baselineOffset)
+                .put("evidenceModel", it.evidenceModel).put("evidenceEffort", it.evidenceEffort)
+                .put("screenHadRejection", it.screenHadRejection).put("screenHadDialog", it.screenHadDialog) })).toString(2)
         private fun decode(raw: String): List<ModelSwitchRequest> {
             val root = JSONObject(raw)
             require(root.getInt("version") == 1)
@@ -155,7 +171,9 @@ internal class ModelChangeStore(file: File) {
                 ModelSwitchRequest(o.getString("taskKey"), o.getString("runtimeId"),
                     o.optString("model").ifBlank { null }, o.optString("effort").ifBlank { null },
                     ModelChangeStatus.valueOf(o.getString("status")), o.optString("detail"),
-                    o.getLong("revision"), o.optInt("readbackTries", 0))
+                    o.getLong("revision"), o.optString("baselineFile"), o.optLong("baselineOffset", -1L),
+                    o.optString("evidenceModel"), o.optString("evidenceEffort"),
+                    o.optBoolean("screenHadRejection"), o.optBoolean("screenHadDialog"))
             }.also { list ->
                 require(list.all { it.taskKey.isNotBlank() && it.runtimeId.isNotBlank() })
                 require(list.map { it.taskKey }.distinct().size == list.size)
@@ -165,17 +183,20 @@ internal class ModelChangeStore(file: File) {
 }
 
 /** 切换协议执行体：无自有线程与锁 —— 调用方（TerminalQueueRunner）持有 [Conn.instructionDeliveryMutex]，
- * 每个 tick 至多一步；门判定与证据源以默认参数注入，测试可替换
+ * 每个 tick 至多一步；门、转录视图以默认参数注入，测试可替换
  * （Model.borrowable 需真 Claude Code 输入框，伪不出 —— DeferredRouteRunnerTest 同款结论）。 */
 internal class ModelSwitchController(
     private val store: ModelChangeStore,
     private val borrowable: (String) -> Boolean = app.yxi.agent.Model::borrowable,
     private val pendingPrompt: (String) -> Any? = { app.yxi.agent.Prompt.parse(it) },
-    /** 会话级生效证据：本会话转录的 Ctx —— model 来自「Set model to …」回执/assistant `message.model`，
-     *  effort 来自转录行顶层 `effort`。与菜单展示的 currentModel/currentEffort 同源
-     *  （DesktopTranscriptMemory，ChatPane 同一条链）。⚠️ 全局 `~/.claude/settings.json`
-     *  **不是**本会话有效模型的证据：同主机多会话并存、`/model` 是会话级。 */
-    private val sessionCtx: (String) -> app.yxi.agent.Transcript.Ctx? = { DesktopTranscriptMemory.get(it)?.view?.context },
+    /** 该 task 的转录证据（文件、已解析字节偏移、会话 Ctx 的 model/effort）—— 与 ChatPane/DesktopTranscriptMemory
+     *  同一条链（Entry.file / view.offset / view.context），仅用于**发送基线**与基线之后的新证据；
+     *  旧缓存值本身不是回执。 */
+    private val sessionEvidence: (String) -> ModelEvidenceView? = { taskKey ->
+        DesktopTranscriptMemory.get(taskKey)?.let {
+            ModelEvidenceView(it.file, it.view.offset, it.view.context?.model.orEmpty(), it.view.context?.effort.orEmpty())
+        }
+    },
 ) {
     /** @return 意图是否已入库（true 时调用方可从 conn.modelChanges 移除）。 */
     suspend fun step(exec: suspend (String) -> String, taskKey: String, runtimeId: String, sessionName: String,
@@ -183,14 +204,23 @@ internal class ModelSwitchController(
         val accepted = intent != null && store.propose(taskKey, runtimeId,
             intent.model?.trim()?.ifBlank { null }, intent.effort?.trim()?.ifBlank { null })
         val entry = store.active(taskKey) ?: return accepted
-        if (!entry.active) return accepted
+        when (entry.status) {
+            ModelChangeStatus.SentAwaitEvidence -> { checkEvidence(taskKey); return accepted } // 纯内存，无键无 IO
+            ModelChangeStatus.Unknown, ModelChangeStatus.Applied -> return accepted
+            else -> Unit
+        }
         val q = app.yxi.ssh.Shell::q
         val capture = "tmux capture-pane -p -t ${q("=" + sessionName + ":")} 2>/dev/null"
         if (entry.status == ModelChangeStatus.Pending) {
             val screen = exec(capture)
             // 空闲 + 无审批框 + 无残留确认框才发；不满足就原样等下一 tick，绝不补键
             if (!borrowable(screen) || pendingPrompt(screen) != null || ModelSwitchProtocol.confirmDialog(screen)) return accepted
-            val started = store.beginSend(taskKey) // 先落盘再 IO
+            val evidence = sessionEvidence(taskKey)
+            val started = store.beginSend(taskKey, ModelEvidenceBaseline(
+                file = evidence?.file.orEmpty(), offset = evidence?.offset ?: -1L,
+                model = evidence?.model.orEmpty(), effort = evidence?.effort.orEmpty(),
+                screenHadRejection = ModelSwitchProtocol.rejected(screen),
+                screenHadDialog = ModelSwitchProtocol.confirmDialog(screen)))
             val command = ModelSwitchProtocol.command(started.model, started.effort)
             require(command.none { it < ' ' }) { "切换命令含控制字符" }
             // ⚠️ beginSend 之后任何异常（含发送 exec 本身）都按「投递不明」收口 Unknown，
@@ -203,46 +233,49 @@ internal class ModelSwitchController(
                 }
                 val after = exec(capture)
                 when {
-                    ModelSwitchProtocol.rejected(after) -> store.markUnknown(taskKey, started.revision,
-                        "运行器未接受该模型/强度（屏上出现拒绝提示）；不会自动重发")
-                    ModelSwitchProtocol.confirmDialog(after) -> store.markAwaitConfirm(taskKey, started.revision)
-                    else -> Unit // 发送当步不判定：回执要等本会话转录，下一 tick 由观察分支核实
+                    // ⚠️ 只认发送后新增变化：发送前就在屏上的旧拒绝/旧弹框不算这次的结果
+                    ModelSwitchProtocol.rejected(after) && !started.screenHadRejection ->
+                        store.markUnknown(taskKey, started.revision, "运行器未接受该模型/强度（屏上新增拒绝提示）；不会自动重发")
+                    ModelSwitchProtocol.confirmDialog(after) && !started.screenHadDialog ->
+                        store.markAwaitConfirm(taskKey, started.revision) // 等用户在终端自己确认
+                    else -> store.markAwaitEvidence(taskKey, started.revision)
                 }
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { store.markUnknown(taskKey, started.revision,
                 "发送过程异常（${e.message}），按键是否送达不明；不会自动重发") }
             return accepted
         }
-        // Delivering / AwaitConfirm：只观察（无 IO 状态推进），绝不再发键；exec 异常照常上抛，
-        // 状态留在 Delivering/AwaitConfirm，下一 tick 继续观察 —— 这里没有按键要收口。
-        observe(entry, exec(capture))
+        // Delivering（上次发送被取消的残留）/ AwaitConfirm（等用户确认）：观察屏面，绝不再发键
+        val screen = exec(capture)
+        when {
+            entry.status == ModelChangeStatus.Delivering && ModelSwitchProtocol.rejected(screen) && !entry.screenHadRejection ->
+                store.markUnknown(taskKey, entry.revision, "运行器未接受该模型/强度（屏上新增拒绝提示）；不会自动重发")
+            ModelSwitchProtocol.confirmDialog(screen) && !entry.screenHadDialog -> if (entry.status == ModelChangeStatus.Delivering)
+                store.markAwaitConfirm(taskKey, entry.revision)
+            else -> checkEvidence(taskKey) // 框已被用户处理/无新屏面变化 → 看转录新证据
+        }
         return accepted
     }
 
-    private fun observe(entry: ModelSwitchRequest, screen: String) {
-        when {
-            entry.status == ModelChangeStatus.Delivering && ModelSwitchProtocol.rejected(screen) ->
-                store.markUnknown(entry.taskKey, entry.revision, "运行器未接受该模型/强度（屏上出现拒绝提示）；不会自动重发")
-            ModelSwitchProtocol.confirmDialog(screen) -> if (entry.status == ModelChangeStatus.Delivering)
-                store.markAwaitConfirm(entry.taskKey, entry.revision) // 等用户在终端自己确认
-            else -> verify(entry)
-        }
-    }
-
-    /** 回执判定只认本会话转录证据；证据未到 ≠ 已生效 —— 计入重试，满了转 Unknown（未知诚实）。
-     *  ⚠️ effort 的证据要等下一条 assistant 消息落转录（顶层 effort 字段），此前不硬判。 */
-    private fun verify(entry: ModelSwitchRequest) {
-        val ctx = sessionCtx(entry.taskKey)
+    /** 只认发送基线之后的新证据：转录文件相同、字节偏移前进、且 Ctx 值相对发送时有变化。
+     *  · 无新证据（含旧缓存同值）→ 保持 SentAwaitEvidence 等待，不判 Applied 也不判失败；
+     *  · 新回执与请求不符 → 立即 Unknown（不自动重发）；
+     *  · 转录文件轮换（file 变了）→ 旧基线不可比，保持等待。 */
+    fun checkEvidence(taskKey: String) {
+        val entry = store.active(taskKey) ?: return
+        if (entry.status != ModelChangeStatus.SentAwaitEvidence && entry.status != ModelChangeStatus.AwaitConfirm) return
+        val evidence = sessionEvidence(entry.taskKey)
+        if (evidence == null || evidence.file != entry.baselineFile || evidence.offset <= entry.baselineOffset) return
         if (entry.model != null) {
-            val actual = ctx?.model.orEmpty()
-            if (actual.isNotBlank() && ModelSwitchProtocol.sameModel(entry.model, actual))
-                store.phaseDone(entry.taskKey, entry.revision, modelPhase = true)
-            else store.readbackRetry(entry.taskKey, entry.revision, "model=${actual.ifBlank { "尚无回执" }}")
+            val now = evidence.model
+            if (now == entry.evidenceModel) return // 发送后没有新的模型回执
+            if (ModelSwitchProtocol.sameModel(entry.model, now)) store.phaseDone(entry.taskKey, entry.revision, modelPhase = true)
+            else store.markUnknown(entry.taskKey, entry.revision, "转录新回执 model=$now 与请求 ${entry.model} 不符；不会自动重发")
         } else {
-            val actual = ctx?.effort.orEmpty()
-            if (actual.isNotBlank() && ModelSwitchProtocol.sameEffort(requireNotNull(entry.effort), actual))
-                store.phaseDone(entry.taskKey, entry.revision, modelPhase = false)
-            else store.readbackRetry(entry.taskKey, entry.revision, "effort=${actual.ifBlank { "尚无回执" }}")
+            val now = evidence.effort
+            if (now == entry.evidenceEffort) return // 发送后没有新的 effort 回执（要等下一条 assistant 消息落转录）
+            if (ModelSwitchProtocol.sameEffort(requireNotNull(entry.effort), now)) store.phaseDone(entry.taskKey, entry.revision, modelPhase = false)
+            else store.markUnknown(entry.taskKey, entry.revision, "转录新回执 effort=$now 与请求 ${entry.effort} 不符；不会自动重发")
         }
     }
 }
