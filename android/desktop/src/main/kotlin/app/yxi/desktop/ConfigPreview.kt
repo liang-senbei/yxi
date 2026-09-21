@@ -6,7 +6,8 @@ import org.json.JSONObject
 /** Display-only projection; never used as the editor's value or save payload. */
 internal fun configPreview(raw: String, path: String): String {
     val lower = path.lowercase()
-    if (lower.endsWith(".toml") || lower.endsWith(".env"))
+    // dotenv 惯例是 basename 以 .env 开头（.env.local / .env.production），不能只认 .env 结尾
+    if (lower.endsWith(".toml") || lower.endsWith(".env") || lower.substringAfterLast('/').startsWith(".env"))
         return "配置源码默认隐藏。点击“查看并编辑源码”读取完整内容。"
     if (!lower.endsWith(".json")) return raw
     fun sensitive(key: String): Boolean {
