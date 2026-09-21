@@ -23,12 +23,14 @@ internal fun previewWebLinks(state: AppState, conn: Conn, taskKey: String, fallb
                 return
             }
             val preview = state.browsers.getOrPut(taskKey) { BrowserPreview(conn.host, taskKey) }
+            preview.preparing = true
             state.browserPanelOpen = true
             state.filePanelOpen = false
             scope.launch {
                 try { preview.open(conn, uri) }
                 catch (e: CancellationException) { throw e }
                 catch (e: Exception) { preview.error = "网页未能打开：${e.message.orEmpty()}" }
+                finally { preview.preparing = false }
             }
         }
     }
