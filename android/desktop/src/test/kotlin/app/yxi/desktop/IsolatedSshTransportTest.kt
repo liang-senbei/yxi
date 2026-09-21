@@ -36,6 +36,7 @@ class IsolatedSshTransportTest {
         val root = Files.createTempDirectory(Path.of("/sandbox/tmp"), "ssh-transport-").toFile()
         Files.setPosixFilePermissions(root.toPath(), PosixFilePermissions.fromString("rwx------"))
         val home = root.resolve("home").apply { mkdir() }
+        val tmuxRoot = home.resolve("tmux").apply { mkdir() }
         val log = root.resolve("sshd.log")
         var server: Process? = null
         var ssh: SshSession? = null
@@ -50,7 +51,7 @@ class IsolatedSshTransportTest {
             command("/usr/bin/ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", root.resolve("host").path)
             command("/usr/bin/ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", root.resolve("client").path)
             val force = root.resolve("command").apply {
-                writeText("#!/bin/sh\nexec /usr/bin/env -i HOME='${home.path}' CLAUDE_CONFIG_DIR='${home.path}/.claude' PATH=/usr/bin:/bin LANG=C.UTF-8 /bin/sh -c \"\$SSH_ORIGINAL_COMMAND\"\n")
+                writeText("#!/bin/sh\nexec /usr/bin/env -i HOME='${home.path}' CLAUDE_CONFIG_DIR='${home.path}/.claude' TMUX_TMPDIR='${tmuxRoot.path}' PATH=/usr/bin:/bin LANG=C.UTF-8 /bin/sh -c \"\$SSH_ORIGINAL_COMMAND\"\n")
                 setExecutable(true, true)
             }
             val port = ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress()).use { it.localPort }
@@ -99,6 +100,20 @@ class IsolatedSshTransportTest {
             val output = request.get(25, TimeUnit.SECONDS)
             assertEquals("${home.path}\n中文🙂", output)
             assertEquals("中文🙂", home.resolve("probe.txt").readText())
+            val ownedSocket = "${tmuxRoot.path}/tmux-0/default"
+            val tmuxCheck = executor.submit<String> {
+                runBlocking {
+                    client.exec("tmux -f /dev/null new-session -d -s transport-check 'sleep 60' && " +
+                        "tmux display-message -p -t '=transport-check:' '#{socket_path}'")
+                }
+            }
+            assertEquals(ownedSocket, tmuxCheck.get(15, TimeUnit.SECONDS).trim(), "The actual tmux socket must belong to this fixture")
+            val closeSession = executor.submit<String> {
+                runBlocking {
+                    client.exec("tmux -S '$ownedSocket' kill-session -t '=transport-check:' && printf 'owned-session-stopped'")
+                }
+            }
+            assertEquals("owned-session-stopped", closeSession.get(10, TimeUnit.SECONDS))
         } finally {
             server?.toHandle()?.descendants()?.use { children -> children.forEach { it.destroyForcibly() } }
             server?.destroyForcibly()
