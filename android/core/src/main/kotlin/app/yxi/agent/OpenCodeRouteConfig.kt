@@ -33,7 +33,7 @@ import java.util.UUID
  *    **备份进 `~/.yxi/backups/`**，前缀 `opencode-route-`，绝不放原文件旁。
  *  - `opencode.json` 与 `opencode.jsonc` 并存时**拒绝写入**（官方两份都会合并，写哪份都算替用户做主）；
  *    读取按官方查找顺序以 `.jsonc` 为准并如实上报 [Status.bothExist]。
- *  - 回读（[status]）apiKey 只出脱敏 fingerprint，**原文不出服务器**。
+ *  - 回读（[status]）apiKey 只出脱敏 fingerprint，原始文件经 SFTP 读入应用内存；状态对象不包含密钥原文。
  *  - 测试走临时目录 fake：不写用户真实配置、不发任何模型请求。
  */
 object OpenCodeRouteConfig {
@@ -58,7 +58,7 @@ object OpenCodeRouteConfig {
         val npm: String?,
         /** provider.options.baseURL（官方字段就是 camelCase）。 */
         val baseURL: String?,
-        /** options.apiKey 的脱敏指纹；**原文不出服务器**。 */
+        /** options.apiKey 的脱敏指纹；原始文件经 SFTP 读入应用内存；状态对象不包含密钥原文。 */
         val apiKeyFingerprint: String?,
         /** models 映射的键，字典序（展示稳定；org.json 的键序无保证）。 */
         val modelIds: List<String>,
@@ -67,7 +67,7 @@ object OpenCodeRouteConfig {
     data class Status(
         /** 配置目录（调用方传入，如 `$HOME/.config/opencode`）。 */
         val dir: String,
-        /** 实际生效的配置文件名；null = 两份都不存在。 */
+        /** 本模块读取的配置文件名；null = 两份都不存在。 */
         val fileName: String?,
         /** 顶层 `model`（用户当前的 provider/model 选择）。 */
         val selectedModel: String?,
@@ -107,7 +107,7 @@ object OpenCodeRouteConfig {
      */
     internal fun parseConfig(text: String): Parsed {
         val root = runCatching { JSONObject(stripJsonc(text)) }
-            .getOrElse { throw IllegalArgumentException("配置不是合法 JSONC：${it.message?.take(80)}") }
+            .getOrElse { throw IllegalArgumentException("配置不是合法 JSONC，请检查语法后重试") }
         val model = when (val v = root.opt("model")) {
             null, JSONObject.NULL -> null
             is String -> v.ifBlank { null }
@@ -296,6 +296,7 @@ object OpenCodeRouteConfig {
                 c == '/' && i + 1 < text.length && text[i + 1] == '*' -> {
                     val e = text.indexOf("*/", i + 2)
                     require(e >= 0) { "块注释未闭合" }
+                    out.append(' ')
                     i = e + 2
                 }
                 c == ',' -> {
@@ -384,7 +385,8 @@ object OpenCodeRouteConfig {
             return "$dir 下 $FILE_JSON 与 $FILE_JSONC 并存：官方会把两份都合并，写哪份都可能被另一份盖回。" +
                 "本次未写入，请先手动整理为一份再使用本功能"
         }
-        if (expected != null && expected.revision != r.snapshot.revision) {
+        if (expected != null && (expected.dir != dir || expected.revision != r.snapshot.revision ||
+                expected.fileName != r.fileName.takeIf { r.snapshot.text != null } || expected.bothExist != r.bothExist)) {
             return "配置在编辑期间已被修改，本次未覆盖，请刷新后重新编辑"
         }
         val newText = try { patchModel(r.snapshot.text, patch.model) } catch (e: IllegalArgumentException) { return e.message }
@@ -448,7 +450,7 @@ def strip_jsonc(s):
         if c=='/' and i+1<n and s[i+1]=='*':
             j=s.find('*/',i+2)
             if j<0: raise ValueError('unclosed block comment')
-            i=j+2;continue
+            out.append(' ');i=j+2;continue
         if c==',':
             j=i+1
             while j<n:

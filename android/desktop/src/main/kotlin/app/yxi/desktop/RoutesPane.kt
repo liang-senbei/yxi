@@ -121,6 +121,10 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
             GeminiConfigurationCard(conn)
             return@Column
         }
+        if (engine == "opencode") {
+            OpenCodeConfigurationCard(conn)
+            return@Column
+        }
         if (engine !in listOf(Lines.CLAUDE, Lines.CODEX)) {
             OutlinedCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
