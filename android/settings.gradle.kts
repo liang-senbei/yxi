@@ -14,4 +14,8 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "Yxi"
-include(":app", ":core", ":desktop")   // core = 手机 / 桌面共用的纯 Kotlin；desktop = Windows 桌面版（Compose Multiplatform）
+if (providers.gradleProperty("yxi.desktopOnly").orNull == "true") {
+    include(":core", ":desktop")
+} else {
+    include(":app", ":core", ":desktop")
+}
