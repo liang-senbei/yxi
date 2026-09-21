@@ -369,38 +369,27 @@ private fun CodexConversationPane(state: AppState) {
                     error = ""
                 } catch (e: Exception) { error = e.message.orEmpty() }
             }
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                TextButton({ voiceOpen = true }, enabled = conn != null) { Text("语音输入") }
-                TextButton({ historyOpen = true }) { Text("历史提示词") }
-                TextButton({ if (conn != null) {
-                    Attach.pickFiles().forEach { file ->
-                        runCatching { workspace.stageAttachment(conn, selected, Attach.fromFile(file)) }.onFailure { error = it.message.orEmpty() }
-                    }
-                } }, enabled = conn?.ssh?.isConnected == true) { Text("添加附件") }
-                TextButton(::pasteImage, enabled = conn?.ssh?.isConnected == true && !Attach.pasteBusy.get()) { Text("粘贴图片") }
-            }
             DraftAttachmentTray(attachments?.toList().orEmpty()) { attachment ->
                 draft.value = draftAfterAttachmentRemoval(draft.value, attachments?.toList().orEmpty(), attachment)
                 attachment.cancelled.set(true); attachments?.remove(attachment)
             }
-            val mentions = rememberAttachmentMentions(attachments?.toList().orEmpty(), draft.value) { draft.value = it }
-            AttachmentMentionList(mentions)
-            OutlinedTextField(draft.value, { draft.value = it }, modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp).onPreviewKeyEvent { event ->
-                when {
-                    mentions.handle(event) -> true
-                    event.type != KeyEventType.KeyDown -> false
-                    event.isCtrlPressed && event.key == Key.V && Attach.hasClipboardImage() -> { pasteImage(); true }
-                    event.isCtrlPressed && event.key == Key.Enter && draft.value.composition == null -> { enqueueDraft(); true }
-                    else -> false
-                }
-            },
-                placeholder = { Text("描述任务，或补充下一步要求…") })
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                Text("Ctrl+Enter 加入队列", Modifier.padding(10.dp), style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
-                Spacer(Modifier.weight(1f))
-                if (controller != null) CodexModelPicker(controller) { state.openRoutes() }
-                Button(::enqueueDraft, enabled = allUploaded && (draft.value.text.isNotBlank() || !attachments.isNullOrEmpty())) { Text(if (controller?.autoDispatch == true) "发送到队列" else "加入队列") }
-            }
+            val composerFocus = remember(selected.key) { androidx.compose.ui.focus.FocusRequester() }
+            Composer(
+                attachments = attachments?.toList().orEmpty(),
+                draft = draft.value, onDraft = { draft.value = it }, focus = composerFocus,
+                ctx = null, busy = controller?.activeTurnId != null, waiting = controller?.pendingRequests?.isNotEmpty() == true,
+                hint = "描述任务，Enter 发送，Shift+Enter 换行；输入 @ 引用附件",
+                hasPending = false,
+                canSend = allUploaded && (draft.value.text.isNotBlank() || !attachments.isNullOrEmpty()),
+                canAct = controller?.ready == true,
+                onAttach = { if (conn != null) Attach.pickFiles().forEach { file ->
+                    runCatching { workspace.stageAttachment(conn, selected, Attach.fromFile(file)) }.onFailure { error = it.message.orEmpty() }
+                } },
+                onPaste = ::pasteImage, onApprove = {}, onReject = {}, onSend = ::enqueueDraft,
+                onHistory = { historyOpen = true }, onSearch = null,
+                onVoice = { if (conn != null) voiceOpen = true }, onRoutes = { state.openRoutes() },
+                modelControl = { if (controller != null) CodexModelPicker(controller) { state.openRoutes() } },
+            )
         }
     }
 }

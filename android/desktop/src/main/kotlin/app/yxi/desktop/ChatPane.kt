@@ -521,14 +521,14 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
  */
 @Composable
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-private fun Composer(
+internal fun Composer(
     attachments: List<DraftAttach>,
     draft: TextFieldValue, onDraft: (TextFieldValue) -> Unit, focus: FocusRequester,
     ctx: Transcript.Ctx?, busy: Boolean, waiting: Boolean, hint: String,
     hasPending: Boolean, canSend: Boolean, canAct: Boolean,
     onAttach: () -> Unit, onPaste: () -> Unit, onApprove: () -> Unit, onReject: () -> Unit, onSend: () -> Unit,
     onHistory: () -> Unit,
-    onSearch: () -> Unit,
+    onSearch: (() -> Unit)?,
     onVoice: () -> Unit,
     onRoutes: () -> Unit,
     modelControl: @Composable () -> Unit,
@@ -582,7 +582,7 @@ private fun Composer(
         Row(Modifier.fillMaxWidth().padding(6.dp, 2.dp, 8.dp, 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             IconButton(onAttach, Modifier.size(30.dp)) { Icon(Icons.Outlined.AttachFile, "添加附件（截图可直接 Ctrl+V）", Modifier.size(16.dp), tint = t.textSecondary) }
             IconButton(onHistory, Modifier.size(30.dp)) { Icon(Icons.Outlined.History, "输入历史", Modifier.size(16.dp), tint = t.textSecondary) }
-            IconButton(onSearch, Modifier.size(30.dp)) { Icon(Icons.Outlined.Search, "搜索当前对话", Modifier.size(16.dp), tint = t.textSecondary) }
+            if (onSearch != null) IconButton(onSearch, Modifier.size(30.dp)) { Icon(Icons.Outlined.Search, "搜索当前对话", Modifier.size(16.dp), tint = t.textSecondary) }
             IconButton(onVoice, Modifier.size(30.dp)) { Icon(Icons.Outlined.Mic, "语音输入", Modifier.size(16.dp), tint = t.textSecondary) }
             if (!canAct) Text("重新连接后可操作", fontSize = 11.sp, color = t.textMuted)
             Spacer(Modifier.weight(1f))
