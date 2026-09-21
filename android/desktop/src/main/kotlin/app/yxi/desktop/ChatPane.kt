@@ -152,6 +152,8 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
     var sendErr by remember(taskKey) { mutableStateOf<String?>(null) }
     var sending by remember(taskKey) { mutableStateOf(false) }
     var rewindChecking by remember(taskKey) { mutableStateOf(false) }
+    val rewindOperation = ConversationRewind.state(taskKey)
+    val rewindRunning = rewindOperation?.running == true
     var stick by remember(taskKey) { mutableStateOf(true) }              // 粘在底部：用户往上翻就停，点 ↓ 再粘上
     val openGroups = remember(taskKey) { mutableStateListOf<String>() }
     val listState = remember(taskKey) { LazyListState() }
@@ -163,9 +165,23 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
         WorkbenchDialog(onDismissRequest = { editingMessage = null }, title = { Text("编辑这条消息") },
             text = { Column {
                 androidx.compose.material3.OutlinedTextField(editedText, { editedText = it }, modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 320.dp), label = { Text("消息内容") })
-                Text("载入草稿不会回退历史。恢复旧上下文请使用回退入口。", style = MaterialTheme.typography.bodySmall)
+                Text("回退对话上下文，然后发送编辑后的内容。已有文件修改不会自动撤销。", style = MaterialTheme.typography.bodySmall)
             } },
-            confirmButton = { TextButton({ draft = TextFieldValue(editedText, selection = TextRange(editedText.length)); editingMessage = null; focus.requestFocus() }, enabled = editedText.isNotBlank()) { Text("载入草稿") } },
+            confirmButton = { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton({ draft = TextFieldValue(editedText, selection = TextRange(editedText.length)); editingMessage = null; focus.requestFocus() }, enabled = editedText.isNotBlank()) { Text("仅载入草稿") }
+                if (!target.queued && !session.isCodex) Button({
+                    val uuid = target.sourceUuid ?: return@Button
+                    val submitted = editedText
+                    val started = ConversationRewind.start(conn, session, uuid, submitted) {
+                        if (draftHolder.value.text == submitted) draftHolder.value = TextFieldValue()
+                    }
+                    if (started) {
+                        draft = TextFieldValue(submitted, selection = TextRange(submitted.length))
+                        editingMessage = null; sendErr = null
+                    }
+                }, enabled = !rewindRunning && !RewindDelivery.gate.blocked(taskKey) && target.sourceUuid != null &&
+                    editedText.isNotBlank() && !live.busy && pending == null && conn.ssh.isConnected) { Text("回到这里并继续") }
+            } },
             dismissButton = { TextButton({
                 scope.launch {
                     try {
@@ -367,14 +383,14 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
     /** Enter（输入框空着）= 第一项 / 提交，Codex 的「Enter 批准」。 */
     fun approve() {
         val p = pending ?: return
-        if (!canAct) return
+        if (!canAct || rewindRunning) return
         if (p.multiSelect || p.tabs.size > 1 || p.review) submit(p) else sendKey(p.options.first().number.toString(), p.fingerprint)
     }
 
     /** Esc = 拒绝项；没有拒绝项（AskUserQuestion / 多选）就送 Esc 本身（脚注写的 `Esc to cancel`）。 */
     fun reject() {
         val p = pending ?: return
-        if (!canAct) return
+        if (!canAct || rewindRunning) return
         sendKey(p.options.firstOrNull { isReject(it.label) }?.number?.toString() ?: "Escape", p.fingerprint)
     }
 
@@ -471,18 +487,22 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
         if (live.busy) BusyLine(live.status)
         val p = pending
         val a = approval?.takeIf { it.first == p?.fingerprint }?.second ?: Approval(null, "")   // 抓屏还没回来就先只有标题
-        if (p != null) ApprovalCard(p, a, busy = !canAct || rewindBlocked, onKey = { sendKey(it, p.fingerprint) }, onSubmit = { submit(p) })
+        if (p != null) ApprovalCard(p, a, busy = !canAct || rewindBlocked || rewindRunning, onKey = { sendKey(it, p.fingerprint) }, onSubmit = { submit(p) })
+        if (rewindRunning) {
+            LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp))
+            Note(rewindOperation?.message.orEmpty(), t.textSecondary)
+        } else if (rewindOperation?.failed == true) Note(rewindOperation.message, t.danger)
         if (rewindBlocked) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("回退尚未确认，发送已暂停。输入和排队消息已保留。", Modifier.weight(1f), color = t.warning, fontSize = 12.sp)
             if (RewindDelivery.gate.pending(taskKey)?.verification != null) TextButton({
                 rewindChecking = true; sendErr = null
                 scope.launch {
-                    try { recheckRewindRecovery(conn, session) }
+                    try { recheckRewindRecovery(conn, session); ConversationRewind.dismiss(taskKey) }
                     catch (e: kotlinx.coroutines.CancellationException) { throw e }
                     catch (e: Exception) { sendErr = e.message ?: "恢复状态无法确认" }
                     finally { rewindChecking = false }
                 }
-            }, enabled = !rewindChecking && conn.ssh.isConnected) {
+            }, enabled = !rewindChecking && !rewindRunning && conn.ssh.isConnected) {
                 Text(if (rewindChecking) "正在核对…" else "重新检查")
             }
             TextButton(onTerminal) { Text("查看终端") }
@@ -492,7 +512,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
             onQuery = { queryInstructionDelivery(conn, session, it) }, compactUnknown = true,
             automatic = QueuePreferences.enabled(taskKey),
             onAutomaticChange = { QueuePreferences.setEnabled(taskKey, it) },
-            canSteer = !rewindBlocked && !session.isCodex && live.busy && pending == null && !sending && !keyBusy,
+            canSteer = !rewindRunning && !rewindBlocked && !session.isCodex && live.busy && pending == null && !sending && !keyBusy,
             onSteer = { item ->
                 keyBusy = true
                 scope.launch {
@@ -524,12 +544,13 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
             ctx = ctx,
             busy = live.busy, waiting = pending != null,
             hint = when {
+                rewindRunning -> "正在回退对话，可继续编辑下一条消息"
                 rewindBlocked -> "可继续编辑，确认回退状态后再发送"
                 pending != null || live.busy -> "输入下一条指令，当前任务结束后自动发送"
                 else -> "跟它说点什么… Enter 发送，Shift+Enter 换行；截图直接 Ctrl+V"
             },
             hasPending = pending != null,
-            canSend = !rewindBlocked && (draft.text.isNotBlank() || hasDone) && !sending && staged.all { it.state is DraftState.Done },
+            canSend = !rewindRunning && !rewindBlocked && (draft.text.isNotBlank() || hasDone) && !sending && staged.all { it.state is DraftState.Done },
             canAct = canAct,
             onAttach = { Attach.pickFiles().forEach { stage(it) } },
             onPaste = ::stagePasted,
@@ -539,7 +560,9 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
             onSearch = { searchOpen = true },
             onVoice = { voiceOpen = true },
             onRoutes = onRoutes,
-            modelControl = { if (session.isCodex) TextButton(onRoutes) { Text("模型与思考 ⌄") } else ConversationModelMenu(conn, session, ctx?.model.orEmpty(), ctx?.effort.orEmpty(), onRoutes, modelSwitches, onTerminal) },
+            modelControl = { if (rewindRunning || rewindBlocked) Text("回退处理中", color = t.textMuted)
+                else if (session.isCodex) TextButton(onRoutes) { Text("模型与思考 ⌄") }
+                else ConversationModelMenu(conn, session, ctx?.model.orEmpty(), ctx?.effort.orEmpty(), onRoutes, modelSwitches, onTerminal) },
         )
     }
 }

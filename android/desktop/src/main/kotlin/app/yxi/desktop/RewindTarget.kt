@@ -8,7 +8,7 @@ import org.json.JSONObject
 /** Read-only plan. The display item's key is never interpreted as a transcript UUID. */
 internal data class RewindTarget(
     val file: String, val sessionId: String, val messageUuid: String, val parentUuid: String?,
-    val laterUserMessages: Int, val size: Long, val modifiedNs: String,
+    val laterUserMessages: Int, val size: Long, val modifiedNs: String, val unsupportedContent: Boolean = false,
 )
 
 internal object RewindTargets {
@@ -21,13 +21,13 @@ internal object RewindTargets {
         val result = runCatching { JSONObject(conn.ssh.exec("python3 -c ${Shell.q(script)} ${Shell.q(file)} ${Shell.q(sourceUuid)}")) }
             .getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it; error("无法确认此消息仍在当前历史分支，请刷新后重试") }
         return RewindTarget(file, result.getString("sessionId"), sourceUuid,
-            result.optString("parent").takeIf { it.isNotBlank() && it != "null" }, result.getInt("later"), result.getLong("size"), result.getString("modifiedNs"))
+            result.optString("parent").takeIf { it.isNotBlank() && it != "null" }, result.getInt("later"), result.getLong("size"), result.getString("modifiedNs"), result.optBoolean("unsupportedContent"))
     }
 
     internal val inspectionScript = """
 import json,os,sys
 path,target=sys.argv[1:]
-nodes={}; leaf=None
+nodes={}; leaf=None; target_unsupported=False
 injected=('teammate-message','agent-message','cross-session-message','task-notification','system-reminder','local-command-caveat','local-command-stdout','command-name')
 with open(path,'rb') as f:
  st=os.fstat(f.fileno()); size=st.st_size
@@ -48,6 +48,8 @@ with open(path,'rb') as f:
    texts=[b.get('text') for b in content if isinstance(b,dict) and b.get('type')=='text' and isinstance(b.get('text'),str)]
    if any(isinstance(b,dict) and b.get('type')=='tool_result' for b in content): texts=[]
   text=any(t.strip() and not any('<'+tag in t for tag in injected) for t in texts)
+  if uid==target:
+   target_unsupported=(isinstance(content,list) and any(not isinstance(b,dict) or b.get('type')!='text' for b in content)) or sum(bool(t.strip()) and not any('<'+tag in t for tag in injected) for t in texts)>1
   human=kind=='user' and not item.get('isMeta',False) and text
   nodes[uid]=(parent,kind,human)
   if kind in ('user','assistant'): leaf=uid
@@ -65,7 +67,7 @@ while cursor is not None and cursor!=target:
 if cursor!=target: raise ValueError('Message is not on current branch')
 parent=nodes[target][0]
 if parent is not None and parent not in nodes: raise ValueError('Missing parent')
-print(json.dumps({'sessionId':os.path.basename(path).removesuffix('.jsonl'),'parent':parent,'later':later,'size':size,'modifiedNs':str(st.st_mtime_ns)}))
+print(json.dumps({'sessionId':os.path.basename(path).removesuffix('.jsonl'),'parent':parent,'later':later,'size':size,'modifiedNs':str(st.st_mtime_ns),'unsupportedContent':target_unsupported}))
 """.trimIndent()
 
 }
