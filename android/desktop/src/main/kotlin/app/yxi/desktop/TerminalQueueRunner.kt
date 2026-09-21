@@ -5,6 +5,7 @@ import androidx.compose.runtime.LaunchedEffect
 import app.yxi.agent.SessionProbe
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.withLock
 
 /** App-level worker: tab switches do not stop already queued instructions. */
 @Composable
@@ -19,15 +20,18 @@ internal fun TerminalQueueRunner(state: AppState) {
                     val first = state.instructions.entries.firstOrNull { it.taskKey == key && it.status in setOf(InstructionStatus.Local, InstructionStatus.Delivering, InstructionStatus.Unknown) }
                     if (first?.status != InstructionStatus.Local && session.runtimeId !in conn.terminalAwaiting) continue
                     try {
-                        val (pending, live) = SessionProbe.snapshot(conn.ssh, session.name)
-                        val barrier = conn.terminalAwaiting[session.runtimeId]
-                        if (barrier != null) {
-                            if (live.busy) conn.terminalAwaiting[session.runtimeId] = barrier.first to true
-                            val completed = (conn.terminalCompletion[session.runtimeId] ?: 0L) > barrier.first
-                            if (!completed && !(barrier.second && !live.busy && pending == null)) continue
-                            conn.terminalAwaiting.remove(session.runtimeId)
+                        val ready = conn.instructionDeliveryMutex.withLock {
+                            val (pending, live) = SessionProbe.snapshot(conn.ssh, session.name)
+                            val barrier = conn.terminalAwaiting[session.runtimeId]
+                            if (barrier != null) {
+                                if (live.busy) conn.terminalAwaiting[session.runtimeId] = barrier.first to true
+                                val completed = (conn.terminalCompletion[session.runtimeId] ?: 0L) > barrier.first
+                                if (!completed && !(barrier.second && !live.busy && pending == null)) return@withLock false
+                                conn.terminalAwaiting.remove(session.runtimeId)
+                            }
+                            !live.busy && pending == null && conn.ssh.isConnected
                         }
-                        if (live.busy || pending != null || !conn.ssh.isConnected) continue
+                        if (!ready) continue
                         if (first?.status != InstructionStatus.Local || state.instructions.error.isNotBlank()) continue
                         // The adapter rechecks identity, empty prompt and screen immediately before writing.
                         deliverInstruction(conn, session, state.instructions, first)
