@@ -32,8 +32,11 @@ import kotlinx.coroutines.sync.withLock
  *       → 捕获原进程上下文（Rewind.captureCommand → /proc argv → 600 临时文件）
  *       → 模式裁定：原地模式要求 others 为空，非空 → Failed("unpreserved")，模型一个 token 都没花
  *   执行（唯一模型调用）：
+ *     → 持锁登记持久发送闸 [RewindDelivery.gate].begin（第一条可能改转录的 exec 之前）：
+ *       此后**失败、取消、只发出重启命令都不清票** —— Report 带 ticket，恢复状态走
+ *       gate.pending(taskKey)，只有运行器与转录都核实同分支后 UI 才 finishVerified。
  *     → exec Rewind.command（cd 会话 cwd + timeout 上限 + 原 model/effort + 真 binary，无绕过）
- *     → Report（带 runtimeId / cwd，root 原样传给 [relaunch]）。pane 没动过。
+ *     → Report（带 runtimeId / cwd / ticket，root 原样传给 [relaunch]）。pane 没动过。
  * [relaunch]（UI 问过用户才调，同样在 [delivery] 锁内）
  *     → 门禁再跑一遍（此刻还空闲吗）
  *     → Esc + /exit 干净退出 pane 里的 claude（此刻才允许碰 pane）
@@ -55,13 +58,21 @@ import kotlinx.coroutines.sync.withLock
  * ⚠️ [rewind] 执行步占着这条连接的 exec 通道直到模型答完或 [Rewind.PRINT_TIMEOUT_SEC]
  * 到点（chanLock 串行）—— 期间这个主机的会话列表刷新会排队等，但**有上界**。
  */
-class RewindController(private val conn: Conn) {
+/** Plan → 闸的 Target：只带三 UUID（session / anchor / message=target），不带正文与密钥（老板令）。 */
+internal fun rewindGateTarget(plan: Rewind.Plan) =
+    RewindDeliveryGate.Target(plan.sessionId, plan.anchorUuid, plan.targetUuid)
+
+/**
+ * ⚠️ internal：[gate] 是 root 的 internal 发送闸（public 会编译不过）；调用方 ChatPane 同模块。
+ * [gate] 默认接生产单例，测试可注入独立文件 —— 控制器代码路径两种一模一样。
+ */
+internal class RewindController(private val conn: Conn, private val gate: RewindDeliveryGate = RewindDelivery.gate) {
 
     /** 本控制器的操作串行锁：投递按键的事一件一件来。 */
     private val delivery get() = conn.instructionDeliveryMutex
 
     /** 一步不缺的全流程结果。 */
-    data class Report(
+    internal data class Report(
         /** [rewind] = print 截断轮结果；[relaunch] 拒绝时 Failed(...)、成功时 null（看 [relaunched]）。 */
         val outcome: Rewind.Outcome?,
         /** 原进程上下文（null = 捕获失败，看 [captureCode]）。 */
@@ -80,6 +91,13 @@ class RewindController(private val conn: Conn) {
         val runtimeId: String? = null,
         /** 门禁 snapshot 时的会话 cwd；[relaunch] 要原样传回（pane 里先 cd 到它）。 */
         val cwd: String? = null,
+        /**
+         * 发送闸票（非 null = 已登记、这轮回退**待核实**）。此刻起 [RewindDelivery.gate].blocked(taskKey)
+         * 为 true：队列与一切发送停摆。**运行器有没有载入新分支不猜** —— 恢复状态以
+         * gate.pending(taskKey) 的持久票为准；清票只有一条路，运行器与转录都确认同分支后
+         * UI 调 finishVerified（本控制器从不调：失败、取消、只发出重启命令一律留着阻塞）。
+         */
+        val ticket: RewindDeliveryGate.Ticket? = null,
     )
 
     /**
@@ -130,6 +148,13 @@ class RewindController(private val conn: Conn) {
             if (s.state == SessionState.Working || s.state == SessionState.NeedsYou)
                 return@withLock Report(Rewind.Outcome.Failed("busy"), capture = null)
 
+            // ── 发送闸（老板令）：这个会话还有**没核实完**的回退、或回退记录读不了 → 一律拒绝再执行。
+            //    这里不负责恢复：root 的 UI 拿 gate.pending(taskKey) 出示待核实状态。taskKey 跟
+            //    队列/ChatPane 用的同一个（taskNavigationKey），闸一关队列投递自动一起停。
+            val taskKey = taskNavigationKey(conn.host, s)
+            if (gate.blocked(taskKey))
+                return@withLock Report(Rewind.Outcome.Failed("pending"), capture = null, runtimeId = s.runtimeId, cwd = s.cwd)
+
             // ── 结构核对：source jsonl 在、anchor/target 字段级精确匹配（父子关系 + type=user +
             //    非 isMeta）。UI 传来的 sourceUuid 哪怕来自旧转录/另一会话，这里也对不上而拒绝。
             Rewind.parseVerify(conn.ssh.exec(Rewind.verifyCommand(s.cwd, plan, inspected?.file, inspected?.size, inspected?.modifiedNs)))?.let {
@@ -154,10 +179,24 @@ class RewindController(private val conn: Conn) {
                 )
             }
 
+            // ── 老板令：第一条可能改转录的 exec 之前（此刻正持 conn.instructionDeliveryMutex）登记
+            //    持久发送闸，拿票；Target 只带 Plan 的三 UUID，不带正文/密钥。此后**失败、取消、
+            //    只发出重启命令都不清票** —— 清票只有一条路：运行器与转录都核实同分支后 UI 调
+            //    finishVerified（本控制器从不调）。
+            val ticket = try {
+                gate.begin(taskKey, s.runtimeId, rewindGateTarget(plan))
+            } catch (e: IllegalStateException) {
+                return@withLock Report(Rewind.Outcome.Failed("gate"), capture = cap, unpreserved = cap.others,
+                    runtimeId = s.runtimeId, cwd = s.cwd)
+            }
+
             // ── 执行：print 截断轮 —— 同一会话 cwd、原 model/effort、真 binary、timeout 有上界、零绕过。
+            //    ⚠️ 从这里到 Report 之间被取消（CancellationException 原样上抛）票也**不清**：
+            //    它已经持久化在 gate 里，重启后照旧阻塞，等 UI 核实或恢复。
             val out = conn.ssh.exec(Rewind.command(cap.exe, s.cwd, cap, plan))
             val outcome = if (out.isBlank()) Rewind.Outcome.Failed("exec") else Rewind.parse(out)
-            Report(outcome, capture = cap, unpreserved = cap.others, runtimeId = s.runtimeId, cwd = s.cwd)
+            Report(outcome, capture = cap, unpreserved = cap.others, runtimeId = s.runtimeId, cwd = s.cwd,
+                ticket = ticket)
         }
 
     /**
@@ -168,8 +207,11 @@ class RewindController(private val conn: Conn) {
      * @param runtimeId / cwd 从 [rewind] 的 [Report] 原样传回 —— **两处**原子复核：
      *   `/exit` 之前（[Rewind.exitCommand]）和投递（[Rewind.relaunchCommand]）都拿
      *   runtimeId + paneId 确认还是**同一个实例**，同名会话被重建顶包当场拒绝（一键不发）。
+     *
+     * ⚠️ **只发出重启命令 ≠ 已恢复**：这里不碰发送闸的票 —— 投完键票照样留着阻塞
+     *   （老板令），等 UI 核实运行器与转录同分支后才 finishVerified。
      */
-    suspend fun relaunch(sessionName: String, capture: Rewind.Capture, sessionId: String, runtimeId: String?, cwd: String?): Report =
+    internal suspend fun relaunch(sessionName: String, capture: Rewind.Capture, sessionId: String, runtimeId: String?, cwd: String?): Report =
         delivery.withLock {
             if (cwd.isNullOrBlank()) return@withLock Report(Rewind.Outcome.Failed("no-cwd"), capture = capture)
             // ── 老板令：回不去就明说，拒绝原地重启，给分支模式让路 —— 不悄悄降级。
