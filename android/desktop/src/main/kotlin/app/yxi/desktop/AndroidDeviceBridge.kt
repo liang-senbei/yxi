@@ -178,15 +178,34 @@ class AndroidDeviceBridge(
                 else -> DEVICES_TIMEOUT_SECONDS
             }
             val p = ProcessBuilder(args).start()
+            val stdout = java.io.ByteArrayOutputStream()
+            val stderr = java.io.ByteArrayOutputStream()
+            fun drain(input: java.io.InputStream, buffer: java.io.ByteArrayOutputStream) = Thread {
+                runCatching { input.use { stream ->
+                    val chunk = ByteArray(8192)
+                    while (true) {
+                        val count = stream.read(chunk)
+                        if (count < 0) break
+                        synchronized(buffer) {
+                            val keep = minOf(count, MAX_OUTPUT_BYTES - buffer.size())
+                            if (keep > 0) buffer.write(chunk, 0, keep)
+                        }
+                    }
+                } }
+            }.apply { isDaemon = true; name = "yxi-adb-output"; start() }
+            val outReader = drain(p.inputStream, stdout)
+            val errReader = drain(p.errorStream, stderr)
             if (!p.waitFor(timeout, TimeUnit.SECONDS)) {
                 p.destroyForcibly()
                 p.waitFor(2, TimeUnit.SECONDS)
+                p.inputStream.close(); p.errorStream.close()
                 AdbRun(null, "", "", "adb ${args.drop(1).take(2)} 超时（${timeout}s），已强制结束")
-            } else AdbRun(
-                p.exitValue(),
-                p.inputStream.readNBytes(MAX_OUTPUT_BYTES).toString(Charsets.UTF_8),
-                p.errorStream.readNBytes(MAX_OUTPUT_BYTES).toString(Charsets.UTF_8),
-            )
+            } else {
+                outReader.join(2000); errReader.join(2000)
+                p.inputStream.close(); p.errorStream.close()
+                AdbRun(p.exitValue(), synchronized(stdout) { stdout.toString(Charsets.UTF_8) },
+                    synchronized(stderr) { stderr.toString(Charsets.UTF_8) })
+            }
         } catch (e: Exception) {
             AdbRun(null, "", "", "adb 执行失败：${e.message?.take(80)}")
         }

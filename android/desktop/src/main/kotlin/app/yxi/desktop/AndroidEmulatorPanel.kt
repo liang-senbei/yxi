@@ -25,6 +25,12 @@ internal fun AndroidEmulatorPanel(open: Boolean, close: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf("") }
     var refresh by remember { mutableStateOf(0) }
+    val bridge = remember { AndroidDeviceBridge(managedSdkRoot = java.io.File(Store.dir, "android-sdk")) }
+    var devices by remember { mutableStateOf<AndroidDeviceBridge.DeviceList?>(null) }
+    var selectedSerial by remember { mutableStateOf("") }
+    var apkPath by remember { mutableStateOf("") }
+    var packageName by remember { mutableStateOf("") }
+    var deviceBusy by remember { mutableStateOf(false) }
     val windows = remember { System.getProperty("os.name").startsWith("Windows", true) }
     DisposableEffect(Unit) { onDispose { launcher?.stopAll() } }
     LaunchedEffect(open, refresh) {
@@ -44,6 +50,13 @@ internal fun AndroidEmulatorPanel(open: Boolean, close: () -> Unit) {
             exits = launcher?.exits().orEmpty()
             delay(1000)
         }
+    }
+    LaunchedEffect(open, environment, refresh) {
+        val adb = environment?.tools?.firstOrNull { it.name == "adb" }?.path
+        if (!open || adb == null) return@LaunchedEffect
+        try { devices = bridge.devices(adb) }
+        catch (e: CancellationException) { throw e }
+        catch (e: Exception) { devices = AndroidDeviceBridge.DeviceList(emptyList(), e.message) }
     }
     if (!open) return
     WorkbenchDialog(onDismissRequest = close, title = { Text("Android 模拟器") }, text = {
@@ -97,6 +110,47 @@ internal fun AndroidEmulatorPanel(open: Boolean, close: () -> Unit) {
                 env.errors.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = Tokens.current.warning) }
             }
             if (notice.isNotBlank()) Text(notice, style = MaterialTheme.typography.bodySmall)
+            devices?.let { result ->
+                HorizontalDivider()
+                Text("安装与运行应用", style = MaterialTheme.typography.titleMedium)
+                result.error?.let { Text(it, color = Tokens.current.warning) }
+                result.devices.forEach { device ->
+                    FilterChip(selectedSerial == device.serial, { selectedSerial = device.serial }, enabled = device.online && !deviceBusy,
+                        label = { Text("${device.model.ifBlank { device.serial }} · ${device.serial} · " + when {
+                            device.online -> "已连接"
+                            device.unauthorized -> "等待设备授权"
+                            else -> "离线"
+                        }) })
+                }
+                if (result.devices.isEmpty() && result.error == null) Text("设备启动后点击刷新设备。", color = Tokens.current.textMuted)
+                OutlinedTextField(apkPath, { apkPath = it }, enabled = !deviceBusy, singleLine = true, modifier = Modifier.fillMaxWidth(), label = { Text("本机 APK 文件路径") })
+                OutlinedTextField(packageName, { packageName = it }, enabled = !deviceBusy, singleLine = true, modifier = Modifier.fillMaxWidth(), label = { Text("应用包名，例如 app.yxi") })
+                val adb = environment?.tools?.firstOrNull { it.name == "adb" }?.path
+                val ready = adb != null && result.devices.any { it.serial == selectedSerial && it.online } && !deviceBusy
+                Row {
+                    TextButton({
+                        val serial = selectedSerial; val path = apkPath
+                        deviceBusy = true
+                        scope.launch {
+                            try { notice = bridge.install(adbPath = adb, serial = serial, apk = java.io.File(path)).detail }
+                            catch (e: CancellationException) { throw e }
+                            catch (e: Exception) { notice = "安装失败：${e.message.orEmpty()}" }
+                            finally { deviceBusy = false }
+                        }
+                    }, enabled = ready && apkPath.isNotBlank()) { Text("安装 APK") }
+                    TextButton({
+                        val serial = selectedSerial; val pkg = packageName.trim()
+                        deviceBusy = true
+                        scope.launch {
+                            try { notice = bridge.launch(adbPath = adb, serial = serial, packageName = pkg).detail }
+                            catch (e: CancellationException) { throw e }
+                            catch (e: Exception) { notice = "启动失败：${e.message.orEmpty()}" }
+                            finally { deviceBusy = false }
+                        }
+                    }, enabled = ready && packageName.isNotBlank()) { Text("启动应用") }
+                }
+                if (deviceBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            }
             Text("关闭面板不会停止模拟器；退出 Yxi 时会停止由本次启动的实例。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
         }
     }, confirmButton = { TextButton({ refresh++ }, enabled = windows && !busy) { Text("刷新设备") } },
