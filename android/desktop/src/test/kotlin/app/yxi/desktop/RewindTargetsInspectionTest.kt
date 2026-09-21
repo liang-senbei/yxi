@@ -18,12 +18,18 @@ class RewindTargetsInspectionTest {
     private class Run(val code: Int, val out: String, val err: String)
 
     private fun inspect(path: String, target: String): Run {
-        val p = ProcessBuilder("python3", "-c", RewindTargets.inspectionScript, path, target).start()
-        val out = p.inputStream.bufferedReader().readText()
-        val err = p.errorStream.bufferedReader().readText()
-        check(p.waitFor(15, TimeUnit.SECONDS)) { "inspection 超时" }
-        p.destroyForcibly()
-        return Run(p.exitValue(), out, err)
+        val stdout = Files.createTempFile("yxi-inspection", ".out").toFile()
+        val stderr = Files.createTempFile("yxi-inspection", ".err").toFile()
+        val python = if (System.getProperty("os.name").startsWith("Windows")) "python" else "python3"
+        val p = ProcessBuilder(python, "-c", RewindTargets.inspectionScript, path, target)
+            .redirectOutput(stdout).redirectError(stderr).start()
+        try {
+            check(p.waitFor(15, TimeUnit.SECONDS)) { "inspection 超时" }
+            return Run(p.exitValue(), stdout.readText(), stderr.readText())
+        } finally {
+            if (p.isAlive) { p.destroyForcibly(); p.waitFor(5, TimeUnit.SECONDS) }
+            stdout.delete(); stderr.delete()
+        }
     }
 
     private fun user(id: String, parent: String?, text: String, isMeta: Boolean = false): String =
@@ -130,7 +136,7 @@ class RewindTargetsInspectionTest {
         assertEquals("a1", result.getString("parent"), "parent 必须是真实 parentUuid")
         assertEquals(file.length(), result.getLong("size"), "size 必须是真实字节数")
         assertEquals("session-x", result.getString("sessionId"), "sessionId 取文件名去 .jsonl")
-        val ns = java.nio.file.Files.readAttributes(file.toPath(), java.nio.file.attribute.PosixFileAttributes::class.java)
+        val ns = java.nio.file.Files.readAttributes(file.toPath(), java.nio.file.attribute.BasicFileAttributes::class.java)
             .lastModifiedTime().toInstant().let { it.epochSecond * 1_000_000_000L + it.nano }
         assertEquals(ns.toString(), result.getString("modifiedNs"), "modifiedNs 必须是真实 mtime_ns")
         assertEquals(0, result.getInt("later"), "目标是叶子时 later 为 0")
