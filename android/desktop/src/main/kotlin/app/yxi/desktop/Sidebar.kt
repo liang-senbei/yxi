@@ -234,6 +234,22 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
         if (state.navigation.error.isNotBlank()) Text(state.navigation.error, Modifier.padding(10.dp), color = t.danger, style = MaterialTheme.typography.bodySmall)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             val f = filter.trim()
+            if (hosts.isNotEmpty()) SidebarSavedSessions(state, hosts, f) { c, favorite ->
+                if (!openingFavorite) {
+                    openingFavorite = true
+                    scope.launch {
+                        try {
+                            c.refresh()
+                            check(c.ssh.isConnected) { "请先连接服务器" }
+                            val live = c.sessions.firstOrNull { taskNavigationKey(c.host, it) == favorite.key }
+                            if (live != null) state.select(c, live)
+                            else { creatingFavorite = favorite; creatingOn = c }
+                        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                        catch (e: Exception) { note = e.message.orEmpty() }
+                        finally { openingFavorite = false }
+                    }
+                }
+            }
             hosts.forEachIndexed { i, h ->
                 if (state.hostScope.isNotEmpty() && state.hostScope != h.id) return@forEachIndexed
                 val c = connOf(h)
