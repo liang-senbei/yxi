@@ -29,7 +29,7 @@ internal fun AndroidSetupCard(onInstalled: () -> Unit) {
             Text("下载 Google 官方命令行工具到 Yxi 数据目录。接下来还需安装系统镜像并创建虚拟设备。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
             val pkg = manifest
             if (pkg == null) TextButton({
-                busy = true; notice = ""
+                cancel.set(false); busy = true; notice = ""; progress = 0L to 0L
                 scope.launch {
                     try {
                         // 取消接线进探测：inspect 在阶段边界轮询这个 flag，
