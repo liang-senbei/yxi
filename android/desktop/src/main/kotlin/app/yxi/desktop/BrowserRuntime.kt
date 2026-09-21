@@ -133,6 +133,7 @@ class BrowserPreview(val owner: Host, val taskId: String) {
         check(PreviewAddress.allowed(next.url, BrowserRuntime.fixtureMode)) { "此地址不能在当前预览环境中打开" }
         preparing = true
         try {
+        address = next.url
         loading = true; error = ""; selectionStale = selection != null; picking = false; status = "准备浏览器…"
         val cef = withContext(Dispatchers.IO) { BrowserRuntime.get() }
         val lease = if (next.remotePort != null) {
@@ -149,6 +150,15 @@ class BrowserPreview(val owner: Host, val taskId: String) {
         address = next.url
         val resolved = lease?.let { next.forwarded(it.localPort) } ?: next.url
         if (handle == null) create(cef, resolved) else { handle!!.stopLoad(); handle!!.loadURL(resolved) }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            loading = false
+            status = "打开已取消"
+            throw e
+        } catch (e: Exception) {
+            loading = false
+            error = "网页未能打开：${e.message.orEmpty()}"
+            status = "打开失败，可重试或在浏览器中打开"
+            throw e
         } finally { preparing = false }
     }
 
