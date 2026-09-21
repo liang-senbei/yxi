@@ -165,8 +165,9 @@ class RewindController(private val conn: Conn) {
      * 不重启就跟不上新分支 —— 这个决定必须让用户自己做）。
      *
      * @param sessionId 用 [Rewind.Outcome.Ok.sessionId]（fork 时是新 id，别拿旧的）。
-     * @param runtimeId / cwd 从 [rewind] 的 [Report] 原样传回 —— 服务器侧投递前会拿
-     *   runtimeId + paneId 复核还是**同一个实例**，同名会话被重建顶包当场拒绝（一键不发）。
+     * @param runtimeId / cwd 从 [rewind] 的 [Report] 原样传回 —— **两处**原子复核：
+     *   `/exit` 之前（[Rewind.exitCommand]）和投递（[Rewind.relaunchCommand]）都拿
+     *   runtimeId + paneId 确认还是**同一个实例**，同名会话被重建顶包当场拒绝（一键不发）。
      */
     suspend fun relaunch(sessionName: String, capture: Rewind.Capture, sessionId: String, runtimeId: String?, cwd: String?): Report =
         delivery.withLock {
@@ -189,14 +190,27 @@ class RewindController(private val conn: Conn) {
             if (s.state == SessionState.Working || s.state == SessionState.NeedsYou)
                 return@withLock Report(Rewind.Outcome.Failed("busy"), capture = capture)
 
-            // ── 此刻才允许碰 pane：Esc 收浮层 → /exit → 等 pane 回 shell。
-            //    pane 里本来就是 shell 时跳过 —— 不然 /exit 敲进 bash 报 command not found。
-            val n = sessionName.replace("'", "'\\''")
+            // ── 此刻才允许碰 pane。先按窗格前台命令分流（审查补漏：不是 claude 不等于就是 shell）：
+            //    · claude/node/bun → [Rewind.exitCommand] **原子核对 runtimeId+paneId 过了**
+            //      才发 Esc+/exit（顶包的窗格一个键都不给），再等窗格回**真 shell**；
+            //    · 本来就是 shell → 直接进入投递；
+            //    · 其余（vim/top/构建中…）→ 不认得的窗格前台，绝不往里打字，按没退干净处理。
             val inClaude = s.cmd in setOf("claude", "node", "bun")
-            if (inClaude) {
-                conn.ssh.exec("tmux send-keys -t '$n' Escape; sleep 0.3; tmux send-keys -t '$n' '/exit' Enter")
+            val isShell = s.cmd.removePrefix("-") in Rewind.SHELL_COMMANDS
+            val exited = when {
+                inClaude -> {
+                    val exitOut = conn.ssh.exec(Rewind.exitCommand(sessionName, capture, runtimeId.orEmpty()))
+                    Rewind.parseExit(exitOut)?.let {
+                        return@withLock Report(
+                            Rewind.Outcome.Failed(if (it == "identity") "identity" else "exit-deliver"),
+                            capture = capture, exited = false,
+                        )
+                    }
+                    waitShell(sessionName)
+                }
+                isShell -> true
+                else -> false
             }
-            val exited = if (inClaude) waitShell(n) else true
             // ── 审查定的硬闸：退不干净就**停在这里** —— 一个键都不再发、如实报错。
             //    （绝对不能拿着"没退干净"的 pane 硬塞 --resume，那会敲进 TUI 里当输入。）
             if (!exited) {
@@ -220,18 +234,13 @@ class RewindController(private val conn: Conn) {
     }
 
     /**
-     * 等 pane 回到 shell（`pane_current_command` 不再是 claude/node/bun）。
+     * 等窗格回到**真 shell**（[Rewind.waitShellCommand]：只有 bash/zsh/… 算回壳，
+     * 别的前台程序一律不算 —— 不能把 vim/top 当成 shell 就往里敲重启命令）。
      * ⚠️ 轮询放进**一条** exec 里跑 shell 循环 —— 别在 Kotlin 侧每 0.5s 发一条 exec，
-     * chanLock 串行会把通道挤成蜂窝。24×0.5s 自带上界。
+     * chanLock 串行会把通道挤成蜂窝。24×0.5s 自带上界；到点没见 shell 一律按没退干净。
      */
-    private suspend fun waitShell(n: String): Boolean {
-        // ⚠️ jsch exec 把整串交给远端 shell **求值一次** —— 想让它求值的就是 `${'$'}(...)`，
-        //    不需要反斜杠（那是两层 shell 的写法，这里用了反而变成字面量）。
-        val out = conn.ssh.exec(
-            "for i in ${'$'}(seq 1 24); do " +
-                "c=${'$'}(tmux display-message -p -t '$n' '#{pane_current_command}' 2>/dev/null); " +
-                "case \"${'$'}c\" in claude|node|bun) sleep 0.5;; *) echo SHELL; exit 0;; esac; done; echo STUCK"
-        )
+    private suspend fun waitShell(sessionName: String): Boolean {
+        val out = conn.ssh.exec(Rewind.waitShellCommand(sessionName))
         return "SHELL" in out.lineSequence().map { it.trim() }.toList()
     }
 }

@@ -270,7 +270,8 @@ class RewindTest {
     @Test
     fun `fork成功认出新会话id`() {
         val forkSid = "11111111-2222-4333-8444-555555555555"
-        val out = """{"result":"好的","session_id":"$forkSid"}""" + "\n__YXI_REWIND__:rc=0\n"
+        // 实机 result 对象带 "type":"result"（hk13 claude 2.1.267 探针F 原样输出），parse 按它认
+        val out = """{"type":"result","result":"好的","session_id":"$forkSid"}""" + "\n__YXI_REWIND__:rc=0\n"
         assertEquals(forkSid, (Rewind.parse(out) as Rewind.Outcome.Ok).sessionId)
     }
 
@@ -325,5 +326,66 @@ class RewindTest {
         val f = Rewind.parse(out) as Rewind.Outcome.Failed
         assertEquals("rc", f.code)
         assertNotNull(f.detail)
+    }
+
+    // ───── 以下为审查补漏的命令契约锁（真 bash 执行的行为验证在 RewindShellTest）─────
+
+    @Test
+    fun `前导横杠prompt经双横杠分隔不当旗标解析`() {
+        val p = plan(prompt = "--model evil --effort low")
+        assertNull(Rewind.validate(p))
+        val cmd = Rewind.command(exe, cwd, cap, p)
+        // prompt 走 `--` 之后的唯一位置参数位 —— 前导 - 的文本不会被 getopt 吃成旗标
+        assertTrue(" -p --output-format json -- '--model evil --effort low'" in cmd)
+        // 绝不出现把 evil 当值回放的形态
+        assertTrue("--model 'evil'" !in cmd)
+        assertTrue("--effort 'low'" !in cmd)
+    }
+
+    @Test
+    fun `exit命令先原子核对再逐级发exit三连`() {
+        val c = cap.copy(pid = "4242", paneId = "%28")
+        val rt = "4321:\$3:1727000000"
+        val cmd = Rewind.exitCommand("cc-yxi", c, rt)
+        // 复核与 /exit 在同一条 exec 里：复核不过只回 identity，一个键都不发
+        assertTrue(cmd.startsWith("rt=\$(tmux display-message -p -t 'cc-yxi' '#{pid}:#{session_id}:#{session_created}'"))
+        assertTrue("[ \"\$rt\" = '$rt' ]" in cmd)
+        assertTrue("[ \"\$pn\" = '%28' ]" in cmd)
+        assertTrue("__YXI_REWIND_ID__:identity" in cmd)
+        // Esc 收浮层 → /exit（-l -- 字面）→ Enter，逐级 &&：任一步失败就没有 exit-sent
+        assertTrue("tmux send-keys -t 'cc-yxi' Escape && sleep 0.3 &&" in cmd)
+        assertTrue("tmux send-keys -t 'cc-yxi' -l -- '/exit' && tmux send-keys -t 'cc-yxi' Enter &&" in cmd)
+        assertTrue(cmd.endsWith("echo \"__YXI_REWIND_ID__:exit-sent\""))
+        assertTrue("skip-permissions" !in cmd)
+    }
+
+    @Test
+    fun `exit命令缺复核基准一律只回identity`() {
+        assertEquals("echo '__YXI_REWIND_ID__:identity'", Rewind.exitCommand("cc-yxi", cap, ""))
+        assertEquals(
+            "echo '__YXI_REWIND_ID__:identity'",
+            Rewind.exitCommand("cc-yxi", cap.copy(paneId = ""), "4321:\$3:1727000000"),
+        )
+    }
+
+    @Test
+    fun `退出结果认得出锚`() {
+        assertNull(Rewind.parseExit("__YXI_REWIND_ID__:exit-sent\n"))
+        assertEquals("identity", Rewind.parseExit("__YXI_REWIND_ID__:identity\n"))
+        assertEquals("noresult", Rewind.parseExit("noise\n"))
+    }
+
+    @Test
+    fun `等壳命令只认真shell名单`() {
+        val cmd = Rewind.waitShellCommand("cc-yxi")
+        // 审查补漏：只有真 shell（含 -bash 登录形态）算回壳 —— 「不是 claude」不再是 shell 证据
+        assertTrue("case \"\$c\" in bash|-bash|zsh|-zsh|sh|-sh|dash|-dash|ash|-ash|ksh|-ksh) echo SHELL; exit 0;;" in cmd)
+        assertTrue("vim" !in cmd && "top" !in cmd)
+        // 旧逻辑的两个「直接放行」词不能再出现在认壳名单里
+        assertTrue("claude" !in cmd.substringAfter("case"))
+        // 默认 24×0.5s 有界；短轮询参数可调（bash 行为测试用）
+        assertTrue("seq 1 24" in cmd && "sleep 0.5" in cmd)
+        val short = Rewind.waitShellCommand("cc-yxi", iterations = 2, intervalSec = "0.1")
+        assertTrue("seq 1 2" in short && "sleep 0.1" in short)
     }
 }

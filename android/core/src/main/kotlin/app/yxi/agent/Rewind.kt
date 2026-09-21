@@ -330,8 +330,8 @@ object Rewind {
      *     —— 会话被 kill 后同名重建即变；
      *  2. **paneId**（`#{pane_id}`，与 [Capture.paneId] 一致）—— pane 重建即变。
      *
-     * 任一不符：回 `ID_TAG:identity`，**一个键都不发**。runtimeId 为空（snapshot 降级没拿到）
-     * 时退化为只核 paneId。
+     * 任一不符：回 `ID_TAG:identity`，**一个键都不发**。runtimeId 或 paneId 为空
+     * （没有复核基准）直接回 `identity` —— 没基准就不投，绝不裸发。
      *
      * 按键内容：pane 里先 `cd <会话cwd>`（审查：与 print 轮同一 cwd）再拉
      * **真 binary + `--resume` + 白名单旗标原值回放**；值在 [parseCapture] 已过
@@ -371,6 +371,66 @@ object Rewind {
             "sent" -> null
             else -> code
         }
+    }
+
+    /**
+     * `/exit` 前的**身份核对 + 退出**命令（审查补漏：投递那步有 [relaunchCommand] 核对，
+     * Esc+/exit 却是裸发的 —— 窗格若在门禁之后被顶包，会把**别人的会话**退掉）。
+     *
+     * 与 [relaunchCommand] 同一套复核（runtimeId + paneId，**同一条 exec 里原子**）：
+     * 任一不符回 `ID_TAG:identity`，**一个键都不发**；runtimeId 或 paneId 为空
+     * （没有复核基准）也直接回 `identity`。核对过了才发
+     * Esc（收浮层）→ `/exit`（`-l --` 字面，不解释内容）→ Enter，三步**逐级 `&&`**，
+     * 任一步 send-keys 失败就没有 `ID_TAG:exit-sent`（[parseExit] 认）——
+     * 不把发送失败当成功。
+     *
+     * @param runtimeId 门禁 snapshot 的 [app.yxi.agent.Session.runtimeId]（relaunch 时原样传回）
+     */
+    fun exitCommand(sessionName: String, c: Capture, runtimeId: String): String {
+        if (runtimeId.isBlank() || c.paneId.isBlank()) return "echo '$ID_TAG:identity'"
+        val n = q(sessionName)
+        return "rt=\$(tmux display-message -p -t '$n' '#{pid}:#{session_id}:#{session_created}' 2>/dev/null); " +
+            "pn=\$(tmux display-message -p -t '$n' '#{pane_id}' 2>/dev/null); " +
+            "[ \"\$rt\" = '${q(runtimeId)}' ] && [ \"\$pn\" = '${q(c.paneId)}' ] || " +
+            "{ echo \"$ID_TAG:identity\"; exit 0; }; " +
+            "tmux send-keys -t '$n' Escape && sleep 0.3 && " +
+            "tmux send-keys -t '$n' -l -- '/exit' && tmux send-keys -t '$n' Enter && " +
+            "echo \"$ID_TAG:exit-sent\""
+    }
+
+    /**
+     * 认 [exitCommand] 的输出。@return null = 退出键已发；否则失败代号：
+     * `identity`（复核不过，一键未发）/ `noresult`（没看到锚，多半连接半断）。
+     */
+    fun parseExit(out: String): String? {
+        val line = out.lineSequence().map { it.trim() }
+            .lastOrNull { it.startsWith("$ID_TAG:") } ?: return "noresult"
+        return when (val code = line.removePrefix("$ID_TAG:")) {
+            "exit-sent" -> null
+            else -> code
+        }
+    }
+
+    /** 「窗格回到 shell」认的前台命令：只有真 shell 算（含 `-bash` 这类登录形态）。 */
+    val SHELL_COMMANDS = setOf("bash", "zsh", "sh", "dash", "ash", "ksh")
+
+    /**
+     * 等窗格回 shell 的轮询命令（**只认真 shell** —— 审查补漏：旧版「不是 claude/node/bun
+     * 就当回壳」会把 vim/top/构建中的窗格当成 shell，接着把重启命令敲进人家程序里）。
+     *
+     * `#{pane_current_command}` 是 [SHELL_COMMANDS] 之一（含带 `-` 的登录形态）才算回壳，
+     * 回 `SHELL`；其余（claude 退出中也好、别的程序也好）一律继续等，到点回 `STUCK`
+     * —— 调用方只见 SHELL 才继续，其余按「没退干净」fail-closed，一键不发。
+     *
+     * @param iterations 轮询次数（默认 24），[intervalSec] 每次间隔秒；最坏 24×0.5=12s 有界。
+     */
+    fun waitShellCommand(sessionName: String, iterations: Int = 24, intervalSec: String = "0.5"): String {
+        val n = q(sessionName)
+        val shells = SHELL_COMMANDS.flatMap { listOf(it, "-$it") }.joinToString("|")
+        return "for i in \$(seq 1 $iterations); do " +
+            "c=\$(tmux display-message -p -t '$n' '#{pane_current_command}' 2>/dev/null); " +
+            "case \"\$c\" in $shells) echo SHELL; exit 0;; esac; " +
+            "sleep $intervalSec; done; echo STUCK"
     }
 
     /** 预检结果 TAG（跟 [TAG] 分开，两段 exec 各认各的锚）。 */
