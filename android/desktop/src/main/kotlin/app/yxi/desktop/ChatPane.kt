@@ -469,7 +469,28 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
             }
         }
         InstructionStrip(instructions, taskNavigationKey(conn.host, session), !sending && !live.busy && pending == null && ssh.isConnected, ::deliver,
-            onQuery = { queryInstructionDelivery(conn, session, it) }, compactUnknown = true)
+            onQuery = { queryInstructionDelivery(conn, session, it) }, compactUnknown = true, automatic = true,
+            canSteer = !session.isCodex && live.busy && pending == null && !sending && !keyBusy,
+            onSteer = { item ->
+                keyBusy = true
+                scope.launch {
+                    try {
+                        conn.instructionDeliveryMutex.lock()
+                        try {
+                            val (approvalNow, runningNow) = SessionProbe.snapshot(ssh, session.name)
+                            check(approvalNow == null && runningNow.busy) { "当前状态已变化，请稍后再试" }
+                            instructions.prioritize(item.id)
+                            val q = app.yxi.ssh.Shell::q
+                            val target = "=" + session.name + ":"
+                            val result = ssh.exec("pane=\$(tmux display-message -p -t ${q(target)} '#{pane_id}') && test \"\$(tmux display-message -p -t \"\$pane\" '#{pid}:#{session_id}:#{session_created}')\" = ${q(session.runtimeId)} && tmux send-keys -t \"\$pane\" Escape && printf '__YXI_REDIRECT__'")
+                            check(result.contains("__YXI_REDIRECT__")) { "调整方向请求未确认，请查看当前任务" }
+                            conn.terminalAwaiting[session.runtimeId] = (conn.terminalCompletion[session.runtimeId] ?: 0L) to true
+                        } finally { conn.instructionDeliveryMutex.unlock() }
+                    } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                    catch (e: Exception) { sendErr = e.message }
+                    finally { keyBusy = false }
+                }
+            })
         Composer(
             draft, { draft = it }, focus,
             ctx = ctx,

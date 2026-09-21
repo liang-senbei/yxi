@@ -74,6 +74,15 @@ internal class InstructionQueue(file: File) {
         return next
     }
     fun edit(id: String, revision: Long, text: String) = change(id, revision, setOf(InstructionStatus.Local)) { it.copy(text = text) }
+    @Synchronized fun prioritize(id: String) {
+        val item = entries.single { it.id == id }
+        check(item.status == InstructionStatus.Local)
+        check(entries.none { it.taskKey == item.taskKey && it.status in setOf(InstructionStatus.Delivering, InstructionStatus.Unknown) }) { "前一条投递尚未确认" }
+        val first = entries.indexOfFirst { it.taskKey == item.taskKey && it.status == InstructionStatus.Local }
+        val remaining = entries.filterNot { it.id == id }.toMutableList()
+        remaining.add(first, item)
+        commit(remaining)
+    }
     fun cancel(id: String, revision: Long) = change(id, revision, setOf(InstructionStatus.Local)) { it.copy(status = InstructionStatus.Cancelled) }
     fun restoreCancelled(id: String, revision: Long) = change(id, revision, setOf(InstructionStatus.Cancelled)) {
         it.copy(status = InstructionStatus.Local, detail = "已撤销本地撤回，等待发送")

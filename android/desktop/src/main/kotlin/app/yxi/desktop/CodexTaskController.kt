@@ -263,9 +263,10 @@ internal class CodexTaskController(
         submit(item, null)
     }
 
-    suspend fun steerNext() = mutation.withLock {
+    suspend fun steerNext(expectedId: String? = null) = mutation.withLock {
         check(ready && !disposed && pendingRequests.isEmpty()) { "运行器尚未就绪或存在待处理审批" }
         val turnId = activeTurnId ?: error("没有可引导的活动轮次")
+        if (expectedId != null) queue.prioritize(expectedId)
         val item = firstPending() ?: error("没有本地待发送指令")
         submit(item, turnId)
     }

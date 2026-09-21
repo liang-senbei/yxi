@@ -310,7 +310,10 @@ private fun CodexConversationPane(state: AppState) {
             }
             InstructionStrip(state.instructions, selected.key,
                 canDeliver = controller?.ready == true && !controller.sending && controller.activeTurnId == null && controller.pendingRequests.isEmpty(),
-                onDeliver = { instruction -> if (controller != null) act { controller.sendNext(instruction.id) } })
+                onDeliver = { instruction -> if (controller != null) act { controller.sendNext(instruction.id) } },
+                automatic = controller?.autoDispatch == true,
+                canSteer = controller?.ready == true && !controller.sending && controller.activeTurnId != null && controller.pendingRequests.isEmpty(),
+                onSteer = { instruction -> if (controller != null) act { controller.steerNext(instruction.id) } })
             if (controller != null) CodexGoalStrip(controller)
             val draft = state.chatDrafts.getOrPut(selected.key) { mutableStateOf(TextFieldValue()) }
             if (controller != null) CodexModelPicker(controller) { state.openRoutes() }

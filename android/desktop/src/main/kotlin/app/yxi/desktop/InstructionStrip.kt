@@ -18,7 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 
 @Composable
-internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliver: Boolean, onDeliver: (QueuedInstruction) -> Unit, onQuery: (suspend (QueuedInstruction) -> String)? = null, compactUnknown: Boolean = false) {
+internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliver: Boolean, onDeliver: (QueuedInstruction) -> Unit, onQuery: (suspend (QueuedInstruction) -> String)? = null, compactUnknown: Boolean = false, automatic: Boolean = false, canSteer: Boolean = false, onSteer: ((QueuedInstruction) -> Unit)? = null) {
     val t = Tokens.current
     val active = queue.entries.filter { it.taskKey == taskKey && (it.runtimeTurnState == RuntimeTurnState.InProgress || it.status !in setOf(InstructionStatus.Sent, InstructionStatus.Accepted, InstructionStatus.Cancelled, InstructionStatus.Resolved)) }
     var expanded by remember(taskKey) { mutableStateOf(false) }
@@ -48,7 +48,7 @@ internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliv
     if (active.isNotEmpty()) Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp).heightIn(max = 220.dp)
         .background(t.surface1, RoundedCornerShape(12.dp)).border(0.5.dp, t.border, RoundedCornerShape(12.dp))) {
         Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("指令 · ${active.size}", style = MaterialTheme.typography.labelMedium, color = t.textMuted, modifier = Modifier.weight(1f))
+            Text((if (automatic) "待执行" else "指令") + " · ${active.size}", style = MaterialTheme.typography.labelMedium, color = t.textMuted, modifier = Modifier.weight(1f))
             if (active.size > 3 || compactUnknown) TextButton({ expanded = !expanded }) { Text(if (expanded) "收起" else "展开全部") }
         }
         androidx.compose.foundation.lazy.LazyColumn {
@@ -58,9 +58,10 @@ internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliv
                 Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f).clickable { editing = item; text = item.text; error = "" }.padding(vertical = 6.dp)) {
                         Text(item.text.ifBlank { "${item.attachments.size} 个附件" }, maxLines = 1, overflow = TextOverflow.Ellipsis, color = t.textPrimary, style = MaterialTheme.typography.bodyMedium)
-                        Text(when(item.status) { InstructionStatus.Local -> "本地待发送"; InstructionStatus.Delivering -> "投递中"; InstructionStatus.Accepted -> "运行器已接收 · 本轮进行中"; else -> "状态待确认" } + if (item.attachments.isEmpty()) "" else " · ${item.attachments.size} 个附件", color = t.textMuted, style = MaterialTheme.typography.labelSmall)
+                        Text(when(item.status) { InstructionStatus.Local -> if (automatic) "本轮结束后自动执行" else "本地待发送"; InstructionStatus.Delivering -> "投递中"; InstructionStatus.Accepted -> "运行器已接收 · 本轮进行中"; else -> "状态待确认" } + if (item.attachments.isEmpty()) "" else " · ${item.attachments.size} 个附件", color = t.textMuted, style = MaterialTheme.typography.labelSmall)
                     }
-                    if (item.status == InstructionStatus.Local && index == 0) TextButton({ onDeliver(item) }, enabled = canDeliver) { Text("发送") }
+                    if (item.status == InstructionStatus.Local && onSteer != null) TextButton({ onSteer(item) }, enabled = canSteer) { Text("调整方向") }
+                    if (!automatic && item.status == InstructionStatus.Local && index == 0) TextButton({ onDeliver(item) }, enabled = canDeliver) { Text("发送") }
                     TextButton({ editing = item; text = item.text; error = "" }) { Text(if (item.status == InstructionStatus.Local) "编辑" else "核对") }
                     if (item.status == InstructionStatus.Local) IconButton({ act {
                         val cancelled = queue.cancel(item.id, item.revision)
@@ -131,4 +132,5 @@ internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliv
         }, dismissButton = { TextButton({ editing = null }) { Text("关闭") } })
     }
 }
+
 
