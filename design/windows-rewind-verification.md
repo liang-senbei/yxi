@@ -29,7 +29,7 @@
 
 补测初版两处预期错误已经纠正：从 u1 分支不能保留旧子节点 a1；上下文量取最后一次 assistant usage，不能跨轮相加。未因此修改产品以迁就错误预期。
 
-这些结果只证明解析和本地发送闸的相应行为，不证明 CLI 回退、重启后运行器上下文或完整界面流程。`47bb9ec` 的远端用户轮次统计修复不在上述测试基线内，仍需针对性验证。
+这些结果只证明解析和本地发送闸的相应行为，不证明 CLI 回退、重启后运行器上下文或完整界面流程。后续远端预检的验证结果见下节。
 
 ## 历史快照续接验证
 
@@ -42,3 +42,9 @@
 `38b06dd`（基于 `5b2f5e3`，控制器改动合入为 `1104454`）隔离工作树，root 核对 2026-09-21 20:12:32–35 UTC XML：RewindControllerGateTest 2、RewindDeliveryGateTest 3、RewindShellTest 8、RewindTest 34，均 0 失败、0 跳过。
 
 控制器在首次可能修改转录的 exec 前持发送锁创建 ticket；尚未确认加载完成时不清除。控制器新增两例只证明探不到会话不建票和 Target 字段映射，不能代替成功回退、取消和恢复的完整控制器测试。`42d5040` 的当前进程捕获修复晚于该测试基线，另待复测。运行器加载确认和 ChatPane 一键执行仍未完成。
+
+## 进程定位与结构化预检补测
+
+root 核对 `42d5040` 基线 20:15:30–32 UTC XML：RewindCaptureLivePaneTest 4、RewindShellTest 8、RewindTest 34 均通过。新增 fixture 验证旧登记指向另一个仍存活的 Claude 不会被误选、双候选拒绝、窗格进程本身为 Claude、没有 Claude 不回退旧登记。
+
+root 核对 20:25:30 UTC RewindPreflightRealExecutionTest XML：8 项通过（补测合入 `1cc4a0e`）。真实隔离转录验证不带 isMeta 的命令回执不计人类轮次、不能选作目标，但快照仍保留模型与强度回执；真 bash/Python 执行验证空格 JSON、正文伪 UUID、错误 parent、size/mtime 变化及显式文件路径。均不是生产会话试跑或完整回退验收。
