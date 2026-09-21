@@ -35,6 +35,8 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
     }
     @Composable fun codexTask(record: CodexTaskRecord) {
         var menu by remember(record.key) { mutableStateOf(false) }
+        var rename by remember(record.key) { mutableStateOf(false) }
+        var displayTitle by remember(record.key, rename) { mutableStateOf(nav.title(record.key) ?: record.title) }
         NativeOverlay(menu)
         val selected = state.page == Page.Codex && state.codexSelectedTaskKey == record.key && state.conn === conn
         val controller = state.codexWorkspace.controllers[record.key]
@@ -60,6 +62,11 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
                 DropdownMenu(menu, { menu = false }) {
                     DropdownMenuItem(text = { Text(if (nav.pinned(record.key)) "取消置顶" else "置顶") }, onClick = { nav.togglePin(record.key); menu = false })
                     DropdownMenuItem(text = { Text(if (nav.favorite(record.key)) "取消收藏" else "收藏") }, onClick = { nav.setCodexFavorite(record, !nav.favorite(record.key)); menu = false })
+                    DropdownMenuItem(text = { Text("修改显示名称") }, onClick = { rename = true; menu = false })
+                    DropdownMenuItem(text = { Text(if (nav.muted(record.key)) "恢复通知" else "静音") }, onClick = { nav.setMuted(record.key, !nav.muted(record.key)); menu = false })
+                    DropdownMenuItem(text = { Text(if (nav.archived(record.key)) "恢复到项目列表" else "归档") },
+                        enabled = controller?.activeTurnId == null && controller?.pendingRequests.isNullOrEmpty(),
+                        onClick = { nav.setArchived(record.key, !nav.archived(record.key)); menu = false })
                     HorizontalDivider()
                     Text("移到项目分组", Modifier.padding(12.dp), style = MaterialTheme.typography.labelMedium)
                     (conn.projectGroups.groups.keys.toList() + "").forEach { group ->
@@ -68,6 +75,13 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
                 }
             }
         }
+        if (rename) WorkbenchDialog(onDismissRequest = { rename = false }, title = { Text("修改 Agent 显示名称") },
+            text = { Column {
+                OutlinedTextField(displayTitle, { displayTitle = it }, singleLine = true, label = { Text("名称") })
+                if (nav.error.isNotBlank()) Text(nav.error, color = t.danger)
+            } },
+            confirmButton = { TextButton({ nav.rename(record.key, displayTitle); if (nav.error.isBlank()) rename = false }) { Text("保存") } },
+            dismissButton = { TextButton({ rename = false }) { Text("取消") } })
     }
     var projectGroups by remember(conn) { mutableStateOf(false) }
     var selectedGroup by remember(conn) { mutableStateOf("") }

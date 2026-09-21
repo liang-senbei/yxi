@@ -151,10 +151,9 @@ private fun CodexConversationPane(state: AppState) {
     Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Codex 任务", style = MaterialTheme.typography.titleLarge)
-                Text(conn?.host?.label ?: "请先从左侧选择服务器", color = Tokens.current.textMuted)
+                Text(selected?.let { state.navigation.title(it.key) ?: it.title } ?: "新建 Agent", style = MaterialTheme.typography.titleLarge)
+                Text(conn?.host?.label?.let { "$it · 运行器 Codex" } ?: "请先从左侧选择服务器", color = Tokens.current.textMuted, style = MaterialTheme.typography.bodySmall)
             }
-            TextButton({ state.page = Page.Workspace }) { Text("返回工作区") }
             TextButton({ recovering = !recovering; creating = false; recoveryId = workspace.recoveryThreadId }, enabled = conn?.ssh?.isConnected == true && !workspace.busy) { Text("恢复任务") }
             Button({ creating = !creating; recovering = false }, enabled = conn?.ssh?.isConnected == true && !workspace.busy) { Text("新任务") }
         }
@@ -207,13 +206,9 @@ private fun CodexConversationPane(state: AppState) {
             Text("使用所选服务器的 Codex 登录和模型配置。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
             if (initialDraft.isNotBlank()) OutlinedTextField(initialDraft, { initialDraft = it }, label = { Text("创建后的提示词草稿") }, modifier = Modifier.fillMaxWidth(), maxLines = 4)
         }
-        CodexTaskPicker(state, tasks, workspace.busy) { task ->
-            state.codexSelectedTaskKey = task.key
-            if (conn != null) act { workspace.open(conn, task) }
-        }
         if (selected == null) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text(if (tasks.isEmpty()) "从项目目录开始一个任务" else "选择任务，继续上次的工作", color = Tokens.current.textMuted)
+                Text(if (tasks.isEmpty()) "从项目目录创建 Agent" else "从左侧项目分组选择 Agent，继续工作", color = Tokens.current.textMuted)
             }
         } else {
             Text(selected.directory, style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
