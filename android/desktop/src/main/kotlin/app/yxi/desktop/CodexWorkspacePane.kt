@@ -260,7 +260,7 @@ private fun CodexConversationPane(state: AppState) {
                         Text(message.author, color = Tokens.current.textMuted, style = MaterialTheme.typography.labelMedium)
                         CompositionLocalProvider(LocalUriHandler provides taskUris) {
                             SelectionContainer {
-                                if (message.author == "Codex") Markdown(message.text) else Text(message.text)
+                                if (message.author == "Codex") Markdown(message.text, flavour = cjkGfmFlavour) else Text(message.text)
                             }
                         }
                     }

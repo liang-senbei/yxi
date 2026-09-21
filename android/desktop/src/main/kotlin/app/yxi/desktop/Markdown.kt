@@ -39,7 +39,7 @@ internal fun workbenchMarkdownTypography() = com.mikepenz.markdown.m3.markdownTy
 @Composable
 fun AssistantBody(md: String) {
     SelectionContainer {
-        com.mikepenz.markdown.m3.Markdown(md, typography = workbenchMarkdownTypography())
+        com.mikepenz.markdown.m3.Markdown(md, flavour = cjkGfmFlavour, typography = workbenchMarkdownTypography())
     }
 }
 
