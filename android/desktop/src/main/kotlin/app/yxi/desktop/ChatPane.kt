@@ -171,6 +171,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                         val target = "=" + session.name + ":"
                         val q = app.yxi.ssh.Shell::q
                         conn.instructionDeliveryMutex.withLock {
+                            check(!RewindDelivery.gate.blocked(taskKey)) { "历史回退尚未确认，请先恢复当前回退" }
                             val screen = ssh.exec("tmux capture-pane -p -t ${q(target)}")
                             check(app.yxi.agent.Model.borrowable(screen) && app.yxi.agent.Prompt.parse(screen) == null) {
                                 "终端仍在工作、等待确认或有未发送输入，请先处理后再回退。"
@@ -326,7 +327,12 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
     /** 送一个键（屏幕上写几号就送几号）；4 秒屏幕还没变就解锁，别永远灰着。 */
     fun sendKey(key: String, fp: String) = scope.launch {
         keyBusy = true; awaitFp = fp
-        catching { SessionProbe.sendKey(ssh, session.name, key) }
+        catching {
+            conn.instructionDeliveryMutex.withLock {
+                check(!RewindDelivery.gate.blocked(taskKey)) { "历史回退尚未确认，暂不能提交审批" }
+                SessionProbe.sendKey(ssh, session.name, key)
+            }
+        }.onFailure { sendErr = it.message }
         delay(4_000)
         if (awaitFp == fp) { awaitFp = null; keyBusy = false }
     }
@@ -335,6 +341,8 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
     fun submit(p: Pending) = scope.launch {
         keyBusy = true; awaitFp = null
         catching {
+            conn.instructionDeliveryMutex.withLock {
+            check(!RewindDelivery.gate.blocked(taskKey)) { "历史回退尚未确认，暂不能提交审批" }
             var cur = p
             var n = 0
             while (!cur.review && n++ < 6) {
@@ -345,7 +353,8 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                 val submit = cur.options.firstOrNull { it.label.startsWith("Submit") }
                 SessionProbe.sendKey(ssh, session.name, (submit?.number ?: 1).toString())
             }
-        }
+            }
+        }.onFailure { sendErr = it.message }
         keyBusy = false
     }
 
@@ -471,6 +480,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                     try {
                         conn.instructionDeliveryMutex.lock()
                         try {
+                            check(!RewindDelivery.gate.blocked(taskKey)) { "历史回退尚未确认，暂不能调整方向" }
                             val q = app.yxi.ssh.Shell::q
                             val target = "=" + session.name + ":"
                             val screen = ssh.exec("tmux capture-pane -p -t ${q(target)}")
