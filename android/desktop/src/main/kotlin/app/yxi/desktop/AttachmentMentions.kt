@@ -20,7 +20,7 @@ internal class AttachmentMentions(
 internal fun rememberAttachmentMentions(items: List<DraftAttach>, draft: TextFieldValue, update: (TextFieldValue) -> Unit): AttachmentMentions {
     val cursor = draft.selection.end
     val before = draft.text.take(cursor)
-    val match = if (draft.composition == null && draft.selection.collapsed) Regex("(?:^|\\s)(@[^\\s@]*)$").find(before) else null
+    val match = if (draft.composition == null && draft.selection.collapsed) Regex("(?<![A-Za-z0-9_@])(@[^\\s@]*)$").find(before) else null
     val start = match?.let { cursor - it.groupValues[1].length }
     val query = match?.groupValues?.get(1)?.drop(1).orEmpty()
     var dismissed by remember { mutableStateOf<String?>(null) }

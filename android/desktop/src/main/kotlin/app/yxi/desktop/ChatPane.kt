@@ -561,7 +561,7 @@ private fun Composer(
                         // 剪贴板里有图 = 粘贴图片（预检是便宜的 isDataFlavorAvailable，不解码）；贴着的时候按键重复不重入
                         e.isCtrlPressed && e.key == Key.V && Attach.hasClipboardImage() && !Attach.pasteBusy.get() -> { onPaste(); true }
                         // 有字就是发消息；空着时 Enter 归审批卡（Codex：Enter 批准）
-                        enter && !e.isShiftPressed -> { if (draft.text.isNotBlank()) onSend() else if (hasPending && canAct) onApprove(); true }
+                        enter && !e.isShiftPressed -> { if (canSend) onSend() else if (draft.text.isBlank() && attachments.isEmpty() && hasPending && canAct) onApprove(); true }
                         e.key == Key.Escape && hasPending && canAct -> { onReject(); true }   // 没在等审批时 Esc 留给窗口壳
                         else -> false
                     }
