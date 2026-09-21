@@ -116,6 +116,15 @@ internal fun OpenCodeConfigurationCard(conn: Conn) {
                             }
                         }
                         Text("${provider.id} · ${provider.modelIds.size} 个已配置模型", color = Tokens.current.textMuted)
+                        provider.baseURL?.takeIf { it.isNotBlank() }?.let { endpoint ->
+                            val address = runCatching {
+                                val uri = java.net.URI(endpoint)
+                                if (uri.host == null || uri.scheme !in listOf("https", "http")) null else
+                                    java.net.URI(uri.scheme, null, uri.host, uri.port, uri.path, null, null).toString()
+                            }.getOrNull()
+                            Text(address ?: "已设置自定义请求地址", color = Tokens.current.textSecondary,
+                                style = MaterialTheme.typography.bodySmall)
+                        }
                         if (provider.apiKeyFingerprint != null) Text("凭据已填写", color = Tokens.current.textSecondary)
                     }
                 }
