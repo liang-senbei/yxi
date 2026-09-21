@@ -11,6 +11,7 @@ import kotlinx.coroutines.sync.withLock
 internal suspend fun deliverInstruction(conn: Conn, session: Session, queue: InstructionQueue, item: QueuedInstruction) = conn.instructionDeliveryMutex.withLock {
     check(conn.ssh.isConnected) { "服务器未连接，指令保留在本地" }
     check(item.taskKey == taskNavigationKey(conn.host, session)) { "任务身份已变化" }
+    check(session.runtimeId !in conn.terminalAwaiting) { "上一条正在接续，请等待本轮结束" }
     check(Regex("[0-9]+:\\$[0-9]+:[0-9]+").matches(session.runtimeId)) { "尚未确认任务实例，请刷新后重试" }
     val screen = conn.ssh.exec("tmux capture-pane -p -t ${Shell.q("=" + session.name + ":")} 2>/dev/null")
     check(app.yxi.agent.Model.borrowable(screen)) { "终端正忙、等待选择或输入状态无法确认，指令继续保留在本地" }

@@ -17,7 +17,7 @@ internal fun TerminalQueueRunner(state: AppState) {
                     if (session.runtimeId.isBlank()) continue
                     val key = taskNavigationKey(conn.host, session)
                     val first = state.instructions.entries.firstOrNull { it.taskKey == key && it.status in setOf(InstructionStatus.Local, InstructionStatus.Delivering, InstructionStatus.Unknown) }
-                    if (first?.status != InstructionStatus.Local || state.instructions.error.isNotBlank()) continue
+                    if (first?.status != InstructionStatus.Local && session.runtimeId !in conn.terminalAwaiting) continue
                     try {
                         val (pending, live) = SessionProbe.snapshot(conn.ssh, session.name)
                         val barrier = conn.terminalAwaiting[session.runtimeId]
@@ -28,6 +28,7 @@ internal fun TerminalQueueRunner(state: AppState) {
                             conn.terminalAwaiting.remove(session.runtimeId)
                         }
                         if (live.busy || pending != null || !conn.ssh.isConnected) continue
+                        if (first?.status != InstructionStatus.Local || state.instructions.error.isNotBlank()) continue
                         // The adapter rechecks identity, empty prompt and screen immediately before writing.
                         deliverInstruction(conn, session, state.instructions, first)
                     } catch (e: CancellationException) { throw e }

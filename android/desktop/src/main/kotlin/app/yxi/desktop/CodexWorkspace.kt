@@ -147,7 +147,7 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File,
                 val result = client.resumeThread(record.threadId, overrides).getJSONObject("result")
                 val thread = result.getJSONObject("thread")
                 check(thread.getString("id") == record.threadId && normalizeProjectPath(thread.getString("cwd")) == normalizeProjectPath(record.directory)) { "恢复响应与原任务不一致" }
-                attach(conn, record, client).also { it.recordSessionConfiguration(result) }
+                attach(conn, record, client, autoRun = false).also { it.recordSessionConfiguration(result) }
             } catch (e: Exception) {
                 client.close()
                 if (e is CancellationException) throw e
@@ -196,10 +196,11 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File,
         }
     }
 
-    private suspend fun attach(conn: Conn, record: CodexTaskRecord, client: CodexAppServer, createdThread: JSONObject? = null): CodexTaskController {
+    private suspend fun attach(conn: Conn, record: CodexTaskRecord, client: CodexAppServer, createdThread: JSONObject? = null, autoRun: Boolean = true): CodexTaskController {
         val controller = CodexTaskController(record.key, record.threadId, client, queue) { title -> onNotice(record, title) }
         try { controller.reconcile(createdThread) } catch (e: Exception) { controller.close(); throw e }
         controllers[record.key] = controller; owners[record.key] = conn
+        controller.setAutoDispatch(autoRun)
         return controller
     }
 
