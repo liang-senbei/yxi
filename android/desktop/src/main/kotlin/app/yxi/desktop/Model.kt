@@ -51,21 +51,27 @@ val HostColors = listOf(Color(0xFF7C9CBF), Color(0xFF8FBF9F), Color(0xFFD9A066),
 fun Host.tint(index: Int): Color =
     color.removePrefix("#").toLongOrNull(16)?.let { Color(0xFF000000L or it) } ?: HostColors[index % HostColors.size]
 
-/** 本地存储：Windows `%LOCALAPPDATA%\Yxi`，其它 `~/.config/yxi`。hosts.json + known_hosts。 */
+/** Persistent data is separate from the updater-owned installation: Windows ~/.yxi. */
 object Store {
     var warning by mutableStateOf("")
         private set
     val dir: File = run {
         val win = System.getProperty("os.name").startsWith("Windows")
-        // ⚠️⚠️ **不能放 %APPDATA%**（审查 P2）：那是**漫游**目录 —— 域账户登录别的机器、
-        //    或者 OneDrive 的「已知文件夹」备份开着的时候，它会被**同步到别处去**。
-        //    旧版 hosts.json 含明文密码；Windows 当前通过 HostConfigFile 迁移为用户级 DPAPI 保护。
-        //    %LOCALAPPDATA% 不漫游；单实例锁（Shell.kt）本来用的就是它，顺带统一到一个目录。
+        // Legacy versions mixed data with Velopack's %LOCALAPPDATA%/Yxi installation.
+        // Keep credentials user-DPAPI protected after copying to the stable home directory.
         val local = System.getenv("LOCALAPPDATA")?.takeIf { win }?.let { File(it, "Yxi") }
-        val base = local ?: File(System.getProperty("user.home"), ".config/yxi")
+        val home = System.getenv("USERPROFILE")?.takeIf { win && it.isNotBlank() } ?: System.getProperty("user.home")
+        val base = if (win) File(home, ".yxi") else File(home, ".config/yxi")
         base.apply { mkdirs() }
+        if (local != null) {
+            try { UserDataMigration.migrate(local, base) }
+            catch (e: Exception) {
+                warning = "用户数据迁移未完成，暂时沿用旧目录：${e.message}"
+                return@run local
+            }
+        }
         // 1.0.0 的 MSI 装的那版写在 %APPDATA%\Yxi —— 搬过来一次，别让人重新加一遍主机。
-        if (local != null) migrateRoaming(File(System.getenv("APPDATA").orEmpty(), "Yxi"), local)
+        if (local != null) migrateRoaming(File(System.getenv("APPDATA").orEmpty(), "Yxi"), base)
         base
     }
 
