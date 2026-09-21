@@ -27,6 +27,7 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
     val t = Tokens.current
     val scope = rememberCoroutineScope()
     var lines by remember { mutableStateOf<List<Lines.Line>?>(null) }
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
     var engine by remember { mutableStateOf(if (state.routesOrigin == Page.Codex || state.session?.isCodex == true) Lines.CODEX else Lines.CLAUDE) }
     var active by remember { mutableStateOf<Lines.Active?>(null) }
     var codex by remember { mutableStateOf<Lines.CodexNow?>(null) }
@@ -155,7 +156,7 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
             placeholder = { Text("搜索线路名称、地址、模型或备注") })
         Spacer(Modifier.height(10.dp))
         val visibleLines = lines.orEmpty().filter { line -> line.agent == engine &&
-            listOf(line.name, line.baseUrl, routeModel(line), line.note).any { it.contains(search.trim(), ignoreCase = true) } }
+            listOf(line.name, line.baseUrl, routeModel(line), line.note, line.website).any { it.contains(search.trim(), ignoreCase = true) } }
         when {
             lines == null -> Text("线路清单未能读取。请确认连接、文件权限与内容格式。", color = t.textMuted)
             lines!!.none { it.agent == engine } -> Text("还没有保存的线路。添加后可配置模型、测试连通性，再应用到服务器。", color = t.textMuted)
@@ -177,6 +178,7 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
                         if (line.note.isNotBlank()) Text(line.note, Modifier.padding(top = 6.dp), style = MaterialTheme.typography.bodySmall, color = t.textMuted)
                         Row(Modifier.padding(top = 10.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             TextButton({ editor = line }, enabled = !busy) { Text("编辑") }
+                            if (runCatching { val uri = java.net.URI(line.website); uri.scheme in listOf("https", "http") && !uri.host.isNullOrBlank() && uri.userInfo == null }.getOrDefault(false)) TextButton({ runCatching { uriHandler.openUri(line.website) }.onFailure { note = "无法打开官网链接" } }) { Text("官网 ↗") }
                             TextButton({ editor = line.copy(id = Lines.newId(), name = line.name + " · 副本", extra = org.json.JSONObject(line.extra.toString())) }, enabled = !busy) { Text("复制线路") }
                             TextButton({ act { note = Lines.probe(conn.ssh, line.baseUrl) + "；此测试不验证密钥或模型可用性。" } }, enabled = !busy) { Text("测连通性") }
                             TextButton({ note = ""; applying = line }, enabled = !busy) { Text("应用配置") }
@@ -236,6 +238,7 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
 private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend (Lines.Line) -> Unit) {
     val scope = rememberCoroutineScope()
     var name by remember { mutableStateOf(original.name) }
+    var website by remember { mutableStateOf(original.website) }
     var url by remember { mutableStateOf(original.baseUrl) }
     var secret by remember { mutableStateOf(original.apiKey) }
     var authToken by remember { mutableStateOf(original.token) }
@@ -274,6 +277,7 @@ private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend
             Text("模板仅预填，可自行修改端点和模型；密钥由你填写。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
             HorizontalDivider()
             OutlinedTextField(name, { name = it }, label = { Text("线路名称") }, singleLine = true)
+            OutlinedTextField(website, { website = it }, label = { Text("官网链接（可选）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(url, { url = it }, label = { Text("服务端点 Base URL") }, singleLine = true)
             OutlinedTextField(secret, { secret = it }, label = { Text("API 密钥") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
             if (!original.isCodex) OutlinedTextField(authToken, { authToken = it }, label = { Text("Auth token（按提供方要求填写）") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
@@ -312,7 +316,11 @@ private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend
                     require(rejected.isEmpty()) { "不支持的配置项：${rejected.joinToString()}" }
                     require(extra.optJSONObject("env")?.let { env -> listOf("ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY").none { env.has(it) } } != false) { "端点和密钥请填写上方独立字段" }
                 }
-                val edited = editedRoute(original.copy(extra = extra), name, url, secret, model, authToken).copy(note = memo.trim())
+                if (website.isNotBlank()) {
+                    val uri = java.net.URI(website.trim())
+                    require(uri.scheme in listOf("https", "http") && !uri.host.isNullOrBlank() && uri.userInfo == null) { "官网链接需要完整的HTTP或HTTPS地址，不能含账号密码" }
+                }
+                val edited = editedRoute(original.copy(extra = extra), name, url, secret, model, authToken).copy(note = memo.trim(), website = website.trim())
                 if (!original.isCodex) {
                     val env = edited.extra.optJSONObject("env") ?: org.json.JSONObject()
                     mappings.forEach { (alias, value) ->

@@ -49,6 +49,7 @@ object Lines {
          */
         val extra: JSONObject = JSONObject(),
         val note: String = "",
+        val website: String = "",
     ) {
         val isCodex get() = agent == CODEX
         /** extra 里 env 部分（不含核心三键） */
@@ -224,6 +225,7 @@ object Lines {
                         // 老清单没有这个字段，默认当 Claude —— 加字段不能让已有的线路变身
                         agent = it.optString("agent").ifBlank { CLAUDE },
                         note = it.optString("note"),
+                        website = it.optString("website"),
                     )
                     // v2：带 settings 片段就从片段拆；v1 条目没有 settings，原样（1.1.8 用户无感升级）
                     it.optJSONObject("settings")?.let { st -> if (base.isCodex) base.copy(extra = st) else Line.fromSettings(base, st) } ?: base
@@ -237,7 +239,7 @@ object Lines {
             a.put(
                 JSONObject().put("id", it.id).put("name", it.name)
                     .put("baseUrl", it.baseUrl).put("token", it.token).put("apiKey", it.apiKey)
-                    .put("agent", it.agent).put("note", it.note)
+                    .put("agent", it.agent).put("note", it.note).put("website", it.website)
                     // v2：整段片段也存一份 —— 读的时候以它为准；核心三键仍单独存是给 1.1.8 之前的 App 读的
                     .put("settings", if (it.isCodex) it.extra else it.settingsJson()),
             )
