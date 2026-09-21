@@ -106,6 +106,10 @@ object OpenCodeRouteConfig {
      * 解析不了抛 [IllegalArgumentException]（status 把它落进 [Status.parseError]，apply 拒绝盲改）。
      */
     internal fun parseConfig(text: String): Parsed {
+        // 严格语法闸：org.json 偏宽（裸 token、单引号、`12 3` 这类 token 粘连都吃），
+        // 官方 jsonc-parser 会拒；写闸/读闸都按官方口径，语法错误统一给脱敏文案。
+        runCatching { validateStrictJsonc(text) }
+            .getOrElse { throw IllegalArgumentException("配置不是合法 JSONC，请检查语法后重试") }
         val root = runCatching { JSONObject(stripJsonc(text)) }
             .getOrElse { throw IllegalArgumentException("配置不是合法 JSONC，请检查语法后重试") }
         val model = when (val v = root.opt("model")) {
@@ -276,6 +280,87 @@ object OpenCodeRouteConfig {
      * 剥注释/尾逗号（只用于读取路径的内存解析与本地自检；**结果绝不写回**）。
      * 字符串内的行注释符、块注释符不当注释；尾逗号按官方 `allowTrailingComma` 语义丢弃。
      */
+    /**
+     * 严格 JSONC 语法校验（与官方 jsonc-parser 语义对齐）。org.json 的解析器偏宽
+     * （裸 token、单引号字符串、注释剥离后 `12 3` 这类粘连都吞），直接拿它当写闸会把
+     * opencode 加载不了的配置放过去；这里按 JSON 语法自己走一遍，块注释当空格（token 不粘连）。
+     */
+    internal fun validateStrictJsonc(text: String) {
+        val rootOpen = skipWsComments(text, 0)
+        require(rootOpen < text.length) { "配置为空" }
+        require(text[rootOpen] == '{') { "配置根必须是对象" }
+        val end = validateObject(text, rootOpen)
+        require(skipWsComments(text, end) >= text.length) { "对象结束后有多余内容" }
+    }
+
+    /** 校验 [openPos] 处的对象，返回其 `}` 之后的位置。尾逗号容忍（官方 allowTrailingComma）。 */
+    private fun validateObject(text: String, openPos: Int): Int {
+        var i = openPos + 1
+        while (true) {
+            i = skipWsComments(text, i)
+            require(i < text.length) { "对象未闭合" }
+            if (text[i] == '}') return i + 1
+            if (text[i] == ',') { i++; continue }
+            require(text[i] == '"') { "对象键必须是字符串" }
+            i = skipString(text, i)
+            i = skipWsComments(text, i)
+            require(i < text.length && text[i] == ':') { "键后缺少冒号" }
+            i = validateValue(text, i + 1)
+        }
+    }
+
+    /** 校验 [openPos] 处的数组，返回其 `]` 之后的位置。 */
+    private fun validateArray(text: String, openPos: Int): Int {
+        var i = openPos + 1
+        while (true) {
+            i = skipWsComments(text, i)
+            require(i < text.length) { "数组未闭合" }
+            if (text[i] == ']') return i + 1
+            if (text[i] == ',') { i++; continue }
+            i = validateValue(text, i)
+        }
+    }
+
+    /** 校验一个严格 JSON 值，返回其末尾位置。 */
+    private fun validateValue(text: String, from: Int): Int {
+        val i = skipWsComments(text, from)
+        require(i < text.length) { "值缺失" }
+        return when (text[i]) {
+            '"' -> skipString(text, i)
+            '{' -> validateObject(text, i)
+            '[' -> validateArray(text, i)
+            't' -> { require(text.startsWith("true", i)) { "非法字面量" }; i + 4 }
+            'f' -> { require(text.startsWith("false", i)) { "非法字面量" }; i + 5 }
+            'n' -> { require(text.startsWith("null", i)) { "非法字面量" }; i + 4 }
+            else -> {
+                require(text[i] == '-' || text[i].isDigit()) { "非法值" }
+                validateNumber(text, i)
+            }
+        }
+    }
+
+    /** 严格数字：`-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?`，后紧跟字母/下划线/点也拒（粘连）。 */
+    private fun validateNumber(text: String, from: Int): Int {
+        var i = from
+        if (text[i] == '-') i++
+        require(i < text.length && text[i].isDigit()) { "数字非法" }
+        if (text[i] == '0') i++
+        else while (i < text.length && text[i].isDigit()) i++
+        if (i < text.length && text[i] == '.') {
+            i++
+            require(i < text.length && text[i].isDigit()) { "小数非法" }
+            while (i < text.length && text[i].isDigit()) i++
+        }
+        if (i < text.length && (text[i] == 'e' || text[i] == 'E')) {
+            i++
+            if (i < text.length && (text[i] == '+' || text[i] == '-')) i++
+            require(i < text.length && text[i].isDigit()) { "指数非法" }
+            while (i < text.length && text[i].isDigit()) i++
+        }
+        require(i >= text.length || !text[i].isLetterOrDigit() && text[i] != '_' && text[i] != '.') { "数字后紧跟非法字符" }
+        return i
+    }
+
     internal fun stripJsonc(text: String): String {
         val out = StringBuilder(text.length)
         var i = 0
@@ -385,14 +470,22 @@ object OpenCodeRouteConfig {
             return "$dir 下 $FILE_JSON 与 $FILE_JSONC 并存：官方会把两份都合并，写哪份都可能被另一份盖回。" +
                 "本次未写入，请先手动整理为一份再使用本功能"
         }
-        if (expected != null && (expected.dir != dir || expected.revision != r.snapshot.revision ||
-                expected.fileName != r.fileName.takeIf { r.snapshot.text != null } || expected.bothExist != r.bothExist)) {
+        if (expected != null && expectationStale(expected, dir, r)) {
             return "配置在编辑期间已被修改，本次未覆盖，请刷新后重新编辑"
         }
         val newText = try { patchModel(r.snapshot.text, patch.model) } catch (e: IllegalArgumentException) { return e.message }
         parseConfig(newText) // 自检：手术结果必须仍是合法 JSONC；不是则视为缺陷，宁可不上传
         return commit(ssh, "$dir/${r.fileName}", newText, r.snapshot.revision)
     }
+
+    /**
+     * expected 快照与当前实况的**全量身份比对**：目录、revision、生效文件名（存在性口径）、
+     * 双文件并存态，任一变化即视为「已被修改」——防期间文件被换名/删除/第二份出现后盖错对象。
+     */
+    internal fun expectationStale(expected: Status, dir: String, r: Resolved): Boolean =
+        expected.dir != dir || expected.revision != r.snapshot.revision ||
+            expected.fileName != r.fileName.takeIf { r.snapshot.text != null } ||
+            expected.bothExist != r.bothExist
 
     /** 服务器侧提交：SFTP 传临时文件 → python3 锁内 hash 比对 + JSONC 校验 → 0600 + 备份 + 原子替换。null = 成功。 */
     private suspend fun commit(ssh: SshSession, path: String, text: String, expected: String): String? {

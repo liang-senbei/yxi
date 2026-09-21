@@ -184,8 +184,20 @@ class OpenCodeRouteConfigTest {
     @Test
     fun `尾逗号跨注释也丢弃`() {
         val stripped = OpenCodeRouteConfig.stripJsonc("""{"a": 1, /* c */ }""")
-        assertEquals("""{"a": 1  }""", stripped)
+        // 4db1e34 起块注释按空格语义落一格：原空格 + 注释空格 + 原空格 = 3 格
+        assertEquals("""{"a": 1   }""", stripped)
         JSONObject(stripped)
+    }
+
+    @Test
+    fun `严格闸拒绝orgjson宽解析才会放过的文档`() {
+        // 这些 org.json 都能吞，官方 jsonc-parser 会拒——按官方口径统一拒绝
+        for (bad in listOf("""{ "a": 12 3 }""", """{'a': 1}""", """{a: 1}""", """{ "a": tru }""", """{ "a": 01 }""", """{ "a": 1. }""", """{ "a": 1 } x""")) {
+            val e = assertFailsWith<IllegalArgumentException>("应拒绝：$bad") { OpenCodeRouteConfig.parseConfig(bad) }
+            assertTrue(e.message!!.contains("JSONC"), "$bad → ${e.message}")
+        }
+        // 严格合法的最小文档照常放行
+        OpenCodeRouteConfig.parseConfig("""{ "a": 1, "b": [true, null], "c": { "d": -1.5e-2 } }""")
     }
 
     // ---------- 远端 python3 脚本（本地临时目录真跑） ----------
@@ -285,5 +297,78 @@ class OpenCodeRouteConfigTest {
         assertMode0600(p)
         val backups = dir.resolve("yxi-backups")
         assertTrue(!Files.exists(backups) || Files.list(backups).use { it.count() } == 0L, "新建不产生备份")
+    }
+
+    // ---------- 4db1e34 回归：块注释按空格语义（官方 jsonc-parser 同款），token 不得粘连 ----------
+
+    @Test
+    fun `块注释粘连文档拒绝且报错不带异常原文`() {
+        // 剥注释若直接删除，`12/*c*/3` 会粘成 `123`（无效文档被误判可解析）；按空格语义必须保持拒绝
+        val fused = """{ "a": 12/*c*/3, "model": "old/x" }"""
+        val e = assertFailsWith<IllegalArgumentException> { OpenCodeRouteConfig.parseConfig(fused) }
+        assertTrue(e.message!!.contains("JSONC"))
+        assertFalse(e.message!!.contains("Expected"), "不带 JSON 异常原文：${e.message}")
+        assertFalse(e.message!!.contains("12"), "不带出错内容片段：${e.message}")
+        // patchModel 路径同样拒绝（结构扫描或解析闸先响均视为拒）
+        assertFailsWith<IllegalArgumentException> { OpenCodeRouteConfig.patchModel(fused, "a/b") }
+        // 剥离结果中间应真的有空格（语义自证），而不是删除
+        val stripped = OpenCodeRouteConfig.stripJsonc(fused)
+        assertTrue(stripped.contains("12 3"), stripped)
+    }
+
+    @Test
+    fun `脚本侧块注释粘连内容不落盘`() {
+        if (!pythonAvailable()) return
+        val dir = Files.createTempDirectory("opencode-route")
+        val p = dir.resolve("opencode.jsonc")
+        Files.write(p, "{}\n".toByteArray())
+        val fused = "{ \"a\": 12/*c*/3 }"
+        val st = runScript(p, fused, app.yxi.agent.RemoteAtomicJson.hash("{}\n".toByteArray()))
+        assertEquals("error", st.optString("status"), st.toString())
+        assertEquals("{}\n", Files.readString(p), "粘连内容不落盘")
+    }
+
+    // ---------- 4db1e34 回归：expected 全量身份比对（目录/revision/文件名/并存态） ----------
+
+    private fun statusOf(
+        dir: String = "/home/u/.config/opencode",
+        fileName: String? = "opencode.jsonc",
+        revision: String = "rev1",
+        bothExist: Boolean = false,
+    ) = OpenCodeRouteConfig.Status(
+        dir = dir, fileName = fileName, selectedModel = "a/b", providers = emptyList(),
+        otherTopLevelKeys = emptyList(), parseError = null, bothExist = bothExist, revision = revision,
+    )
+
+    @Test
+    fun `expected身份一致才放行`() {
+        val r = OpenCodeRouteConfig.Resolved(
+            "opencode.jsonc",
+            app.yxi.agent.RemoteAtomicJson.Snapshot("{\n}", "rev1"),
+            bothExist = false,
+        )
+        val dir = "/home/u/.config/opencode"
+        assertFalse(OpenCodeRouteConfig.expectationStale(statusOf(), dir, r), "全一致 → 不陈旧")
+    }
+
+    @Test
+    fun `expected身份任一变化即拒绝`() {
+        val dir = "/home/u/.config/opencode"
+        val snapshot = app.yxi.agent.RemoteAtomicJson.Snapshot("{\n}", "rev1")
+        fun res(fileName: String, rev: String = "rev1", both: Boolean = false) =
+            OpenCodeRouteConfig.Resolved(fileName, snapshot.copy(revision = rev), bothExist = both)
+        // 目录变了（UI 切了连接/改了根）
+        assertTrue(OpenCodeRouteConfig.expectationStale(statusOf(), "/other/dir", res("opencode.jsonc")))
+        // 内容被别人改过
+        assertTrue(OpenCodeRouteConfig.expectationStale(statusOf(), dir, res("opencode.jsonc", rev = "rev2")))
+        // 生效文件名变了（.jsonc 被删只剩 .json）
+        assertTrue(OpenCodeRouteConfig.expectationStale(statusOf(fileName = "opencode.jsonc"), dir, res("opencode.json")))
+        // 读取时文件还在、写入时两份都不存在了（missing：fileName 取 null 口径）
+        val missing = OpenCodeRouteConfig.Resolved("opencode.jsonc", app.yxi.agent.RemoteAtomicJson.Snapshot(null, "missing"), bothExist = false)
+        assertTrue(OpenCodeRouteConfig.expectationStale(statusOf(fileName = "opencode.jsonc"), dir, missing))
+        // 第二份配置出现（jsonc+json 并存）→ 写哪份都可能被另一份盖回
+        assertTrue(OpenCodeRouteConfig.expectationStale(statusOf(bothExist = false), dir, res("opencode.jsonc", both = true)))
+        // 之前就是并存态、现在只剩一份：同样拒绝（世界已变，快照不可信）
+        assertTrue(OpenCodeRouteConfig.expectationStale(statusOf(bothExist = true), dir, res("opencode.jsonc", both = false)))
     }
 }
