@@ -17,7 +17,14 @@ internal object RewindTargets {
         val key = taskNavigationKey(conn.host, session)
         val file = DesktopTranscriptMemory.get(key)?.file ?: error("当前对话尚未载入，请稍后重试")
         check(TranscriptStream.latestFor(conn.ssh, session.cwd, session.name) == file) { "服务器已切换对话，请刷新后重新选择消息" }
-        val script = """
+        val script = inspectionScript
+        val result = runCatching { JSONObject(conn.ssh.exec("python3 -c ${Shell.q(script)} ${Shell.q(file)} ${Shell.q(sourceUuid)}")) }
+            .getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it; error("无法确认此消息仍在当前历史分支，请刷新后重试") }
+        return RewindTarget(file, result.getString("sessionId"), sourceUuid,
+            result.optString("parent").takeIf { it.isNotBlank() && it != "null" }, result.getInt("later"), result.getLong("size"), result.getString("modifiedNs"))
+    }
+
+    internal val inspectionScript = """
 import json,os,sys
 path,target=sys.argv[1:]
 nodes={}; leaf=None
@@ -58,9 +65,5 @@ parent=nodes[target][0]
 if parent is not None and parent not in nodes: raise ValueError('Missing parent')
 print(json.dumps({'sessionId':os.path.basename(path).removesuffix('.jsonl'),'parent':parent,'later':later,'size':size,'modifiedNs':str(st.st_mtime_ns)}))
 """.trimIndent()
-        val result = runCatching { JSONObject(conn.ssh.exec("python3 -c ${Shell.q(script)} ${Shell.q(file)} ${Shell.q(sourceUuid)}")) }
-            .getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it; error("无法确认此消息仍在当前历史分支，请刷新后重试") }
-        return RewindTarget(file, result.getString("sessionId"), sourceUuid,
-            result.optString("parent").takeIf { it.isNotBlank() && it != "null" }, result.getInt("later"), result.getLong("size"), result.getString("modifiedNs"))
-    }
+
 }
