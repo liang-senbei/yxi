@@ -4,6 +4,8 @@
 
 冻结提交5d9fa2e60503e9baed27949d968b284e59dfcbc6，分支codex/windows-release-1.4.11，Windows构建https://github.com/liang-senbei/yxi/actions/runs/35640436282 。该run已确认运行中，不因观察超时重新触发。后续开发提交不自动进入此候选。
 
+后续：该CI已成功完成，包括Setup安装启动检查。产物10658376470，905217561字节，传输到hk13的`1.4.11-run35640436282`，下载进程2471519。尚未发布，待传输、校验及WebP资源生命周期结果回收。官网仍1.4.10。
+
 ## 本批代码
 
 - Claude/Codex Agent显示在同一项目树，内部保留运行器适配；共用输入框与快捷键。现有Codex组归属只存本机，跨设备分组同步及每Agent独立线路仍待完成。
