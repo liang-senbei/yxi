@@ -7,11 +7,13 @@ import org.json.JSONObject
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
+import app.yxi.agent.RewindLiveVerification
 
 /** Persist before the first history mutation. A restart or a lost reply must not resume delivery. */
 internal class RewindDeliveryGate(file: File) {
     data class Target(val sessionId: String, val anchorUuid: String, val messageUuid: String)
-    data class Ticket(val taskKey: String, val runtimeId: String, val operationId: String, val target: Target? = null)
+    data class Ticket(val taskKey: String, val runtimeId: String, val operationId: String, val target: Target? = null,
+        val verification: RewindLiveVerification.Query? = null)
     private val disk = DurableFile(file) { decode(it) }
     private var readable = true
     private var tickets by mutableStateOf<List<Ticket>>(try {
@@ -43,11 +45,25 @@ internal class RewindDeliveryGate(file: File) {
         commit(tickets.filterNot { it == ticket })
     }
 
+    /** Persist the exact resume identity before sending restart keys; never contains prompt text or keys. */
+    @Synchronized fun prepareVerification(ticket: Ticket, query: RewindLiveVerification.Query): Ticket {
+        check(readable && tickets.contains(ticket)) { "回退记录已变化，发送保持暂停" }
+        require(RewindLiveVerification.validate(query) == null)
+        require(query.runtimeId == ticket.runtimeId && query.anchorUuid == ticket.target?.anchorUuid &&
+            query.targetUuid == ticket.target?.messageUuid)
+        require(query.transcriptPath.endsWith("/${query.sessionId}.jsonl"))
+        val next = ticket.copy(verification = query)
+        commit(tickets.map { if (it == ticket) next else it })
+        return next
+    }
+
     private fun commit(next: List<Ticket>) {
         disk.write(JSONArray().apply { next.forEach { t -> put(JSONObject()
             .put("task", t.taskKey).put("runtime", t.runtimeId).put("operation", t.operationId)
             .apply { t.target?.let { put("target", JSONObject().put("session", it.sessionId)
-                .put("anchor", it.anchorUuid).put("message", it.messageUuid)) } }) } }.toString())
+                .put("anchor", it.anchorUuid).put("message", it.messageUuid)) }
+                t.verification?.let { put("verification", encodeVerification(it)) }
+            }) } }.toString())
         tickets = next
     }
 
@@ -59,12 +75,26 @@ internal class RewindDeliveryGate(file: File) {
                     listOf(t.sessionId, t.anchorUuid, t.messageUuid).forEach(UUID::fromString)
                 }
             }
-            Ticket(it.getString("task"), it.getString("runtime"), it.getString("operation"), target).also { t ->
+            val verification = if (it.has("verification") && !it.isNull("verification")) decodeVerification(it.getJSONObject("verification")) else null
+            Ticket(it.getString("task"), it.getString("runtime"), it.getString("operation"), target, verification).also { t ->
                 require(t.taskKey.isNotBlank() && t.runtimeId.isNotBlank())
                 UUID.fromString(t.operationId)
+                verification?.let { q -> require(q.runtimeId == t.runtimeId && q.anchorUuid == target?.anchorUuid && q.targetUuid == target?.messageUuid) }
             }
         } }.also { require(it.map { t -> t.taskKey }.distinct().size == it.size) }
     }
+
+    private fun encodeVerification(q: RewindLiveVerification.Query) = JSONObject()
+        .put("sessionName", q.sessionName).put("runtimeId", q.runtimeId).put("paneId", q.paneId)
+        .put("exe", q.exe).put("oldPid", q.oldPid).put("sessionId", q.sessionId)
+        .put("anchorUuid", q.anchorUuid).put("targetUuid", q.targetUuid)
+        .put("transcriptPath", q.transcriptPath).put("notBeforeEpochSec", q.notBeforeEpochSec)
+
+    private fun decodeVerification(d: JSONObject): RewindLiveVerification.Query = RewindLiveVerification.Query(
+        d.getString("sessionName"), d.getString("runtimeId"), d.getString("paneId"), d.getString("exe"),
+        d.getString("oldPid"), d.getString("sessionId"), d.getString("anchorUuid"), d.getString("targetUuid"),
+        d.getString("transcriptPath"), d.getDouble("notBeforeEpochSec"),
+    ).also { require(RewindLiveVerification.validate(it) == null && it.transcriptPath.endsWith("/${it.sessionId}.jsonl")) }
 }
 
 internal object RewindDelivery {
