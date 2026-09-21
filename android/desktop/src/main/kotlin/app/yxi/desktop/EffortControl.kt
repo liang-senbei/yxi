@@ -35,7 +35,7 @@ internal fun effortName(value: String) = when (value) {
 internal fun EffortControl(model: String, levels: List<String>, selected: String?, onSelect: (String) -> Unit) {
     if (levels.isEmpty()) return
     val index = levels.indexOf(selected).coerceAtLeast(0)
-    val fraction = if (levels.size == 1) 0f else index.toFloat() / levels.lastIndex
+    val fraction = (index + 1).toFloat() / levels.size
     val tint = when (selected) {
         "none", "minimal" -> Color(0xFF7A8DA8)
         "low" -> Color(0xFF3B82F6)
@@ -48,7 +48,7 @@ internal fun EffortControl(model: String, levels: List<String>, selected: String
     val change by rememberUpdatedState(onSelect)
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-            Text(model.ifBlank { "选择模型" }, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
+            Text(model.ifBlank { "选择模型" }, color = Tokens.current.textPrimary, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
             Spacer(Modifier.width(6.dp))
             Text(selected?.let(::effortName) ?: "保持当前", color = tint, style = MaterialTheme.typography.bodyMedium)
             Text(" ›", color = Tokens.current.textMuted)
@@ -73,7 +73,7 @@ internal fun EffortControl(model: String, levels: List<String>, selected: String
                 fun select(x: Float) {
                     val inset = 17.dp.toPx()
                     val ratio = ((x - inset) / (size.width - 2 * inset).coerceAtLeast(1f)).coerceIn(0f, 1f)
-                    change(levels[(ratio * levels.lastIndex).roundToInt()])
+                    change(levels[(ratio * levels.size - 1).roundToInt().coerceIn(0, levels.lastIndex)])
                 }
                 awaitEachGesture {
                     val down = awaitFirstDown(); down.consume(); select(down.position.x)
@@ -94,9 +94,9 @@ internal fun EffortControl(model: String, levels: List<String>, selected: String
                 val brush = if (selected == "max") Brush.horizontalGradient(listOf(Color(0xFF5430A5), Color(0xFFA66CEC), Color(0xFFCF8AE8)))
                     else Brush.horizontalGradient(listOf(tint, tint))
                 drawRect(brush, Offset(0f, y), Size(x, trackH))
-                repeat(levels.size) { n ->
-                    val dotX = thumb + (size.width - 2 * thumb) * n / levels.lastIndex.coerceAtLeast(1)
-                    drawCircle(if (n <= index) Color.White.copy(alpha = .4f) else Color(0xFFB8B8BC), 2.3.dp.toPx(), Offset(dotX, size.height / 2))
+                repeat(levels.size + 1) { n ->
+                    val dotX = thumb + (size.width - 2 * thumb) * n / levels.size
+                    drawCircle(if (n <= index + 1) Color.White.copy(alpha = .4f) else Color(0xFFB8B8BC), 2.3.dp.toPx(), Offset(dotX, size.height / 2))
                 }
                 if (selected == "max") repeat(21) { n ->
                     val px = 12.dp.toPx() + ((n * 43) % 257) / 257f * (size.width - 24.dp.toPx())
