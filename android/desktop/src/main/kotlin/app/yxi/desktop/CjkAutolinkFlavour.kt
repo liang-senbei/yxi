@@ -12,7 +12,7 @@ import org.intellij.markdown.lexer.MarkdownLexer
 internal val cjkGfmFlavour: CjkAwareGfmFlavourDescriptor by lazy { CjkAwareGfmFlavourDescriptor() }
 
 /**
- * GFM 变体：裸链接（GFM_AUTOLINK token）内出现首个非 URL 字符（中文/全角标点/emoji）即截断，其后文本回正文；
+ * GFM 变体：裸链接遇到中文句读或引号边界时截断，其后文本回正文；保留 Unicode 路径与查询。
  * 反引号紧邻的裸链接整体降级为纯文本。lexer 只会剪 ASCII 尾标点，「https://x。后续」会整体成链导致点击打开无效 URL；
  * 行内码里的裸链接同理不该可点。在 inline lexer 层拆 token：截出的尾巴存入 pending、下次 advance 以 TEXT 吐出、
  * 交给默认管线渲染为正文。不改写 Markdown 原文——已有 [文本](…) 显式链接的 href（取 LINK_DESTINATION 整段）、
@@ -23,11 +23,11 @@ internal class CjkAwareGfmFlavourDescriptor : GFMFlavourDescriptor() {
 }
 
 /**
- * URL 合法字符（RFC unreserved + reserved + %）：裸链接 token 从起点扫到第一个非法字符即截断——
- * CJK 字符/全角标点/emoji 都不是合法 URL 字符，「https://x。后续」在句号前切开，尾巴整体回正文。
+ * Natural-language punctuation delimits a bare URL. Unicode letters/emoji can be
+ * valid IRI path/query content and must not be removed by an ASCII allowlist.
+ * Ambiguous punctuation inside a URL remains expressible via an explicit Markdown link.
  */
-private val URL_SAFE_CHARS =
-    ("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~:/?#[]@!$&*+,;=%'()").toSet()
+private val PROSE_BOUNDARIES = "。，、；：！？“”‘’「」『』（）【】《》〈〉".toSet()
 
 /**
  * GeneratedLexer 代理（MarkdownLexer 只经它的 5 个成员取流，tokenEnd 先读后推进）：对 GFM_AUTOLINK
@@ -63,7 +63,7 @@ private class CjkTailLexer(private val delegate: GeneratedLexer) : GeneratedLexe
             }
             var cut = end
             for (i in start until end) {
-                if (text[i] !in URL_SAFE_CHARS) { cut = i; break }
+                if (text[i] in PROSE_BOUNDARIES) { cut = i; break }
             }
             if (cut < end) {
                 current = start to cut
