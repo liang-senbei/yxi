@@ -263,7 +263,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                     needsMetadata = false
                 }
                 if (f != file) {
-                    val ts = TranscriptStream.tailStart(ssh, f, 400)
+                    val ts = TranscriptBranchStart.inspect(ssh, f, 400)
                     if (ts == null) { status = "连接还没稳，正在重试…"; delay(2_000); continue }
                     val previous = entry; val previousLease = lease
                     withContext(Dispatchers.Default) { previous?.release(previousLease) }
