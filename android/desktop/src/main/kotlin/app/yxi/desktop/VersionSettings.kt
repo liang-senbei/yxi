@@ -16,6 +16,8 @@ internal fun VersionSettings() {
     val urls = LocalUriHandler.current
     var checking by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf("") }
+    var notesOpen by remember { mutableStateOf(false) }
+    if (notesOpen) ReleaseNotesDialog { notesOpen = false }
     Text("Yxi", style = MaterialTheme.typography.headlineMedium)
     Text("当前版本 · " + if (Updater.version == "dev") "开发版" else Updater.version,
         style = MaterialTheme.typography.titleMedium)
@@ -31,6 +33,7 @@ internal fun VersionSettings() {
             }
         }, enabled = !checking && Updater.state !is Updater.Downloading) { Text(if (checking) "正在检查…" else "检查更新") }
         OutlinedButton({ runCatching { urls.openUri(Updater.FEED + "Yxi-win-Setup.exe?download=" + System.currentTimeMillis()) }.onFailure { notice = "无法打开浏览器，请手动访问官网" } }) { Text("官网下载") }
+        TextButton({ notesOpen = true }) { Text("查看更新日志") }
     }
     if (notice.isNotBlank()) Text(notice, style = MaterialTheme.typography.bodySmall)
     UpdateBanner()

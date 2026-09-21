@@ -176,6 +176,12 @@ object Updater {
 fun UpdateBanner() {
     val s = Updater.state
     var confirm by remember { mutableStateOf(false) }
+    var notesOpen by remember { mutableStateOf(false) }
+    if (notesOpen) ReleaseNotesDialog(when (s) {
+        is Updater.Ready -> s.version
+        is Updater.Available -> s.version
+        else -> null
+    }) { notesOpen = false }
     if (s is Updater.Idle) return
     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(
@@ -188,6 +194,7 @@ fun UpdateBanner() {
             },
             style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f),
         )
+        TextButton({ notesOpen = true }) { Text("更新内容") }
         when (s) {
             is Updater.Ready -> TextButton(onClick = { confirm = true }) { Text("立即重启") }
             is Updater.Error -> TextButton(onClick = Updater::download) { Text("重试") }
