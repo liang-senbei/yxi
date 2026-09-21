@@ -95,6 +95,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.jetbrains.skia.Image as SkiaImage
 
@@ -168,10 +169,17 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                     try {
                         val target = "=" + session.name + ":"
                         val q = app.yxi.ssh.Shell::q
-                        val script = "test \"\$(tmux display-message -p -t ${q(target)} '#{pid}:#{session_id}:#{session_created}')\" = ${q(session.runtimeId)} && tmux send-keys -t ${q(target)} Escape && sleep 0.15 && tmux send-keys -t ${q(target)} Escape && printf '__YXI_REWIND_OPEN__'"
-                        check(ssh.exec(script).contains("__YXI_REWIND_OPEN__")) { "无法打开原任务的回退选择器" }
+                        conn.instructionDeliveryMutex.withLock {
+                            val screen = ssh.exec("tmux capture-pane -p -t ${q(target)}")
+                            check(app.yxi.agent.Model.borrowable(screen) && app.yxi.agent.Prompt.parse(screen) == null) {
+                                "终端仍在工作、等待确认或有未发送输入，请先处理后再回退。"
+                            }
+                            val script = "pane=\$(tmux display-message -p -t ${q(target)} '#{pane_id}') && test \"\$(tmux display-message -p -t \"\$pane\" '#{pid}:#{session_id}:#{session_created}')\" = ${q(session.runtimeId)} && test \"\$(tmux capture-pane -p -t \"\$pane\")\" = ${q(screen.trimEnd('\n'))} && tmux send-keys -t \"\$pane\" Escape && sleep 0.15 && tmux send-keys -t \"\$pane\" Escape && printf '__YXI_REWIND_OPEN__'"
+                            check(ssh.exec(script).contains("__YXI_REWIND_OPEN__")) { "任务状态已变化，未能打开回退选择器" }
+                        }
                         editingMessage = null; onTerminal()
-                    } catch (e: Exception) { sendErr = e.message }
+                    } catch (e: CancellationException) { throw e }
+                    catch (e: Exception) { sendErr = e.message }
                 }
             }, enabled = !target.queued && !session.isCodex && !live.busy && pending == null && session.runtimeId.isNotBlank()) { Text("打开 Claude 回退选择器") } })
     }
