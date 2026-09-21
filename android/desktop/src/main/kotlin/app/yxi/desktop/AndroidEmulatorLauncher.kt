@@ -27,7 +27,7 @@ import java.util.concurrent.TimeUnit
  * 超限后**继续读、只不再写**：管道必须读空，否则模拟器会被日志管道反向卡死。
  */
 class AndroidEmulatorLauncher(
-    private val env: AndroidEmulatorEnvironment.Result,
+    @Volatile private var env: AndroidEmulatorEnvironment.Result,
     /** 日志目录。默认 Yxi 自有目录下的 emulator-logs；测试注临时目录。 */
     private val logDir: File = File(Store.dir, "emulator-logs"),
     /** 进程启动器。生产用 ProcessBuilder 参数列表起 emulator；测试注假的，绝不写真进程。 */
@@ -65,6 +65,10 @@ class AndroidEmulatorLauncher(
 
     /** 自己起的句柄，只增于此、只清于此 —— 「stop 只停自己的」物理上由这张表保证。 */
     private val running = ConcurrentHashMap<String, Running>()
+    @Synchronized fun updateEnvironment(next: AndroidEmulatorEnvironment.Result) {
+        check(env.sdkRoot == next.sdkRoot || runningAvds().isEmpty()) { "请先停止当前 SDK 启动的设备，再切换 SDK" }
+        env = next
+    }
 
     @Synchronized fun launch(avdName: String): LaunchOutcome {
         val emu = env.tools.firstOrNull { it.name == "emulator" }

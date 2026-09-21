@@ -40,7 +40,7 @@ internal fun AndroidEmulatorPanel(open: Boolean, close: () -> Unit) {
         busy = true
         try {
             val found = withContext(Dispatchers.IO) { AndroidEmulatorEnvironment(managedSdkRoot = java.io.File(Store.dir, "android-sdk")).discover() }
-            if (launcher?.runningAvds().isNullOrEmpty()) launcher = AndroidEmulatorLauncher(found)
+            if (launcher == null) launcher = AndroidEmulatorLauncher(found) else launcher!!.updateEnvironment(found)
             environment = found
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { notice = "环境读取失败：${e.message.orEmpty()}" }
@@ -72,7 +72,22 @@ internal fun AndroidEmulatorPanel(open: Boolean, close: () -> Unit) {
                 environment?.missing?.any { it == "emulator" || it == "adb" } == true) AndroidComponentsCard { refresh++ }
             environment?.let { env ->
                 if (windows && env.usable && env.sdkRoot == java.io.File(Store.dir, "android-sdk").absolutePath)
-                    AndroidDeviceSetupCard { refresh++ }
+                    AndroidDeviceSetupCard { name ->
+                        busy = true
+                        scope.launch {
+                            try {
+                                val found = withContext(Dispatchers.IO) { AndroidEmulatorEnvironment(managedSdkRoot = java.io.File(Store.dir, "android-sdk")).discover() }
+                                check(name in found.avds) { "设备创建结果尚未出现在本机列表，请刷新核对" }
+                                val engine = launcher ?: AndroidEmulatorLauncher(found).also { launcher = it }
+                                engine.updateEnvironment(found); environment = found
+                                val result = withContext(Dispatchers.IO) { engine.launch(name) }
+                                notice = if (result.started) "已启动 $name，请等待开机。" else result.reason.orEmpty()
+                                running = engine.runningAvds()
+                            } catch (e: CancellationException) { throw e }
+                            catch (e: Exception) { notice = "设备已创建，但自动启动未完成：${e.message.orEmpty()}" }
+                            finally { busy = false }
+                        }
+                    }
                 if (env.sdkRoot != null) Text("SDK · ${env.sdkRoot}", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 env.tools.firstOrNull { it.name == "emulator" }?.let { executable ->
                     TextButton({

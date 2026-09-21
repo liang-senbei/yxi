@@ -9,7 +9,7 @@ import kotlinx.coroutines.*
 import java.util.concurrent.atomic.AtomicBoolean
 
 @Composable
-internal fun AndroidDeviceSetupCard(onCreated: () -> Unit) {
+internal fun AndroidDeviceSetupCard(onCreated: (String) -> Unit) {
     val installer = remember { AndroidSdkComponentInstaller() }
     val creator = remember { AndroidAvdCreator() }
     val scope = rememberCoroutineScope()
@@ -57,13 +57,13 @@ internal fun AndroidDeviceSetupCard(onCreated: () -> Unit) {
                     scope.launch {
                         try {
                             val result = withContext(Dispatchers.IO) { creator.create(chosenName, image.path, "pixel", cancel::get) }
-                            notice = if (result.created) "虚拟设备已创建，可在设备列表点击运行。" else result.reason.orEmpty()
-                            if (result.created) onCreated()
+                            notice = if (result.created) "虚拟设备已创建，正在准备启动。" else result.reason.orEmpty()
+                            if (result.created) onCreated(chosenName)
                         } catch (e: CancellationException) { cancel.set(true); throw e }
                         catch (_: Exception) { notice = "创建未完成，请刷新设备列表后核对。" }
                         finally { busy = false }
                     }
-                }, enabled = !busy && name.isNotBlank()) { Text("创建设备") }
+                }, enabled = !busy && name.isNotBlank()) { Text("创建并启动") }
                 if (busy) TextButton({ cancel.set(true) }) { Text("取消创建") }
             }
         }
