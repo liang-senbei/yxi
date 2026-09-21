@@ -510,18 +510,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
             onSearch = { searchOpen = true },
             onVoice = { voiceOpen = true },
             onRoutes = onRoutes,
-            onQuickPicker = {
-                if (session.isCodex) onRoutes() else scope.launch {
-                    try {
-                        check(!live.busy && pending == null && !keyBusy) { "请等当前轮次或审批结束后切换模型" }
-                        val q = app.yxi.ssh.Shell::q
-                        val target = "=" + session.name + ":"
-                        val script = "pane=\$(tmux display-message -p -t ${q(target)} '#{pane_id}') && test \"\$(tmux display-message -p -t \"\$pane\" '#{pid}:#{session_id}:#{session_created}')\" = ${q(session.runtimeId)} && tmux send-keys -t \"\$pane\" M-p && printf '__YXI_MODEL_PICKER__'"
-                        check(session.runtimeId.isNotBlank() && ssh.exec(script).contains("__YXI_MODEL_PICKER__")) { "无法打开当前任务的模型选择器" }
-                        onTerminal()
-                    } catch (e: Exception) { sendErr = e.message }
-                }
-            },
+            modelControl = { if (session.isCodex) TextButton(onRoutes) { Text("模型与思考 ⌄") } else ConversationModelMenu(conn, session, ctx?.model.orEmpty(), ctx?.effort.orEmpty(), onRoutes) },
         )
     }
 }
@@ -542,7 +531,7 @@ private fun Composer(
     onSearch: () -> Unit,
     onVoice: () -> Unit,
     onRoutes: () -> Unit,
-    onQuickPicker: () -> Unit,
+    modelControl: @Composable () -> Unit,
 ) {
     val t = Tokens.current
     var focused by remember { mutableStateOf(false) }
@@ -580,8 +569,8 @@ private fun Composer(
         )
         ctx?.let { c ->
             androidx.compose.foundation.layout.FlowRow(Modifier.fillMaxWidth().padding(14.dp, 2.dp, 14.dp, 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Chip(modelShort(c.model), onClick = onQuickPicker)
-                Chip(effortLabel(c.effort) ?: "思考强度", color = t.accent, onClick = onQuickPicker)
+
+
                 Chip("线路", onClick = onRoutes)
                 if (c.mode == "plan") Chip("计划模式", color = t.warning)
                 if (c.tokens > 0) Chip("上下文 " + kShort(c.tokens))
@@ -594,6 +583,7 @@ private fun Composer(
             IconButton(onVoice, Modifier.size(30.dp)) { Icon(Icons.Outlined.Mic, "语音输入", Modifier.size(16.dp), tint = t.textSecondary) }
             if (!canAct) Text("重新连接后可操作", fontSize = 11.sp, color = t.textMuted)
             Spacer(Modifier.weight(1f))
+            modelControl()
             // 圆形发送（Codex 的 ↑）：能发时点亮（Copper 主操作，手机端同款）；附件在传时灰着不亮
             Box(
                 Modifier.size(30.dp).clip(CircleShape)
@@ -915,4 +905,5 @@ private fun summary(c: ChatItem.ToolCall): String {
     }
     return raw.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty().trim()
 }
+
 

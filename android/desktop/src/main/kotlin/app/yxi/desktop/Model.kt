@@ -171,6 +171,7 @@ class Conn(val host: Host, hostKeys: HostKeys) {
     var keyChanged by mutableStateOf(false)
     var sessions by mutableStateOf<List<Session>>(emptyList())
     internal val instructionDeliveryMutex = kotlinx.coroutines.sync.Mutex()
+    internal val modelChanges = androidx.compose.runtime.mutableStateMapOf<String, ConversationModelChange>()
     internal val terminalCompletion = mutableMapOf<String, Long>()
     internal val terminalAwaiting = mutableMapOf<String, Pair<Long, Boolean>>()
     var projectGroups by mutableStateOf(app.yxi.agent.Groups.Table()); private set
