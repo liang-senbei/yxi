@@ -32,9 +32,10 @@ internal class TranscriptBranch {
         }
         val switched = chain != null && leaf != null && leaf !in chain
         if (switched) {
+            val kept = checkNotNull(chain)
             rows.removeAll { row -> !row.operational &&
-                (chain!!.isEmpty() || (row.id ?: row.owner)?.let { it !in chain } == true) }
-            parents.keys.retainAll(chain!!)
+                (kept.isEmpty() || (row.id ?: row.owner)?.let { it !in kept } == true) }
+            parents.keys.retainAll(kept)
         }
         // File snapshots/progress can be large. Keep their parent links, not their payloads.
         if (type in setOf("user", "assistant", "attachment", "mode", "queue-operation"))
