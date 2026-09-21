@@ -9,6 +9,14 @@ import androidx.compose.ui.platform.UriHandler
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
+/** GFM emits bare www. links without a scheme; preserve other relative file links. */
+internal fun normalizedWebLink(value: String): String {
+    if (!value.startsWith("www.", ignoreCase = true)) return value
+    val candidate = "https://$value"
+    val parsed = runCatching { java.net.URI(candidate) }.getOrNull() ?: return value
+    return if (parsed.userInfo == null && parsed.host?.split('.')?.let { it.size >= 3 && it.all(String::isNotBlank) } == true) candidate else value
+}
+
 /** Ordinary web links stay alongside the conversation; Ctrl opens the OS browser. */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable

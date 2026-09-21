@@ -30,7 +30,7 @@ internal fun AndroidEmulatorPanel(open: Boolean, close: () -> Unit) {
         if (!open || !windows) return@LaunchedEffect
         busy = true
         try {
-            val found = withContext(Dispatchers.IO) { AndroidEmulatorEnvironment().discover() }
+            val found = withContext(Dispatchers.IO) { AndroidEmulatorEnvironment(managedSdkRoot = java.io.File(Store.dir, "android-sdk")).discover() }
             if (launcher?.runningAvds().isNullOrEmpty()) launcher = AndroidEmulatorLauncher(found)
             environment = found
         } catch (e: CancellationException) { throw e }

@@ -27,6 +27,7 @@ class AndroidEmulatorEnvironment(
     private val env: (String) -> String? = { System.getenv(it) },
     /** `emulator -list-avds` 的执行器，返回 (stdout 原始行, 错误)。测试注假的，生产走真进程。 */
     private val listAvds: (File) -> Pair<List<String>, String?> = ::runEmulatorListAvds,
+    private val managedSdkRoot: File? = null,
 ) {
 
     /** 找到的一件工具。 */
@@ -130,6 +131,7 @@ class AndroidEmulatorEnvironment(
      * LOCALAPPDATA 缺了再从 USERPROFILE 拼——命令行环境有时只有后者。
      */
     private fun rootCandidates(): List<String> = listOfNotNull(
+        managedSdkRoot?.absolutePath,
         env("ANDROID_HOME"),
         env("ANDROID_SDK_ROOT"),
         env("LOCALAPPDATA")?.let { File(File(it, "Android"), "Sdk").absolutePath },
