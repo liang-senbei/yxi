@@ -19,4 +19,8 @@ Local guard validation (no containers or SSH processes are started):
 python3 -m unittest discover -s dev/isolated-tests -p test_verify_container.py
 ```
 
-Remaining verification: image build, an actual inspected container run, constrained cleanup under failure, and migration of the quarantined real SSH/CLI test. Passing the guard unit tests alone does not prove those items.
+Verified on hk13: image source `4caf4f7` built after setting a UTF-8 locale; runner `09c6f59` validated Docker's canonical `CAP_` capability names without expanding the allowlist. An intentionally blocked pre-start attempt was removed, and the subsequent inspected container ran `RewindCommandStreamTest` with 3 executed tests, no failures or skips, then was removed. Evidence is retained under the run directories in `~/.cache/yxi-isolated-tests/`.
+
+To validate a runner-only change against an already built, explicitly recorded image, set `YXI_TEST_IMAGE_REVISION` to its full commit SHA. Results record both runner and image revisions; this is not evidence for newer application code.
+
+Remaining verification: runtime timeout/failure cleanup and migration of the quarantined real SSH/CLI test. The 3-test smoke run does not prove the complete rewind workflow.
