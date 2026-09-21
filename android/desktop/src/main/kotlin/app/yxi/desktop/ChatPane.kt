@@ -160,7 +160,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
         WorkbenchDialog(onDismissRequest = { editingMessage = null }, title = { Text("编辑这条消息") },
             text = { Column {
                 androidx.compose.material3.OutlinedTextField(editedText, { editedText = it }, modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 320.dp), label = { Text("消息内容") })
-                Text("载入草稿会作为新消息继续。精确回到此轮的操作正在接入；当前原生回退入口仍需选择历史轮次。", style = MaterialTheme.typography.bodySmall)
+                Text("载入草稿不会回退历史。恢复旧上下文请使用回退入口。", style = MaterialTheme.typography.bodySmall)
             } },
             confirmButton = { TextButton({ draft = TextFieldValue(editedText, selection = TextRange(editedText.length)); editingMessage = null; focus.requestFocus() }, enabled = editedText.isNotBlank()) { Text("载入草稿") } },
             dismissButton = { TextButton({
@@ -173,7 +173,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                         editingMessage = null; onTerminal()
                     } catch (e: Exception) { sendErr = e.message }
                 }
-            }, enabled = !session.isCodex && !live.busy && pending == null && session.runtimeId.isNotBlank()) { Text("打开 Claude 回退选择器") } })
+            }, enabled = !target.queued && !session.isCodex && !live.busy && pending == null && session.runtimeId.isNotBlank()) { Text("打开 Claude 回退选择器") } })
     }
     val staged = remember(taskKey) { mutableStateListOf<DraftAttach>() }
 
