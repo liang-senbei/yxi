@@ -42,25 +42,34 @@ class GeminiRouteConfigTest {
         assertEquals("k2", kv[GeminiRouteConfig.KEY_API])
         assertEquals("m2", kv[GeminiRouteConfig.KEY_MODEL])
         assertTrue(out.indexOf("# 中转商备注") < out.indexOf("GOOGLE_GEMINI_BASE_URL="), "顺序不动")
-        assertTrue(out.indexOf("UNKNOWN_KEEP=") < out.indexOf("GEMINI_API_KEY=k2"), "未命中键不挪位")
+        assertTrue(out.indexOf("UNKNOWN_KEEP=") < out.indexOf("GEMINI_API_KEY='k2'"), "未命中键不挪位")
     }
 
     @Test
     fun `env手术保留export前缀`() {
         val out = GeminiRouteConfig.patchEnv("export GEMINI_API_KEY=old\n", GeminiRouteConfig.Patch(apiKey = "new"))
-        assertEquals("export GEMINI_API_KEY=new\n", out)
+        assertEquals("export GEMINI_API_KEY='new'\n", out)
     }
 
     @Test
     fun `env缺键补尾`() {
         val out = GeminiRouteConfig.patchEnv("FOO=bar\n", GeminiRouteConfig.Patch(apiKey = "k", baseUrl = "https://a.b"))
-        assertEquals("FOO=bar\nGEMINI_API_KEY=k\nGOOGLE_GEMINI_BASE_URL=https://a.b\n", out)
+        assertEquals("FOO=bar\nGEMINI_API_KEY='k'\nGOOGLE_GEMINI_BASE_URL='https://a.b'\n", out)
     }
 
     @Test
     fun `env空串显式清空`() {
         val out = GeminiRouteConfig.patchEnv("GEMINI_API_KEY=old\n", GeminiRouteConfig.Patch(apiKey = ""))
-        assertEquals("GEMINI_API_KEY=\n", out)
+        assertEquals("GEMINI_API_KEY=''\n", out)
+    }
+
+    @Test
+    fun `env井号空格单引号保真`() {
+        // 61eab14：值统一单引号包裹——裸写时 `#` 会成为 dotenv 行内注释、空格会被截断
+        val secret = "sk abc #1 x"
+        val out = GeminiRouteConfig.patchEnv("GEMINI_API_KEY=old\n", GeminiRouteConfig.Patch(apiKey = secret))
+        assertEquals("GEMINI_API_KEY='sk abc #1 x'\n", out)
+        assertEquals(secret, GeminiRouteConfig.parseEnv(out)[GeminiRouteConfig.KEY_API], "往返不丢字符")
     }
 
     @Test
@@ -88,7 +97,7 @@ class GeminiRouteConfigTest {
             GeminiRouteConfig.patchEnv(null, GeminiRouteConfig.Patch(baseUrl = "https://u:p@a.b"))
         }
         // 空串 = 显式清空，放行
-        assertEquals("GOOGLE_GEMINI_BASE_URL=\n", GeminiRouteConfig.patchEnv(null, GeminiRouteConfig.Patch(baseUrl = "")))
+        assertEquals("GOOGLE_GEMINI_BASE_URL=''\n", GeminiRouteConfig.patchEnv(null, GeminiRouteConfig.Patch(baseUrl = "")))
     }
 
     // ---------- patchSettings：只动 selectedType，其余保留 ----------
