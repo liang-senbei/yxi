@@ -93,7 +93,7 @@ class BrowserPreview(val owner: Host, val taskId: String) {
     var error by mutableStateOf("")
     var loading by mutableStateOf(false)
     var preparing by mutableStateOf(false)
-        private set
+        internal set
     var capturing by mutableStateOf(false)
         private set
     @Volatile private var pageVersion = 0L
