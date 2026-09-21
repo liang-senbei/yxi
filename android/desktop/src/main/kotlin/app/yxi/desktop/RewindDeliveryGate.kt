@@ -4,6 +4,9 @@ import java.io.File
 import java.util.UUID
 import org.json.JSONArray
 import org.json.JSONObject
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 
 /** Persist before the first history mutation. A restart or a lost reply must not resume delivery. */
 internal class RewindDeliveryGate(file: File) {
@@ -11,7 +14,7 @@ internal class RewindDeliveryGate(file: File) {
     data class Ticket(val taskKey: String, val runtimeId: String, val operationId: String, val target: Target? = null)
     private val disk = DurableFile(file) { decode(it) }
     private var readable = true
-    private var tickets: List<Ticket> = try {
+    private var tickets by mutableStateOf<List<Ticket>>(try {
         // Never restore an older empty backup: it can predate an in-flight rewind.
         // In particular, do not rewrite the primary while reading; otherwise the
         // second application restart could mistake a restored empty file for safety.
@@ -19,7 +22,7 @@ internal class RewindDeliveryGate(file: File) {
             check(!file.exists() && !File(file.parentFile, file.name + ".bak").exists())
             emptyList()
         }
-    } catch (_: Exception) { readable = false; emptyList() }
+    } catch (_: Exception) { readable = false; emptyList() })
 
     @Synchronized fun blocked(taskKey: String): Boolean = !readable || tickets.any { it.taskKey == taskKey }
     @Synchronized fun pending(taskKey: String): Ticket? = tickets.firstOrNull { it.taskKey == taskKey }

@@ -359,6 +359,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
     }
 
     val canAct = !keyBusy && conn.status == Conn.Status.Connected   // 断着时按钮灰掉：send-keys 会静默失败
+    val rewindBlocked = RewindDelivery.gate.blocked(taskKey)
 
     /** Enter（输入框空着）= 第一项 / 提交，Codex 的「Enter 批准」。 */
     fun approve() {
@@ -467,13 +468,17 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
         if (live.busy) BusyLine(live.status)
         val p = pending
         val a = approval?.takeIf { it.first == p?.fingerprint }?.second ?: Approval(null, "")   // 抓屏还没回来就先只有标题
-        if (p != null) ApprovalCard(p, a, busy = !canAct, onKey = { sendKey(it, p.fingerprint) }, onSubmit = { submit(p) })
+        if (p != null) ApprovalCard(p, a, busy = !canAct || rewindBlocked, onKey = { sendKey(it, p.fingerprint) }, onSubmit = { submit(p) })
+        if (rewindBlocked) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("回退尚未确认，发送已暂停。输入和排队消息已保留。", Modifier.weight(1f), color = t.warning, fontSize = 12.sp)
+            TextButton(onTerminal) { Text("查看终端") }
+        }
         sendErr?.let { Note(it, t.danger) }
-        InstructionStrip(instructions, taskNavigationKey(conn.host, session), !sending && !live.busy && pending == null && ssh.isConnected, ::deliver,
+        InstructionStrip(instructions, taskNavigationKey(conn.host, session), !rewindBlocked && !sending && !live.busy && pending == null && ssh.isConnected, ::deliver,
             onQuery = { queryInstructionDelivery(conn, session, it) }, compactUnknown = true,
             automatic = QueuePreferences.enabled(taskKey),
             onAutomaticChange = { QueuePreferences.setEnabled(taskKey, it) },
-            canSteer = !session.isCodex && live.busy && pending == null && !sending && !keyBusy,
+            canSteer = !rewindBlocked && !session.isCodex && live.busy && pending == null && !sending && !keyBusy,
             onSteer = { item ->
                 keyBusy = true
                 scope.launch {
@@ -505,11 +510,12 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
             ctx = ctx,
             busy = live.busy, waiting = pending != null,
             hint = when {
+                rewindBlocked -> "可继续编辑，确认回退状态后再发送"
                 pending != null || live.busy -> "输入下一条指令，当前任务结束后自动发送"
                 else -> "跟它说点什么… Enter 发送，Shift+Enter 换行；截图直接 Ctrl+V"
             },
             hasPending = pending != null,
-            canSend = (draft.text.isNotBlank() || hasDone) && !sending && staged.all { it.state is DraftState.Done },
+            canSend = !rewindBlocked && (draft.text.isNotBlank() || hasDone) && !sending && staged.all { it.state is DraftState.Done },
             canAct = canAct,
             onAttach = { Attach.pickFiles().forEach { stage(it) } },
             onPaste = ::stagePasted,
