@@ -21,6 +21,7 @@ internal fun AndroidEmulatorPanel(open: Boolean, close: () -> Unit) {
     var environment by remember { mutableStateOf<AndroidEmulatorEnvironment.Result?>(null) }
     var launcher by remember { mutableStateOf<AndroidEmulatorLauncher?>(null) }
     var running by remember { mutableStateOf(emptyList<String>()) }
+    var exits by remember { mutableStateOf(emptyMap<String, AndroidEmulatorLauncher.ExitInfo>()) }
     var busy by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf("") }
     var refresh by remember { mutableStateOf(0) }
@@ -38,7 +39,11 @@ internal fun AndroidEmulatorPanel(open: Boolean, close: () -> Unit) {
         finally { busy = false }
     }
     LaunchedEffect(open) {
-        while (open) { running = launcher?.runningAvds().orEmpty(); delay(1000) }
+        while (open) {
+            running = launcher?.runningAvds().orEmpty()
+            exits = launcher?.exits().orEmpty()
+            delay(1000)
+        }
     }
     if (!open) return
     WorkbenchDialog(onDismissRequest = close, title = { Text("Android 模拟器") }, text = {
@@ -54,7 +59,20 @@ internal fun AndroidEmulatorPanel(open: Boolean, close: () -> Unit) {
                         Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(name, style = MaterialTheme.typography.titleSmall)
-                                Text(if (name in running) "进程运行中" else "本地虚拟设备", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                                val exit = exits[name]
+                                Text(when {
+                                    name in running -> "模拟器进程运行中"
+                                    exit?.stoppedByUser == true || exit?.code == 0 -> "已停止"
+                                    exit != null -> "模拟器已退出 · 错误码 ${exit.code}"
+                                    else -> "本地虚拟设备"
+                                }, style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                                if (exit != null) TextButton({
+                                    scope.launch {
+                                        try { withContext(Dispatchers.IO) { java.awt.Desktop.getDesktop().open(exit.log) } }
+                                        catch (e: CancellationException) { throw e }
+                                        catch (e: Exception) { notice = "日志无法打开：${e.message.orEmpty()}" }
+                                    }
+                                }, enabled = exit.log.isFile) { Text("查看启动日志") }
                             }
                             TextButton({
                                 val engine = launcher ?: return@TextButton

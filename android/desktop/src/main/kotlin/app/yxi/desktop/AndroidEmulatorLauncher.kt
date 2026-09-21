@@ -56,7 +56,12 @@ class AndroidEmulatorLauncher(
     /** 一次启动的结果。[started] false 时 [reason] 说人话，直接可以摆到界面上。 */
     data class LaunchOutcome(val avd: String, val started: Boolean, val pid: Long? = null, val reason: String? = null)
 
-    private class Running(val process: EmuProcess, val log: File)
+    private class Running(val process: EmuProcess, val log: File) {
+        @Volatile var stopping = false
+    }
+    data class ExitInfo(val code: Int, val stoppedByUser: Boolean, val log: File)
+    private val exited = ConcurrentHashMap<String, ExitInfo>()
+    fun exits(): Map<String, ExitInfo> = exited.toMap()
 
     /** 自己起的句柄，只增于此、只清于此 —— 「stop 只停自己的」物理上由这张表保证。 */
     private val running = ConcurrentHashMap<String, Running>()
@@ -83,6 +88,7 @@ class AndroidEmulatorLauncher(
             return LaunchOutcome(avdName, false, reason = "启动失败：${e.message?.take(80)}")
         }
         val h = Running(proc, log)
+        exited.remove(avdName)
         running[avdName] = h
         watch(avdName, h)
         return LaunchOutcome(avdName, true, pid = proc.pid)
@@ -91,6 +97,7 @@ class AndroidEmulatorLauncher(
     /** 停掉自己起的某个 AVD。false = 那个 AVD 不是这里起的（或已退出），什么也不做。 */
     fun stop(avdName: String): Boolean {
         val h = running[avdName] ?: return false
+        h.stopping = true
         h.process.destroy()
         Thread {
             // 优雅窗口内没退就强杀；放进短命线程，调用方（可能在 UI 线程）不等这一下
@@ -128,7 +135,8 @@ class AndroidEmulatorLauncher(
     private fun watch(avdName: String, h: Running) {
         Thread {
             drainLog(h)
-            h.process.waitFor()
+            val code = runCatching { h.process.waitFor() }.getOrDefault(-1)
+            exited[avdName] = ExitInfo(code, h.stopping, h.log)
             // remove(k, v) 带值比较：退出期间同名被重新起过的话，别把新句柄误删
             running.remove(avdName, h)
         }.apply { isDaemon = true; name = "yxi-emulator-watch-$avdName" }.start()
