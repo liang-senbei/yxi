@@ -204,17 +204,10 @@ object Rewind {
     const val CAP_TAG = "__YXI_REWIND_CAP__"
 
     /**
-     * 捕获原运行器启动上下文（老板令：明确读取并保留，不猜；不输出凭据）。
-     *
-     * 做四件事，全程只读进程元数据，**不碰 environ**（环境块里是密钥的老家，读不得）：
-     *
-     * 1. 找 pid：先查 cloud-enter 登记表（~/.claude/sessions 下的登记 json，按 tmux 名精确匹配
-     *    `"tmux":"<名>:"`）；没有就退回 pane 直接子进程里认 cmdline 含 `claude` 的那个；
-     * 2. 解析真 binary：`readlink /proc/<pid>/exe`；
-     * 3. argv 存**服务器本地** mktemp（chmod 600）—— 值不回传客户端；
-     * 4. 只回传：白名单旗标（`--model`/`--effort`/`-n|--name`）的值 + 其余旗标的**名**
-     *    （值一律不回传，凭据没有出口）+ pid 与 pane id（`#{pane_id}`）——
-     *    后两个是 relaunch 时**同一实例复核**的比对基准（runtimeId 在门禁 snapshot 里有）。
+     * Resolve the live pane first, then identify its unique native Claude process.
+     * Old session registration files are not a process-identity source.
+     * Arguments remain in a mode-600 server temporary file; only model/effort/name
+     * and unsupported flag names are returned. No environment values are returned.
      */
     fun captureCommand(sessionName: String): String {
         val n = q(sessionName)
@@ -438,25 +431,9 @@ object Rewind {
     const val CHECK_TAG = "__YXI_REWIND_CHK__"
 
     /**
-     * 执行前的**结构化核对**（老板令：精确 source/anchor/target UUID，不能只靠文本）。
-     *
-     * 三件事全部对转录文件做**字段级**匹配，一个字正文都不看：
-     *
-     * 1. **source**：`~/.claude/projects/<cwd 编码>/<sessionId>.jsonl` 存在
-     *    （编码 = 路径非字母数字全换 `-`，跟 [Dirs] 拉起路径同一个 sed）；
-     * 2. **anchor**：文件里有**自己 uuid 字段**恰好等于 anchor 的行，且行号在 target 之前；
-     * 3. **target**（[Plan.targetUuid]）：有自己 uuid 恰好等于 target 的行，且那一行
-     *    `parentUuid` **恰好等于 anchor**（父子关系，不是文本相似）、
-     *    `type == "user"`、不是 `isMeta`（工具结果/注入消息不算真 prompt）。
-     *
-     * 多轮回退（drops 未声明）时丢弃范围的正确性**全靠这一步**把守 ——
-     * 它核对的是父子关系与类型，跟目标在第几轮无关。
-     *
-     * ⚠️ 匹配键写成 `"uuid":"<值>"` 整串 —— JSON 里 `parentUuid` 是大写 U 开头，
-     * `"uuid"` 这个带引号的键在它里面天然不出现，子串匹配不会误命中；
-     * 这就是拿字段名当边界，不是 grep 正文。
-     *
-     * @param cwd 会话工作目录（[app.yxi.agent.SessionProbe.Session.cwd]，会话列表现成的）
+     * Verify the inspected file using top-level JSON fields, independent of formatting.
+     * The optional size and mtime bind execution to the snapshot selected in the UI.
+     * Without an explicit file, retain the legacy project-directory lookup.
      */
     fun verifyCommand(cwd: String, p: Plan, sourceFile: String? = null,
         expectedSize: Long? = null, expectedModifiedNs: String? = null): String {
