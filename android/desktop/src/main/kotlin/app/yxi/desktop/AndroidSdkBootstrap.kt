@@ -318,7 +318,8 @@ class AndroidSdkBootstrap(
         const val REPO_URL = "https://dl.google.com/android/repository/repository2-3.xml"
         /** 清单里的下载 url 是相对路径，拼回这个基址；install 也只认这个前缀。 */
         const val REPO_BASE = "https://dl.google.com/android/repository/"
-        private const val STABLE_CHANNEL = "channel-0"
+        /** 稳定通道（镜像/工具包的可选列表都只收稳定通道，preview/beta 不进 UI）。 */
+        internal const val STABLE_CHANNEL = "channel-0"
 
         /** command-line tools 解开 ~500MB；超过 2GB 一定是异常包，zip 炸弹不解。 */
         const val MAX_EXTRACT_BYTES = 2L * 1024 * 1024 * 1024

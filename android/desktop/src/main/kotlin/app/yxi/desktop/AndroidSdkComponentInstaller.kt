@@ -2,11 +2,40 @@ package app.yxi.desktop
 
 import java.io.File
 import java.io.IOException
-import java.io.RandomAccessFile
 import java.util.concurrent.TimeUnit
 
 /** 一次外部工具运行的结果。exitCode=-1 且 cancelled/timedOut=false 表示没跑起来（output 里是原因）。 */
 data class ToolRun(val exitCode: Int, val output: String, val cancelled: Boolean = false, val timedOut: Boolean = false)
+
+/** 工具输出只保留末尾 64KB——回执与诊断够用，内存不随输出增长。 */
+internal const val TOOL_OUTPUT_TAIL_BYTES = 64 * 1024
+
+/**
+ * 输出尾部环形缓冲：外部工具一跑几分钟，输出总量不可控，
+ * 只保留**末尾** [cap] 字节（诊断信息都在结尾），内存/磁盘都不随输出增长。
+ */
+private class TailBuffer(private val cap: Int) {
+    private val lock = Any()
+    private val buf = ByteArray(cap)
+    private var len = 0
+
+    fun append(b: ByteArray, off: Int, n: Int) {
+        synchronized(lock) {
+            if (n <= 0) return
+            if (n >= cap) {
+                System.arraycopy(b, off + n - cap, buf, 0, cap)
+                len = cap
+                return
+            }
+            val keep = minOf(len, cap - n)
+            System.arraycopy(buf, len - keep, buf, 0, keep)
+            System.arraycopy(b, off, buf, keep, n)
+            len = keep + n
+        }
+    }
+
+    fun text(): String = synchronized(lock) { String(buf, 0, len, Charsets.UTF_8) }
+}
 
 /**
  * 真跑 SDK 工具（sdkmanager/avdmanager 的 .bat）。
@@ -19,37 +48,53 @@ data class ToolRun(val exitCode: Int, val output: String, val cancelled: Boolean
  * - 启动后**立即关闭 stdin**——sdkmanager 的交互提示（`--licenses` 的 `(y/N)?`、
  *   install 的「Continue installing the remaining packages?」）读到 EOF 一律走
  *   「拒绝」分支并退出，既不会挂着等输入，也绝不会替我们接受任何许可；
+ * - 输出由**drain 线程持续抽干**进 [TailBuffer]（只留末尾 64KB）：旧实现重定向到
+ *   临时文件、跑多久长多大，长安装能把磁盘写穿；
+ * - .bat 依赖 JAVA_HOME：用户机器可能没装 JDK——把**我们自己运行时的** java.home
+ *   （`System.getProperty("java.home")`，bin 下有 java 可执行才设）只放进**子进程**
+ *   的环境，绝不写系统环境变量；
  * - 取消/超时杀 **进程树**：`cmd /c` 的父进程死了 Java 子进程不一定死，
- *   Windows 上 `taskkill /F /T /PID` 杀整棵，其余平台 destroyForcibly 兜底；
- * - 输出重定向临时文件（避开设管道边跑边读的死锁），只回读**末尾 64KB**
- *   （诊断信息都在结尾，回执只需要它），临时文件不设上限的旧实现已收紧。
+ *   Windows 上 `taskkill /F /T /PID` 杀整棵，其余平台 destroyForcibly 兜底。
  */
 internal fun runToolNative(exe: File, args: List<String>, timeoutSeconds: Long, isCancelled: () -> Boolean): ToolRun {
-    val out = File.createTempFile("yxi-sdktool-", ".log")
-    try {
-        val p = try {
-            ProcessBuilder(listOf("cmd", "/c", exe.absolutePath) + args)
-                .redirectErrorStream(true)
-                .redirectOutput(out)
-                .start()
-        } catch (e: IOException) {
-            return ToolRun(-1, "无法启动 ${exe.name}：${e.message?.take(120)}（cmd /c 仅在 Windows 上可用）")
+    val p = try {
+        ProcessBuilder(listOf("cmd", "/c", exe.absolutePath) + args)
+            .redirectErrorStream(true)
+            .apply { environment().putAll(javaHomeEnv()) }
+            .start()
+    } catch (e: IOException) {
+        return ToolRun(-1, "无法启动 ${exe.name}：${e.message?.take(120)}（cmd /c 仅在 Windows 上可用）")
+    }
+    runCatching { p.outputStream.close() }   // stdin EOF：任何交互提示都走「拒绝」，绝不盲 yes
+    val tail = TailBuffer(TOOL_OUTPUT_TAIL_BYTES)
+    val drain = Thread {
+        runCatching {
+            p.inputStream.use { input ->
+                val buf = ByteArray(8 * 1024)
+                while (true) {
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    tail.append(buf, 0, n)
+                }
+            }
         }
-        runCatching { p.outputStream.close() }   // stdin EOF：任何交互提示都走「拒绝」，绝不盲 yes
+    }.apply { isDaemon = true; name = "yxi-sdktool-drain" }
+    drain.start()
+    try {
         val deadline = System.currentTimeMillis() + timeoutSeconds * 1000
         while (true) {
-            if (p.waitFor(500, TimeUnit.MILLISECONDS)) return ToolRun(p.exitValue(), tailOf(out))
+            if (p.waitFor(500, TimeUnit.MILLISECONDS)) return ToolRun(p.exitValue(), tail.text())
             if (isCancelled()) {
                 killTree(p)
-                return ToolRun(-1, tailOf(out), cancelled = true)
+                return ToolRun(-1, tail.text(), cancelled = true)
             }
             if (System.currentTimeMillis() > deadline) {
                 killTree(p)
-                return ToolRun(-1, tailOf(out), timedOut = true)
+                return ToolRun(-1, tail.text(), timedOut = true)
             }
         }
     } finally {
-        out.delete()
+        drain.join(2_000)   // 杀掉后流会 EOF，drain 随即结束；join 只为收齐最后一批输出
     }
 }
 
@@ -67,17 +112,13 @@ private fun killTree(p: Process) {
     runCatching { p.waitFor(5, TimeUnit.SECONDS) }
 }
 
-/** 只回读输出**末尾**，防无上限读入；截断点可能切在多字节字符中间，容错解码。 */
-private fun tailOf(out: File, maxBytes: Long = 64L * 1024): String = runCatching {
-    val len = out.length()
-    if (len <= maxBytes) return@runCatching out.readText()
-    RandomAccessFile(out, "r").use { raf ->
-        raf.seek(len - maxBytes)
-        val bytes = ByteArray(maxBytes.toInt())
-        val n = raf.read(bytes)
-        String(bytes, 0, if (n < 0) 0 else n, Charsets.UTF_8)
-    }
-}.getOrDefault("")
+/** 只给子进程的 JAVA_HOME：用应用自身运行时的 java.home（确有 java 可执行才设），不碰系统环境。 */
+private fun javaHomeEnv(): Map<String, String> {
+    val home = System.getProperty("java.home") ?: return emptyMap()
+    val windows = (System.getProperty("os.name") ?: "").lowercase().contains("windows")
+    val exe = if (windows) "java.exe" else "java"
+    return if (File(home, "bin").resolve(exe).isFile) mapOf("JAVA_HOME" to home) else emptyMap()
+}
 
 /**
  * AndroidSdkComponentInstaller —— 在 Yxi 自有 SDK 根（`Store.dir/android-sdk`）上
@@ -91,9 +132,11 @@ private fun tailOf(out: File, maxBytes: Long = 64L * 1024): String = runCatching
  *   XML 解析的**原值、不 trim**（licenseType 是 simpleContent xsd:string，JAXB
  *   原样保留，含首尾换行——官方 android-sdk-license 文本本身以 `\n` 收尾）；
  *   追加格式与 License.setAccepted 一致（`"%n%s"`，首行前也有换行）；
- * - 用户按**许可 ID** 勾选，hash 由同一份官方 XML 解析自算——不接受外部传 hash
- *   （裸 40-hex 证明不了它对应哪段文本）；勾选集合必须是所选包 uses-license
- *   引用的**子集**，之外的一个不写——机制上排除「替用户 yes 全部许可」；
+ * - 用户按**许可 ID** 勾选，并随勾选携带**同意时看到的 hash 快照**
+ *   （[install] 的 `reviewedLicenseHashes`）——安装时重新取清单再核对，官方若已
+ *   换条款（hash 变了）就拒绝，防「同意的是旧条款、接受的却是新条款」；
+ * - 勾选集合必须是所选包 uses-license 引用的**子集**，之外的一个不写——机制上
+ *   排除「替用户 yes 全部许可」；清单（含 sys-img 描述符）核对不了的包一律先拒；
  * - `sdkmanager --licenses` 完全不跑（其互动输出无 hash、EOF 前还会挂 60s），
  *   待接受状态由本机 `licenses/<id>` 现状 + XML 解析纯本地比对（[listPendingLicenses]）。
  *
@@ -106,7 +149,7 @@ class AndroidSdkComponentInstaller(
     private val sdkmanagerBat: File = File(File(File(File(sdkRoot, "cmdline-tools"), "latest"), "bin"), "sdkmanager.bat"),
     /** 工具执行器；生产走 [runToolNative]，测试注假的，零真安装。 */
     private val runTool: (File, List<String>, Long, () -> Boolean) -> ToolRun = ::runToolNative,
-    /** 官方仓库清单获取器，许可文本解析用；测试注假 XML。 */
+    /** 官方清单获取器（主仓库 + sys-img 描述符），许可文本与镜像列表解析用；测试注假 XML。 */
     private val fetchXml: (String) -> String = ::fetchXmlNative,
 ) {
 
@@ -115,7 +158,7 @@ class AndroidSdkComponentInstaller(
 
     data class LicenseTexts(
         val docs: List<LicenseDoc> = emptyList(),
-        /** 官方清单里没找到的包（system-images 不在 repository2-3 里，单独 sys-img 描述符）。 */
+        /** 主清单和 sys-img 描述符里都没找到的包，许可无从核对。 */
         val missing: List<String> = emptyList(),
         val reason: String? = null,
     ) {
@@ -133,13 +176,31 @@ class AndroidSdkComponentInstaller(
         val ok: Boolean get() = reason == null
     }
 
+    /** 一个可选系统镜像：官方 sys-img 描述符动态解析，版本不写死。 */
+    data class SystemImage(
+        /** 完整包路径，如 `system-images;android-36;default;x86_64`。 */
+        val path: String,
+        val apiLevel: Int,
+        val abi: String,
+        /** 镜像变体 tag（default / google_apis / …）。 */
+        val tagId: String,
+        /** 完整包下载字节数（官方清单元数据）。 */
+        val sizeBytes: Long,
+        /** 该镜像要求的许可 ID（UI 可同屏给出对应全文）。 */
+        val licenseIds: List<String>,
+    )
+
+    data class SystemImageList(val images: List<SystemImage> = emptyList(), val reason: String? = null) {
+        val ok: Boolean get() = reason == null
+    }
+
     data class Outcome(val installed: Boolean = false, val reason: String? = null) {
         val ok: Boolean get() = installed
     }
 
     /**
-     * 待接受许可清单：官方 XML 按所选包的 uses-license 引用解析许可全文/hash，
- * 再比对本机 `licenses/<id>` 现状。给 UI 展示 + 用户逐条勾选用。
+     * 待接受许可清单：官方清单按所选包的 uses-license 引用解析许可全文/hash，
+     * 再比对本机 `licenses/<id>` 现状。给 UI 展示 + 用户逐条勾选用。
      */
     fun listPendingLicenses(packages: List<String>, repoUrl: String = AndroidSdkBootstrap.REPO_URL): LicenseStatusList {
         if (packages.isEmpty()) return LicenseStatusList(reason = "没有选择组件，无从解析许可")
@@ -152,35 +213,91 @@ class AndroidSdkComponentInstaller(
     }
 
     /**
-     * 从官方仓库 XML 按**具体包**的 uses-license 引用解析许可全文与 hash。
-     * 文本是解析原值**不 trim**（hash 对未 trim 的值才算得对）；system-images 等
-     * 不在 repository2-3 的包（单独 sys-img 描述符）如实进 [LicenseTexts.missing]。
+     * 从官方清单按**具体包**的 uses-license 引用解析许可全文与 hash。
+     * 文本是解析原值**不 trim**（hash 对未 trim 的值才算得对）；主仓库
+     * （repository2-3）没有的包再到官方 sys-img 描述符里查一轮（system-images
+     * 都在那边，描述符自带同样的 license 全文）；两边都没有才进 [LicenseTexts.missing]。
      */
     fun licenseTexts(packages: List<String>, repoUrl: String = AndroidSdkBootstrap.REPO_URL): LicenseTexts {
         if (packages.isEmpty()) return LicenseTexts(reason = "没有选择组件，无从解析许可")
-        val xml = try {
-            fetchXml(repoUrl)
+        val primary = try {
+            val doc = AndroidSdkBootstrap.parseRepositoryXml(fetchXml(repoUrl))
+            AndroidSdkBootstrap.resolveLicenseTexts(doc, packages)
         } catch (e: Exception) {
-            return LicenseTexts(reason = "获取官方仓库清单失败：${e.message?.take(120)}")
+            return LicenseTexts(reason = "解析官方仓库清单失败：${e.message?.take(120)}")
         }
-        val doc = try {
-            AndroidSdkBootstrap.parseRepositoryXml(xml)
+        if (primary.missing.isEmpty()) return primary
+
+        // 主清单没有的包（system-images 等）：官方 sys-img 描述符再核对一轮
+        val sysDoc = try {
+            val url = sysImgDescriptorUrl(SYS_IMG_VENDOR_DEFAULT) ?: return primary
+            AndroidSdkBootstrap.parseRepositoryXml(fetchXml(url))
         } catch (e: Exception) {
-            return LicenseTexts(reason = "仓库清单解析失败：${e.message?.take(120)}")
+            return primary   // 描述符取不到：这些包保持 missing（install 会先拒），不给假绿灯
         }
-        return AndroidSdkBootstrap.resolveLicenseTexts(doc, packages)
+        val secondary = AndroidSdkBootstrap.resolveLicenseTexts(sysDoc, primary.missing)
+        val merged = primary.docs + secondary.docs.filter { s -> primary.docs.none { it.id == s.id } }
+        return LicenseTexts(merged, secondary.missing)
     }
 
     /**
-     * 安装组件。[acceptedLicenseIds] 是用户逐条勾选的**许可 ID**（[listPendingLicenses]
-     * 给出的那些）——hash 从同一份官方 XML 自算、勾选集合必须是其 uses-license 引用的
-     * 子集，核对通过才写接受记录，最后 `--install`。
+     * 可选系统镜像列表：先从官方站点列表（addons_list-N.xml，从最新往回探测，
+     * 版本不写死）找到 vendor 的 sys-img 描述符，再解析**稳定通道**（channel-0）
+     * 匹配 [abi] 的镜像：包名 / API / 架构 / 下载大小 / 要求的许可。
+     * 默认 vendor=`android`（AOSP 镜像）、abi=`x86_64`。
+     */
+    fun systemImages(vendor: String = SYS_IMG_VENDOR_DEFAULT, abi: String = SYS_IMG_ABI_DEFAULT): SystemImageList {
+        if (!SITE_SEGMENT.matches(vendor) || !SITE_SEGMENT.matches(abi)) {
+            return SystemImageList(reason = "vendor/架构含不允许的字符（只允许小写字母数字_-）：${vendor.take(40)}/${abi.take(40)}")
+        }
+        val url = sysImgDescriptorUrl(vendor)
+            ?: return SystemImageList(reason = "官方站点列表里找不到 vendor=$vendor 的系统镜像描述符")
+        val doc = try {
+            AndroidSdkBootstrap.parseRepositoryXml(fetchXml(url))
+        } catch (e: Exception) {
+            return SystemImageList(reason = "获取系统镜像描述符失败：${e.message?.take(120)}")
+        }
+        val images = mutableListOf<SystemImage>()
+        val list = doc.getElementsByTagNameNS("*", "remotePackage")
+        for (i in 0 until list.length) {
+            val pkg = list.item(i) as org.w3c.dom.Element
+            val path = pkg.getAttribute("path")
+            if (!path.startsWith("system-images;")) continue
+            // 只要稳定通道；preview/beta 通道不进可选列表
+            if (pkg.childElements("channelRef").none { it.getAttribute("ref") == AndroidSdkBootstrap.STABLE_CHANNEL }) continue
+            val details = pkg.childElements("type-details").firstOrNull() ?: continue
+            val api = details.childElements("api-level").firstOrNull()?.textContent?.trim()?.toIntOrNull() ?: continue
+            val imageAbi = details.childElements("abi").firstOrNull()?.textContent?.trim() ?: continue
+            if (imageAbi != abi) continue
+            val tag = details.childElements("tag").firstOrNull()?.childElements("id")?.firstOrNull()?.textContent?.trim() ?: ""
+            val complete = pkg.childElements("archives").firstOrNull()?.childElements("archive")
+                ?.firstOrNull()?.childElements("complete")?.firstOrNull()
+            val size = complete?.childElements("size")?.firstOrNull()?.textContent?.trim()?.toLongOrNull() ?: -1L
+            images += SystemImage(
+                path = path,
+                apiLevel = api,
+                abi = imageAbi,
+                tagId = tag,
+                sizeBytes = size,
+                licenseIds = pkg.childElements("uses-license").mapNotNull { it.getAttribute("ref").takeIf { r -> r.isNotBlank() } },
+            )
+        }
+        // 新 API 在前，同级按包路径排序——UI 列表次序确定
+        images.sortWith(compareByDescending<SystemImage> { it.apiLevel }.thenBy { it.path })
+        return SystemImageList(images)
+    }
+
+    /**
+     * 安装组件。[acceptedLicenseIds] 是用户逐条勾选的**许可 ID**；
+     * [reviewedLicenseHashes] 是勾选时**看到的 hash 快照**（id → hash，来自
+     * [listPendingLicenses] 展示的那份）——安装时重新取清单核对，官方若已换条款
+     * 就拒绝。核对全过才写接受记录，最后 `--install`。
      */
     fun install(
         packages: List<String>,
         acceptedLicenseIds: Set<String>,
-        isCancelled: () -> Boolean = { false },
         reviewedLicenseHashes: Map<String, String> = emptyMap(),
+        isCancelled: () -> Boolean = { false },
     ): Outcome {
         if (packages.isEmpty()) return Outcome(reason = "没有选择要安装的组件")
         packages.firstOrNull { !PACKAGE_SPEC.matches(it) }?.let {
@@ -195,20 +312,33 @@ class AndroidSdkComponentInstaller(
         if (pathUnsafe(sdkRoot)) {
             return Outcome(reason = "SDK 根路径含命令行特殊字符，无法安全调用：${sdkRoot.path.take(120)}")
         }
+        // 可自定义 exe 路径——只查 sdkRoot 挡不住 bat 本身的路径注入
+        if (pathUnsafe(sdkmanagerBat)) {
+            return Outcome(reason = "sdkmanager 路径含命令行特殊字符，无法安全调用：${sdkmanagerBat.path.take(120)}")
+        }
         if (!sdkmanagerBat.isFile) return Outcome(reason = "找不到 sdkmanager（${sdkmanagerBat.path}）—— 先完成命令行工具的首次下载")
 
-        // hash 从同一份 XML 解析自算；勾选的 id 必须是所选包引用过的——无关/不存在的许可一个不写
+        // hash 从同一份 XML 解析自算；清单（含 sys-img 描述符）核对不了的包**先拒**：
+        // 许可要求不明，绝不盲装——这一关在一切许可核对之前
         val lt = licenseTexts(packages)
         if (!lt.ok) return Outcome(reason = lt.reason)
+        if (lt.missing.isNotEmpty()) {
+            return Outcome(reason = "这些组件不在官方清单里（含 sys-img 描述符），许可无法核对，拒绝安装：${lt.missing.first().take(60)}")
+        }
         val referenced = lt.docs.associateBy { it.id }
-        if (lt.missing.isNotEmpty()) return Outcome(reason = "尚未取得这些组件的许可信息：${lt.missing.joinToString()}，未安装")
         val unknown = acceptedLicenseIds.filter { it !in referenced }
         if (unknown.isNotEmpty()) {
             return Outcome(reason = "勾选的许可不在所选组件的许可清单里（不存在或与所选组件无关）：${unknown.first().take(40)}")
         }
-        if (acceptedLicenseIds.any { reviewedLicenseHashes[it] != referenced[it]?.hash })
-            return Outcome(reason = "许可内容未确认或已变化，请重新阅读并确认后再安装")
-        if (isCancelled()) return Outcome(reason = "已取消，未写入许可记录")
+        // consent 快照：勾选时的 hash 必须与**现在**清单里的一致——官方换了条款就停，
+        // 防止用户同意的是旧文本、写下的却是新文本的接受记录
+        val changed = acceptedLicenseIds.firstOrNull { reviewedLicenseHashes[it] != referenced.getValue(it).hash }
+        if (changed != null) {
+            return Outcome(reason = "许可全文与同意时不一致（官方可能已更新条款，或未带同意快照）——请重新查看并逐条再次同意：${changed.take(40)}")
+        }
+        if (isCancelled()) {
+            return Outcome(reason = "已取消（未写任何许可记录）")
+        }
 
         // 接受记录：<sdkRoot>/licenses/<id>，多行 hash 追加（License.setAccepted 的 "%n%s" 格式）
         File(sdkRoot, "licenses").mkdirs()
@@ -225,7 +355,7 @@ class AndroidSdkComponentInstaller(
             run.timedOut -> Outcome(reason = "安装超时（${INSTALL_TIMEOUT_SECONDS / 60} 分钟），进程树已强制结束")
             run.exitCode == 0 -> Outcome(installed = true)
             run.output.contains("were not accepted") -> Outcome(
-                reason = "有组件要求的许可未全部接受（system-images 等清单外包需另行核对），未安装：${lastLine(run.output)}",
+                reason = "有组件要求的许可未全部接受（如依赖包的许可不在本次勾选里），未安装：${lastLine(run.output)}",
             )
             else -> Outcome(reason = "安装失败（退出码 ${run.exitCode}）：${lastLine(run.output)}")
         }
@@ -248,12 +378,50 @@ class AndroidSdkComponentInstaller(
         f.appendText(String.format("%n%s", doc.hash))
     }
 
+    /**
+     * 官方站点列表（addons_list-N.xml）里找 vendor 的 sys-img 描述符 URL。
+     * N 从最新已知版本往回探测，第一个能取到的就是当前口径——版本不写死，
+     * Google 升版后旧版仍在线，回退自然落到能用的最高版。
+     */
+    private fun sysImgDescriptorUrl(vendor: String): String? {
+        for (n in SITES_LIST_MAX_VERSION downTo 1) {
+            val xml = try {
+                fetchXml("${AndroidSdkBootstrap.REPO_BASE}addons_list-$n.xml")
+            } catch (e: Exception) {
+                continue
+            }
+            val doc = try {
+                AndroidSdkBootstrap.parseRepositoryXml(xml)
+            } catch (e: Exception) {
+                continue
+            }
+            val sites = doc.getElementsByTagNameNS("*", "site")
+            for (i in 0 until sites.length) {
+                val url = (sites.item(i) as org.w3c.dom.Element)
+                    .childElements("url").firstOrNull()?.textContent?.trim() ?: continue
+                val segs = url.split('/')
+                val k = segs.indexOf("sys-img")
+                if (k >= 0 && k + 1 < segs.size && segs[k + 1] == vendor) {
+                    return if (url.startsWith("http")) url else AndroidSdkBootstrap.REPO_BASE + url.removePrefix("/")
+                }
+            }
+        }
+        return null
+    }
+
+    private fun org.w3c.dom.Element.childElements(name: String): List<org.w3c.dom.Element> =
+        (0 until childNodes.length).map { childNodes.item(it) }.filterIsInstance<org.w3c.dom.Element>()
+            .filter { it.localName == name }
+
     companion object {
-        /** 组件包名（如 platform-tools / emulator）：字母数字开头 + `._;+-`。 */
+        /** 组件包名（如 platform-tools / emulator / system-images;android-36;default;x86_64）：字母数字开头 + `._;+-`。 */
         val PACKAGE_SPEC = Regex("^[A-Za-z0-9][A-Za-z0-9._;+-]{0,199}$")
 
         /** 许可 ID（如 android-sdk-license）：xsd:ID 即 NCName，字母/下划线开头。 */
         val LICENSE_ID = Regex("^[A-Za-z_][A-Za-z0-9._-]{0,99}$")
+
+        /** 站点列表里 vendor/架构段的白名单（android、google_apis_playstore、x86_64、arm64-v8a…）。 */
+        val SITE_SEGMENT = Regex("^[a-z0-9_-]{1,64}$")
 
         /** cmd 在引号内仍展开 `%VAR%`（`!var!` 要延迟展开）——路径里出现即拒绝，不做转义赌注。 */
         private val PATH_UNSAFE = Regex("[%!\"&|<>^\r\n]")
@@ -261,6 +429,13 @@ class AndroidSdkComponentInstaller(
         internal fun pathUnsafe(f: File): Boolean = PATH_UNSAFE.containsMatchIn(f.absolutePath)
 
         const val INSTALL_TIMEOUT_SECONDS = 20L * 60
+
+        /** 默认查 AOSP 镜像（vendor=android）的 x86_64；其他 vendor/架构由 UI 显式传。 */
+        const val SYS_IMG_VENDOR_DEFAULT = "android"
+        const val SYS_IMG_ABI_DEFAULT = "x86_64"
+
+        /** 官方站点列表当前最新是 addons_list-7.xml（对齐 Studio sites-list-7 schema）。 */
+        const val SITES_LIST_MAX_VERSION = 7
 
         private fun lastLine(output: String): String =
             output.trim().lineSequence().lastOrNull()?.take(160).takeUnless { it.isNullOrBlank() } ?: "无输出"

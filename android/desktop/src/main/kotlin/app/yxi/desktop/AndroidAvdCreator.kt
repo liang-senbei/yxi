@@ -43,6 +43,10 @@ class AndroidAvdCreator(
         if (AndroidSdkComponentInstaller.pathUnsafe(sdkRoot)) {
             return Outcome(reason = "SDK 根路径含命令行特殊字符，无法安全调用：${sdkRoot.path.take(120)}")
         }
+        // 可自定义 exe 路径——只查 sdkRoot 挡不住 bat 本身的路径注入
+        if (AndroidSdkComponentInstaller.pathUnsafe(avdmanagerBat)) {
+            return Outcome(reason = "avdmanager 路径含命令行特殊字符，无法安全调用：${avdmanagerBat.path.take(120)}")
+        }
         if (!avdmanagerBat.isFile) {
             return Outcome(reason = "找不到 avdmanager（${avdmanagerBat.path}）—— 先完成命令行工具的首次下载")
         }
