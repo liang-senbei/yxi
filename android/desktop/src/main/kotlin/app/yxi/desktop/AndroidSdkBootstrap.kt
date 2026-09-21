@@ -164,8 +164,8 @@ class AndroidSdkBootstrap(
         }
         stagingDir.mkdirs()
         // 每次安装用独立的 zip 与解压目录，并发互不踩
-        val stamp = System.currentTimeMillis()
-        val zip = File(stagingDir, "commandlinetools-win-${manifest.version}-$stamp.zip")
+        val stamp = java.util.UUID.randomUUID().toString()
+        val zip = File(stagingDir, "commandlinetools-win-$stamp.zip")
         val extractDir = File(stagingDir, "extract-$stamp")
 
         // 1) 下载（超时/进度/取消/超清单大小都在下载器里；失败清半截文件）
@@ -176,9 +176,9 @@ class AndroidSdkBootstrap(
         }
 
         // 2) 实际大小不得超过清单声明（清单给可信大小时）
-        if (manifest.sizeBytes > 0 && zip.length() > manifest.sizeBytes) {
+        if (manifest.sizeBytes > 0 && zip.length() != manifest.sizeBytes) {
             deleteStaged(zip)
-            return InstallOutcome(reason = "下载内容（${zip.length()} 字节）超出清单大小（${manifest.sizeBytes}），已删除")
+            return InstallOutcome(reason = "下载内容大小与清单不一致，已删除暂存包")
         }
 
         // 3) 校验（SHA-1/SHA-256 按清单元数据）：对不上就删，绝不让坏包进 SDK 根
@@ -245,7 +245,9 @@ class AndroidSdkBootstrap(
      * 暂存里、目标一个字节不动，由调用方只清暂存。
      */
     private fun publish(src: File, dst: File): String? = try {
-        Files.move(src.toPath(), dst.toPath(), StandardCopyOption.ATOMIC_MOVE)
+        // ATOMIC_MOVE permits provider-specific replacement of an existing target.
+        // A normal same-volume move without REPLACE_EXISTING refuses that collision.
+        Files.move(src.toPath(), dst.toPath())
         null
     } catch (_: FileAlreadyExistsException) {
         "目标已出现（可能被并发安装抢先）——未覆盖、未删除，请确认后再试"
