@@ -74,7 +74,7 @@ private fun attachmentBitmap(attachment: DraftAttach, maxSize: Int): ImageBitmap
     LaunchedEffect(attachment.stamp, maxSize) {
         if (!attachment.isImage) return@LaunchedEffect
         bitmap = withContext(Dispatchers.IO) {
-            runCatching {
+            val standard = runCatching {
                 attachment.open().use { input -> ImageIO.createImageInputStream(input).use imageStream@ { stream ->
                     val reader = ImageIO.getImageReaders(stream).asSequence().firstOrNull() ?: return@imageStream null
                     try {
@@ -85,7 +85,32 @@ private fun attachmentBitmap(attachment: DraftAttach, maxSize: Int): ImageBitmap
                     } finally { reader.dispose() }
                 } }
             }.getOrNull()
+            standard ?: runCatching { skiaThumbnail(attachment, maxSize) }.getOrNull()
         }
     }
     return bitmap
+}
+
+/** Skia covers WebP when ImageIO has no decoder. Both encoded input and pixel size are bounded. */
+private fun skiaThumbnail(attachment: DraftAttach, maxSize: Int): ImageBitmap? {
+    val cap = 32 * 1024 * 1024
+    val bytes = attachment.open().use { it.readNBytes(cap + 1) }
+    if (bytes.size > cap) return null
+    return org.jetbrains.skia.Image.makeFromEncoded(bytes).use decoded@ { image ->
+        if (image.width.toLong() * image.height > 48_000_000L) return@decoded null
+        val ratio = minOf(1.0, maxSize.toDouble() / maxOf(image.width, image.height))
+        val width = (image.width * ratio).toInt().coerceAtLeast(1)
+        val height = (image.height * ratio).toInt().coerceAtLeast(1)
+        org.jetbrains.skia.Bitmap().use resizedBitmap@ { resized ->
+            resized.allocPixels(org.jetbrains.skia.ImageInfo.makeN32Premul(width, height))
+            val pixels = resized.peekPixels() ?: return@resizedBitmap null
+            pixels.use sampled@ {
+                if (!image.scalePixels(it, org.jetbrains.skia.SamplingMode.MITCHELL, false)) return@sampled null
+                // Detach the Compose bitmap from resources closed by this decoder.
+                org.jetbrains.skia.Image.makeFromBitmap(resized).use { scaled ->
+                    scaled.toComposeImageBitmap()
+                }
+            }
+        }
+    }
 }
