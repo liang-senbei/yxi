@@ -4,23 +4,28 @@ import app.yxi.agent.Session
 import app.yxi.ssh.Shell
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.withLock
 
 /** A terminal transport, deliberately not advertised as runtime steering or an
  * accepted-message receipt. Exactly one literal text write and one Enter. */
-internal suspend fun deliverInstruction(conn: Conn, session: Session, queue: InstructionQueue, item: QueuedInstruction) {
+internal suspend fun deliverInstruction(conn: Conn, session: Session, queue: InstructionQueue, item: QueuedInstruction) = conn.instructionDeliveryMutex.withLock {
     check(conn.ssh.isConnected) { "服务器未连接，指令保留在本地" }
     check(item.taskKey == taskNavigationKey(conn.host, session)) { "任务身份已变化" }
     check(Regex("[0-9]+:\\$[0-9]+:[0-9]+").matches(session.runtimeId)) { "尚未确认任务实例，请刷新后重试" }
     val screen = conn.ssh.exec("tmux capture-pane -p -t ${Shell.q("=" + session.name + ":")} 2>/dev/null")
     check(app.yxi.agent.Model.borrowable(screen)) { "终端正忙、等待选择或输入状态无法确认，指令继续保留在本地" }
     val started = queue.beginDelivery(item.id, item.revision)
+    val completionBefore = conn.terminalCompletion[session.runtimeId] ?: 0L
     withContext(NonCancellable) {
         try {
             val raw = conn.ssh.exec(instructionDeliveryCommand(session, item, screen))
             when (raw.lineSequence().lastOrNull { it.startsWith("__YXI_DELIVERY__:") }) {
                 "__YXI_DELIVERY__:blocked" -> queue.notDelivered(started.id, started.revision, "任务或画面已变化，未投递；请核对后重试")
                 "__YXI_DELIVERY__:attachment" -> queue.notDelivered(started.id, started.revision, "附件不存在或无法读取，请重新上传")
-                "__YXI_DELIVERY__:terminal" -> queue.confirmTerminalWrite(started.id, started.revision)
+                "__YXI_DELIVERY__:terminal" -> {
+                    conn.terminalAwaiting[session.runtimeId] = completionBefore to false
+                    queue.confirmTerminalWrite(started.id, started.revision)
+                }
                 "__YXI_DELIVERY__:reserved" -> queue.markUnknown(started.id, started.revision, "服务端已登记本指令，但没有完整写入记录；可能只写入了部分内容。请查看终端，不要重复发送。")
                 else -> queue.markUnknown(started.id, started.revision, "投递结果无法确认，请核对任务；不会自动重发")
             }

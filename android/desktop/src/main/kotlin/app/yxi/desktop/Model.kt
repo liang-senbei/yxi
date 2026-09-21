@@ -170,6 +170,9 @@ class Conn(val host: Host, hostKeys: HostKeys) {
     /** 指纹变了：不重连，等用户在侧栏点「我确认过了，删除旧指纹」 */
     var keyChanged by mutableStateOf(false)
     var sessions by mutableStateOf<List<Session>>(emptyList())
+    internal val instructionDeliveryMutex = kotlinx.coroutines.sync.Mutex()
+    internal val terminalCompletion = mutableMapOf<String, Long>()
+    internal val terminalAwaiting = mutableMapOf<String, Pair<Long, Boolean>>()
     var projectGroups by mutableStateOf(app.yxi.agent.Groups.Table()); private set
     var groupsLoaded by mutableStateOf(false); private set
     var groupsError by mutableStateOf(""); private set
@@ -225,6 +228,7 @@ class Conn(val host: Host, hostKeys: HostKeys) {
                 val task = fresh.firstOrNull { it.name == event.session } ?: return@forEach
                 val createdAt = task.runtimeId.substringAfterLast(':').toDoubleOrNull() ?: return@forEach
                 if (event.timestamp < createdAt) return@forEach
+                terminalCompletion[task.runtimeId] = (terminalCompletion[task.runtimeId] ?: 0L) + 1
                 val preview = event.preview.replace(Regex("\\s+"), " ").trim().take(100)
                 Notify.notify("本轮处理结束", "任务: ${task.short}" + if (preview.isBlank()) "" else " · $preview", host.id, task.name, taskNavigationKey(host, task))
             }

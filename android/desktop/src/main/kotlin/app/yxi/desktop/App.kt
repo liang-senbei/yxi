@@ -55,6 +55,7 @@ fun App(state: AppState) {
         }
     }
     DeferredRouteRunner(state)
+    TerminalQueueRunner(state)
     val scope = rememberCoroutineScope()
     val defaultUris = LocalUriHandler.current
     val density = LocalDensity.current.density

@@ -475,7 +475,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
             ctx = ctx,
             busy = live.busy, waiting = pending != null,
             hint = when {
-                pending != null || live.busy -> "输入下一条指令，Enter 保存为本地待发送"
+                pending != null || live.busy -> "输入下一条指令，当前任务结束后自动发送"
                 else -> "跟它说点什么… Enter 发送，Shift+Enter 换行；截图直接 Ctrl+V"
             },
             hasPending = pending != null,
