@@ -71,6 +71,8 @@ internal fun AndroidEmulatorPanel(open: Boolean, close: () -> Unit) {
                 environment?.missing?.contains("sdkmanager") == false &&
                 environment?.missing?.any { it == "emulator" || it == "adb" } == true) AndroidComponentsCard { refresh++ }
             environment?.let { env ->
+                if (windows && env.usable && env.sdkRoot == java.io.File(Store.dir, "android-sdk").absolutePath)
+                    AndroidDeviceSetupCard { refresh++ }
                 if (env.sdkRoot != null) Text("SDK · ${env.sdkRoot}", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 env.tools.firstOrNull { it.name == "emulator" }?.let { executable ->
                     TextButton({

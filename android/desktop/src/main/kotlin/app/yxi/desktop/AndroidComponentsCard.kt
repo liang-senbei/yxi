@@ -12,11 +12,10 @@ import kotlinx.coroutines.*
 import java.util.concurrent.atomic.AtomicBoolean
 
 @Composable
-internal fun AndroidComponentsCard(onInstalled: () -> Unit) {
+internal fun AndroidComponentsCard(packages: List<String> = listOf("emulator", "platform-tools"), title: String = "安装模拟器运行组件", onInstalled: () -> Unit) {
     val installer = remember { AndroidSdkComponentInstaller() }
     val scope = rememberCoroutineScope()
     val cancel = remember { AtomicBoolean(false) }
-    val packages = remember { listOf("emulator", "platform-tools") }
     var licenses by remember { mutableStateOf<AndroidSdkComponentInstaller.LicenseStatusList?>(null) }
     val accepted = remember { mutableStateMapOf<String, Boolean>() }
     var expanded by remember { mutableStateOf<String?>(null) }
@@ -26,8 +25,8 @@ internal fun AndroidComponentsCard(onInstalled: () -> Unit) {
     DisposableEffect(Unit) { onDispose { cancel.set(true) } }
     OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("安装模拟器运行组件", style = MaterialTheme.typography.titleMedium)
-            Text("Android Emulator 与 ADB · 安装到 Yxi 专用 SDK 目录", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(packages.joinToString("、") + " · Yxi 专用 SDK 目录", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
             if (licenses == null) TextButton({
                 busy = true; notice = ""
                 scope.launch {
@@ -56,7 +55,7 @@ internal fun AndroidComponentsCard(onInstalled: () -> Unit) {
                 val hashes = reviewed.statuses.associate { it.id to it.hash }
                 scope.launch {
                     try {
-                        val result = withContext(Dispatchers.IO) { installer.install(packages, ids, cancel::get, hashes) }
+                        val result = withContext(Dispatchers.IO) { installer.install(packages, ids, reviewedLicenseHashes = hashes, isCancelled = cancel::get) }
                         notice = if (result.installed) "运行组件已安装。下一步需要准备系统镜像和虚拟设备。" else result.reason.orEmpty()
                         if (result.installed) onInstalled()
                     } catch (e: CancellationException) { cancel.set(true); throw e }
