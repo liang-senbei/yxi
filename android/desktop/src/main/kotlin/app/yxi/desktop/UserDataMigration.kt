@@ -9,7 +9,8 @@ internal object UserDataMigration {
     private val files = setOf("hosts.json", "auth.json", "prefs.json", "window.json", "known_hosts",
         "workspace.json", "project-previews.json", "project-services.json", "plugin-operations.json",
         "instructions.json", "model-changes.json", "codex-tasks.json", "support-drafts.json",
-        "shop-purchases.json", "id_ed25519", "id_ed25519.pub")
+        "shop-purchases.json", "id_ed25519", "id_ed25519.pub", "hosts.json.migration-copy.protected",
+        "hosts.json.bak.migration-copy.protected", "hosts.json.damaged.migration-copy.protected")
 
     fun migrate(source: File, destination: File) {
         require(destination.isDirectory || destination.mkdirs()) { "无法创建用户数据目录" }
