@@ -64,6 +64,7 @@ internal fun AndroidEmulatorPanel(open: Boolean, close: () -> Unit) {
             Text("运行在本机 Windows · 不占用远程服务器的模拟器资源", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
             if (!windows) Text("请在 Windows 电脑上使用本地 Android 模拟器。")
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (windows && environment?.missing?.contains("sdkmanager") == true) AndroidSetupCard { refresh++ }
             environment?.let { env ->
                 if (env.sdkRoot != null) Text("SDK · ${env.sdkRoot}", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 if (env.avds.isEmpty() && !busy) Text("没有找到虚拟设备。需要准备 Android SDK、系统镜像并创建虚拟设备后才能运行。")

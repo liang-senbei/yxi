@@ -216,6 +216,10 @@ class AndroidSdkBootstrap(
             deleteStaged(zip); deleteStaged(extractDir)
             return InstallOutcome(reason = "目标已出现（${target.path}），不覆盖 —— 请确认后再试")
         }
+        if (isCancelled()) {
+            deleteStaged(zip); deleteStaged(extractDir)
+            return InstallOutcome(reason = "已取消")
+        }
         target.parentFile.mkdirs()
         val publishError = publish(inner, target)
         deleteStaged(zip); deleteStaged(extractDir)
