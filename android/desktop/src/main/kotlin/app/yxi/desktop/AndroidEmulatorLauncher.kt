@@ -61,7 +61,7 @@ class AndroidEmulatorLauncher(
     /** 自己起的句柄，只增于此、只清于此 —— 「stop 只停自己的」物理上由这张表保证。 */
     private val running = ConcurrentHashMap<String, Running>()
 
-    fun launch(avdName: String): LaunchOutcome {
+    @Synchronized fun launch(avdName: String): LaunchOutcome {
         val emu = env.tools.firstOrNull { it.name == "emulator" }
             ?: return LaunchOutcome(avdName, false, reason = "SDK 里没有 emulator，先按环境探测的缺失项补齐")
         if (avdName !in env.avds)
@@ -73,7 +73,9 @@ class AndroidEmulatorLauncher(
         if (existing != null) running.remove(avdName, existing)
 
         pruneOldLogs()
-        val log = newLogFile(avdName)
+        val log = try { newLogFile(avdName) } catch (e: Exception) {
+            return LaunchOutcome(avdName, false, reason = "无法准备模拟器日志目录：${e.message?.take(80)}")
+        }
         val proc = try {
             // 参数列表，不经过 shell：路径带空格、AVD 名带空格都不断
             startProcess(listOf(emu.path, "-avd", avdName))
@@ -118,7 +120,8 @@ class AndroidEmulatorLauncher(
     private fun pruneOldLogs() {
         logDir.listFiles { f -> f.isFile && f.name.endsWith(".log") }
             ?.sortedByDescending { it.lastModified() }
-            ?.drop(KEEP_LOG_FILES)
+            ?.filter { file -> running.values.none { it.log == file } }
+            ?.drop((KEEP_LOG_FILES - running.size - 1).coerceAtLeast(0))
             ?.forEach { it.delete() }
     }
 
@@ -137,8 +140,8 @@ class AndroidEmulatorLauncher(
      * 日志可以丢，进程不能被日志卡死。
      */
     private fun drainLog(h: Running) {
+        var out: java.io.OutputStream? = runCatching { h.log.outputStream() }.getOrNull()
         try {
-            h.log.outputStream().use { out ->
                 val buf = ByteArray(8192)
                 var written = 0L
                 while (true) {
@@ -146,16 +149,16 @@ class AndroidEmulatorLauncher(
                     if (n < 0) break
                     if (written < MAX_LOG_BYTES) {
                         val take = minOf(n.toLong(), MAX_LOG_BYTES - written).toInt()
-                        out.write(buf, 0, take)
+                        try { out?.write(buf, 0, take) }
+                        catch (_: Exception) {
+                            runCatching { out?.close() }; out = null
+                        }
                         written += take
                     }
                 }
-                if (written >= MAX_LOG_BYTES)
-                    out.write("\n[yxi] 日志达到上限，后续内容已丢弃（进程不受影响）\n".toByteArray())
-            }
         } catch (_: Exception) {
-            // 日志搬运失败不影响进程管理 —— 输出管道断了的后果由 waitFor 兜住
-        }
+            // A broken input stream ends draining; file failures above keep consuming stdout.
+        } finally { runCatching { out?.close() } }
     }
 
     companion object {
