@@ -136,9 +136,12 @@ class AndroidEmulatorLauncher(
         Thread {
             drainLog(h)
             val code = runCatching { h.process.waitFor() }.getOrDefault(-1)
-            exited[avdName] = ExitInfo(code, h.stopping, h.log)
-            // remove(k, v) 带值比较：退出期间同名被重新起过的话，别把新句柄误删
-            running.remove(avdName, h)
+            synchronized(this@AndroidEmulatorLauncher) {
+                if (running[avdName] === h) {
+                    exited[avdName] = ExitInfo(code, h.stopping, h.log)
+                    running.remove(avdName, h)
+                }
+            }
         }.apply { isDaemon = true; name = "yxi-emulator-watch-$avdName" }.start()
     }
 
