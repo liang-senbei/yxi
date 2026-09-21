@@ -154,14 +154,15 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
     val listState = remember(taskKey) { LazyListState() }
     val seen = remember(taskKey) { Seen() }
     val focus = remember { FocusRequester() }
-    var editingMessage by remember(taskKey) { mutableStateOf<String?>(null) }
-    editingMessage?.let { original ->
+    var editingMessage by remember(taskKey) { mutableStateOf<MessageEditTarget?>(null) }
+    editingMessage?.let { target ->
+        var editedText by remember(taskKey, target.key) { mutableStateOf(target.text) }
         WorkbenchDialog(onDismissRequest = { editingMessage = null }, title = { Text("编辑这条消息") },
             text = { Column {
-                Text(original.take(600), style = MaterialTheme.typography.bodySmall)
-                Text("载入输入框会替换当前草稿，作为新消息编辑。需要回到旧轮次时，在 Claude 原生选择器中选择对应消息及恢复范围。双 Esc 要求终端输入为空；若终端有未发送文字，会先清到 Claude 输入历史，可用上箭头找回。", style = MaterialTheme.typography.bodySmall)
+                androidx.compose.material3.OutlinedTextField(editedText, { editedText = it }, modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 320.dp), label = { Text("消息内容") })
+                Text("载入草稿会作为新消息继续。精确回到此轮的操作正在接入；当前原生回退入口仍需选择历史轮次。", style = MaterialTheme.typography.bodySmall)
             } },
-            confirmButton = { TextButton({ draft = TextFieldValue(original, selection = TextRange(original.length)); editingMessage = null; focus.requestFocus() }) { Text("载入输入框编辑") } },
+            confirmButton = { TextButton({ draft = TextFieldValue(editedText, selection = TextRange(editedText.length)); editingMessage = null; focus.requestFocus() }, enabled = editedText.isNotBlank()) { Text("载入草稿") } },
             dismissButton = { TextButton({
                 scope.launch {
                     try {
@@ -687,11 +688,12 @@ private suspend fun waitChange(before: String, timeoutMs: Long = 4_000, get: () 
 }
 
 // ── 条目渲染 ──
+private data class MessageEditTarget(val key: String, val text: String, val queued: Boolean = false)
 
 @Composable
-private fun ItemView(conn: Conn, item: ChatItem, onEdit: (String) -> Unit) = when (item) {
-    is ChatItem.UserText -> UserBubble(conn, item.text, queued = false, onEdit = { onEdit(item.text) })
-    is ChatItem.Queued -> UserBubble(conn, item.text, queued = true, onEdit = { onEdit(item.text) })
+private fun ItemView(conn: Conn, item: ChatItem, onEdit: (MessageEditTarget) -> Unit) = when (item) {
+    is ChatItem.UserText -> UserBubble(conn, item.text, queued = false, onEdit = { onEdit(MessageEditTarget(item.key, item.text)) })
+    is ChatItem.Queued -> UserBubble(conn, item.text, queued = true, onEdit = { onEdit(MessageEditTarget(item.key, item.text, queued = true)) })
     is ChatItem.AssistantText -> MessageRow(item.markdown, user = false) { AssistantBody(item.markdown) }
     is ChatItem.Thinking -> Fold("✳ 思考过程", item.text)
     is ChatItem.ToolCall -> ToolCard(item)
