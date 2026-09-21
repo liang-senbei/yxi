@@ -1,0 +1,86 @@
+package app.yxi.desktop
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+/** Retained at App scope so dismissing the panel never loses owned process handles. */
+@Composable
+internal fun AndroidEmulatorPanel(open: Boolean, close: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var environment by remember { mutableStateOf<AndroidEmulatorEnvironment.Result?>(null) }
+    var launcher by remember { mutableStateOf<AndroidEmulatorLauncher?>(null) }
+    var running by remember { mutableStateOf(emptyList<String>()) }
+    var busy by remember { mutableStateOf(false) }
+    var notice by remember { mutableStateOf("") }
+    var refresh by remember { mutableStateOf(0) }
+    val windows = remember { System.getProperty("os.name").startsWith("Windows", true) }
+    DisposableEffect(Unit) { onDispose { launcher?.stopAll() } }
+    LaunchedEffect(open, refresh) {
+        if (!open || !windows) return@LaunchedEffect
+        busy = true
+        try {
+            val found = withContext(Dispatchers.IO) { AndroidEmulatorEnvironment().discover() }
+            if (launcher?.runningAvds().isNullOrEmpty()) launcher = AndroidEmulatorLauncher(found)
+            environment = found
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { notice = "环境读取失败：${e.message.orEmpty()}" }
+        finally { busy = false }
+    }
+    LaunchedEffect(open) {
+        while (open) { running = launcher?.runningAvds().orEmpty(); delay(1000) }
+    }
+    if (!open) return
+    WorkbenchDialog(onDismissRequest = close, title = { Text("Android 模拟器") }, text = {
+        Column(Modifier.widthIn(min = 360.dp, max = 560.dp).heightIn(max = 480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text("运行在本机 Windows · 不占用远程服务器的模拟器资源", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+            if (!windows) Text("请在 Windows 电脑上使用本地 Android 模拟器。")
+            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            environment?.let { env ->
+                if (env.sdkRoot != null) Text("SDK · ${env.sdkRoot}", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                if (env.avds.isEmpty() && !busy) Text("没有找到虚拟设备。需要准备 Android SDK、系统镜像并创建虚拟设备后才能运行。")
+                env.avds.forEach { name ->
+                    OutlinedCard(Modifier.fillMaxWidth()) {
+                        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(name, style = MaterialTheme.typography.titleSmall)
+                                Text(if (name in running) "进程运行中" else "本地虚拟设备", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                            }
+                            TextButton({
+                                val engine = launcher ?: return@TextButton
+                                if (name in running) { engine.stop(name); notice = "正在停止 $name" }
+                                else {
+                                    busy = true
+                                    scope.launch {
+                                        try {
+                                            val result = withContext(Dispatchers.IO) { engine.launch(name) }
+                                            notice = if (result.started) "已启动 $name，请等待模拟器窗口完成开机。" else result.reason.orEmpty()
+                                            running = engine.runningAvds()
+                                        } catch (e: CancellationException) { throw e }
+                                        catch (e: Exception) { notice = "启动失败：${e.message.orEmpty()}" }
+                                        finally { busy = false }
+                                    }
+                                }
+                            }, enabled = !busy && env.tools.any { it.name == "emulator" }) { Text(if (name in running) "停止" else "运行") }
+                        }
+                    }
+                }
+                if (env.missing.isNotEmpty()) Text("缺少组件：${env.missing.joinToString("、")}", style = MaterialTheme.typography.bodySmall)
+                env.errors.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = Tokens.current.warning) }
+            }
+            if (notice.isNotBlank()) Text(notice, style = MaterialTheme.typography.bodySmall)
+            Text("关闭面板不会停止模拟器；退出 Yxi 时会停止由本次启动的实例。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+        }
+    }, confirmButton = { TextButton({ refresh++ }, enabled = windows && !busy) { Text("刷新设备") } },
+        dismissButton = { TextButton(close) { Text("关闭") } })
+}
