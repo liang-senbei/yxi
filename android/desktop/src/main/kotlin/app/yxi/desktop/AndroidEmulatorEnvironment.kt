@@ -174,8 +174,8 @@ class AndroidEmulatorEnvironment(
                 emptyList<String>() to "emulator -list-avds 超时（${LIST_TIMEOUT_SECONDS}s），已强制结束"
             } else {
                 val out = p.inputStream.readBytes().toString(Charsets.UTF_8)
-                // 只拆行；清洗（trim/空行/去重）统一在 discover() 做
-                out.lineSequence().toList() to null
+                if (p.exitValue() != 0) emptyList<String>() to "emulator -list-avds 失败（退出码 ${p.exitValue()}）"
+                else out.lineSequence().toList() to null
             }
         } catch (e: Exception) {
             emptyList<String>() to "emulator -list-avds 执行失败：${e.message?.take(80)}"
