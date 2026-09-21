@@ -1,5 +1,9 @@
 package app.yxi.desktop
 import androidx.compose.material.icons.outlined.Extension
+import androidx.compose.material.icons.outlined.AccountCircle
+import androidx.compose.material.icons.outlined.SystemUpdateAlt
+import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.outlined.Dns
 
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -477,15 +481,14 @@ private fun AccountRow(state: AppState) {
         DropdownMenuItem(text = { Column {
             Text(name, style = MaterialTheme.typography.titleSmall, color = t.textPrimary)
             Text(listOfNotNull(tier, "Yxi $ver").joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
-        } }, onClick = {}, enabled = false)
+        } }, leadingIcon = { AccountAvatar(name, 28.dp) }, onClick = {}, enabled = false)
         HorizontalDivider(color = t.border)
-        DropdownMenuItem(text = { Text("我的 · 账号与使用情况") }, leadingIcon = { Icon(Icons.Default.Person, null, Modifier.size(18.dp)) }, onClick = { menu = false; state.meSection = "个人资料"; state.page = Page.Me })
-        DropdownMenuItem(text = { Text("版本与更新 · $ver") }, onClick = { menu = false; state.settingsSection = "关于"; state.showSettings = true })
-        DropdownMenuItem(text = { Text("设置") }, trailingIcon = { Text("Ctrl+,", style = MaterialTheme.typography.labelSmall, color = t.textMuted) }, leadingIcon = { Icon(Icons.Default.Tune, null, Modifier.size(18.dp)) }, onClick = { menu = false; state.showSettings = true })
+        DropdownMenuItem(text = { Text("我的 · 账号与使用情况") }, leadingIcon = { Icon(Icons.Outlined.AccountCircle, null, Modifier.size(18.dp)) }, onClick = { menu = false; state.meSection = "个人资料"; state.page = Page.Me })
+        DropdownMenuItem(text = { Text("版本与更新 · $ver") }, leadingIcon = { Icon(Icons.Outlined.SystemUpdateAlt, null, Modifier.size(18.dp)) }, onClick = { menu = false; state.settingsSection = "关于"; state.showSettings = true })
+        DropdownMenuItem(text = { Text("设置") }, trailingIcon = { Text("Ctrl+,", style = MaterialTheme.typography.labelSmall, color = t.textMuted) }, leadingIcon = { Icon(Icons.Outlined.Tune, null, Modifier.size(18.dp)) }, onClick = { menu = false; state.showSettings = true })
         HorizontalDivider(color = t.border)
-        DropdownMenuItem(text = { Text("服务器配置与插件") }, onClick = { menu = false; state.page = Page.Config })
-        DropdownMenuItem(text = { Text("模型与线路") }, onClick = { menu = false; state.openRoutes() })
-        DropdownMenuItem(text = { Text("Codex 任务") }, onClick = { menu = false; state.page = Page.Codex })
+        DropdownMenuItem(text = { Text("服务器配置") }, leadingIcon = { Icon(Icons.Outlined.Dns, null, Modifier.size(18.dp)) }, onClick = { menu = false; state.page = Page.Config })
+        DropdownMenuItem(text = { Text("插件") }, leadingIcon = { Icon(Icons.Outlined.Extension, null, Modifier.size(18.dp)) }, onClick = { menu = false; state.page = Page.Plugins })
         HorizontalDivider(color = t.border)
         DropdownMenuItem(text = { Text(if (signedIn) "切换账号…" else "浏览器登录…") }, leadingIcon = { Icon(Icons.Outlined.SwapHoriz, null, Modifier.size(18.dp)) }, enabled = !MeAuth.waitingBrowser, onClick = { menu = false; state.requestAccountLogin(true) })
         if (signedIn) DropdownMenuItem(text = { Text("退出登录", color = t.danger) }, leadingIcon = { Icon(Icons.Outlined.Logout, null, Modifier.size(18.dp), tint = t.danger) }, onClick = { menu = false; MeAuth.signOut() })

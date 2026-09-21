@@ -118,7 +118,7 @@ fun App(state: AppState) {
                                     DropdownMenu(taskMenu.value, { taskMenu.value = false }) {
                                         DropdownMenuItem(text = { Text("模型与线路") }, onClick = { taskMenu.value = false; state.openRoutes() })
                                         DropdownMenuItem(text = { Text("Android 模拟器") }, onClick = { taskMenu.value = false; state.showAndroidEmulator = true })
-                                        DropdownMenuItem(text = { Text("Codex 任务") }, onClick = { taskMenu.value = false; state.page = Page.Codex })
+                                        DropdownMenuItem(text = { Text("Codex 会话") }, onClick = { taskMenu.value = false; state.page = Page.Codex })
                                         DropdownMenuItem(text = { Text("协作组") }, onClick = { taskMenu.value = false; state.showCollaboration = true })
                                         DropdownMenuItem(text = { Text("切换任务 · Ctrl+K") }, onClick = { taskMenu.value = false; state.showTaskSwitcher = true })
                                         DropdownMenuItem(text = { Text("键盘快捷键") }, onClick = { taskMenu.value = false; state.showShortcuts = true })
