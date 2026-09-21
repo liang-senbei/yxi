@@ -21,12 +21,13 @@ internal fun TerminalQueueRunner(state: AppState) {
                     val first = state.instructions.entries.firstOrNull { it.taskKey == key && it.status in setOf(InstructionStatus.Local, InstructionStatus.Delivering, InstructionStatus.Unknown) }
                     if (first?.status != InstructionStatus.Local && session.runtimeId !in conn.terminalAwaiting && session.runtimeId !in conn.modelChanges && state.modelSwitches.active(session.runtimeId) == null) continue
                     try {
-                        if (session.runtimeId in conn.modelChanges || state.modelSwitches.active(session.runtimeId) != null) {
+                        if (session.runtimeId in conn.modelChanges || state.modelSwitches.active(key) != null) {
                             conn.instructionDeliveryMutex.withLock {
-                                // 持久化切换协议：菜单意图入库后走 Pending→Delivering→回读/AwaitConfirm 闭环；
-                                // store 在途时不接收新意图（返回 false 保留在 conn.modelChanges 下轮再试）。
+                                // 持久化切换协议：菜单意图入库后走 Pending→Delivering→转录回执/AwaitConfirm 闭环；
+                                // store 以 taskNavigationKey 为键（host+session，跨主机不撞），
+                                // 在途时不接收新意图（返回 false 保留在 conn.modelChanges 下轮再试）。
                                 val intent = conn.modelChanges[session.runtimeId]
-                                val accepted = modelSwitch.step({ conn.ssh.exec(it) }, session.runtimeId, session.name, intent)
+                                val accepted = modelSwitch.step({ conn.ssh.exec(it) }, key, session.runtimeId, session.name, intent)
                                 if (intent != null && accepted) conn.modelChanges.remove(session.runtimeId)
                             }
                             continue
