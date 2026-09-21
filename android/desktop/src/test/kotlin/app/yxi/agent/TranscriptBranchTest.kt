@@ -48,4 +48,13 @@ class TranscriptBranchTest {
         parser.add(sequenceOf(row("a1", "outside-window", "answer", true), row("u2", "a1", "second")))
         assertEquals(2, parser.snapshot().size)
     }
+
+    @Test fun `new explicit root clears old turns and context`() {
+        val parser = Transcript.Incremental()
+        parser.add(sequenceOf(row("u1", null, "first"), row("a1", "u1", "old answer", true)))
+        parser.add(sequenceOf(row("new-root", null, "edited first")))
+        assertEquals(listOf("edited first"), parser.snapshot().filterIsInstance<ChatItem.UserText>().map { it.text })
+        assertEquals(emptyList(), parser.snapshot().filterIsInstance<ChatItem.AssistantText>())
+        assertEquals(null, parser.ctx)
+    }
 }

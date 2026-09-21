@@ -24,7 +24,12 @@ internal class TranscriptBranch {
             (content is String || (content is org.json.JSONArray &&
                 (0 until content.length()).any { content.optJSONObject(it)?.optString("type") == "text" } &&
                 (0 until content.length()).none { content.optJSONObject(it)?.optString("type") == "tool_result" }))
-        val chain = if (linked && !known && human && parent != null && parents.containsKey(parent)) ancestors(parent) else null
+        val chain = when {
+            !linked || known || !human -> null
+            parent == null -> emptySet()
+            parents.containsKey(parent) -> ancestors(parent)
+            else -> null
+        }
         val switched = chain != null && leaf != null && leaf !in chain
         if (switched) {
             rows.removeAll { row -> !row.operational && (row.id ?: row.owner)?.let { it !in chain!! } == true }
