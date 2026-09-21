@@ -156,6 +156,8 @@ class AndroidEmulatorLauncher(
                         written += take
                     }
                 }
+                if (written >= MAX_LOG_BYTES)
+                    runCatching { out?.write("\n[yxi] 日志达到上限，后续内容已丢弃（进程不受影响）\n".toByteArray()) }
         } catch (_: Exception) {
             // A broken input stream ends draining; file failures above keep consuming stdout.
         } finally { runCatching { out?.close() } }
