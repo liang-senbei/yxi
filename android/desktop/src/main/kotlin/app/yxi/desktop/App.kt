@@ -88,12 +88,13 @@ fun App(state: AppState) {
                                 catch (e: CancellationException) { throw e }
                                 catch (e: Exception) { state.workspaceError = "文件无法打开：${e.message}" }
                             } }
+                            val webLinks = previewWebLinks(state, conn, taskKey, defaultUris)
                             val links = object : UriHandler {
                                 override fun openUri(uri: String) {
                                     val parsed = runCatching { java.net.URI(uri) }.getOrNull()
                                     when {
                                         parsed == null -> state.workspaceError = "无法识别链接"
-                                        parsed.scheme in listOf("https", "http", "mailto") -> runCatching { defaultUris.openUri(uri) }.onFailure { state.workspaceError = it.message.orEmpty() }
+                                        parsed.scheme in listOf("https", "http", "mailto") -> runCatching { webLinks.openUri(uri) }.onFailure { state.workspaceError = it.message.orEmpty() }
                                         parsed.scheme == null && !parsed.path.isNullOrBlank() -> openFile(parsed.path)
                                         else -> state.workspaceError = "暂不支持该链接，请从文件列表打开"
                                     }

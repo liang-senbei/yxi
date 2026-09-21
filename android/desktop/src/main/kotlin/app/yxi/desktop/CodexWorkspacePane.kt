@@ -134,12 +134,13 @@ private fun CodexConversationPane(state: AppState) {
         }
     }
     val externalUris = LocalUriHandler.current
+    val webLinks = if (conn != null && selected != null) previewWebLinks(state, conn, selected.key, externalUris) else externalUris
     val taskUris = object : UriHandler {
         override fun openUri(uri: String) {
             val parsed = runCatching { java.net.URI(uri) }.getOrNull()
             when {
                 parsed == null -> error = "无法识别链接"
-                parsed.scheme in listOf("http", "https", "mailto") -> runCatching { externalUris.openUri(uri) }.onFailure { error = it.message.orEmpty() }
+                parsed.scheme in listOf("http", "https", "mailto") -> runCatching { webLinks.openUri(uri) }.onFailure { error = it.message.orEmpty() }
                 parsed.scheme == null && !parsed.path.isNullOrBlank() -> openTaskFile(parsed.path)
                 else -> error = "暂不支持此链接，请从文件列表打开"
             }
