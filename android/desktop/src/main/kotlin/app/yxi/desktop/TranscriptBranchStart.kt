@@ -64,27 +64,30 @@ with open(path,'rb') as f:
   if not known and kind in ('user','assistant'): leaf=uid
   if len(nodes)>500000: raise ValueError('History index limit exceeded')
  if os.fstat(f.fileno()).st_size<size: raise ValueError('History truncated')
-cursor=leaf; seen=set(); offsets=[]; messages=0
+cursor=leaf; seen=set(); offsets=[]; ordered=[]; messages=0
 while cursor is not None and messages<count:
  if cursor in seen: raise ValueError('Cyclic history')
  seen.add(cursor)
  if cursor not in nodes: break
+ ordered.append(cursor)
  parent,offset,kind,_,_=nodes[cursor]
  offsets.append(offset)
  if kind in ('user','assistant'): messages+=1
  cursor=parent
 result={'size':size,'start':min(offsets) if offsets else None}
 if snapshot:
- ranges={(nodes[uid][3],nodes[uid][4]) for uid in seen if uid in nodes}
- ranges.update((q[1],q[2]) for q in queued)
- if mode is not None: ranges.add(mode)
+ # A repeated ancestor can have its newest payload physically after the leaf.
+ # Render parent order, not latest-write order, or it would look like a new root.
+ ranges=[(nodes[uid][3],nodes[uid][4]) for uid in reversed(ordered)]
+ ranges.extend((q[1],q[2]) for q in queued)
+ if mode is not None: ranges.append(mode)
  lines=[]
  with open(path,'rb') as f:
   current=os.fstat(f.fileno())
   if (current.st_dev,current.st_ino)!=(original.st_dev,original.st_ino): raise ValueError('History replaced')
   if current.st_size<size: raise ValueError('History truncated')
   if current.st_size==size and current.st_mtime_ns!=original.st_mtime_ns: raise ValueError('History changed')
-  for offset,length in sorted(ranges):
+  for offset,length in ranges:
    f.seek(offset); raw=f.read(length)
    if len(raw)!=length or not raw.endswith(b'\n'): raise ValueError('History changed')
    lines.append(raw.decode('utf-8').rstrip('\n'))
