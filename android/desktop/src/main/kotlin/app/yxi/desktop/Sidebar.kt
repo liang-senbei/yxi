@@ -32,6 +32,10 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Logout
 import androidx.compose.material.icons.outlined.SwapHoriz
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Spacer
@@ -161,12 +165,21 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
         if (creatingOn == null) note = "先连上一台主机，再新建会话"
     }
 
+    var filter by remember { mutableStateOf("") }
+    var searchVisible by remember { mutableStateOf(false) }
+    val searchFocus = remember { FocusRequester() }
+    LaunchedEffect(searchVisible) { if (searchVisible) searchFocus.requestFocus() }
+    fun newConversation() {
+        val c = if (state.hostScope.isEmpty()) state.conn else state.conns.firstOrNull { it.host.id == state.hostScope }
+        if (c?.status == Conn.Status.Connected) creatingOn = c else note = "先选择并连接要运行 Agent 的主机"
+    }
     Column(modifier.background(t.surface1)) {
         UpdateBanner()   // 有新版时才画（Codex 把更新横幅放侧栏顶部）
         Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.weight(1f)) {
-                TextButton({ hostMenu = true }) {
-                    Text((hosts.firstOrNull { it.id == state.hostScope }?.label ?: "所有主机") + " ▾", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Row(Modifier.clip(RoundedCornerShape(9.dp)).clickable { hostMenu = true }.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(hosts.firstOrNull { it.id == state.hostScope }?.label ?: "所有主机", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, color = t.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    Text("⌄", Modifier.padding(start = 6.dp), color = t.textMuted)
                 }
                 DropdownMenu(hostMenu, { hostMenu = false }) {
                     DropdownMenuItem(text = { Text("所有主机") }, onClick = { state.scopeHost(""); hostMenu = false })
@@ -178,6 +191,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
                         })
                     }
                     HorizontalDivider()
+                    DropdownMenuItem(text = { Text("添加服务器…") }, onClick = { hostMenu = false; editing = Host(id = UUID.randomUUID().toString(), alias = "", hostname = "", keyPath = defaultKey()) })
                     DropdownMenuItem(text = { Text("导入服务器…") }, onClick = {
                         hostMenu = false; pickingTransfer = true
                         try { chooseHostTransferFile(false)?.let { file ->
@@ -199,24 +213,25 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
                     })
                 }
             }
-            IconButton({ editing = Host(id = UUID.randomUUID().toString(), alias = "", hostname = "", keyPath = defaultKey()) }, Modifier.size(28.dp)) {
-                Icon(Icons.Default.Add, "加主机", Modifier.size(18.dp), tint = t.textSecondary)
+            IconButton({ searchVisible = !searchVisible; if (!searchVisible) filter = "" }, Modifier.size(30.dp)) {
+                Icon(Icons.Outlined.Search, "搜索会话", Modifier.size(18.dp), tint = t.textMuted)
             }
         }
         if (note.isNotBlank()) Text(note, Modifier.padding(14.dp, 2.dp), color = t.danger, style = MaterialTheme.typography.bodySmall)
         if (Store.warning.isNotBlank()) Text(Store.warning, Modifier.padding(14.dp, 2.dp), color = t.danger, style = MaterialTheme.typography.bodySmall)
         if (Store.hostRecoveryNeeded()) TextButton({ recoveringHosts = true }, enabled = state.conns.isEmpty()) { Text(if (state.conns.isEmpty()) "从受保护副本恢复服务器" else "恢复前请先断开连接") }
-        TextButton({
-            val c = if (state.hostScope.isEmpty()) state.conn else state.conns.firstOrNull { it.host.id == state.hostScope }
-            if (c?.status == Conn.Status.Connected) creatingOn = c else note = "先选择并连接要运行 Agent 的主机"
-        }, Modifier.fillMaxWidth()) { Text("＋ 新对话") }
-        TextButton({ state.showTaskSwitcher = true }, Modifier.fillMaxWidth()) {
-            Text("切换任务", Modifier.weight(1f))
+        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp).clip(RoundedCornerShape(8.dp)).clickable { newConversation() }.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Icon(Icons.Outlined.Edit, null, Modifier.size(18.dp), tint = t.textSecondary)
+            Text("新对话", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = t.textPrimary)
+            Icon(Icons.Default.Add, null, Modifier.size(16.dp), tint = t.textMuted)
+        }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp).clip(RoundedCornerShape(8.dp)).clickable { state.showTaskSwitcher = true }.padding(horizontal = 10.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Icon(Icons.Outlined.SwapHoriz, null, Modifier.size(18.dp), tint = t.textSecondary)
+            Text("切换任务", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = t.textPrimary)
             Text("Ctrl+K", style = MaterialTheme.typography.labelSmall, color = t.textMuted)
         }
         // 会话过滤（ZCode 的搜索框 / Codex 的过滤）：按会话名 / 主机名滤，主机全不匹配就整组藏掉
-        var filter by remember { mutableStateOf("") }
-        if (hosts.isNotEmpty()) Row(
+        if (searchVisible) Row(
             Modifier.fillMaxWidth().padding(10.dp, 2.dp, 10.dp, 6.dp).clip(RoundedCornerShape(8.dp)).background(t.border),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -225,7 +240,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
                 filter, { filter = it }, singleLine = true,
                 textStyle = MaterialTheme.typography.bodySmall.copy(color = t.textPrimary),
                 cursorBrush = androidx.compose.ui.graphics.SolidColor(t.accent),
-                modifier = Modifier.fillMaxWidth().padding(8.dp, 6.dp),
+                modifier = Modifier.fillMaxWidth().focusRequester(searchFocus).padding(8.dp, 6.dp),
                 decorationBox = { inner -> Box { if (filter.isEmpty()) Text("搜索会话", style = MaterialTheme.typography.bodySmall, color = t.textMuted); inner() } },
             )
         }
