@@ -1,6 +1,8 @@
 # Windows 1.4.9 候选
 
-状态：准备构建，未发布官网。版本号不能作为已经发布的证据。
+状态：已触发候选构建，未发布官网。版本号不能作为已经发布的证据。
+
+冻结源码：7e9bb18dc29a39301cd77c4ca7b02354d4e685b9；分支codex/windows-release-1.4.9；Windows CI：https://github.com/liang-senbei/yxi/actions/runs/35612716002 。后续开发提交不自动包含在此候选中。
 
 ## 本批变化
 
