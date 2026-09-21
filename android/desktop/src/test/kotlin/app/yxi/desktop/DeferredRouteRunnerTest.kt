@@ -129,6 +129,7 @@ class DeferredRouteRunnerTest {
     }
 
     /** 其余分支需要能连、能写、能造 tmux 会话的隔离环境。 */
+    @org.junit.jupiter.api.Disabled("Host SSH fixture is quarantined pending dedicated container isolation; see design/windows-test-isolation-incident.md")
     @Test fun `deferred route over real ssh waits cancels recovers and writes`() = runBlocking {
         val fixture = System.getenv("YXI_ROUTE_FIXTURE")
         assumeTrue(fixture != null, "Requires the isolated SSH fixture")

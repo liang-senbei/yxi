@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+printf '%s\n' 'Disabled after the tmux isolation incident. Migrate this SSH fixture to a dedicated container before enabling it.' >&2
+exit 78
 # Agent 会话本身就跑在 tmux 里，TMUX 环境变量指向**绝对 socket 路径**且优先于 TMUX_TMPDIR——
 # 不 strip 掉的话，下面 trap 里的 `tmux kill-server` 会命中宿主默认服务（本组 Agent 全在上面）。
 unset TMUX TMUX_PANE

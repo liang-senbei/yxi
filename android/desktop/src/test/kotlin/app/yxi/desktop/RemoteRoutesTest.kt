@@ -15,6 +15,7 @@ import kotlin.test.*
 
 /** Only runs against dev/test-remote-routes.sh's disposable localhost SSH server. */
 class RemoteRoutesTest {
+    @org.junit.jupiter.api.Disabled("Host SSH fixture is quarantined pending dedicated container isolation; see design/windows-test-isolation-incident.md")
     @Test fun `catalog scopes and provider restoration use the real SSH transport`(): Unit = runBlocking {
         val fixture = System.getenv("YXI_ROUTE_FIXTURE")
         assumeTrue(fixture != null, "Requires the isolated SSH fixture")
