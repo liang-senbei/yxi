@@ -71,7 +71,7 @@ object Updater {
     }
 
     /** 读 releases.win.json，Type=Full 里挑最高版本，比当前新就开始下。查失败只打日志，不打扰用户（可能只是没网）。 */
-    fun check() {
+    @Synchronized fun check() {
         if (state !is Idle && state !is Error) return   // 正在下 / 已就绪
         runCatching {
             val latest = pickUpdate(fetch(FEED + "releases.win.json", BodyHandlers.ofString()), version) ?: return
@@ -81,9 +81,29 @@ object Updater {
         }.onFailure { println("update check: $it") }
     }
 
+    @Synchronized fun checkManually(): String {
+        if (state is Downloading) return "正在下载更新"
+        if (state is Ready) return "更新已就绪，可安装并重启"
+        val raw = fetch(FEED + "releases.win.json", BodyHandlers.ofString())
+        val assets = JSONObject(raw).getJSONArray("Assets")
+        val latest = (0 until assets.length()).map { assets.getJSONObject(it) }
+            .filter { it.optString("Type") == "Full" && it.optString("PackageId") == "Yxi" }
+            .maxWithOrNull { a, b -> cmpVer(a.getString("Version"), b.getString("Version")) }
+            ?: error("更新清单没有可用的 Windows 安装包")
+        val latestVersion = latest.getString("Version")
+        if (version != "dev" && cmpVer(latestVersion, version) <= 0) return "已是最新版本 · $version"
+        if (updateExe == null) return "官网最新版本 $latestVersion · 请下载安装包更新"
+        pending = latest
+        state = Available(latestVersion)
+        download()
+        return "发现 $latestVersion，正在下载"
+    }
+
     /** 下 pending 那个 nupkg 到 packages\，SHA256 对得上才算 Ready；上次下好没重启的直接复用。 */
-    fun download() {
+    @Synchronized fun download() {
+        if (updateExe == null || state is Downloading || state is Ready) return
         val a = pending ?: return
+        state = Downloading(0)
         thread(isDaemon = true, name = "yxi-download") {
             runCatching {
                 val dir = File(updateExe!!.parentFile, "packages").apply { mkdirs() }

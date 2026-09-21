@@ -486,6 +486,7 @@ private fun AccountRow(state: AppState) {
         } }, onClick = {}, enabled = false)
         HorizontalDivider(color = t.border)
         DropdownMenuItem(text = { Text("我的 · 账号与使用情况") }, leadingIcon = { Icon(Icons.Default.Person, null, Modifier.size(18.dp)) }, onClick = { menu = false; state.meSection = "个人资料"; state.page = Page.Me })
+        DropdownMenuItem(text = { Text("版本与更新 · $ver") }, onClick = { menu = false; state.settingsSection = "关于"; state.showSettings = true })
         DropdownMenuItem(text = { Text("设置") }, trailingIcon = { Text("Ctrl+,", style = MaterialTheme.typography.labelSmall, color = t.textMuted) }, leadingIcon = { Icon(Icons.Default.Tune, null, Modifier.size(18.dp)) }, onClick = { menu = false; state.showSettings = true })
         HorizontalDivider(color = t.border)
         DropdownMenuItem(text = { Text("服务器配置与插件") }, onClick = { menu = false; state.page = Page.Config })

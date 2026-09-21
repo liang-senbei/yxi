@@ -68,8 +68,7 @@ fun SettingsDialog(state: AppState) {
                                 if (retentionError.isNotBlank()) Text(retentionError, color = Tokens.current.danger)
                             }
                             else -> {
-                                Text("Yxi " + (Updater.version.takeIf { it != "dev" }?.let { "v$it" } ?: "开发版"), style = MaterialTheme.typography.titleLarge)
-                                Text("Windows 工作台 · 主机、分组与 Agent", style = MaterialTheme.typography.bodyMedium)
+                                VersionSettings()
                             }
                         }
                     }
