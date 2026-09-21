@@ -36,3 +36,9 @@
 `624fed9` 基线与补测 `4aead4d`：root 核对 `TranscriptBranchSnapshotInspectionTest` XML（2026-09-21 20:07:53 UTC），7 项、0 失败、0 跳过。通过真实 Python 进程执行生产 snapshot 脚本，再将结果喂给产品 Transcript/Entry，覆盖：450 条弃支不进入返回记录、残行续接字节位置、队列重复内容与出队、最新 UUID 内容、祖先重放顺序、旧格式回退标识。
 
 快照路径与早期连续字节区间方案不同：已有证据证明返回记录不包含被弃支。服务器仍扫描原文件元数据，完整性能与历史分页尚未验收；不能继续沿用“snapshot 仍传全部弃支”的旧描述。无链旧格式仍使用 tail 回退，实际 SSH 网络中断不在这 7 项的覆盖范围内。
+
+## 控制器发送闸接线复核
+
+`38b06dd`（基于 `5b2f5e3`，控制器改动合入为 `1104454`）隔离工作树，root 核对 2026-09-21 20:12:32–35 UTC XML：RewindControllerGateTest 2、RewindDeliveryGateTest 3、RewindShellTest 8、RewindTest 34，均 0 失败、0 跳过。
+
+控制器在首次可能修改转录的 exec 前持发送锁创建 ticket；尚未确认加载完成时不清除。控制器新增两例只证明探不到会话不建票和 Target 字段映射，不能代替成功回退、取消和恢复的完整控制器测试。`42d5040` 的当前进程捕获修复晚于该测试基线，另待复测。运行器加载确认和 ChatPane 一键执行仍未完成。
