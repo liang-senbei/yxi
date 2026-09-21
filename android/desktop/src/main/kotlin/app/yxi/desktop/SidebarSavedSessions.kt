@@ -1,6 +1,9 @@
 package app.yxi.desktop
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -41,7 +44,8 @@ internal fun SidebarSavedSessions(state: AppState, hosts: List<Host>, query: Str
         }.sortedBy { nav.pinOrder(taskNavigationKey(host, it)) }
         live.forEach { session ->
             count++
-            SavedSessionRow(nav.title(taskNavigationKey(host, session)) ?: session.short, host.label + " · " + session.cwd, conn?.ssh?.isConnected == true) { if (conn != null) state.select(conn, session) }
+            SavedSessionRow(nav.title(taskNavigationKey(host, session)) ?: session.short, host.label + " · " + session.cwd, conn?.ssh?.isConnected == true,
+                selected = state.page == Page.Workspace && state.conn === conn && state.session?.runtimeId == session.runtimeId) { if (conn != null) state.select(conn, session) }
         }
         state.codexWorkspace.tasks(host).filter { task ->
             val controller = state.codexWorkspace.controllers[task.key]
@@ -54,7 +58,8 @@ internal fun SidebarSavedSessions(state: AppState, hosts: List<Host>, query: Str
                 } && listOf(nav.title(task.key).orEmpty(), task.title, task.directory, host.label).any { it.contains(query, true) }
         }.sortedBy { nav.pinOrder(it.key) }.forEach { task ->
             count++
-            SavedSessionRow(nav.title(task.key) ?: task.title, host.label + " · Codex · " + task.directory, conn != null) {
+            SavedSessionRow(nav.title(task.key) ?: task.title, host.label + " · Codex · " + task.directory, conn != null,
+                selected = state.page == Page.Codex && state.conn === conn && state.codexSelectedTaskKey == task.key) {
                 if (conn != null) {
                     openError = ""
                     state.select(conn, null)
@@ -82,8 +87,10 @@ internal fun SidebarSavedSessions(state: AppState, hosts: List<Host>, query: Str
 }
 
 @Composable
-private fun SavedSessionRow(title: String, subtitle: String, enabled: Boolean, open: () -> Unit) {
-    Column(Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = open).padding(horizontal = 18.dp, vertical = 7.dp)) {
+private fun SavedSessionRow(title: String, subtitle: String, enabled: Boolean, selected: Boolean = false, open: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 1.dp).clip(RoundedCornerShape(9.dp))
+        .then(if (selected) Modifier.background(Tokens.current.surface3) else Modifier)
+        .clickable(enabled = enabled, onClick = open).padding(horizontal = 10.dp, vertical = 7.dp)) {
         Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, color = if (enabled) Tokens.current.textPrimary else Tokens.current.textMuted)
         Text(subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
     }
