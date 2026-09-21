@@ -281,7 +281,10 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
                     (hostMatch || favorite.title.contains(f, true) || favorite.directory.contains(f, true)) &&
                         c?.sessions?.none { taskNavigationKey(h, it) == favorite.key } != false
                 } else emptyList()
-                if (!hostMatch && sessions.isEmpty() && favorites.isEmpty()) return@forEachIndexed
+                val managedMatch = state.codexWorkspace.tasks(h).any { record ->
+                    listOf(record.title, record.directory, state.navigation.title(record.key).orEmpty(), state.navigation.group(record.key)).any { it.contains(f, true) }
+                }
+                if (!hostMatch && sessions.isEmpty() && favorites.isEmpty() && !managedMatch) return@forEachIndexed
                 Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
                     Box(Modifier.width(3.dp).fillMaxHeight().background(h.tint(i)))   // 连接颜色条，整组都带着
                     Column(Modifier.weight(1f)) {
@@ -301,7 +304,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
                         // 断线重连中列表照旧摆着（服务器上的会话还在），不清；搜索时只画滤剩下的
                         if (c != null) {
                             ProjectTree(state, c, sessions, searching = f.isNotEmpty(), query = f)
-                            if (f.isEmpty() && c.status == Conn.Status.Connected && c.sessions.isEmpty())
+                            if (f.isEmpty() && c.status == Conn.Status.Connected && c.sessions.isEmpty() && state.codexWorkspace.tasks(h).isEmpty())
                                 Text("这台机器上还没有会话", Modifier.padding(start = 24.dp, bottom = 6.dp), style = MaterialTheme.typography.bodySmall, color = t.textMuted)
                         }
                         if (favorites.isNotEmpty()) Text("收藏 · 未启用", Modifier.padding(start = 18.dp, top = 8.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)

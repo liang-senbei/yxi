@@ -31,7 +31,7 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
         val controller = state.codexWorkspace.controllers[record.key]
         nav.visible(record.key, if (controller?.pendingRequests?.isNotEmpty() == true) SessionState.NeedsYou
             else if (controller?.activeTurnId != null) SessionState.Working else SessionState.Idle) &&
-            listOf(nav.title(record.key).orEmpty(), record.title, record.directory, conn.host.label).any { it.contains(query, true) }
+            listOf(nav.title(record.key).orEmpty(), record.title, record.directory, conn.host.label, conn.host.region, nav.group(record.key)).any { it.contains(query, true) }
     }
     @Composable fun codexTask(record: CodexTaskRecord) {
         var menu by remember(record.key) { mutableStateOf(false) }
