@@ -371,4 +371,171 @@ class OpenCodeRouteConfigTest {
         // 之前就是并存态、现在只剩一份：同样拒绝（世界已变，快照不可信）
         assertTrue(OpenCodeRouteConfig.expectationStale(statusOf(bothExist = true), dir, res("opencode.jsonc", both = false)))
     }
+
+    // ---------- provider 新增/编辑：手术纪律同 patchModel，未提及字节一律不动 ----------
+
+    private fun pp(
+        id: String,
+        name: String? = null,
+        npm: String? = null,
+        baseURL: String? = null,
+        apiKey: String? = null,
+        ensureModelIds: List<String> = emptyList(),
+    ) = OpenCodeRouteConfig.ProviderPatch(id, name, npm, baseURL, apiKey, ensureModelIds)
+
+    @Test
+    fun `新增provider全字段且既有内容逐字节保留`() {
+        val out = OpenCodeRouteConfig.patchProvider(
+            richDoc,
+            pp("new-relay", name = "中转二号", npm = "@scope/pkg", baseURL = "https://n.example.com/v1", apiKey = "sk-new", ensureModelIds = listOf("m-1", "m-2")),
+        )
+        // 最强证明：输出 = 原文在 provider 对象 `{` 后恰好插入一个成员，其余逐字节不变
+        val pOpen = richDoc.indexOf("\"provider\": {") + "\"provider\": {".length - 1
+        val member = "\"new-relay\": { \"name\": \"中转二号\", \"npm\": \"@scope/pkg\", " +
+            "\"options\": { \"baseURL\": \"https://n.example.com/v1\", \"apiKey\": \"sk-new\" }, " +
+            "\"models\": { \"m-1\": {}, \"m-2\": {} } }"
+        assertEquals(richDoc.replaceRange(pOpen + 1, pOpen + 1, "\n    $member,"), out)
+        val p = OpenCodeRouteConfig.parseConfig(out)
+        val nr = p.providers.first { it.id == "new-relay" }
+        assertEquals("中转二号", nr.name)
+        assertEquals("@scope/pkg", nr.npm)
+        assertEquals("https://n.example.com/v1", nr.baseURL)
+        assertEquals(OpenCodeRouteConfig.fingerprint("sk-new"), nr.apiKeyFingerprint)
+        assertEquals(listOf("m-1", "m-2"), nr.modelIds)
+        assertTrue(out.contains("// 中转商备注：别删"), "注释保留")
+        assertTrue(out.contains("unknown_future_key"), "未知字段保留")
+        assertEquals(listOf("my-relay", "new-relay"), p.providers.map { it.id }, "既有 provider 不动")
+    }
+
+    @Test
+    fun `编辑已有provider的baseURL原位替换`() {
+        val out = OpenCodeRouteConfig.patchProvider(richDoc, pp("my-relay", baseURL = "https://new.example.com/v2"))
+        assertEquals(
+            richDoc.replace("\"https://relay.example.com/v1\"", "\"https://new.example.com/v2\""),
+            out,
+            "除 baseURL 值外逐字节不变",
+        )
+    }
+
+    @Test
+    fun `options缺失时新建并写入baseURL与apiKey`() {
+        val out = OpenCodeRouteConfig.patchProvider("""{"provider": {"r": { "name": "n" }}}""", pp("r", baseURL = "https://x", apiKey = "sk-2"))
+        assertEquals("""{"provider": {"r": {"options": { "baseURL": "https://x", "apiKey": "sk-2" }, "name": "n" }}}""", out)
+        val p = OpenCodeRouteConfig.parseConfig(out)
+        assertEquals("https://x", p.providers.single().baseURL)
+        assertEquals(OpenCodeRouteConfig.fingerprint("sk-2"), p.providers.single().apiKeyFingerprint)
+    }
+
+    @Test
+    fun `options已有键保留`() {
+        val doc = """{"provider": {"r": {"options": {"enterpriseUrl": "https://e"}}}}"""
+        val out = OpenCodeRouteConfig.patchProvider(doc, pp("r", baseURL = "https://x.example.com", apiKey = "sk-2"))
+        // 两次插入都落在 options 的 `{` 后（后者居前）；enterpriseUrl 一字不动
+        assertEquals(
+            """{"provider": {"r": {"options": {"apiKey": "sk-2","baseURL": "https://x.example.com","enterpriseUrl": "https://e"}}}}""",
+            out,
+        )
+    }
+
+    @Test
+    fun `空串显式清空apiKey`() {
+        val out = OpenCodeRouteConfig.patchProvider(richDoc, pp("my-relay", apiKey = ""))
+        assertEquals(richDoc.replace("\"sk-keep\"", "\"\""), out, "除 apiKey 值外逐字节不变")
+        assertNull(OpenCodeRouteConfig.parseConfig(out).providers.single().apiKeyFingerprint, "空串按未配置口径")
+        assertTrue(out.contains("https://relay.example.com/v1"), "未提及的 baseURL 不动")
+    }
+
+    @Test
+    fun `ensureModels只补缺不改已有条目`() {
+        val out = OpenCodeRouteConfig.patchProvider(richDoc, pp("my-relay", ensureModelIds = listOf("m-b", "m-c")))
+        assertTrue(out.contains("\"m-b\": { \"name\": \"B\" }"), "已有条目内容绝不改写")
+        val mop = richDoc.indexOf("\"models\": {") + "\"models\": {".length
+        assertEquals(richDoc.replaceRange(mop, mop, "\"m-c\": {},"), out, "缺的登记为空条目，其余逐字节不变")
+        assertEquals(listOf("m-a", "m-b", "m-c"), OpenCodeRouteConfig.parseConfig(out).providers.single().modelIds)
+    }
+
+    @Test
+    fun `provider类型冲突拒绝`() {
+        // 现有值不是字符串
+        assertFailsWith<IllegalArgumentException> {
+            OpenCodeRouteConfig.patchProvider("""{"provider": {"r": {"name": 3}}}""", pp("r", name = "x"))
+        }
+        // options 不是对象
+        assertFailsWith<IllegalArgumentException> {
+            OpenCodeRouteConfig.patchProvider("""{"provider": {"r": {"options": "s"}}}""", pp("r", baseURL = "https://x"))
+        }
+        // provider 条目不是对象
+        assertFailsWith<IllegalArgumentException> {
+            OpenCodeRouteConfig.patchProvider("""{"provider": {"r": 3}}""", pp("r", name = "x"))
+        }
+        // models 不是对象
+        assertFailsWith<IllegalArgumentException> {
+            OpenCodeRouteConfig.patchProvider("""{"provider": {"r": {"models": []}}}""", pp("r", ensureModelIds = listOf("m")))
+        }
+        // 顶层 provider 不是对象 / 坏配置拒绝盲改
+        assertFailsWith<IllegalArgumentException> { OpenCodeRouteConfig.patchProvider("""{"provider": []}""", pp("r", name = "x")) }
+        assertFailsWith<IllegalArgumentException> { OpenCodeRouteConfig.patchProvider("""{ "provider": }""", pp("r", name = "x")) }
+        // 顶层 provider 重复
+        assertFailsWith<IllegalArgumentException> {
+            OpenCodeRouteConfig.patchProvider("""{"provider": {"r": {}}, "provider": {}}""", pp("r", name = "x"))
+        }
+    }
+
+    @Test
+    fun `provider容器缺失时新建并保留既有键`() {
+        val out = OpenCodeRouteConfig.patchProvider("{\n  \"theme\": \"dark\"\n}", pp("r", name = "n"))
+        assertEquals("{\n  \"provider\": { \"r\": { \"name\": \"n\" } },\n  \"theme\": \"dark\"\n}", out)
+        val p = OpenCodeRouteConfig.parseConfig(out)
+        assertEquals("n", p.providers.single().name)
+        assertEquals(listOf("theme"), p.otherTopLevelKeys)
+    }
+
+    @Test
+    fun `provider新建最小配置字段顺序确定`() {
+        val patch = pp("r", npm = "pkg", baseURL = "https://x", apiKey = "k", ensureModelIds = listOf("m"))
+        val out = OpenCodeRouteConfig.patchProvider(null, patch)
+        assertEquals(
+            "{\n  \"provider\": {\n    \"r\": { \"npm\": \"pkg\", \"options\": { \"baseURL\": \"https://x\", \"apiKey\": \"k\" }, \"models\": { \"m\": {} } }\n  }\n}\n",
+            out,
+        )
+        assertEquals(out, OpenCodeRouteConfig.patchProvider("  \n", patch), "空白文本同新建")
+    }
+
+    @Test
+    fun `provider嵌套同名与注释含括号不碰`() {
+        // 嵌套对象里的同名 provider 不碰；顶层容器缺失照常新建
+        val out13 = OpenCodeRouteConfig.patchProvider("""{"nested": {"provider": {"r": {"name": "decoy"}}}}""", pp("r", name = "new"))
+        assertEquals("""{"provider": { "r": { "name": "new" } },"nested": {"provider": {"r": {"name": "decoy"}}}}""", out13)
+        // 注释里的花括号不得污染括号深度（否则值 span 截断在注释里，手术定错位）
+        val out11 = OpenCodeRouteConfig.patchProvider(
+            """{"provider": {"r": {"models": {"m": {}}} /* } */}, "theme": "dark"}""",
+            pp("r", name = "b"),
+        )
+        assertEquals("""{"provider": {"r": {"name": "b","models": {"m": {}}} /* } */}, "theme": "dark"}""", out11)
+        val out12 = OpenCodeRouteConfig.patchProvider(
+            """{"provider": {"r": {"name": "a" // }
+}}}""",
+            pp("r", name = "b"),
+        )
+        assertEquals("""{"provider": {"r": {"name": "b" // }
+}}}""", out12)
+        // 多行空对象：无既有成员可抄缩进，按本模块固定 2 空格插入（语义等价，可读性略让位）
+        val out14 = OpenCodeRouteConfig.patchProvider("{\n  \"provider\": {\n  }\n}", pp("r", name = "n"))
+        assertEquals("{\n  \"provider\": {\n  \"r\": { \"name\": \"n\" }\n  }\n}", out14)
+    }
+
+    @Test
+    fun `providerPatch校验拒绝`() {
+        assertFailsWith<IllegalArgumentException>("全空 patch 拒绝") { OpenCodeRouteConfig.patchProvider(richDoc, pp("my-relay")) }
+        for (badId in listOf("", "a b", "a/b", "a\nb", "a\"b")) {
+            assertFailsWith<IllegalArgumentException>("应拒绝 id：$badId") { OpenCodeRouteConfig.patchProvider(null, pp(badId, name = "n")) }
+        }
+        assertFailsWith<IllegalArgumentException> { OpenCodeRouteConfig.patchProvider(null, pp("r", baseURL = "ftp://x")) }
+        assertFailsWith<IllegalArgumentException> { OpenCodeRouteConfig.patchProvider(null, pp("r", baseURL = "https://u:p@h")) }
+        assertFailsWith<IllegalArgumentException> { OpenCodeRouteConfig.patchProvider(null, pp("r", baseURL = "not a url")) }
+        assertFailsWith<IllegalArgumentException> { OpenCodeRouteConfig.patchProvider(null, pp("r", npm = "has space")) }
+        assertFailsWith<IllegalArgumentException> { OpenCodeRouteConfig.patchProvider(null, pp("r", ensureModelIds = listOf("m1", "m1"))) }
+        assertFailsWith<IllegalArgumentException> { OpenCodeRouteConfig.patchProvider(null, pp("r", ensureModelIds = listOf(""))) }
+        assertFailsWith<IllegalArgumentException> { OpenCodeRouteConfig.patchProvider(null, pp("r", apiKey = "line1\nline2")) }
+    }
 }
