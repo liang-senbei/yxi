@@ -394,7 +394,10 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
         }
         searchOpen = false
     }
-    LaunchedEffect(rows, stick) { if (stick && rows.isNotEmpty()) listState.requestScrollToItem(Int.MAX_VALUE / 2, 100_000) }
+    // A real end anchor also exposes the end of an assistant reply taller than the viewport.
+    LaunchedEffect(rows, stick) {
+        if (stick && rows.isNotEmpty()) listState.requestScrollToItem(rows.size)
+    }
     LaunchedEffect(taskKey) { focus.requestFocus() }   // 焦点先落输入框，Enter / Esc 一开始就能批
     // 只认用户的滚动（程序滚到底那一下也会走这里，不过滤会把 stick 关掉）；往上翻 = 停跟随，翻回底 = 再粘上
     val scrollWatch = remember(taskKey) {
@@ -433,12 +436,13 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                         is ChatRow.One -> ItemView(conn, row.item) { editingMessage = it }
                     }
                 }
+                item(key = "conversation-bottom-anchor") { Spacer(Modifier.height(1.dp)) }
             }
             if (items.isEmpty()) Text(status ?: "还没有对话", Modifier.align(Alignment.Center), style = BodyStyle, color = t.textMuted)
             if (!stick) TextButton(
                 onClick = { stick = true },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp).background(t.surface3, RoundedCornerShape(Radius)).border(1.dp, t.border, RoundedCornerShape(Radius)),
-            ) { Text("↓ 回到底部", color = t.textPrimary) }
+            ) { Text("↓ 回到最新", color = t.textPrimary) }
         }
         if (items.isNotEmpty()) status?.let { Note(it, t.textMuted) }
         if (live.busy) BusyLine(live.status)
