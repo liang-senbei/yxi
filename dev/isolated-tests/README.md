@@ -24,3 +24,5 @@ Verified on hk13: image source `4caf4f7` built after setting a UTF-8 locale; run
 To validate a runner-only change against an already built, explicitly recorded image, set `YXI_TEST_IMAGE_REVISION` to its full commit SHA. Results record both runner and image revisions; this is not evidence for newer application code.
 
 Remaining verification: runtime timeout/failure cleanup and migration of the quarantined real SSH/CLI test. The 3-test smoke run does not prove the complete rewind workflow.
+
+Image `6253431` was rebuilt offline from validated dependency image `4caf4f7` using `YXI_TEST_BASE_IMAGE_REVISION`. In the resulting network-isolated container, `IsolatedSshTransportTest` ran one real OpenSSH/JSch test with a pinned generated host key, strict filesystem permissions, password authentication disabled, and a forced private HOME. SSH connection and UTF-8 file write/read succeeded; XML reported 1 executed, 0 failures, 0 skips. The exact labelled container was removed. Evidence: `run.Ht4l7s` in the private test cache. No tmux or agent process was started by this test.
