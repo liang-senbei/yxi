@@ -22,7 +22,8 @@ def verify(container, run_id, results, image_id, native=None):
     check(not config.get("PortBindings") and not config.get("PublishAllPorts"))
     check(not config.get("Devices") and not config.get("DeviceRequests") and not config.get("VolumesFrom"))
     check(set(config.get("CapDrop") or []) == {"ALL"})
-    check(set(config.get("CapAdd") or []) <= {"SETUID", "SETGID", "SYS_CHROOT"})
+    capabilities = {value.removeprefix("CAP_") for value in (config.get("CapAdd") or [])}
+    check(capabilities <= {"SETUID", "SETGID", "SYS_CHROOT"})
     check("no-new-privileges" in (config.get("SecurityOpt") or []))
     check(0 < config["Memory"] <= 4 * 1024**3)
     check(config["MemorySwap"] == config["Memory"])

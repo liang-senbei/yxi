@@ -11,7 +11,13 @@ docker_local() {
 }
 test -z "$(git -C "$repo" status --porcelain)" || { echo 'Use a clean committed source snapshot.' >&2; exit 2; }
 revision=$(git -C "$repo" rev-parse HEAD)
-image="yxi-isolated-tests:$revision"
+image_revision=$revision
+if test "$mode" = run && test -n "${YXI_TEST_IMAGE_REVISION:-}"; then
+    image_revision=$YXI_TEST_IMAGE_REVISION
+    [[ "$image_revision" =~ ^[a-f0-9]{40}$ ]]
+    git -C "$repo" cat-file -e "$image_revision^{commit}"
+fi
+image="yxi-isolated-tests:$image_revision"
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/yxi-isolated-tests"
 mkdir -p "$cache"
 chmod 700 "$cache"
@@ -41,9 +47,10 @@ if test -n "$native"; then
     mounts+=(--mount "type=bind,src=$native,dst=/opt/native/claude,readonly")
 fi
 test "$(docker_local image inspect --format '{{ index .Config.Labels "org.yxi.test-isolation" }}' "$image")" = 1
-test "$(docker_local image inspect --format '{{ index .Config.Labels "org.yxi.source-revision" }}' "$image")" = "$revision"
+test "$(docker_local image inspect --format '{{ index .Config.Labels "org.yxi.source-revision" }}' "$image")" = "$image_revision"
 image_id=$(docker_local image inspect --format '{{.Id}}' "$image")
 mkdir "$run_root/results"
+printf 'runner=%s\nimage-source=%s\ntest=%s\n' "$revision" "$image_revision" "$test_class" > "$run_root/source.txt"
 run_id=$(python3 -c 'import uuid;print(uuid.uuid4())')
 container_id=
 cleanup() {
@@ -75,4 +82,5 @@ set -e
 docker_local inspect "$container_id" > "$run_root/final-container.json"
 exit_code=$(docker_local inspect --format '{{.State.ExitCode}}' "$container_id")
 echo "Results: $run_root"
+echo "Tested image source: $image_revision"
 test "$client_result" = 0 && test "$exit_code" = 0

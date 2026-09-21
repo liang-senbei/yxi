@@ -23,6 +23,14 @@ class ContainerBoundaryTest(unittest.TestCase):
     def test_expected_boundary(self):
         verify(self.safe, "run-1", self.results, self.image)
 
+    def test_docker_cap_prefix_preserves_the_same_allowlist(self):
+        candidate = copy.deepcopy(self.safe)
+        candidate["HostConfig"]["CapAdd"] = ["CAP_SETUID", "CAP_SETGID", "CAP_SYS_CHROOT"]
+        verify(candidate, "run-1", self.results, self.image)
+        candidate["HostConfig"]["CapAdd"].append("CAP_SYS_ADMIN")
+        with self.assertRaises(ValueError):
+            verify(candidate, "run-1", self.results, self.image)
+
     def test_host_namespaces_and_privileges_rejected(self):
         for field, value in [("NetworkMode", "host"), ("PidMode", "host"), ("IpcMode", "host"),
                              ("Privileged", True), ("RestartPolicy", {"Name": "always"}), ("CapAdd", ["SYS_ADMIN"]), ("PidsLimit", -1)]:
