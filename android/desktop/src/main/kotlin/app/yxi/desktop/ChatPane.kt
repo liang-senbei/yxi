@@ -172,11 +172,8 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                 if (!target.queued && !session.isCodex) Button({
                     val uuid = target.sourceUuid ?: return@Button
                     val submitted = editedText
-                    val started = ConversationRewind.start(conn, session, uuid, submitted) {
-                        if (draftHolder.value.text == submitted) draftHolder.value = TextFieldValue()
-                    }
+                    val started = ConversationRewind.start(conn, session, uuid, submitted)
                     if (started) {
-                        draft = TextFieldValue(submitted, selection = TextRange(submitted.length))
                         editingMessage = null; sendErr = null
                     }
                 }, enabled = !rewindRunning && !RewindDelivery.gate.blocked(taskKey) && target.sourceUuid != null &&
@@ -491,8 +488,14 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
         if (rewindRunning) {
             LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp))
             Note(rewindOperation?.message.orEmpty(), t.textSecondary)
-        } else if (rewindOperation?.failed == true) Note(rewindOperation.message, t.danger)
-        if (rewindBlocked) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        } else if (rewindOperation?.failed == true) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(rewindOperation.message, Modifier.weight(1f), color = t.danger, fontSize = 12.sp)
+            if (!rewindBlocked && rewindOperation.messageUuid != null && rewindOperation.editedText != null) TextButton({
+                editingMessage = MessageEditTarget(rewindOperation.messageUuid, rewindOperation.editedText,
+                    sourceUuid = rewindOperation.messageUuid)
+            }) { Text("重新编辑") }
+        }
+        if (rewindBlocked && !rewindRunning) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("回退尚未确认，发送已暂停。输入和排队消息已保留。", Modifier.weight(1f), color = t.warning, fontSize = 12.sp)
             if (RewindDelivery.gate.pending(taskKey)?.verification != null) TextButton({
                 rewindChecking = true; sendErr = null
@@ -508,7 +511,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
             TextButton(onTerminal) { Text("查看终端") }
         }
         sendErr?.let { Note(it, t.danger) }
-        InstructionStrip(instructions, taskNavigationKey(conn.host, session), !rewindBlocked && !sending && !live.busy && pending == null && ssh.isConnected, ::deliver,
+        InstructionStrip(instructions, taskNavigationKey(conn.host, session), !rewindRunning && !rewindBlocked && !sending && !live.busy && pending == null && ssh.isConnected, ::deliver,
             onQuery = { queryInstructionDelivery(conn, session, it) }, compactUnknown = true,
             automatic = QueuePreferences.enabled(taskKey),
             onAutomaticChange = { QueuePreferences.setEnabled(taskKey, it) },

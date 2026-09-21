@@ -17,26 +17,26 @@ import kotlinx.coroutines.sync.withLock
 
 /** App-lifetime operation: changing the selected conversation does not cancel a submitted rewind. */
 internal object ConversationRewind {
-    data class State(val running: Boolean, val message: String, val failed: Boolean = false)
+    data class State(val running: Boolean, val message: String, val failed: Boolean = false,
+        val editedText: String? = null, val messageUuid: String? = null)
     private val states = mutableStateMapOf<String, State>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
     fun state(taskKey: String): State? = states[taskKey]
     fun dismiss(taskKey: String) { if (states[taskKey]?.running != true) states.remove(taskKey) }
 
-    fun start(conn: Conn, session: Session, messageUuid: String, text: String, onRestored: () -> Unit): Boolean {
+    fun start(conn: Conn, session: Session, messageUuid: String, text: String): Boolean {
         val key = taskNavigationKey(conn.host, session)
         if (states[key]?.running == true || RewindDelivery.gate.blocked(key)) return false
         states[key] = State(true, "正在核对历史轮次…")
         scope.launch {
             try {
                 restore(conn, session, messageUuid, text) { states[key] = State(true, it) }
-                onRestored()
                 states[key] = State(false, "已回到所选轮次，可以继续对话。")
             } catch (e: CancellationException) {
-                states[key] = State(false, "回退操作已中断，请核对恢复状态。", true)
+                states[key] = State(false, "回退操作已中断，请核对恢复状态。", true, text, messageUuid)
                 throw e
             } catch (e: Exception) {
-                states[key] = State(false, e.message ?: "回退未完成，请核对当前会话。", true)
+                states[key] = State(false, e.message ?: "回退未完成，请核对当前会话。", true, text, messageUuid)
             }
         }
         return true
