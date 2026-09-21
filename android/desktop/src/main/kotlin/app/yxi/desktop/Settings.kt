@@ -48,6 +48,7 @@ fun SettingsDialog(state: AppState) {
                     Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         when (state.settingsSection) {
                             "常规" -> {
+                                UserDataSettings()
                                 SwitchRow("关闭窗口时留在托盘", Store.pref("closeToTray", "1") == "1") { Store.setPref("closeToTray", if (it) "1" else "0") }
                                 SwitchRow("开机自启", autostart, enabled = isWindows) { autostart = it; setAutostart(it) }
                                 SwitchRow("启动时重连上次主机", Store.pref("reconnectOnStart", "1") == "1") { Store.setPref("reconnectOnStart", if (it) "1" else "0") }
