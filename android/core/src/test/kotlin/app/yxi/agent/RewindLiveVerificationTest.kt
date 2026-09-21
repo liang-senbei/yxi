@@ -6,6 +6,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.Assumptions.assumeTrue
 
 /**
  * RewindLiveVerification 针对性小测：解析/校验纯单测 + **真 bash、真 python3、假 tmux、真进程树**
@@ -93,7 +94,7 @@ class RewindLiveVerificationTest {
         assertTrue(cmd.contains("python3 -c '"), cmd.take(200))
         assertTrue(!cmd.contains("python3 -c i"), cmd.take(200))
         // 生成的命令必须真的能跑出 TAG（真 bash 执行到 no-reg 也算执行成功；裂碎则无 TAG）
-        if (!unixTools()) return
+        assumeTrue(System.getProperty("os.name").contains("Linux") && unixTools(), "Requires Linux /proc, bash and python3")
         val out = ProcessBuilder("/bin/bash", "-c", cmd)
             .redirectErrorStream(true).start().inputStream.readBytes().toString(Charsets.UTF_8)
         assertTrue(out.contains(RewindLiveVerification.TAG), out)
@@ -196,7 +197,7 @@ class RewindLiveVerificationTest {
 
     @Test
     fun `fixture全链ok并跳过旧pid登记`() {
-        if (!unixTools()) return
+        assumeTrue(System.getProperty("os.name").contains("Linux") && unixTools(), "Requires Linux /proc, bash and python3")
         val home = Files.createTempDirectory("rlv-home")
         val bin = Files.createTempDirectory("rlv-bin")
         writeFakeTmux(bin)
@@ -220,7 +221,7 @@ class RewindLiveVerificationTest {
 
     @Test
     fun `fixture_sid不匹配立即失败`() {
-        if (!unixTools()) return
+        assumeTrue(System.getProperty("os.name").contains("Linux") && unixTools(), "Requires Linux /proc, bash and python3")
         val home = Files.createTempDirectory("rlv-home")
         val bin = Files.createTempDirectory("rlv-bin")
         writeFakeTmux(bin)
@@ -242,7 +243,7 @@ class RewindLiveVerificationTest {
 
     @Test
     fun `fixture顶包identity`() {
-        if (!unixTools()) return
+        assumeTrue(System.getProperty("os.name").contains("Linux") && unixTools(), "Requires Linux /proc, bash and python3")
         val home = Files.createTempDirectory("rlv-home")
         val bin = Files.createTempDirectory("rlv-bin")
         writeFakeTmux(bin)
@@ -262,7 +263,7 @@ class RewindLiveVerificationTest {
 
     @Test
     fun `fixture无登记与状态陈旧`() {
-        if (!unixTools()) return
+        assumeTrue(System.getProperty("os.name").contains("Linux") && unixTools(), "Requires Linux /proc, bash and python3")
         val home = Files.createTempDirectory("rlv-home")
         val bin = Files.createTempDirectory("rlv-bin")
         writeFakeTmux(bin)
@@ -290,7 +291,7 @@ class RewindLiveVerificationTest {
 
     @Test
     fun `fixture链核对三态`() {
-        if (!unixTools()) return
+        assumeTrue(System.getProperty("os.name").contains("Linux") && unixTools(), "Requires Linux /proc, bash and python3")
         val home = Files.createTempDirectory("rlv-home")
         val bin = Files.createTempDirectory("rlv-bin")
         writeFakeTmux(bin)
@@ -321,7 +322,7 @@ class RewindLiveVerificationTest {
 
     @Test
     fun `fixture链对抗样本不能假ok`() {
-        if (!unixTools()) return
+        assumeTrue(System.getProperty("os.name").contains("Linux") && unixTools(), "Requires Linux /proc, bash and python3")
         val home = Files.createTempDirectory("rlv-home")
         val bin = Files.createTempDirectory("rlv-bin")
         writeFakeTmux(bin)
@@ -397,7 +398,7 @@ class RewindLiveVerificationTest {
 
     @Test
     fun `fixture缺parent显式失败`() {
-        if (!unixTools()) return
+        assumeTrue(System.getProperty("os.name").contains("Linux") && unixTools(), "Requires Linux /proc, bash and python3")
         val home = Files.createTempDirectory("rlv-home")
         val bin = Files.createTempDirectory("rlv-bin")
         writeFakeTmux(bin)

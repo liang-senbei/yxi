@@ -128,7 +128,7 @@ object RewindLiveVerification {
             "'${q(q.anchorUuid)}' '${q(q.targetUuid)}'"
         // 轮询：硬代号（identity / sid-mismatch）与 READY 立即收；软代号继续等。
         // 链 ok 后尾部复核（REG 再跑一拍）：复核不过按原代号收，绝不带着过期证据回 ok。
-        return "r=; for i in ${'$'}(seq 1 $iters); do " +
+        val body = "r=; for i in ${'$'}(seq 1 $iters); do " +
             "r=${'$'}($reg 2>/dev/null) || r=probe-fail; " +
             "case ${'$'}r in identity|sid-mismatch|READY*) break;; esac; " +
             "sleep $REG_INTERVAL_SEC; done; " +
@@ -137,13 +137,17 @@ object RewindLiveVerification {
             "if [ \"${'$'}c\" = ok ]; then " +
             "r2=${'$'}($reg 2>/dev/null) || r2=probe-fail; " +
             "case ${'$'}r2 in " +
-            "READY*) echo \"$TAG:ok pid=${'$'}{r#READY }\";; " +
+            "READY*) if [ \"${'$'}r2\" = \"${'$'}r\" ]; then echo \"$TAG:ok pid=${'$'}{r#READY }\"; " +
+            "else echo \"$TAG:process-changed\"; fi;; " +
             "identity|sid-mismatch) echo \"$TAG:${'$'}r2\";; " +
             "*) echo \"$TAG:not-ready\";; esac; " +
             "else echo \"$TAG:${'$'}c\"; fi;; " +
             "not-ready:*) echo \"$TAG:not-ready\";; " +
             "none|stale-only|\"\") echo \"$TAG:no-reg\";; " +
             "*) echo \"$TAG:${'$'}r\";; esac"
+        return "command -v timeout >/dev/null 2>&1 || { echo '$TAG:no-timeout'; exit 0; }; " +
+            "timeout ${regTimeoutSec + chainTimeoutSec + 5}s sh -c '${q(body)}'; rlv_rc=\$?; " +
+            "if [ \"\$rlv_rc\" = 124 ]; then echo '$TAG:timeout'; fi"
     }
 
     /** 认 [command] 的输出。@return 成功带新 pid（非敏感身份，UI 可展示）；失败带代号；没有锚行 = `noresult`。 */
@@ -270,7 +274,7 @@ try:
     f = open(path, "rb")
 except OSError:
     print("chain-missing"); raise SystemExit
-size = os.fstat(f.fileno()).st_size
+original = os.fstat(f.fileno()); size = original.st_size
 if size > int(sys.argv[2]):
     print("chain-too-large"); raise SystemExit
 t0 = time.monotonic(); deadline = float(sys.argv[3]); node_cap = int(sys.argv[4])
@@ -292,7 +296,7 @@ try:
             o = json.loads(line.decode("utf-8", "replace"))
         except Exception:
             continue
-        if o.get("isSidechain") is True:
+        if not isinstance(o, dict) or o.get("isSidechain") is True:
             continue
         u = o.get("uuid")
         if not isinstance(u, str) or not u:
@@ -304,6 +308,9 @@ try:
         seen.add(u)
         if o.get("type") in ("user", "assistant"):
             leaf = u
+    current = os.stat(path)
+    if (current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns) != (original.st_dev, original.st_ino, original.st_size, original.st_mtime_ns):
+        print("chain-changed"); raise SystemExit
 finally:
     f.close()
 if leaf is None:
