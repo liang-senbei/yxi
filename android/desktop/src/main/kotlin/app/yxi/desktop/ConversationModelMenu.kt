@@ -76,8 +76,7 @@ internal fun ConversationModelMenu(conn: Conn, session: Session, currentModel: S
                 }) { Text(if (request?.status == ModelChangeStatus.Pending) "取消待切换选择" else "沿用运行器当前配置，继续队列") }
                 if (actionError.isNotBlank()) Text(actionError, color = Tokens.current.danger, style = MaterialTheme.typography.bodySmall)
                 if (!store?.error.isNullOrBlank()) Text(store!!.error, color = Tokens.current.danger, style = MaterialTheme.typography.bodySmall)
-                Text("思考强度 · " + labels.getOrElse(levels.indexOf(effort)) { effort.ifBlank { "保持当前" } })
-                Slider(value = levels.indexOf(effort).coerceAtLeast(0).toFloat(), onValueChange = { effort = levels[it.roundToInt().coerceIn(0, levels.lastIndex)] }, valueRange = 0f..4f, steps = 3)
+                EffortControl(chosen.ifBlank { mappedCurrent ?: currentModel }, levels, effort.takeIf { it in levels }) { effort = it }
                 Text("工作中选择会在空闲后应用；支持程度由模型决定。Claude 命令也可能保存为默认设置。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 val changedModel = chosen.takeIf { it in models && it != (mappedCurrent ?: currentModel) }
                 val changedEffort = effort.takeIf { it.isNotBlank() && it != reportedEffort }

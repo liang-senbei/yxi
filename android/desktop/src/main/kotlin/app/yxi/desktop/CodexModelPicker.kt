@@ -41,12 +41,7 @@ internal fun CodexModelPicker(controller: CodexTaskController, onRoutes: () -> U
             if (efforts.isNotEmpty()) {
                 HorizontalDivider()
                 Column(Modifier.padding(16.dp, 8.dp)) {
-                    Text("思考强度 · " + (controller.selectedEffort?.let(::effortLabel) ?: "默认"))
-                    if (efforts.size > 1) Slider(
-                        value = efforts.indexOf(controller.selectedEffort).coerceAtLeast(0).toFloat(),
-                        onValueChange = { controller.chooseEffort(efforts[it.roundToInt().coerceIn(0, efforts.lastIndex)]) },
-                        valueRange = 0f..efforts.lastIndex.toFloat(), steps = (efforts.size - 2).coerceAtLeast(0),
-                    ) else TextButton({ controller.chooseEffort(efforts.single()) }) { Text(effortLabel(efforts.single())) }
+                    EffortControl(chosen?.label ?: controller.selectedModel.orEmpty(), efforts, controller.selectedEffort, controller::chooseEffort)
                 }
             }
             Column(Modifier.padding(16.dp, 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
