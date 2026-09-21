@@ -460,10 +460,6 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
         val a = approval?.takeIf { it.first == p?.fingerprint }?.second ?: Approval(null, "")   // 抓屏还没回来就先只有标题
         if (p != null) ApprovalCard(p, a, busy = !canAct, onKey = { sendKey(it, p.fingerprint) }, onSubmit = { submit(p) })
         sendErr?.let { Note(it, t.danger) }
-        DraftAttachmentTray(staged.toList()) { attachment ->
-            draft = draftAfterAttachmentRemoval(draft, staged.toList(), attachment)
-            attachment.cancelled.set(true); staged.remove(attachment)
-        }
         InstructionStrip(instructions, taskNavigationKey(conn.host, session), !sending && !live.busy && pending == null && ssh.isConnected, ::deliver,
             onQuery = { queryInstructionDelivery(conn, session, it) }, compactUnknown = true,
             automatic = QueuePreferences.enabled(taskKey),
@@ -491,6 +487,10 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
             })
         Composer(
             attachments = staged.toList(),
+            onRemoveAttachment = { attachment ->
+                draft = draftAfterAttachmentRemoval(draft, staged.toList(), attachment)
+                attachment.cancelled.set(true); staged.remove(attachment)
+            },
             draft, { draft = it }, focus,
             ctx = ctx,
             busy = live.busy, waiting = pending != null,
@@ -523,6 +523,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 internal fun Composer(
     attachments: List<DraftAttach>,
+    onRemoveAttachment: (DraftAttach) -> Unit,
     draft: TextFieldValue, onDraft: (TextFieldValue) -> Unit, focus: FocusRequester,
     ctx: Transcript.Ctx?, busy: Boolean, waiting: Boolean, hint: String,
     hasPending: Boolean, canSend: Boolean, canAct: Boolean,
@@ -545,6 +546,7 @@ internal fun Composer(
             .background(glow)
             .border(if (focused) 1.5.dp else 1.dp, if (focused) t.accent.copy(alpha = 0.6f) else t.border, RoundedCornerShape(RadiusComposer)),
     ) {
+        DraftAttachmentTray(attachments, onRemoveAttachment)
         AttachmentMentionList(mentions)
         BasicTextField(
             value = draft, onValueChange = onDraft,

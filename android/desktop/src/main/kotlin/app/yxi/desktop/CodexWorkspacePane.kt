@@ -369,13 +369,13 @@ private fun CodexConversationPane(state: AppState) {
                     error = ""
                 } catch (e: Exception) { error = e.message.orEmpty() }
             }
-            DraftAttachmentTray(attachments?.toList().orEmpty()) { attachment ->
-                draft.value = draftAfterAttachmentRemoval(draft.value, attachments?.toList().orEmpty(), attachment)
-                attachment.cancelled.set(true); attachments?.remove(attachment)
-            }
             val composerFocus = remember(selected.key) { androidx.compose.ui.focus.FocusRequester() }
             Composer(
                 attachments = attachments?.toList().orEmpty(),
+                onRemoveAttachment = { attachment ->
+                    draft.value = draftAfterAttachmentRemoval(draft.value, attachments?.toList().orEmpty(), attachment)
+                    attachment.cancelled.set(true); attachments?.remove(attachment)
+                },
                 draft = draft.value, onDraft = { draft.value = it }, focus = composerFocus,
                 ctx = null, busy = controller?.activeTurnId != null, waiting = controller?.pendingRequests?.isNotEmpty() == true,
                 hint = "描述任务，Enter 发送，Shift+Enter 换行；输入 @ 引用附件",
