@@ -107,18 +107,17 @@ private fun AccountContent(state: AppState) {
 
     Box(Modifier.fillMaxSize().background(t.surface0)) {
         Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(28.dp),
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 40.dp, vertical = 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Column(Modifier.widthIn(max = 640.dp).fillMaxWidth()) {
-                Text(if (MeAuth.signedIn) state.meSection else "登录 Yxi", style = MaterialTheme.typography.headlineSmall, color = t.textPrimary)
-                Spacer(Modifier.height(16.dp))
-                if (state.meSection == "账号与连接") ConnectionIdentityCard(state)
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    TextButton({ state.requestAccountLogin(true) }, enabled = !busy && !MeAuth.waitingBrowser) { Text(if (MeAuth.signedIn) "切换账号" else "浏览器登录") }
-                    if (MeAuth.signedIn) TextButton({ MeAuth.signOut() }, enabled = !busy) { Text("退出登录") }
+            Column(Modifier.widthIn(max = 860.dp).fillMaxWidth()) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(if (MeAuth.signedIn) state.meSection else "登录 Yxi", Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall, color = t.textPrimary)
+                    TextButton({ state.requestAccountLogin(true) }, enabled = !busy && !MeAuth.waitingBrowser, colors = androidx.compose.material3.ButtonDefaults.textButtonColors(contentColor = t.textSecondary)) { Text(if (MeAuth.signedIn) "切换账号" else "浏览器登录") }
+                    if (MeAuth.signedIn) TextButton({ MeAuth.signOut() }, enabled = !busy, colors = androidx.compose.material3.ButtonDefaults.textButtonColors(contentColor = t.textMuted)) { Text("退出登录") }
                 }
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(24.dp))
+                if (state.meSection == "账号与连接") ConnectionIdentityCard(state)
 
                 val me = MeAuth.me
                 when {
@@ -252,95 +251,65 @@ private fun SignedIn(
     onSignOut: () -> Unit,
 ) {
     val t = Tokens.current
-    TextButton(onMail) { Text("打开信箱 · 未读 ${me.unreadMail} · 待领取 ${me.unclaimedMail}") }
-    TextButton(onSupport) { Text("工单中心 · ${me.unreadTickets} 张有新回复") }
+    val tier = when (me.tier) { AccountApi.Tier.Ultra -> "Ultra"; AccountApi.Tier.Pro -> "Pro"; else -> "Free" }
     Card {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    me.nickname.ifEmpty { "还没起名字" },
-                    style = MaterialTheme.typography.titleMedium,
-                    color = if (me.nickname.isEmpty()) t.textMuted else t.textPrimary,
-                )
-                if (me.email.isNotEmpty()) {
-                    // ⚠️ 登录来源按未知值兜底:服务端以后会冒出新的连接器名,**别写穷举**
-                    val from = when (me.signInWith) {
-                        "google" -> " · 用 Google 登录"
-                        "github" -> " · 用 GitHub 登录"
-                        "email" -> " · 邮箱注册"
-                        else -> ""
-                    }
-                    Text(me.email + from, style = MaterialTheme.typography.bodySmall, color = t.textMuted)
-                }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+            AccountAvatar(me.nickname.ifBlank { "Yxi" }, 68.dp)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(me.nickname.ifBlank { "Yxi 用户" }, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = t.textPrimary)
+                if (me.email.isNotBlank()) Text(me.email, style = MaterialTheme.typography.bodyMedium, color = t.textMuted)
+                Text(if (me.signInWith.isBlank()) "Yxi 账号" else "通过 ${me.signInWith} 登录", style = MaterialTheme.typography.labelSmall, color = t.textMuted)
             }
-            TextButton(onClick = onRefresh, enabled = !busy) { Text("刷新") }
-            TextButton(onClick = onSignOut) { Text("退出登录") }
+            androidx.compose.material3.AssistChip(onClick = {}, label = { Text(tier) })
         }
-        if (me.signature.isNotEmpty()) {
-            Text(me.signature, Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyMedium, color = t.textMuted)
-        }
-        if (err.isNotEmpty()) {
-            Text(err, Modifier.padding(top = 8.dp), color = t.danger, style = MaterialTheme.typography.bodySmall)
-        }
+        if (me.signature.isNotBlank()) Text(me.signature, Modifier.padding(top = 18.dp), style = MaterialTheme.typography.bodyMedium, color = t.textSecondary)
     }
-
-    Spacer(Modifier.height(12.dp))
+    Spacer(Modifier.height(22.dp))
+    Text("账户概览", style = MaterialTheme.typography.titleSmall, color = t.textSecondary)
+    Spacer(Modifier.height(10.dp))
     Card {
-        Text("会员", style = MaterialTheme.typography.titleMedium, color = t.textPrimary)
-        Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(
-                when (me.tier) {
-                    AccountApi.Tier.Ultra -> "Ultra"
-                    AccountApi.Tier.Pro -> "Pro"
-                    AccountApi.Tier.Free -> "免费"
-                },
-                style = MaterialTheme.typography.bodyLarge, color = t.accent, fontWeight = FontWeight.Medium,
-            )
-            Text(
-                when {
-                    me.tier == AccountApi.Tier.Free -> "· 还不是会员"
-                    me.neverExpires -> "· 永久"
-                    me.expiresAt != null -> "· " + me.expiresAt!!.take(10) + " 到期"
-                    else -> ""
-                },
-                style = MaterialTheme.typography.bodyMedium, color = t.textMuted,
-            )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
+            Column(Modifier.weight(1f)) { Stat("当前会员", tier) }
+            Column(Modifier.weight(1f)) { Stat("账户余额", AccountApi.yuan(me.balanceCents)) }
+            Column(Modifier.weight(1f)) { Stat("曦光", me.tickets.toString() + if (me.micro > 0) " + ${me.micro} 微曦" else "") }
         }
-        Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-            Stat("余额", AccountApi.yuan(me.balanceCents))
-            Stat("曦光", me.tickets.toString() + (if (me.micro > 0) " + ${me.micro} 微曦" else ""))
-        }
+        androidx.compose.material3.HorizontalDivider(Modifier.padding(vertical = 18.dp), color = t.border)
+        Text(when {
+            me.tier == AccountApi.Tier.Free -> "免费方案"
+            me.neverExpires -> "会员长期有效"
+            me.expiresAt != null -> "有效期至 ${me.expiresAt!!.take(10)}"
+            else -> "会员有效期以账号资料为准"
+        }, style = MaterialTheme.typography.bodySmall, color = t.textMuted)
     }
-
-    Spacer(Modifier.height(12.dp))
-    Card {
-        Text("改资料额度", style = MaterialTheme.typography.titleMedium, color = t.textPrimary)
-        Text(
-            quotaSummary(me),
-            Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyMedium, color = t.textMuted,
-        )
-        if (me.quotaRule.isNotEmpty()) {
-            Text(me.quotaRule, Modifier.padding(top = 6.dp), style = MaterialTheme.typography.bodySmall, color = t.textMuted)
-        }
-    }
-
-    if (me.unreadMail > 0 || me.unclaimedMail > 0 || me.unreadTickets > 0) {
-        Spacer(Modifier.height(12.dp))
-        Card {
-            Text("待处理", style = MaterialTheme.typography.titleMedium, color = t.textPrimary)
-            Column(Modifier.padding(top = 8.dp)) {
-                // ⚠️ 未读和未领是**两回事**:读过了也可能没领。分开说,别合并成一个数。
-                if (me.unreadMail > 0) Text("${me.unreadMail} 封信没读", color = t.textMuted, style = MaterialTheme.typography.bodyMedium)
-                if (me.unclaimedMail > 0) Text("${me.unclaimedMail} 封信里有东西没领", color = t.textMuted, style = MaterialTheme.typography.bodyMedium)
-                if (me.unreadTickets > 0) Text("${me.unreadTickets} 张工单有新回复", color = t.textMuted, style = MaterialTheme.typography.bodyMedium)
+    Spacer(Modifier.height(16.dp))
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        androidx.compose.material3.OutlinedCard(onClick = onMail, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp)) {
+            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("信箱  ↗", style = MaterialTheme.typography.titleSmall)
+                Text("${me.unreadMail} 封未读", style = MaterialTheme.typography.headlineSmall)
+                Text("${me.unclaimedMail} 项待领取", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
             }
-            Text(
-                "可在上方信箱或工单中心查看详情。",
-                Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall, color = t.textMuted,
-            )
+        }
+        androidx.compose.material3.OutlinedCard(onClick = onSupport, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp)) {
+            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("帮助与工单  ↗", style = MaterialTheme.typography.titleSmall)
+                Text("${me.unreadTickets} 条新回复", style = MaterialTheme.typography.headlineSmall)
+                Text("查看处理进度", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+            }
         }
     }
-
+    Spacer(Modifier.height(16.dp))
+    Card {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("资料修改额度", style = MaterialTheme.typography.titleSmall)
+            Text(quotaSummary(me), style = MaterialTheme.typography.bodyMedium, color = t.textSecondary)
+        }
+        if (me.quotaRule.isNotBlank()) Text(me.quotaRule, Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+    }
+    Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.End) {
+        TextButton(onRefresh, enabled = !busy) { Text(if (busy) "正在刷新…" else "刷新账户资料") }
+    }
+    if (err.isNotBlank()) Text(err, color = t.danger, style = MaterialTheme.typography.bodySmall)
     if (me.bans.isNotEmpty()) {
         Spacer(Modifier.height(12.dp))
         Card {
@@ -373,9 +342,11 @@ private fun Card(content: @Composable ColumnScopeAlias.() -> Unit) {
             .clip(RoundedCornerShape(Radius))
             .background(t.surface2)
             .border(1.dp, t.border, RoundedCornerShape(Radius))
-            .padding(18.dp),
+            .padding(24.dp),
         content = content,
     )
 }
 
 private typealias ColumnScopeAlias = androidx.compose.foundation.layout.ColumnScope
+
+

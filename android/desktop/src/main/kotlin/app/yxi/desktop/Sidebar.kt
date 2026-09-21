@@ -472,9 +472,7 @@ private fun AccountRow(state: AppState) {
     }
     val ver = Updater.version.takeIf { it != "dev" }?.let { "v$it" } ?: "开发版"
     Row(Modifier.fillMaxWidth().clickable { menu = true }.padding(10.dp, 7.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Box(Modifier.size(26.dp).clip(CircleShape).background(if (signedIn) t.userBubble else t.border), contentAlignment = Alignment.Center) {
-            Text(name.take(1).uppercase(), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = if (signedIn) t.userBubbleText else t.textMuted)
-        }
+        AccountAvatar(name, 34.dp)
         Column(Modifier.weight(1f)) {
             Text(name, style = MaterialTheme.typography.labelLarge, color = t.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(tier ?: "点一下登录", fontSize = 10.sp, color = t.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)

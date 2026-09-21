@@ -57,10 +57,10 @@ data class Tokens(
         )
         /** 手机端 `LightPalette`：参考款——白底、蓝灰卡片 #F0F4F9、Google 蓝。 */
         val light = Tokens(
-            surface0 = Color(0xFFF8FAFD), surface1 = Color(0xFFF0F4F9), surface2 = Color(0xFFFFFFFF), surface3 = Color(0xFFE9EEF6),
+            surface0 = Color(0xFFFAFAF9), surface1 = Color(0xFFF3F3F1), surface2 = Color(0xFFFFFFFF), surface3 = Color(0xFFEAEAE7),
             textPrimary = Color(0xFF1F1F1F), textSecondary = Color(0xFF3C4043), textMuted = Color(0xFF5F6368),
             accent = Color(0xFF0B57D0), onAccent = Color(0xFFFFFFFF),
-            userBubble = Color(0xFFD3E3FD), userBubbleText = Color(0xFF041E49),
+            userBubble = Color(0xFFECEDEB), userBubbleText = Color(0xFF242724),
             danger = Color(0xFFC5221F), success = Color(0xFF0B8043), warning = Color(0xFFE37400), dark = false,
         )
         val current: Tokens @Composable get() = LocalTokens.current
