@@ -16,6 +16,8 @@ hk13 的 cc-yxi 负责必要编译，cc-logto_yxi 负责临时文件的字节边
 
 已回收结果：cc-yxi 在 a1bfd31 上完成 compileKotlin 与 compileTestKotlin，成功；cc-yxi_pilot 的独立提交 ccddefe 已合入，5 个解析更新用例和 DesktopTranscriptMemoryTest 通过。前者不覆盖后合入的解析器改动，后者不证明真实 Windows 端到端体验。字节边界与取消链路的结果另行补录。
 
+后续结果：cc-yxi 在 146ce9c 上完成编译及五个定向测试类，26/26 通过（队列 18、转录解析 5、转录缓存 3）。cc-logto_yxi 针对同一提交的流包装器检查 5/5 通过：超时后 EOF、输出逐字节等于文件内容、半行不被心跳截断、模拟 HUP 后退出并清理子进程。此结果覆盖壳层行为，不替代真实 SSH 通道取消和 Windows 界面验收。
+
 ## 交付后手动观察
 
 1. 在一条普通会话中生成多段较长回复，确认对话页持续出现新增内容、最终尾段可见。
