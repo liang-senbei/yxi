@@ -195,6 +195,8 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
                                 Text(line.baseUrl, color = t.textMuted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                             if (line.id == current?.id) Text("配置匹配", style = MaterialTheme.typography.labelSmall, color = t.success)
+                            Spacer(Modifier.width(12.dp))
+                            ProviderQuotaBadge(line)
                         }
                         Text("模型 · " + routeModel(line).ifBlank { "使用运行器默认值" }, Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyMedium)
                         if (line.isCodex && line.extra.optString("model_reasoning_effort").isNotBlank()) Text("推理强度 · ${line.extra.optString("model_reasoning_effort")}", style = MaterialTheme.typography.bodySmall, color = t.textMuted)

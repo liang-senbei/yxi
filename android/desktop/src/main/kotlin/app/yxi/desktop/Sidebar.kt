@@ -298,8 +298,6 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
                             // 删旧指纹是单独一步；删完立刻重连，新指纹会再弹一次「确认这是 X 吗」让用户核对
                             if (c.keyChanged) TextButton({ keys.forget(h); connect(h) }, Modifier.padding(start = 12.dp)) { Text("我确认过了，删除旧指纹") }
                         }
-                        // 用量紧凑条（PRD P0-13）：连着才有数据，ccusage 探不到就整块不画
-                        if (c?.status == Conn.Status.Connected) UsageStrip(c)
                         // 断线重连中列表照旧摆着（服务器上的会话还在），不清；搜索时只画滤剩下的
                         if (c != null) {
                             ProjectTree(state, c, sessions, searching = f.isNotEmpty())
