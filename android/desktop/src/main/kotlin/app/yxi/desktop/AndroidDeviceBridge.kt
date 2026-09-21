@@ -131,7 +131,12 @@ class AndroidDeviceBridge(
                 "设备/包管理器拒绝：" + r.stdout.lineSequence().first { it.trimStart().startsWith("Failure") }.trim().take(160))
         r.exitCode != 0 -> AdbOutcome(AdbOutcome.Kind.AdbFailure,
             "adb 失败（退出码 ${r.exitCode}）${(r.stderr.ifBlank { r.stdout }).trim().take(120)}")
-        successMarker in r.stdout -> AdbOutcome(AdbOutcome.Kind.Done, r.stdout.trim().take(120))
+        (r.stdout + "\n" + r.stderr).contains("monkey aborted", ignoreCase = true) ->
+            AdbOutcome(AdbOutcome.Kind.CommandFailure, "应用启动被设备拒绝，请确认包名和启动入口。")
+        r.stdout.lineSequence().any { line ->
+            if (successMarker == "Success") line.trim() == "Success"
+            else Regex("""Events injected:\s*[1-9][0-9]*\s*""").matches(line.trim())
+        } -> AdbOutcome(AdbOutcome.Kind.Done, r.stdout.trim().take(120))
         else -> AdbOutcome(AdbOutcome.Kind.AdbFailure, "adb 跑完了但输出确认不了结果（无 ${successMarker} 标记）：${r.stdout.trim().take(80)}")
     }
 

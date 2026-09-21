@@ -124,7 +124,21 @@ internal fun AndroidEmulatorPanel(open: Boolean, close: () -> Unit) {
                         }) })
                 }
                 if (result.devices.isEmpty() && result.error == null) Text("设备启动后点击刷新设备。", color = Tokens.current.textMuted)
-                OutlinedTextField(apkPath, { apkPath = it }, enabled = !deviceBusy, singleLine = true, modifier = Modifier.fillMaxWidth(), label = { Text("本机 APK 文件路径") })
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(apkPath, { apkPath = it }, enabled = !deviceBusy, singleLine = true, modifier = Modifier.weight(1f), label = { Text("本机 APK 文件路径") })
+                    TextButton({
+                        val owner = java.awt.Window.getWindows().filterIsInstance<java.awt.Frame>().firstOrNull { it.isFocused }
+                        val dialog = java.awt.FileDialog(owner, "选择 Android 安装包", java.awt.FileDialog.LOAD)
+                        try {
+                            dialog.file = "*.apk"
+                            dialog.isVisible = true
+                            dialog.files.firstOrNull()?.let { file ->
+                                if (file.isFile && file.extension.equals("apk", true)) apkPath = file.absolutePath
+                                else notice = "请选择 APK 文件。"
+                            }
+                        } finally { dialog.dispose() }
+                    }, enabled = !deviceBusy) { Text("选择文件") }
+                }
                 OutlinedTextField(packageName, { packageName = it }, enabled = !deviceBusy, singleLine = true, modifier = Modifier.fillMaxWidth(), label = { Text("应用包名，例如 app.yxi") })
                 val adb = environment?.tools?.firstOrNull { it.name == "adb" }?.path
                 val ready = adb != null && result.devices.any { it.serial == selectedSerial && it.online } && !deviceBusy
