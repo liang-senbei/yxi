@@ -8,10 +8,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun SidebarSavedSessions(state: AppState, hosts: List<Host>, query: String, openFavorite: (Conn, FavoriteLaunch) -> Unit) {
     val nav = state.navigation
+    val scope = rememberCoroutineScope()
+    var openError by remember { mutableStateOf("") }
     val t = Tokens.current
     var choice by remember { mutableStateOf(Store.pref("sidebarSavedKind", "置顶").takeIf { it in listOf("置顶", "收藏") } ?: "置顶") }
     var menu by remember { mutableStateOf(false) }
@@ -29,7 +33,7 @@ internal fun SidebarSavedSessions(state: AppState, hosts: List<Host>, query: Str
         }
     }
     scopedHosts.forEach { host ->
-        val conn = state.conns.firstOrNull { it.host == host }
+        val conn = state.conns.firstOrNull { it.host.id == host.id && DocumentEndpoint.of(it.host) == DocumentEndpoint.of(host) }
         val live = conn?.sessions.orEmpty().filter { session ->
             val key = taskNavigationKey(host, session)
             (if (choice == "置顶") nav.pinned(key) else nav.favorite(key)) && nav.visible(key, session.state) &&
@@ -38,6 +42,31 @@ internal fun SidebarSavedSessions(state: AppState, hosts: List<Host>, query: Str
         live.forEach { session ->
             count++
             SavedSessionRow(nav.title(taskNavigationKey(host, session)) ?: session.short, host.label + " · " + session.cwd, conn?.ssh?.isConnected == true) { if (conn != null) state.select(conn, session) }
+        }
+        state.codexWorkspace.tasks(host).filter { task ->
+            val controller = state.codexWorkspace.controllers[task.key]
+            val attention = controller?.pendingRequests?.isNotEmpty() == true
+            (if (choice == "置顶") nav.pinned(task.key) else nav.favorite(task.key)) &&
+                when (nav.mode) {
+                    "归档" -> nav.archived(task.key)
+                    "待处理" -> attention
+                    else -> !nav.archived(task.key) || attention
+                } && listOf(nav.title(task.key).orEmpty(), task.title, task.directory, host.label).any { it.contains(query, true) }
+        }.sortedBy { nav.pinOrder(it.key) }.forEach { task ->
+            count++
+            SavedSessionRow(nav.title(task.key) ?: task.title, host.label + " · Codex · " + task.directory, conn != null) {
+                if (conn != null) {
+                    openError = ""
+                    state.select(conn, null)
+                    state.codexSelectedTaskKey = task.key
+                    state.page = Page.Codex
+                    if (conn.ssh.isConnected && !state.codexWorkspace.busy && state.codexWorkspace.controllers[task.key] == null) scope.launch {
+                        try { state.codexWorkspace.open(conn, task) }
+                        catch (e: CancellationException) { throw e }
+                        catch (e: Exception) { openError = "任务连接未完成：${e.message.orEmpty()}" }
+                    }
+                }
+            }
         }
         if (choice == "收藏" && nav.mode == "全部") nav.favorites(host).filter { favorite ->
             conn?.sessions?.none { taskNavigationKey(host, it) == favorite.key } != false &&
@@ -48,6 +77,7 @@ internal fun SidebarSavedSessions(state: AppState, hosts: List<Host>, query: Str
         }
     }
     if (count == 0) Text(if (query.isNotBlank()) "没有匹配的${choice}会话" else "暂无${choice}会话，可在任务菜单中添加", Modifier.padding(16.dp, 6.dp), style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+    if (openError.isNotBlank()) Text(openError, Modifier.padding(16.dp, 6.dp), style = MaterialTheme.typography.bodySmall, color = t.danger)
     HorizontalDivider(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), color = t.border)
 }
 
