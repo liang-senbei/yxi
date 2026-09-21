@@ -356,8 +356,8 @@ object Rewind {
         return "rt=\$(tmux display-message -p -t '$n' '#{pid}:#{session_id}:#{session_created}' 2>/dev/null); " +
             "pn=\$(tmux display-message -p -t '$n' '#{pane_id}' 2>/dev/null); " +
             "$rtOk [ \"\$pn\" = '${q(c.paneId)}' ] || { echo \"$ID_TAG:identity\"; exit 0; }; " +
-            "tmux send-keys -t '$n' -l -- '${q(keys)}' && " +
-            "tmux send-keys -t '$n' Enter && echo \"$ID_TAG:sent\""
+            "tmux send-keys -t \"\$pn\" -l -- '${q(keys)}' && " +
+            "tmux send-keys -t \"\$pn\" Enter && echo \"$ID_TAG:sent\""
     }
 
     /**
@@ -393,8 +393,8 @@ object Rewind {
             "pn=\$(tmux display-message -p -t '$n' '#{pane_id}' 2>/dev/null); " +
             "[ \"\$rt\" = '${q(runtimeId)}' ] && [ \"\$pn\" = '${q(c.paneId)}' ] || " +
             "{ echo \"$ID_TAG:identity\"; exit 0; }; " +
-            "tmux send-keys -t '$n' Escape && sleep 0.3 && " +
-            "tmux send-keys -t '$n' -l -- '/exit' && tmux send-keys -t '$n' Enter && " +
+            "tmux send-keys -t \"\$pn\" Escape && sleep 0.3 && " +
+            "tmux send-keys -t \"\$pn\" -l -- '/exit' && tmux send-keys -t \"\$pn\" Enter && " +
             "echo \"$ID_TAG:exit-sent\""
     }
 

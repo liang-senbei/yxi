@@ -229,9 +229,9 @@ class RewindTest {
         assertTrue("[ \"\$pn\" = '%28' ]" in cmd)
         assertTrue("__YXI_REWIND_ID__:identity" in cmd)
         // pane 里先 cd 回会话 cwd，再真 binary --resume + 白名单旗标（值一律单引号包裹）
-        assertTrue("tmux send-keys -t 'cc-yxi' -l -- '" in cmd)
+        assertTrue("tmux send-keys -t \"\$pn\" -l -- '" in cmd)
         assertTrue("--resume" in cmd && "--model" in cmd && "--effort" in cmd)
-        assertTrue("&& tmux send-keys -t 'cc-yxi' Enter &&" in cmd)
+        assertTrue("&& tmux send-keys -t \"\$pn\" Enter &&" in cmd)
         assertTrue("__YXI_REWIND_ID__:sent" in cmd)
         assertTrue("skip-permissions" !in cmd)
         assertTrue("IS_SANDBOX" !in cmd)
@@ -353,8 +353,8 @@ class RewindTest {
         assertTrue("[ \"\$pn\" = '%28' ]" in cmd)
         assertTrue("__YXI_REWIND_ID__:identity" in cmd)
         // Esc 收浮层 → /exit（-l -- 字面）→ Enter，逐级 &&：任一步失败就没有 exit-sent
-        assertTrue("tmux send-keys -t 'cc-yxi' Escape && sleep 0.3 &&" in cmd)
-        assertTrue("tmux send-keys -t 'cc-yxi' -l -- '/exit' && tmux send-keys -t 'cc-yxi' Enter &&" in cmd)
+        assertTrue("tmux send-keys -t \"\$pn\" Escape && sleep 0.3 &&" in cmd)
+        assertTrue("tmux send-keys -t \"\$pn\" -l -- '/exit' && tmux send-keys -t \"\$pn\" Enter &&" in cmd)
         assertTrue(cmd.endsWith("echo \"__YXI_REWIND_ID__:exit-sent\""))
         assertTrue("skip-permissions" !in cmd)
     }
