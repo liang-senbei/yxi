@@ -13,6 +13,11 @@ import androidx.compose.ui.unit.dp
 import app.yxi.agent.Lines
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.MoreHoriz
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.NetworkCheck
+import androidx.compose.material.icons.outlined.DeleteOutline
 
 /** Server-side route settings: configuration confirmation is deliberately separate from request verification. */
 @Composable
@@ -175,6 +180,8 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
             lines!!.none { it.agent == engine } -> Text("还没有保存的线路。添加后可配置模型、测试连通性，再应用到服务器。", color = t.textMuted)
             visibleLines.isEmpty() -> Text("没有匹配的线路", color = t.textMuted)
             else -> visibleLines.forEach { line ->
+                var actionsOpen by remember(line.id) { mutableStateOf(false) }
+                NativeOverlay(actionsOpen)
                 Surface(Modifier.fillMaxWidth().padding(bottom = 10.dp), shape = RoundedCornerShape(14.dp), color = t.surface2,
                     border = BorderStroke(0.5.dp, t.border)) {
                     Column(Modifier.clickable(enabled = !busy) { editor = line }.padding(18.dp)) {
@@ -196,10 +203,19 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
                         Row(Modifier.padding(top = 10.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             TextButton({ editor = line }, enabled = !busy) { Text("编辑") }
                             if (runCatching { val uri = java.net.URI(line.website); uri.scheme in listOf("https", "http") && !uri.host.isNullOrBlank() && uri.userInfo == null }.getOrDefault(false)) TextButton({ runCatching { uriHandler.openUri(line.website) }.onFailure { note = "无法打开官网链接" } }) { Text("官网 ↗") }
-                            TextButton({ editor = line.copy(id = Lines.newId(), name = line.name + " · 副本", extra = org.json.JSONObject(line.extra.toString())) }, enabled = !busy) { Text("复制线路") }
-                            TextButton({ act { note = Lines.probe(conn.ssh, line.baseUrl) + "；此测试不验证密钥或模型可用性。" } }, enabled = !busy) { Text("测连通性") }
-                            TextButton({ note = ""; applying = line }, enabled = !busy) { Text("应用配置") }
-                            TextButton({ note = ""; deleting = line }, enabled = !busy) { Text("移除记录") }
+                            FilledTonalButton({ note = ""; applying = line }, enabled = !busy) { Text("应用配置") }
+                            Box {
+                                IconButton({ actionsOpen = true }, enabled = !busy) { Icon(Icons.Outlined.MoreHoriz, "更多供应商操作") }
+                                DropdownMenu(actionsOpen, { actionsOpen = false }) {
+                                    DropdownMenuItem(text = { Text("复制供应商") }, leadingIcon = { Icon(Icons.Outlined.ContentCopy, null, Modifier.size(18.dp)) },
+                                        onClick = { actionsOpen = false; editor = line.copy(id = Lines.newId(), name = line.name + " · 副本", extra = org.json.JSONObject(line.extra.toString())) })
+                                    DropdownMenuItem(text = { Text("检查连通性") }, leadingIcon = { Icon(Icons.Outlined.NetworkCheck, null, Modifier.size(18.dp)) },
+                                        onClick = { actionsOpen = false; act { note = Lines.probe(conn.ssh, line.baseUrl) + "；此检查不验证密钥或模型可用性。" } })
+                                    HorizontalDivider()
+                                    DropdownMenuItem(text = { Text("移除记录", color = t.danger) }, leadingIcon = { Icon(Icons.Outlined.DeleteOutline, null, Modifier.size(18.dp), tint = t.danger) },
+                                        onClick = { actionsOpen = false; note = ""; deleting = line })
+                                }
+                            }
                         }
                     }
                 }
