@@ -85,13 +85,7 @@ class AndroidSdkBootstrap(
         }
         if (isCancelled()) return InspectOutcome(reason = "已取消（清单已取回，未解析）")
         val doc = try {
-            val factory = DocumentBuilderFactory.newInstance().apply {
-                setNamespaceAware(true)   // 官方 XML 标签带 sdk: 前缀，按 localName 匹配
-                setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true)
-                // XXE 防护：清单是外部内容，绝不允许 DOCTYPE/外部实体
-                try { setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) } catch (_: Exception) {}
-            }
-            factory.newDocumentBuilder().parse(xml.byteInputStream())
+            parseRepositoryXml(xml)
         } catch (e: Exception) {
             return InspectOutcome(reason = "仓库清单解析失败：${e.message?.take(120)}")
         }
@@ -336,16 +330,57 @@ class AndroidSdkBootstrap(
             else -> null
         }
 
-        private fun fetchXmlNative(url: String): String {
-            val c = (URL(url).openConnection() as HttpURLConnection).apply {
-                connectTimeout = 10_000; readTimeout = 30_000; requestMethod = "GET"
+        /**
+         * 轻量解析官方仓库 XML：namespaceAware（子元素无前缀、根带 sdk: 前缀，
+         * 按 localName 匹配）+ XXE 防护。inspect 与许可全文解析共用这一个实现。
+         */
+        internal fun parseRepositoryXml(xml: String): org.w3c.dom.Document {
+            val factory = DocumentBuilderFactory.newInstance().apply {
+                setNamespaceAware(true)
+                setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true)
+                try { setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) } catch (_: Exception) {}
             }
-            return try {
-                if (c.responseCode !in 200..299) throw IOException("HTTP ${c.responseCode}")
-                c.inputStream.bufferedReader().use { it.readText() }
-            } finally {
-                c.disconnect()
+            return factory.newDocumentBuilder().parse(xml.byteInputStream())
+        }
+
+        /**
+         * 按包的 uses-license 引用解析许可全文（给 UI 展示、供用户逐条同意）。
+         * 只解析清单里存在的包；清单没有的包（如 system-images，单独 sys-img 描述符）
+         * 如实进 [AndroidSdkComponentInstaller.LicenseTexts.missing]。
+         */
+        internal fun resolveLicenseTexts(doc: org.w3c.dom.Document, packages: List<String>): AndroidSdkComponentInstaller.LicenseTexts {
+            fun Element.childrenByName(name: String): List<Element> =
+                (0 until childNodes.length).map { childNodes.item(it) }.filterIsInstance<Element>()
+                    .filter { it.localName == name }
+
+            val licenseTexts = mutableMapOf<String, String>()
+            val list = doc.getElementsByTagNameNS("*", "license")
+            for (i in 0 until list.length) {
+                val el = list.item(i) as Element
+                el.getAttribute("id").takeIf { it.isNotBlank() }?.let { licenseTexts[it] = el.textContent.trim() }
             }
+            val docs = linkedMapOf<String, AndroidSdkComponentInstaller.LicenseDoc>()
+            val missing = mutableListOf<String>()
+            val pkgList = doc.getElementsByTagNameNS("*", "remotePackage")
+            val paths = HashMap<String, Element>()
+            for (i in 0 until pkgList.length) {
+                val el = pkgList.item(i) as Element
+                paths[el.getAttribute("path")] = el
+            }
+            for (pkg in packages) {
+                val el = paths[pkg]
+                val refs = el?.childrenByName("uses-license")
+                    ?.mapNotNull { it.getAttribute("ref").takeIf { r -> r.isNotBlank() } }
+                    .orEmpty()
+                if (el == null || refs.isEmpty()) {
+                    missing += pkg
+                    continue
+                }
+                refs.forEach { ref ->
+                    licenseTexts[ref]?.let { docs.putIfAbsent(ref, AndroidSdkComponentInstaller.LicenseDoc(ref, it)) }
+                }
+            }
+            return AndroidSdkComponentInstaller.LicenseTexts(docs = docs.values.toList(), missing = missing)
         }
 
         /**
