@@ -266,9 +266,15 @@ private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend
             Text("选择供应商模板", style = MaterialTheme.typography.titleMedium)
             OutlinedTextField(presetSearch, { presetSearch = it }, singleLine = true, label = { Text("搜索模板") }, modifier = Modifier.fillMaxWidth())
             androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                SuggestionChip(onClick = {
+                    name = ""; url = ""; website = ""; model = ""; secret = ""; authToken = ""
+                    presetExtra = org.json.JSONObject(); advanced = "{}"
+                    mappings.keys.toList().forEach { mappings[it] = "" }
+                }, label = { Text("自定义供应商") }, enabled = !busy)
                 app.yxi.agent.LinePresets.forAgent(original.agent).filter { it.name.contains(presetSearch, true) }.forEach { preset ->
                     SuggestionChip(onClick = {
                         name = preset.name; url = preset.baseUrl
+                        website = ""; secret = ""; authToken = ""
                         presetExtra = org.json.JSONObject(original.extra.toString())
                         if (!original.isCodex) {
                             presetExtra.put("env", preset.envJson())
@@ -279,7 +285,7 @@ private fun RouteForm(original: Lines.Line, onClose: () -> Unit, onSave: suspend
                     }, label = { Text(preset.name) }, enabled = !busy)
                 }
             }
-            Text("模板仅预填，可自行修改端点和模型；密钥由你填写。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+            Text("模板仅预填，可自行修改端点和模型；切换模板会清空密钥，避免将上一供应商凭据带到新地址。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
             HorizontalDivider()
             OutlinedTextField(name, { name = it }, label = { Text("供应商名称") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(website, { website = it }, label = { Text("官网链接（可选）") }, singleLine = true, modifier = Modifier.fillMaxWidth())

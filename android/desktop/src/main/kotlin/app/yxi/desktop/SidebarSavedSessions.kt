@@ -47,7 +47,7 @@ internal fun SidebarSavedSessions(state: AppState, hosts: List<Host>, query: Str
             SavedSessionRow(favorite.title, host.label + " · " + if (conn?.ssh?.isConnected == true) "启动入口" else "未连接", conn?.ssh?.isConnected == true) { if (conn != null) openFavorite(conn, favorite) }
         }
     }
-    if (count == 0) Text(if (query.isNotBlank()) "没有匹配的$choice 会话" else "暂无$choice 会话，可在任务菜单中添加", Modifier.padding(16.dp, 6.dp), style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+    if (count == 0) Text(if (query.isNotBlank()) "没有匹配的${choice}会话" else "暂无${choice}会话，可在任务菜单中添加", Modifier.padding(16.dp, 6.dp), style = MaterialTheme.typography.bodySmall, color = t.textMuted)
     HorizontalDivider(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), color = t.border)
 }
 
