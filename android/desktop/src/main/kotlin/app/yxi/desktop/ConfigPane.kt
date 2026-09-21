@@ -160,6 +160,8 @@ private fun ItemDetail(conn: Conn, item: ConfigRemote.Item) {
     var dirty by remember(item) { mutableStateOf(false) }
     var note by remember(item) { mutableStateOf("") }
     var saving by remember(item) { mutableStateOf(false) }
+    var sourceVisible by remember(conn, item) { mutableStateOf(false) }
+    val preview = remember(text, item.path) { configPreview(text, item.path.ifBlank { item.title }) }
 
     LaunchedEffect(item) {
         if (item.path.isBlank()) return@LaunchedEffect
@@ -179,8 +181,9 @@ private fun ItemDetail(conn: Conn, item: ConfigRemote.Item) {
                     color = t.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }
+            TextButton({ sourceVisible = !sourceVisible }, enabled = !saving && !loading) { Text(if (sourceVisible) "隐藏源码" else "查看并编辑源码") }
             if (item.path.isNotBlank()) TextButton(
-                enabled = dirty && !saving,
+                enabled = sourceVisible && dirty && !saving,
                 onClick = {
                     scope.launch {
                         saving = true
@@ -197,8 +200,8 @@ private fun ItemDetail(conn: Conn, item: ConfigRemote.Item) {
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
             }
-            item.path.isBlank() -> Text(
-                text.ifBlank { "（这一项没有内容）" },
+            !sourceVisible || item.path.isBlank() -> Text(
+                (if (sourceVisible) text else preview).ifBlank { "（这一项没有内容）" },
                 Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(14.dp),
                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace), color = t.textPrimary,
             )
