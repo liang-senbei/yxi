@@ -5,6 +5,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineStart
 
 /**
  * 把远端的 Claude Code 转录流回来。
@@ -86,20 +90,40 @@ object TranscriptStream {
      * ⚠️ 起点是 0 起的字节位置；`tail -c +N` 是 1 起的，[streamFrom] 里会 +1。
      */
     suspend fun tailStart(ssh: SshSession, file: String, backlog: Int): Pair<Long, Long>? {
-        val out = ssh.exec(
-            "f='$file'; s=\$(stat -c %s \"\$f\" 2>/dev/null || echo 0); b=\$(tail -n $backlog \"\$f\" 2>/dev/null | wc -c); echo \$s \$b"
-        ).trim()
+        // Read a fixed file-size snapshot; stat followed by tail races with concurrent appends.
+        val script = """
+import os, sys
+with open(sys.argv[1], 'rb') as f:
+    size = os.fstat(f.fileno()).st_size
+    pos, count = size, 0
+    need = int(sys.argv[2])
+    start = 0
+    while pos > 0:
+        n = min(pos, 65536)
+        pos -= n
+        f.seek(pos)
+        block = f.read(n)
+        for i in range(len(block)-1, -1, -1):
+            if block[i] == 10 and pos+i != size-1:
+                count += 1
+                if count == need:
+                    start = pos+i+1
+                    break
+        if count == need: break
+    print(size, start)
+""".trimIndent()
+        val out = ssh.exec("python3 -c ${app.yxi.ssh.Shell.q(script)} ${app.yxi.ssh.Shell.q(file)} ${backlog.coerceAtLeast(1)}").trim()
         val parts = out.split(Regex("\\s+"))
         val size = parts.getOrNull(0)?.toLongOrNull() ?: return null
-        val bytes = parts.getOrNull(1)?.toLongOrNull() ?: return null
-        return size to (size - bytes).coerceAtLeast(0)
+        val start = parts.getOrNull(1)?.toLongOrNull() ?: return null
+        return (size to start).takeIf { size >= 0 && start in 0..size }
     }
 
     /**
      * 从字节位置 [offset]（0 起）开始持续跟随 —— **重进对话只拉增量**（[ChatMemory]）。
      * 文件要是被重写得比 offset 还短，`tail -c` 什么都不吐、等它长回来；那种情况上层按「转录文件换了」处理。
      */
-    fun streamFrom(ssh: SshSession, file: String, offset: Long): Flow<String> =
+    fun streamFrom(ssh: SshSession, file: String, offset: Long, windowSeconds: Int = 0): Flow<String> =
         // ⚠️⚠️ **起点先夹到文件大小以内。** `tail -c +N -f` 的 N 一旦超过文件大小，GNU tail 在文件下次变长时
         //    判成「file truncated」，从第 0 字节把整个文件重放（#273，几百 MB 的转录 = 几周前的对话涌上屏）。
         //    上层的 offset 是自己数出来的，任何一处多数了一个字节（心跳空行、编码差异）都会踩进去；
@@ -107,27 +131,36 @@ object TranscriptStream {
         follow(
             ssh,
             "f='$file'; o=$offset; s=\$(stat -c %s \"\$f\" 2>/dev/null || echo 0); " +
-                "[ \"\$o\" -gt \"\$s\" ] && o=\$s; tail -c +\$((o+1)) -f \"\$f\"",
+                "[ \"\$o\" -gt \"\$s\" ] && o=\$s; " +
+                (if (windowSeconds > 0) "timeout ${windowSeconds.coerceIn(5, 60)}s " else "") +
+                "tail -s 0.2 -c +\$((o+1)) -f \"\$f\"",
         )
 
     fun stream(ssh: SshSession, file: String, backlog: Int = 800): Flow<String> =
         follow(ssh, "tail -n $backlog -f '$file'")
 
-    private fun follow(ssh: SshSession, cmd: String): Flow<String> = flow {
+    private fun follow(ssh: SshSession, cmd: String): Flow<String> = flow { coroutineScope {
         val shell = ssh.openExecStream(SshSession.follow(cmd))
         // ⚠️ **取消协程不会打断阻塞在 readLine() 上的线程** —— 它不是挂起点。
         // 不主动关通道的话，`finally` 永远轮不到执行，线程和远端进程一起挂着。
-        val onCancel = kotlin.coroutines.coroutineContext[kotlinx.coroutines.Job]
-            ?.invokeOnCompletion { runCatching { shell.close() } }
+        val closer = launch(Dispatchers.IO, start = CoroutineStart.UNDISPATCHED) {
+            try { awaitCancellation() } finally { runCatching { shell.close() } }
+        }
         try {
             val reader = shell.output.bufferedReader()
+            val line = StringBuilder()
+            val chunk = CharArray(8192)
             while (true) {
-                val line = reader.readLine() ?: break
-                emit(line)
+                val count = reader.read(chunk)
+                if (count < 0) break
+                for (i in 0 until count) {
+                    if (chunk[i] == '\n') { emit(line.toString()); line.setLength(0) }
+                    else line.append(chunk[i])
+                }
             }
         } finally {
-            onCancel?.dispose()
+            closer.cancel()
             shell.close()
         }
-    }.flowOn(Dispatchers.IO)
+    } }.flowOn(Dispatchers.IO)
 }

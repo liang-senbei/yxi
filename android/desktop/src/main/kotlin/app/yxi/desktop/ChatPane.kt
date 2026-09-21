@@ -232,9 +232,9 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                     val committed = withContext(Dispatchers.Default) {
                         batch.entry?.append(batch.lease, batch.lines, batch.bytes)
                     } ?: continue
-                    if (batch.entry === entry && batch.lease == lease && committed.offset >= targetOffset) {
+                    if (batch.entry === entry && batch.lease == lease) {
                         items = committed.items; ctx = committed.context
-                        if (ssh.isConnected) status = null
+                        if (ssh.isConnected) status = if (committed.offset >= targetOffset) null else "正在补齐对话…"
                     }
                 }
             }
@@ -267,15 +267,16 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                     needsMetadata = false
                 }
                 if ((entry?.view?.offset ?: 0L) >= targetOffset) status = null
-                catching {
-                    TranscriptStream.streamFrom(ssh, f, pos).collect { line ->
-                        if (line.isEmpty()) return@collect
+                val streamResult = catching {
+                    TranscriptStream.streamFrom(ssh, f, pos, windowSeconds = 15).collect { line ->
                         synchronized(lock) { buf += line; val n = line.toByteArray().size + 1L; bufBytes += n; pos += n }
                     }
                 }
                 needsMetadata = true
-                status = "转录流断了 —— 接上后自动续上"
-                delay(2_000)
+                if (!ssh.isConnected || streamResult.isFailure) {
+                    status = "对话同步中断，正在恢复…"
+                    delay(2_000)
+                }
             }
         } finally {
             val previous = entry; val previousLease = lease
