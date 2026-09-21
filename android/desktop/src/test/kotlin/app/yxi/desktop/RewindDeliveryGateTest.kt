@@ -12,10 +12,13 @@ class RewindDeliveryGateTest {
         try {
             val file = dir.resolve("gate.json")
             val first = RewindDeliveryGate(file)
-            val ticket = first.begin("host1/task", "runtime1")
+            val target = RewindDeliveryGate.Target("11111111-1111-4111-8111-111111111111",
+                "22222222-2222-4222-8222-222222222222", "33333333-3333-4333-8333-333333333333")
+            val ticket = first.begin("host1/task", "runtime1", target)
             assertTrue(first.blocked("host1/task"))
             assertFalse(first.blocked("host2/task"))
             val restarted = RewindDeliveryGate(file)
+            assertTrue(restarted.pending("host1/task")?.target == target)
             assertTrue(restarted.blocked("host1/task"))
             assertFailsWith<IllegalStateException> { restarted.begin("host1/task", "runtime2") }
             assertFailsWith<IllegalStateException> { restarted.finishVerified(ticket.copy(runtimeId = "runtime2")) }
