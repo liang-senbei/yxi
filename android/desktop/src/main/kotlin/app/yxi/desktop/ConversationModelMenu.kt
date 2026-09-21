@@ -5,7 +5,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import app.yxi.agent.Lines
 import app.yxi.agent.Session
 import kotlinx.coroutines.CancellationException
 import kotlin.math.roundToInt
@@ -48,7 +47,7 @@ internal fun ConversationModelMenu(conn: Conn, session: Session, currentModel: S
         }) { Text((mappedCurrent ?: currentModel.takeIf(ConfiguredModels::concrete)).orEmpty().ifBlank { "选择模型" } + " · " + labels.getOrElse(levels.indexOf(reportedEffort)) { reportedEffort.ifBlank { "思考强度" } } + " ⌄") }
         LaunchedEffect(menu, taskKey) {
             if (!menu) return@LaunchedEffect
-            loading = true; loadError = ""
+            loading = true; loadError = ""; models = emptyList()
             try {
                 val configured = ConfiguredModels.load(conn.ssh, session.cwd, currentModel)
                 models = configured.models
@@ -89,7 +88,7 @@ internal fun ConversationModelMenu(conn: Conn, session: Session, currentModel: S
                         else conn.modelChanges.remove(session.runtimeId)
                         actionError = ""; menu = false
                     } catch (e: Exception) { actionError = e.message.orEmpty() }
-                }, enabled = session.runtimeId.isNotBlank() && (changedModel != null || changedEffort != null)) { Text("应用选择") }
+                }, enabled = !loading && loadError.isBlank() && session.runtimeId.isNotBlank() && (changedModel != null || changedEffort != null)) { Text("应用选择") }
                 TextButton({ menu = false; routes() }) { Text("管理第三方线路") }
             }
         }
