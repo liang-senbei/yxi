@@ -18,7 +18,17 @@ import kotlinx.coroutines.launch
 @Composable
 fun RoutesPane(state: AppState) {
     val conn = state.configurationConnection()
-    if (conn == null) { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("先连接需要配置的主机") }; return }
+    if (conn == null) {
+        Column(Modifier.fillMaxSize().padding(28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("服务器配置", style = MaterialTheme.typography.headlineMedium)
+            Text(if (state.configurationHostId.isNotBlank()) "原配置服务器已断开，请重新选择。" else "选择需要配置的服务器。", color = Tokens.current.textMuted)
+            state.conns.filter { it.ssh.isConnected }.forEach { available ->
+                OutlinedButton({ state.configurationHostId = available.host.id }) { Text(available.host.label) }
+            }
+            if (state.conns.none { it.ssh.isConnected }) Text("在侧边栏连接服务器后即可配置供应商。", color = Tokens.current.textMuted)
+        }
+        return
+    }
     key(conn) { BoundRoutesPane(state, conn) }
 }
 

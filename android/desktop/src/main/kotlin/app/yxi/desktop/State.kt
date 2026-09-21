@@ -28,7 +28,8 @@ internal class CodexConversationView {
 
 class AppState {
     var configurationHostId by mutableStateOf("")
-    internal fun configurationConnection() = conns.firstOrNull { it.host.id == configurationHostId } ?: conn
+    internal fun configurationConnection() = if (configurationHostId.isBlank()) conn
+        else conns.firstOrNull { it.host.id == configurationHostId }
     var pluginLocation by mutableStateOf("本地")
     var showAndroidEmulator by mutableStateOf(false)
     internal val codexConversationViews = mutableMapOf<String, CodexConversationView>()
