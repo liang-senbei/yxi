@@ -13,7 +13,11 @@ import kotlinx.coroutines.withContext
 
 /** Own one exec channel; never hold the host-wide command mutex while the model runs. */
 internal suspend fun runRewindCommand(ssh: SshSession, command: String): String {
-    val channel = withContext(NonCancellable) { ssh.openExecStream("( $command ) 2>&1") }
+    // Print-mode CLIs may also inspect stdin even when a prompt argument exists.
+    // Supply EOF explicitly; keep the same tool PATH prefix as SshSession.exec.
+    val channel = withContext(NonCancellable) {
+        ssh.openExecStream("( export PATH=\"\$HOME/.local/bin:\$PATH\"; $command ) </dev/null 2>&1")
+    }
     try {
         return coroutineScope {
             val closer = launch(Dispatchers.IO, start = CoroutineStart.UNDISPATCHED) {
