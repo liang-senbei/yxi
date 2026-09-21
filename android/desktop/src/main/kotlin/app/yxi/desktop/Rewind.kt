@@ -24,7 +24,7 @@ import kotlinx.coroutines.sync.withLock
  * 流程（准备 / 执行两阶段，审查收敛版）：
  *
  * ```
- * [rewind] —— 全程在 [delivery] 锁内
+ * [rewind] —— 准备和 ticket 登记在 [delivery] 锁内，模型执行使用独立通道
  *   准备（全只读，拒绝全在这里）：
  *     校验 Plan → （可选）[RewindTargets] 的 inspect 结果交叉核对
  *       → 门禁（空闲 + claude + 会话在；记下 runtimeId / cwd）
@@ -55,8 +55,8 @@ import kotlinx.coroutines.sync.withLock
  * 原样重抛（审查指出的 runCatching 吞取消）。连接半断（exec 返回空/残缺）由各
  * parse 的 fail-closed 代号兜住，不猜成功。
  *
- * ⚠️ [rewind] 执行步占着这条连接的 exec 通道直到模型答完或 [Rewind.PRINT_TIMEOUT_SEC]
- * 到点（chanLock 串行）—— 期间这个主机的会话列表刷新会排队等，但**有上界**。
+ * 模型执行期间不持主机发送锁或 SSH 命令锁；目标会话由持久 ticket 阻塞。
+ * 专用通道在取消时关闭，输出有内存上限，远端命令仍受 [Rewind.PRINT_TIMEOUT_SEC] 限制。
  */
 /** Plan → 闸的 Target：只带三 UUID（session / anchor / message=target），不带正文与密钥（老板令）。 */
 internal fun rewindGateTarget(plan: Rewind.Plan) =

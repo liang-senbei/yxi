@@ -48,3 +48,5 @@
 root 核对 `42d5040` 基线 20:15:30–32 UTC XML：RewindCaptureLivePaneTest 4、RewindShellTest 8、RewindTest 34 均通过。新增 fixture 验证旧登记指向另一个仍存活的 Claude 不会被误选、双候选拒绝、窗格进程本身为 Claude、没有 Claude 不回退旧登记。
 
 root 核对 20:25:30 UTC RewindPreflightRealExecutionTest XML：8 项通过（补测合入 `1cc4a0e`）。真实隔离转录验证不带 isMeta 的命令回执不计人类轮次、不能选作目标，但快照仍保留模型与强度回执；真 bash/Python 执行验证空格 JSON、正文伪 UUID、错误 parent、size/mtime 变化及显式文件路径。均不是生产会话试跑或完整回退验收。
+
+`ae63dfd` 与补测 `f9aa5fe` 工作树，root 核对 20:27:42–43 UTC XML：RewindCommandStreamTest 3 项和 RewindControllerGateTest 2 项通过。证明 UTF-8 输出、字节上限、超限后仍排空输出等单元行为；不等于真实 SSH 断线/取消及多会话并发已经端到端验证。实现已将模型执行移出主机级发送锁，单独 exec 流仍需联调。
