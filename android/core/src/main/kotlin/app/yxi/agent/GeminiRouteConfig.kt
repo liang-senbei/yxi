@@ -53,6 +53,8 @@ object GeminiRouteConfig {
         val settingsModel: String?,
         /** settings.json 读不了/不是严格 JSON 时给原因，其余 settings 字段为 null。 */
         val settingsError: String?,
+        val envRevision: String = "",
+        val settingsRevision: String = "",
     )
 
     // ---------- 纯函数层（本地可单测，不碰 SSH） ----------
@@ -185,6 +187,8 @@ object GeminiRouteConfig {
             settingsAuthType = authType,
             settingsModel = sModel,
             settingsError = sErr,
+            envRevision = env.revision,
+            settingsRevision = settings?.revision.orEmpty(),
         )
     }
 
@@ -193,13 +197,15 @@ object GeminiRouteConfig {
      * settings.json 失败则尽力把 `.env` 回滚到原样（expected = 自己刚写的 hash；期间被第三方改过就不再动，如实上报）。
      * @return null = 成功；否则中文错误说明（哪些文件动了/没动，绝不静默）。
      */
-    suspend fun apply(ssh: SshSession, geminiDir: String, patch: Patch): String? {
+    suspend fun apply(ssh: SshSession, geminiDir: String, patch: Patch, expected: Status? = null): String? {
         validate(patch)
         if (patch.baseUrl == null && patch.apiKey == null && patch.model == null) return "Gemini 线路没有任何要改的字段"
         val envPath = "$geminiDir/.env"
         val setPath = "$geminiDir/settings.json"
         val envOld = RemoteAtomicJson.read(ssh, envPath)
         val setOld = RemoteAtomicJson.read(ssh, setPath)
+        if (expected != null && (expected.envRevision != envOld.revision || expected.settingsRevision != setOld.revision))
+            return "配置在编辑期间已被修改，本次未覆盖，请刷新后重新编辑"
         val envNew = patchEnv(envOld.text, patch)
         val setNew = try { patchSettings(setOld.text) } catch (e: IllegalArgumentException) { return e.message }
         commit(ssh, envPath, envNew, envOld.revision, jsonMode = false)?.let {

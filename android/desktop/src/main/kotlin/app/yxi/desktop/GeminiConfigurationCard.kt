@@ -63,11 +63,15 @@ internal fun GeminiConfigurationCard(conn: Conn) {
         Text("将修改 ${conn.host.label} 的 Gemini 用户级配置及认证方式，可能影响该服务器同一用户下的其他 Gemini 会话。")
     }, confirmButton = { TextButton({
         val patch = GeminiRouteConfig.Patch(base.trim(), secret.takeIf { it.isNotBlank() }, model.trim())
+        val expected = status
         busy = true
         scope.launch {
             try {
                 check(conn.ssh.isConnected) { "服务器未连接" }
-                GeminiRouteConfig.apply(conn.ssh, directory, patch)?.let { error(it) }
+                check(expected != null) { "配置尚未读取" }
+                GeminiRouteConfig.apply(conn.ssh, directory, patch, expected)?.let {
+                    confirm = false; notice = it; return@launch
+                }
                 secret = ""; confirm = false; load()
                 notice = "配置已写入并重新读取；尚未验证模型请求。"
             } catch (e: CancellationException) { throw e }
