@@ -133,10 +133,11 @@ class RewindTest {
     @Test
     fun `捕获命令读argv不碰environ且带身份基准`() {
         val cmd = Rewind.captureCommand("cc-yxi")
-        // pid 定位：登记表按 tmux 名精确匹配（带冒号界），退回 pane 子进程认 cmdline
-        assertTrue("\"tmux\":\"cc-yxi:" in cmd)
+        // Resolve the live pane, not a stale registration left by an earlier process.
+        assertTrue("-t 'cc-yxi' '#{pane_id}'" in cmd)
+        assertTrue(".claude/sessions" !in cmd)
         assertTrue("pane_pid" in cmd)
-        assertTrue("grep -q claude" in cmd)
+        assertTrue("candidate=" in cmd && "readlink /proc/" in cmd)
         // exe 解析 + argv 落 600 临时文件
         assertTrue("readlink /proc/" in cmd)
         assertTrue("chmod 600" in cmd)

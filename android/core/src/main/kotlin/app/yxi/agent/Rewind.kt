@@ -218,11 +218,12 @@ object Rewind {
      */
     fun captureCommand(sessionName: String): String {
         val n = q(sessionName)
-        return "reg=\$(grep -h '\"tmux\":\"$n:' \"\$HOME/.claude/sessions/\"*.json 2>/dev/null | head -1); " +
-            "pid=\$(printf '%s' \"\$reg\" | sed -n 's/.*\"pid\":\\([0-9]*\\).*/\\1/p'); " +
-            "[ -n \"\$pid\" ] || { pp=\$(tmux display-message -p -t '$n' '#{pane_pid}' 2>/dev/null); " +
-            "for c in \$(pgrep -P \"\$pp\" 2>/dev/null); do " +
-            "if tr '\\0' ' ' < /proc/\$c/cmdline 2>/dev/null | grep -q claude; then pid=\$c; break; fi; done; }; " +
+        return "pn=\$(tmux display-message -p -t '$n' '#{pane_id}' 2>/dev/null); " +
+            "pp=\$(tmux display-message -p -t \"\$pn\" '#{pane_pid}' 2>/dev/null); pid=''; " +
+            "for c in \"\$pp\" \$(pgrep -P \"\$pp\" 2>/dev/null); do " +
+            "candidate=\$(readlink /proc/\$c/exe 2>/dev/null); " +
+            "case \"\$candidate\" in */claude|*/claude/*) " +
+            "[ -z \"\$pid\" ] || { echo \"$CAP_TAG:ambiguous\"; exit 0; }; pid=\$c;; esac; done; " +
             "[ -n \"\$pid\" ] && [ -r /proc/\$pid/cmdline ] || { echo \"$CAP_TAG:gone\"; exit 0; }; " +
             "exe=\$(readlink /proc/\$pid/exe 2>/dev/null); " +
             "[ -n \"\$exe\" ] || { echo \"$CAP_TAG:noexe\"; exit 0; }; " +
@@ -230,7 +231,6 @@ object Rewind {
             "tr '\\0' '\\n' < /proc/\$pid/cmdline > \"\$tf\" 2>/dev/null; " +
             "echo \"$CAP_TAG:file=\$tf\"; echo \"$CAP_TAG:exe=\$exe\"; " +
             "echo \"$CAP_TAG:pid=\$pid\"; " +
-            "pn=\$(tmux display-message -p -t '$n' '#{pane_id}' 2>/dev/null); " +
             "echo \"$CAP_TAG:pane=\$pn\"; " +
             "a=\$(tr '\\0' '\\n' < /proc/\$pid/cmdline); " +
             "m=\$(printf '%s\\n' \"\$a\" | awk 'p{print;p=0} /^--model\$/{p=1}' | head -1); " +
@@ -282,6 +282,7 @@ object Rewind {
         when (val head = first.removePrefix("$CAP_TAG:").substringBefore('=')) {
             "gone" -> return Failed("gone")
             "noexe" -> return Failed("noexe")
+            "ambiguous" -> return Failed("ambiguous")
         }
         var file = ""; var exe = ""
         var model = ""; var effort = ""; var name = ""
