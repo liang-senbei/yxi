@@ -334,7 +334,12 @@ object Transcript {
                     // 顶栏那个模型名来自「最后一条 assistant 消息」的 model —— 切换不会改写旧消息，
                     // 所以不认这一步的话，用户切了模型还看见旧名字，会以为没切成（用户报过）。
                     // `/model` 的回执落在命令输出里（`Set model to …`），照它覆盖。
-                    modelSwitchOf(msg)?.let { name -> lastCtx?.let { onCtx(it.copy(model = name)) } }
+                    modelSwitchOf(msg)?.let { name -> lastCtx?.let { old ->
+                        lastCtx = old.copy(model = name); onCtx(lastCtx!!)
+                    } }
+                    effortSwitchOf(msg)?.let { effort -> lastCtx?.let { old ->
+                        lastCtx = old.copy(effort = effort); onCtx(lastCtx!!)
+                    } }
                 }
                 "assistant" -> {
                     // ⚠️ 顺路取，不额外跑一趟服务器 —— 这些行本来就在手上
@@ -407,6 +412,13 @@ object Transcript {
         var r = raw
         repeat(4) { r = r.trim().trim('`').removePrefix("[1m").removeSuffix("[22m").removeSuffix("(default)") }
         return r.trim().takeIf { it.isNotBlank() }?.take(40)
+    }
+
+    /** CLI effort receipts can arrive before another assistant turn is generated. */
+    private fun effortSwitchOf(msg: JSONObject): String? {
+        val text = msg.opt("content") as? String ?: return null
+        val receipt = Regex("""^\s*<local-command-stdout>Set effort level to (none|minimal|low|medium|high|xhigh|max)(?:\s|<)""")
+        return receipt.find(text)?.groupValues?.get(1)
     }
 
     private fun uuidOf(d: JSONObject, line: String): String =
