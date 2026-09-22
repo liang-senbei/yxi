@@ -107,6 +107,7 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
         var menu by remember(key) { mutableStateOf(false) }
         NativeOverlay(menu)
         var renaming by remember(key) { mutableStateOf(false) }
+        var configuring by remember(key) { mutableStateOf(false) }
         var title by remember(key, renaming) { mutableStateOf(nav.title(key) ?: s.short) }
         val stable = s.runtimeId.isNotBlank()
         val selected = state.conn === conn && (if (stable) state.session?.runtimeId == s.runtimeId else state.session?.name == s.name)
@@ -122,6 +123,7 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
                         DropdownMenuItem(text = { Text(label) }, enabled = enabled, onClick = { menu = false; action() })
                     }
                     if (!stable) DropdownMenuItem(text = { Text("会话标识不可用，请刷新后整理") }, enabled = false, onClick = {})
+                    item("配置") { configuring = true }
                     item(if (nav.pinned(key)) "取消置顶" else "置顶") { nav.togglePin(key) }
                     item(if (nav.muted(key)) "恢复任务通知" else "静音此任务") { nav.setMuted(key, !nav.muted(key)) }
                     item(if (nav.favorite(key)) "取消收藏启动入口" else "收藏为启动入口", stable && s.cwd.startsWith('/')) { nav.setFavorite(key, conn.host, s, !nav.favorite(key)) }
@@ -138,6 +140,7 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
                 }
             }
         }
+        if (configuring) AgentConfigurationDialog(conn, s) { configuring = false }
         if (renaming) WorkbenchDialog(onDismissRequest = { renaming = false }, title = { Text("修改任务显示名称") },
             text = { Column {
                 OutlinedTextField(title, { title = it }, singleLine = true, label = { Text("名称") })
