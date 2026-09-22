@@ -45,24 +45,26 @@ class RewindDialogUiTest {
                         try {
                             delay(1800)
                             withContext(Dispatchers.IO) {
-                                val robot = Robot()
+                                val robot = Robot().apply { autoDelay = 60 }
                                 val bounds = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment().defaultScreenDevice.defaultConfiguration.bounds
                                 ImageIO.write(robot.createScreenCapture(Rectangle(bounds)), "png", File("/results/rewind-dialog-$width.png"))
                             }
                             val dialog = requireNotNull(dialogBounds)
                             val origin = window.contentPane.locationOnScreen
                             withContext(Dispatchers.IO) {
-                                val robot = Robot()
+                                val robot = Robot().apply { autoDelay = 60 }
                                 robot.mouseMove(origin.x + dialog.left.toInt() + 80, origin.y + dialog.top.toInt() + 125)
                                 robot.mousePress(InputEvent.BUTTON1_DOWN_MASK); robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK)
+                                robot.delay(150)
                                 robot.keyPress(KeyEvent.VK_CONTROL); robot.keyPress(KeyEvent.VK_A)
                                 robot.keyRelease(KeyEvent.VK_A); robot.keyRelease(KeyEvent.VK_CONTROL)
+                                robot.delay(150)
                                 robot.keyPress(KeyEvent.VK_A); robot.keyRelease(KeyEvent.VK_A)
                             }
                             delay(400)
                             assertEquals("a", text, "Typing must update the actual editor")
                             withContext(Dispatchers.IO) {
-                                val robot = Robot()
+                                val robot = Robot().apply { autoDelay = 60 }
                                 val current = requireNotNull(dialogBounds)
                                 robot.mouseMove(origin.x + current.right.toInt() - 90, origin.y + current.bottom.toInt() - 48)
                                 robot.mousePress(InputEvent.BUTTON1_DOWN_MASK); robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK)
