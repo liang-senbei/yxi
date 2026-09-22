@@ -18,7 +18,13 @@ internal data class CodexResumeOverrides(val provider: String?, val model: Strin
  * Protocol: https://learn.chatgpt.com/docs/app-server
  */
 internal class CodexAppServer internal constructor(private val shell: SshSession.Shell,
-    private val profileOverrides: CodexResumeOverrides? = null) : AutoCloseable {
+    private val profileOverrides: CodexResumeOverrides? = null,
+    private val providerModelLoader: (suspend () -> List<ProviderModels.Model>)? = null) : AutoCloseable {
+    internal val hasIndependentProfile get() = profileOverrides != null
+    internal suspend fun independentModels(): List<String> {
+        check(!closed.get() && providerModelLoader != null) { "独立配置连接已关闭" }
+        return providerModelLoader.invoke().map { it.id }
+    }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val pending = ConcurrentHashMap<String, CompletableDeferred<JSONObject>>()
     private val serverRequests = ConcurrentHashMap<String, JSONObject>()
@@ -99,7 +105,7 @@ internal class CodexAppServer internal constructor(private val shell: SshSession
 
     suspend fun resumeThread(threadId: String, overrides: CodexResumeOverrides? = null) = request("thread/resume",
         JSONObject().put("threadId", requiredId(threadId)).apply {
-            applyProfile(this, overrides ?: profileOverrides)
+            applyProfile(this, overrides ?: profileOverrides?.copy(model = null, effort = null))
         })
 
     private fun applyProfile(params: JSONObject, overrides: CodexResumeOverrides?) {
@@ -108,10 +114,10 @@ internal class CodexAppServer internal constructor(private val shell: SshSession
         overrides?.effort?.let { params.put("config", JSONObject().put("model_reasoning_effort", it)) }
     }
 
-    internal fun verifyProfile(result: JSONObject) {
+    internal fun verifyProfile(result: JSONObject, verifyModel: Boolean = true) {
         val expected = profileOverrides ?: return
         check(result.optString("modelProvider") == expected.provider &&
-            (expected.model == null || result.optString("model") == expected.model)) {
+            (!verifyModel || expected.model == null || result.optString("model") == expected.model)) {
             "运行器返回的供应商或模型与所选独立配置不一致；未启用发送"
         }
     }
@@ -190,7 +196,8 @@ exec "${'$'}bin" app-server
                 if (prepared != null) CodexProfileLaunch.cleanup(ssh, prepared)
                 throw e
             }
-            val client = CodexAppServer(shell, prepared?.overrides)
+            val client = CodexAppServer(shell, prepared?.overrides,
+                profile?.let { line -> suspend { ProviderModels.fetch(ssh, line.baseUrl, line.apiKey) } })
             try {
                 client.request("initialize", JSONObject().put("clientInfo", JSONObject()
                     .put("name", "yxi_desktop").put("title", "Yxi").put("version", System.getProperty("jpackage.app-version", "dev"))))

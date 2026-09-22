@@ -20,7 +20,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        raw = json.dumps({'models': [], 'data': []}).encode()
+        authenticated = self.headers.get('Authorization') == 'Bearer ' + key
+        with lock, (root / 'models-requests.jsonl').open('a') as out:
+            out.write(json.dumps({'path': self.path, 'authenticated': authenticated}) + '\n')
+        if not authenticated:
+            self.send_error(401)
+            return
+        index = key.rsplit('-', 1)[-1]
+        raw = json.dumps({'data': [{'id': 'fixture-model-' + index}, {'id': 'provider/alternative:' + index}]}).encode()
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(raw)))

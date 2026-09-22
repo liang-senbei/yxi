@@ -143,7 +143,7 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File,
             val result = resumeExistingThread(client, record.threadId)
             val thread = result.getJSONObject("thread")
             check(thread.getString("id") == record.threadId) { "恢复响应不属于原任务" }
-            client.verifyProfile(result)
+            client.verifyProfile(result, verifyModel = false)
             attach(conn, record, client, autoRun = autoRun).also { it.recordSessionConfiguration(result) }
         } catch (e: Exception) { client.close(); throw e }
         finally { busy = false }

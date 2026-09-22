@@ -10,13 +10,17 @@ internal object ProviderModels {
     internal val script: String get() = ProviderModels::class.java.getResource("/app/yxi/desktop/provider-models.py")!!.readText()
 
     suspend fun fetch(conn: Conn, baseUrl: String, apiKey: String, modelsUrl: String = ""): List<Model> {
+        return fetch(conn.ssh, baseUrl, apiKey, modelsUrl)
+    }
+
+    suspend fun fetch(ssh: app.yxi.ssh.SshSession, baseUrl: String, apiKey: String, modelsUrl: String = ""): List<Model> {
         require(baseUrl.isNotBlank()) { "请先填写请求地址" }
         require(apiKey.isNotBlank()) { "请先填写 API Key 或 Auth token" }
-        check(conn.ssh.isConnected) { "服务器已断开，请重新连接后获取模型" }
+        check(ssh.isConnected) { "服务器已断开，请重新连接后获取模型" }
         val input = JSONObject().put("baseUrl", baseUrl.trim()).put("apiKey", apiKey.trim())
             .put("modelsUrl", modelsUrl.trim()).toString().toByteArray(Charsets.UTF_8)
         require(input.size <= 65536) { "模型列表请求配置过长" }
-        val channel = withContext(NonCancellable) { conn.ssh.openExecStream("timeout 65s python3 -c ${Shell.q(script)} 2>/dev/null") }
+        val channel = withContext(NonCancellable) { ssh.openExecStream("timeout 65s python3 -c ${Shell.q(script)} 2>/dev/null") }
         val output = try {
             coroutineScope {
                 val closer = launch(Dispatchers.IO, start = CoroutineStart.UNDISPATCHED) {

@@ -33,8 +33,8 @@ internal object CodexProfileLaunch {
         val definition = "{ name = ${tomlString(line.name)}, base_url = ${tomlString(url.toString())}, " +
             "env_key = \"YXI_AGENT_API_KEY\", wire_api = \"responses\", requires_openai_auth = false }"
         val args = mutableListOf("-c", "model_providers.$provider=$definition", "-c", "model_provider=${tomlString(provider)}")
-        model?.let { args += listOf("-c", "model=${tomlString(it)}") }
-        effort?.let { args += listOf("-c", "model_reasoning_effort=${tomlString(it)}") }
+        // Model/effort are thread/start or explicit configuration-change overrides.
+        // CLI defaults here would reset a conversation's later model choice on reconnect.
         args += "app-server"
         require(args.none { it.contains(line.apiKey) }) { "请求地址、模型或配置名称中不能包含 API Key" }
         val payload = JSONObject().put("args", JSONArray(args)).put("key", line.apiKey)

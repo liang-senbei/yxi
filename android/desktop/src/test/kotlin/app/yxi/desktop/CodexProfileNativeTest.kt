@@ -61,6 +61,10 @@ trust_level = "trusted"
                     val controlB = ws.controllers.getValue(b.key).apply { setAutoDispatch(false) }
                     assertEquals("fixture-model-0", controlA.configuredModel)
                     assertEquals("fixture-model-1", controlB.configuredModel)
+                    controlA.refreshModels(); controlB.refreshModels()
+                    assertEquals(listOf("fixture-model-0", "provider/alternative:0"), controlA.models.map { it.model })
+                    assertEquals(listOf("fixture-model-1", "provider/alternative:1"), controlB.models.map { it.model })
+                    assertTrue(controlA.models.all { it.efforts.isEmpty() }, "Do not invent capabilities for third-party models")
                     suspend fun send(controller: CodexTaskController, text: String) {
                         val item = queue.enqueue(controller.taskKey, text)
                         controller.sendNext(item.id)
@@ -75,6 +79,9 @@ trust_level = "trusted"
                     assertTrue(requests(0).all { it.getBoolean("authenticated") && it.getString("model") == "fixture-model-0" })
                     assertTrue(requests(1).all { it.getBoolean("authenticated") && it.getString("model") == "fixture-model-1" })
                     assertFalse(requests(0).any { it.optJSONArray("input").toString().contains("CODEX-PROFILE-B") })
+                    controlA.chooseModel("provider/alternative:0")
+                    send(controlA, "CODEX-PROFILE-A-ALTERNATIVE")
+                    assertEquals("provider/alternative:0", requests(0).last().getString("model"))
                     val switched = ws.applyCurrentConfiguration(bridge.conn, a, profiles[1].id)
                     assertSame(controlB, ws.controllers.getValue(b.key))
                     assertFalse(switched.autoDispatch)
@@ -87,6 +94,10 @@ trust_level = "trusted"
                     assertFalse(sent.optJSONArray("input").toString().contains("CODEX-PROFILE-B"))
                     assertContentEquals(before, global.readBytes())
                     assertFalse(configDir.resolve("auth.json").exists())
+                    switched.refreshModels()
+                    switched.chooseModel("provider/alternative:1")
+                    send(switched, "CODEX-PROFILE-A-NEW-MODEL")
+                    assertEquals("provider/alternative:1", requests(1).last().getString("model"))
                     ws.close()
                     bridge.conn.ssh.disconnect(); bridge.conn.ssh.connect()
                     val reopened = CodexWorkspace(queue, registryFile).also { workspace = it }
@@ -94,22 +105,37 @@ trust_level = "trusted"
                     assertEquals(profiles[1].id, savedA.profileId)
                     assertEquals(a.profileScope, savedA.profileScope)
                     val resumed = reopened.open(bridge.conn, savedA, autoRun = false)
-                    assertEquals("fixture-model-1", resumed.configuredModel)
+                    assertEquals("provider/alternative:1", resumed.configuredModel)
                     assertTrue(resumed.messages.any { it.text.contains("CODEX-PROFILE-A") })
                     send(resumed, "CODEX-PROFILE-A-RECONNECTED")
                     assertTrue(requests(1).last().getBoolean("authenticated"))
+                    assertEquals("provider/alternative:1", requests(1).last().getString("model"))
                     assertFalse(registryFile.readText().contains("fixture-codex-key"))
                     assertContentEquals(before, global.readBytes())
                     File("/results/codex-profile-proof.json").writeText(JSONObject().put("twoNativeAppServers", true)
                         .put("differentModelsAndKeys", true).put("sameThreadAfterSwitch", true).put("otherAgentUnchanged", true)
-                        .put("reconnectKeepsProfile", true).put("globalConfigUnchanged", true).toString(2))
+                        .put("reconnectKeepsProfile", true).put("providerModelCatalog", true)
+                        .put("modelChoiceSurvivesReconnect", true).put("globalConfigUnchanged", true).toString(2))
                 } }
             }
         } finally {
             workspace?.close()
+            val metadata = org.json.JSONArray()
+            configDir.walkTopDown().filter { it.isFile && it.extension == "jsonl" }.forEach { file ->
+                file.useLines { lines -> lines.forEach { raw ->
+                    val record = runCatching { JSONObject(raw) }.getOrNull()
+                    if (record?.optString("type") in listOf("session_meta", "turn_context")) {
+                        val value = record!!.optJSONObject("payload") ?: JSONObject()
+                        metadata.put(JSONObject().put("file", file.name).put("type", record.optString("type"))
+                            .put("model", value.optString("model")).put("effort", value.optString("effort"))
+                            .put("id", value.optString("id")))
+                    }
+                } }
+            }
+            File("/results/codex-profile-history-metadata.json").writeText(metadata.toString(2))
             servers.forEach { it.destroyForcibly(); it.waitFor(5, TimeUnit.SECONDS) }
             endpoints.forEachIndexed { i, endpoint ->
-                for (name in listOf("server.log", "requests.jsonl")) endpoint.resolve(name).takeIf { it.isFile }
+                for (name in listOf("server.log", "requests.jsonl", "models-requests.jsonl")) endpoint.resolve(name).takeIf { it.isFile }
                     ?.copyTo(File("/results/codex-profile-$i-$name"), overwrite = true)
             }
             root.deleteRecursively()

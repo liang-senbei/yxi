@@ -217,9 +217,20 @@ internal class CodexTaskController(
     }
 
     suspend fun refreshModels() {
-        if (modelsLoading) return
+        if (modelsLoading || disposed) return
         modelsLoading = true; modelError = ""
         try {
+            if (client.hasIndependentProfile) {
+                // A custom provider's catalog must not be replaced with the engine's built-in OpenAI catalog.
+                val configured = configuredModel.takeIf { it.isNotBlank() }
+                models = listOfNotNull(configured).map { CodexModelOption(it, it, emptyList(), "") }
+                val fetched = client.independentModels()
+                if (!disposed) {
+                    models = (listOfNotNull(configured) + fetched).distinct().map { CodexModelOption(it, it, emptyList(), "") }
+                    modelNotice = "模型来自此 Agent 的供应商配置；供应商未报告思考档位时，不推测支持范围。"
+                }
+                return
+            }
             val next = mutableListOf<CodexModelOption>()
             val seen = mutableSetOf<String>()
             var cursor: String? = null
@@ -237,7 +248,7 @@ internal class CodexTaskController(
                 cursor = result.optString("nextCursor").takeIf { it.isNotBlank() && it != "null" }
                 check(cursor == null || seen.add(cursor)) { "模型列表分页异常" }
             } while (cursor != null)
-            models = next.distinctBy { it.model }
+            if (!disposed) models = next.distinctBy { it.model }
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { modelError = "模型列表读取失败：${e.message}" }
         finally { modelsLoading = false }
