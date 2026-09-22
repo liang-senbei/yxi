@@ -340,6 +340,8 @@ private fun RouteForm(original: Lines.Line, conn: Conn, onClose: () -> Unit, onS
     fun fetchModels() {
         // 密钥口径：Auth token 优先，其次 API Key（与该线路实际认证字段一致）
         val key = authToken.trim().ifBlank { secret.trim() }
+        val requestUrl = url.trim()
+        val requestModelsUrl = modelsUrl.trim()
         if (url.isBlank() || key.isBlank()) {
             modelsNote = "获取模型列表需要先填写请求地址和密钥（Auth token 优先，其次 API Key）。"; modelsNoteIsError = true
             return
@@ -351,8 +353,9 @@ private fun RouteForm(original: Lines.Line, conn: Conn, onClose: () -> Unit, onS
         modelsNote = ""; modelsNoteIsError = false; modelsLoading = true
         fetchJob = scope.launch {
             try {
-                val fetched = ProviderModels.fetch(conn, url.trim(), key, modelsUrl.trim())
-                if (gen == modelsGen) {
+                val fetched = ProviderModels.fetch(conn, requestUrl, key, requestModelsUrl)
+                if (gen == modelsGen && url.trim() == requestUrl && modelsUrl.trim() == requestModelsUrl &&
+                    authToken.trim().ifBlank { secret.trim() } == key) {
                     models = fetched
                     modelsNote = if (fetched.isEmpty()) "接口未返回任何模型。" else "已获取 ${fetched.size} 个模型；在各字段下方「从列表选择」回填。"
                 }

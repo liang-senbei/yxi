@@ -29,9 +29,9 @@ internal fun setOneM(base: String, enabled: Boolean) = if (enabled) "$base[1m]" 
 internal fun ProviderModelField(
     label: String,
     value: String,
-    change: (String) -> Unit,
     models: List<ProviderModels.Model> = emptyList(),
     supportsOneM: Boolean = true,
+    change: (String) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -41,6 +41,8 @@ internal fun ProviderModelField(
                 Text("1M", style = MaterialTheme.typography.labelMedium)
             }
         }
-        if (models.isNotEmpty()) ProviderModelPicker(models, change)
+        if (models.isNotEmpty()) ProviderModelPicker(models) { picked ->
+            change(setOneM(oneMBase(picked), supportsOneM && hasOneM(value)))
+        }
     }
 }
