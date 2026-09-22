@@ -1,5 +1,13 @@
 # 对话历史回退验收记录
 
+## 原生中断记录核验
+
+读取 hk13 既有探针 `/tmp/yxi-rw-probe/home/.claude/projects/*/*.jsonl` 的实际记录：原生 `[Request interrupted by user]` 为单 text block，含一致的 `session_id`/`sessionId`、`entrypoint=cli`、`version=2.1.278`，没有普通输入的 origin/promptSource/turnOrigin；其 parent 实际也可能是 attachment，不能假定直接指向用户消息。
+
+`85418d4` / `428c668` 只按这组已核对的字段将其认作原生中断；普通用户文本、错误会话 ID 或带用户来源字段的记录仍拒绝作为完成依据。中断可以成为终止节点，但原消息必须已排除、唯一的新根正文摘要及全链完整性仍须通过，外层仍核对原生 idle 和运行身份。
+
+`run.KBHJpI` 编译成功，`run.8xtIEw` NativeRootVerificationTest 通过（1 test、0 failures/errors/skipped），包含真实形状、手写同名文本、错误来源/会话、缺失新根的反例。仅为核验脚本测试；真实 UI 停止动作及 Transcript/可编辑目标中的同类控制记录识别仍待统一验证。首轮生产开关仍关闭。
+
 ## 确认页失败取消
 
 `4b8de9c` 让失败清理同时识别已知菜单和精确的 conversation-only 确认页；补写恢复记录失败时保留原始异常及 suppressed 信息。`dd0af94` 的真实 CLI 整链 `run.ljjpxN` 通过，新增不可写恢复记录路径、回到空输入、原历史和请求数不变的检查。
