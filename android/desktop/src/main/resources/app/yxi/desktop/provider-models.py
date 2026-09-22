@@ -31,7 +31,9 @@ def candidates(base, override=''):
     if path.endswith('/models'): return [base]
     if any(path.endswith(s) for s in ('/messages', '/chat/completions', '/responses')):
         if '/v1/' in path: return [at(path.split('/v1/', 1)[0] + '/v1/models')]
-        return [at(path.rsplit('/', 1)[0] + '/v1/models')]
+        suffix = next(s for s in ('/chat/completions', '/messages', '/responses') if path.endswith(s))
+        root = path[:-len(suffix)]
+        return [at(root + ('/models' if re.search(r'/v\d+$', root) else '/v1/models'))]
     urls = [at(path + '/models')] if re.search(r'/v\d+$', path) else [at(path + '/v1/models')]
     if re.search(r'/v\d+$', path) and not path.endswith('/v1'): urls.append(at(path + '/v1/models'))
     for suffix in SUFFIXES:
@@ -79,6 +81,7 @@ def fetch(request):
                 models.setdefault(ident, {'id': ident, 'owner': owner[:256] if owner else None})
             return {'ok': True, 'models': [models[k] for k in sorted(models)]}
         except urllib.error.HTTPError as e:
+            e.close()
             if e.code in (404, 405): continue
             return {'ok': False, 'error': 'auth' if e.code in (401, 403) else 'redirect' if 300 <= e.code < 400 else 'http', 'status': e.code}
         except (TimeoutError, socket.timeout): return {'ok': False, 'error': 'timeout'}
