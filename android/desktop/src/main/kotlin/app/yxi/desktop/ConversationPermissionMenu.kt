@@ -77,11 +77,25 @@ internal suspend fun changeConversationPermission(conn: Conn, session: Session, 
             val actual = PermissionMode.fromScreen(screen) ?: error("无法确认运行器当前权限模式，请查看终端")
             if (actual == desired) return@withLock actual
             if (!seen.add(actual)) throw PermissionModeUnavailable(desired)
-            val script = "pane=\$(tmux display-message -p -t $target '#{pane_id}') && " +
-                "test \"\$(tmux display-message -p -t \"\$pane\" '#{pid}:#{session_id}:#{session_created}')\" = ${Shell.q(session.runtimeId)} && " +
-                "test \"\$(tmux capture-pane -p -t \"\$pane\")\" = ${Shell.q(screen.trimEnd('\n'))} && " +
-                "tmux send-keys -t \"\$pane\" BTab && printf '__YXI_PERMISSION_STEP__'"
-            check(conn.ssh.exec(script).trim() == "__YXI_PERMISSION_STEP__") { "会话状态已变化，切换已停止" }
+            var stepScreen = screen
+            var sent = false
+            repeat(3) {
+                if (!sent) {
+                    val script = "pane=\$(tmux display-message -p -t $target '#{pane_id}') || exit 1; " +
+                        "test \"\$(tmux display-message -p -t \"\$pane\" '#{pid}:#{session_id}:#{session_created}')\" = ${Shell.q(session.runtimeId)} || { printf '__YXI_PERMISSION_IDENTITY__'; exit 0; }; " +
+                        "test \"\$(tmux capture-pane -p -t \"\$pane\")\" = ${Shell.q(stepScreen.trimEnd('\n'))} || { printf '__YXI_PERMISSION_STALE__'; exit 0; }; " +
+                        "tmux send-keys -t \"\$pane\" BTab && printf '__YXI_PERMISSION_STEP__'"
+                    when (conn.ssh.exec(script).trim()) {
+                        "__YXI_PERMISSION_STEP__" -> sent = true
+                        "__YXI_PERMISSION_STALE__" -> {
+                            stepScreen = stableScreen()
+                            check(PermissionMode.fromScreen(stepScreen) == actual) { "权限模式已被其他操作改变，切换已停止" }
+                        }
+                        else -> error("会话身份或按键回执无法确认，切换已停止；不会重复发送按键")
+                    }
+                }
+            }
+            check(sent) { "终端画面持续变化，尚未发送切换按键，请稍后重试" }
             var changed = false
             repeat(30) {
                 if (!changed) {
