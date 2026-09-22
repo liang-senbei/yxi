@@ -39,7 +39,7 @@ object NativeRootVerification {
     val chainScript = """
 import hashlib,json,os,sys,time
 path,old,expected=sys.argv[1:]
-session=os.path.basename(path).removesuffix('.jsonl')
+session=os.path.splitext(os.path.basename(path))[0]
 nodes={}; leaf=None; started=time.monotonic()
 with open(path,'rb') as f:
  before=os.fstat(f.fileno())
