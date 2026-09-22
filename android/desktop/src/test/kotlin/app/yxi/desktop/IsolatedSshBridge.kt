@@ -59,6 +59,7 @@ internal class IsolatedSshBridge(private val root: File, environment: Map<String
                 AllowTcpForwarding no
                 AllowAgentForwarding no
                 X11Forwarding no
+                Subsystem sftp /usr/lib/openssh/sftp-server
                 ForceCommand ${forced.path}
             """.trimIndent() + "\n") }
             server = ProcessBuilder("/usr/sbin/sshd", "-D", "-e", "-f", config.path)

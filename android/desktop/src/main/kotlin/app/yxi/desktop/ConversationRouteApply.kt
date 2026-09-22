@@ -2,6 +2,7 @@ package app.yxi.desktop
 
 import app.yxi.agent.*
 import app.yxi.ssh.Shell
+import app.yxi.ssh.SshSession
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
@@ -17,6 +18,16 @@ internal object ConversationRouteApply {
         require(line.agent == Lines.CLAUDE) { "此适配器仅支持 Claude Code" }
         require(Lines.rejectedKeys(line.extra).isEmpty()) { "配置含不支持的字段，请先在配置页修正" }
         return line.settingsJson()
+    }
+
+    suspend fun currentSettings(ssh: SshSession, session: Session): String? {
+        val output = ssh.exec("python3 -c ${Shell.q(script)} inspect ${Shell.q(session.name)} ${Shell.q(session.runtimeId)} 2>/dev/null")
+        val result = JSONObject(output)
+        return when (result.optString("status")) {
+            "unmanaged" -> null
+            "configured" -> result.getJSONObject("settings").toString()
+            else -> error("本会话的独立配置无法核对，请检查终端后重试")
+        }
     }
 
     suspend fun apply(conn: Conn, session: Session, line: Lines.Line): Receipt = conn.instructionDeliveryMutex.withLock {

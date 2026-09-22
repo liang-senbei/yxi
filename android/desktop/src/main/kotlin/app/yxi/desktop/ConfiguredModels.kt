@@ -33,12 +33,13 @@ internal object ConfiguredModels {
         val explicit = (0 until (available?.length() ?: 0)).mapNotNull { resolve(available!!.optString(it)) }
         val configured = (mapped + listOfNotNull(resolve(data.optString("model")))).distinct()
         val currentId = resolve(current)
-        val thirdParty = env.optString("ANTHROPIC_BASE_URL").let { it.isNotBlank() &&
+        val thirdParty = data.optBoolean("thirdParty") || env.optString("ANTHROPIC_BASE_URL").let { it.isNotBlank() &&
             runCatching { java.net.URI(it).host }.getOrNull() != "api.anthropic.com" }
         val result = if (thirdParty && configured.isNotEmpty()) configured else (configured + explicit + listOfNotNull(currentId)).distinct()
         return Selection(result, currentId)
     }
-    suspend fun load(ssh: SshSession, cwd: String, current: String): Selection {
+    suspend fun load(ssh: SshSession, cwd: String, current: String, session: app.yxi.agent.Session? = null): Selection {
+        if (session != null) ConversationRouteApply.currentSettings(ssh, session)?.let { return parse(it, current) }
         val script = """
 import json,os,sys
 paths=[os.path.expanduser('~/.claude/settings.json')]

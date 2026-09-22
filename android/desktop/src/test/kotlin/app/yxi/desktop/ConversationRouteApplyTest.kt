@@ -98,6 +98,7 @@ class ConversationRouteApplyTest {
                         apiKey = "fixture-key-1", extra = JSONObject().put("env", JSONObject().put("ANTHROPIC_MODEL", "fixture-route-b")))
                     val receipt = ConversationRouteApply.apply(bridge.conn, a, line)
                     assertEquals(ids.getValue("a"), receipt.sessionId)
+                    assertEquals(listOf("fixture-route-b"), ConfiguredModels.load(bridge.conn.ssh, project.path, "default", a).models)
                     assertTrue(receipt.processIdentity.matches(Regex("[0-9a-f-]+:[0-9]+:[0-9]+")))
                     val privateSettings = JSONObject(File(receipt.settingsPath).readText())
                     assertEquals("", privateSettings.getJSONObject("env").getString("ANTHROPIC_DEFAULT_OPUS_MODEL"))

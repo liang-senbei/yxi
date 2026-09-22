@@ -205,9 +205,63 @@ def verify(args):
     return {'status': 'waiting'}
 
 
+def inspect_settings(args):
+    name, runtime = args
+    pane = tm('display-message', '-p', '-t', '=' + name + ':', '#{pane_id}')
+    if not same_pane(name, runtime, pane):
+        return {'status': 'changed'}
+    parent = tm('display-message', '-p', '-t', pane, '#{pane_pid}')
+    candidates = [parent]
+    try:
+        candidates += pathlib.Path('/proc', parent, 'task', parent, 'children').read_text().split()
+    except OSError:
+        pass
+    for pid in candidates:
+        try:
+            executable = os.path.realpath('/proc/' + pid + '/exe')
+            if pathlib.Path(executable).name != 'claude' and '/claude/' not in executable:
+                continue
+            environment = env_of(pid)
+            token = environment.get('YXI_AGENT_SETTINGS_ID')
+            if not token:
+                continue
+            argv = pathlib.Path('/proc', pid, 'cmdline').read_bytes().decode().split('\0')
+            path = argv[argv.index('--settings') + 1]
+            check_path(path, environment['HOME'])
+            raw = secure_read(path)
+            if pathlib.Path(path).stem != token or hashlib.sha256(raw).hexdigest() != environment.get('YXI_AGENT_SETTINGS_DIGEST'):
+                return {'status': 'changed'}
+            settings = json.loads(raw)
+            allowed = {'ANTHROPIC_MODEL'} | {'ANTHROPIC_DEFAULT_' + role + '_MODEL' for role in ('OPUS', 'SONNET', 'HAIKU', 'FABLE')}
+            values = settings.get('env', {})
+            from urllib.parse import urlparse
+            public = {k: settings[k] for k in ('model', 'availableModels') if k in settings}
+            public['env'] = {k: v for k, v in values.items() if k in allowed}
+            public['thirdParty'] = bool(values.get('ANTHROPIC_BASE_URL')) and urlparse(values['ANTHROPIC_BASE_URL']).hostname != 'api.anthropic.com'
+            if not same_pane(name, runtime, pane):
+                return {'status': 'changed'}
+            return {'status': 'configured', 'settings': public}
+        except (OSError, ValueError, IndexError):
+            return {'status': 'changed'}
+    return {'status': 'unmanaged'}
+
+
 if __name__ == '__main__':
     try:
-        result = apply(sys.argv[2:]) if sys.argv[1] == 'apply' else verify(sys.argv[2:])
-    except Exception:
-        result = {'status': 'failed', 'error': '会话状态、启动选项或配置无法确认；请查看终端'}
+        result = {'apply': apply, 'verify': verify, 'inspect': inspect_settings}[sys.argv[1]](sys.argv[2:])
+    except Exception as error:
+        reasons = {
+            'unsupported launch option': '当前启动参数暂不能完整保留，未重启会话',
+            'process identity changed': '原运行器进程已变化，未重启会话',
+            'screen changed': '终端内容已变化，请等待空闲后重试',
+            'runner is not idle': '运行器尚未空闲，请等待任务结束',
+            'configuration changed': '配置已被修改，请重新读取',
+            'invalid private configuration path': '独立配置路径无法确认，未重启会话',
+            'private configuration permissions invalid': '独立配置文件的访问权限不正确',
+            'session identity mismatch': '原对话身份不一致，未重启会话',
+            'invalid session identity': '无法确认原对话 ID，未重启会话',
+            'unknown permission mode': '无法保留当前权限模式，未重启会话',
+            'restart worker did not consume configuration': '重启结果尚未确认，请查看终端，不要重复提交',
+        }
+        result = {'status': 'failed', 'error': reasons.get(str(error), '会话状态、启动选项或配置无法确认；请查看终端')}
     print(json.dumps(result, ensure_ascii=False))

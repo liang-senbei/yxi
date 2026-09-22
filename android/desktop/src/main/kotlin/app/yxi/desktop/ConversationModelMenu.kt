@@ -49,7 +49,7 @@ internal fun ConversationModelMenu(conn: Conn, session: Session, currentModel: S
             if (!menu) return@LaunchedEffect
             loading = true; loadError = ""; models = emptyList()
             try {
-                val configured = ConfiguredModels.load(conn.ssh, session.cwd, currentModel)
+                val configured = ConfiguredModels.load(conn.ssh, session.cwd, currentModel, session)
                 models = configured.models
                 mappedCurrent = configured.resolvedCurrent
                 chosen = chosen.takeIf { it in models } ?: configured.resolvedCurrent?.takeIf { it in models }.orEmpty()
