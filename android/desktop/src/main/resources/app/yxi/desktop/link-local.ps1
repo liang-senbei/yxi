@@ -10,7 +10,7 @@ function Inspect-Local {
         hostKey = if (Test-Path -LiteralPath $hostPath) { (Get-Content -LiteralPath $hostPath -Raw).Trim() } else { '' } }
 }
 if ($Mode -eq 'inspect') { Inspect-Local | ConvertTo-Json -Compress; exit 0 }
-$req = Get-Content -LiteralPath $RequestPath -Raw | ConvertFrom-Json
+$req = Get-Content -LiteralPath $RequestPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $resultPath = Join-Path (Split-Path -Parent $RequestPath) 'result.json'
 try {
     $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
