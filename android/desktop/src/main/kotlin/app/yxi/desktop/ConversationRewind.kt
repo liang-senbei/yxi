@@ -56,8 +56,11 @@ internal object ConversationRewind {
         val target = RewindTargets.inspect(conn, session, messageUuid)
         check(!target.unsupportedContent) { "此消息包含附件或多个内容块，附件恢复尚未接入，未执行回退。" }
         val anchor = target.parentUuid ?: error("首轮自动回退尚未接入，请使用原生回退入口。")
-        val plan = Rewind.Plan(target.sessionId, anchor, target.messageUuid,
-            target.messageUuid.takeIf { target.laterUserMessages == 0 }, text)
+        // Native drops-turn validation can count abandoned sibling branches after a
+        // previous rewind. Use the same branch operation for last and earlier turns;
+        // inspect + immutable file preflight still bind the exact current-chain target.
+        // Never retry a rejected model invocation with different arguments.
+        val plan = Rewind.Plan(target.sessionId, anchor, target.messageUuid, prompt = text)
         conn.instructionDeliveryMutex.withLock { checkEmptyPrompt(conn, session) }
         val controller = RewindController(conn, gate)
         progress("正在恢复历史并生成回复…")
