@@ -16,6 +16,24 @@ internal class AttachmentMentions(
     val choose: (Int) -> Unit, val handle: (KeyEvent) -> Boolean,
 )
 
+/** 弹层键盘语义（纯函数，JVM 可单测）：返回 true = 事件已消费。
+ *  Down/Up 环绕移动选中；Enter / 小键盘 Enter 接受候选；**Shift+Enter 不接受**——交还输入框换行；
+ *  Esc 关闭；其余键一律放行。IME 组字（compositionActive）与无候选（count=0）时全部放行。 */
+internal fun handleMentionKey(
+    type: KeyEventType, key: Key, isShiftPressed: Boolean,
+    count: Int, compositionActive: Boolean, current: Int,
+    move: (Int) -> Unit, accept: () -> Unit, dismiss: () -> Unit,
+): Boolean {
+    if (type != KeyEventType.KeyDown || compositionActive || count == 0) return false
+    return when (key) {
+        Key.DirectionDown -> { move((current + 1) % count); true }
+        Key.DirectionUp -> { move((current + count - 1) % count); true }
+        Key.Enter, Key.NumPadEnter -> if (isShiftPressed) false else { accept(); true }
+        Key.Escape -> { dismiss(); true }
+        else -> false
+    }
+}
+
 @Composable
 internal fun rememberAttachmentMentions(items: List<DraftAttach>, draft: TextFieldValue, update: (TextFieldValue) -> Unit): AttachmentMentions {
     val cursor = draft.selection.end
@@ -37,14 +55,9 @@ internal fun rememberAttachmentMentions(items: List<DraftAttach>, draft: TextFie
         update(TextFieldValue(text, TextRange(from + inserted.length)))
     }
     return AttachmentMentions(choices, selected, ::choose) { event ->
-        if (event.type != KeyEventType.KeyDown || draft.composition != null || choices.isEmpty()) false
-        else when (event.key) {
-            Key.DirectionDown -> { selected = (selected + 1) % choices.size; true }
-            Key.DirectionUp -> { selected = (selected + choices.size - 1) % choices.size; true }
-            Key.Enter, Key.NumPadEnter -> { choose(selected); true }
-            Key.Escape -> { dismissed = trigger; true }
-            else -> false
-        }
+        handleMentionKey(event.type, event.key, event.isShiftPressed, choices.size,
+            draft.composition != null, selected,
+            move = { selected = it }, accept = { choose(selected) }, dismiss = { dismissed = trigger })
     }
 }
 
@@ -67,12 +80,15 @@ internal fun AttachmentMentionList(mentions: AttachmentMentions) {
     }
 }
 
-/** Keep references attached to the same remaining file after ordinal labels change. */
+/** Keep references attached to the same remaining file after ordinal labels change.
+ *  干净边界 = 空白 / 结尾 / 中文全角标点（，。！？、；：）】》」』与弯引号）/ ASCII 标点
+ *  （.,;:!?)]}"' 且其后不紧跟字母数字——挡住 `@图片1.png` 这类文件名尾巴）。字母/数字紧贴
+ *  依旧不是边界（`@图片2y` 绝不改写）。 */
 internal fun draftAfterAttachmentRemoval(draft: TextFieldValue, items: List<DraftAttach>, removed: DraftAttach): TextFieldValue {
     val remaining = items.filter { it !== removed }
     val next = attachmentLabels(remaining).zip(remaining).associate { it.second.stamp to it.first }
     val labels = attachmentLabels(items).zip(items).associate { it.first to next[it.second.stamp] }
-    val pattern = Regex("@(图片|附件)[0-9]+(?=\\s|$|[，。！？、])")
+    val pattern = Regex("@(图片|附件)[0-9]+(?=\\s|$|[，。！？、；：）】》」』“”‘’]|[.,;:!?)\\]}\"'](?![A-Za-z0-9]))")
     fun replace(text: String) = pattern.replace(text) { match ->
         val old = match.value.drop(1)
         if (old in labels) labels[old]?.let { "@$it" }.orEmpty() else match.value

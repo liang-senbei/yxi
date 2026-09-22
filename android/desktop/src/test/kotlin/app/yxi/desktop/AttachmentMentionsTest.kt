@@ -1,10 +1,14 @@
 package app.yxi.desktop
 
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import java.io.InputStream
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /**
  * 附件提及纯函数定向测试：只测 attachmentLabels 与 draftAfterAttachmentRemoval（零网络、
@@ -72,5 +76,72 @@ class AttachmentMentionsTest {
         val next = draftAfterAttachmentRemoval(edited(text, cursor = 9), listOf(a, b), a)
         assertEquals("首张 次张@图片1", next.text)
         assertEquals(5, next.selection.end, "光标按重写后的前缀长度平移，不跳位")
+    }
+
+    // ── G1：ASCII 标点落点 ──
+
+    @Test
+    fun `ascii punctuation after a mention is a clean boundary`() {
+        val a = attach("s1.png", true, "a"); val b = attach("s2.png", true, "b")
+        // 半角逗号/句号+空格/右括号/冒号都算干净边界：死引用删除、存活引用重编号、标点原样保留
+        val draft = edited("先@图片1, 后@图片2. 收尾@图片2)；注@图片2:尾")
+        val next = draftAfterAttachmentRemoval(draft, listOf(a, b), a)
+        assertEquals("先, 后@图片1. 收尾@图片1)；注@图片1:尾", next.text)
+        assertEquals(next.text.length, next.selection.end)
+    }
+
+    @Test
+    fun `period glued to letters stays a filename tail not a boundary`() {
+        val a = attach("s1.png", true, "a"); val b = attach("s2.png", true, "b")
+        // `@图片1.png` 读起来像文件名尾巴：句号后紧跟字母数字 → 绝不当边界改写；后面正常引用照常重编号
+        val next = draftAfterAttachmentRemoval(edited("见@图片1.png 与@图片2"), listOf(a, b), a)
+        assertEquals("见@图片1.png 与@图片1", next.text)
+    }
+
+    @Test
+    fun `unknown number before ascii punctuation stays verbatim`() {
+        val a = attach("s1.png", true, "a")
+        // 不存在的编号即使落在 ASCII 标点前也原样保留（不改写也不删除别人的引用）
+        val next = draftAfterAttachmentRemoval(edited("引用@附件9, 无此物"), listOf(a), a)
+        assertEquals("引用@附件9, 无此物", next.text)
+    }
+
+    // ── G3：弹层键盘语义（handleMentionKey 纯函数） ──
+
+    private fun tap(
+        key: Key, type: KeyEventType = KeyEventType.KeyDown, shift: Boolean = false,
+        count: Int = 2, composition: Boolean = false, current: Int = 0,
+        move: (Int) -> Unit = {}, accept: () -> Unit = {}, dismiss: () -> Unit = {},
+    ) = handleMentionKey(type, key, shift, count, composition, current, move, accept, dismiss)
+
+    @Test
+    fun `shift enter hands the newline back to the field`() {
+        var accepted = 0
+        // Shift+Enter 不接受候选：事件放行给输入框插换行
+        assertFalse(tap(Key.Enter, shift = true, accept = { accepted++ }))
+        assertFalse(tap(Key.NumPadEnter, shift = true, accept = { accepted++ }))
+        assertEquals(0, accepted)
+        // 普通 Enter 与小键盘 Enter 仍然接受
+        assertTrue(tap(Key.Enter, accept = { accepted++ }))
+        assertTrue(tap(Key.NumPadEnter, accept = { accepted++ }))
+        assertEquals(2, accepted)
+    }
+
+    @Test
+    fun `arrows wrap selection and other keys pass through`() {
+        var moved: Int? = null; var dismissed = false
+        assertTrue(tap(Key.DirectionDown, current = 0, count = 3, move = { moved = it }))
+        assertEquals(1, moved)
+        assertTrue(tap(Key.DirectionDown, current = 2, count = 3, move = { moved = it }))
+        assertEquals(0, moved, "末尾再向下环绕回首项")
+        assertTrue(tap(Key.DirectionUp, current = 0, count = 3, move = { moved = it }))
+        assertEquals(2, moved, "首项向上环绕到末项")
+        assertTrue(tap(Key.Escape, dismiss = { dismissed = true }))
+        assertTrue(dismissed)
+        // 非处理键、KeyUp、IME 组字、无候选：一律放行
+        assertFalse(tap(Key.A))
+        assertFalse(tap(Key.Enter, type = KeyEventType.KeyUp))
+        assertFalse(tap(Key.Enter, composition = true, accept = { error("组字中不接受") }))
+        assertFalse(tap(Key.Enter, count = 0, accept = { error("无候选不接受") }))
     }
 }
