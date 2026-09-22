@@ -225,6 +225,7 @@ class IsolatedNativeCliTest {
                         assertFalse(appRequest.contains("INTERACTIVE-container-followup"))
                         assertEquals(listOf("KEEP-container-first", "APP-container-rewind"), renderedUsers(),
                             "The live conversation cache must discard the old branch")
+                        assertEquals(listOf("ok", "ok"), memory.view.items.filterIsInstance<ChatItem.AssistantText>().map { it.markdown })
                         val secondTarget = transcript.readLines().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
                             .last { it.optString("type") == "user" &&
                                 it.optJSONObject("message")?.toString()?.contains("APP-container-rewind") == true }
@@ -239,6 +240,7 @@ class IsolatedNativeCliTest {
                         assertFalse(gate.blocked(key), "Second rewind must independently verify before clearing its gate")
                         assertFalse(RewindDeliveryGate(root.resolve("application-gate.json")).blocked(key))
                         assertEquals(listOf("KEEP-container-first", "SECOND-app-rewind"), renderedUsers())
+                        assertEquals(listOf("ok", "ok"), memory.view.items.filterIsInstance<ChatItem.AssistantText>().map { it.markdown })
                         val secondRequest = root.resolve("requests.jsonl").readLines().map(::JSONObject).last {
                             it.getJSONArray("messages").toString().contains("SECOND-app-rewind")
                         }.getJSONArray("messages").toString()
@@ -282,6 +284,8 @@ class IsolatedNativeCliTest {
                         val coldView = requireNotNull(coldMemory.append(coldMemory.claim().first, requireNotNull(cold.lines), 0))
                         assertEquals(renderedUsers(), coldView.items.filterIsInstance<ChatItem.UserText>().map { it.text },
                             "Reopening the conversation must show the same branch as the live cache")
+                        assertEquals(listOf("ok", "ok"), coldView.items.filterIsInstance<ChatItem.AssistantText>().map { it.markdown },
+                            "Abandoned assistant replies must not reappear when reopening")
                     } catch (e: Exception) {
                         if (e is ConversationRewindFailure) root.resolve("application-failure.txt").writeText("${e.code}\n${e.detail}")
                         gate.pending(key)?.verification?.let { query ->
