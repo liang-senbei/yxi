@@ -41,6 +41,8 @@ internal class CodexTaskController(
     var selectedEffort by mutableStateOf(initialEffort); private set
     private var currentModel: String? = null
     private var currentEffort: String? = null
+    internal val currentModelLabel get() = currentModel ?: reportedModel.ifBlank { configuredModel }
+    internal val configurationLabel get() = client.profileLabel ?: configuredProvider
     var modelsLoading by mutableStateOf(false); private set
     var modelError by mutableStateOf(""); private set
     var reportedModel by mutableStateOf(""); private set
@@ -264,6 +266,7 @@ internal class CodexTaskController(
 
     fun chooseModel(model: String?) {
         check(!disposed) { "任务连接已关闭" }
+        check(!sending) { "指令正在提交，请稍后再选择模型" }
         val option = model?.let { id -> models.firstOrNull { it.model == id } ?: error("模型不在服务器列表中") }
         val effort = option?.let { entry -> entry.defaultEffort.takeIf { it in entry.efforts } }
         if (selectedModel == option?.model && selectedEffort == effort) return
@@ -274,6 +277,7 @@ internal class CodexTaskController(
 
     fun chooseEffort(effort: String) {
         check(!disposed) { "任务连接已关闭" }
+        check(!sending) { "指令正在提交，请稍后再选择思考强度" }
         check(models.firstOrNull { it.model == selectedModel }?.efforts?.contains(effort) == true) { "该模型不支持此思考强度" }
         if (selectedEffort == effort) return
         onModelSelection(selectedModel, effort)

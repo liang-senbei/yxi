@@ -28,7 +28,7 @@ internal fun CodexModelPicker(controller: CodexTaskController, onRoutes: () -> U
             menu = true
             if (controller.models.isEmpty()) scope.launch { controller.refreshModels() }
         }, enabled = controller.ready && !controller.sending) {
-            Text((chosen?.label ?: controller.selectedModel ?: "沿用任务模型") +
+            Text((chosen?.label ?: controller.selectedModel ?: controller.currentModelLabel.takeIf { it.isNotBlank() } ?: "选择模型") +
                 (controller.selectedEffort?.let { " · ${effortLabel(it)}" } ?: "") + " ⌄")
         }
         DropdownMenu(menu, { menu = false }, Modifier.width(310.dp)) {
@@ -54,7 +54,7 @@ internal fun CodexModelPicker(controller: CodexTaskController, onRoutes: () -> U
             Column(Modifier.padding(16.dp, 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("选择用于下一轮；调整方向沿用正在运行的模型。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 if (controller.reportedModel.isNotBlank()) Text("最近任务记录 · ${controller.reportedModel}", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
-                if (controller.configuredProvider.isNotBlank()) Text("当前线路 · ${controller.configuredProvider}", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                if (controller.configurationLabel.isNotBlank()) Text("当前线路 · ${controller.configurationLabel}", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 if (controller.modelNotice.isNotBlank()) Text(controller.modelNotice, style = MaterialTheme.typography.bodySmall, color = Tokens.current.warning)
                 if (controller.modelError.isNotBlank()) Text(controller.modelError, style = MaterialTheme.typography.bodySmall, color = Tokens.current.danger)
                 if (selectionError.isNotBlank()) Text(selectionError, style = MaterialTheme.typography.bodySmall, color = Tokens.current.danger)

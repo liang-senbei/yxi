@@ -19,7 +19,8 @@ internal data class CodexResumeOverrides(val provider: String?, val model: Strin
  */
 internal class CodexAppServer internal constructor(private val shell: SshSession.Shell,
     private val profileOverrides: CodexResumeOverrides? = null,
-    private val providerModelLoader: (suspend () -> List<ProviderModels.Model>)? = null) : AutoCloseable {
+    private val providerModelLoader: (suspend () -> List<ProviderModels.Model>)? = null,
+    internal val profileLabel: String? = null) : AutoCloseable {
     internal val hasIndependentProfile get() = profileOverrides != null
     internal suspend fun independentModels(): List<String> {
         check(!closed.get() && providerModelLoader != null) { "独立配置连接已关闭" }
@@ -201,7 +202,7 @@ exec "${'$'}bin" app-server
                 throw e
             }
             val client = CodexAppServer(shell, prepared?.overrides,
-                profile?.let { line -> suspend { ProviderModels.fetch(ssh, line.baseUrl, line.apiKey) } })
+                profile?.let { line -> suspend { ProviderModels.fetch(ssh, line.baseUrl, line.apiKey) } }, profile?.name)
             try {
                 client.request("initialize", JSONObject().put("clientInfo", JSONObject()
                     .put("name", "yxi_desktop").put("title", "Yxi").put("version", System.getProperty("jpackage.app-version", "dev"))))
