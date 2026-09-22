@@ -1,6 +1,7 @@
 package app.yxi.desktop
 
 import app.yxi.agent.Rewind
+import app.yxi.agent.RewindMessageInput
 import app.yxi.agent.Model
 import app.yxi.agent.ChatItem
 import app.yxi.agent.SessionProbe
@@ -100,10 +101,11 @@ class IsolatedNativeCliTest {
             val png = java.io.ByteArrayOutputStream().also { javax.imageio.ImageIO.write(pixels, "png", it) }.toByteArray()
             val imageBlock = JSONObject().put("type", "image").put("source", JSONObject()
                 .put("type", "base64").put("media_type", "image/png").put("data", java.util.Base64.getEncoder().encodeToString(png)))
-            val imageInput = JSONObject().put("type", "user").put("message", JSONObject().put("role", "user")
-                .put("content", org.json.JSONArray().put(imageBlock).put(JSONObject().put("type", "text").put("text", "FOLLOWUP-container-second"))))
+            val imageInput = RewindMessageInput.create(JSONObject().put("role", "user")
+                .put("content", org.json.JSONArray().put(imageBlock).put(JSONObject().put("type", "text").put("text", "original image caption"))),
+                "FOLLOWUP-container-second")
             val second = invoke("second", "--resume", sid, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-                structuredInput = imageInput.toString(), inputPrompt = "FOLLOWUP-container-second")
+                structuredInput = imageInput.json, inputPrompt = "FOLLOWUP-container-second")
             assertEquals(sid, second.getString("session_id"))
             val requests = root.resolve("requests.jsonl").readLines().map(::JSONObject)
             val followup = requests.last { it.getJSONArray("messages").toString().contains("FOLLOWUP-container-second") }
