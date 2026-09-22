@@ -468,6 +468,9 @@ class IsolatedNativeCliTest {
                             changeConversationPermission(bridge.conn, recoveredSession, app.yxi.agent.PermissionMode.Bypass)
                         }
                         assertTrue(unavailable.isFailure, "Fixture did not enable bypass at startup")
+                        root.resolve("permission-unavailable.txt").writeText(unavailable.exceptionOrNull()?.stackTraceToString().orEmpty())
+                        assertTrue(unavailable.exceptionOrNull() is PermissionModeUnavailable,
+                            "Only a completed native mode cycle proves bypass unavailable: ${unavailable.exceptionOrNull()}")
                         assertEquals(app.yxi.agent.PermissionMode.Manual,
                             app.yxi.agent.PermissionMode.fromScreen(tmux("capture-pane", "-p", "-t", "=cc-native-check:")))
                         assertEquals(requestsBeforeModes, root.resolve("requests.jsonl").readLines().size,

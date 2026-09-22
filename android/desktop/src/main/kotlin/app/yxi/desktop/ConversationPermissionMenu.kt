@@ -58,9 +58,21 @@ internal suspend fun changeConversationPermission(conn: Conn, session: Session, 
         check(!RewindDelivery.gate.blocked(taskNavigationKey(conn.host, session))) { "请先完成回退核验" }
         val target = Shell.q("=" + session.name + ":")
         suspend fun capture() = conn.ssh.exec("tmux capture-pane -p -t $target")
+        suspend fun stableScreen(): String {
+            var previous: PermissionMode? = null
+            repeat(30) {
+                val screen = capture()
+                check(Model.borrowable(screen) && Prompt.parse(screen) == null) { "请等待任务空闲并处理终端中的未发送内容" }
+                val mode = PermissionMode.fromScreen(screen)
+                if (mode != null && mode == previous) return screen
+                previous = mode
+                delay(150)
+            }
+            error("运行器权限状态仍在变化，请稍后重试")
+        }
         val seen = mutableSetOf<PermissionMode>()
         repeat(PermissionMode.entries.size + 1) {
-            val screen = capture()
+            val screen = stableScreen()
             check(Model.borrowable(screen) && Prompt.parse(screen) == null) { "请等待任务空闲并处理终端中的未发送内容" }
             val actual = PermissionMode.fromScreen(screen) ?: error("无法确认运行器当前权限模式，请查看终端")
             if (actual == desired) return@withLock actual
@@ -70,7 +82,16 @@ internal suspend fun changeConversationPermission(conn: Conn, session: Session, 
                 "test \"\$(tmux capture-pane -p -t \"\$pane\")\" = ${Shell.q(screen.trimEnd('\n'))} && " +
                 "tmux send-keys -t \"\$pane\" BTab && printf '__YXI_PERMISSION_STEP__'"
             check(conn.ssh.exec(script).trim() == "__YXI_PERMISSION_STEP__") { "会话状态已变化，切换已停止" }
-            delay(250)
+            var changed = false
+            repeat(30) {
+                if (!changed) {
+                    delay(100)
+                    val observed = capture()
+                    check(Model.borrowable(observed) && Prompt.parse(observed) == null) { "运行器出现新的提示，切换已暂停，请查看终端" }
+                    changed = PermissionMode.fromScreen(observed)?.let { it != actual } == true
+                }
+            }
+            check(changed) { "运行器尚未确认权限模式变化，请稍后重试；这不表示模式未开放。" }
         }
         error("权限切换尚未确认，请查看终端")
     }
