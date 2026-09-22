@@ -28,10 +28,8 @@ class DeviceLinkIsolationTest {
         val homeA = root.resolve("home-a").apply { mkdir() }
         val homeB = root.resolve("home-b").apply { mkdir() }
         val device = UUID.randomUUID().toString().replace("-", "")
-        val pair = KeyPair.genKeyPair(JSch(), KeyPair.ED25519)
-        val secret = ByteArrayOutputStream().also { pair.writePrivateKey(it) }.toString("UTF-8")
-        val pub = "ssh-ed25519 " + Base64.getEncoder().encodeToString(pair.publicKeyBlob)
-        pair.dispose()
+        val (secret, publicLine) = DesktopKey.generateMaterial()
+        val pub = publicLine.split(' ').take(2).joinToString(" ")
         try {
             IsolatedSshBridge(root.resolve("ssh-a"), mapOf("HOME" to homeA.path), root.resolve("a.sock"),
                 allowForwarding = true, additionalAuthorizedKeys = homeA.resolve(".ssh/authorized_keys")).use { a ->

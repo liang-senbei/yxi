@@ -28,20 +28,39 @@ object DesktopKey {
      */
     @Synchronized
     fun ensure(): Pair<File, String> {
-        if (privFile.isFile && pubFile.isFile) {
+        if (privFile.isFile) {
+            val pair = KeyPair.load(JSch(), privFile.readBytes(), null)
+            val derived = try {
+                check(!pair.isEncrypted) { "Yxi 私钥需要解锁，请先修复本机密钥配置" }
+                publicLine(pair)
+            } finally { pair.dispose() }
+            if (pubFile.isFile) check(pubFile.readText().trim().split(Regex("\\s+")).take(2) == derived.split(' ').take(2)) { "Yxi 公私钥不匹配，已保留原文件" }
+            else DurableFile.replace(pubFile, derived)
             fixPerm()
-            return privFile to pubFile.readText().trim()
+            return privFile to derived
         }
-        var rsa = false
-        val kp = runCatching { KeyPair.genKeyPair(JSch(), KeyPair.ED25519) }
-            .getOrElse { rsa = true; KeyPair.genKeyPair(JSch(), KeyPair.RSA, 4096) }
-        kp.writePrivateKey(privFile.outputStream())
-        // openSSH 格式的公钥行：`<算法> <base64(blob)> <备注>`。installPublicKey 按整行追加
-        val type = if (rsa) "ssh-rsa" else "ssh-ed25519"
-        val line = "$type " + Base64.getEncoder().encodeToString(kp.getPublicKeyBlob()) + " " + COMMENT
-        pubFile.writeText(line)
+        check(!pubFile.exists()) { "Yxi 私钥缺失，已保留已有公钥，请先恢复密钥" }
+        val (privateText, line) = generateMaterial()
+        DurableFile.replace(privFile, privateText)
+        DurableFile.replace(pubFile, line)
         fixPerm()
         return privFile to line
+    }
+
+    /** Some JSch providers generate Ed25519 but cannot serialize its private key. Fallback before writing anything. */
+    internal fun generateMaterial(): Pair<String, String> {
+        fun generate(type: Int): Pair<String, String> {
+            val pair = if (type == KeyPair.RSA) KeyPair.genKeyPair(JSch(), type, 4096) else KeyPair.genKeyPair(JSch(), type)
+            return try {
+                val out = java.io.ByteArrayOutputStream(); pair.writePrivateKey(out)
+                out.toString("UTF-8") to publicLine(pair)
+            } finally { pair.dispose() }
+        }
+        return runCatching { generate(KeyPair.ED25519) }.getOrElse { generate(KeyPair.RSA) }
+    }
+    private fun publicLine(pair: KeyPair): String {
+        val type = when (pair.keyType) { KeyPair.ED25519 -> "ssh-ed25519"; KeyPair.RSA -> "ssh-rsa"; else -> error("Yxi 密钥算法不受支持") }
+        return "$type ${Base64.getEncoder().encodeToString(pair.publicKeyBlob)} $COMMENT"
     }
 
     /** 私钥权限收到只有本人可读（Windows 上是 no-op）。⚠️ 早退路径也要走：1.1.0 之前落盘的可能是 644。 */
