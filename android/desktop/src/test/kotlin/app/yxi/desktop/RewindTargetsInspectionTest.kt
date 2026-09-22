@@ -29,6 +29,17 @@ class RewindTargetsInspectionTest {
             assertEquals(0, root.code, root.err)
             assertEquals(0, JSONObject(root.out).getInt("later"))
             assertNotEquals(0, inspect(file.path, "stop").code)
+            val snapshot = JSONObject(root.out)
+            val python = if (System.getProperty("os.name").startsWith("Windows")) "python" else "python3"
+            val stderr = dir.resolve("load-error")
+            val load = ProcessBuilder(python, "-c", RewindTargets.messageScript, file.path, "stop",
+                snapshot.getLong("size").toString(), snapshot.getString("modifiedNs"))
+                .redirectOutput(dir.resolve("load-output")).redirectError(stderr).start()
+            try {
+                assertTrue(load.waitFor(10, TimeUnit.SECONDS))
+                assertNotEquals(0, load.exitValue())
+                assertTrue(stderr.readText().contains("Not an editable user message"))
+            } finally { if (load.isAlive) load.destroyForcibly() }
             marker.put("origin", "user")
             file.writeText(user("u1", null, "first") + assistant("a1", "u1", "answer") + marker.toString() + "\n")
             assertEquals(1, JSONObject(inspect(file.path, "u1").out).getInt("later"))
