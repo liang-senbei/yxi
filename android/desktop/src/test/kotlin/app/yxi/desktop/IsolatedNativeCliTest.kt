@@ -1,6 +1,8 @@
 package app.yxi.desktop
 
 import app.yxi.agent.Rewind
+import app.yxi.agent.Model
+import app.yxi.ssh.Shell
 import org.json.JSONObject
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
 import org.junit.jupiter.api.condition.EnabledOnOs
@@ -29,22 +31,34 @@ class IsolatedNativeCliTest {
         val script = root.resolve("stub.py")
         javaClass.classLoader.getResourceAsStream("rewind/anthropic_stub.py")!!.use { input -> script.outputStream().use { input.copyTo(it) } }
         val server = ProcessBuilder("python3", script.path, root.path).redirectErrorStream(true).redirectOutput(root.resolve("stub.log")).start()
-        fun invoke(label: String, vararg args: String, rewind: Rewind.Plan? = null): JSONObject {
-            val output = root.resolve("$label.json")
-            val error = root.resolve("$label.err")
-            val port = root.resolve("port").readText().trim()
-            val command = if (rewind == null) listOf(native.path) + args else listOf("/bin/sh", "-c",
-                Rewind.command(native.path, project.path, Rewind.Capture(native.path, ""), rewind))
-            val builder = ProcessBuilder(command).directory(project).redirectOutput(output).redirectError(error)
-            builder.environment().apply {
+        val socket = root.resolve("tmux.sock")
+        fun isolated(builder: ProcessBuilder): ProcessBuilder = builder.apply {
+            environment().apply {
                 clear()
                 put("HOME", home.path); put("CLAUDE_CONFIG_DIR", config.path)
-                put("PATH", "/usr/bin:/bin"); put("LANG", "C.UTF-8"); put("TERM", "dumb")
-                put("ANTHROPIC_BASE_URL", "http://127.0.0.1:$port")
+                put("PATH", "/usr/bin:/bin"); put("LANG", "C.UTF-8"); put("TERM", "xterm-256color")
+                put("ANTHROPIC_BASE_URL", "http://127.0.0.1:${root.resolve("port").readText().trim()}")
                 put("ANTHROPIC_API_KEY", "sk-ant-yxi-container-test-only")
                 put("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
                 put("DISABLE_TELEMETRY", "1"); put("DISABLE_AUTOUPDATER", "1")
             }
+        }
+        fun tmux(vararg args: String): String {
+            val output = root.resolve("tmux-command.log")
+            val p = isolated(ProcessBuilder(listOf("/usr/bin/tmux", "-S", socket.path) + args))
+                .redirectErrorStream(true).redirectOutput(output).start()
+            try {
+                check(p.waitFor(10, TimeUnit.SECONDS)) { "Private tmux command timed out" }
+                check(p.exitValue() == 0) { output.readText() }
+                return output.readText()
+            } finally { if (p.isAlive) p.destroyForcibly() }
+        }
+        fun invoke(label: String, vararg args: String, rewind: Rewind.Plan? = null): JSONObject {
+            val output = root.resolve("$label.json")
+            val error = root.resolve("$label.err")
+            val command = if (rewind == null) listOf(native.path) + args else listOf("/bin/sh", "-c",
+                Rewind.command(native.path, project.path, Rewind.Capture(native.path, ""), rewind))
+            val builder = isolated(ProcessBuilder(command).directory(project).redirectOutput(output).redirectError(error))
             val process = builder.start()
             process.outputStream.close()
             try {
@@ -111,7 +125,49 @@ class IsolatedNativeCliTest {
             assertTrue(singlePayload.contains("EDIT-container-second"))
             assertFalse(singlePayload.contains("VERIFY-container-branch"))
             assertFalse(root.resolve("unexpected").exists(), "Prompt must remain literal shell data")
+
+            // Only this disposable project is trusted; no permission-mode bypass is used.
+            val preferences = config.resolve(".claude.json")
+            val prefs = if (preferences.exists()) JSONObject(preferences.readText()) else JSONObject()
+            prefs.put("hasCompletedOnboarding", true).put("lastOnboardingVersion", "2.1.278")
+                .put("projects", JSONObject().put(project.path, JSONObject().put("hasTrustDialogAccepted", true)))
+                .put("customApiKeyResponses", JSONObject().put("approved",
+                    org.json.JSONArray().put("sk-ant-yxi-container-test-only".takeLast(20))).put("rejected", org.json.JSONArray()))
+            preferences.writeText(prefs.toString())
+            tmux("-f", "/dev/null", "new-session", "-d", "-s", "cc-native-check", "-x", "180", "-y", "50",
+                "-c", project.path, "${Shell.q(native.path)} --resume ${Shell.q(sid)}")
+            assertEquals(socket.path, tmux("display-message", "-p", "-t", "=cc-native-check:", "#{socket_path}").trim())
+            var screen = ""
+            var ready = false
+            repeat(100) {
+                if (!ready) {
+                    screen = tmux("capture-pane", "-p", "-t", "=cc-native-check:")
+                    ready = Model.borrowable(screen)
+                    if (!ready) Thread.sleep(100)
+                }
+            }
+            root.resolve("interactive-screen.txt").writeText(screen)
+            assertTrue(ready, "Real resumed CLI must reach an empty input prompt: $screen")
+            tmux("send-keys", "-t", "=cc-native-check:", "-l", "--", "INTERACTIVE-container-followup")
+            tmux("send-keys", "-t", "=cc-native-check:", "Enter")
+            var interactive: JSONObject? = null
+            repeat(100) {
+                if (interactive == null) {
+                    interactive = root.resolve("requests.jsonl").readLines().mapNotNull {
+                        runCatching { JSONObject(it) }.getOrNull()
+                    }.lastOrNull { it.getJSONArray("messages").toString().contains("INTERACTIVE-container-followup") }
+                    if (interactive == null) Thread.sleep(100)
+                }
+            }
+            val interactiveMessages = requireNotNull(interactive) { "Interactive prompt never reached the stub" }
+                .getJSONArray("messages").toString()
+            assertTrue(interactiveMessages.contains("KEEP-container-first"))
+            assertTrue(interactiveMessages.contains("SINGLE-container-edit"))
+            assertFalse(interactiveMessages.contains("FOLLOWUP-container-second"))
+            assertFalse(interactiveMessages.contains("DROP-container-third"))
+            assertFalse(interactiveMessages.contains("VERIFY-container-branch"))
         } finally {
+            if (socket.exists()) runCatching { tmux("kill-session", "-t", "=cc-native-check:") }
             server.destroyForcibly(); server.waitFor(5, TimeUnit.SECONDS)
             root.listFiles().orEmpty().filter { it.isFile && it.name != "stub.py" }.forEach {
                 it.copyTo(File("/results/native-${it.name}"), overwrite = true)
