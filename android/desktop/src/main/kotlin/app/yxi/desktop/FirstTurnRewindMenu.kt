@@ -45,10 +45,14 @@ internal object FirstTurnRewindMenu {
     fun confirmsConversationOnly(capture: String, version: String, expectedText: String): Boolean {
         if (version != VERSION || capture.length > 100_000) return false
         val all = lines(capture)
-        val header = "Confirm you want to restore the conversation to the point before you sent this message:"
-        val start = all.indexOfLast { it == header }
-        if (start < 0) return false
-        val body = all.drop(start + 1)
+        val headers = setOf("Confirm you want to restore the conversation to the point before you sent this message:",
+            "Confirm you want to restore to the point before you sent this message:")
+        val headerEnd = all.indices.mapNotNull { start ->
+            if (!all[start].startsWith("Confirm you want to restore")) null
+            else (1..4).firstOrNull { count -> start + count <= all.size &&
+                normalize(all.subList(start, start + count).joinToString(" ")) in headers }?.let { start + it }
+        }.lastOrNull() ?: return false
+        val body = all.drop(headerEnd)
         if (body.size != 8 || !body[0].startsWith("│ ")) return false
         if (normalize(body[0].removePrefix("│ ")) != normalize(expectedText)) return false
         if (!Regex("│ \\(\\d+[smhd] ago\\)").matches(body[1])) return false

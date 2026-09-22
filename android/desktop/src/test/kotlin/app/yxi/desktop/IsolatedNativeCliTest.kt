@@ -537,8 +537,13 @@ class IsolatedNativeCliTest {
                             System.setProperty("yxi.experimental.firstTurnRewind", "true")
                             try {
                                 val stopping = async(kotlinx.coroutines.Dispatchers.IO) {
-                                    ConversationRewind.restore(bridge.conn, launched, requireNotNull(original.sourceUuid),
-                                        "ROOT-container-native-stop", stoppedGate)
+                                    try {
+                                        ConversationRewind.restore(bridge.conn, launched, requireNotNull(original.sourceUuid),
+                                            "ROOT-container-native-stop", stoppedGate)
+                                    } catch (e: Exception) {
+                                        root.resolve("native-stop-restore-failure-screen.txt").writeText(tmux("capture-pane", "-p", "-t", "=" + promptPlan.sessionName + ":"))
+                                        throw e
+                                    }
                                 }
                                 withTimeout(20_000) {
                                     while (!root.resolve("native-stop-request-started").exists()) delay(50)
