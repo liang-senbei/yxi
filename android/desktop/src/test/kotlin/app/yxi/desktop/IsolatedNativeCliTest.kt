@@ -393,13 +393,16 @@ class IsolatedNativeCliTest {
                         captureUntil("root-ready") { Model.borrowable(it) }
                         tmux("send-keys", "-t", "=cc-native-check:", "-l", "--", "/rewind")
                         tmux("send-keys", "-t", "=cc-native-check:", "Enter")
-                        captureUntil("root-menu") { s -> s.contains("Restore the code and/or conversation") &&
-                            s.contains("Enter to continue") && beforeRootUsers.all { it in s } && "more above" !in s && "more below" !in s }
+                        captureUntil("root-menu") { s -> FirstTurnRewindMenu.parse(s, FirstTurnRewindMenu.VERSION)?.let {
+                            it.matches(beforeRootUsers) && it.currentSelected
+                        } == true }
                         repeat(beforeRootUsers.size) { tmux("send-keys", "-t", "=cc-native-check:", "Up") }
-                        captureUntil("root-selected") { s -> s.lineSequence().any { "❯" in it && "KEEP-container-first" in it } }
+                        captureUntil("root-selected") { s -> FirstTurnRewindMenu.parse(s, FirstTurnRewindMenu.VERSION)?.let {
+                            it.matches(beforeRootUsers) && it.selectedIndex == 0
+                        } == true }
                         tmux("send-keys", "-t", "=cc-native-check:", "Enter")
-                        captureUntil("root-confirm") { s -> s.contains("The code will be unchanged") &&
-                            s.lineSequence().any { it.trim().matches(Regex("❯\\s*1\\. Restore conversation")) } }
+                        captureUntil("root-confirm") { s -> FirstTurnRewindMenu.confirmsConversationOnly(
+                            s, FirstTurnRewindMenu.VERSION, beforeRootUsers.first()) }
                         tmux("send-keys", "-t", "=cc-native-check:", "Enter")
                         captureUntil("root-restored-input") { "Confirm you want to restore" !in it && "KEEP-container-first" in it }
                         tmux("send-keys", "-t", "=cc-native-check:", "C-u")
