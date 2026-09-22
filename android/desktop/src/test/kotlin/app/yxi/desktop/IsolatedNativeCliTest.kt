@@ -415,7 +415,8 @@ class IsolatedNativeCliTest {
                         val nativeGateFile = root.resolve("native-root-gate.json")
                         val nativeGate = RewindDeliveryGate(nativeGateFile)
                         var sawDurableRoot = false
-                        ConversationRewind.restore(bridge.conn, recoveredSession, rootSource.messageUuid, rootText, nativeGate, progress = { message ->
+                        System.setProperty("yxi.experimental.firstTurnRewind", "true")
+                        try { ConversationRewind.restore(bridge.conn, recoveredSession, rootSource.messageUuid, rootText, nativeGate, progress = { message ->
                             root.resolve("root-controller-progress.txt").appendText(message + "\n")
                             if (nativeGate.blocked(key)) {
                                 val persisted = RewindDeliveryGate(nativeGateFile)
@@ -423,7 +424,7 @@ class IsolatedNativeCliTest {
                                 assertFalse(nativeGateFile.readText().contains("ROOT-container-restarted"))
                                 sawDurableRoot = true
                             }
-                        })
+                        }) } finally { System.clearProperty("yxi.experimental.firstTurnRewind") }
                         assertTrue(sawDurableRoot, "Controller must persist recovery before confirming restore")
                         assertFalse(nativeGate.blocked(key))
                         assertFalse(RewindDeliveryGate(nativeGateFile).blocked(key))

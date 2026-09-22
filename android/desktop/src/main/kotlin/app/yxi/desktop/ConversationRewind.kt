@@ -62,6 +62,9 @@ internal object ConversationRewind {
         check(!target.unsupportedContent || structured != null) { "此消息包含尚不支持的内容，请重新打开编辑确认附件。" }
         val anchor = target.parentUuid
         if (anchor == null) {
+            check(java.lang.Boolean.getBoolean("yxi.experimental.firstTurnRewind")) {
+                "首轮自动回退仍在验证异常恢复，请使用原生回退入口。"
+            }
             NativeFirstTurnController.restore(conn, session, target, text, gate, progress)
             return
         }
