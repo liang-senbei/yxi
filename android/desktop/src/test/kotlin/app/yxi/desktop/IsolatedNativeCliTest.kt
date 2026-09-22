@@ -2,7 +2,10 @@ package app.yxi.desktop
 
 import app.yxi.agent.Rewind
 import app.yxi.agent.Model
+import app.yxi.agent.SessionProbe
 import app.yxi.ssh.Shell
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
 import org.junit.jupiter.api.condition.EnabledOnOs
@@ -135,7 +138,7 @@ class IsolatedNativeCliTest {
                     org.json.JSONArray().put("sk-ant-yxi-container-test-only".takeLast(20))).put("rejected", org.json.JSONArray()))
             preferences.writeText(prefs.toString())
             tmux("-f", "/dev/null", "new-session", "-d", "-s", "cc-native-check", "-x", "180", "-y", "50",
-                "-c", project.path, "${Shell.q(native.path)} --resume ${Shell.q(sid)}")
+                "-c", project.path, "${Shell.q(native.path)} --resume ${Shell.q(sid)}; exec /bin/bash --noprofile --norc")
             assertEquals(socket.path, tmux("display-message", "-p", "-t", "=cc-native-check:", "#{socket_path}").trim())
             var screen = ""
             var ready = false
@@ -166,7 +169,46 @@ class IsolatedNativeCliTest {
             assertFalse(interactiveMessages.contains("FOLLOWUP-container-second"))
             assertFalse(interactiveMessages.contains("DROP-container-third"))
             assertFalse(interactiveMessages.contains("VERIFY-container-branch"))
+
+            // Use the actual desktop orchestration with real SSH, real tmux and the native CLI.
+            ready = false
+            repeat(100) {
+                if (!ready) {
+                    ready = Model.borrowable(tmux("capture-pane", "-p", "-t", "=cc-native-check:"))
+                    if (!ready) Thread.sleep(100)
+                }
+            }
+            assertTrue(ready, "Follow-up must finish before application rewind")
+            IsolatedSshBridge(root.resolve("ssh"), isolated(ProcessBuilder()).environment().toMap(), socket).use { bridge ->
+                runBlocking { withTimeout(120_000) {
+                    bridge.conn.ssh.connect()
+                    val session = SessionProbe.snapshot(bridge.conn.ssh).single { it.name == "cc-native-check" }
+                    val key = taskNavigationKey(bridge.conn.host, session)
+                    val gate = RewindDeliveryGate(root.resolve("application-gate.json"))
+                    DesktopTranscriptMemory.put(key, DesktopTranscriptMemory.Entry(transcript.path, transcript.length()))
+                    try {
+                        val target = transcript.readLines().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+                            .last { it.optString("type") == "user" &&
+                                it.optJSONObject("message")?.toString()?.contains("EDIT-container-second") == true }
+                        ConversationRewind.restore(bridge.conn, session, target.getString("uuid"),
+                            "APP-container-rewind", gate) { stage ->
+                            root.resolve("application-progress.log").appendText("$stage\n")
+                        }
+                        assertFalse(gate.blocked(key), "Gate must clear only after verified native resume")
+                        val appRequest = root.resolve("requests.jsonl").readLines().map(::JSONObject).last {
+                            it.getJSONArray("messages").toString().contains("APP-container-rewind")
+                        }.getJSONArray("messages").toString()
+                        assertTrue(appRequest.contains("KEEP-container-first"))
+                        assertFalse(appRequest.contains("EDIT-container-second"))
+                        assertFalse(appRequest.contains("SINGLE-container-edit"))
+                        assertFalse(appRequest.contains("INTERACTIVE-container-followup"))
+                    } finally { DesktopTranscriptMemory.drop(key) }
+                } }
+            }
         } finally {
+            if (socket.exists()) runCatching {
+                root.resolve("final-screen.txt").writeText(tmux("capture-pane", "-p", "-t", "=cc-native-check:"))
+            }
             if (socket.exists()) runCatching { tmux("kill-session", "-t", "=cc-native-check:") }
             server.destroyForcibly(); server.waitFor(5, TimeUnit.SECONDS)
             root.listFiles().orEmpty().filter { it.isFile && it.name != "stub.py" }.forEach {
