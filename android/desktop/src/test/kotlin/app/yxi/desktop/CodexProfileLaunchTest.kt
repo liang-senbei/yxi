@@ -6,11 +6,12 @@ import kotlin.test.*
 
 class CodexProfileLaunchTest {
     @Test fun `provider arguments contain no key and keep per-agent scope stable`() {
-        val line = Lines.Line("p", "供应商", "https://example.invalid/v1", apiKey = "fixture-secret-key", agent = Lines.CODEX,
+        val line = Lines.Line("p", "供应商 </route> \\ \"quoted\"", "https://example.invalid/v1", apiKey = "fixture-secret-key", agent = Lines.CODEX,
             extra = JSONObject().put("model", "provider/glm:variant").put("model_reasoning_effort", "high"))
         val (payload, overrides) = CodexProfileLaunch.configuration(line, "a".repeat(32))
         assertEquals(line.apiKey, payload.getString("key"))
         assertFalse(payload.getJSONArray("args").toString().contains(line.apiKey))
+        assertFalse(payload.getJSONArray("args").getString(1).contains("<\\/"), "JSON's escaped slash is not a TOML escape")
         assertEquals("yxi_agent_" + "a".repeat(32), overrides.provider)
         assertEquals("provider/glm:variant", overrides.model)
         val (_, second) = CodexProfileLaunch.configuration(line.copy(id = "another", apiKey = "other-secret"), "a".repeat(32))

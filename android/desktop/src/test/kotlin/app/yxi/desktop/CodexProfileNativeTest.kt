@@ -42,7 +42,7 @@ trust_level = "trusted"
         try {
             repeat(100) { if (endpoints.any { !it.resolve("port").exists() }) Thread.sleep(50) }
             check(endpoints.all { it.resolve("port").exists() } && servers.all { it.isAlive })
-            val profiles = endpoints.mapIndexed { index, endpoint -> Lines.Line("profile-$index", "Fixture $index",
+            val profiles = endpoints.mapIndexed { index, endpoint -> Lines.Line("profile-$index", "Fixture $index </route> \\ \"quoted\"",
                 "http://127.0.0.1:${endpoint.resolve("port").readText().trim()}/v1", apiKey = "fixture-codex-key-$index", agent = Lines.CODEX,
                 extra = JSONObject().put("model", "fixture-model-$index")) }
             val queue = InstructionQueue(root.resolve("queue.json"))

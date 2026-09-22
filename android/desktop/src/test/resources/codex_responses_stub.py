@@ -52,7 +52,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         response_id = 'resp_fixture_' + str(time.time_ns())
         events = [
             {'type': 'response.created', 'response': {'id': response_id}},
-            {'type': 'response.output_item.done', 'item': {'type': 'message', 'role': 'assistant', 'id': 'msg_fixture',
+            {'type': 'response.output_item.done', 'item': {'type': 'message', 'role': 'assistant', 'id': 'msg_' + response_id,
                 'content': [{'type': 'output_text', 'text': 'fixture-complete'}]}},
             {'type': 'response.completed', 'response': {'id': response_id, 'usage': {
                 'input_tokens': 1, 'input_tokens_details': None, 'output_tokens': 1,

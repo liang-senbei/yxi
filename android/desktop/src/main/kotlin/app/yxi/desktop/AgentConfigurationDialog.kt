@@ -52,6 +52,7 @@ internal fun AgentConfigurationDialog(conn: Conn, session: Session, modelSwitche
                 onProfile = { profileId = it; notice = "" })
             Text(if (engine == Lines.CLAUDE && session.agent == Lines.CLAUDE)
                 "应用会重启此空闲对话，保留原历史和权限模式。其他 Agent 的配置不变。"
+                else if (engine == session.agent) "此会话的独立配置应用尚未接通，目前只能保存配置草稿。"
                 else "切换运行器的新对话与摘要交接尚未接通，目前只能保存配置草稿。",
                 style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
             if (engine == Lines.CLAUDE && session.agent == Lines.CLAUDE) {

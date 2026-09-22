@@ -14,6 +14,7 @@ import java.util.UUID
 /** A custom provider belongs to this app-server process, never ~/.codex/config.toml. */
 internal object CodexProfileLaunch {
     data class Prepared(val command: String, val path: String, val overrides: CodexResumeOverrides)
+    private fun tomlString(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
     internal fun configuration(line: Lines.Line, id: String): Pair<JSONObject, CodexResumeOverrides> {
         require(line.agent == Lines.CODEX) { "请选择 Codex 的已保存配置" }
@@ -27,13 +28,13 @@ internal object CodexProfileLaunch {
         require(model == null || app.yxi.agent.Model.selectableId(model)) { "模型 ID 格式无效" }
         val effort = line.extra.optString("model_reasoning_effort").takeIf { it.isNotBlank() }
         require(effort == null || effort.matches(Regex("[a-z]{1,20}"))) { "思考强度格式无效" }
-        require(line.name.length <= 200 && line.name.none { it < ' ' }) { "配置名称格式无效" }
+        require(line.name.length <= 200 && line.name.none { it < ' ' || it == '\u007f' }) { "配置名称格式无效" }
         val provider = "yxi_agent_$id"
-        val definition = "{ name = ${JSONObject.quote(line.name)}, base_url = ${JSONObject.quote(url.toString())}, " +
+        val definition = "{ name = ${tomlString(line.name)}, base_url = ${tomlString(url.toString())}, " +
             "env_key = \"YXI_AGENT_API_KEY\", wire_api = \"responses\", requires_openai_auth = false }"
-        val args = mutableListOf("-c", "model_providers.$provider=$definition", "-c", "model_provider=${JSONObject.quote(provider)}")
-        model?.let { args += listOf("-c", "model=${JSONObject.quote(it)}") }
-        effort?.let { args += listOf("-c", "model_reasoning_effort=${JSONObject.quote(it)}") }
+        val args = mutableListOf("-c", "model_providers.$provider=$definition", "-c", "model_provider=${tomlString(provider)}")
+        model?.let { args += listOf("-c", "model=${tomlString(it)}") }
+        effort?.let { args += listOf("-c", "model_reasoning_effort=${tomlString(it)}") }
         args += "app-server"
         require(args.none { it.contains(line.apiKey) }) { "请求地址、模型或配置名称中不能包含 API Key" }
         val payload = JSONObject().put("args", JSONArray(args)).put("key", line.apiKey)

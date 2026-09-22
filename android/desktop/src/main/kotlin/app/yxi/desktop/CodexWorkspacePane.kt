@@ -91,6 +91,22 @@ private fun CodexConversationPane(state: AppState) {
     }
     val conn = state.conn
     val tasks = conn?.let { workspace.tasks(it.host) }.orEmpty()
+    var createProfile by remember(conn) { mutableStateOf("") }
+    var createProfiles by remember(conn) { mutableStateOf<List<app.yxi.agent.Lines.Line>>(emptyList()) }
+    var profileMenu by remember(conn) { mutableStateOf(false) }
+    var profilesLoading by remember(conn) { mutableStateOf(false) }
+    var profilesError by remember(conn) { mutableStateOf("") }
+    var profileReload by remember(conn) { mutableStateOf(0) }
+    NativeOverlay(profileMenu)
+    LaunchedEffect(creating, conn, profileReload) {
+        if (!creating || conn == null) return@LaunchedEffect
+        profilesLoading = true; profilesError = ""
+        try { createProfiles = (app.yxi.agent.Lines.list(conn.ssh) ?: error("无法读取已保存配置"))
+            .filter { it.agent == app.yxi.agent.Lines.CODEX } }
+        catch (e: CancellationException) { throw e }
+        catch (e: Exception) { profilesError = e.message.orEmpty() }
+        finally { profilesLoading = false }
+    }
     val selected = tasks.firstOrNull { it.key == state.codexSelectedTaskKey }
     val controller = selected?.let { workspace.controllers[it.key] }
     val emptyView = remember { CodexConversationView() }
@@ -184,6 +200,24 @@ private fun CodexConversationPane(state: AppState) {
         if (creating && conn != null) {
             OutlinedTextField(title, { title = it }, label = { Text("任务名称") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(directory, { directory = it }, label = { Text("服务器项目目录") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            Box {
+                OutlinedButton({ profileMenu = true }, enabled = !profilesLoading && !workspace.busy) {
+                    RunnerBrandIcon("codex", Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
+                    Text(if (createProfile.isBlank()) "服务器默认（未设置独立配置）"
+                        else createProfiles.firstOrNull { it.id == createProfile }?.name ?: "原配置已删除，请重新选择")
+                }
+                DropdownMenu(profileMenu, { profileMenu = false }) {
+                    DropdownMenuItem(text = { Text("服务器默认") }, onClick = { createProfile = ""; profileMenu = false })
+                    createProfiles.forEach { profile ->
+                        DropdownMenuItem(text = { Text(profile.name) }, onClick = { createProfile = profile.id; profileMenu = false })
+                    }
+                }
+            }
+            if (profilesLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (profilesError.isNotBlank()) Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(profilesError, color = Tokens.current.danger)
+                TextButton({ profileReload++ }, enabled = !profilesLoading) { Text("重试") }
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button({
                     val target = conn
@@ -191,8 +225,9 @@ private fun CodexConversationPane(state: AppState) {
                     val name = title
                     val prompt = initialDraft
                     val group = state.codexCreateGroup
+                    val profile = createProfile
                     act {
-                        val record = workspace.create(target, path, name)
+                        val record = workspace.create(target, path, name, profile)
                         if (group.isNotBlank()) state.navigation.setGroup(record.key, group)
                         if (prompt.isNotBlank()) state.appendCodexQuote(record, prompt)
                         state.codexSelectedTaskKey = record.key
@@ -200,10 +235,12 @@ private fun CodexConversationPane(state: AppState) {
                         state.codexCreateGroup = ""
                         creating = false
                     }
-                }, enabled = !workspace.busy && directory.startsWith('/')) { Text("创建任务") }
+                }, enabled = !workspace.busy && !profilesLoading && conn.ssh.isConnected && directory.startsWith('/') &&
+                    (createProfile.isBlank() || createProfiles.any { it.id == createProfile })) { Text("创建任务") }
                 TextButton({ creating = false; state.codexCreateGroup = "" }) { Text("取消") }
             }
-            Text("使用所选服务器的 Codex 登录和模型配置。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+            Text(if (createProfile.isBlank()) "使用所选服务器的 Codex 默认登录和模型配置。"
+                else "从第一条消息开始使用所选独立配置，不改动其他 Agent。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
             if (initialDraft.isNotBlank()) OutlinedTextField(initialDraft, { initialDraft = it }, label = { Text("创建后的提示词草稿") }, modifier = Modifier.fillMaxWidth(), maxLines = 4)
         }
         if (selected == null) {
