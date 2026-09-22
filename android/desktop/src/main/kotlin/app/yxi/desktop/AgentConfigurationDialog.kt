@@ -79,8 +79,36 @@ internal fun AgentConfigurationDialog(conn: Conn, session: Session, dismiss: () 
                 if (profileId.isNotBlank() && matching.none { it.id == profileId })
                     Text("原配置已删除，请重新选择。", color = Tokens.current.danger)
             }
-            Text("配置按 Agent 单独保存。当前仅保存配置草稿，尚未连接运行器应用流程，不会立即切换正在运行的对话。",
+            Text(if (engine == Lines.CLAUDE && session.agent == Lines.CLAUDE)
+                "应用会重启此空闲对话，保留原历史和权限模式。其他 Agent 的配置不变。"
+                else "切换运行器的新对话与摘要交接尚未接通，目前只能保存配置草稿。",
                 style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+            if (engine == Lines.CLAUDE && session.agent == Lines.CLAUDE) {
+                FilledTonalButton({ scope.launch {
+                    saving = true; error = ""; notice = ""
+                    try {
+                        val selected = Lines.list(conn.ssh)?.singleOrNull { it.id == profileId && it.agent == engine }
+                            ?: error("所选配置已变化，请重新读取")
+                        val desired = AgentBindingStore.Desired(engine, profileId)
+                        AgentBindingStore.setDesired(conn.ssh, session.name, desired, bindings)?.let { error(it) }
+                        bindings = AgentBindingStore.list(conn.ssh) ?: error("配置保存后无法回读，未重启")
+                        check(bindings?.get(session.name)?.desired == desired) { "选择已变化，未重启" }
+                        val receipt = ConversationRouteApply.apply(conn, session, selected)
+                        val checked = Lines.list(conn.ssh)?.singleOrNull { it.id == selected.id && it.agent == selected.agent }
+                        check(checked != null && selected.settingsJson().similar(checked.settingsJson())) {
+                            "应用期间供应商配置已变化，请重新核对；未标记为已应用"
+                        }
+                        AgentBindingStore.markApplied(conn.ssh, session.name, desired, receipt.processIdentity,
+                            System.currentTimeMillis() / 1000.0)?.let { error(it) }
+                        bindings = AgentBindingStore.list(conn.ssh)
+                        notice = "已应用并核对新进程，原对话历史保留。"
+                    } catch (e: CancellationException) { throw e }
+                    catch (e: Exception) { error = e.message ?: "应用未完成，请查看终端" }
+                    finally { saving = false }
+                } }, enabled = !saving && !loading && bindings != null && profiles.any { it.id == profileId && it.agent == engine }) {
+                    Text(if (saving) "正在应用…" else "应用到当前对话")
+                }
+            }
             if (notice.isNotBlank()) Text(notice)
             if (error.isNotBlank()) {
                 Text(error, color = Tokens.current.danger)
