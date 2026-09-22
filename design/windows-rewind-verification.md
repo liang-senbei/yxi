@@ -1,5 +1,11 @@
 # 对话历史回退验收记录
 
+## 首轮同进程恢复核验
+
+`84cc7b1` 增加独立 NativeRootVerification：复用运行实例登记检查但要求同一 PID，再检查稳定转录的当前链已排除原首条、仅有一个根用户消息且 SHA-256 与编辑文字一致，已有助手回复；最后再次核对运行实例。普通 print 回退仍要求新 PID，不混用两种语义。补正登记进程本身就是 pane PID 时的合法进程树判断。
+
+`run.AtV6aA` 首轮链校验测试通过；`run.C64K33` 原 RewindLiveVerificationTest 通过；`run.KaPsqz` 真实 Claude 首轮能力探针执行新核验命令，输出 `__YXI_REWIND_ROOT__:ok`，既有整链也通过。隔离 runner 已能按明确包名运行 core 测试。首轮持久 ticket、驱动控制器、滚动/长文本和应用入口仍未完成。
+
 ## 首轮原生菜单只读校验
 
 `5992637` 新增 FirstTurnRewindMenu，按已验证 2.1.278 布局核对完整可见菜单行、当前项、选中位置和逐行文本；确认页必须匹配目标文字并明确 code unchanged、选中 Restore conversation。未知版本、滚动、未知副行、重复选中标记和不完整菜单均拒绝。重复文本仍按位置保留，必须同时匹配全行列表。
