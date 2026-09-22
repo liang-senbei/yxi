@@ -1,5 +1,11 @@
 # 对话历史回退验收记录
 
+## 原生图片结构化输入协议
+
+`6e9003d`，`run.OawsWq`：通过 stdin stream-json 向真实 Claude 2.1.278 发送含 PNG base64 image 块和文字的用户消息，检查假端点收到可解码的 image/png 图片块。回退丢弃该轮后，后续请求不含旧 image 块；既有实际控制器、Read 工具、连续回退、缓存及断线用例同时通过。输出必须使用 stream-json 和 verbose，最终从 result 事件取结果；最初 `run.ZRG0QZ` 证明 input stream-json + output json 会被 CLI 拒绝。
+
+这确认了后续附件恢复实现所需协议，不等于应用已经支持编辑带附件的历史消息；ConversationRewind 的附件拒绝仍在，结构化图片保留/删除、预览与大小限制仍待接入。
+
 ## 编辑弹窗实际输入与按钮
 
 `05309e5`，`run.uMtERa`：真实 Compose 窗口中用 Robot 点击输入框、Ctrl+A 替换全文为 `a`，点击主按钮后回调收到精确的新文字并关闭弹窗；禁用态点击不提交；Esc 取消不触发载入草稿或原生选择器。820/460 两种宽度通过，XML 1 项、0 失败/错误/跳过。测试使用组件实际布局边界定位，按键留出焦点/选择事件处理时间。此前独立系统窗口假设和无间隔按键的失败记录保留为 `run.6Tpyqq`、`run.Z2U3Ti`。
