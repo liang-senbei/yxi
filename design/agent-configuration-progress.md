@@ -22,7 +22,13 @@ Verification on hk13, isolated container, source 6d90d54afe76c4ff06c7a72433701a8
 
 - Compile successful: `/root/.cache/yxi-isolated-tests/run.lTR2o8`.
 - AgentBindingStoreTest: 3 passed, 0 skipped, `/root/.cache/yxi-isolated-tests/run.gkgCwr`.
-- RunnerBrandIconTest rendered actual Compose controls, `/root/.cache/yxi-isolated-tests/run.xocSx9`. Visual inspection caught a wrong OpenAI docs book icon and poorly rendered SpaceXAI favicon; these assets were subsequently replaced and need a new render check.
+- RunnerBrandIconTest rendered actual Compose controls, `/root/.cache/yxi-isolated-tests/run.xocSx9`. Visual inspection caught a wrong OpenAI docs book icon and poorly rendered SpaceXAI favicon; these assets were subsequently replaced.
+
+Corrected icon verification, source 0bf1cbdd1baade1c3b11aa8ba0599d7b2729f303:
+
+- Compile successful: `/root/.cache/yxi-isolated-tests/run.N8s4ta`.
+- Actual Compose render passed and screenshot visually inspected: `/root/.cache/yxi-isolated-tests/run.z7sh9e/results/official-runtime-icons.png`.
+- Codex uses the official OpenAI developer-site publisher mark; it is not claimed to be a Codex-specific logo. Grok uses the actual product-site mark. This screenshot verifies the light theme; dark-theme visual verification is still outstanding.
 
 Provider model discovery verification at source 5b5e92b7989b74a631b89442093c83cc63c4c317:
 
