@@ -12,6 +12,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.yxi.agent.Lines
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.MoreHoriz
@@ -101,7 +102,7 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
         note = result; applying = null; resetting = false
         }
     }
-    editor?.let { original -> RouteForm(original, conn.host.label, onClose = { editor = null }) { edited ->
+    editor?.let { original -> RouteForm(original, conn, onClose = { editor = null }) { edited ->
         val before = lines ?: error("清单未读取，不能覆盖")
         val latest = Lines.list(conn.ssh) ?: error("无法确认服务器最新清单")
         check(routeCatalogEqual(before, latest)) { "线路清单已被其他人修改，请关闭编辑后刷新" }
@@ -277,9 +278,23 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
         dismissButton = { TextButton({ deleting = null }, enabled = !busy) { Text("取消") } }) }
 }
 
+/** 模型映射的角色档位；alias 对应 env 键 ANTHROPIC_DEFAULT_{alias}_MODEL(_NAME)，null = 子 Agent（CLAUDE_CODE_SUBAGENT_MODEL）。 */
+private data class ModelRoleRow(val label: String, val alias: String?, val supportsOneM: Boolean)
+
+private val RoleAliases = listOf("SONNET", "OPUS", "FABLE", "HAIKU")
+
+/** 映射区行序（参照 CC Switch）：Sonnet、Opus、Fable、Haiku、Subagent；Haiku 不支持 1M。 */
+private val RoleRows = listOf(
+    ModelRoleRow("Sonnet", "SONNET", true),
+    ModelRoleRow("Opus", "OPUS", true),
+    ModelRoleRow("Fable", "FABLE", true),
+    ModelRoleRow("Haiku", "HAIKU", false),
+    ModelRoleRow("Subagent", null, true),
+)
+
 @Composable
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-private fun RouteForm(original: Lines.Line, hostLabel: String, onClose: () -> Unit, onSave: suspend (Lines.Line) -> Unit) {
+private fun RouteForm(original: Lines.Line, conn: Conn, onClose: () -> Unit, onSave: suspend (Lines.Line) -> Unit) {
     val scope = rememberCoroutineScope()
     var name by remember { mutableStateOf(original.name) }
     var website by remember { mutableStateOf(original.website) }
@@ -290,7 +305,10 @@ private fun RouteForm(original: Lines.Line, hostLabel: String, onClose: () -> Un
     var model by remember { mutableStateOf(routeModel(original)) }
     var mappingsOpen by remember { mutableStateOf(false) }
     val mappings = remember { mutableStateMapOf<String, String>().apply {
-        listOf("HAIKU", "SONNET", "OPUS", "FABLE").forEach { alias -> put(alias, original.extraEnv().optString("ANTHROPIC_DEFAULT_${alias}_MODEL")) }
+        RoleAliases.forEach { alias -> put(alias, original.extraEnv().optString("ANTHROPIC_DEFAULT_${alias}_MODEL")) }
+    } }
+    val displayNames = remember { mutableStateMapOf<String, String>().apply {
+        RoleAliases.forEach { alias -> put(alias, original.extraEnv().optString("ANTHROPIC_DEFAULT_${alias}_MODEL_NAME")) }
     } }
     var subagentModel by remember { mutableStateOf(original.extraEnv().optString("CLAUDE_CODE_SUBAGENT_MODEL")) }
     var memo by remember { mutableStateOf(original.note) }
@@ -304,9 +322,76 @@ private fun RouteForm(original: Lines.Line, hostLabel: String, onClose: () -> Un
     var presetExtra by remember { mutableStateOf(org.json.JSONObject(original.extra.toString())) }
     var advancedOpen by remember { mutableStateOf(false) }
     var advanced by remember { mutableStateOf(original.extra.toString(2)) }
+    // 可用模型列表（网络层在 ProviderModels，本表单只发起与展示状态；请求在选中服务器执行）
+    var models by remember { mutableStateOf<List<ProviderModels.Model>>(emptyList()) }
+    var modelsLoading by remember { mutableStateOf(false) }
+    var modelsNote by remember { mutableStateOf("") }
+    var modelsNoteIsError by remember { mutableStateOf(false) }
+    var modelsGen by remember { mutableStateOf(0) }
+    var fetchJob by remember { mutableStateOf<Job?>(null) }
+    var modelsUrl by remember { mutableStateOf("") }
+    // 端点、密钥或列表 URL 一旦变化：取消在途请求并作废旧结果，不许残留旧线路的模型供误选
+    LaunchedEffect(url, secret, authToken, modelsUrl) {
+        modelsGen += 1
+        fetchJob?.cancel(); fetchJob = null
+        models = emptyList(); modelsLoading = false
+        modelsNote = ""; modelsNoteIsError = false
+    }
+    fun fetchModels() {
+        // 密钥口径：Auth token 优先，其次 API Key（与该线路实际认证字段一致）
+        val key = authToken.trim().ifBlank { secret.trim() }
+        if (url.isBlank() || key.isBlank()) {
+            modelsNote = "获取模型列表需要先填写请求地址和密钥（Auth token 优先，其次 API Key）。"; modelsNoteIsError = true
+            return
+        }
+        fetchJob?.cancel()
+        // 每次发起都换新代号：被取消的旧任务回到 finally 时对不上号，不会关掉新任务的状态
+        modelsGen += 1
+        val gen = modelsGen
+        modelsNote = ""; modelsNoteIsError = false; modelsLoading = true
+        fetchJob = scope.launch {
+            try {
+                val fetched = ProviderModels.fetch(conn, url.trim(), key, modelsUrl.trim())
+                if (gen == modelsGen) {
+                    models = fetched
+                    modelsNote = if (fetched.isEmpty()) "接口未返回任何模型。" else "已获取 ${fetched.size} 个模型；在各字段下方「从列表选择」回填。"
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                if (gen == modelsGen) {
+                    models = emptyList()
+                    modelsNote = e.message?.takeIf { it.isNotBlank() } ?: "获取模型列表失败。"
+                    modelsNoteIsError = true
+                }
+            } finally { if (gen == modelsGen) modelsLoading = false }
+        }
+    }
+    fun roleModelChange(alias: String?, supportsOneM: Boolean, raw: String) {
+        val normalized = if (supportsOneM) raw else oneMBase(raw)
+        if (alias == null) { subagentModel = normalized; return }
+        // 实际模型变更：显示名称为空或还跟着旧模型 ID 时跟随更新，用户自定义过的显示名称不动
+        val oldBase = oneMBase(mappings[alias].orEmpty())
+        mappings[alias] = normalized
+        val shown = displayNames[alias].orEmpty().trim()
+        if (shown.isEmpty() || shown == oldBase) displayNames[alias] = oneMBase(normalized)
+    }
+    fun quickSetRoles() {
+        // 按面板行序取第一个非空角色模型，兜底用默认模型；全部为空时按钮本就禁用
+        val source = RoleRows.firstNotNullOfOrNull { row ->
+            (if (row.alias == null) subagentModel else mappings[row.alias].orEmpty()).takeIf { it.isNotBlank() }
+        } ?: model.takeIf { it.isNotBlank() } ?: return
+        RoleRows.forEach { row ->
+            val value = if (row.supportsOneM) source else oneMBase(source)
+            if (row.alias == null) subagentModel = value
+            else {
+                mappings[row.alias] = value
+                displayNames[row.alias] = oneMBase(value)
+            }
+        }
+    }
     ProviderEditorPage(onDismissRequest = { if (!busy) onClose() }, title = { Text("${if (original.name.isBlank()) "添加" else "编辑"}供应商 · ${if (original.isCodex) "Codex" else "Claude Code"}", style = MaterialTheme.typography.titleLarge) },
         text = { Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text("配置服务器 · $hostLabel", style = MaterialTheme.typography.bodyMedium, color = Tokens.current.textMuted)
+            Text("配置服务器 · ${conn.host.label}", style = MaterialTheme.typography.bodyMedium, color = Tokens.current.textMuted)
             TextButton({ templatesOpen = !templatesOpen }) { Text(if (templatesOpen) "收起供应商模板" else "选择供应商模板") }
             if (templatesOpen) {
             OutlinedTextField(presetSearch, { presetSearch = it }, singleLine = true, label = { Text("搜索模板") }, modifier = Modifier.fillMaxWidth())
@@ -316,6 +401,7 @@ private fun RouteForm(original: Lines.Line, hostLabel: String, onClose: () -> Un
                     name = ""; url = ""; website = ""; model = ""; secret = ""; authToken = ""
                     presetExtra = org.json.JSONObject(); advanced = "{}"
                     mappings.keys.toList().forEach { mappings[it] = "" }
+                    displayNames.keys.toList().forEach { displayNames[it] = "" }
                     subagentModel = ""
                 }, label = { Text("自定义供应商") }, enabled = !busy)
                 (if (presetsExpanded || presetSearch.isNotBlank()) matchingPresets else matchingPresets.take(12)).forEach { preset ->
@@ -327,6 +413,7 @@ private fun RouteForm(original: Lines.Line, hostLabel: String, onClose: () -> Un
                             presetExtra.put("env", preset.envJson())
                             model = preset.env["ANTHROPIC_MODEL"].orEmpty()
                             mappings.keys.toList().forEach { alias -> mappings[alias] = preset.env["ANTHROPIC_DEFAULT_${alias}_MODEL"].orEmpty() }
+                            displayNames.keys.toList().forEach { alias -> displayNames[alias] = preset.env["ANTHROPIC_DEFAULT_${alias}_MODEL_NAME"].orEmpty() }
                             subagentModel = preset.env["CLAUDE_CODE_SUBAGENT_MODEL"].orEmpty()
                         } else model = preset.model
                         advanced = presetExtra.toString(2)
@@ -346,16 +433,55 @@ private fun RouteForm(original: Lines.Line, hostLabel: String, onClose: () -> Un
             OutlinedTextField(secret, { secret = it }, label = { Text("API Key") }, singleLine = true, modifier = Modifier.fillMaxWidth(), visualTransformation = if (showSecret) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(), trailingIcon = { TextButton({ showSecret = !showSecret }) { Text(if (showSecret) "隐藏" else "显示") } })
             if (!original.isCodex) OutlinedTextField(authToken, { authToken = it }, label = { Text("Auth token（按提供方要求填写）") }, singleLine = true, modifier = Modifier.fillMaxWidth(), visualTransformation = if (showSecret) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation())
             if (original.isCodex) OutlinedTextField(model, { model = it }, label = { Text("模型 ID（可留空）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            else ProviderModelField("默认 / 兜底模型（可留空）", model) { model = it }
+            else ProviderModelField("默认 / 兜底模型（可留空）", model, models = models) { model = it }
             if (!original.isCodex) {
-                TextButton({ mappingsOpen = !mappingsOpen }) { Text(if (mappingsOpen) "收起模型映射" else "模型映射 · 主模型与子 Agent") }
+                val quickSetSource = RoleRows.firstNotNullOfOrNull { row ->
+                    (if (row.alias == null) subagentModel else mappings[row.alias].orEmpty()).takeIf { it.isNotBlank() }
+                } ?: model.takeIf { it.isNotBlank() }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton({ mappingsOpen = !mappingsOpen }) { Text(if (mappingsOpen) "收起模型映射" else "模型映射 · 主模型与子 Agent") }
+                    Spacer(Modifier.weight(1f))
+                    TextButton({ quickSetRoles() }, enabled = quickSetSource != null) { Text("一键设置") }
+                    TextButton({ fetchModels() }, enabled = !modelsLoading) { Text(if (modelsLoading) "获取中…" else "获取模型列表") }
+                }
+                OutlinedTextField(modelsUrl, { modelsUrl = it }, label = { Text("模型列表 URL（可选；留空按 Base URL 常规约定尝试）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                if (modelsNote.isNotBlank()) Text(modelsNote, style = MaterialTheme.typography.bodySmall,
+                    color = if (modelsNoteIsError) Tokens.current.danger else Tokens.current.textMuted)
                 if (mappingsOpen) {
-                    Text("把 Claude 的模型档位映射到此线路的模型 ID，例如 glm-5.3-flash。留空使用运行器默认。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
-                    listOf("HAIKU", "SONNET", "OPUS", "FABLE").forEach { alias ->
-                        ProviderModelField("$alias 对应模型", mappings[alias].orEmpty()) { mappings[alias] = it }
+                    Text("把 Claude 的模型档位映射到此线路的模型 ID，例如 glm-5.3-flash。留空使用运行器默认；显示名称是菜单里展示用的别名。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                    Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("角色", Modifier.weight(0.6f), style = MaterialTheme.typography.labelMedium, color = Tokens.current.textMuted)
+                        Text("显示名称", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = Tokens.current.textMuted)
+                        Text("实际模型", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = Tokens.current.textMuted)
+                        Text("1M", Modifier.width(56.dp), style = MaterialTheme.typography.labelMedium, color = Tokens.current.textMuted)
                     }
-                    ProviderModelField("子 Agent 模型（可选）", subagentModel) { subagentModel = it }
-                    Text("1M 会添加运行器的 [1m] 标记；需要供应商支持，不会自动扩展模型能力或转换第三方协议。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        RoleRows.forEach { row ->
+                            val alias = row.alias
+                            val modelValue = if (alias == null) subagentModel else mappings[alias].orEmpty()
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(row.label, Modifier.weight(0.6f), style = MaterialTheme.typography.bodyMedium, color = Tokens.current.textSecondary)
+                                if (alias == null) Text("不显示在 /model 菜单", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                                else OutlinedTextField(displayNames[alias].orEmpty(), { displayNames[alias] = it }, Modifier.weight(1f), singleLine = true,
+                                    placeholder = { Text(oneMBase(modelValue).ifBlank { "选填" }) })
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    OutlinedTextField(modelValue, { roleModelChange(alias, row.supportsOneM, it) }, Modifier.fillMaxWidth(), singleLine = true,
+                                        placeholder = { Text("留空使用运行器默认") })
+                                    if (models.isNotEmpty()) ProviderModelPicker(models) { picked ->
+                                        // 换模型时保留该档位已声明的 1M 状态
+                                        val keep = row.supportsOneM && hasOneM(modelValue)
+                                        roleModelChange(alias, row.supportsOneM, if (keep) setOneM(picked, true) else picked)
+                                    }
+                                }
+                                Box(Modifier.width(56.dp)) {
+                                    if (row.supportsOneM) Checkbox(hasOneM(modelValue),
+                                        { enabled -> roleModelChange(alias, row.supportsOneM, setOneM(oneMBase(modelValue), enabled)) },
+                                        enabled = modelValue.isNotBlank())
+                                }
+                            }
+                        }
+                    }
+                    Text("1M 会添加运行器的 [1m] 标记；需要供应商支持，不会自动扩展模型能力或转换第三方协议。Haiku 档位不提供 1M。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 }
             }
             run {
@@ -394,6 +520,11 @@ private fun RouteForm(original: Lines.Line, hostLabel: String, onClose: () -> Un
                         require(value.none { it < ' ' }) { "模型映射不能包含控制字符" }
                         val key = "ANTHROPIC_DEFAULT_${alias}_MODEL"
                         if (value.isBlank()) env.remove(key) else env.put(key, value.trim())
+                    }
+                    displayNames.forEach { (alias, value) ->
+                        require(value.none { it < ' ' }) { "显示名称不能包含控制字符" }
+                        val nameKey = "ANTHROPIC_DEFAULT_${alias}_MODEL_NAME"
+                        if (value.isBlank()) env.remove(nameKey) else env.put(nameKey, value.trim())
                     }
                     require(subagentModel.none { it < ' ' }) { "子 Agent 模型不能包含控制字符" }
                     if (subagentModel.isBlank()) env.remove("CLAUDE_CODE_SUBAGENT_MODEL") else env.put("CLAUDE_CODE_SUBAGENT_MODEL", subagentModel.trim())
