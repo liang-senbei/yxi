@@ -63,7 +63,7 @@ internal object LocalProcess {
         } finally { if (process.isAlive) process.destroyForcibly(); output.delete() }
     }
     fun powershell(code: String) = listOf("powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand",
-        Base64.getEncoder().encodeToString(("\$ErrorActionPreference = 'Stop'; [Console]::OutputEncoding = New-Object Text.UTF8Encoding(\$false); " + code).toByteArray(Charsets.UTF_16LE)))
+        Base64.getEncoder().encodeToString(("\$ErrorActionPreference = 'Stop'; \$ProgressPreference = 'SilentlyContinue'; [Console]::OutputEncoding = New-Object Text.UTF8Encoding(\$false); " + code).toByteArray(Charsets.UTF_16LE)))
     fun psQuote(value: String) = "'" + value.replace("'", "''") + "'"
 }
 

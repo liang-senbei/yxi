@@ -43,6 +43,7 @@ import kotlinx.coroutines.launch
                     Text("SSH 双向连接", style = MaterialTheme.typography.titleLarge)
                     Text("服务器 → 本机 SSH：127.0.0.1:${record?.reversePort ?: 2222} → 本机 :22\n本机 → 服务器服务：127.0.0.1:${record?.localPort ?: 5901} → 服务器 :5901")
                     Text("连接由 Yxi 在后台保持，保活间隔 30 秒；退出 Yxi 会断开。断开不会删除双方公钥。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                    if (conn.status != Conn.Status.Connected) Text("首次配置需要先连接服务器；已配置的隧道可以单独重连。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.warning)
                     if (System.getProperty("os.name").contains("Mac")) Text("macOS：请先自行开启“系统设置 → 通用 → 共享 → 远程登录”，并允许当前用户。")
                     links.status[key]?.let { Text(it, color = if (links.connected(conn)) Tokens.current.accent else Tokens.current.textSecondary) }
                     if (key in links.busy) LinearProgressIndicator(Modifier.fillMaxWidth())

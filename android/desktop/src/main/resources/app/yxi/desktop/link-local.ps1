@@ -4,10 +4,12 @@ function Inspect-Local {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $service = Get-Service sshd -ErrorAction SilentlyContinue
     $hostPath = Join-Path $env:ProgramData 'ssh\ssh_host_ed25519_key.pub'
+    $hostKey = ''
+    try { if (Test-Path -LiteralPath $hostPath) { $hostKey = (Get-Content -LiteralPath $hostPath -Raw).Trim() } } catch { }
     [ordered]@{ username = $env:USERNAME; sid = $identity.User.Value; profile = $env:USERPROFILE;
         administrator = @($identity.Groups.Value) -contains 'S-1-5-32-544';
         service = if ($service) { [string]$service.Status } else { 'NotInstalled' };
-        hostKey = if (Test-Path -LiteralPath $hostPath) { (Get-Content -LiteralPath $hostPath -Raw).Trim() } else { '' } }
+        hostKey = $hostKey }
 }
 if ($Mode -eq 'inspect') { Inspect-Local | ConvertTo-Json -Compress; exit 0 }
 $req = Get-Content -LiteralPath $RequestPath -Raw -Encoding UTF8 | ConvertFrom-Json
