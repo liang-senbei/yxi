@@ -17,4 +17,14 @@ class UpdaterTest {
     @Test fun sameOrNewerIsNull() { assertNull(Updater.pickUpdate(feed, "1.0.10")); assertNull(Updater.pickUpdate(feed, "1.1.0")); assertNull(Updater.pickUpdate(feed, "2.0.0")) }
     @Test fun cmpVer() { assert(Updater.cmpVer("1.0.10", "1.0.9") > 0); assert(Updater.cmpVer("1.0", "1.0.0") == 0); assert(Updater.cmpVer("1.0.1-beta", "1.0.1") == 0) }
     @Test fun emptyFeed() = assertNull(Updater.pickUpdate("""{"Assets":[]}""", "1.0.0"))
+    @Test fun downloadedOlderPackageDoesNotHideNewRelease() {
+        assertEquals("1.0.10", Updater.pickUpdate(feed, "1.0.2", "1.0.6")?.getString("Version"))
+        assertNull(Updater.pickUpdate(feed, "1.0.2", "1.0.10"))
+        assertNull(Updater.pickUpdate(feed, "1.0.2", "1.1.0"))
+    }
+    @Test fun foreignPackageDoesNotOverrideYxi() {
+        val mixed = org.json.JSONObject(feed)
+        mixed.getJSONArray("Assets").put(org.json.JSONObject("""{"PackageId":"Other","Version":"99.0.0","Type":"Full"}"""))
+        assertEquals("1.0.10", Updater.pickUpdate(mixed.toString(), "1.0.2", "1.0.6")?.getString("Version"))
+    }
 }

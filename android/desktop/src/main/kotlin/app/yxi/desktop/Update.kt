@@ -72,9 +72,9 @@ object Updater {
 
     /** 读 releases.win.json，Type=Full 里挑最高版本，比当前新就开始下。查失败只打日志，不打扰用户（可能只是没网）。 */
     @Synchronized fun check() {
-        if (state !is Idle && state !is Error) return   // 正在下 / 已就绪
+        if (state is Downloading || state is Available) return
         runCatching {
-            val latest = pickUpdate(fetch(FEED + "releases.win.json", BodyHandlers.ofString()), version) ?: return
+            val latest = pickUpdate(fetch(FEED + "releases.win.json", BodyHandlers.ofString()), version, (state as? Ready)?.version) ?: return
             pending = latest
             state = Available(latest.getString("Version"))
             download()
@@ -83,7 +83,6 @@ object Updater {
 
     @Synchronized fun checkManually(): String {
         if (state is Downloading) return "正在下载更新"
-        if (state is Ready) return "更新已就绪，可安装并重启"
         val raw = fetch(FEED + "releases.win.json", BodyHandlers.ofString())
         val assets = JSONObject(raw).getJSONArray("Assets")
         val latest = (0 until assets.length()).map { assets.getJSONObject(it) }
@@ -91,6 +90,9 @@ object Updater {
             .maxWithOrNull { a, b -> cmpVer(a.getString("Version"), b.getString("Version")) }
             ?: error("更新清单没有可用的 Windows 安装包")
         val latestVersion = latest.getString("Version")
+        (state as? Ready)?.let {
+            if (cmpVer(latestVersion, it.version) <= 0) return "更新 ${it.version} 已就绪，可安装并重启"
+        }
         if (version != "dev" && cmpVer(latestVersion, version) <= 0) return "已是最新版本 · $version"
         if (updateExe == null) return "官网最新版本 $latestVersion · 请下载安装包更新"
         pending = latest
@@ -134,7 +136,8 @@ object Updater {
     }
 
     /** 拉起 Update.exe 后自己退出：它等我们（--waitPid）退干净再换 current\，装完默认重启新版（VELOPACK_RESTART=true）。 */
-    fun restartToApply() {
+    @Synchronized fun restartToApply() {
+        if (state !is Ready) return // An old confirmation dialog must not install a superseded cached package.
         val pkg = ready ?: return
         ProcessBuilder(updateExe!!.path, "--silent", "apply", "--package", pkg.path, "--waitPid", ProcessHandle.current().pid().toString())
             .directory(updateExe.parentFile).start()
@@ -142,12 +145,13 @@ object Updater {
     }
 
     /** 纯逻辑，拆出来好测：feed 里 Type=Full 的最高版本，比 current 新才返回。 */
-    fun pickUpdate(feedJson: String, current: String): JSONObject? {
+    fun pickUpdate(feedJson: String, current: String, readyVersion: String? = null): JSONObject? {
         val assets = JSONObject(feedJson).getJSONArray("Assets")
         val latest = (0 until assets.length()).map { assets.getJSONObject(it) }
-            .filter { it.getString("Type") == "Full" }
+            .filter { it.getString("Type") == "Full" && it.optString("PackageId") == "Yxi" }
             .maxWithOrNull { p, q -> cmpVer(p.getString("Version"), q.getString("Version")) } ?: return null
-        return latest.takeIf { cmpVer(it.getString("Version"), current) > 0 }
+        return latest.takeIf { cmpVer(it.getString("Version"), current) > 0 &&
+            (readyVersion == null || cmpVer(it.getString("Version"), readyVersion) > 0) }
     }
 
     // 按数字段比（1.0.10 > 1.0.9）。JDK 的 Runtime.Version 不认 1.1.0 这种末尾带 0 的号，所以自己写。-beta 之类的后缀直接忽略。
