@@ -428,12 +428,14 @@ object Rewind {
      *
      * @param iterations 轮询次数（默认 24），[intervalSec] 每次间隔秒；最坏 24×0.5=12s 有界。
      */
-    fun waitShellCommand(sessionName: String, iterations: Int = 24, intervalSec: String = "0.5"): String {
+    fun waitShellCommand(sessionName: String, iterations: Int = 24, intervalSec: String = "0.5", exitingPid: String? = null): String {
+        require(exitingPid == null || Regex("^[0-9]{1,10}$").matches(exitingPid))
         val n = q(sessionName)
         val shells = SHELL_COMMANDS.flatMap { listOf(it, "-$it") }.joinToString("|")
+        val gone = exitingPid?.let { "[ ! -e /proc/$it/exe ] && " }.orEmpty()
         return "for i in \$(seq 1 $iterations); do " +
             "c=\$(tmux display-message -p -t '$n' '#{pane_current_command}' 2>/dev/null); " +
-            "case \"\$c\" in $shells) echo SHELL; exit 0;; esac; " +
+            "case \"\$c\" in $shells) ${gone}{ echo SHELL; exit 0; };; esac; " +
             "sleep $intervalSec; done; echo STUCK"
     }
 

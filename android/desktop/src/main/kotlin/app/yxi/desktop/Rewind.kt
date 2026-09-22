@@ -253,7 +253,23 @@ internal class RewindController(private val conn: Conn, private val gate: Rewind
             //      才发 Esc+/exit（顶包的窗格一个键都不给），再等窗格回**真 shell**；
             //    · 本来就是 shell → 直接进入投递；
             //    · 其余（vim/top/构建中…）→ 不认得的窗格前台，绝不往里打字，按没退干净处理。
-            val inClaude = s.cmd in setOf("claude", "node", "bun")
+            // tmux can report the parent shell while its native Claude child still owns input.
+            // Recheck the real process rather than treating that label as proof of an empty shell.
+            val current = Rewind.parseCapture(conn.ssh.exec(Rewind.captureCommand(sessionName)))
+            val inClaude = when (current) {
+                is Rewind.Got -> {
+                    conn.ssh.exec(Rewind.cleanupCommand(current.capture))
+                    if (current.capture.pid != capture.pid || current.capture.exe != capture.exe ||
+                        current.capture.paneId != capture.paneId) {
+                        return@withLock Report(Rewind.Outcome.Failed("identity"), capture = capture)
+                    }
+                    true
+                }
+                is Rewind.Failed -> {
+                    if (current.code != "gone") return@withLock Report(Rewind.Outcome.Failed("capture"), capture = capture)
+                    false
+                }
+            }
             val isShell = s.cmd.removePrefix("-") in Rewind.SHELL_COMMANDS
             val exited = when {
                 inClaude -> {
@@ -264,7 +280,7 @@ internal class RewindController(private val conn: Conn, private val gate: Rewind
                             capture = capture, exited = false,
                         )
                     }
-                    waitShell(sessionName)
+                    waitShell(sessionName, capture.pid)
                 }
                 isShell -> true
                 else -> false
@@ -299,8 +315,8 @@ internal class RewindController(private val conn: Conn, private val gate: Rewind
      * ⚠️ 轮询放进**一条** exec 里跑 shell 循环 —— 别在 Kotlin 侧每 0.5s 发一条 exec，
      * chanLock 串行会把通道挤成蜂窝。24×0.5s 自带上界；到点没见 shell 一律按没退干净。
      */
-    private suspend fun waitShell(sessionName: String): Boolean {
-        val out = conn.ssh.exec(Rewind.waitShellCommand(sessionName))
+    private suspend fun waitShell(sessionName: String, exitingPid: String): Boolean {
+        val out = conn.ssh.exec(Rewind.waitShellCommand(sessionName, exitingPid = exitingPid))
         return "SHELL" in out.lineSequence().map { it.trim() }.toList()
     }
 }
