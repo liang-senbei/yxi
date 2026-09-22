@@ -399,6 +399,20 @@ class IsolatedNativeCliTest {
                         val rootQuery = NativeRootVerification.Query(RewindLiveVerification.RuntimeIdentity(session.name,
                             session.runtimeId, rootCapture.paneId, rootCapture.exe, rootCapture.pid, sid, rootTime),
                             transcript.path, messageUuid("KEEP-container-first"), rootHash)
+                        val rootSource = RewindTargets.inspect(bridge.conn, recoveredSession, rootQuery.originalMessageUuid)
+                        val unchangedRequests = root.resolve("requests.jsonl").readLines().size
+                        val readyScreen = captureUntil("root-guard-ready") { Model.borrowable(it) }
+                        assertFalse(NativeFirstTurnKeys.sent(bridge.conn.ssh.exec(NativeFirstTurnKeys.command(
+                            rootQuery.runtime, rootSource, "stale screen", NativeFirstTurnKeys.Action.Open))))
+                        assertFalse(NativeFirstTurnKeys.sent(bridge.conn.ssh.exec(NativeFirstTurnKeys.command(
+                            rootQuery.runtime.copy(pid = "999999999"), rootSource, readyScreen, NativeFirstTurnKeys.Action.Open))))
+                        assertFalse(NativeFirstTurnKeys.sent(bridge.conn.ssh.exec(NativeFirstTurnKeys.command(
+                            rootQuery.runtime, rootSource.copy(size = rootSource.size - 1), readyScreen, NativeFirstTurnKeys.Action.Open))))
+                        assertEquals(unchangedRequests, root.resolve("requests.jsonl").readLines().size)
+                        suspend fun guarded(action: NativeFirstTurnKeys.Action, screen: String, count: Int = 1) {
+                            val response = bridge.conn.ssh.exec(NativeFirstTurnKeys.command(rootQuery.runtime, rootSource, screen, action, count))
+                            check(NativeFirstTurnKeys.sent(response)) { "Native menu step rejected: $response" }
+                        }
                         val nativeGateFile = root.resolve("native-root-gate.json")
                         val nativeGate = RewindDeliveryGate(nativeGateFile)
                         nativeGate.beginNativeRoot(key, rootQuery)
@@ -406,21 +420,20 @@ class IsolatedNativeCliTest {
                         assertEquals(rootQuery, reloadedNativeGate.pending(key)?.nativeRoot)
                         assertTrue(reloadedNativeGate.blocked(key))
                         assertFalse(nativeGateFile.readText().contains("ROOT-container-restarted"), "Recovery record must not store the edited prompt")
-                        tmux("send-keys", "-t", "=cc-native-check:", "-l", "--", "/rewind")
-                        tmux("send-keys", "-t", "=cc-native-check:", "Enter")
-                        captureUntil("root-menu") { s -> FirstTurnRewindMenu.parse(s, FirstTurnRewindMenu.VERSION)?.let {
+                        guarded(NativeFirstTurnKeys.Action.Open, captureUntil("root-open-ready") { Model.borrowable(it) })
+                        val menuScreen = captureUntil("root-menu") { s -> FirstTurnRewindMenu.parse(s, FirstTurnRewindMenu.VERSION)?.let {
                             it.matches(beforeRootUsers) && it.currentSelected
                         } == true }
-                        repeat(beforeRootUsers.size) { tmux("send-keys", "-t", "=cc-native-check:", "Up") }
-                        captureUntil("root-selected") { s -> FirstTurnRewindMenu.parse(s, FirstTurnRewindMenu.VERSION)?.let {
+                        guarded(NativeFirstTurnKeys.Action.Up, menuScreen, beforeRootUsers.size)
+                        val selectedScreen = captureUntil("root-selected") { s -> FirstTurnRewindMenu.parse(s, FirstTurnRewindMenu.VERSION)?.let {
                             it.matches(beforeRootUsers) && it.selectedIndex == 0
                         } == true }
-                        tmux("send-keys", "-t", "=cc-native-check:", "Enter")
-                        captureUntil("root-confirm") { s -> FirstTurnRewindMenu.confirmsConversationOnly(
+                        guarded(NativeFirstTurnKeys.Action.Enter, selectedScreen)
+                        val confirmScreen = captureUntil("root-confirm") { s -> FirstTurnRewindMenu.confirmsConversationOnly(
                             s, FirstTurnRewindMenu.VERSION, beforeRootUsers.first()) }
-                        tmux("send-keys", "-t", "=cc-native-check:", "Enter")
-                        captureUntil("root-restored-input") { "Confirm you want to restore" !in it && "KEEP-container-first" in it }
-                        tmux("send-keys", "-t", "=cc-native-check:", "C-u")
+                        guarded(NativeFirstTurnKeys.Action.Enter, confirmScreen)
+                        val restoredScreen = captureUntil("root-restored-input") { "Confirm you want to restore" !in it && "KEEP-container-first" in it }
+                        guarded(NativeFirstTurnKeys.Action.Clear, restoredScreen)
                         captureUntil("root-empty-input") { Model.borrowable(it) }
                         tmux("send-keys", "-t", "=cc-native-check:", "-l", "--", "ROOT-container-restarted")
                         tmux("send-keys", "-t", "=cc-native-check:", "Enter")
