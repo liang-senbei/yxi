@@ -588,6 +588,7 @@ class IsolatedNativeCliTest {
                             it.extension == "json" && JSONObject(it.readText()).optString("sessionId") == sid
                         }, "First-turn restore must retain the native conversation ID")
                     } catch (e: Exception) {
+                        if (e is NativeRootRecoveryFailure) root.resolve("root-recovery-receipt.txt").writeText(e.receipt)
                         if (e is ConversationRewindFailure) root.resolve("application-failure.txt").writeText("${e.code}\n${e.detail}")
                         gate.pending(key)?.verification?.let { query ->
                             root.resolve("recovery-probe.txt").writeText(bridge.conn.ssh.exec(

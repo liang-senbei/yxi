@@ -24,6 +24,7 @@ internal suspend fun recheckRewindRecovery(conn: Conn, session: Session, gate: R
         while (System.nanoTime() < deadline) {
             val remaining = ((deadline - System.nanoTime()) / 1_000_000_000L).toInt().coerceIn(1, 600)
             val result = runRewindCommand(conn.ssh, NativeRootVerification.command(root, remaining))
+            if (NativeRootVerification.becameBusy(result)) { delay(200); continue }
             if (NativeRootVerification.verified(result)) {
                 conn.instructionDeliveryMutex.withLock { gate.finishVerified(ticket) }
                 return

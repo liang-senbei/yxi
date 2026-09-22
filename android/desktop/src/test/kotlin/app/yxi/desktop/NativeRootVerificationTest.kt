@@ -16,6 +16,10 @@ class NativeRootVerificationTest {
         assertFalse(NativeRootVerification.verified(output))
         assertTrue(NativeRootVerification.needsIdleInputProof(output))
         assertFalse(NativeRootVerification.needsIdleInputProof(output + "\n" + NativeRootVerification.TAG + ":process-changed"))
+        val busy = NativeRootVerification.TAG + ":became-busy"
+        assertTrue(NativeRootVerification.becameBusy(busy))
+        assertFalse(NativeRootVerification.verified(busy))
+        assertFalse(NativeRootVerification.needsIdleInputProof(busy))
     }
     @Test fun `root proof excludes old context and binds the exact new prompt`() {
         val root = Files.createTempDirectory("native-root-proof").toFile()

@@ -29,13 +29,15 @@ object NativeRootVerification {
             "[ \$(date +%s) -lt \$deadline ] || break; sleep 2; done; " +
             "case \"\$r\" in READY*) c=\$($chain) || c=chain-fail; " +
             "if [ \"\$c\" = ok ] || [ \"\$c\" = idle-user ]; then r2=\$($reg) || r2=probe-fail; " +
-            "if [ \"\$r\" = \"\$r2\" ]; then printf '$TAG:%s\\n' \"\$c\"; else echo '$TAG:process-changed'; fi; " +
+            "if [ \"\$r\" = \"\$r2\" ]; then printf '$TAG:%s\\n' \"\$c\"; " +
+            "elif [ \"\$r2\" = not-ready:status ]; then echo '$TAG:became-busy'; else echo '$TAG:process-changed'; fi; " +
             "else printf '$TAG:%s\\n' \"\$c\"; fi;; *) printf '$TAG:%s\\n' \"\$r\";; esac"
         return "timeout ${registrationTimeoutSec + 30}s sh -c ${Shell.q(body)}"
     }
 
     fun verified(output: String): Boolean = output.lineSequence().lastOrNull { it.startsWith("$TAG:") } == "$TAG:ok"
     fun needsIdleInputProof(output: String): Boolean = output.lineSequence().lastOrNull { it.startsWith("$TAG:") } == "$TAG:idle-user"
+    fun becameBusy(output: String): Boolean = output.lineSequence().lastOrNull { it.startsWith("$TAG:") } == "$TAG:became-busy"
 
     val chainScript = """
 import hashlib,json,os,sys,time
