@@ -2,6 +2,8 @@
 
 ## 原生中断记录核验
 
+`0a59d53` / `48ab5ca` 将远程脚本的中断识别集中到 NativeControlMessages.pythonInterruptionFunction，目标检查不再把中断算后续用户轮，也拒绝选它为目标；按快照直接读取原消息同样拒绝系统标记。`run.u2GVNN` 编译通过；`run.TUcWwG` 目标检查 7 项、`run.NLaXiq` 原消息读取 1 项、`run.bUxHoS` 根分支核验 1 项均无失败/错误/跳过。仍非实际停止按钮整链验收；未发布。
+
 `5700c63` / `6c5f367` 将同一已验证原生信封形态接入 Transcript：作为系统消息展示，不产生 UserText，也不加入待发消息的已发送匹配集。`run.aOBkqe` 编译通过；`run.aCv2PX` NativeControlMessagesTest 2 tests、0 failures/errors/skipped，覆盖同文待发消息保留与手写/其他会话元数据的反例。可编辑目标识别和真实停止动作仍待补齐；未发布。
 
 读取 hk13 既有探针 `/tmp/yxi-rw-probe/home/.claude/projects/*/*.jsonl` 的实际记录：原生 `[Request interrupted by user]` 为单 text block，含一致的 `session_id`/`sessionId`、`entrypoint=cli`、`version=2.1.278`，没有普通输入的 origin/promptSource/turnOrigin；其 parent 实际也可能是 attachment，不能假定直接指向用户消息。
