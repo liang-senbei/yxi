@@ -14,6 +14,7 @@ internal class PluginRpc private constructor(output: InputStream,
     private val write: suspend (String) -> Boolean, private val stop: () -> Unit) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val pending = ConcurrentHashMap<String, CompletableDeferred<JSONObject>>()
+    private val closed = java.util.concurrent.atomic.AtomicBoolean(false)
     init {
         scope.launch {
             try {
@@ -28,7 +29,7 @@ internal class PluginRpc private constructor(output: InputStream,
                     }
                 }
             } catch (_: Exception) { /* Fail pending requests below without leaking runtime diagnostics. */ }
-            finally { pending.values.forEach { it.completeExceptionally(IllegalStateException("插件运行器连接已关闭")) }; pending.clear() }
+            finally { closed.set(true); pending.values.forEach { it.completeExceptionally(IllegalStateException("Codex 未启动或连接已关闭，请检查目标机器的安装和配置目录")) }; pending.clear() }
         }
     }
     suspend fun request(method: String, params: JSONObject = JSONObject()): JSONObject {
@@ -36,6 +37,7 @@ internal class PluginRpc private constructor(output: InputStream,
         val response = CompletableDeferred<JSONObject>()
         pending[id] = response
         try {
+            check(!closed.get()) { "Codex 未启动或连接已关闭，请检查目标机器的安装和配置目录" }
             return withTimeout(60000) {
                 check(write(JSONObject().put("id", id).put("method", method).put("params", params).toString() + "\n")) { "插件请求未能写入" }
                 val value = response.await()
@@ -44,7 +46,7 @@ internal class PluginRpc private constructor(output: InputStream,
             }
         } finally { pending.remove(id) }
     }
-    override fun close() { stop(); scope.cancel(); pending.values.forEach { it.cancel() }; pending.clear() }
+    override fun close() { closed.set(true); stop(); scope.cancel(); pending.values.forEach { it.cancel() }; pending.clear() }
     companion object {
         suspend fun connect(conn: Conn?): PluginRpc {
             val client = if (conn != null) {

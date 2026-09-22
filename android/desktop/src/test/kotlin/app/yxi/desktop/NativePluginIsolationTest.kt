@@ -22,6 +22,7 @@ class NativePluginIsolationTest {
         check(File("/opt/native/claude").canExecute()) // Runner's generic read-only native binary mount is Codex here.
         val root = Files.createTempDirectory(Path.of("/sandbox/tmp"), "codex-plugins-").toFile()
         val home = root.resolve("home").apply { mkdir() }
+        home.resolve(".codex").mkdir()
         val market = home.resolve("market").apply { mkdir() }
         market.resolve(".agents/plugins").mkdirs()
         market.resolve("plugins/sample/.codex-plugin").mkdirs()
@@ -53,6 +54,7 @@ class NativePluginIsolationTest {
                         assertTrue(after.entries.single { it.id == sample.id }.installed)
                     }
                     val otherHome = root.resolve("other-home").apply { mkdir() }
+                    otherHome.resolve(".codex").mkdir()
                     IsolatedSshBridge(root.resolve("ssh-other"), mapOf("HOME" to otherHome.path,
                         "CODEX_HOME" to otherHome.resolve(".codex").path), root.resolve("other.sock")).use { other ->
                         Files.createSymbolicLink(root.resolve("ssh-other/bin/codex").toPath(), Path.of("/opt/native/claude"))
