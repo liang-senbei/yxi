@@ -11,6 +11,12 @@ import kotlin.test.*
 
 @EnabledOnOs(OS.LINUX)
 class NativeRootVerificationTest {
+    @Test fun `a user-only root requires separate idle input proof`() {
+        val output = NativeRootVerification.TAG + ":idle-user"
+        assertFalse(NativeRootVerification.verified(output))
+        assertTrue(NativeRootVerification.needsIdleInputProof(output))
+        assertFalse(NativeRootVerification.needsIdleInputProof(output + "\n" + NativeRootVerification.TAG + ":process-changed"))
+    }
     @Test fun `root proof excludes old context and binds the exact new prompt`() {
         val root = Files.createTempDirectory("native-root-proof").toFile()
         try {
