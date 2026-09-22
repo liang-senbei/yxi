@@ -173,24 +173,22 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
     var editingMessage by remember(taskKey) { mutableStateOf<MessageEditTarget?>(null) }
     editingMessage?.let { target ->
         var editedText by remember(taskKey, target.key) { mutableStateOf(target.text) }
-        WorkbenchDialog(onDismissRequest = { editingMessage = null }, title = { Text("编辑这条消息") },
-            text = { Column {
-                androidx.compose.material3.OutlinedTextField(editedText, { editedText = it }, modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 320.dp), label = { Text("消息内容") })
-                Text("回退对话上下文，然后发送编辑后的内容。已有文件修改不会自动撤销。", style = MaterialTheme.typography.bodySmall)
-            } },
-            confirmButton = { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton({ draft = TextFieldValue(editedText, selection = TextRange(editedText.length)); editingMessage = null; focus.requestFocus() }, enabled = editedText.isNotBlank()) { Text("仅载入草稿") }
-                if (!target.queued && !session.isCodex) Button({
-                    val uuid = target.sourceUuid ?: return@Button
-                    val submitted = editedText
-                    val started = ConversationRewind.start(conn, session, uuid, submitted)
-                    if (started) {
+        RewindMessageDialog(text = editedText, onTextChange = { editedText = it },
+            showRewind = !target.queued && !session.isCodex,
+            canRewind = !rewindRunning && !RewindDelivery.gate.blocked(taskKey) && target.sourceUuid != null &&
+                !live.busy && pending == null && conn.ssh.isConnected,
+            canOpenNative = !live.busy && pending == null && session.runtimeId.isNotBlank() &&
+                !rewindRunning && !RewindDelivery.gate.blocked(taskKey) && conn.ssh.isConnected,
+            onDismiss = { editingMessage = null },
+            onDraft = { draft = TextFieldValue(editedText, selection = TextRange(editedText.length)); editingMessage = null; focus.requestFocus() },
+            onRewind = {
+                target.sourceUuid?.let { uuid ->
+                    if (ConversationRewind.start(conn, session, uuid, editedText)) {
                         editingMessage = null; sendErr = null
                     }
-                }, enabled = !rewindRunning && !RewindDelivery.gate.blocked(taskKey) && target.sourceUuid != null &&
-                    editedText.isNotBlank() && !live.busy && pending == null && conn.ssh.isConnected) { Text("回到这里并继续") }
-            } },
-            dismissButton = { TextButton({
+                }
+            },
+            onNative = {
                 scope.launch {
                     try {
                         val target = "=" + session.name + ":"
@@ -208,8 +206,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                     } catch (e: CancellationException) { throw e }
                     catch (e: Exception) { sendErr = e.message }
                 }
-            }, enabled = !target.queued && !session.isCodex && !live.busy && pending == null && session.runtimeId.isNotBlank() &&
-                !rewindRunning && !RewindDelivery.gate.blocked(taskKey) && conn.ssh.isConnected) { Text("打开 Claude 回退选择器") } })
+            })
     }
     val staged = remember(taskKey) { mutableStateListOf<DraftAttach>() }
 
