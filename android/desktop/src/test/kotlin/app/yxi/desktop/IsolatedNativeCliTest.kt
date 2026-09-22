@@ -67,6 +67,28 @@ class IsolatedNativeCliTest {
             val followup = requests.last { it.getJSONArray("messages").toString().contains("FOLLOWUP-container-second") }
             assertTrue(followup.getBoolean("fake_auth"))
             assertTrue(followup.getJSONArray("messages").toString().contains("KEEP-container-first"))
+
+            // Select the actual persisted parent UUID, never infer a turn from its display index.
+            val transcript = config.walkTopDown().single { it.isFile && it.name == "$sid.jsonl" }
+            val records = transcript.readLines().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+            val selected = records.last { it.optString("type") == "user" &&
+                it.optJSONObject("message")?.toString()?.contains("FOLLOWUP-container-second") == true }
+            val anchor = selected.getString("parentUuid")
+            invoke("third", "--resume", sid, "-p", "DROP-container-third", "--output-format", "json")
+            val edited = invoke("edited", "--resume", sid, "--resume-session-at", anchor,
+                "-p", "EDIT-container-second", "--output-format", "json")
+            assertEquals(sid, edited.getString("session_id"))
+            invoke("after-edit", "--resume", sid, "-p", "VERIFY-container-branch", "--output-format", "json")
+            val allRequests = root.resolve("requests.jsonl").readLines().map(::JSONObject)
+            for (marker in listOf("EDIT-container-second", "VERIFY-container-branch")) {
+                val payload = allRequests.last { it.getJSONArray("messages").toString().contains(marker) }
+                assertTrue(payload.getBoolean("fake_auth"))
+                val messages = payload.getJSONArray("messages").toString()
+                assertTrue(messages.contains("KEEP-container-first"), "Retained ancestor missing: $marker")
+                assertTrue(messages.contains("EDIT-container-second"), "Edited turn missing: $marker")
+                assertFalse(messages.contains("FOLLOWUP-container-second"), "Replaced turn leaked: $marker")
+                assertFalse(messages.contains("DROP-container-third"), "Abandoned descendant leaked: $marker")
+            }
         } finally {
             server.destroyForcibly(); server.waitFor(5, TimeUnit.SECONDS)
             root.listFiles().orEmpty().filter { it.isFile && it.name != "stub.py" }.forEach {
