@@ -374,6 +374,48 @@ class IsolatedNativeCliTest {
                             it.getJSONArray("messages").toString().contains("EDIT-container-images-removed")
                         }.getJSONArray("messages").toString()
                         assertFalse(removedRequest.contains("\"type\":\"image\""), "Explicitly removed images must not be sent")
+                        // Capability proof for the first-turn path. Only the dedicated fixture is driven.
+                        val beforeRootUsers = renderedUsers()
+                        assertEquals(listOf("KEEP-container-first", "RECOVERY-app-rewind", "EDIT-container-images-removed"), beforeRootUsers)
+                        fun captureUntil(label: String, predicate: (String) -> Boolean): String {
+                            var captured = ""
+                            repeat(100) {
+                                captured = tmux("capture-pane", "-p", "-t", "=cc-native-check:")
+                                if (predicate(captured)) {
+                                    root.resolve("$label.txt").writeText(captured)
+                                    return captured
+                                }
+                                Thread.sleep(100)
+                            }
+                            root.resolve("$label.txt").writeText(captured)
+                            error("Native first-turn fixture did not reach $label")
+                        }
+                        captureUntil("root-ready") { Model.borrowable(it) }
+                        tmux("send-keys", "-t", "=cc-native-check:", "-l", "--", "/rewind")
+                        tmux("send-keys", "-t", "=cc-native-check:", "Enter")
+                        captureUntil("root-menu") { s -> s.contains("Restore the code and/or conversation") &&
+                            s.contains("Enter to continue") && beforeRootUsers.all { it in s } && "more above" !in s && "more below" !in s }
+                        repeat(beforeRootUsers.size) { tmux("send-keys", "-t", "=cc-native-check:", "Up") }
+                        captureUntil("root-selected") { s -> s.lineSequence().any { "❯" in it && "KEEP-container-first" in it } }
+                        tmux("send-keys", "-t", "=cc-native-check:", "Enter")
+                        captureUntil("root-confirm") { s -> s.contains("The code will be unchanged") &&
+                            s.lineSequence().any { it.trim().matches(Regex("❯\\s*1\\. Restore conversation")) } }
+                        tmux("send-keys", "-t", "=cc-native-check:", "Enter")
+                        captureUntil("root-restored-input") { "Confirm you want to restore" !in it && "KEEP-container-first" in it }
+                        tmux("send-keys", "-t", "=cc-native-check:", "C-u")
+                        captureUntil("root-empty-input") { Model.borrowable(it) }
+                        tmux("send-keys", "-t", "=cc-native-check:", "-l", "--", "ROOT-container-restarted")
+                        tmux("send-keys", "-t", "=cc-native-check:", "Enter")
+                        captureUntil("root-completed") { Model.borrowable(it) && "answer:ROOT-container-restarted" in it }
+                        val rootRequest = root.resolve("requests.jsonl").readLines().map(::JSONObject).last {
+                            it.getJSONArray("messages").toString().contains("ROOT-container-restarted")
+                        }.getJSONArray("messages").toString()
+                        for (old in beforeRootUsers) assertFalse(rootRequest.contains(old), "First-turn restore kept $old")
+                        assertFalse(rootRequest.contains("RETAINED_TOOL_CONTENT"))
+                        assertEquals(listOf("ROOT-container-restarted"), renderedUsers())
+                        assertTrue(config.resolve("sessions").listFiles().orEmpty().any {
+                            it.extension == "json" && JSONObject(it.readText()).optString("sessionId") == sid
+                        }, "First-turn restore must retain the native conversation ID")
                     } catch (e: Exception) {
                         if (e is ConversationRewindFailure) root.resolve("application-failure.txt").writeText("${e.code}\n${e.detail}")
                         gate.pending(key)?.verification?.let { query ->

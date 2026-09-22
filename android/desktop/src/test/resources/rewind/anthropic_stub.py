@@ -41,7 +41,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.reply_json({"input_tokens": 1})
             return
         marker = next((found for m in reversed(body.get("messages", [])) if m.get("role") == "user"
-                       for found in [re.search(r"(?:KEEP|FOLLOWUP|DROP|EDIT|VERIFY|SINGLE|INTERACTIVE|APP|SECOND|RECOVERY)-[A-Za-z-]+", json.dumps(m.get("content", "")))] if found), None)
+                       for found in [re.search(r"(?:KEEP|FOLLOWUP|DROP|EDIT|VERIFY|SINGLE|INTERACTIVE|APP|SECOND|RECOVERY|ROOT)-[A-Za-z-]+", json.dumps(m.get("content", "")))] if found), None)
         answer = "answer:" + marker.group(0) if marker else "ok"
         tool = None
         if marker and marker.group(0) in ("KEEP-container-first", "DROP-container-third"):
