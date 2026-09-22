@@ -1,10 +1,12 @@
 package app.yxi.desktop
 
 import app.yxi.agent.Dirs
+import app.yxi.agent.PermissionMode
 import app.yxi.ssh.Shell
 import java.util.UUID
 
-data class DesktopLaunchPlan(val directory: String, val agent: String, val requestId: String, val initialPrompt: String = "", val collaborationGroup: String = "", val isolatedWorktree: Boolean = false) {
+data class DesktopLaunchPlan(val directory: String, val agent: String, val requestId: String, val initialPrompt: String = "", val collaborationGroup: String = "", val isolatedWorktree: Boolean = false,
+    val permissionMode: PermissionMode? = null) {
     init {
         require(agent in listOf("claude", "codex")) { "不支持的运行器" }
         require(directory.startsWith('/') && directory.none { it < ' ' || it == '\u007f' }) { "请输入服务器上的绝对路径，不含控制字符" }
@@ -17,6 +19,10 @@ data class DesktopLaunchPlan(val directory: String, val agent: String, val reque
     }
     fun command(): String {
         val tag = Dirs.TAG
+        require(permissionMode == null || agent == "claude") { "此权限模式仅适用于 Claude Code" }
+        val modeArgs = permissionMode?.let { " --permission-mode ${it.nativeId}" }.orEmpty()
+        // Native root bypass requires this compatibility flag; it does not create a sandbox.
+        val execPrefix = if (permissionMode == PermissionMode.Bypass) "exec env IS_SANDBOX=1" else "exec"
         val prepareDirectory = if (!isolatedWorktree) "mkdir -p -- \"${'$'}d\" 2>/dev/null || { echo '$tag:nodir'; exit 0; }" else {
             val script = """
 import pathlib, subprocess, sys
@@ -74,9 +80,9 @@ if tmux has-session -t "=${'$'}n" 2>/dev/null; then
 fi
 $joinGroup
 if [ -n "${'$'}prompt" ]; then
-  tmux new-session -d -s "${'$'}n" -c "${'$'}want" /bin/sh -c 'exec "${'$'}1" -- "${'$'}2"' yxi-launch "${'$'}bin" "${'$'}prompt" 2>/dev/null || { echo '$tag:failed'; exit 0; }
+  tmux new-session -d -s "${'$'}n" -c "${'$'}want" /bin/sh -c '$execPrefix "${'$'}1"$modeArgs -- "${'$'}2"' yxi-launch "${'$'}bin" "${'$'}prompt" 2>/dev/null || { echo '$tag:failed'; exit 0; }
 else
-  tmux new-session -d -s "${'$'}n" -c "${'$'}want" /bin/sh -c 'exec "${'$'}1"' yxi-launch "${'$'}bin" 2>/dev/null || { echo '$tag:failed'; exit 0; }
+  tmux new-session -d -s "${'$'}n" -c "${'$'}want" /bin/sh -c '$execPrefix "${'$'}1"$modeArgs' yxi-launch "${'$'}bin" 2>/dev/null || { echo '$tag:failed'; exit 0; }
 fi
 sleep 0.2
 tmux has-session -t "=${'$'}n" 2>/dev/null || { echo '$tag:exited'; exit 0; }

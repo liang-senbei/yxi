@@ -451,6 +451,25 @@ class IsolatedNativeCliTest {
                             app.yxi.agent.PermissionMode.fromScreen(tmux("capture-pane", "-p", "-t", "=cc-native-check:")))
                         assertEquals(requestsBeforeModes, root.resolve("requests.jsonl").readLines().size,
                             "Permission switching must not submit a model request")
+                        Files.createSymbolicLink(root.resolve("ssh/bin/claude").toPath(), native.toPath())
+                        val bypassPlan = DesktopLaunchPlan(project.path, "claude", DesktopLaunchPlan.newRequestId(),
+                            permissionMode = app.yxi.agent.PermissionMode.Bypass)
+                        try {
+                            assertTrue(bridge.conn.ssh.exec(bypassPlan.command()).contains("__YXI_NEW__:ok"))
+                            var bypassScreen = ""
+                            var bypassReady = false
+                            repeat(100) {
+                                if (!bypassReady) {
+                                    bypassScreen = tmux("capture-pane", "-p", "-t", "=" + bypassPlan.sessionName + ":")
+                                    bypassReady = app.yxi.agent.PermissionMode.fromScreen(bypassScreen) == app.yxi.agent.PermissionMode.Bypass
+                                    if (!bypassReady) Thread.sleep(100)
+                                }
+                            }
+                            root.resolve("permission-bypass-startup.txt").writeText(bypassScreen)
+                            assertTrue(bypassReady, "Explicit bypass startup must report its actual mode: $bypassScreen")
+                        } finally {
+                            tmux("kill-session", "-t", "=" + bypassPlan.sessionName)
+                        }
                         bridge.conn.ssh.exec(Rewind.cleanupCommand(rootCapture))
                         assertTrue(config.resolve("sessions").listFiles().orEmpty().any {
                             it.extension == "json" && JSONObject(it.readText()).optString("sessionId") == sid

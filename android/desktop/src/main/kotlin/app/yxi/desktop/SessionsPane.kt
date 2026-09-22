@@ -101,7 +101,9 @@ fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: Stri
     var agent by remember { mutableStateOf(initialAgent?.takeIf { it in listOf("claude", "codex") } ?: "claude") }
     var initialPrompt by remember { mutableStateOf(groupContext) }
     var isolatedWorktree by remember { mutableStateOf(false) }
-    val requestId = remember(path, agent, initialPrompt, collaborationGroup, isolatedWorktree) { DesktopLaunchPlan.newRequestId() }
+    var permissionMode by remember { mutableStateOf(app.yxi.agent.PermissionMode.Manual) }
+    var permissionsOpen by remember { mutableStateOf(false) }
+    val requestId = remember(path, agent, initialPrompt, collaborationGroup, isolatedWorktree, permissionMode) { DesktopLaunchPlan.newRequestId() }
     WorkbenchDialog(
         onDismissRequest = { if (!busy) onDismiss() },
         title = { Text("在 ${conn.host.label} 上新建会话") },
@@ -111,6 +113,16 @@ fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: Stri
                 if (initialDirectory != null) Text("已填入所选目录，可在创建前调整。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 Text("先检查运行器，再创建独立会话。目录不存在会创建；已有任务继续运行。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 OutlinedTextField(path, { path = it }, enabled = !busy, singleLine = true, label = { Text("服务器工作目录") }, placeholder = { Text("/opt/workspace/…") }, modifier = Modifier.fillMaxWidth())
+                if (agent == "claude") Box {
+                    TextButton({ permissionsOpen = true }, enabled = !busy) { Text("权限：${permissionMode.title} ⌄") }
+                    androidx.compose.material3.DropdownMenu(permissionsOpen, { permissionsOpen = false }) {
+                        app.yxi.agent.PermissionMode.entries.forEach { mode ->
+                            androidx.compose.material3.DropdownMenuItem(text = { Text(mode.title) }, onClick = {
+                                permissionMode = mode; permissionsOpen = false
+                            })
+                        }
+                    }
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     androidx.compose.material3.Checkbox(isolatedWorktree, { isolatedWorktree = it }, enabled = !busy)
                     Text("使用独立 Git worktree", style = MaterialTheme.typography.bodySmall)
@@ -133,7 +145,8 @@ fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: Stri
             TextButton(enabled = path.isNotBlank() && !busy, onClick = {
                 busy = true
                 scope.launch {
-                    try { createSession(conn, DesktopLaunchPlan(path.trim(), agent, requestId, initialPrompt, collaborationGroup, isolatedWorktree)).fold(onCreated) { err = it.message.orEmpty() } }
+                    try { createSession(conn, DesktopLaunchPlan(path.trim(), agent, requestId, initialPrompt, collaborationGroup, isolatedWorktree,
+                        permissionMode.takeIf { agent == "claude" })).fold(onCreated) { err = it.message.orEmpty() } }
                     catch (e: kotlinx.coroutines.CancellationException) { throw e }
                     catch (e: Exception) { err = e.message.orEmpty() }
                     finally { busy = false }
