@@ -270,7 +270,9 @@ internal class RewindController(private val conn: Conn, private val gate: Rewind
                 return@withLock Report(Rewind.Outcome.Failed("exit-stuck"), capture = capture, exited = false)
             }
             // ── 投递：复核（runtimeId + paneId，同一条 exec 里原子完成）过了才 send-keys。
-            val deliver = conn.ssh.exec(Rewind.relaunchCommand(sessionName, capture, sessionId, s.cwd, runtimeId.orEmpty()))
+            // Reuse the directory bound to the rewind plan. A later pane probe may report
+            // a different shell directory; resuming there would load another project's config.
+            val deliver = conn.ssh.exec(Rewind.relaunchCommand(sessionName, capture, sessionId, cwd, runtimeId.orEmpty()))
             val code = Rewind.parseRelaunch(deliver)
             if (code != null) {
                 return@withLock Report(
