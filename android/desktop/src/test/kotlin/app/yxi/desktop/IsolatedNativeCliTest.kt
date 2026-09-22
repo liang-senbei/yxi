@@ -394,7 +394,8 @@ class IsolatedNativeCliTest {
                         captureUntil("root-ready") { Model.borrowable(it) }
                         val rootCapture = (Rewind.parseCapture(bridge.conn.ssh.exec(Rewind.captureCommand(session.name))) as Rewind.Got).capture
                         val rootTime = bridge.conn.ssh.exec("python3 -c 'import time; print(time.time())'").trim().toDouble()
-                        val rootHash = java.security.MessageDigest.getInstance("SHA-256").digest("ROOT-container-restarted".toByteArray())
+                        val rootText = "ROOT-container-restarted\n第二行中文🙂，保持为同一条消息。"
+                        val rootHash = java.security.MessageDigest.getInstance("SHA-256").digest(rootText.toByteArray())
                             .joinToString("") { "%02x".format(it) }
                         val rootQuery = NativeRootVerification.Query(RewindLiveVerification.RuntimeIdentity(session.name,
                             session.runtimeId, rootCapture.paneId, rootCapture.exe, rootCapture.pid, sid, rootTime),
@@ -428,7 +429,7 @@ class IsolatedNativeCliTest {
                         }
                         val nativeGateFile = root.resolve("native-root-gate.json")
                         val nativeGate = RewindDeliveryGate(nativeGateFile)
-                        nativeGate.beginNativeRoot(key, rootQuery)
+                        val rootTicket = nativeGate.beginNativeRoot(key, rootQuery)
                         val reloadedNativeGate = RewindDeliveryGate(nativeGateFile)
                         assertEquals(rootQuery, reloadedNativeGate.pending(key)?.nativeRoot)
                         assertTrue(reloadedNativeGate.blocked(key))
@@ -447,16 +448,20 @@ class IsolatedNativeCliTest {
                         guarded(NativeFirstTurnKeys.Action.Enter, confirmScreen)
                         val restoredScreen = captureUntil("root-restored-input") { "Confirm you want to restore" !in it && "KEEP-container-first" in it }
                         guarded(NativeFirstTurnKeys.Action.Clear, restoredScreen)
-                        captureUntil("root-empty-input") { Model.borrowable(it) }
-                        tmux("send-keys", "-t", "=cc-native-check:", "-l", "--", "ROOT-container-restarted")
-                        tmux("send-keys", "-t", "=cc-native-check:", "Enter")
+                        val emptyScreen = captureUntil("root-empty-input") { Model.borrowable(it) }
+                        assertTrue(NativeFirstTurnKeys.paste(bridge.conn, rootQuery, rootSource, sourceHash,
+                            emptyScreen, rootText, rootTicket.operationId))
+                        val pastedScreen = captureUntil("root-pasted-input") {
+                            app.yxi.agent.Live.inputEmpty(it) == false && app.yxi.agent.Prompt.parse(it) == null
+                        }
+                        guarded(NativeFirstTurnKeys.Action.Enter, pastedScreen)
                         captureUntil("root-completed") { Model.borrowable(it) && "answer:ROOT-container-restarted" in it }
                         val rootRequest = root.resolve("requests.jsonl").readLines().map(::JSONObject).last {
                             it.getJSONArray("messages").toString().contains("ROOT-container-restarted")
                         }.getJSONArray("messages").toString()
                         for (old in beforeRootUsers) assertFalse(rootRequest.contains(old), "First-turn restore kept $old")
                         assertFalse(rootRequest.contains("RETAINED_TOOL_CONTENT"))
-                        assertEquals(listOf("ROOT-container-restarted"), renderedUsers())
+                        assertEquals(listOf(rootText), renderedUsers())
                         val rootProof = runRewindCommand(bridge.conn.ssh, NativeRootVerification.command(rootQuery))
                         root.resolve("root-proof.txt").writeText(rootProof)
                         assertTrue(NativeRootVerification.verified(rootProof), rootProof)
