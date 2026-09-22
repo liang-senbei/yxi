@@ -14,7 +14,7 @@ class ProviderModelsTest {
         val dir = Files.createTempDirectory("provider-model-tests").toFile()
         try {
             val service = dir.resolve("discovery.py").apply { writeText(ProviderModels.script) }
-            val tests = dir.resolve("tests.py").apply { writeText(javaClass.getResource("/provider_models_test.py")!!.readText()) }
+            val tests = dir.resolve("tests.py").apply { writeText(ProviderModelsTest::class.java.getResource("/provider_models_test.py")!!.readText()) }
             val output = dir.resolve("result.txt")
             val process = ProcessBuilder("python3", tests.path, service.path).redirectErrorStream(true).redirectOutput(output).start()
             try {
