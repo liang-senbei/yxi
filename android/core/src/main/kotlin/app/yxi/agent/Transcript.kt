@@ -339,7 +339,7 @@ object Transcript {
                     parseUser(
                         msg, d.optJSONObject("toolUseResult"), uuid, calls, out, said,
                         // ⚠️ Claude Code 给「不是用户打的」消息打了 isMeta —— 见 [parseUser]
-                        isMeta = d.optBoolean("isMeta", false),
+                        isMeta = d.optBoolean("isMeta", false) || NativeControlMessages.isInterruption(d),
                     )
                     // ⚠️ **切完模型、但它还没回话时，标签也得跟着变。**
                     // 顶栏那个模型名来自「最后一条 assistant 消息」的 model —— 切换不会改写旧消息，
