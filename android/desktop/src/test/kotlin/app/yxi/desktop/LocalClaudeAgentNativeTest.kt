@@ -18,7 +18,7 @@ class LocalClaudeAgentNativeTest {
         val root = Files.createTempDirectory(Path.of("/sandbox/tmp"), "local-claude-").toFile()
         val bin = File(home, ".local/bin").apply { mkdirs() }
         Files.createSymbolicLink(File(bin, "claude").toPath(), Path.of("/opt/native/claude"))
-        val script = root.resolve("stub.py").apply { writeText(javaClass.getResource("/rewind/anthropic_stub.py")!!.readText()) }
+        val script = root.resolve("stub.py").apply { writeText(LocalClaudeAgentNativeTest::class.java.getResource("/rewind/anthropic_stub.py")!!.readText()) }
         val server = ProcessBuilder("python3", script.path, root.path).redirectErrorStream(true).redirectOutput(root.resolve("stub.log")).start()
         val agents = LocalAgents(root.resolve("jobs"))
         try {
