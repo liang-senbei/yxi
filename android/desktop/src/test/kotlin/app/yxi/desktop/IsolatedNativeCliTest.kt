@@ -2,6 +2,7 @@ package app.yxi.desktop
 
 import app.yxi.agent.Rewind
 import app.yxi.agent.RewindMessageInput
+import app.yxi.agent.NativeRootVerification
 import app.yxi.agent.Model
 import app.yxi.agent.ChatItem
 import app.yxi.agent.SessionProbe
@@ -391,6 +392,13 @@ class IsolatedNativeCliTest {
                             error("Native first-turn fixture did not reach $label")
                         }
                         captureUntil("root-ready") { Model.borrowable(it) }
+                        val rootCapture = (Rewind.parseCapture(bridge.conn.ssh.exec(Rewind.captureCommand(session.name))) as Rewind.Got).capture
+                        val rootTime = bridge.conn.ssh.exec("python3 -c 'import time; print(time.time())'").trim().toDouble()
+                        val rootHash = java.security.MessageDigest.getInstance("SHA-256").digest("ROOT-container-restarted".toByteArray())
+                            .joinToString("") { "%02x".format(it) }
+                        val rootQuery = NativeRootVerification.Query(RewindLiveVerification.RuntimeIdentity(session.name,
+                            session.runtimeId, rootCapture.paneId, rootCapture.exe, rootCapture.pid, sid, rootTime),
+                            transcript.path, messageUuid("KEEP-container-first"), rootHash)
                         tmux("send-keys", "-t", "=cc-native-check:", "-l", "--", "/rewind")
                         tmux("send-keys", "-t", "=cc-native-check:", "Enter")
                         captureUntil("root-menu") { s -> FirstTurnRewindMenu.parse(s, FirstTurnRewindMenu.VERSION)?.let {
@@ -416,6 +424,10 @@ class IsolatedNativeCliTest {
                         for (old in beforeRootUsers) assertFalse(rootRequest.contains(old), "First-turn restore kept $old")
                         assertFalse(rootRequest.contains("RETAINED_TOOL_CONTENT"))
                         assertEquals(listOf("ROOT-container-restarted"), renderedUsers())
+                        val rootProof = runRewindCommand(bridge.conn.ssh, NativeRootVerification.command(rootQuery))
+                        root.resolve("root-proof.txt").writeText(rootProof)
+                        assertTrue(NativeRootVerification.verified(rootProof), rootProof)
+                        bridge.conn.ssh.exec(Rewind.cleanupCommand(rootCapture))
                         assertTrue(config.resolve("sessions").listFiles().orEmpty().any {
                             it.extension == "json" && JSONObject(it.readText()).optString("sessionId") == sid
                         }, "First-turn restore must retain the native conversation ID")

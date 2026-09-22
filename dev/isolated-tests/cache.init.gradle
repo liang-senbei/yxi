@@ -2,9 +2,9 @@ gradle.projectsEvaluated {
     def desktop = gradle.rootProject.project(':desktop')
     desktop.tasks.register('cacheIsolatedRuntime') {
         doLast {
-            desktop.configurations.testRuntimeClasspath.files.each { artifact ->
+            [desktop, gradle.rootProject.project(':core')].each { project -> project.configurations.testRuntimeClasspath.files.each { artifact ->
                 if (!artifact.isFile()) throw new GradleException('Missing test runtime artifact')
-            }
+            } }
         }
     }
     desktop.tasks.withType(Test).configureEach {

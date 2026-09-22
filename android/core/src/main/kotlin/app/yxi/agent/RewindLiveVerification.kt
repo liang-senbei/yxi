@@ -119,10 +119,8 @@ object RewindLiveVerification {
         val iters = (regTimeoutSec * 2).coerceAtLeast(1)   // 0.5s 一拍
         // ⚠️ q() 只转义不包引号——python 脚本整体必须自己套单引号，漏了就是 root 审查指出的
         // 「生成的脚本根本不能执行」（多行无引号会被 shell 裂成碎片）。
-        val reg = "python3 -c '${q(REG_PY)}' '~/.claude/sessions' " +
-            "'${q(q.sessionName)}' '${q(q.runtimeId)}' '${q(q.paneId)}' " +
-            "'${q(q.exe)}' '${q(q.oldPid)}' '${q(q.sessionId)}' " +
-            "'${(q.notBeforeEpochSec * 1000).toString()}'"
+        val reg = registrationCommand(RuntimeIdentity(q.sessionName, q.runtimeId, q.paneId, q.exe,
+            q.oldPid, q.sessionId, q.notBeforeEpochSec))
         val chain = "python3 -c '${q(CHAIN_PY)}' " +
             "'${q(q.transcriptPath)}' ${chainMaxBytes} $chainTimeoutSec ${CHAIN_NODE_CAP} " +
             "'${q(q.anchorUuid)}' '${q(q.targetUuid)}'"
@@ -177,6 +175,22 @@ object RewindLiveVerification {
     /** shell 单引号里安全地嵌一个值（`'\''` 四字符，同 [Rewind]）。⚠️ 只转义不包引号，调用处自己套。 */
     private fun q(v: String) = v.replace("'", "'\\''")
 
+    data class RuntimeIdentity(val sessionName: String, val runtimeId: String, val paneId: String,
+        val exe: String, val pid: String, val sessionId: String, val notBeforeEpochSec: Double)
+
+    fun registrationCommand(identity: RuntimeIdentity, sameProcess: Boolean = false): String {
+        require(Regex("^[A-Za-z0-9_.:@%+-]{1,128}$").matches(identity.sessionName))
+        require(Regex("^\\d{1,10}:\\$\\d{1,10}:\\d{1,12}$").matches(identity.runtimeId))
+        require(Regex("^%\\d{1,10}$").matches(identity.paneId))
+        require(Regex("^[A-Za-z0-9/._-]{2,300}$").matches(identity.exe))
+        require(Regex("^\\d{1,10}$").matches(identity.pid) && UUIDRX.matches(identity.sessionId))
+        require(identity.notBeforeEpochSec.isFinite() && identity.notBeforeEpochSec >= 0)
+        return "python3 -c '${q(REG_PY)}' '~/.claude/sessions' " +
+            "'${q(identity.sessionName)}' '${q(identity.runtimeId)}' '${q(identity.paneId)}' " +
+            "'${q(identity.exe)}' '${q(identity.pid)}' '${q(identity.sessionId)}' " +
+            "'${identity.notBeforeEpochSec * 1000}' '${if (sameProcess) "same" else "new"}'"
+    }
+
     // ⚠️ 两段 python 里不许出现单引号（要进 shell 单引号串）也不许 `$`（Kotlin 原样串直接嵌）；
     //    值一律走 argv。状态时间字段实测为 epoch 毫秒，与 SessionProbe 的 optDouble(...)/1000.0 同一口径。
 
@@ -219,7 +233,9 @@ cands.sort(reverse=True)
 picked = None; saw_any = bool(cands)
 for _, _, o in cands:
     pid = str(o.get("pid", ""))
-    if not pid.isdigit() or pid == sys.argv[6]:
+    if not pid.isdigit():
+        continue
+    if (sys.argv[9] == "same") != (pid == sys.argv[6]):
         continue
     saw_any = False
     picked = (pid, o)
@@ -241,8 +257,10 @@ if not reason:
     except OSError:
         reason = "proc-exe"
 if not reason:
-    ppid = pid; tree_ok = False
+    ppid = pid; tree_ok = pid == pane_pid
     for _ in range(12):
+        if tree_ok:
+            break
         try:
             s = open("/proc/%s/stat" % ppid).read()
         except OSError:

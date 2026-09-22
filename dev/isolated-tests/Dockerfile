@@ -13,7 +13,7 @@ ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 WORKDIR /workspace
 COPY . /workspace
-RUN cd android && bash gradlew -Pyxi.desktopOnly=true :desktop:testClasses :desktop:cacheIsolatedRuntime \
+RUN cd android && bash gradlew -Pyxi.desktopOnly=true :core:testClasses :desktop:testClasses :desktop:cacheIsolatedRuntime \
     -I /workspace/dev/isolated-tests/cache.init.gradle --no-daemon --max-workers=1 \
     -Dorg.gradle.jvmargs=-Xmx1536m -Pkotlin.compiler.execution.strategy=in-process
 ARG SOURCE_REVISION

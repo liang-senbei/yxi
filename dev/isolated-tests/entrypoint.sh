@@ -8,17 +8,22 @@ test "$(ls /sys/class/net)" = lo
 test "$#" = 1
 test_class=$1
 [[ "$test_class" =~ ^app\.yxi\.[A-Za-z0-9_.]+Test$ ]]
+case "$test_class" in
+    app.yxi.desktop.*) test_project=desktop;;
+    app.yxi.agent.*|app.yxi.ssh.*) test_project=core;;
+    *) echo 'Unsupported test package' >&2; exit 2;;
+esac
 mkdir -p /sandbox/tmp /sandbox/home/.claude /results
 cd /workspace/android
 set +e
-xvfb-run -a bash gradlew -Pyxi.desktopOnly=true :desktop:test --tests "$test_class" \
+xvfb-run -a bash gradlew -Pyxi.desktopOnly=true ":$test_project:test" --tests "$test_class" \
     --offline --no-daemon --max-workers=1 -Dorg.gradle.jvmargs=-Xmx1536m \
     -Pkotlin.compiler.execution.strategy=in-process \
     -I /workspace/dev/isolated-tests/cache.init.gradle
 test_result=$?
 set -e
-if test -d desktop/build/test-results/test; then cp -R desktop/build/test-results/test /results/xml; fi
-if test -d desktop/build/reports/tests/test; then cp -R desktop/build/reports/tests/test /results/report; fi
+if test -d "$test_project/build/test-results/test"; then cp -R "$test_project/build/test-results/test" /results/xml; fi
+if test -d "$test_project/build/reports/tests/test"; then cp -R "$test_project/build/reports/tests/test" /results/report; fi
 test "$test_result" = 0
 python3 - "$test_class" <<'PY'
 import pathlib,sys,xml.etree.ElementTree as ET
