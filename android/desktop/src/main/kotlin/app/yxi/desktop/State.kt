@@ -31,6 +31,9 @@ class AppState {
     internal fun configurationConnection() = if (configurationHostId.isBlank()) conn
         else conns.firstOrNull { it.host.id == configurationHostId }
     var pluginLocation by mutableStateOf("本地")
+    var pluginMarketplace by mutableStateOf(true)
+    var pluginMarketScope by mutableStateOf(0)
+    var pluginMarketQuery by mutableStateOf("")
     var showAndroidEmulator by mutableStateOf(false)
     internal val codexConversationViews = mutableMapOf<String, CodexConversationView>()
     internal var codexSelectedTaskKey by mutableStateOf<String?>(null)

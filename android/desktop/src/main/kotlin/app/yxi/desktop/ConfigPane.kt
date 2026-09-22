@@ -81,7 +81,7 @@ fun ConfigPane(state: AppState) {
     Row(Modifier.fillMaxSize().background(t.surface0)) {
         Column(Modifier.width(300.dp).fillMaxHeight().verticalScroll(rememberScrollState())) {
             TextButton({ state.page = Page.Config }) { Text("返回供应商配置") }
-            TextButton({ state.pluginLocation = "服务器"; state.page = Page.Plugins }) { Text("管理服务器插件") }
+            TextButton({ state.pluginLocation = "服务器"; state.pluginMarketplace = false; state.page = Page.Plugins }) { Text("管理服务器插件") }
             TextButton({ state.openRoutes() }) { Text("模型与第三方线路") }
             Text(
                 conn.host.label,

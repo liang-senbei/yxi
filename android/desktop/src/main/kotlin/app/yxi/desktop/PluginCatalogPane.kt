@@ -4,9 +4,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.dp
 import app.yxi.ssh.Shell
 import kotlinx.coroutines.CancellationException
@@ -27,7 +30,8 @@ internal object PluginCatalog {
 }
 
 @Composable
-internal fun PluginCatalogPane(state: AppState, conn: Conn, showInstalled: (() -> Unit)? = null) {
+internal fun PluginCatalogPane(state: AppState, conn: Conn, embedded: Boolean = false, searchText: String? = null,
+    showInstalled: (() -> Unit)? = null) {
     val t = Tokens.current
     var revision by remember(conn) { mutableStateOf(0) }
     var entries by remember(conn) { mutableStateOf<List<CatalogPlugin>>(emptyList()) }
@@ -46,13 +50,13 @@ internal fun PluginCatalogPane(state: AppState, conn: Conn, showInstalled: (() -
         catch (e: Exception) { error = e.message.orEmpty() }
         finally { busy = false }
     }
-    Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    Column(Modifier.fillMaxSize().padding(if (embedded) 0.dp else 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Row(Modifier.fillMaxWidth()) {
             Column(Modifier.weight(1f)) {
-                Text("插件目录", style = MaterialTheme.typography.headlineSmall)
-                Text(conn.host.label, color = t.textMuted)
+                if (!embedded) Text("插件市场", style = MaterialTheme.typography.headlineSmall)
+                Text("${conn.host.label} · Claude Code 市场", color = t.textMuted, style = MaterialTheme.typography.titleSmall)
             }
-            OutlinedButton({ revision++ }, enabled = !busy) { Text("刷新目录") }
+            OutlinedButton({ revision++ }, enabled = !busy) { Text("刷新") }
         }
         Text("来自这台主机已配置的市场。目录条目不代表已安装或已验证兼容。", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
         if (last != null) Row(Modifier.fillMaxWidth()) {
@@ -60,10 +64,10 @@ internal fun PluginCatalogPane(state: AppState, conn: Conn, showInstalled: (() -
             TextButton({ operations.query(conn, last) }, enabled = last.id !in operations.running && conn.status == Conn.Status.Connected) { Text("查询结果") }
         }
         if (operations.error.isNotBlank()) Text(operations.error, color = t.danger)
-        OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("搜索插件或市场") }, shape = RoundedCornerShape(14.dp))
+        if (searchText == null) OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("搜索插件或市场") }, shape = RoundedCornerShape(14.dp))
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (error.isNotBlank()) Text(error, color = t.danger)
-        val shown = entries.filter { "${it.id} ${it.description}".contains(query.trim(), ignoreCase = true) }
+        val shown = entries.filter { "${it.id} ${it.name} ${it.marketplace} ${it.description}".contains((searchText ?: query).trim(), ignoreCase = true) }
         Text("${shown.size} / ${entries.size} 个插件", style = MaterialTheme.typography.labelMedium, color = t.textMuted)
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (!busy && error.isBlank() && shown.isEmpty()) item {
@@ -77,13 +81,19 @@ internal fun PluginCatalogPane(state: AppState, conn: Conn, showInstalled: (() -
             }
             items(shown) { p -> OutlinedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp)) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(p.name.ifBlank { p.id }, style = MaterialTheme.typography.titleMedium)
-                    Text(p.marketplace, style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Icon(Icons.Outlined.Extension, null, Modifier.size(26.dp), tint = t.accent)
+                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(p.name.ifBlank { p.id }, style = MaterialTheme.typography.titleMedium)
+                            Text(p.marketplace, style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+                        }
+                    }
                     if (p.description.isNotBlank()) Text(p.description, style = MaterialTheme.typography.bodySmall)
                     Text("版本：${p.version.ifBlank { "目录未提供" }} · 来源：${when(p.source) { "marketplace-path" -> "市场内目录"; "url", "git-subdir", "github" -> "代码仓库"; "npm", "pip" -> "软件包"; "command" -> "安装命令"; else -> "未识别" }}", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
                     if (p.location.isNotBlank()) Text(p.location, style = MaterialTheme.typography.bodySmall, color = t.textMuted)
-                    OutlinedButton({ selected = p }, enabled = conn.status == Conn.Status.Connected && !operations.unresolved(host) && operations.error.isBlank() && p.source != "command") { Text("安装到此主机") }
+                    OutlinedButton({ selected = p }, enabled = conn.status == Conn.Status.Connected && !operations.unresolved(host) && operations.error.isBlank() && p.source !in setOf("command", "unknown")) { Text("安装到 ${conn.host.label}") }
                     if (p.source == "command") Text("此来源需要单独授权安装命令。", style = MaterialTheme.typography.bodySmall, color = t.warning)
+                    if (p.source == "unknown") Text("暂不支持此插件来源。", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
                 }
             } }
         }
