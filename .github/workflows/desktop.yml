@@ -26,6 +26,13 @@ jobs:
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v4
 
+      - name: Windows SSH key update contract (isolated temporary files)
+        shell: pwsh
+        timeout-minutes: 2
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -File dev/test-link-windows-keys.ps1 2>&1 | Tee-Object smoke-link-keys.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Windows SSH key update contract failed' }
+
       - name: 打包（jpackage app-image + uber jar）
         working-directory: android
         shell: bash
