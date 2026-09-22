@@ -2,6 +2,7 @@
 import http.server
 import json
 import pathlib
+import re
 import sys
 import threading
 import time
@@ -39,8 +40,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if "count_tokens" in self.path:
             self.reply_json({"input_tokens": 1})
             return
+        last_user = next((m.get("content", "") for m in reversed(body.get("messages", [])) if m.get("role") == "user"), "")
+        marker = re.search(r"(?:KEEP|FOLLOWUP|DROP|EDIT|VERIFY|SINGLE|INTERACTIVE|APP|SECOND|RECOVERY)-[A-Za-z-]+", json.dumps(last_user))
+        answer = "answer:" + marker.group(0) if marker else "ok"
         message = {"id": "msg_fixture_" + str(time.time_ns()), "type": "message", "role": "assistant",
-                   "model": body.get("model", "fixture"), "content": [{"type": "text", "text": "ok"}],
+                   "model": body.get("model", "fixture"), "content": [{"type": "text", "text": answer}],
                    "stop_reason": "end_turn", "stop_sequence": None,
                    "usage": {"input_tokens": 1, "output_tokens": 2}}
         if not body.get("stream"):
@@ -56,7 +60,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         event("message_start", {"type": "message_start", "message": dict(message, content=[], stop_reason=None)})
         event("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}})
-        event("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "ok"}})
+        event("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": answer}})
         event("content_block_stop", {"type": "content_block_stop", "index": 0})
         event("message_delta", {"type": "message_delta", "delta": {"stop_reason": "end_turn", "stop_sequence": None}, "usage": {"output_tokens": 2}})
         event("message_stop", {"type": "message_stop"})
