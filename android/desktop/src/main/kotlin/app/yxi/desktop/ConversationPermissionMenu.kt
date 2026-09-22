@@ -1,0 +1,84 @@
+package app.yxi.desktop
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import app.yxi.agent.*
+import app.yxi.ssh.Shell
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
+
+internal suspend fun changeConversationPermission(conn: Conn, session: Session, desired: PermissionMode): PermissionMode {
+    return conn.instructionDeliveryMutex.withLock {
+        check(conn.ssh.isConnected && !session.isCodex && session.runtimeId.isNotBlank()) { "当前运行器暂不支持切换" }
+        check(!RewindDelivery.gate.blocked(taskNavigationKey(conn.host, session))) { "请先完成回退核验" }
+        val target = Shell.q("=" + session.name + ":")
+        suspend fun capture() = conn.ssh.exec("tmux capture-pane -p -t $target")
+        val seen = mutableSetOf<PermissionMode>()
+        repeat(PermissionMode.entries.size + 1) {
+            val screen = capture()
+            check(Model.borrowable(screen) && Prompt.parse(screen) == null) { "请等待任务空闲并处理终端中的未发送内容" }
+            val actual = PermissionMode.fromScreen(screen) ?: error("无法确认运行器当前权限模式，请查看终端")
+            if (actual == desired) return@withLock actual
+            check(seen.add(actual)) { "当前运行器未开放所选模式；完全访问需要以允许 bypass 的参数启动" }
+            val script = "pane=\$(tmux display-message -p -t $target '#{pane_id}') && " +
+                "test \"\$(tmux display-message -p -t \"\$pane\" '#{pid}:#{session_id}:#{session_created}')\" = ${Shell.q(session.runtimeId)} && " +
+                "test \"\$(tmux capture-pane -p -t \"\$pane\")\" = ${Shell.q(screen.trimEnd('\n'))} && " +
+                "tmux send-keys -t \"\$pane\" BTab && printf '__YXI_PERMISSION_STEP__'"
+            check(conn.ssh.exec(script).trim() == "__YXI_PERMISSION_STEP__") { "会话状态已变化，切换已停止" }
+            delay(250)
+        }
+        error("权限切换尚未确认，请查看终端")
+    }
+}
+
+@Composable
+internal fun ConversationPermissionMenu(conn: Conn, session: Session, enabled: Boolean, onTerminal: () -> Unit) {
+    var open by remember(session.runtimeId) { mutableStateOf(false) }
+    var actual by remember(session.runtimeId) { mutableStateOf<PermissionMode?>(null) }
+    var error by remember(session.runtimeId) { mutableStateOf("") }
+    var changing by remember(session.runtimeId) { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    NativeOverlay(open)
+    LaunchedEffect(session.runtimeId, open, changing) {
+        if (!changing && conn.ssh.isConnected) {
+            try { actual = PermissionMode.fromScreen(conn.ssh.exec("tmux capture-pane -p -t ${Shell.q("=" + session.name + ":")}")) }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { actual = null }
+        }
+    }
+    Box {
+        TextButton({ open = true }, enabled = enabled && !changing) {
+            Icon(Icons.Outlined.Shield, null, Modifier.size(16.dp))
+            Spacer(Modifier.width(5.dp))
+            Text(if (changing) "切换中…" else actual?.title ?: "权限模式")
+        }
+        DropdownMenu(open, { if (!changing) open = false }, Modifier.width(300.dp)) {
+            Text("当前会话权限", Modifier.padding(16.dp, 8.dp), style = MaterialTheme.typography.labelMedium)
+            PermissionMode.entries.forEach { mode ->
+                DropdownMenuItem(text = { Column {
+                    Text(mode.title + if (actual == mode) "  ✓" else "")
+                    Text(mode.description, style = MaterialTheme.typography.bodySmall)
+                } }, enabled = enabled && !changing, onClick = {
+                    changing = true; error = ""
+                    scope.launch {
+                        try { actual = changeConversationPermission(conn, session, mode); open = false }
+                        catch (e: CancellationException) { throw e }
+                        catch (e: Exception) { actual = null; error = e.message ?: "切换失败" }
+                        finally { changing = false }
+                    }
+                })
+            }
+            if (error.isNotBlank()) {
+                Text(error, Modifier.padding(16.dp, 8.dp), color = MaterialTheme.colorScheme.error)
+                DropdownMenuItem(text = { Text("查看终端") }, onClick = { open = false; onTerminal() })
+            }
+        }
+    }
+}

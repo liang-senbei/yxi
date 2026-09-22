@@ -618,6 +618,10 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
             onSearch = { searchOpen = true },
             onVoice = { voiceOpen = true },
             onRoutes = onRoutes,
+            permissionControl = {
+                if (!session.isCodex) ConversationPermissionMenu(conn, session,
+                    canAct && !rewindRunning && !rewindBlocked && !live.busy && pending == null && !sending, onTerminal)
+            },
             modelControl = { if (rewindRunning || rewindBlocked) Text("回退处理中", color = t.textMuted)
                 else if (session.isCodex) TextButton(onRoutes) { Text("模型与思考 ⌄") }
                 else ConversationModelMenu(conn, session, ctx?.model.orEmpty(), ctx?.effort.orEmpty(), onRoutes, modelSwitches, onTerminal) },
@@ -644,6 +648,7 @@ internal fun Composer(
     onVoice: () -> Unit,
     onRoutes: () -> Unit,
     modelControl: @Composable () -> Unit,
+    permissionControl: @Composable () -> Unit = {},
 ) {
     val t = Tokens.current
     val mentions = rememberAttachmentMentions(attachments, draft, onDraft)
@@ -694,6 +699,7 @@ internal fun Composer(
         }
         Row(Modifier.fillMaxWidth().padding(6.dp, 2.dp, 8.dp, 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             IconButton(onAttach, Modifier.size(30.dp)) { Icon(Icons.Outlined.AttachFile, "添加附件（截图可直接 Ctrl+V）", Modifier.size(16.dp), tint = t.textSecondary) }
+            permissionControl()
             IconButton(onHistory, Modifier.size(30.dp)) { Icon(Icons.Outlined.History, "输入历史", Modifier.size(16.dp), tint = t.textSecondary) }
             if (onSearch != null) IconButton(onSearch, Modifier.size(30.dp)) { Icon(Icons.Outlined.Search, "搜索当前对话", Modifier.size(16.dp), tint = t.textSecondary) }
             IconButton(onVoice, Modifier.size(30.dp)) { Icon(Icons.Outlined.Mic, "语音输入", Modifier.size(16.dp), tint = t.textSecondary) }
