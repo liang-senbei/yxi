@@ -42,6 +42,10 @@ class FirstTurnRewindMenuTest {
               4. Never mind
         """.trimIndent()
         assertTrue(FirstTurnRewindMenu.confirmsConversationOnly(confirm, FirstTurnRewindMenu.VERSION, "duplicate"))
+        assertTrue(FirstTurnRewindMenu.canCancelNavigation(confirm, FirstTurnRewindMenu.VERSION, "duplicate"))
+        assertTrue(FirstTurnRewindMenu.canCancelNavigation(menu, FirstTurnRewindMenu.VERSION, "duplicate"))
+        assertFalse(FirstTurnRewindMenu.canCancelNavigation(confirm, "unknown", "duplicate"))
+        assertFalse(FirstTurnRewindMenu.canCancelNavigation("❯ draft\nRewind\nEsc to cancel", FirstTurnRewindMenu.VERSION, "duplicate"))
         assertFalse(FirstTurnRewindMenu.confirmsConversationOnly(confirm, FirstTurnRewindMenu.VERSION, "other"))
         assertFalse(FirstTurnRewindMenu.confirmsConversationOnly(confirm.replace("Restore conversation", "Restore code and conversation"), FirstTurnRewindMenu.VERSION, "duplicate"))
         assertFalse(FirstTurnRewindMenu.confirmsConversationOnly(confirm.replace("unchanged", "restored"), FirstTurnRewindMenu.VERSION, "duplicate"))

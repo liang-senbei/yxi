@@ -55,4 +55,8 @@ internal object FirstTurnRewindMenu {
         return body.drop(2) == listOf("The conversation will be forked.", "The code will be unchanged.",
             "❯ 1. Restore conversation", "2. Summarize from here", "3. Summarize up to here", "4. Never mind")
     }
+
+    /** Both known navigation screens can be dismissed with Escape; neither implies restore ran. */
+    fun canCancelNavigation(capture: String, version: String, expectedText: String): Boolean =
+        parse(capture, version) != null || confirmsConversationOnly(capture, version, expectedText)
 }

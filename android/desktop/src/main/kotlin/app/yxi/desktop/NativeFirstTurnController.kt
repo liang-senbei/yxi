@@ -87,7 +87,8 @@ internal object NativeFirstTurnController {
                         runCatching { withTimeout(5_000) {
                             repeat(2) {
                                 val current = screen()
-                                if (!Model.borrowable(current) && "Rewind" in current && "Esc to cancel" in current) {
+                                if (!Model.borrowable(current) && FirstTurnRewindMenu.canCancelNavigation(
+                                        current, FirstTurnRewindMenu.VERSION, rows.first())) {
                                     check(NativeFirstTurnKeys.sent(conn.ssh.exec(NativeFirstTurnKeys.command(query!!.runtime,
                                         source, hash, current, NativeFirstTurnKeys.Action.Cancel))))
                                     delay(150)
@@ -99,7 +100,10 @@ internal object NativeFirstTurnController {
                                     MessageDigest.getInstance("SHA-256").digest(initial.trimEnd('\n').toByteArray()))
                         } }.getOrDefault(false)
                     }
-                    if (!cancelled) gate.beginNativeRoot(key, query!!)
+                    if (!cancelled) {
+                        // Preserve the original failure if persisting the recovery guard also fails.
+                        runCatching { gate.beginNativeRoot(key, query!!) }.exceptionOrNull()?.let(e::addSuppressed)
+                    }
                 }
                 throw e
             } finally {
