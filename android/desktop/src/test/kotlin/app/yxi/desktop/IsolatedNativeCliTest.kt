@@ -9,6 +9,8 @@ import app.yxi.agent.SessionProbe
 import app.yxi.agent.RewindLiveVerification
 import app.yxi.ssh.Shell
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
@@ -517,6 +519,48 @@ class IsolatedNativeCliTest {
                                 app.yxi.agent.PermissionMode.fromScreen(tmux("capture-pane", "-p", "-t", "=" + promptPlan.sessionName + ":")))
                             assertEquals(count, root.resolve("requests.jsonl").readLines().size, "Do not replay the startup prompt on resume")
                             assertTrue(File("/tmp").listFiles().orEmpty().none { it.name.startsWith("yxi-permission-") }, "Secret restart capsules must be consumed")
+                            val activeRegistration = config.resolve("sessions").listFiles().orEmpty()
+                                .mapNotNull { runCatching { JSONObject(it.readText()) }.getOrNull() }
+                                .single { it.optString("tmux").startsWith(promptPlan.sessionName + ":") &&
+                                    ProcessHandle.of(it.optLong("pid")).map { p -> p.isAlive }.orElse(false) }
+                            val stoppedSid = activeRegistration.getString("sessionId")
+                            val stoppedFile = config.resolve("projects").walkTopDown().single { it.isFile && it.name == "$stoppedSid.jsonl" }
+                            val original = app.yxi.agent.Transcript.parse(stoppedFile.readLines().asSequence())
+                                .filterIsInstance<ChatItem.UserText>().single { it.text == promptPlan.initialPrompt }
+                            val stopKey = taskNavigationKey(bridge.conn.host, launched)
+                            val stoppedGateFile = root.resolve("interrupted-root-gate.json")
+                            val stoppedGate = RewindDeliveryGate(stoppedGateFile)
+                            DesktopTranscriptMemory.put(stopKey, DesktopTranscriptMemory.Entry(stoppedFile.path, 0))
+                            System.setProperty("yxi.experimental.firstTurnRewind", "true")
+                            try {
+                                val stopping = async(kotlinx.coroutines.Dispatchers.IO) {
+                                    ConversationRewind.restore(bridge.conn, launched, requireNotNull(original.sourceUuid),
+                                        "ROOT-container-native-stop", stoppedGate)
+                                }
+                                withTimeout(20_000) {
+                                    while (!root.resolve("native-stop-request-started").exists()) delay(50)
+                                }
+                                val waitingScreen = tmux("capture-pane", "-p", "-t", "=" + promptPlan.sessionName + ":")
+                                root.resolve("native-stop-before.txt").writeText(waitingScreen)
+                                assertTrue(app.yxi.agent.Prompt.parse(waitingScreen) == null)
+                                tmux("send-keys", "-t", "=" + promptPlan.sessionName + ":", "Escape")
+                                stopping.await()
+                                root.resolve("native-stop-after.txt").writeText(tmux("capture-pane", "-p", "-t", "=" + promptPlan.sessionName + ":"))
+                                assertFalse(stoppedGate.blocked(stopKey))
+                                assertFalse(RewindDeliveryGate(stoppedGateFile).blocked(stopKey))
+                                assertTrue(stoppedFile.readLines().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+                                    .any(app.yxi.agent.NativeControlMessages::isInterruption), "The CLI must emit the native interruption envelope")
+                                val branch = requireNotNull(TranscriptBranchStart.load(bridge.conn.ssh, stoppedFile.path, 2000))
+                                val visible = app.yxi.agent.Transcript.parse(requireNotNull(branch.lines).asSequence())
+                                assertEquals(listOf("ROOT-container-native-stop"), visible.filterIsInstance<ChatItem.UserText>().map { it.text })
+                                val stopRequests = root.resolve("requests.jsonl").readLines().map(::JSONObject).filter {
+                                    !it.getString("path").contains("count_tokens") && it.getJSONArray("messages").toString().contains("ROOT-container-native-stop")
+                                }
+                                assertEquals(1, stopRequests.size, "Recovery must not resend the interrupted request")
+                            } finally {
+                                System.clearProperty("yxi.experimental.firstTurnRewind")
+                                DesktopTranscriptMemory.drop(stopKey)
+                            }
                         } finally {
                             tmux("kill-session", "-t", "=" + promptPlan.sessionName)
                         }
