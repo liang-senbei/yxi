@@ -17,13 +17,17 @@ import kotlinx.coroutines.sync.withLock
 /** Called only after an explicit Bypass selection for this newly created launch plan. */
 internal suspend fun confirmBypassStartup(conn: Conn, session: Session, plan: DesktopLaunchPlan) {
     check(plan.permissionMode == PermissionMode.Bypass && plan.agent == "claude" && plan.sessionName == session.name)
-    conn.instructionDeliveryMutex.withLock {
+    conn.instructionDeliveryMutex.withLock { confirmExplicitBypass(conn, session) }
+}
+
+/** Caller holds the delivery mutex and has explicit permission to enable bypass. */
+internal suspend fun confirmExplicitBypass(conn: Conn, session: Session) {
         val target = Shell.q("=" + session.name + ":")
         var moved = false
         var accepted = false
         repeat(80) {
             val screen = conn.ssh.exec("tmux capture-pane -p -t $target")
-            if (PermissionMode.fromScreen(screen) == PermissionMode.Bypass) return@withLock
+            if (PermissionMode.fromScreen(screen) == PermissionMode.Bypass) return
             val warning = "WARNING: Claude Code running in Bypass Permissions mode" in screen &&
                 "Enter to confirm" in screen && "Yes, I accept" in screen && "No, exit" in screen
             val key = when {
@@ -42,8 +46,11 @@ internal suspend fun confirmBypassStartup(conn: Conn, session: Session, plan: De
             delay(250)
         }
         error("完全访问模式尚未确认，请在新会话终端查看启动提示")
-    }
 }
+
+internal class PermissionModeUnavailable(val desired: PermissionMode) : IllegalStateException(
+    if (desired == PermissionMode.Bypass) "这个会话启动时没有启用完全访问。可配置并重启当前会话，保留原会话历史；不会修改其他会话。"
+    else "当前运行器没有开放${desired.title}，可能受版本、模型或服务器配置限制。")
 
 internal suspend fun changeConversationPermission(conn: Conn, session: Session, desired: PermissionMode): PermissionMode {
     return conn.instructionDeliveryMutex.withLock {
@@ -57,7 +64,7 @@ internal suspend fun changeConversationPermission(conn: Conn, session: Session, 
             check(Model.borrowable(screen) && Prompt.parse(screen) == null) { "请等待任务空闲并处理终端中的未发送内容" }
             val actual = PermissionMode.fromScreen(screen) ?: error("无法确认运行器当前权限模式，请查看终端")
             if (actual == desired) return@withLock actual
-            check(seen.add(actual)) { "当前运行器未开放所选模式；完全访问需要以允许 bypass 的参数启动" }
+            if (!seen.add(actual)) throw PermissionModeUnavailable(desired)
             val script = "pane=\$(tmux display-message -p -t $target '#{pane_id}') && " +
                 "test \"\$(tmux display-message -p -t \"\$pane\" '#{pid}:#{session_id}:#{session_created}')\" = ${Shell.q(session.runtimeId)} && " +
                 "test \"\$(tmux capture-pane -p -t \"\$pane\")\" = ${Shell.q(screen.trimEnd('\n'))} && " +
@@ -75,6 +82,7 @@ internal fun ConversationPermissionMenu(conn: Conn, session: Session, enabled: B
     var actual by remember(session.runtimeId) { mutableStateOf<PermissionMode?>(null) }
     var error by remember(session.runtimeId) { mutableStateOf("") }
     var changing by remember(session.runtimeId) { mutableStateOf(false) }
+    var canConfigure by remember(session.runtimeId) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     NativeOverlay(open)
     LaunchedEffect(session.runtimeId, open, changing) {
@@ -97,17 +105,26 @@ internal fun ConversationPermissionMenu(conn: Conn, session: Session, enabled: B
                     Text(mode.title + if (actual == mode) "  ✓" else "")
                     Text(mode.description, style = MaterialTheme.typography.bodySmall)
                 } }, enabled = enabled && !changing, onClick = {
-                    changing = true; error = ""
+                    changing = true; error = ""; canConfigure = false
                     scope.launch {
                         try { actual = changeConversationPermission(conn, session, mode); open = false }
                         catch (e: CancellationException) { throw e }
-                        catch (e: Exception) { actual = null; error = e.message ?: "切换失败" }
+                        catch (e: Exception) { actual = null; error = e.message ?: "切换失败"; canConfigure = e is PermissionModeUnavailable && e.desired == PermissionMode.Bypass }
                         finally { changing = false }
                     }
                 })
             }
             if (error.isNotBlank()) {
                 Text(error, Modifier.padding(16.dp, 8.dp), color = MaterialTheme.colorScheme.error)
+                if (canConfigure) DropdownMenuItem(text = { Text("配置并重启当前会话") }, enabled = enabled && !changing, onClick = {
+                    changing = true; canConfigure = false
+                    scope.launch {
+                        try { configureConversationBypass(conn, session); actual = PermissionMode.Bypass; error = ""; open = false }
+                        catch (e: CancellationException) { throw e }
+                        catch (e: Exception) { actual = null; error = e.message ?: "配置未完成，请查看终端" }
+                        finally { changing = false }
+                    }
+                })
                 DropdownMenuItem(text = { Text("查看终端") }, onClick = { open = false; onTerminal() })
             }
         }

@@ -451,6 +451,12 @@ class IsolatedNativeCliTest {
                             app.yxi.agent.PermissionMode.fromScreen(tmux("capture-pane", "-p", "-t", "=cc-native-check:")))
                         assertEquals(requestsBeforeModes, root.resolve("requests.jsonl").readLines().size,
                             "Permission switching must not submit a model request")
+                        configureConversationBypass(bridge.conn, recoveredSession)
+                        assertEquals(app.yxi.agent.PermissionMode.Bypass,
+                            app.yxi.agent.PermissionMode.fromScreen(tmux("capture-pane", "-p", "-t", "=cc-native-check:")))
+                        assertEquals(listOf(rootText), renderedUsers(), "One-click configuration must preserve the conversation")
+                        assertEquals(requestsBeforeModes, root.resolve("requests.jsonl").readLines().size,
+                            "One-click permission configuration must not replay a prompt")
                         Files.createSymbolicLink(root.resolve("ssh/bin/claude").toPath(), native.toPath())
                         val bypassPlan = DesktopLaunchPlan(project.path, "claude", DesktopLaunchPlan.newRequestId(),
                             permissionMode = app.yxi.agent.PermissionMode.Bypass)
