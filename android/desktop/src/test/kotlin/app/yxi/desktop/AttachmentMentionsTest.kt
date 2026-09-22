@@ -49,6 +49,10 @@ class AttachmentMentionsTest {
         // 指向已删首张的引用整段删除（绝不让它改指别人），其余按新序号重写
         assertEquals("首张 次张@图片1，末张@图片2 结尾", next.text)
         assertEquals(next.text.length, next.selection.end)
+        assertEquals(
+            ",next @图片1:detail @图片1)end",
+            draftAfterAttachmentRemoval(edited("@图片1,next @图片2:detail @图片2)end"), listOf(a, b), a).text,
+        )
     }
 
     @Test

@@ -82,13 +82,13 @@ internal fun AttachmentMentionList(mentions: AttachmentMentions) {
 
 /** Keep references attached to the same remaining file after ordinal labels change.
  *  干净边界 = 空白 / 结尾 / 中文全角标点（，。！？、；：）】》」』与弯引号）/ ASCII 标点
- *  （.,;:!?)]}"' 且其后不紧跟字母数字——挡住 `@图片1.png` 这类文件名尾巴）。字母/数字紧贴
+ *  （逗号等直接分隔；句点/引号后不紧跟字母数字——挡住 `@图片1.png` 这类文件名尾巴）。字母/数字紧贴
  *  依旧不是边界（`@图片2y` 绝不改写）。 */
 internal fun draftAfterAttachmentRemoval(draft: TextFieldValue, items: List<DraftAttach>, removed: DraftAttach): TextFieldValue {
     val remaining = items.filter { it !== removed }
     val next = attachmentLabels(remaining).zip(remaining).associate { it.second.stamp to it.first }
     val labels = attachmentLabels(items).zip(items).associate { it.first to next[it.second.stamp] }
-    val pattern = Regex("@(图片|附件)[0-9]+(?=\\s|$|[，。！？、；：）】》」』“”‘’]|[.,;:!?)\\]}\"'](?![A-Za-z0-9]))")
+    val pattern = Regex("@(图片|附件)[0-9]+(?=\\s|$|[，。！？、；：）】》」』“”‘’,;:!?)\\]}]|[.\"'](?![A-Za-z0-9]))")
     fun replace(text: String) = pattern.replace(text) { match ->
         val old = match.value.drop(1)
         if (old in labels) labels[old]?.let { "@$it" }.orEmpty() else match.value
