@@ -111,6 +111,6 @@ internal object NativeFirstTurnController {
             }
         }
         progress("正在确认首轮恢复状态…")
-        recheckRewindRecovery(conn, session, gate, rootTimeoutSec = 600)
+        recheckRewindRecovery(conn, session, gate, rootTimeoutSec = 600, allowRestoredDraftClear = true)
     }
 }
