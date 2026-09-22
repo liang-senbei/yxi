@@ -122,7 +122,7 @@ class IsolatedSshTransportTest {
             val originalProject = root.resolve("original project").apply { mkdir() }
             val changedProject = root.resolve("changed-project").apply { mkdir() }
             val observed = root.resolve("resumed-cwd")
-            val executable = root.resolve("resume-probe").apply {
+            val executable = root.resolve("claude-resume-probe").apply {
                 writeText("#!/bin/sh\npwd > '${observed.path}'\n")
                 setExecutable(true, true)
             }
