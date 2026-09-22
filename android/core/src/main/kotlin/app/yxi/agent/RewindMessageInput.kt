@@ -11,7 +11,8 @@ object RewindMessageInput {
     private val mediaTypes = setOf("image/png", "image/jpeg", "image/gif", "image/webp")
     data class Prepared(val json: String, val imageCount: Int, val imageBytes: Int)
 
-    fun create(message: JSONObject, editedText: String): Prepared {
+    /** null keeps all images; indices refer to the original image order, never the filtered list. */
+    fun create(message: JSONObject, editedText: String, keepImageIndices: Set<Int>? = null): Prepared {
         require(message.optString("role") == "user") { "Only user messages can be edited" }
         require(editedText.isNotBlank() && editedText.length <= 100_000 && '\u0000' !in editedText) { "Invalid edited message" }
         val source = when (val value = message.opt("content")) {
@@ -19,8 +20,11 @@ object RewindMessageInput {
             is JSONArray -> value
             else -> error("Unsupported message content")
         }
+        val originalImages = (0 until source.length()).count { source.optJSONObject(it)?.optString("type") == "image" }
+        require(keepImageIndices == null || keepImageIndices.all { it in 0 until originalImages }) { "Image selection is stale or invalid" }
         val content = JSONArray()
         var images = 0
+        var imageIndex = 0
         var imageBytes = 0
         var texts = 0
         for (index in 0 until source.length()) {
@@ -31,6 +35,8 @@ object RewindMessageInput {
                     content.put(JSONObject().put("type", "text").put("text", editedText))
                 }
                 "image" -> {
+                    val originalIndex = imageIndex++
+                    if (keepImageIndices != null && originalIndex !in keepImageIndices) continue
                     require(++images <= MAX_IMAGES) { "Too many images" }
                     val image = block.optJSONObject("source") ?: error("Missing image source")
                     require(image.optString("type") == "base64") { "Only embedded images can be restored" }

@@ -27,6 +27,20 @@ class RewindMessageInputTest {
         val result = RewindMessageInput.create(message(image()), "caption")
         assertEquals(2, JSONObject(result.json).getJSONObject("message").getJSONArray("content").length())
     }
+    @Test fun `explicit image removal uses stable original indices`() {
+        val original = message(image(), text("old"), image("BAUG", "image/jpeg"))
+        val result = RewindMessageInput.create(original, "new", setOf(1))
+        val blocks = JSONObject(result.json).getJSONObject("message").getJSONArray("content")
+        assertEquals(1, result.imageCount)
+        assertEquals(3, result.imageBytes)
+        assertEquals("new", blocks.getJSONObject(0).getString("text"))
+        assertEquals("BAUG", blocks.getJSONObject(1).getJSONObject("source").getString("data"))
+        val removed = RewindMessageInput.create(original, "new", emptySet())
+        assertEquals(0, removed.imageCount)
+        assertEquals(1, JSONObject(removed.json).getJSONObject("message").getJSONArray("content").length())
+        assertFails { RewindMessageInput.create(original, "new", setOf(-1)) }
+        assertFails { RewindMessageInput.create(original, "new", setOf(2)) }
+    }
     @Test fun `plain text uses the same structured user envelope`() {
         val result = RewindMessageInput.create(JSONObject().put("role", "user").put("content", "old"), "new")
         assertEquals(0, result.imageCount)

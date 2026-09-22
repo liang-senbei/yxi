@@ -101,9 +101,14 @@ class IsolatedNativeCliTest {
             val png = java.io.ByteArrayOutputStream().also { javax.imageio.ImageIO.write(pixels, "png", it) }.toByteArray()
             val imageBlock = JSONObject().put("type", "image").put("source", JSONObject()
                 .put("type", "base64").put("media_type", "image/png").put("data", java.util.Base64.getEncoder().encodeToString(png)))
+            pixels.setRGB(0, 0, 0x22aa66)
+            val selectedPng = java.io.ByteArrayOutputStream().also { javax.imageio.ImageIO.write(pixels, "png", it) }.toByteArray()
+            val selectedImageBlock = JSONObject(imageBlock.toString()).apply {
+                getJSONObject("source").put("data", java.util.Base64.getEncoder().encodeToString(selectedPng))
+            }
             val imageInput = RewindMessageInput.create(JSONObject().put("role", "user")
-                .put("content", org.json.JSONArray().put(imageBlock).put(JSONObject().put("type", "text").put("text", "original image caption"))),
-                "FOLLOWUP-container-second")
+                .put("content", org.json.JSONArray().put(imageBlock).put(JSONObject().put("type", "text").put("text", "original image caption")).put(selectedImageBlock)),
+                "FOLLOWUP-container-second", keepImageIndices = setOf(1))
             val second = invoke("second", "--resume", sid, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
                 structuredInput = imageInput.json, inputPrompt = "FOLLOWUP-container-second")
             assertEquals(sid, second.getString("session_id"))
@@ -120,6 +125,9 @@ class IsolatedNativeCliTest {
             assertEquals(1, sentImages.size, "Image must reach the API as an image block")
             assertEquals("image/png", sentImages.single().getJSONObject("source").getString("media_type"))
             assertTrue(java.util.Base64.getDecoder().decode(sentImages.single().getJSONObject("source").getString("data")).isNotEmpty())
+            val receivedPng = java.util.Base64.getDecoder().decode(sentImages.single().getJSONObject("source").getString("data"))
+            val receivedPixels = javax.imageio.ImageIO.read(java.io.ByteArrayInputStream(receivedPng))
+            assertEquals(0x22aa66, receivedPixels.getRGB(0, 0) and 0xffffff, "Only the selected original image may be sent")
 
             // Select the actual persisted parent UUID, never infer a turn from its display index.
             val transcript = config.walkTopDown().single { it.isFile && it.name == "$sid.jsonl" }
