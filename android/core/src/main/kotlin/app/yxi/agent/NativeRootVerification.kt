@@ -39,6 +39,7 @@ object NativeRootVerification {
     val chainScript = """
 import hashlib,json,os,sys,time
 path,old,expected=sys.argv[1:]
+session=os.path.basename(path).removesuffix('.jsonl')
 nodes={}; leaf=None; started=time.monotonic()
 with open(path,'rb') as f:
  before=os.fstat(f.fileno())
@@ -58,14 +59,19 @@ with open(path,'rb') as f:
   human=kind=='user' and not item.get('isMeta') and not tool
   text=content if isinstance(content,str) else None
   if isinstance(content,list) and len(content)==1 and isinstance(content[0],dict) and content[0].get('type')=='text': text=content[0].get('text')
+  interrupted=(kind=='user' and parent is not None and isinstance(content,list) and len(content)==1
+   and text=='[Request interrupted by user]' and item.get('session_id')==session and item.get('sessionId')==session
+   and item.get('entrypoint')=='cli' and item.get('version')=='2.1.278'
+   and not any(k in item for k in ('origin','promptSource','turnOrigin')))
+  if interrupted: human=False
   digest=hashlib.sha256(text.encode('utf-8')).hexdigest() if isinstance(text,str) else None
   fresh=uid not in nodes
-  nodes[uid]=(parent,kind,human,digest)
+  nodes[uid]=(parent,'interrupted' if interrupted else kind,human,digest)
   if fresh and kind in ('user','assistant'): leaf=uid
  after=os.fstat(f.fileno()); current=os.stat(path)
  identity=lambda s:(s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns)
  if identity(before)!=identity(after) or identity(before)!=identity(current): raise ValueError('History changed')
-if leaf is None or nodes[leaf][1]!='assistant': raise ValueError('Reply not complete')
+if leaf is None or nodes[leaf][1] not in ('assistant','interrupted'): raise ValueError('Reply not complete')
 cursor=leaf; seen=set(); humans=[]
 while cursor is not None:
  if cursor in seen or cursor not in nodes or cursor==old: raise ValueError('Wrong branch')
