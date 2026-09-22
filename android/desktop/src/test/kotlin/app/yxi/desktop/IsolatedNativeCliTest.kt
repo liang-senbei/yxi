@@ -78,7 +78,10 @@ class IsolatedNativeCliTest {
                 if (rewind != null) {
                     assertEquals(Rewind.Outcome.Ok(rewind.sessionId, answer), Rewind.parse(raw), raw.takeLast(1500))
                 }
-                val result = JSONObject(if (rewind == null) raw else raw.lineSequence().last { it.startsWith("{") })
+                val result = if (structuredInput != null) raw.lineSequence().mapNotNull {
+                    runCatching { JSONObject(it) }.getOrNull()
+                }.last { it.optString("type") == "result" }
+                else JSONObject(if (rewind == null) raw else raw.lineSequence().last { it.startsWith("{") })
                 assertFalse(result.optBoolean("is_error"), output.readText().takeLast(1000))
                 assertEquals(answer, result.getString("result"))
                 return result
@@ -99,7 +102,7 @@ class IsolatedNativeCliTest {
                 .put("type", "base64").put("media_type", "image/png").put("data", java.util.Base64.getEncoder().encodeToString(png)))
             val imageInput = JSONObject().put("type", "user").put("message", JSONObject().put("role", "user")
                 .put("content", org.json.JSONArray().put(imageBlock).put(JSONObject().put("type", "text").put("text", "FOLLOWUP-container-second"))))
-            val second = invoke("second", "--resume", sid, "-p", "--input-format", "stream-json", "--output-format", "json",
+            val second = invoke("second", "--resume", sid, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
                 structuredInput = imageInput.toString(), inputPrompt = "FOLLOWUP-container-second")
             assertEquals(sid, second.getString("session_id"))
             val requests = root.resolve("requests.jsonl").readLines().map(::JSONObject)
