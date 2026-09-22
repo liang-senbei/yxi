@@ -10,6 +10,7 @@ import org.junit.jupiter.api.condition.OS
 import java.awt.Rectangle
 import java.awt.Robot
 import java.awt.event.KeyEvent
+import java.awt.event.InputEvent
 import java.io.File
 import javax.imageio.ImageIO
 import kotlin.test.*
@@ -24,13 +25,15 @@ class RewindDialogUiTest {
             var open by mutableStateOf(true)
             var text by mutableStateOf("请回到这条消息，保留前面的上下文。\n把登录页面改成清爽的布局，并检查保存后的状态。")
             var actions = 0
+            var submitted: String? = null
             var failure: Throwable? = null
             application(exitProcessOnExit = false) {
                 Window(onCloseRequest = ::exitApplication, title = "Yxi rewind dialog fixture",
                     state = rememberWindowState(width = width.dp, height = 720.dp)) {
                     YxiTheme {
                         if (open) RewindMessageDialog(text, { text = it }, enabled, true, enabled,
-                            onDismiss = { open = false }, onDraft = { actions++ }, onRewind = { actions++ }, onNative = { actions++ })
+                            onDismiss = { open = false }, onDraft = { actions++ },
+                            onRewind = { submitted = text; open = false }, onNative = { actions++ })
                     }
                     LaunchedEffect(Unit) {
                         try {
@@ -39,11 +42,40 @@ class RewindDialogUiTest {
                                 val robot = Robot()
                                 val bounds = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment().defaultScreenDevice.defaultConfiguration.bounds
                                 ImageIO.write(robot.createScreenCapture(Rectangle(bounds)), "png", File("/results/rewind-dialog-$width.png"))
-                                robot.keyPress(KeyEvent.VK_ESCAPE); robot.keyRelease(KeyEvent.VK_ESCAPE)
+                            }
+                            val dialog = java.awt.Window.getWindows().last { it.isShowing && it !== window }
+                            val origin = dialog.locationOnScreen
+                            withContext(Dispatchers.IO) {
+                                val robot = Robot()
+                                robot.mouseMove(origin.x + 80, origin.y + 125)
+                                robot.mousePress(InputEvent.BUTTON1_DOWN_MASK); robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK)
+                                robot.keyPress(KeyEvent.VK_CONTROL); robot.keyPress(KeyEvent.VK_A)
+                                robot.keyRelease(KeyEvent.VK_A); robot.keyRelease(KeyEvent.VK_CONTROL)
+                                robot.keyPress(KeyEvent.VK_A); robot.keyRelease(KeyEvent.VK_A)
+                            }
+                            delay(400)
+                            assertEquals("a", text, "Typing must update the actual editor")
+                            withContext(Dispatchers.IO) {
+                                val robot = Robot()
+                                robot.mouseMove(origin.x + dialog.width - 90, origin.y + dialog.height - 48)
+                                robot.mousePress(InputEvent.BUTTON1_DOWN_MASK); robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK)
+                            }
+                            delay(400)
+                            if (enabled) {
+                                assertEquals("a", submitted, "Primary action must receive edited text")
+                                assertFalse(open)
+                                open = true
+                                delay(400)
+                            } else {
+                                assertNull(submitted, "Disabled primary action must not submit")
+                                assertTrue(open)
+                            }
+                            withContext(Dispatchers.IO) {
+                                Robot().apply { keyPress(KeyEvent.VK_ESCAPE); keyRelease(KeyEvent.VK_ESCAPE) }
                             }
                             delay(500)
                             assertFalse(open, "Escape must cancel the dialog")
-                            assertEquals(0, actions, "Cancel must not send, load a draft or open the terminal picker")
+                            assertEquals(0, actions, "Primary/cancel must not load a draft or open the terminal picker")
                         } catch (e: Throwable) { failure = e }
                         finally { exitApplication() }
                     }
