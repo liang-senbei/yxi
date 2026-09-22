@@ -11,11 +11,17 @@ name: Desktop
 
 on:
   workflow_dispatch:
+    inputs:
+      transfer_only:
+        description: 'Only transfer the verified 1.4.13 artifact to its temporary restricted receiver'
+        type: boolean
+        default: false
   push:
     tags: ['desktop-v*']
 
 jobs:
   windows:
+    if: github.event_name != 'workflow_dispatch' || inputs.transfer_only != true
     name: Windows Setup.exe + jar
     runs-on: windows-latest
     steps:
@@ -123,3 +129,69 @@ jobs:
             smoke-*.txt
             smoke-browser.png
           if-no-files-found: ignore
+
+  transfer:
+    if: github.event_name == 'workflow_dispatch' && inputs.transfer_only == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Download and verify the frozen artifact without rebuilding
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os,json,urllib.request,urllib.error,pathlib,hashlib
+          base='https://api.github.com/repos/liang-senbei/yxi'
+          headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'}
+          def api(path):
+              with urllib.request.urlopen(urllib.request.Request(base+path,headers=headers),timeout=30) as r:return json.load(r)
+          run=api('/actions/runs/35745571188')
+          assert run['head_sha']=='e97b02835a1409bda664496e25585cf05ac29ae0' and run['conclusion']=='success'
+          meta=api('/actions/artifacts/10702793843')
+          digest='792ada1e0886803cee5a41df0b34dc32e4e8743ecd6392b6531c7776503f6f13'
+          assert meta['name']=='Yxi-windows' and meta['size_in_bytes']==910629866 and meta['digest']=='sha256:'+digest
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self,*args):return None
+          try:
+              urllib.request.build_opener(NoRedirect).open(urllib.request.Request(base+'/actions/artifacts/10702793843/zip',headers=headers),timeout=30)
+              raise RuntimeError('Expected a download redirect')
+          except urllib.error.HTTPError as response:
+              assert response.code==302
+              url=response.headers['Location'];response.close()
+          assert url.startswith('https://')
+          h=hashlib.sha256();size=0
+          target=pathlib.Path(os.environ['RUNNER_TEMP'])/'yxi-artifact.zip'
+          with urllib.request.urlopen(url,timeout=60) as response,target.open('xb') as output:
+              while True:
+                  chunk=response.read(1024*1024)
+                  if not chunk:break
+                  size+=len(chunk);assert size<=910629866
+                  output.write(chunk);h.update(chunk)
+          assert size==910629866 and h.hexdigest()==digest
+          print('Frozen artifact size and SHA256 verified')
+          PY
+      - name: Transfer using the one-time forced-command key
+        env:
+          TRANSFER_KEY: ${{ secrets.YXI_RELEASE_TRANSFER_35745571188 }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os,pathlib,subprocess
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])
+          key=root/'yxi-transfer-key';known=root/'yxi-transfer-known-hosts'
+          private=os.environ.pop('TRANSFER_KEY')
+          assert private.strip(),'Temporary transfer credential is unavailable'
+          fd=os.open(key,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+          with os.fdopen(fd,'w') as f:f.write(private.strip()+'\n')
+          known.write_text('64.90.25.56 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICzZmr/DQxwT9G8RwcABQbDTYlJCPercdng9RZXUN5vk\n')
+          try:
+              with (root/'yxi-artifact.zip').open('rb') as stream:
+                  subprocess.run(['ssh','-T','-o','BatchMode=yes','-o','IdentitiesOnly=yes','-o','StrictHostKeyChecking=yes',
+                      '-o','UserKnownHostsFile='+str(known),'-o','ConnectTimeout=15','-o','ServerAliveInterval=30',
+                      '-i',str(key),'root@64.90.25.56'],stdin=stream,timeout=900,check=True)
+          finally:key.unlink(missing_ok=True)
+          PY
