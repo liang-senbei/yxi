@@ -60,7 +60,11 @@ internal object ConversationRewind {
             RewindMessageInput.create(RewindTargets.loadMessage(conn, target), text, selection.keep)
         }
         check(!target.unsupportedContent || structured != null) { "此消息包含尚不支持的内容，请重新打开编辑确认附件。" }
-        val anchor = target.parentUuid ?: error("首轮自动回退尚未接入，请使用原生回退入口。")
+        val anchor = target.parentUuid
+        if (anchor == null) {
+            NativeFirstTurnController.restore(conn, session, target, text, gate, progress)
+            return
+        }
         // Native drops-turn validation can count abandoned sibling branches after a
         // previous rewind. Use the same branch operation for last and earlier turns;
         // inspect + immutable file preflight still bind the exact current-chain target.

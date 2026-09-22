@@ -1,5 +1,9 @@
 # 对话历史回退验收记录
 
+## 首轮控制器真实 CLI 验证
+
+`142489b` 的 `run.F4TCFc`：IsolatedNativeCliTest 1 test、0 failures/errors/skipped，通过实际 NativeFirstTurnController 完成首轮多行中文/emoji 回退；断言确认前已持久保存恢复记录、最终解除发送暂停、当前链只含新首轮、请求不含旧轮次和旧工具结果、原 sessionId 保持。测试使用隔离容器中的真实 CLI 与假接口。随后将首轮分支接入 ConversationRewind，并改测试调用该统一入口；入口改动仍待下一次验证。首轮图片、滚动长菜单及 Windows 完整交互仍未完成。
+
 ## 首轮控制器编排待验证
 
 后续清理六份已完成构建的可再生 context（清单 `context-cleanup-1790049892873158456.json`）与指定测试编译缓存 `w3yb6mcwu6bt4cn5jrekbf8rc`，恢复构建空间。`run.n9tnoW` 已成功编译 `7e64e43` 的 core/desktop 与测试源码；`run.eM7V6R` 的 NativeRootVerificationTest 通过。此用例验证根消息链内容约束，不覆盖新增控制器编排和等待时序，后两者仍需真实 CLI 集成验证。
