@@ -130,6 +130,10 @@ object SessionProbe {
 
     suspend fun snapshotFull(session: SshSession): Snap {
         val out = session.exec(SCRIPT)
+        return parseSnapshot(out)
+    }
+
+    internal fun parseSnapshot(out: String): Snap {
         // ⚠️ **输出不完整就报错，别当成「零个会话」。** 连接半断的时候 exec 会带着半截
         // （或空的）输出回来，原来 [extract] 安静地返回 ""，解析出零个会话、还标成 fresh ——
         // 看板上所有收藏立刻全变「未启用」（用户截图：断线重连时只剩「未启用 5」）。
@@ -239,7 +243,13 @@ object SessionProbe {
             //    宁可看板上少一个也不能让它流进命令行。见 ssh/Shell.kt。
             if (!app.yxi.ssh.Shell.safeName(name)) return@mapNotNull null
             // Claude Code 自己那份优先；没有才退回 cc-state（我们自己机器上才有）
-            val st = ccStates[name] ?: states[name]
+            val runtime = p.getOrNull(6)?.takeIf { Regex("""\d+:\${'$'}\d+:\d+""").matches(it) }.orEmpty()
+            val created = runtime.substringAfterLast(':').toDoubleOrNull()
+            fun current(record: Triple<String, String, Double>?): Triple<String, String, Double>? =
+                record?.takeIf { it.third.isFinite() && (created == null || it.third >= created) }
+            // A recreated shell must not inherit an earlier agent's busy/waiting hook.
+            val st = current(ccStates[name]) ?: current(states[name])
+            val staleStatus = st == null && (ccStates.containsKey(name) || states.containsKey(name))
             Session(
                 name = name,
                 windows = p[1].toIntOrNull() ?: 1,
@@ -248,10 +258,10 @@ object SessionProbe {
                 cwd = p[4],
                 state = SessionState.of(st?.first),
                 // 状态源给的 detail 优先（它更「此刻」）；空了才用 hook 那句摘要
-                detail = st?.second?.takeIf { it.isNotBlank() } ?: evPreview[name].orEmpty(),
+                detail = st?.second?.takeIf { it.isNotBlank() } ?: if (staleStatus) "" else evPreview[name].orEmpty(),
                 stateTs = st?.third ?: 0.0,
                 cmd = p.getOrNull(5).orEmpty(),
-                runtimeId = p.getOrNull(6)?.takeIf { Regex("""\d+:\${'$'}\d+:\d+""").matches(it) }.orEmpty(),
+                runtimeId = runtime,
             )
         }.toList(),
             Groups.parse(extract(out, "gp")),
