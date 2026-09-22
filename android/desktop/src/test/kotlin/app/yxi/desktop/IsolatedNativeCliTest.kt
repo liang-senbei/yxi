@@ -412,49 +412,21 @@ class IsolatedNativeCliTest {
                         assertFalse(NativeFirstTurnKeys.sent(bridge.conn.ssh.exec(NativeFirstTurnKeys.command(
                             rootQuery.runtime, rootSource.copy(size = rootSource.size - 1), sourceHash, readyScreen, NativeFirstTurnKeys.Action.Open))))
                         assertEquals(unchangedRequests, root.resolve("requests.jsonl").readLines().size)
-                        suspend fun guarded(action: NativeFirstTurnKeys.Action, screen: String, count: Int = 1) {
-                            val response = bridge.conn.ssh.exec(NativeFirstTurnKeys.command(rootQuery.runtime, rootSource, sourceHash, screen, action, count))
-                            if (!NativeFirstTurnKeys.sent(response)) {
-                                root.resolve("root-rejected-step.txt").writeText("$action\n$response")
-                                java.io.RandomAccessFile(transcript, "r").use { file ->
-                                    if (file.length() >= rootSource.size) {
-                                        file.seek(rootSource.size)
-                                        val bytes = ByteArray(minOf(file.length() - rootSource.size, 1024 * 1024).toInt())
-                                        file.readFully(bytes)
-                                        root.resolve("root-history-delta.jsonl").writeBytes(bytes)
-                                    }
-                                }
-                            }
-                            check(NativeFirstTurnKeys.sent(response)) { "Native menu step rejected: $response" }
-                        }
                         val nativeGateFile = root.resolve("native-root-gate.json")
                         val nativeGate = RewindDeliveryGate(nativeGateFile)
-                        val rootTicket = nativeGate.beginNativeRoot(key, rootQuery)
-                        val reloadedNativeGate = RewindDeliveryGate(nativeGateFile)
-                        assertEquals(rootQuery, reloadedNativeGate.pending(key)?.nativeRoot)
-                        assertTrue(reloadedNativeGate.blocked(key))
-                        assertFalse(nativeGateFile.readText().contains("ROOT-container-restarted"), "Recovery record must not store the edited prompt")
-                        guarded(NativeFirstTurnKeys.Action.Open, captureUntil("root-open-ready") { Model.borrowable(it) })
-                        val menuScreen = captureUntil("root-menu") { s -> FirstTurnRewindMenu.parse(s, FirstTurnRewindMenu.VERSION)?.let {
-                            it.matches(beforeRootUsers) && it.currentSelected
-                        } == true }
-                        guarded(NativeFirstTurnKeys.Action.Up, menuScreen, beforeRootUsers.size)
-                        val selectedScreen = captureUntil("root-selected") { s -> FirstTurnRewindMenu.parse(s, FirstTurnRewindMenu.VERSION)?.let {
-                            it.matches(beforeRootUsers) && it.selectedIndex == 0
-                        } == true }
-                        guarded(NativeFirstTurnKeys.Action.Enter, selectedScreen)
-                        val confirmScreen = captureUntil("root-confirm") { s -> FirstTurnRewindMenu.confirmsConversationOnly(
-                            s, FirstTurnRewindMenu.VERSION, beforeRootUsers.first()) }
-                        guarded(NativeFirstTurnKeys.Action.Enter, confirmScreen)
-                        val restoredScreen = captureUntil("root-restored-input") { "Confirm you want to restore" !in it && "KEEP-container-first" in it }
-                        guarded(NativeFirstTurnKeys.Action.Clear, restoredScreen)
-                        val emptyScreen = captureUntil("root-empty-input") { Model.borrowable(it) }
-                        assertTrue(NativeFirstTurnKeys.paste(bridge.conn, rootQuery, rootSource, sourceHash,
-                            emptyScreen, rootText, rootTicket.operationId))
-                        val pastedScreen = captureUntil("root-pasted-input") {
-                            app.yxi.agent.Live.inputEmpty(it) == false && app.yxi.agent.Prompt.parse(it) == null
+                        var sawDurableRoot = false
+                        NativeFirstTurnController.restore(bridge.conn, recoveredSession, rootSource, rootText, nativeGate) { message ->
+                            root.resolve("root-controller-progress.txt").appendText(message + "\n")
+                            if (nativeGate.blocked(key)) {
+                                val persisted = RewindDeliveryGate(nativeGateFile)
+                                assertNotNull(persisted.pending(key)?.nativeRoot)
+                                assertFalse(nativeGateFile.readText().contains("ROOT-container-restarted"))
+                                sawDurableRoot = true
+                            }
                         }
-                        guarded(NativeFirstTurnKeys.Action.Enter, pastedScreen)
+                        assertTrue(sawDurableRoot, "Controller must persist recovery before confirming restore")
+                        assertFalse(nativeGate.blocked(key))
+                        assertFalse(RewindDeliveryGate(nativeGateFile).blocked(key))
                         captureUntil("root-completed") { Model.borrowable(it) && "answer:ROOT-container-restarted" in it }
                         val rootRequest = root.resolve("requests.jsonl").readLines().map(::JSONObject).last {
                             it.getJSONArray("messages").toString().contains("ROOT-container-restarted")
@@ -465,11 +437,6 @@ class IsolatedNativeCliTest {
                         val rootProof = runRewindCommand(bridge.conn.ssh, NativeRootVerification.command(rootQuery))
                         root.resolve("root-proof.txt").writeText(rootProof)
                         assertTrue(NativeRootVerification.verified(rootProof), rootProof)
-                        val requestsBeforeRootRecheck = root.resolve("requests.jsonl").readLines().size
-                        recheckRewindRecovery(bridge.conn, recoveredSession, reloadedNativeGate)
-                        assertFalse(reloadedNativeGate.blocked(key))
-                        assertFalse(RewindDeliveryGate(nativeGateFile).blocked(key))
-                        assertEquals(requestsBeforeRootRecheck, root.resolve("requests.jsonl").readLines().size)
                         bridge.conn.ssh.exec(Rewind.cleanupCommand(rootCapture))
                         assertTrue(config.resolve("sessions").listFiles().orEmpty().any {
                             it.extension == "json" && JSONObject(it.readText()).optString("sessionId") == sid
