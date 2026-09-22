@@ -541,7 +541,9 @@ class IsolatedNativeCliTest {
                                         ConversationRewind.restore(bridge.conn, launched, requireNotNull(original.sourceUuid),
                                             "ROOT-container-native-stop", stoppedGate)
                                     } catch (e: Exception) {
-                                        root.resolve("native-stop-restore-failure-screen.txt").writeText(tmux("capture-pane", "-p", "-t", "=" + promptPlan.sessionName + ":"))
+                                        runCatching {
+                                            root.resolve("native-stop-restore-failure-screen.txt").writeText(tmux("capture-pane", "-p", "-t", "=" + promptPlan.sessionName + ":"))
+                                        }.exceptionOrNull()?.let(e::addSuppressed)
                                         throw e
                                     }
                                 }
@@ -552,7 +554,7 @@ class IsolatedNativeCliTest {
                                 root.resolve("native-stop-before.txt").writeText(waitingScreen)
                                 assertTrue(app.yxi.agent.Prompt.parse(waitingScreen) == null)
                                 tmux("send-keys", "-t", "=" + promptPlan.sessionName + ":", "Escape")
-                                stopping.await()
+                                withTimeout(15_000) { stopping.await() }
                                 root.resolve("native-stop-after.txt").writeText(tmux("capture-pane", "-p", "-t", "=" + promptPlan.sessionName + ":"))
                                 assertFalse(stoppedGate.blocked(stopKey))
                                 assertFalse(RewindDeliveryGate(stoppedGateFile).blocked(stopKey))
@@ -566,6 +568,13 @@ class IsolatedNativeCliTest {
                                 }
                                 assertEquals(1, stopRequests.size, "Recovery must not resend the interrupted request")
                             } finally {
+                                runCatching { stoppedFile.copyTo(root.resolve("native-stopped-transcript.jsonl"), overwrite = true) }
+                                runCatching {
+                                    val records = config.resolve("sessions").listFiles().orEmpty()
+                                        .mapNotNull { runCatching { JSONObject(it.readText()) }.getOrNull() }
+                                        .filter { it.optString("tmux").startsWith(promptPlan.sessionName + ":") }
+                                    root.resolve("native-stopped-registrations.json").writeText(org.json.JSONArray(records).toString())
+                                }
                                 System.clearProperty("yxi.experimental.firstTurnRewind")
                                 DesktopTranscriptMemory.drop(stopKey)
                             }
