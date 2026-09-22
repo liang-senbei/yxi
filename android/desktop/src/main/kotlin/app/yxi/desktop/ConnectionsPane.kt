@@ -40,7 +40,7 @@ import kotlinx.coroutines.launch
             val record = links.record(conn)
             OutlinedCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("SSH 双向连接", style = MaterialTheme.typography.titleLarge)
+                    Text("SSH 双向连接（预览）", style = MaterialTheme.typography.titleLarge)
                     Text("服务器 → 本机 SSH：127.0.0.1:${record?.reversePort ?: 2222} → 本机 :22\n本机 → 服务器服务：127.0.0.1:${record?.localPort ?: 5901} → 服务器 :5901")
                     Text("连接由 Yxi 在后台保持，保活间隔 30 秒；退出 Yxi 会断开。断开不会删除双方公钥。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                     if (conn.status != Conn.Status.Connected) Text("首次配置需要先连接服务器；已配置的隧道可以单独重连。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.warning)
