@@ -400,17 +400,19 @@ class IsolatedNativeCliTest {
                             session.runtimeId, rootCapture.paneId, rootCapture.exe, rootCapture.pid, sid, rootTime),
                             transcript.path, messageUuid("KEEP-container-first"), rootHash)
                         val rootSource = RewindTargets.inspect(bridge.conn, recoveredSession, rootQuery.originalMessageUuid)
+                        val sourceHash = bridge.conn.ssh.exec(NativeFirstTurnKeys.fingerprintCommand(rootSource)).trim()
+                        root.resolve("root-source-hash.txt").writeText(sourceHash)
                         val unchangedRequests = root.resolve("requests.jsonl").readLines().size
                         val readyScreen = captureUntil("root-guard-ready") { Model.borrowable(it) }
                         assertFalse(NativeFirstTurnKeys.sent(bridge.conn.ssh.exec(NativeFirstTurnKeys.command(
-                            rootQuery.runtime, rootSource, "stale screen", NativeFirstTurnKeys.Action.Open))))
+                            rootQuery.runtime, rootSource, sourceHash, "stale screen", NativeFirstTurnKeys.Action.Open))))
                         assertFalse(NativeFirstTurnKeys.sent(bridge.conn.ssh.exec(NativeFirstTurnKeys.command(
-                            rootQuery.runtime.copy(pid = "999999999"), rootSource, readyScreen, NativeFirstTurnKeys.Action.Open))))
+                            rootQuery.runtime.copy(pid = "999999999"), rootSource, sourceHash, readyScreen, NativeFirstTurnKeys.Action.Open))))
                         assertFalse(NativeFirstTurnKeys.sent(bridge.conn.ssh.exec(NativeFirstTurnKeys.command(
-                            rootQuery.runtime, rootSource.copy(size = rootSource.size - 1), readyScreen, NativeFirstTurnKeys.Action.Open))))
+                            rootQuery.runtime, rootSource.copy(size = rootSource.size - 1), sourceHash, readyScreen, NativeFirstTurnKeys.Action.Open))))
                         assertEquals(unchangedRequests, root.resolve("requests.jsonl").readLines().size)
                         suspend fun guarded(action: NativeFirstTurnKeys.Action, screen: String, count: Int = 1) {
-                            val response = bridge.conn.ssh.exec(NativeFirstTurnKeys.command(rootQuery.runtime, rootSource, screen, action, count))
+                            val response = bridge.conn.ssh.exec(NativeFirstTurnKeys.command(rootQuery.runtime, rootSource, sourceHash, screen, action, count))
                             if (!NativeFirstTurnKeys.sent(response)) {
                                 root.resolve("root-rejected-step.txt").writeText("$action\n$response")
                                 java.io.RandomAccessFile(transcript, "r").use { file ->
