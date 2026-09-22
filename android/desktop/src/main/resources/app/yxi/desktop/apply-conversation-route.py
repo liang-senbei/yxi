@@ -129,6 +129,9 @@ def apply(args):
         raise ValueError('invalid route environment')
     # Clear provider-specific values inherited from an earlier route, including user/project settings.
     known = {k for k in environment if k.startswith('ANTHROPIC_') or k == 'CLAUDE_CODE_SUBAGENT_MODEL'}
+    known.update(('ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_MODEL', 'CLAUDE_CODE_SUBAGENT_MODEL'))
+    for role in ('OPUS', 'SONNET', 'HAIKU', 'FABLE'):
+        known.update(('ANTHROPIC_DEFAULT_' + role + '_MODEL', 'ANTHROPIC_DEFAULT_' + role + '_MODEL_NAME'))
     config_root = pathlib.Path(environment.get('CLAUDE_CONFIG_DIR', str(pathlib.Path(environment['HOME']) / '.claude')))
     sources = [config_root / 'settings.json']
     for directory in [pathlib.Path(cwd), *pathlib.Path(cwd).parents]:

@@ -39,12 +39,13 @@ class ConversationRouteApplyTest {
             "DISABLE_TELEMETRY" to "1", "DISABLE_AUTOUPDATER" to "1")
         fun run(vararg args: String): String {
             val out = root.resolve("command-${System.nanoTime()}.log")
-            val builder = ProcessBuilder(*args).directory(project).redirectErrorStream(true).redirectOutput(out)
+            val err = File(out.path + ".err")
+            val builder = ProcessBuilder(*args).directory(project).redirectError(err).redirectOutput(out)
             builder.environment().apply { clear(); putAll(environment()) }
             val process = builder.start()
             try {
                 check(process.waitFor(60, TimeUnit.SECONDS)) { "Fixture command timed out" }
-                check(process.exitValue() == 0) { out.readText().takeLast(3000) }
+                check(process.exitValue() == 0) { err.readText().takeLast(2000) + out.readText().takeLast(2000) }
                 return out.readText()
             } finally { if (process.isAlive) process.destroyForcibly() }
         }
@@ -77,7 +78,11 @@ class ConversationRouteApplyTest {
                 .put("ANTHROPIC_API_KEY", "fixture-key-0").put("ANTHROPIC_DEFAULT_OPUS_MODEL", "old-mapping")).toString())
             val beforeGlobal = global.readBytes()
             val ids = listOf("a", "b").associateWith { label ->
-                JSONObject(run(native.path, "-p", "ROOT-agent-$label", "--output-format", "json")).getString("session_id")
+                val output = run(native.path, "-p", "ROOT-agent-$label", "--output-format", "json")
+                val result = output.lineSequence().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+                    .lastOrNull { it.optString("type") == "result" } ?: error("Missing native result: ${output.takeLast(2000)}")
+                assertFalse(result.optBoolean("is_error"), result.toString())
+                result.getString("session_id")
             }
             for ((label, sid) in ids) {
                 tm("-f", "/dev/null", "new-session", "-d", "-s", "cc-route-$label", "-x", "180", "-y", "50", "-c", project.path,
@@ -119,6 +124,9 @@ class ConversationRouteApplyTest {
                 } }
             }
         } finally {
+            root.listFiles()?.filter { it.isFile && it.name.startsWith("command-") }?.forEach {
+                it.copyTo(File("/results/" + it.name), overwrite = true)
+            }
             if (socket.exists()) runCatching { tm("kill-server") } // private disposable socket inside network-none container only
             servers.forEach { it.destroyForcibly(); it.waitFor(5, TimeUnit.SECONDS) }
             endpoints.forEachIndexed { i, endpoint -> endpoint.resolve("server.log").takeIf { it.exists() }

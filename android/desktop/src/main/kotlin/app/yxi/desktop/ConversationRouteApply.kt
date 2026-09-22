@@ -47,6 +47,10 @@ internal object ConversationRouteApply {
                 val result = runCatching { JSONObject(conn.ssh.exec(command(listOf("verify", session.name,
                     session.runtimeId, capture.paneId, capture.exe, sid, path, digest, token))).trim()) }.getOrNull()
                 if (result?.optString("status") == "verified") {
+                    val live = conn.ssh.exec("tmux capture-pane -p -t ${Shell.q(capture.paneId)}")
+                    check(Model.borrowable(live) && PermissionMode.fromScreen(live) == mode) {
+                        "新进程的权限模式或输入状态尚未确认，未记录为生效，请查看终端"
+                    }
                     return@withLock Receipt(result.getString("processIdentity"), sid, path)
                 }
                 if (result?.optString("status") == "changed") error("会话或配置已变化，未记录为生效；请查看终端")
