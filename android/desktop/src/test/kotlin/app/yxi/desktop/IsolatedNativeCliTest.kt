@@ -1,5 +1,6 @@
 package app.yxi.desktop
 
+import app.yxi.agent.Rewind
 import org.json.JSONObject
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
 import org.junit.jupiter.api.condition.EnabledOnOs
@@ -28,11 +29,13 @@ class IsolatedNativeCliTest {
         val script = root.resolve("stub.py")
         javaClass.classLoader.getResourceAsStream("rewind/anthropic_stub.py")!!.use { input -> script.outputStream().use { input.copyTo(it) } }
         val server = ProcessBuilder("python3", script.path, root.path).redirectErrorStream(true).redirectOutput(root.resolve("stub.log")).start()
-        fun invoke(label: String, vararg args: String): JSONObject {
+        fun invoke(label: String, vararg args: String, rewind: Rewind.Plan? = null): JSONObject {
             val output = root.resolve("$label.json")
             val error = root.resolve("$label.err")
             val port = root.resolve("port").readText().trim()
-            val builder = ProcessBuilder(listOf(native.path) + args).directory(project).redirectOutput(output).redirectError(error)
+            val command = if (rewind == null) listOf(native.path) + args else listOf("/bin/sh", "-c",
+                Rewind.command(native.path, project.path, Rewind.Capture(native.path, ""), rewind))
+            val builder = ProcessBuilder(command).directory(project).redirectOutput(output).redirectError(error)
             builder.environment().apply {
                 clear()
                 put("HOME", home.path); put("CLAUDE_CONFIG_DIR", config.path)
@@ -47,7 +50,11 @@ class IsolatedNativeCliTest {
             try {
                 check(process.waitFor(60, TimeUnit.SECONDS)) { "Native CLI timeout: $label" }
                 assertEquals(0, process.exitValue(), error.readText().takeLast(1500))
-                val result = JSONObject(output.readText())
+                val raw = output.readText()
+                if (rewind != null) {
+                    assertEquals(Rewind.Outcome.Ok(rewind.sessionId, "ok"), Rewind.parse(raw), raw.takeLast(1500))
+                }
+                val result = JSONObject(if (rewind == null) raw else raw.lineSequence().last { it.startsWith("{") })
                 assertFalse(result.optBoolean("is_error"), output.readText().takeLast(1000))
                 assertEquals("ok", result.getString("result"))
                 return result
@@ -75,8 +82,8 @@ class IsolatedNativeCliTest {
                 it.optJSONObject("message")?.toString()?.contains("FOLLOWUP-container-second") == true }
             val anchor = selected.getString("parentUuid")
             invoke("third", "--resume", sid, "-p", "DROP-container-third", "--output-format", "json")
-            val edited = invoke("edited", "--resume", sid, "--resume-session-at", anchor,
-                "-p", "EDIT-container-second", "--output-format", "json")
+            val edited = invoke("edited", rewind = Rewind.Plan(sid, anchor, selected.getString("uuid"),
+                prompt = "EDIT-container-second"))
             assertEquals(sid, edited.getString("session_id"))
             invoke("after-edit", "--resume", sid, "-p", "VERIFY-container-branch", "--output-format", "json")
             val allRequests = root.resolve("requests.jsonl").readLines().map(::JSONObject)
@@ -89,6 +96,21 @@ class IsolatedNativeCliTest {
                 assertFalse(messages.contains("FOLLOWUP-container-second"), "Replaced turn leaked: $marker")
                 assertFalse(messages.contains("DROP-container-third"), "Abandoned descendant leaked: $marker")
             }
+
+            // The product uses the CLI's stricter drops-turn guard when editing the last turn.
+            val lastTurn = transcript.readLines().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+                .last { it.optString("type") == "user" &&
+                    it.optJSONObject("message")?.toString()?.contains("VERIFY-container-branch") == true }
+            val literal = "SINGLE-container-edit 'quoted' ${'$'}(touch ${root.path}/unexpected)\n中文🙂"
+            invoke("single-edit", rewind = Rewind.Plan(sid, lastTurn.getString("parentUuid"),
+                lastTurn.getString("uuid"), lastTurn.getString("uuid"), literal))
+            invoke("after-single-edit", "--resume", sid, "-p", "VERIFY-container-single", "--output-format", "json")
+            val singlePayload = root.resolve("requests.jsonl").readLines().map(::JSONObject).last()
+                .getJSONArray("messages").toString()
+            assertTrue(singlePayload.contains("SINGLE-container-edit"))
+            assertTrue(singlePayload.contains("EDIT-container-second"))
+            assertFalse(singlePayload.contains("VERIFY-container-branch"))
+            assertFalse(root.resolve("unexpected").exists(), "Prompt must remain literal shell data")
         } finally {
             server.destroyForcibly(); server.waitFor(5, TimeUnit.SECONDS)
             root.listFiles().orEmpty().filter { it.isFile && it.name != "stub.py" }.forEach {
