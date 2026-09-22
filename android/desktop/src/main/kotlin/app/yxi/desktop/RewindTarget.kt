@@ -12,6 +12,44 @@ internal data class RewindTarget(
 )
 
 internal object RewindTargets {
+    /** Load content only for the exact inspected snapshot; never substitute a newer message. */
+    suspend fun loadMessage(conn: Conn, target: RewindTarget): JSONObject {
+        val raw = conn.ssh.exec("python3 -c ${Shell.q(messageScript)} ${Shell.q(target.file)} " +
+            "${Shell.q(target.messageUuid)} ${target.size} ${Shell.q(target.modifiedNs)}")
+        return try { JSONObject(raw) }
+        catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            error("无法读取原消息或历史已变化，请重新打开编辑。")
+        }
+    }
+
+    internal val messageScript = """
+import json,os,sys
+path,target,wanted_size,wanted_time=sys.argv[1:]
+limit=32*1024*1024
+message=None
+with open(path,'rb') as f:
+ before=os.fstat(f.fileno())
+ if before.st_size!=int(wanted_size) or before.st_mtime_ns!=int(wanted_time): raise ValueError('History changed')
+ if before.st_size>1024*1024*1024: raise ValueError('History too large')
+ while f.tell()<before.st_size:
+  raw=f.readline(min(limit+1,before.st_size-f.tell()))
+  if len(raw)>limit: raise ValueError('Message too large')
+  if not raw.endswith(b'\n'): break
+  try: item=json.loads(raw)
+  except (ValueError,UnicodeDecodeError): continue
+  if not isinstance(item,dict) or item.get('uuid')!=target: continue
+  if item.get('type')!='user' or item.get('isSidechain') or item.get('isMeta'): raise ValueError('Not an editable user message')
+  message=item.get('message')
+ after=os.fstat(f.fileno()); current=os.stat(path)
+ identity=lambda s:(s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns)
+ if identity(before)!=identity(after) or identity(before)!=identity(current): raise ValueError('History changed')
+if not isinstance(message,dict) or message.get('role')!='user': raise ValueError('Message missing')
+encoded=json.dumps(message,ensure_ascii=False)
+if len(encoded.encode('utf-8'))>limit: raise ValueError('Message too large')
+print(encoded)
+""".trimIndent()
+
     suspend fun inspect(conn: Conn, session: Session, sourceUuid: String): RewindTarget {
         require(Regex("[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}").matches(sourceUuid))
         val key = taskNavigationKey(conn.host, session)
