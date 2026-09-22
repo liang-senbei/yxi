@@ -3,24 +3,24 @@ package app.yxi.desktop
 import app.yxi.agent.RewindLiveVerification
 import app.yxi.agent.NativeRootVerification
 import app.yxi.agent.Session
-import app.yxi.agent.Model
-import app.yxi.agent.Prompt
+import app.yxi.agent.Live
 import app.yxi.ssh.Shell
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.withLock
+
+internal class NativeRootReplyStopped : IllegalStateException("回复已停止，原生输入已保留；上下文尚未恢复确认，发送仍暂停。")
 
 internal class NativeRootRecoveryFailure(val receipt: String) : IllegalStateException("首轮回退尚未确认，发送仍暂停。请核对终端状态。")
 
 /** Recheck persisted evidence without sending a prompt or restarting any process. */
 internal suspend fun recheckRewindRecovery(conn: Conn, session: Session, gate: RewindDeliveryGate = RewindDelivery.gate,
-    rootTimeoutSec: Int = 20, allowRestoredDraftClear: Boolean = false) {
+    rootTimeoutSec: Int = 20) {
     check(conn.ssh.isConnected) { "请先重新连接服务器" }
     val key = taskNavigationKey(conn.host, session)
     val ticket = gate.pending(key) ?: error("没有可核对的回退记录")
     ticket.nativeRoot?.let { root ->
         check(root.runtime.sessionName == session.name && root.runtime.runtimeId == session.runtimeId) { "会话实例已变化，发送仍暂停" }
         val deadline = System.nanoTime() + rootTimeoutSec * 1_000_000_000L
-        var draftClearAttempted = false
         while (System.nanoTime() < deadline) {
             val remaining = ((deadline - System.nanoTime()) / 1_000_000_000L).toInt().coerceIn(1, 600)
             val result = runRewindCommand(conn.ssh, NativeRootVerification.command(root, remaining))
@@ -30,34 +30,8 @@ internal suspend fun recheckRewindRecovery(conn: Conn, session: Session, gate: R
                 return
             }
             if (!NativeRootVerification.needsIdleInputProof(result)) throw NativeRootRecoveryFailure(result)
-            val idle = conn.instructionDeliveryMutex.withLock {
-                suspend fun emptyInput(): Boolean {
-                    val screen = conn.ssh.exec("tmux capture-pane -p -t ${Shell.q("=" + session.name + ":")}")
-                    if (allowRestoredDraftClear && !draftClearAttempted && RestoredRewindDraft.matches(screen, root.editedTextSha256)) {
-                        draftClearAttempted = true
-                        val target = Shell.q("=" + session.name + ":")
-                        val registration = RewindLiveVerification.registrationCommand(root.runtime, sameProcess = true)
-                        val script = "test \"\$($registration)\" = ${Shell.q("READY " + root.runtime.pid)} && " +
-                            "test \"\$(tmux capture-pane -p -t $target)\" = ${Shell.q(screen.trimEnd('\n'))} && " +
-                            "tmux send-keys -t ${Shell.q(root.runtime.paneId)} C-u && printf '__YXI_RESTORED_DRAFT_CLEARED__'"
-                        check(conn.ssh.exec(script).trim() == "__YXI_RESTORED_DRAFT_CLEARED__") { "停止后的输入内容已变化，保留终端草稿，发送仍暂停" }
-                        delay(150)
-                        val after = conn.ssh.exec("tmux capture-pane -p -t $target")
-                        return Model.borrowable(after) && Prompt.parse(after) == null
-                    }
-                    return Model.borrowable(screen) && Prompt.parse(screen) == null
-                }
-                if (!emptyInput()) false else {
-                    delay(200)
-                    if (!emptyInput()) false else {
-                        val confirmed = runRewindCommand(conn.ssh, NativeRootVerification.command(root, 1))
-                        if (NativeRootVerification.verified(confirmed) || NativeRootVerification.needsIdleInputProof(confirmed)) {
-                            gate.finishVerified(ticket); true
-                        } else false
-                    }
-                }
-            }
-            if (idle) return
+            val screen = conn.ssh.exec("tmux capture-pane -p -t ${Shell.q("=" + session.name + ":")}")
+            if (!Live.parse(screen).busy) throw NativeRootReplyStopped()
             delay(200)
         }
         error("运行器尚未回到空闲输入状态，发送仍暂停。")

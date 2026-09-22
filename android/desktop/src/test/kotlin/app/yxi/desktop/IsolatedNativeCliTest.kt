@@ -536,7 +536,7 @@ class IsolatedNativeCliTest {
                             DesktopTranscriptMemory.put(stopKey, DesktopTranscriptMemory.Entry(stoppedFile.path, 0))
                             System.setProperty("yxi.experimental.firstTurnRewind", "true")
                             try {
-                                val stopping = async(kotlinx.coroutines.Dispatchers.IO) {
+                                val stopping = async(kotlinx.coroutines.Dispatchers.IO) { runCatching {
                                     try {
                                         ConversationRewind.restore(bridge.conn, launched, requireNotNull(original.sourceUuid),
                                             "ROOT-container-native-stop", stoppedGate)
@@ -547,7 +547,7 @@ class IsolatedNativeCliTest {
                                         }.exceptionOrNull()?.let(e::addSuppressed)
                                         throw e
                                     }
-                                }
+                                } }
                                 withTimeout(20_000) {
                                     while (!root.resolve("native-stop-request-started").exists()) delay(50)
                                 }
@@ -555,12 +555,13 @@ class IsolatedNativeCliTest {
                                 root.resolve("native-stop-before.txt").writeText(waitingScreen)
                                 assertTrue(app.yxi.agent.Prompt.parse(waitingScreen) == null)
                                 tmux("send-keys", "-t", "=" + promptPlan.sessionName + ":", "Escape")
-                                withTimeout(15_000) { stopping.await() }
+                                val stopped = withTimeout(15_000) { stopping.await() }
+                                assertTrue(stopped.exceptionOrNull() is NativeRootReplyStopped, "Stopping must retain the recovery guard: ${stopped.exceptionOrNull()}")
                                 root.resolve("native-stop-after.txt").writeText(tmux("capture-pane", "-p", "-t", "=" + promptPlan.sessionName + ":"))
-                                assertFalse(stoppedGate.blocked(stopKey))
-                                assertFalse(RewindDeliveryGate(stoppedGateFile).blocked(stopKey))
+                                assertTrue(stoppedGate.blocked(stopKey))
+                                assertTrue(RewindDeliveryGate(stoppedGateFile).blocked(stopKey))
                                 // Before its first response token the CLI can stop without appending an interruption record.
-                                assertTrue(Model.borrowable(tmux("capture-pane", "-p", "-t", "=" + promptPlan.sessionName + ":")))
+                                assertTrue(RestoredRewindDraft.matches(tmux("capture-pane", "-p", "-t", "=" + promptPlan.sessionName + ":"), requireNotNull(stoppedGate.pending(stopKey)?.nativeRoot).editedTextSha256))
                                 val branch = requireNotNull(TranscriptBranchStart.load(bridge.conn.ssh, stoppedFile.path, 2000))
                                 val visible = app.yxi.agent.Transcript.parse(requireNotNull(branch.lines).asSequence())
                                 assertEquals(listOf("ROOT-container-native-stop"), visible.filterIsInstance<ChatItem.UserText>().map { it.text })
@@ -568,6 +569,15 @@ class IsolatedNativeCliTest {
                                     !it.getString("path").contains("count_tokens") && it.getJSONArray("messages").toString().contains("ROOT-container-native-stop")
                                 }
                                 assertEquals(1, stopRequests.size, "Recovery must not resend the interrupted request")
+                                // Capability probe only: rehydrate the saved root in a fresh native process.
+                                tmux("respawn-pane", "-k", "-t", "=" + promptPlan.sessionName + ":", "-c", project.path,
+                                    "${Shell.q(native.path)} --resume ${Shell.q(stoppedSid)} --permission-mode manual")
+                                withTimeout(10_000) {
+                                    while (!Model.borrowable(tmux("capture-pane", "-p", "-t", "=" + promptPlan.sessionName + ":"))) delay(100)
+                                }
+                                assertEquals(stopRequests.size, root.resolve("requests.jsonl").readLines().map(::JSONObject).count {
+                                    !it.getString("path").contains("count_tokens") && it.getJSONArray("messages").toString().contains("ROOT-container-native-stop")
+                                }, "Reloading must not automatically resend the stopped request")
                                 tmux("send-keys", "-t", "=" + promptPlan.sessionName + ":", "-l", "--", "FOLLOWUP-container-after-stop")
                                 tmux("send-keys", "-t", "=" + promptPlan.sessionName + ":", "Enter")
                                 var followup: JSONObject? = null
