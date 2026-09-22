@@ -49,7 +49,8 @@ internal class RewindDeliveryGate(file: File) {
     @Synchronized fun prepareVerification(ticket: Ticket, query: RewindLiveVerification.Query): Ticket {
         check(readable && tickets.contains(ticket)) { "回退记录已变化，发送保持暂停" }
         require(RewindLiveVerification.validate(query) == null)
-        require(query.runtimeId == ticket.runtimeId && query.anchorUuid == ticket.target?.anchorUuid &&
+        require(query.sessionId == ticket.target?.sessionId &&
+            query.runtimeId == ticket.runtimeId && query.anchorUuid == ticket.target?.anchorUuid &&
             query.targetUuid == ticket.target?.messageUuid)
         require(query.transcriptPath.endsWith("/${query.sessionId}.jsonl"))
         val next = ticket.copy(verification = query)
@@ -79,7 +80,8 @@ internal class RewindDeliveryGate(file: File) {
             Ticket(it.getString("task"), it.getString("runtime"), it.getString("operation"), target, verification).also { t ->
                 require(t.taskKey.isNotBlank() && t.runtimeId.isNotBlank())
                 UUID.fromString(t.operationId)
-                verification?.let { q -> require(q.runtimeId == t.runtimeId && q.anchorUuid == target?.anchorUuid && q.targetUuid == target?.messageUuid) }
+                verification?.let { q -> require(q.sessionId == target?.sessionId &&
+                    q.runtimeId == t.runtimeId && q.anchorUuid == target?.anchorUuid && q.targetUuid == target?.messageUuid) }
             }
         } }.also { require(it.map { t -> t.taskKey }.distinct().size == it.size) }
     }

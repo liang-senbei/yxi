@@ -20,8 +20,19 @@ class RewindDeliveryGateTest {
             val query = RewindLiveVerification.Query("cc-demo", initial.runtimeId, "%1", "/opt/claude", "123",
                 target.sessionId, target.anchorUuid, target.messageUuid, "/tmp/${target.sessionId}.jsonl", 1234.5)
             assertFailsWith<IllegalArgumentException> { gate.prepareVerification(initial, query.copy(runtimeId = "1:\$3:4")) }
+            val otherSession = "44444444-4444-4444-8444-444444444444"
+            assertFailsWith<IllegalArgumentException> { gate.prepareVerification(initial,
+                query.copy(sessionId = otherSession, transcriptPath = "/tmp/$otherSession.jsonl")) }
             assertEquals(initial, gate.pending(initial.taskKey))
             val prepared = gate.prepareVerification(initial, query)
+            val validDisk = file.readText()
+            val corrupted = org.json.JSONArray(validDisk)
+            corrupted.getJSONObject(0).getJSONObject("verification")
+                .put("sessionId", otherSession).put("transcriptPath", "/tmp/$otherSession.jsonl")
+            file.writeText(corrupted.toString())
+            assertTrue(RewindDeliveryGate(file).blocked(initial.taskKey))
+            assertEquals(null, RewindDeliveryGate(file).pending(initial.taskKey))
+            file.writeText(validDisk)
             val restarted = RewindDeliveryGate(file)
             assertEquals(prepared, restarted.pending(initial.taskKey))
             assertTrue(restarted.blocked(initial.taskKey))
