@@ -38,6 +38,10 @@ if test "$mode" = build; then
         test "$(docker_local image inspect --format '{{ index .Config.Labels "org.yxi.source-revision" }}' "$base_image")" = "$YXI_TEST_BASE_IMAGE_REVISION"
         dockerfile="$run_root/context/dev/isolated-tests/Dockerfile.incremental"
         build_args=(--build-arg "BASE_IMAGE=$base_image" --network none)
+        if test "${YXI_TEST_INSTALL_GUI:-0}" = 1; then
+            # Explicit build-only package bootstrap; test execution remains --network none.
+            build_args=(--build-arg "BASE_IMAGE=$base_image" --build-arg INSTALL_GUI=1)
+        fi
     fi
     docker_local build --builder default --platform linux/amd64 -f "$dockerfile" "${build_args[@]}" \
         --build-arg "SOURCE_REVISION=$revision" -t "$image" "$run_root/context"

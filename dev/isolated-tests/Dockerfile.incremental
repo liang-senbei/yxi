@@ -1,5 +1,9 @@
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
+ARG INSTALL_GUI=0
+RUN if [ "$INSTALL_GUI" = 1 ]; then apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openjdk-21-jre fonts-noto-cjk libgl1 && \
+    rm -rf /var/lib/apt/lists/*; fi
 # The base image owns this directory; no host directory is mounted during build.
 RUN rm -rf /workspace && mkdir /workspace
 COPY . /workspace

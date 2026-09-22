@@ -2,7 +2,7 @@ FROM ubuntu:24.04
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates git gcc libc6-dev openssh-server tmux python3 xvfb xauth \
-    openjdk-17-jdk-headless openjdk-21-jdk-headless \
+    openjdk-17-jdk-headless openjdk-21-jdk-headless openjdk-21-jre fonts-noto-cjk libgl1 \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /run/sshd /sandbox/home /sandbox/tmp \
     && chmod 700 /sandbox /sandbox/home /sandbox/tmp \
