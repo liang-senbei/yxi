@@ -7,12 +7,15 @@ import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 
-internal class LocalAgentJob(val id: String, val engine: String, val directory: File, val prompt: String, val log: File) {
+internal class LocalAgentJob(val id: String, val engine: String, val directory: File, val prompt: String, val log: File,
+    val resumedFrom: String? = null) {
     var status by mutableStateOf("准备启动"); internal set
     var output by mutableStateOf(""); internal set
     internal var process: Process? = null
     internal var cancelRequested = false
-    val running get() = status in setOf("准备启动", "正在运行", "正在停止")
+    var sessionId by mutableStateOf(resumedFrom); internal set
+    internal var active by mutableStateOf(true)
+    val running get() = active
 }
 
 /** Local CLI jobs are user-initiated; inherit native credentials and permission defaults. */
@@ -24,26 +27,37 @@ internal class LocalAgents(private val root: File = File(Store.dir, "local-agent
             ?.sortedByDescending { it.lastModified() }?.take(100)?.forEach { folder ->
                 runCatching {
                     val saved = JSONObject(File(folder, "task.json").readText())
-                    LocalAgentJob(folder.name, saved.getString("engine"), File(saved.getString("directory")), "", File(folder, "output.log")).also {
+                    LocalAgentJob(folder.name, saved.getString("engine"), File(saved.getString("directory")), saved.optString("prompt"), File(folder, "output.log"),
+                        saved.optString("resumedFrom").takeIf(::validSessionId)).also {
                         it.status = saved.getString("status").let { status -> if (status in setOf("created", "准备启动", "正在运行", "正在停止")) "上次运行结果未确认" else status }
+                        it.sessionId = saved.optString("sessionId").takeIf(::validSessionId)
+                        it.active = false
+                        it.output = readableOutput(readTail(it.log))
                         jobs.add(it)
                     }
                 }
             }
     }
-    fun start(engine: String, directory: String, prompt: String) {
+    fun start(engine: String, directory: String, prompt: String) = launch(engine, directory, prompt, null)
+    fun continueSession(job: LocalAgentJob, prompt: String) {
+        require(jobs.any { it === job } && !job.running && job.status == "已完成") { "只能继续已确认完成的会话" }
+        val session = job.sessionId?.takeIf(::validSessionId) ?: error("运行器未提供可恢复的会话标识")
+        check(jobs.none { it.engine == job.engine && it.sessionId == session && (it.running || it.status == "上次运行结果未确认") }) { "此会话仍在运行或上次结果未确认" }
+        launch(job.engine, job.directory.path, prompt, session)
+    }
+    private fun launch(engine: String, directory: String, prompt: String, resume: String?) {
         require(engine in setOf("codex", "claude") && prompt.isNotBlank())
         val cwd = File(directory).canonicalFile
         require(cwd.isDirectory) { "本机工作目录不存在" }
         check(jobs.count { it.running } < 4) { "最多同时运行 4 个本机任务" }
         val folder = File(root, UUID.randomUUID().toString()).apply { mkdirs() }
-        DurableFile.replace(File(folder, "task.json"), JSONObject().put("engine", engine).put("directory", cwd.path).put("status", "created").toString())
-        val job = LocalAgentJob(folder.name, engine, cwd, prompt, File(folder, "output.log"))
+        val job = LocalAgentJob(folder.name, engine, cwd, prompt, File(folder, "output.log"), resume)
+        persist(job, "created")
         jobs.add(0, job)
         scope.launch {
             try {
                 val binary = binary(engine) ?: error("本机未找到 $engine，请先安装并完成登录")
-                val args = if (engine == "codex") listOf(binary.path, "exec", "--skip-git-repo-check", "--json", "-") else listOf(binary.path, "-p", "--output-format", "stream-json", "--verbose")
+                val args = command(binary, engine, resume)
                 val process = withContext(Dispatchers.IO) {
                     ProcessBuilder(args).directory(cwd).redirectErrorStream(true).redirectOutput(job.log).start()
                 }
@@ -58,15 +72,24 @@ internal class LocalAgents(private val root: File = File(Store.dir, "local-agent
                     delay(700)
                 }
                 job.output = readableOutput(tail(job.log))
+                val identity = withContext(Dispatchers.IO) { sessionIdentity(engine, job.log) }
+                check(resume == null || identity != null) { "运行器未确认恢复会话，结果需核对" }
+                if (identity != null) {
+                    check(resume == null || identity == resume) { "运行器返回了不同的会话，结果需核对" }
+                    job.sessionId = identity
+                }
                 job.status = if (job.cancelRequested) "已停止" else if (process.exitValue() == 0) "已完成" else "运行失败 (${process.exitValue()})"
             } catch (e: Exception) { job.status = if (job.cancelRequested) "已停止" else "启动失败"; job.output = e.message.orEmpty() }
             finally {
                 job.process?.takeIf { it.isAlive }?.let { terminate(it) }
-                withContext(NonCancellable + Dispatchers.IO) { runCatching { DurableFile.replace(File(folder, "task.json"), JSONObject().put("engine", engine).put("directory", cwd.path).put("status", job.status).toString()) } }
+                val saved = withContext(NonCancellable + Dispatchers.IO) { runCatching { persist(job, job.status) } }
+                if (saved.isFailure) job.status = "结果记录未保存，请保留日志核对"
+                job.active = false
             }
         }
     }
     fun stop(job: LocalAgentJob) {
+        if (!job.running || job.status !in setOf("准备启动", "正在运行", "正在停止")) return
         job.cancelRequested = true; job.status = "正在停止"
         job.process?.let(::terminate)
     }
@@ -77,12 +100,35 @@ internal class LocalAgents(private val root: File = File(Store.dir, "local-agent
         if (process.isAlive) process.destroyForcibly()
     }
     private suspend fun tail(file: File): String = withContext(Dispatchers.IO) {
-        if (!file.isFile) "" else java.io.RandomAccessFile(file, "r").use { f ->
-            f.seek((f.length() - 64000).coerceAtLeast(0)); val bytes = ByteArray((f.length() - f.filePointer).toInt()); f.readFully(bytes); bytes.toString(Charsets.UTF_8)
-        }
+        readTail(file)
     }
     override fun close() { jobs.filter { it.running }.forEach(::stop); scope.cancel() }
+    private fun persist(job: LocalAgentJob, status: String) {
+        DurableFile.replace(File(job.log.parentFile, "task.json"), JSONObject().put("engine", job.engine).put("directory", job.directory.path)
+            .put("status", status).put("prompt", job.prompt).put("sessionId", job.sessionId.orEmpty()).put("resumedFrom", job.resumedFrom.orEmpty()).toString())
+    }
     companion object {
+        private fun readTail(file: File): String = if (!file.isFile) "" else java.io.RandomAccessFile(file, "r").use { f ->
+            val length = f.length(); f.seek((length - 64000).coerceAtLeast(0))
+            val bytes = ByteArray((length - f.filePointer).toInt()); f.readFully(bytes); bytes.toString(Charsets.UTF_8)
+        }
+        internal fun validSessionId(value: String) = value.matches(Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"))
+        internal fun command(binary: File, engine: String, resume: String?): List<String> {
+            require(resume == null || validSessionId(resume))
+            return if (engine == "codex") listOf(binary.path, "exec") +
+                (if (resume != null) listOf("resume", "--skip-git-repo-check", "--json", resume, "-") else listOf("--skip-git-repo-check", "--json", "-"))
+            else listOf(binary.path, "-p", "--output-format", "stream-json", "--verbose") +
+                (if (resume != null) listOf("--resume", resume) else emptyList())
+        }
+        private fun sessionIdentity(engine: String, log: File): String? {
+            if (!log.isFile) return null
+            return log.bufferedReader().use { reader -> reader.lineSequence().take(1000).mapNotNull { line ->
+                val event = runCatching { JSONObject(line) }.getOrNull() ?: return@mapNotNull null
+                val id = if (engine == "codex" && event.optString("type") == "thread.started") event.optString("thread_id")
+                    else if (engine == "claude" && event.optString("type") in setOf("system", "result")) event.optString("session_id") else ""
+                id.takeIf(::validSessionId)
+            }.firstOrNull() }
+        }
         internal fun readableOutput(raw: String): String = raw.lineSequence().mapNotNull { line ->
             val event = runCatching { JSONObject(line) }.getOrNull() ?: return@mapNotNull line.takeIf { it.isNotBlank() }
             when (event.optString("type")) {

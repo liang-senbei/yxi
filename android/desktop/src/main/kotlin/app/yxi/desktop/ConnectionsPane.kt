@@ -94,6 +94,9 @@ import kotlinx.coroutines.launch
     var directory by remember { mutableStateOf(System.getProperty("user.home")) }
     var error by remember { mutableStateOf("") }
     val agents = state.localAgents
+    var continuation by remember { mutableStateOf<LocalAgentJob?>(null) }
+    var followup by remember { mutableStateOf("") }
+    var continueError by remember { mutableStateOf("") }
     LazyColumn(Modifier.fillMaxSize().padding(28.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item { Text("本地 Agent", style = MaterialTheme.typography.headlineMedium) }
         item { Text("任务在这台电脑运行，使用本机运行器的登录与权限设置。系统管理员操作仍由系统授权。", color = Tokens.current.textMuted) }
@@ -112,9 +115,20 @@ import kotlinx.coroutines.launch
             OutlinedCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row { Text("${job.engine} · ${job.status}", Modifier.weight(1f)); if (job.running) TextButton({ agents.stop(job) }) { Text("停止") } }
                 Text(job.directory.path, color = Tokens.current.textMuted)
+                if (job.prompt.isNotBlank()) Text(job.prompt, maxLines = 2, style = MaterialTheme.typography.titleSmall)
                 SelectionContainer { Text(job.output.ifBlank { if (job.running) "等待运行器输出…" else "没有文本输出" }, style = MaterialTheme.typography.bodySmall, maxLines = 30) }
                 TextButton({ runCatching { java.awt.Desktop.getDesktop().open(job.log) } }, enabled = job.log.exists()) { Text("打开完整日志") }
+                if (!job.running && job.status == "已完成" && job.sessionId != null) TextButton({ continuation = job; followup = ""; continueError = "" }) { Text("继续会话") }
             } }
         }
     }
+    continuation?.let { job -> AlertDialog(onDismissRequest = { continuation = null }, title = { Text("继续 ${if (job.engine == "codex") "Codex" else "Claude Code"} 会话") },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("${job.directory.path}\n继续此原生会话的最新上下文，已有后续轮次也会保留。", style = MaterialTheme.typography.bodySmall)
+            OutlinedTextField(followup, { followup = it }, Modifier.fillMaxWidth(), minLines = 3, label = { Text("接下来要做什么") })
+            if (continueError.isNotBlank()) Text(continueError, color = Tokens.current.danger)
+        } }, confirmButton = { Button({
+            runCatching { agents.continueSession(job, followup) }.onSuccess { continuation = null }.onFailure { continueError = it.message.orEmpty() }
+        }, enabled = followup.isNotBlank() && !job.running) { Text("发送") } },
+        dismissButton = { TextButton({ continuation = null }) { Text("取消") } }) }
 }

@@ -37,6 +37,21 @@ class LocalClaudeAgentNativeTest {
             assertContentEquals(before, settings.readBytes())
             val requests = root.resolve("requests.jsonl").readLines().map(::JSONObject)
             assertTrue(requests.any { it.getBoolean("fake_auth") && it.getJSONArray("messages").toString().contains("KEEP-local-claude") })
+            assertNotNull(job.sessionId)
+            val reopened = LocalAgents(root.resolve("jobs"))
+            try {
+                val saved = reopened.jobs.single()
+                assertEquals(job.sessionId, saved.sessionId)
+                withContext(Dispatchers.Swing) { reopened.continueSession(saved, "FOLLOWUP-local-claude") }
+                val followup = reopened.jobs.first()
+                withTimeout(45000) { while (followup.running) delay(100) }
+                assertEquals("已完成", followup.status, followup.output)
+                assertEquals(job.sessionId, followup.sessionId)
+                val continued = root.resolve("requests.jsonl").readLines().map(::JSONObject).last {
+                    it.getJSONArray("messages").toString().contains("FOLLOWUP-local-claude")
+                }
+                assertTrue(continued.getJSONArray("messages").toString().contains("KEEP-local-claude"))
+            } finally { reopened.close() }
         } finally { agents.close(); server.destroyForcibly(); server.waitFor(); root.deleteRecursively() }
     }
 }

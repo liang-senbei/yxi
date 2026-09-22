@@ -56,6 +56,26 @@ http_headers = { Authorization = "Bearer fixture-key-0" }
                 assertFalse(root.resolve("not-a-command").exists())
                 assertTrue(root.resolve("requests.jsonl").readText().contains("YXI-LOCAL-FIXTURE"))
                 assertContentEquals(before, config.readBytes(), "Launching local agents must not rewrite their global configuration")
+                assertNotNull(job.sessionId)
+                val reopened = LocalAgents(File(Store.dir, "local-agents"))
+                try {
+                    val saved = reopened.jobs.single { it.id == job.id }
+                    assertEquals(job.sessionId, saved.sessionId)
+                    assertEquals(job.prompt, saved.prompt)
+                    assertTrue(saved.output.contains("fixture-complete"))
+                    withContext(Dispatchers.Swing) {
+                        reopened.continueSession(saved, "YXI-LOCAL-FOLLOWUP")
+                        assertFailsWith<IllegalStateException> { reopened.continueSession(saved, "DUPLICATE-FOLLOWUP") }
+                    }
+                    val followup = reopened.jobs.first()
+                    withTimeout(45000) { while (followup.running) delay(100) }
+                    assertEquals("已完成", followup.status, followup.output)
+                    assertEquals(job.sessionId, followup.sessionId)
+                    val requests = root.resolve("requests.jsonl").readLines().map(::JSONObject)
+                    val continued = requests.last { it.optJSONArray("input").toString().contains("YXI-LOCAL-FOLLOWUP") }
+                    assertTrue(continued.optJSONArray("input").toString().contains("YXI-LOCAL-FIXTURE"), "Resume must carry the earlier conversation")
+                    assertFalse(requests.any { it.optJSONArray("input").toString().contains("DUPLICATE-FOLLOWUP") })
+                } finally { reopened.close() }
                 val canceled = withContext(Dispatchers.Swing) {
                     state.localAgents.start("codex", root.path, "CANCEL-BEFORE-DELIVERY")
                     state.localAgents.jobs.first().also { state.localAgents.stop(it) }
