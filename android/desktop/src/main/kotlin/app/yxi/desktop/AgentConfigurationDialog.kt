@@ -47,38 +47,9 @@ internal fun AgentConfigurationDialog(conn: Conn, session: Session, modelSwitche
         text = { Column(Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-            Text("1  选择运行器", style = MaterialTheme.typography.titleSmall)
-            configurationEngines.chunked(2).forEach { row ->
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    row.forEach { (id, label) ->
-                        FilterChip(engine == id, {
-                            engine = id; profileId = ""; notice = ""
-                        }, enabled = !loading && !saving, modifier = Modifier.weight(1f),
-                            label = { Text(label) }, leadingIcon = { RunnerBrandIcon(id, Modifier.size(20.dp)) })
-                    }
-                }
-            }
-            HorizontalDivider()
-            Text("2  选择已保存配置", style = MaterialTheme.typography.titleSmall)
-            val matching = profiles.filter { it.agent == engine }
-            if (engine !in listOf(Lines.CLAUDE, Lines.CODEX)) {
-                Text("该运行器的独立配置适配尚未完成，暂不能保存。", color = Tokens.current.textMuted)
-            } else {
-                matching.forEach { profile ->
-                    OutlinedCard(onClick = { profileId = profile.id; notice = "" }, enabled = !saving && !loading) {
-                        Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            RadioButton(profileId == profile.id, null)
-                            Column(Modifier.weight(1f).padding(start = 8.dp)) {
-                                Text(profile.name)
-                                Text(profile.baseUrl, style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
-                            }
-                        }
-                    }
-                }
-                if (matching.isEmpty() && !loading) Text("此运行器还没有已保存配置，请先在配置页添加。", color = Tokens.current.textMuted)
-                if (profileId.isNotBlank() && matching.none { it.id == profileId })
-                    Text("原配置已删除，请重新选择。", color = Tokens.current.danger)
-            }
+            AgentProfileChoices(engine, profileId, profiles, loading, saving,
+                onEngine = { engine = it; profileId = ""; notice = "" },
+                onProfile = { profileId = it; notice = "" })
             Text(if (engine == Lines.CLAUDE && session.agent == Lines.CLAUDE)
                 "应用会重启此空闲对话，保留原历史和权限模式。其他 Agent 的配置不变。"
                 else "切换运行器的新对话与摘要交接尚未接通，目前只能保存配置草稿。",

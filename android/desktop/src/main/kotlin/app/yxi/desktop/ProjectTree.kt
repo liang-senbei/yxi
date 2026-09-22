@@ -36,6 +36,7 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
     @Composable fun codexTask(record: CodexTaskRecord) {
         var menu by remember(record.key) { mutableStateOf(false) }
         var rename by remember(record.key) { mutableStateOf(false) }
+        var configuring by remember(record.key) { mutableStateOf(false) }
         var displayTitle by remember(record.key, rename) { mutableStateOf(nav.title(record.key) ?: record.title) }
         NativeOverlay(menu)
         val selected = state.page == Page.Codex && state.codexSelectedTaskKey == record.key && state.conn === conn
@@ -60,6 +61,7 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
             Box {
                 IconButton({ menu = true }, Modifier.size(26.dp)) { Icon(Icons.Default.MoreHoriz, "会话操作", Modifier.size(16.dp)) }
                 DropdownMenu(menu, { menu = false }) {
+                    DropdownMenuItem(text = { Text("配置") }, onClick = { configuring = true; menu = false })
                     DropdownMenuItem(text = { Text(if (nav.pinned(record.key)) "取消置顶" else "置顶") }, onClick = { nav.togglePin(record.key); menu = false })
                     DropdownMenuItem(text = { Text(if (nav.favorite(record.key)) "取消收藏" else "收藏") }, onClick = { nav.setCodexFavorite(record, !nav.favorite(record.key)); menu = false })
                     DropdownMenuItem(text = { Text("修改显示名称") }, onClick = { rename = true; menu = false })
@@ -75,6 +77,7 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
                 }
             }
         }
+        if (configuring) CodexAgentConfigurationDialog(state, conn, record) { configuring = false }
         if (rename) WorkbenchDialog(onDismissRequest = { rename = false }, title = { Text("修改 Agent 显示名称") },
             text = { Column {
                 OutlinedTextField(displayTitle, { displayTitle = it }, singleLine = true, label = { Text("名称") })

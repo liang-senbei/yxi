@@ -17,7 +17,8 @@ internal data class CodexResumeOverrides(val provider: String?, val model: Strin
  * Notifications and server approval requests remain raw events for the workspace controller.
  * Protocol: https://learn.chatgpt.com/docs/app-server
  */
-internal class CodexAppServer internal constructor(private val shell: SshSession.Shell) : AutoCloseable {
+internal class CodexAppServer internal constructor(private val shell: SshSession.Shell,
+    private val profileOverrides: CodexResumeOverrides? = null) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val pending = ConcurrentHashMap<String, CompletableDeferred<JSONObject>>()
     private val serverRequests = ConcurrentHashMap<String, JSONObject>()
@@ -93,18 +94,31 @@ internal class CodexAppServer internal constructor(private val shell: SshSession
     suspend fun startThread(directory: String): JSONObject {
         require(directory.startsWith('/') && '\u0000' !in directory)
         // Keep the server's configured approval, sandbox, model and provider defaults.
-        return request("thread/start", JSONObject().put("cwd", directory))
+        return request("thread/start", JSONObject().put("cwd", directory).apply { applyProfile(this, profileOverrides) })
     }
 
     suspend fun resumeThread(threadId: String, overrides: CodexResumeOverrides? = null) = request("thread/resume",
         JSONObject().put("threadId", requiredId(threadId)).apply {
-            overrides?.provider?.let { put("modelProvider", it) }
-            overrides?.model?.let { put("model", it) }
-            overrides?.effort?.let { put("config", JSONObject().put("model_reasoning_effort", it)) }
+            applyProfile(this, overrides ?: profileOverrides)
         })
+
+    private fun applyProfile(params: JSONObject, overrides: CodexResumeOverrides?) {
+        overrides?.provider?.let { params.put("modelProvider", it) }
+        overrides?.model?.let { params.put("model", it) }
+        overrides?.effort?.let { params.put("config", JSONObject().put("model_reasoning_effort", it)) }
+    }
+
+    internal fun verifyProfile(result: JSONObject) {
+        val expected = profileOverrides ?: return
+        check(result.optString("modelProvider") == expected.provider &&
+            (expected.model == null || result.optString("model") == expected.model)) {
+            "运行器返回的供应商或模型与所选独立配置不一致；未启用发送"
+        }
+    }
 
     suspend fun readResumeOverrides(directory: String): CodexResumeOverrides {
         require(directory.startsWith('/') && directory.none { it < ' ' }) { "项目目录无效" }
+        profileOverrides?.let { return it }
         val config = request("config/read", JSONObject().put("cwd", directory).put("includeLayers", false))
             .getJSONObject("result").getJSONObject("config")
         fun value(key: String) = config.optString(key).takeIf { it.isNotBlank() && it != "null" }
@@ -165,14 +179,18 @@ internal class CodexAppServer internal constructor(private val shell: SshSession
             return input
         }
 
-        suspend fun connect(ssh: SshSession): CodexAppServer {
-            val shell = ssh.openExecStream("""
+        suspend fun connect(ssh: SshSession, profile: app.yxi.agent.Lines.Line? = null, profileScope: String? = null): CodexAppServer {
+            val prepared = profile?.let { CodexProfileLaunch.prepare(ssh, it, profileScope) }
+            val shell = try { ssh.openExecStream(prepared?.command ?: """
 bin=${'$'}(command -v codex || true)
 if [ -z "${'$'}bin" ] && [ -x "${'$'}HOME/.local/bin/codex" ]; then bin="${'$'}HOME/.local/bin/codex"; fi
 [ -n "${'$'}bin" ] || exit 127
 exec "${'$'}bin" app-server
-""".trimIndent())
-            val client = CodexAppServer(shell)
+""".trimIndent()) } catch (e: Exception) {
+                if (prepared != null) CodexProfileLaunch.cleanup(ssh, prepared)
+                throw e
+            }
+            val client = CodexAppServer(shell, prepared?.overrides)
             try {
                 client.request("initialize", JSONObject().put("clientInfo", JSONObject()
                     .put("name", "yxi_desktop").put("title", "Yxi").put("version", System.getProperty("jpackage.app-version", "dev"))))
@@ -181,6 +199,7 @@ exec "${'$'}bin" app-server
                 }
                 return client
             } catch (e: Exception) { client.close(); throw e }
+            finally { if (prepared != null) CodexProfileLaunch.cleanup(ssh, prepared) }
         }
     }
 }

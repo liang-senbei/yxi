@@ -15,12 +15,12 @@ import kotlinx.coroutines.swing.Swing
 
 internal data class CodexTaskRecord(
     val hostKey: String, val threadId: String, val directory: String,
-    val title: String, val createdAt: Long,
+    val title: String, val createdAt: Long, val profileId: String = "", val profileScope: String = "",
 ) {
     val key get() = "codex:" + contentHash((hostKey + "\n" + threadId).toByteArray())
 }
 
-/** Local metadata only. Authentication remains in the selected server's Codex configuration. */
+/** Local metadata only. Profile IDs reference the selected server's catalog; no credentials are copied here. */
 internal class CodexTaskRegistry(file: File) {
     private val disk = DurableFile(file) { decode(it) }
     var records by mutableStateOf<List<CodexTaskRecord>>(emptyList()); private set
@@ -42,6 +42,7 @@ internal class CodexTaskRegistry(file: File) {
             disk.write(JSONObject().put("version", 1).put("tasks", JSONArray(next.map { task ->
                 JSONObject().put("hostKey", task.hostKey).put("threadId", task.threadId)
                     .put("directory", task.directory).put("title", task.title).put("createdAt", task.createdAt)
+                    .put("profileId", task.profileId).put("profileScope", task.profileScope)
             })).toString(2))
             records = next; error = ""
         } catch (e: Exception) { error = "任务登记未保存：${e.message}"; throw e }
@@ -54,8 +55,10 @@ internal class CodexTaskRegistry(file: File) {
         val result = (0 until tasks.length()).map { index ->
             val task = tasks.getJSONObject(index)
             CodexTaskRecord(task.getString("hostKey"), task.getString("threadId"), task.getString("directory"),
-                task.getString("title"), task.getLong("createdAt")).also {
+                task.getString("title"), task.getLong("createdAt"), task.optString("profileId"), task.optString("profileScope")).also {
                 require(it.hostKey.isNotBlank() && it.threadId.isNotBlank() && it.directory.startsWith('/') && it.createdAt > 0)
+                require(it.profileId.length <= 200 && it.profileId.none { c -> c < ' ' })
+                require(it.profileScope.isEmpty() || it.profileScope.matches(Regex("[a-f0-9]{32}")))
             }
         }
         require(result.map { it.key }.distinct().size == result.size)
@@ -90,24 +93,35 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File,
     var recoveryThreadId by mutableStateOf(""); private set
     // 测试缝（机械改动，仅供离线协议测试注入假运行器；生产默认即真实实现）
     internal var clientFactory: suspend (Conn) -> CodexAppServer = { CodexAppServer.connect(it.ssh) }
+    internal var profileClientFactory: suspend (Conn, app.yxi.agent.Lines.Line, String) -> CodexAppServer = { conn, line, scope -> CodexAppServer.connect(conn.ssh, line, scope) }
     internal var connected: (Conn) -> Boolean = { it.ssh.isConnected }
+
+    private fun scopeFor(record: CodexTaskRecord) = record.profileScope.ifBlank { contentHash(record.key.toByteArray()).take(32) }
+    private suspend fun clientFor(conn: Conn, profileId: String, scope: String): CodexAppServer {
+        if (profileId.isBlank()) return clientFactory(conn)
+        val line = app.yxi.agent.Lines.list(conn.ssh)?.singleOrNull { it.id == profileId && it.agent == app.yxi.agent.Lines.CODEX }
+            ?: error("此 Agent 的供应商配置无法读取或已删除，请先恢复该配置；不会改用全局配置")
+        return profileClientFactory(conn, line, scope)
+    }
 
     fun tasks(host: Host) = registry.records.filter { it.hostKey == projectKey(host, "/") }.sortedByDescending { it.createdAt }
 
-    suspend fun create(conn: Conn, directory: String, title: String): CodexTaskRecord = operations.withLock {
+    suspend fun create(conn: Conn, directory: String, title: String, profileId: String = ""): CodexTaskRecord = operations.withLock {
         registry.requireWritable()
         check(connected(conn)) { "请先连接服务器" }
         require(directory.startsWith('/') && directory.none { it < ' ' }) { "请输入服务器绝对目录" }
         busy = true; recoveryThreadId = ""
-        val client = try { clientFactory(conn) } catch (e: Exception) { busy = false; throw e }
+        val profileScope = java.util.UUID.randomUUID().toString().replace("-", "")
+        val client = try { clientFor(conn, profileId, profileScope) } catch (e: Exception) { busy = false; throw e }
         try {
             val result = client.startThread(directory).getJSONObject("result")
             val thread = result.getJSONObject("thread")
             val id = thread.getString("id")
             recoveryThreadId = id // Retain the server ID if local metadata cannot be written.
             val record = CodexTaskRecord(projectKey(conn.host, "/"), id, thread.optString("cwd").ifBlank { directory },
-                title.trim().ifBlank { directory.substringAfterLast('/').ifBlank { "新任务" } }, System.currentTimeMillis())
+                title.trim().ifBlank { directory.substringAfterLast('/').ifBlank { "新任务" } }, System.currentTimeMillis(), profileId, profileScope)
             registry.save(record)
+            client.verifyProfile(result)
             recoveryThreadId = ""
             attach(conn, record, client, thread.takeIf { it.optJSONArray("turns")?.length() == 0 && it.optJSONObject("status")?.optString("type") == "idle" }).recordSessionConfiguration(result)
             record
@@ -115,29 +129,34 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File,
         finally { busy = false }
     }
 
-    suspend fun open(conn: Conn, record: CodexTaskRecord): CodexTaskController = operations.withLock {
+    suspend fun open(conn: Conn, record: CodexTaskRecord, autoRun: Boolean = true): CodexTaskController = operations.withLock {
         check(record.hostKey == projectKey(conn.host, "/")) { "任务不属于当前服务器配置" }
-        controllers[record.key]?.takeIf { it.ready && owners[record.key] === conn }?.let { return@withLock it }
+        controllers[record.key]?.takeIf { it.ready && owners[record.key] === conn }?.let {
+            if (!autoRun) it.setAutoDispatch(false)
+            return@withLock it
+        }
         check(connected(conn)) { "服务器未连接" }
         controllers.remove(record.key)?.close(); owners.remove(record.key)
         busy = true
-        val client = try { clientFactory(conn) } catch (e: Exception) { busy = false; throw e }
+        val client = try { clientFor(conn, record.profileId, scopeFor(record)) } catch (e: Exception) { busy = false; throw e }
         try {
             val result = resumeExistingThread(client, record.threadId)
             val thread = result.getJSONObject("thread")
             check(thread.getString("id") == record.threadId) { "恢复响应不属于原任务" }
-            attach(conn, record, client).also { it.recordSessionConfiguration(result) }
+            client.verifyProfile(result)
+            attach(conn, record, client, autoRun = autoRun).also { it.recordSessionConfiguration(result) }
         } catch (e: Exception) { client.close(); throw e }
         finally { busy = false }
     }
 
-    suspend fun applyCurrentConfiguration(conn: Conn, record: CodexTaskRecord): CodexTaskController = operations.withLock {
+    suspend fun applyCurrentConfiguration(conn: Conn, record: CodexTaskRecord, profileId: String = record.profileId): CodexTaskController = operations.withLock {
+        registry.requireWritable()
         check(record.hostKey == projectKey(conn.host, "/") && connected(conn)) { "请连接任务原服务器" }
         val previous = controllers[record.key]
         check(previous != null && owners[record.key] === conn) { "请先打开原任务" }
         busy = true
         try {
-            val client = clientFactory(conn)
+            val client = clientFor(conn, profileId, scopeFor(record))
             var originalClosed = false
             try {
                 val overrides = client.readResumeOverrides(record.directory)
@@ -147,7 +166,10 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File,
                 val result = client.resumeThread(record.threadId, overrides).getJSONObject("result")
                 val thread = result.getJSONObject("thread")
                 check(thread.getString("id") == record.threadId && normalizeProjectPath(thread.getString("cwd")) == normalizeProjectPath(record.directory)) { "恢复响应与原任务不一致" }
-                attach(conn, record, client, autoRun = false).also { it.recordSessionConfiguration(result) }
+                client.verifyProfile(result)
+                val updated = record.copy(profileId = profileId, profileScope = scopeFor(record))
+                registry.save(updated)
+                attach(conn, updated, client, autoRun = false).also { it.recordSessionConfiguration(result) }
             } catch (e: Exception) {
                 client.close()
                 if (e is CancellationException) throw e
