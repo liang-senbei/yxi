@@ -17,6 +17,8 @@ import kotlin.test.*
 @EnabledIfEnvironmentVariable(named = "YXI_ISOLATED_TEST_RUN", matches = "[0-9a-f-]{36}")
 class PluginMarketplaceUiTest {
     @Test fun `marketplace renders local and real isolated server catalog without installing anything`() {
+        // Xvfb has no physical GPU; avoid llvmpipe teardown while switching Compose plugin panes.
+        System.setProperty("skiko.renderApi", "SOFTWARE")
         check(File("/.dockerenv").isFile && File("/sys/class/net").list()?.toSet() == setOf("lo"))
         check(File("/opt/native/claude").canExecute())
         val root = Files.createTempDirectory(Path.of("/sandbox/tmp"), "plugin-market-").toFile()
