@@ -60,17 +60,18 @@ class IsolatedNativeCliTest {
                 return output.readText()
             } finally { if (p.isAlive) p.destroyForcibly() }
         }
-        fun invoke(label: String, vararg args: String, rewind: Rewind.Plan? = null): JSONObject {
+        fun invoke(label: String, vararg args: String, rewind: Rewind.Plan? = null,
+            structuredInput: String? = null, inputPrompt: String? = null): JSONObject {
             val output = root.resolve("$label.json")
             val error = root.resolve("$label.err")
             val command = if (rewind == null) listOf(native.path) + args else listOf("/bin/sh", "-c",
                 Rewind.command(native.path, project.path, Rewind.Capture(native.path, ""), rewind))
-            val prompt = rewind?.prompt ?: args[args.indexOf("-p") + 1]
+            val prompt = inputPrompt ?: rewind?.prompt ?: args[args.indexOf("-p") + 1]
             val answer = "answer:" + prompt.substringBefore(' ').substringBefore('\n')
             val builder = isolated(ProcessBuilder(command).directory(project).redirectOutput(output).redirectError(error))
             val process = builder.start()
-            process.outputStream.close()
             try {
+                process.outputStream.use { input -> structuredInput?.let { input.write((it + "\n").toByteArray(Charsets.UTF_8)) } }
                 check(process.waitFor(60, TimeUnit.SECONDS)) { "Native CLI timeout: $label" }
                 assertEquals(0, process.exitValue(), error.readText().takeLast(1500))
                 val raw = output.readText()
@@ -91,12 +92,29 @@ class IsolatedNativeCliTest {
             check(root.resolve("port").isFile && server.isAlive) { "Loopback stub failed to start" }
             val first = invoke("first", "-p", "KEEP-container-first", "--output-format", "json")
             val sid = first.getString("session_id")
-            val second = invoke("second", "--resume", sid, "-p", "FOLLOWUP-container-second", "--output-format", "json")
+            val pixels = java.awt.image.BufferedImage(2, 2, java.awt.image.BufferedImage.TYPE_INT_RGB)
+            pixels.setRGB(0, 0, 0x3366ff)
+            val png = java.io.ByteArrayOutputStream().also { javax.imageio.ImageIO.write(pixels, "png", it) }.toByteArray()
+            val imageBlock = JSONObject().put("type", "image").put("source", JSONObject()
+                .put("type", "base64").put("media_type", "image/png").put("data", java.util.Base64.getEncoder().encodeToString(png)))
+            val imageInput = JSONObject().put("type", "user").put("message", JSONObject().put("role", "user")
+                .put("content", org.json.JSONArray().put(imageBlock).put(JSONObject().put("type", "text").put("text", "FOLLOWUP-container-second"))))
+            val second = invoke("second", "--resume", sid, "-p", "--input-format", "stream-json", "--output-format", "json",
+                structuredInput = imageInput.toString(), inputPrompt = "FOLLOWUP-container-second")
             assertEquals(sid, second.getString("session_id"))
             val requests = root.resolve("requests.jsonl").readLines().map(::JSONObject)
             val followup = requests.last { it.getJSONArray("messages").toString().contains("FOLLOWUP-container-second") }
             assertTrue(followup.getBoolean("fake_auth"))
             assertTrue(followup.getJSONArray("messages").toString().contains("KEEP-container-first"))
+            val sentImages = (0 until followup.getJSONArray("messages").length()).flatMap { index ->
+                val content = followup.getJSONArray("messages").getJSONObject(index).optJSONArray("content")
+                if (content == null) emptyList() else (0 until content.length()).mapNotNull {
+                    content.optJSONObject(it)?.takeIf { block -> block.optString("type") == "image" }
+                }
+            }
+            assertEquals(1, sentImages.size, "Image must reach the API as an image block")
+            assertEquals("image/png", sentImages.single().getJSONObject("source").getString("media_type"))
+            assertTrue(java.util.Base64.getDecoder().decode(sentImages.single().getJSONObject("source").getString("data")).isNotEmpty())
 
             // Select the actual persisted parent UUID, never infer a turn from its display index.
             val transcript = config.walkTopDown().single { it.isFile && it.name == "$sid.jsonl" }
@@ -118,6 +136,7 @@ class IsolatedNativeCliTest {
                 assertTrue(messages.contains("EDIT-container-second"), "Edited turn missing: $marker")
                 assertFalse(messages.contains("FOLLOWUP-container-second"), "Replaced turn leaked: $marker")
                 assertFalse(messages.contains("DROP-container-third"), "Abandoned descendant leaked: $marker")
+                assertFalse(messages.contains("\"type\":\"image\""), "Discarded image leaked: $marker")
             }
 
             // The product uses the CLI's stricter drops-turn guard when editing the last turn.
