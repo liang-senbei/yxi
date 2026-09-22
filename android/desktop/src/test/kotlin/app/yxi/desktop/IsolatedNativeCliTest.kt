@@ -3,6 +3,7 @@ package app.yxi.desktop
 import app.yxi.agent.Rewind
 import app.yxi.agent.Model
 import app.yxi.agent.SessionProbe
+import app.yxi.agent.RewindLiveVerification
 import app.yxi.ssh.Shell
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -202,6 +203,19 @@ class IsolatedNativeCliTest {
                         assertFalse(appRequest.contains("EDIT-container-second"))
                         assertFalse(appRequest.contains("SINGLE-container-edit"))
                         assertFalse(appRequest.contains("INTERACTIVE-container-followup"))
+                    } catch (e: Exception) {
+                        gate.pending(key)?.verification?.let { query ->
+                            root.resolve("recovery-probe.txt").writeText(bridge.conn.ssh.exec(
+                                RewindLiveVerification.command(query, regTimeoutSec = 1)))
+                        }
+                        root.resolve("registrations.json").writeText(org.json.JSONArray().apply {
+                            config.resolve("sessions").listFiles().orEmpty().filter { it.extension == "json" }.forEach {
+                                put(JSONObject(it.readText()))
+                            }
+                        }.toString())
+                        root.resolve("pane-identity.txt").writeText(tmux("display-message", "-p", "-t", "=cc-native-check:",
+                            "#{pane_pid}|#{pane_current_command}|#{session_name}:#{window_id}.#{pane_id}|#{session_name}:#{window_index}.#{pane_index}"))
+                        throw e
                     } finally { DesktopTranscriptMemory.drop(key) }
                 } }
             }
