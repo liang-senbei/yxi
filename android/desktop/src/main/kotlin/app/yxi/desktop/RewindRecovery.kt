@@ -31,7 +31,7 @@ internal suspend fun recheckRewindRecovery(conn: Conn, session: Session, gate: R
             }
             if (!NativeRootVerification.needsIdleInputProof(result)) throw NativeRootRecoveryFailure(result)
             val screen = conn.ssh.exec("tmux capture-pane -p -t ${Shell.q("=" + session.name + ":")}")
-            if (!Live.parse(screen).busy) throw NativeRootReplyStopped()
+            if (RestoredRewindDraft.matches(screen, root.editedTextSha256)) throw NativeRootReplyStopped()
             delay(200)
         }
         error("运行器尚未回到空闲输入状态，发送仍暂停。")
