@@ -140,7 +140,7 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
                 }
             }
         }
-        if (configuring) AgentConfigurationDialog(conn, s) { configuring = false }
+        if (configuring) AgentConfigurationDialog(conn, s, state.modelSwitches) { configuring = false }
         if (renaming) WorkbenchDialog(onDismissRequest = { renaming = false }, title = { Text("修改任务显示名称") },
             text = { Column {
                 OutlinedTextField(title, { title = it }, singleLine = true, label = { Text("名称") })

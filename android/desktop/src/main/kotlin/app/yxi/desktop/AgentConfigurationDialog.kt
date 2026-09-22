@@ -15,7 +15,7 @@ import kotlinx.coroutines.launch
 
 /** Desired configuration is a draft until the runtime adapter supplies a verified receipt. */
 @Composable
-internal fun AgentConfigurationDialog(conn: Conn, session: Session, dismiss: () -> Unit) {
+internal fun AgentConfigurationDialog(conn: Conn, session: Session, modelSwitches: ModelChangeStore? = null, dismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
     var bindings by remember { mutableStateOf<Map<String, AgentBindingStore.Binding>?>(null) }
     var profiles by remember { mutableStateOf<List<Lines.Line>>(emptyList()) }
@@ -93,7 +93,7 @@ internal fun AgentConfigurationDialog(conn: Conn, session: Session, dismiss: () 
                         AgentBindingStore.setDesired(conn.ssh, session.name, desired, bindings)?.let { error(it) }
                         bindings = AgentBindingStore.list(conn.ssh) ?: error("配置保存后无法回读，未重启")
                         check(bindings?.get(session.name)?.desired == desired) { "选择已变化，未重启" }
-                        val receipt = ConversationRouteApply.apply(conn, session, selected)
+                        val receipt = ConversationRouteApply.apply(conn, session, selected, modelSwitches)
                         val checked = Lines.list(conn.ssh)?.singleOrNull { it.id == selected.id && it.agent == selected.agent }
                         check(checked != null && selected.settingsJson().similar(checked.settingsJson())) {
                             "应用期间供应商配置已变化，请重新核对；未标记为已应用"

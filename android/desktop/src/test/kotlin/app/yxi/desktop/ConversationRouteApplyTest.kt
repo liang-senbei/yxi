@@ -96,9 +96,21 @@ class ConversationRouteApplyTest {
                     val a = SessionProbe.snapshot(bridge.conn.ssh).single { it.name == "cc-route-a" }
                     val line = Lines.Line("route-b", "Fixture B", "http://127.0.0.1:${endpoints[1].resolve("port").readText().trim()}",
                         apiKey = "fixture-key-1", extra = JSONObject().put("env", JSONObject().put("ANTHROPIC_MODEL", "fixture-route-b")))
-                    val receipt = ConversationRouteApply.apply(bridge.conn, a, line)
+                    val changes = ModelChangeStore(root.resolve("models.json"))
+                    val taskKey = taskNavigationKey(bridge.conn.host, a)
+                    assertTrue(changes.propose(taskKey, a.runtimeId, null, "high"))
+                    val beforePid = tm("display-message", "-p", "-t", "=cc-route-a:", "#{pane_pid}").trim()
+                    val refused = runCatching { ConversationRouteApply.apply(bridge.conn, a, line, changes) }.exceptionOrNull()
+                    assertTrue(refused?.message.orEmpty().contains("模型切换"))
+                    assertEquals(beforePid, tm("display-message", "-p", "-t", "=cc-route-a:", "#{pane_pid}").trim())
+                    changes.dismiss(taskKey, changes.latest(taskKey)!!.revision)
+                    val receipt = ConversationRouteApply.apply(bridge.conn, a, line, changes)
                     assertEquals(ids.getValue("a"), receipt.sessionId)
+                    bridge.conn.ssh.disconnect()
+                    bridge.conn.ssh.connect()
                     assertEquals(listOf("fixture-route-b"), ConfiguredModels.load(bridge.conn.ssh, project.path, "default", a).models)
+                    assertEquals(setOf(java.nio.file.attribute.PosixFilePermission.OWNER_READ, java.nio.file.attribute.PosixFilePermission.OWNER_WRITE),
+                        Files.getPosixFilePermissions(Path.of(receipt.settingsPath)))
                     assertTrue(receipt.processIdentity.matches(Regex("[0-9a-f-]+:[0-9]+:[0-9]+")))
                     val privateSettings = JSONObject(File(receipt.settingsPath).readText())
                     assertEquals("", privateSettings.getJSONObject("env").getString("ANTHROPIC_DEFAULT_OPUS_MODEL"))
@@ -119,9 +131,29 @@ class ConversationRouteApplyTest {
                     assertNull(request(endpoints[0], "VERIFY-agent-a"))
                     assertNull(request(endpoints[1], "VERIFY-agent-b"))
                     assertContentEquals(beforeGlobal, global.readBytes())
+                    ready("cc-route-a")
+                    val nextLine = Lines.Line("route-a", "Fixture A", environment().getValue("ANTHROPIC_BASE_URL"), apiKey = "fixture-key-0",
+                        extra = JSONObject().put("env", JSONObject().put("ANTHROPIC_MODEL", "fixture-route-a")))
+                    val second = ConversationRouteApply.apply(bridge.conn, a, nextLine, changes)
+                    assertEquals(receipt.sessionId, second.sessionId)
+                    assertNotEquals(receipt.processIdentity, second.processIdentity)
+                    assertEquals(listOf("fixture-route-a"), ConfiguredModels.load(bridge.conn.ssh, project.path, "default", a).models)
+                    tm("send-keys", "-t", "=cc-route-a:", "-l", "--", "VERIFY-agent-return")
+                    tm("send-keys", "-t", "=cc-route-a:", "Enter")
+                    repeat(150) { if (request(endpoints[0], "VERIFY-agent-return") == null) delay(100) }
+                    val returned = requireNotNull(request(endpoints[0], "VERIFY-agent-return"))
+                    assertTrue(returned.getBoolean("fake_auth"))
+                    assertEquals("fixture-route-a", returned.getString("model"))
+                    assertTrue(returned.getJSONArray("messages").toString().contains("ROOT-agent-a"))
+                    assertTrue(returned.getJSONArray("messages").toString().contains("VERIFY-agent-a"))
+                    assertFalse(returned.getJSONArray("messages").toString().contains("ROOT-agent-b"))
+                    assertNull(request(endpoints[1], "VERIFY-agent-return"))
+                    assertEquals(bPid, tm("display-message", "-p", "-t", "=cc-route-b:", "#{pane_pid}").trim())
+                    assertContentEquals(beforeGlobal, global.readBytes())
                     File("/results/route-isolation-proof.json").writeText(JSONObject().put("originalSessionPreserved", true)
                         .put("otherProcessUnchanged", true).put("separateEndpointsAndKeys", true)
-                        .put("globalSettingsUnchanged", true).put("model", sentA.getString("model")).toString(2))
+                        .put("globalSettingsUnchanged", true).put("reconnectAndSecondSwitch", true)
+                        .put("model", sentA.getString("model")).put("secondModel", returned.getString("model")).toString(2))
                 } }
             }
         } finally {

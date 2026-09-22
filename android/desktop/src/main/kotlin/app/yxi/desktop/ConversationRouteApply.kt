@@ -30,9 +30,13 @@ internal object ConversationRouteApply {
         }
     }
 
-    suspend fun apply(conn: Conn, session: Session, line: Lines.Line): Receipt = conn.instructionDeliveryMutex.withLock {
+    suspend fun apply(conn: Conn, session: Session, line: Lines.Line, modelSwitches: ModelChangeStore? = null): Receipt = conn.instructionDeliveryMutex.withLock {
         check(session.agent == Lines.CLAUDE && session.runtimeId.isNotBlank() && conn.ssh.isConnected)
-        check(!RewindDelivery.gate.blocked(taskNavigationKey(conn.host, session))) { "请先完成回退核验" }
+        val taskKey = taskNavigationKey(conn.host, session)
+        check(!RewindDelivery.gate.blocked(taskKey)) { "请先完成回退核验" }
+        check(conn.modelChanges[session.runtimeId] == null && modelSwitches?.active(taskKey) == null && modelSwitches?.blocksQueue(taskKey) != true) {
+            "请先完成或取消待处理的模型切换，再应用 Agent 配置"
+        }
         val screen = conn.ssh.exec("tmux capture-pane -p -t ${Shell.q("=" + session.name + ":")}")
         check(Model.borrowable(screen) && Prompt.parse(screen) == null) { "请等待任务结束，并处理终端中未发送的内容" }
         val mode = PermissionMode.fromScreen(screen) ?: error("无法确认当前权限模式，未重启会话")
