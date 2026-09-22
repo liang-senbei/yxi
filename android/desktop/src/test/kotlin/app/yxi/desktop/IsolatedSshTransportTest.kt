@@ -102,6 +102,18 @@ class IsolatedSshTransportTest {
             val output = request.get(25, TimeUnit.SECONDS)
             assertEquals("${home.path}\n中文🙂", output)
             assertEquals("中文🙂", home.resolve("probe.txt").readText())
+            val payload = "输入🙂".repeat(50_000).toByteArray(Charsets.UTF_8)
+            val digest = java.security.MessageDigest.getInstance("SHA-256").digest(payload).joinToString("") { "%02x".format(it) }
+            val sid = "11111111-1111-4111-8111-111111111111"
+            val echoScript = "import sys,json,hashlib; d=sys.stdin.buffer.read(); " +
+                "print(json.dumps({'type':'user','echo':d.decode()})); " +
+                "print(json.dumps({'type':'result','session_id':'$sid','result':hashlib.sha256(d).hexdigest()})); " +
+                "print('${Rewind.TAG}:rc=0')"
+            val streamed = executor.submit<String> { runBlocking {
+                runRewindCommand(client, "python3 -c ${app.yxi.ssh.Shell.q(echoScript)}", payload)
+            } }.get(25, TimeUnit.SECONDS)
+            assertEquals(Rewind.Outcome.Ok(sid, digest), Rewind.parse(streamed))
+            assertTrue(streamed.length < 500, "Verbose input echo must not be retained")
             val ownedSocket = "${tmuxRoot.path}/tmux-0/default"
             val tmuxCheck = executor.submit<String> {
                 runBlocking {

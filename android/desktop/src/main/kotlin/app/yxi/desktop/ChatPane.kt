@@ -176,15 +176,20 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
         var sourceLoading by remember(taskKey, target.key) { mutableStateOf(!target.queued && !session.isCodex && target.sourceUuid != null) }
         var sourceError by remember(taskKey, target.key) { mutableStateOf<String?>(null) }
         var sourceImages by remember(taskKey, target.key) { mutableStateOf<List<RewindImageDraft>>(emptyList()) }
+        var sourceTarget by remember(taskKey, target.key) { mutableStateOf<RewindTarget?>(null) }
         val removedImages = remember(taskKey, target.key) { mutableStateListOf<Int>() }
         LaunchedEffect(taskKey, target.key) {
             val uuid = target.sourceUuid ?: return@LaunchedEffect
             if (target.queued || session.isCodex) return@LaunchedEffect
             try {
-                sourceImages = withContext(Dispatchers.IO) {
+                val loaded = withContext(Dispatchers.IO) {
                     val inspected = RewindTargets.inspect(conn, session, uuid)
-                    rewindImageDrafts(uuid, RewindTargets.loadMessage(conn, inspected))
+                    target.imageSelection?.let { check(it.target == inspected) { "Original image selection is stale" } }
+                    inspected to rewindImageDrafts(uuid, RewindTargets.loadMessage(conn, inspected))
                 }
+                sourceTarget = loaded.first
+                sourceImages = loaded.second
+                target.imageSelection?.let { selected -> removedImages.addAll(loaded.second.map { it.originalIndex }.filterNot { it in selected.keep }) }
             } catch (e: CancellationException) { throw e }
             catch (_: Exception) { sourceError = "原消息暂时无法读取或内容不受支持，请重新打开编辑或使用终端回退。" }
             finally { sourceLoading = false }
@@ -199,20 +204,22 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
             status = when {
                 sourceLoading -> "正在读取原消息…"
                 sourceError != null -> sourceError
-                sourceImages.isNotEmpty() -> "图片可预览；带图片消息的自动回退传输尚未接入。"
+                sourceImages.isNotEmpty() -> if (visibleImages.isEmpty()) "已移除本条消息的全部图片。" else "将保留 ${visibleImages.size} 张图片。"
                 else -> null
             },
             draftLabel = "仅载入文字",
             showRewind = !target.queued && !session.isCodex,
             canRewind = !rewindRunning && !RewindDelivery.gate.blocked(taskKey) && target.sourceUuid != null &&
-                !live.busy && pending == null && conn.ssh.isConnected && !sourceLoading && sourceError == null && sourceImages.isEmpty(),
+                !live.busy && pending == null && conn.ssh.isConnected && !sourceLoading && sourceError == null && sourceTarget != null,
             canOpenNative = !live.busy && pending == null && session.runtimeId.isNotBlank() &&
                 !rewindRunning && !RewindDelivery.gate.blocked(taskKey) && conn.ssh.isConnected,
             onDismiss = { editingMessage = null },
             onDraft = { draft = TextFieldValue(editedText, selection = TextRange(editedText.length)); editingMessage = null; focus.requestFocus() },
             onRewind = {
                 target.sourceUuid?.let { uuid ->
-                    if (ConversationRewind.start(conn, session, uuid, editedText)) {
+                    val selection = if (sourceImages.isEmpty()) null else RewindImageSelection(
+                        sourceTarget ?: return@let, visibleImages.map { it.originalIndex }.toSet())
+                    if (ConversationRewind.start(conn, session, uuid, editedText, selection)) {
                         editingMessage = null; sendErr = null
                     }
                 }
@@ -530,7 +537,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
             Text(rewindOperation.message, Modifier.weight(1f), color = t.danger, fontSize = 12.sp)
             if (!rewindBlocked && rewindOperation.messageUuid != null && rewindOperation.editedText != null) TextButton({
                 editingMessage = MessageEditTarget(rewindOperation.messageUuid, rewindOperation.editedText,
-                    sourceUuid = rewindOperation.messageUuid)
+                    sourceUuid = rewindOperation.messageUuid, imageSelection = rewindOperation.imageSelection)
             }) { Text("重新编辑") }
         } else if (rewindOperation != null && !rewindBlocked) Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -789,7 +796,8 @@ private suspend fun waitChange(before: String, timeoutMs: Long = 4_000, get: () 
 }
 
 // ── 条目渲染 ──
-private data class MessageEditTarget(val key: String, val text: String, val queued: Boolean = false, val sourceUuid: String? = null)
+private data class MessageEditTarget(val key: String, val text: String, val queued: Boolean = false, val sourceUuid: String? = null,
+    val imageSelection: RewindImageSelection? = null)
 
 @Composable
 private fun ItemView(conn: Conn, item: ChatItem, onEdit: (MessageEditTarget) -> Unit) = when (item) {

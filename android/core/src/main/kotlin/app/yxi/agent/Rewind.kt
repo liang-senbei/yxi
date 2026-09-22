@@ -170,7 +170,7 @@ object Rewind {
      * 不合进来 [parse] 就只能看到 rc=1 什么都解释不了。
      * ⚠️ 结尾的 TAG 行是结果锚 —— exec 的输出里 JSON 和报错混在一起，认行不猜。
      */
-    fun command(exe: String, cwd: String, cap: Capture, p: Plan): String {
+    fun command(exe: String, cwd: String, cap: Capture, p: Plan, structuredInput: Boolean = false): String {
         require(validate(p) == null && validateExe(exe) == null)
         require(cap.resumeSessionId == null || cap.resumeSessionId == p.sessionId)
         val fork = if (p.fork) " --fork-session" else ""
@@ -184,7 +184,8 @@ object Rewind {
             cap.model?.let { append(" --model '").append(q(it)).append("'") }
             cap.effort?.let { append(" --effort '").append(q(it)).append("'") }
             append(fork)
-            append(" -p --output-format json -- '").append(q(p.prompt)).append("' 2>&1")
+            if (structuredInput) append(" -p --input-format stream-json --output-format stream-json --verbose 2>&1")
+            else append(" -p --output-format json -- '").append(q(p.prompt)).append("' 2>&1")
         }
         return "command -v timeout >/dev/null 2>&1 || { echo \"$TAG:rc=notimeout\"; exit 0; }; " +
             "cd '${q(cwd)}' || { echo \"$TAG:rc=cwd\"; exit 0; }; " +

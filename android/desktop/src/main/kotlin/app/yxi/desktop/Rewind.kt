@@ -2,6 +2,7 @@ package app.yxi.desktop
 
 import app.yxi.agent.Rewind
 import app.yxi.agent.RewindLiveVerification
+import app.yxi.agent.RewindMessageInput
 import app.yxi.agent.SessionProbe
 import app.yxi.agent.SessionState
 import kotlinx.coroutines.CancellationException
@@ -114,13 +115,18 @@ internal class RewindController(private val conn: Conn, private val gate: Rewind
      */
     // ⚠️ internal：参数带 root 的 internal RewindTarget（public 会编译不过）；
     //    调用方 ChatPane 就在同模块里，不受影响。
-    internal suspend fun rewind(sessionName: String, plan: Rewind.Plan, inspected: RewindTarget? = null): Report {
+    internal suspend fun rewind(sessionName: String, plan: Rewind.Plan, inspected: RewindTarget? = null,
+        structuredInput: RewindMessageInput.Prepared? = null): Report {
+        require(structuredInput == null || inspected != null) { "Structured input requires an inspected source" }
+        val input = structuredInput?.let { (it.json + "\n").toByteArray(Charsets.UTF_8) }
+        require(input == null || input.size <= 32 * 1024 * 1024) { "Structured input exceeds transport limit" }
         val prepared = prepare(sessionName, plan, inspected)
         val capture = prepared.capture
         if (prepared.ticket == null || capture == null) return prepared
         // The durable task gate now owns exclusion. Other tasks on this host may proceed.
         val outcome = try {
-            val out = runRewindCommand(conn.ssh, Rewind.command(capture.exe, requireNotNull(prepared.cwd), capture, plan))
+            val out = runRewindCommand(conn.ssh, Rewind.command(capture.exe, requireNotNull(prepared.cwd), capture, plan,
+                structuredInput = input != null), input)
             if (out.isBlank()) Rewind.Outcome.Failed("exec") else Rewind.parse(out)
         } catch (e: CancellationException) { throw e }
         catch (_: Exception) { Rewind.Outcome.Failed("exec") }

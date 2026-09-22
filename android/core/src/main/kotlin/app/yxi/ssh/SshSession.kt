@@ -162,6 +162,11 @@ class SshSession(
             if (outbox.trySend(Out(bytes, d)).isFailure) return false
             return d.await()
         }
+
+        /** Close only stdin after acknowledged writes; the exec stdout remains readable. */
+        suspend fun finishInput(): Boolean = withContext(Dispatchers.IO) {
+            ioLock.withLock { runCatching { input.close(); true }.getOrDefault(false) }
+        }
         suspend fun write(text: String): Boolean = write(text.toByteArray())
         /** 横竖屏切换、软键盘弹出都要重发，不然远端还按老尺寸折行 */
         suspend fun resize(cols: Int, rows: Int, widthPx: Int = 0, heightPx: Int = 0): Boolean =

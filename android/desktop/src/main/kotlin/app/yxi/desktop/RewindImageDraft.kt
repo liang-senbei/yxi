@@ -6,6 +6,7 @@ import java.io.ByteArrayInputStream
 import java.util.Base64
 
 internal data class RewindImageDraft(val originalIndex: Int, val attachment: DraftAttach)
+internal data class RewindImageSelection(val target: RewindTarget, val keep: Set<Int>)
 
 internal fun rewindImageDrafts(messageUuid: String, message: JSONObject): List<RewindImageDraft> {
     val prepared = RewindMessageInput.create(message, "preview")

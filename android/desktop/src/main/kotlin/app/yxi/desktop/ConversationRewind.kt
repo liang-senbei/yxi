@@ -4,6 +4,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import app.yxi.agent.Model
 import app.yxi.agent.Prompt
 import app.yxi.agent.Rewind
+import app.yxi.agent.RewindMessageInput
 import app.yxi.agent.RewindLiveVerification
 import app.yxi.agent.Session
 import app.yxi.ssh.Shell
@@ -20,25 +21,25 @@ internal class ConversationRewindFailure(val code: String, val detail: String, m
 
 internal object ConversationRewind {
     data class State(val running: Boolean, val message: String, val failed: Boolean = false,
-        val editedText: String? = null, val messageUuid: String? = null)
+        val editedText: String? = null, val messageUuid: String? = null, val imageSelection: RewindImageSelection? = null)
     private val states = mutableStateMapOf<String, State>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
     fun state(taskKey: String): State? = states[taskKey]
     fun dismiss(taskKey: String) { if (states[taskKey]?.running != true) states.remove(taskKey) }
 
-    fun start(conn: Conn, session: Session, messageUuid: String, text: String): Boolean {
+    fun start(conn: Conn, session: Session, messageUuid: String, text: String, imageSelection: RewindImageSelection? = null): Boolean {
         val key = taskNavigationKey(conn.host, session)
         if (states[key]?.running == true || RewindDelivery.gate.blocked(key)) return false
         states[key] = State(true, "正在核对历史轮次…")
         scope.launch {
             try {
-                restore(conn, session, messageUuid, text, progress = { states[key] = State(true, it) })
+                restore(conn, session, messageUuid, text, imageSelection = imageSelection, progress = { states[key] = State(true, it) })
                 states[key] = State(false, "已回到所选轮次，可以继续对话。")
             } catch (e: CancellationException) {
-                states[key] = State(false, "回退操作已中断，请核对恢复状态。", true, text, messageUuid)
+                states[key] = State(false, "回退操作已中断，请核对恢复状态。", true, text, messageUuid, imageSelection)
                 throw e
             } catch (e: Exception) {
-                states[key] = State(false, e.message ?: "回退未完成，请核对当前会话。", true, text, messageUuid)
+                states[key] = State(false, e.message ?: "回退未完成，请核对当前会话。", true, text, messageUuid, imageSelection)
             }
         }
         return true
@@ -50,11 +51,15 @@ internal object ConversationRewind {
     }
 
     internal suspend fun restore(conn: Conn, session: Session, messageUuid: String, text: String,
-        gate: RewindDeliveryGate = RewindDelivery.gate, progress: (String) -> Unit = {}) {
+        gate: RewindDeliveryGate = RewindDelivery.gate, imageSelection: RewindImageSelection? = null, progress: (String) -> Unit = {}) {
         require(text.isNotBlank()) { "请输入继续对话的内容" }
         check(conn.ssh.isConnected && !session.isCodex) { "当前会话暂不支持此回退方式" }
         val target = RewindTargets.inspect(conn, session, messageUuid)
-        check(!target.unsupportedContent) { "此消息包含附件或多个内容块，附件恢复尚未接入，未执行回退。" }
+        val structured = imageSelection?.let { selection ->
+            check(selection.target == target) { "原消息已变化，请重新打开编辑并确认图片选择。" }
+            RewindMessageInput.create(RewindTargets.loadMessage(conn, target), text, selection.keep)
+        }
+        check(!target.unsupportedContent || structured != null) { "此消息包含尚不支持的内容，请重新打开编辑确认附件。" }
         val anchor = target.parentUuid ?: error("首轮自动回退尚未接入，请使用原生回退入口。")
         // Native drops-turn validation can count abandoned sibling branches after a
         // previous rewind. Use the same branch operation for last and earlier turns;
@@ -64,7 +69,7 @@ internal object ConversationRewind {
         conn.instructionDeliveryMutex.withLock { checkEmptyPrompt(conn, session) }
         val controller = RewindController(conn, gate)
         progress("正在恢复历史并生成回复…")
-        val report = controller.rewind(session.name, plan, target)
+        val report = controller.rewind(session.name, plan, target, structured)
         val capture = report.capture
         try {
             val outcome = report.outcome

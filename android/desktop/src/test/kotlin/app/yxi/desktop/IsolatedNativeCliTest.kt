@@ -331,6 +331,37 @@ class IsolatedNativeCliTest {
                         assertEquals(1, coldTools.size)
                         assertTrue(coldTools.single().result.orEmpty().contains("RETAINED_TOOL_CONTENT"))
                         assertFalse(coldTools.single().result.orEmpty().contains("DISCARDED_TOOL_CONTENT"))
+                        val attachmentSeed = RewindMessageInput.create(JSONObject().put("role", "user")
+                            .put("content", org.json.JSONArray().put(imageBlock).put(selectedImageBlock)
+                                .put(JSONObject().put("type", "text").put("text", "original"))), "FOLLOWUP-container-image-source")
+                        invoke("image-source", "--resume", sid, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+                            structuredInput = attachmentSeed.json, inputPrompt = "FOLLOWUP-container-image-source")
+                        fun messageUuid(marker: String) = transcript.readLines().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+                            .last { it.optString("type") == "user" && it.optJSONObject("message")?.toString()?.contains(marker) == true }.getString("uuid")
+                        val imageTarget = RewindTargets.inspect(bridge.conn, recoveredSession, messageUuid("FOLLOWUP-container-image-source"))
+                        ConversationRewind.restore(bridge.conn, recoveredSession, imageTarget.messageUuid, "EDIT-container-image-restored",
+                            recoveredGate, imageSelection = RewindImageSelection(imageTarget, setOf(1)))
+                        assertFalse(recoveredGate.blocked(key))
+                        val imageRequest = root.resolve("requests.jsonl").readLines().map(::JSONObject).last {
+                            it.getJSONArray("messages").toString().contains("EDIT-container-image-restored")
+                        }.getJSONArray("messages")
+                        val retainedImages = (0 until imageRequest.length()).flatMap { i ->
+                            val content = imageRequest.getJSONObject(i).optJSONArray("content")
+                            if (content == null) emptyList() else (0 until content.length()).mapNotNull { j ->
+                                content.optJSONObject(j)?.takeIf { it.optString("type") == "image" }
+                            }
+                        }
+                        assertEquals(1, retainedImages.size)
+                        val retainedBytes = java.util.Base64.getDecoder().decode(retainedImages.single().getJSONObject("source").getString("data"))
+                        assertEquals(0x22aa66, javax.imageio.ImageIO.read(java.io.ByteArrayInputStream(retainedBytes)).getRGB(0, 0) and 0xffffff)
+                        val removeTarget = RewindTargets.inspect(bridge.conn, recoveredSession, messageUuid("EDIT-container-image-restored"))
+                        ConversationRewind.restore(bridge.conn, recoveredSession, removeTarget.messageUuid, "EDIT-container-images-removed",
+                            recoveredGate, imageSelection = RewindImageSelection(removeTarget, emptySet()))
+                        assertFalse(recoveredGate.blocked(key))
+                        val removedRequest = root.resolve("requests.jsonl").readLines().map(::JSONObject).last {
+                            it.getJSONArray("messages").toString().contains("EDIT-container-images-removed")
+                        }.getJSONArray("messages").toString()
+                        assertFalse(removedRequest.contains("\"type\":\"image\""), "Explicitly removed images must not be sent")
                     } catch (e: Exception) {
                         if (e is ConversationRewindFailure) root.resolve("application-failure.txt").writeText("${e.code}\n${e.detail}")
                         gate.pending(key)?.verification?.let { query ->
