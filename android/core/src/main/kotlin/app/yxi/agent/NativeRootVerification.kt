@@ -16,18 +16,22 @@ object NativeRootVerification {
         RewindLiveVerification.registrationCommand(query.runtime, sameProcess = true)
     }
 
-    fun command(query: Query): String {
+    fun command(query: Query, registrationTimeoutSec: Int = 20): String {
         requireValid(query)
+        require(registrationTimeoutSec in 1..600)
         val reg = RewindLiveVerification.registrationCommand(query.runtime, sameProcess = true)
         val chain = "python3 -c ${Shell.q(chainScript)} ${Shell.q(query.transcriptPath)} " +
             "${Shell.q(query.originalMessageUuid)} ${Shell.q(query.editedTextSha256)}"
-        val body = "r=; for i in \$(seq 1 40); do r=\$($reg) || r=probe-fail; " +
-            "case \"\$r\" in READY*|identity|sid-mismatch) break;; esac; sleep 0.5; done; " +
+        val body = "deadline=\$((\$(date +%s) + $registrationTimeoutSec)); c=pending; " +
+            "while :; do r=\$($reg) || r=probe-fail; " +
+            "case \"\$r\" in identity|sid-mismatch) break;; " +
+            "READY*) c=\$($chain) || c=chain-fail; [ \"\$c\" != ok ] || break;; esac; " +
+            "[ \$(date +%s) -lt \$deadline ] || break; sleep 2; done; " +
             "case \"\$r\" in READY*) c=\$($chain) || c=chain-fail; " +
             "if [ \"\$c\" = ok ]; then r2=\$($reg) || r2=probe-fail; " +
             "if [ \"\$r\" = \"\$r2\" ]; then echo '$TAG:ok'; else echo '$TAG:process-changed'; fi; " +
             "else printf '$TAG:%s\\n' \"\$c\"; fi;; *) printf '$TAG:%s\\n' \"\$r\";; esac"
-        return "timeout 50s sh -c ${Shell.q(body)}"
+        return "timeout ${registrationTimeoutSec + 30}s sh -c ${Shell.q(body)}"
     }
 
     fun verified(output: String): Boolean = output.lineSequence().lastOrNull { it.startsWith("$TAG:") } == "$TAG:ok"
