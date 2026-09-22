@@ -412,6 +412,20 @@ class IsolatedNativeCliTest {
                         assertFalse(NativeFirstTurnKeys.sent(bridge.conn.ssh.exec(NativeFirstTurnKeys.command(
                             rootQuery.runtime, rootSource.copy(size = rootSource.size - 1), sourceHash, readyScreen, NativeFirstTurnKeys.Action.Open))))
                         assertEquals(unchangedRequests, root.resolve("requests.jsonl").readLines().size)
+                        // Fail persistence only after the native confirmation page opens.
+                        // Cancellation must dismiss that page instead of leaving Restore armed.
+                        val invalidGateParent = root.resolve("root-gate-parent-file").apply { writeText("not a directory") }
+                        val failedGate = RewindDeliveryGate(File(invalidGateParent, "pending.json"))
+                        val failedRestore = runCatching {
+                            NativeFirstTurnController.restore(bridge.conn, recoveredSession, rootSource, rootText, failedGate)
+                        }
+                        assertTrue(failedRestore.isFailure, "A recovery record write failure must abort restore")
+                        val cancelledScreen = captureUntil("root-failed-confirmation-cancelled") {
+                            Model.borrowable(it) && app.yxi.agent.Prompt.parse(it) == null
+                        }
+                        assertFalse("Confirm you want to restore" in cancelledScreen)
+                        assertEquals(beforeRootUsers, renderedUsers())
+                        assertEquals(unchangedRequests, root.resolve("requests.jsonl").readLines().size)
                         val nativeGateFile = root.resolve("native-root-gate.json")
                         val nativeGate = RewindDeliveryGate(nativeGateFile)
                         var sawDurableRoot = false
