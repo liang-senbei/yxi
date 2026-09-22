@@ -4,6 +4,17 @@ import org.json.JSONObject
 import kotlin.test.*
 
 class NativePluginCatalogTest {
+    @Test fun `recovered installation ledger remains blocked after another restart`() {
+        val root = java.nio.file.Files.createTempDirectory("native-plugin-ledger-").toFile()
+        try {
+            val file = root.resolve("ledger.json")
+            file.writeText("broken")
+            root.resolve("ledger.json.bak").writeText("""{"version":1,"pendingId":"sample@fixture"}""")
+            assertTrue(NativePluginStore(null, file).error.isNotBlank())
+            assertTrue(NativePluginStore(null, file).error.isNotBlank())
+            assertTrue(root.resolve("ledger.json.needs-review").isFile)
+        } finally { root.deleteRecursively() }
+    }
     @Test fun `catalog preserves machine-local install state and policy`() {
         val raw = JSONObject("""{"marketplaces":[{"name":"fixture","path":"/tmp/market/.agents/plugins/marketplace.json","plugins":[
             {"id":"gmail@fixture","name":"gmail","installed":false,"enabled":false,"installPolicy":"AVAILABLE","authPolicy":"ON_INSTALL","source":{"type":"remote"},"interface":{"displayName":"Gmail","shortDescription":"Mail","category":"Communication","logoUrl":"https://example.org/logo.png"}},

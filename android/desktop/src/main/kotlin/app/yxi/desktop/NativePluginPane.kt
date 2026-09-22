@@ -99,6 +99,8 @@ internal fun categoryLabel(value: String) = when (value.lowercase()) {
     "design", "creative", "creativity" -> "创意"; "research", "science", "scientific research" -> "科学研究"
     "business", "business & operations" -> "业务与运营"; "finance" -> "金融"; "security" -> "安全"
     "travel" -> "旅行"; "entertainment" -> "娱乐"; "health", "health & fitness" -> "医疗健康"
+    "healthcare" -> "医疗健康"; "education & research" -> "教育与研究"; "data & analytics" -> "数据与分析"
+    "engineering" -> "工程"; "other" -> "其他"
     else -> value
 }
 

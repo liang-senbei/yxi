@@ -23,22 +23,27 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
 /** One plugin destination with explicit local/remote ownership. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun PluginsPane(state: AppState) {
     val conn = state.conn
     Column(Modifier.fillMaxSize().padding(28.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-        Text("插件", style = MaterialTheme.typography.headlineMedium)
-        PluginTabs(listOf("本地插件" to Icons.Outlined.Computer, "服务器插件" to Icons.Outlined.Dns),
-            if (state.pluginLocation == "本地") 0 else 1) { state.pluginLocation = if (it == 0) "本地" else "服务器" }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("插件", style = MaterialTheme.typography.headlineMedium)
+            PluginTabs(listOf("本地插件" to Icons.Outlined.Computer, "服务器插件" to Icons.Outlined.Dns),
+                if (state.pluginLocation == "本地") 0 else 1) { state.pluginLocation = if (it == 0) "本地" else "服务器" }
+        }
         Text(if (state.pluginLocation == "本地") "此电脑共用 · 切换服务器不影响本地插件"
             else conn?.host?.label?.let { "当前服务器 · $it" } ?: "先在侧边栏选择服务器",
             style = MaterialTheme.typography.bodyMedium, color = Tokens.current.textMuted)
-        PluginTabs(listOf("插件市场" to Icons.Outlined.Storefront, "已安装" to Icons.Outlined.Extension),
-            if (state.pluginMarketplace) 0 else 1) { state.pluginMarketplace = it == 0 }
-        if (state.pluginLocation != "本地") Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("codex" to "Codex", "claude" to "Claude Code").forEach { (engine, label) ->
-                FilterChip(state.pluginCatalogRuntime == engine, { state.pluginCatalogRuntime = engine },
-                    label = { Text(label) }, leadingIcon = { RunnerBrandIcon(engine, Modifier.size(18.dp)) })
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            PluginTabs(listOf("插件市场" to Icons.Outlined.Storefront, "已安装" to Icons.Outlined.Extension),
+                if (state.pluginMarketplace) 0 else 1) { state.pluginMarketplace = it == 0 }
+            if (state.pluginLocation != "本地") Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("codex" to "Codex", "claude" to "Claude Code").forEach { (engine, label) ->
+                    FilterChip(state.pluginCatalogRuntime == engine, { state.pluginCatalogRuntime = engine },
+                        label = { Text(label) }, leadingIcon = { RunnerBrandIcon(engine, Modifier.size(18.dp)) })
+                }
             }
         }
         OutlinedTextField(state.pluginMarketQuery, { state.pluginMarketQuery = it }, Modifier.fillMaxWidth(),

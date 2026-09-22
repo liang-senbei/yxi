@@ -131,6 +131,7 @@ internal class NativePluginStore(private var conn: Conn?, file: File) {
     private suspend fun connect() = PluginRpc.connect(conn)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
     private val ledger = DurableFile(file) { check(JSONObject(it).getInt("version") == 1) }
+    private val reviewMarker = File(file.parentFile, file.name + ".needs-review")
     var entries by mutableStateOf<List<NativePlugin>>(emptyList()); private set
     var busy by mutableStateOf(false); private set
     var message by mutableStateOf(""); private set
@@ -141,7 +142,8 @@ internal class NativePluginStore(private var conn: Conn?, file: File) {
     init {
         try {
             ledger.read()?.let { pendingId = JSONObject(it).optString("pendingId").takeIf(String::isNotBlank) }
-            check(!ledger.recovered) { "插件安装记录已恢复，请先人工核对" }
+            if (ledger.recovered) DurableFile.replace(reviewMarker, "Plugin installation ledger recovered; reconcile before new writes")
+            check(!reviewMarker.exists()) { "插件安装记录已恢复，请先人工核对" }
         } catch (_: Exception) { readable = false; error = "插件安装记录无法确认，已禁止重复安装" }
     }
     private fun savePending(id: String?) {
