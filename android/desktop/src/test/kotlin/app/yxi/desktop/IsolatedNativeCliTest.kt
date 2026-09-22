@@ -224,6 +224,35 @@ class IsolatedNativeCliTest {
                             "INTERACTIVE-container-followup", "DROP-container-third", "FOLLOWUP-container-second")) {
                             assertFalse(secondRequest.contains(discarded), "Second rewind leaked $discarded")
                         }
+                        val recoveryTarget = transcript.readLines().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+                            .last { it.optString("type") == "user" &&
+                                it.optJSONObject("message")?.toString()?.contains("SECOND-app-rewind") == true }
+                        var disconnected = false
+                        try {
+                            ConversationRewind.restore(bridge.conn, refreshed, recoveryTarget.getString("uuid"),
+                                "RECOVERY-app-rewind", gate) { stage ->
+                                root.resolve("application-progress.log").appendText("recovery: $stage\n")
+                                if (stage == "正在确认运行器与历史上下文…") {
+                                    bridge.conn.ssh.disconnect()
+                                    disconnected = true
+                                    throw java.io.IOException("Injected connection loss before verification")
+                                }
+                            }
+                            error("Expected the injected disconnect")
+                        } catch (e: java.io.IOException) { assertTrue(disconnected, e.message) }
+                        val recoveredGate = RewindDeliveryGate(root.resolve("application-gate.json"))
+                        assertTrue(recoveredGate.blocked(key), "Restart must preserve uncertain delivery state")
+                        assertTrue(recoveredGate.pending(key)?.verification != null)
+                        val requestCount = root.resolve("requests.jsonl").readLines().size
+                        bridge.conn.ssh.connect()
+                        val recoveredSession = SessionProbe.snapshot(bridge.conn.ssh).single { it.name == session.name }
+                        recheckRewindRecovery(bridge.conn, recoveredSession, recoveredGate)
+                        assertFalse(recoveredGate.blocked(key))
+                        assertEquals(requestCount, root.resolve("requests.jsonl").readLines().size,
+                            "Read-only recovery must never resend the edited prompt")
+                        assertEquals(1, root.resolve("requests.jsonl").readLines().map(::JSONObject).count {
+                            it.getJSONArray("messages").toString().contains("RECOVERY-app-rewind")
+                        })
                     } catch (e: Exception) {
                         if (e is ConversationRewindFailure) root.resolve("application-failure.txt").writeText("${e.code}\n${e.detail}")
                         gate.pending(key)?.verification?.let { query ->
