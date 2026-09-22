@@ -437,6 +437,20 @@ class IsolatedNativeCliTest {
                         val rootProof = runRewindCommand(bridge.conn.ssh, NativeRootVerification.command(rootQuery))
                         root.resolve("root-proof.txt").writeText(rootProof)
                         assertTrue(NativeRootVerification.verified(rootProof), rootProof)
+                        val requestsBeforeModes = root.resolve("requests.jsonl").readLines().size
+                        assertEquals(app.yxi.agent.PermissionMode.Plan,
+                            changeConversationPermission(bridge.conn, recoveredSession, app.yxi.agent.PermissionMode.Plan))
+                        root.resolve("permission-plan.txt").writeText(tmux("capture-pane", "-p", "-t", "=cc-native-check:"))
+                        assertEquals(app.yxi.agent.PermissionMode.Manual,
+                            changeConversationPermission(bridge.conn, recoveredSession, app.yxi.agent.PermissionMode.Manual))
+                        val unavailable = runCatching {
+                            changeConversationPermission(bridge.conn, recoveredSession, app.yxi.agent.PermissionMode.Bypass)
+                        }
+                        assertTrue(unavailable.isFailure, "Fixture did not enable bypass at startup")
+                        assertEquals(app.yxi.agent.PermissionMode.Manual,
+                            app.yxi.agent.PermissionMode.fromScreen(tmux("capture-pane", "-p", "-t", "=cc-native-check:")))
+                        assertEquals(requestsBeforeModes, root.resolve("requests.jsonl").readLines().size,
+                            "Permission switching must not submit a model request")
                         bridge.conn.ssh.exec(Rewind.cleanupCommand(rootCapture))
                         assertTrue(config.resolve("sessions").listFiles().orEmpty().any {
                             it.extension == "json" && JSONObject(it.readText()).optString("sessionId") == sid
