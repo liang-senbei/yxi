@@ -411,6 +411,17 @@ class IsolatedNativeCliTest {
                         assertEquals(unchangedRequests, root.resolve("requests.jsonl").readLines().size)
                         suspend fun guarded(action: NativeFirstTurnKeys.Action, screen: String, count: Int = 1) {
                             val response = bridge.conn.ssh.exec(NativeFirstTurnKeys.command(rootQuery.runtime, rootSource, screen, action, count))
+                            if (!NativeFirstTurnKeys.sent(response)) {
+                                root.resolve("root-rejected-step.txt").writeText("$action\n$response")
+                                java.io.RandomAccessFile(transcript, "r").use { file ->
+                                    if (file.length() >= rootSource.size) {
+                                        file.seek(rootSource.size)
+                                        val bytes = ByteArray(minOf(file.length() - rootSource.size, 1024 * 1024).toInt())
+                                        file.readFully(bytes)
+                                        root.resolve("root-history-delta.jsonl").writeBytes(bytes)
+                                    }
+                                }
+                            }
                             check(NativeFirstTurnKeys.sent(response)) { "Native menu step rejected: $response" }
                         }
                         val nativeGateFile = root.resolve("native-root-gate.json")
