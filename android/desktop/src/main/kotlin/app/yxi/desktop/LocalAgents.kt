@@ -11,7 +11,7 @@ internal class LocalAgentJob(val id: String, val engine: String, val directory: 
     val resumedFrom: String? = null) {
     var status by mutableStateOf("准备启动"); internal set
     var output by mutableStateOf(""); internal set
-    internal var process: Process? = null
+    @Volatile internal var process: Process? = null
     internal var cancelRequested = false
     var sessionId by mutableStateOf(resumedFrom); internal set
     internal var active by mutableStateOf(true)
@@ -59,7 +59,10 @@ internal class LocalAgents(private val root: File = File(Store.dir, "local-agent
                 val binary = binary(engine) ?: error("本机未找到 $engine，请先安装并完成登录")
                 val args = command(binary, engine, resume)
                 val process = withContext(Dispatchers.IO) {
-                    ProcessBuilder(args).directory(cwd).redirectErrorStream(true).redirectOutput(job.log).start()
+                    ProcessBuilder(args).directory(cwd).redirectErrorStream(true).redirectOutput(job.log).start().also {
+                        // Retain ownership before crossing the cancellable dispatcher boundary.
+                        job.process = it
+                    }
                 }
                 job.process = process
                 if (job.cancelRequested) stop(job) else {
@@ -94,6 +97,7 @@ internal class LocalAgents(private val root: File = File(Store.dir, "local-agent
         job.process?.let(::terminate)
     }
     private fun terminate(process: Process) {
+        if (!process.isAlive) return
         val children = process.toHandle().descendants().use { it.toList() }
         children.asReversed().forEach { it.destroy() }; process.destroy()
         children.asReversed().filter { it.isAlive }.forEach { it.destroyForcibly() }
