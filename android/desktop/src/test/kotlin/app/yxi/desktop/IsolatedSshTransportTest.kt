@@ -1,8 +1,9 @@
 package app.yxi.desktop
 
-import app.yxi.ssh.HostConfig
 import app.yxi.ssh.HostKeys
 import app.yxi.ssh.SshSession
+import app.yxi.agent.Rewind
+import app.yxi.agent.SessionProbe
 import com.jcraft.jsch.HostKey
 import com.jcraft.jsch.HostKeyRepository
 import com.jcraft.jsch.UserInfo
@@ -86,8 +87,9 @@ class IsolatedSshTransportTest {
             }
             assertTrue(ready && listener.isAlive, "Private sshd failed to start: ${log.readText().takeLast(2000)}")
             val expected = root.resolve("host.pub").readText().trim().split(' ')[1]
-            val client = SshSession(HostConfig("container", "127.0.0.1", port, "root",
-                HostConfig.Auth.PrivateKey(root.resolve("client").readText())), pinnedKeys(expected))
+            val conn = Conn(Host(id = "container", alias = "container", hostname = "127.0.0.1",
+                port = port, username = "root", keyPath = root.resolve("client").path), pinnedKeys(expected))
+            val client = conn.ssh
             ssh = client
             val request = executor.submit<String> {
                 runBlocking {
@@ -114,6 +116,34 @@ class IsolatedSshTransportTest {
                 }
             }
             assertEquals("owned-session-stopped", closeSession.get(10, TimeUnit.SECONDS))
+
+            // Real controller regression: the pane's current directory can differ from
+            // the directory captured before rewind. Resume must retain the captured one.
+            val originalProject = root.resolve("original project").apply { mkdir() }
+            val changedProject = root.resolve("changed-project").apply { mkdir() }
+            val observed = root.resolve("resumed-cwd")
+            val executable = root.resolve("resume-probe").apply {
+                writeText("#!/bin/sh\npwd > '${observed.path}'\n")
+                setExecutable(true, true)
+            }
+            val resumeCheck = executor.submit<Boolean> {
+                runBlocking {
+                    client.exec("tmux -S '$ownedSocket' -f /dev/null new-session -d -s cc-resume-check -c '${changedProject.path}' '/bin/bash --noprofile --norc'")
+                    val before = SessionProbe.snapshot(client).single { it.name == "cc-resume-check" }
+                    assertEquals(changedProject.path, before.cwd)
+                    val pane = client.exec("tmux -S '$ownedSocket' display-message -p -t '=cc-resume-check:' '#{pane_id}'").trim()
+                    val report = RewindController(conn, RewindDeliveryGate(root.resolve("gate.json")))
+                        .relaunch(before.name, Rewind.Capture(executable.path, "", paneId = pane),
+                            "11111111-1111-4111-8111-111111111111", before.runtimeId, originalProject.path)
+                    report.relaunched
+                }
+            }
+            assertTrue(resumeCheck.get(25, TimeUnit.SECONDS), "Controller must deliver the verified resume")
+            repeat(50) { if (!observed.exists()) Thread.sleep(100) }
+            assertEquals(originalProject.path, observed.readText().trim())
+            executor.submit<String> { runBlocking {
+                client.exec("tmux -S '$ownedSocket' kill-session -t '=cc-resume-check:'")
+            } }.get(10, TimeUnit.SECONDS)
         } finally {
             server?.toHandle()?.descendants()?.use { children -> children.forEach { it.destroyForcibly() } }
             server?.destroyForcibly()
