@@ -20,6 +20,9 @@ internal class CodexTaskController(
     val threadId: String,
     private val client: CodexAppServer,
     private val queue: InstructionQueue,
+    initialModel: String? = null,
+    initialEffort: String? = null,
+    private val onModelSelection: (String?, String?) -> Unit = { _, _ -> },
     private val onNotice: (String) -> Unit = {},
 ) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
@@ -34,8 +37,10 @@ internal class CodexTaskController(
     val recentEvents = mutableStateListOf<JSONObject>()
     val messages = mutableStateListOf<CodexMessage>()
     var models by mutableStateOf<List<CodexModelOption>>(emptyList()); private set
-    var selectedModel by mutableStateOf<String?>(null); private set
-    var selectedEffort by mutableStateOf<String?>(null); private set
+    var selectedModel by mutableStateOf(initialModel); private set
+    var selectedEffort by mutableStateOf(initialEffort); private set
+    private var currentModel: String? = null
+    private var currentEffort: String? = null
     var modelsLoading by mutableStateOf(false); private set
     var modelError by mutableStateOf(""); private set
     var reportedModel by mutableStateOf(""); private set
@@ -45,6 +50,8 @@ internal class CodexTaskController(
     internal fun recordSessionConfiguration(result: JSONObject) {
         configuredProvider = result.optString("modelProvider").takeUnless { it == "null" }.orEmpty()
         configuredModel = result.optString("model").takeUnless { it == "null" }.orEmpty()
+        currentModel = configuredModel.takeIf { it.isNotBlank() }
+        currentEffort = result.optString("reasoningEffort").takeIf { it.isNotBlank() && it != "null" }
     }
     var modelNotice by mutableStateOf(""); private set
     private var modelReportRevision = 0L
@@ -86,6 +93,7 @@ internal class CodexTaskController(
                         "model/rerouted" -> {
                             modelReportRevision++
                             reportedModel = params.getString("toModel")
+                            currentModel = reportedModel
                             modelNotice = "运行器将本轮模型从 ${params.optString("fromModel")} 调整为 $reportedModel"
                         }
                         "item/started", "item/completed" -> params.optJSONObject("item")?.let { recordItem(it) }
@@ -255,13 +263,20 @@ internal class CodexTaskController(
     }
 
     fun chooseModel(model: String?) {
+        check(!disposed) { "任务连接已关闭" }
         val option = model?.let { id -> models.firstOrNull { it.model == id } ?: error("模型不在服务器列表中") }
+        val effort = option?.let { entry -> entry.defaultEffort.takeIf { it in entry.efforts } }
+        if (selectedModel == option?.model && selectedEffort == effort) return
+        onModelSelection(option?.model ?: currentModel, if (option == null) currentEffort else effort)
         selectedModel = option?.model
-        selectedEffort = option?.let { entry -> entry.defaultEffort.takeIf { it in entry.efforts } }
+        selectedEffort = effort
     }
 
     fun chooseEffort(effort: String) {
+        check(!disposed) { "任务连接已关闭" }
         check(models.firstOrNull { it.model == selectedModel }?.efforts?.contains(effort) == true) { "该模型不支持此思考强度" }
+        if (selectedEffort == effort) return
+        onModelSelection(selectedModel, effort)
         selectedEffort = effort
     }
 
@@ -287,6 +302,7 @@ internal class CodexTaskController(
         CodexAppServer.userInput(item.text, item.attachments) // Validate before changing durable delivery state.
         val model = selectedModel
         val effort = selectedEffort
+        val initialModelRevision = modelReportRevision
         val started = if (steeringTurn == null) queue.beginDelivery(item.id, item.revision)
             else queue.beginSteering(item.id, item.revision, steeringTurn)
         sending = true
@@ -297,6 +313,10 @@ internal class CodexTaskController(
             val turnId = if (steeringTurn == null) result.getJSONObject("turn").getString("id") else result.getString("turnId")
             check(steeringTurn == null || steeringTurn == turnId) { "引导响应不属于目标轮次" }
             queue.confirmRuntimeAccepted(started.id, started.revision, turnId, response.toString())
+            if (steeringTurn == null && initialModelRevision == modelReportRevision) {
+                if (model != null) currentModel = model
+                if (effort != null) currentEffort = effort
+            }
             activeTurnId = turnId
             terminalEvents[turnId]?.let { finish(it, it.toString()) }
             if (steeringTurn == null) finish(result.getJSONObject("turn"), response.toString())

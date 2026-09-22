@@ -1,5 +1,21 @@
 # Dedicated integration-test container
 
+## Current dependency baseline (2026-09-22)
+
+Use the fixed, verified dependency image below for subsequent offline builds. Do not continually use each newly built application image as the next base: that preserves obsolete `/workspace` and Gradle layers and previously grew the image to about 13 GB.
+
+```sh
+YXI_TEST_BASE_IMAGE_REVISION=27a1a26cbd685a0cf8e883e0e278b8254a79cc3f bash dev/isolated-tests/run.sh build
+```
+
+On hk13, that image descends from the flattened `7a3f01bf7e91ea43062e8f34c69d1b4553244df2` image (`sha256:dbe8b2a1d1ac8e1bfa86655f276b353d52929eb65e75aea41bda9f32655fc821`). The flatten operation removed only container-local Gradle build-cache entries, preserved dependency artifacts and runtime configuration, and was followed by the real Claude isolation test in `run.A7FDtb` (passed). Application source must still be built and tested at its own commit; a dependency baseline is not evidence for newer source.
+
+The verified export is retained on Windows at `C:\Users\dfhzw\Documents\ChatGPT\Yunxi\.artifacts\yxi-test-image-7a3f01b.tar.gz`; SHA-256 `0f24b362357a750f2478229e6d3aa4f41a54b87abd28e4bb7752254e895939ca`, 1,390,140,246 compressed bytes, 2,496,356,726 file bytes. Original/imported image metadata are beside it. Server audit: `~/.cache/yxi-isolated-tests/retired-test-images-1790071524108342303.json`. Only 82 unused images with the Yxi test ownership label and exclusively Yxi test tags were retired; container-referenced images were protected. No production images, volumes, release files or rollback packages were removed. An exact-ID build-cache prune reported 0 B; the freed space came from image retirement, not that prune.
+
+Keep the fixed baseline and its verified export when retiring later application test images. Changing dependencies may require a separately reviewed baseline update. Runtime test isolation requirements below are unchanged.
+
+## Runner and historical validation
+
 Full builds now include the desktop JRE and CJK fonts for actual Compose window fixtures. To upgrade an older headless dependency image, explicitly set `YXI_TEST_INSTALL_GUI=1` together with `YXI_TEST_BASE_IMAGE_REVISION` for that one build. This enables package downloads during building only; runtime containers remain network-isolated. Subsequent builds from the upgraded image can use the normal offline incremental path. `RewindDialogUiTest` renders the actual shared editor at two widths and verifies Escape cancels without invoking an action; its screenshots are component evidence, not Windows application acceptance.
 
 This replacement runner is under validation. The quarantined host SSH tests remain disabled.

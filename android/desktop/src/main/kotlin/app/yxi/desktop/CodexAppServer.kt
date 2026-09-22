@@ -105,8 +105,12 @@ internal class CodexAppServer internal constructor(private val shell: SshSession
 
     suspend fun resumeThread(threadId: String, overrides: CodexResumeOverrides? = null) = request("thread/resume",
         JSONObject().put("threadId", requiredId(threadId)).apply {
-            applyProfile(this, overrides ?: profileOverrides?.copy(model = null, effort = null))
+            applyProfile(this, overrides ?: profileOverrides)
         })
+
+    internal fun conversationOverrides(model: String?, effort: String?): CodexResumeOverrides? =
+        if (profileOverrides == null && model == null && effort == null) null
+        else CodexResumeOverrides(profileOverrides?.provider, model ?: profileOverrides?.model, effort ?: profileOverrides?.effort)
 
     private fun applyProfile(params: JSONObject, overrides: CodexResumeOverrides?) {
         overrides?.provider?.let { params.put("modelProvider", it) }

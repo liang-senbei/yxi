@@ -39,6 +39,33 @@ class CodexWorkspaceTest {
         assertEquals(listOf(record), CodexTaskRegistry(file).records)
     }
 
+    @Test fun `independent profile and model choice survive registry reload`() = fixture { dir ->
+        val file = File(dir, "registry.json")
+        val record = CodexTaskRecord("host/srv", "thr-9", "/srv/demo", "标题", 123L,
+            "saved-profile", "a".repeat(32), "provider/alternative:1", "high")
+        CodexTaskRegistry(file).save(record)
+        assertEquals(record, CodexTaskRegistry(file).records.single())
+        assertFalse(file.readText().contains("apiKey"))
+    }
+
+    @Test fun `failed model preference save does not change the visible selection`() = fixture { dir ->
+        val (ws, cleanup) = workspace(dir, "models")
+        try {
+            val record = runBlocking { ws.create(conn(), "/srv/demo", "标题") }
+            val controller = ws.controllers.getValue(record.key)
+            runBlocking { controller.refreshModels() }
+            controller.chooseModel("m-a")
+            val before = controller.selectedEffort
+            val persisted = ws.registry.records.single()
+            val file = File(dir, "registry.json")
+            assertTrue(file.delete()); assertTrue(file.mkdir())
+            assertFails { controller.chooseEffort("low") }
+            assertTrue(ws.registry.error.contains("未保存"))
+            assertEquals(before, controller.selectedEffort)
+            assertEquals(persisted, ws.registry.records.single())
+        } finally { ws.close(); cleanup() }
+    }
+
     @Test
     fun `create registers thread then reopen resumes it and disconnect keeps records`() = fixture { dir ->
         val (ws, cleanup) = workspace(dir, "create-ok")

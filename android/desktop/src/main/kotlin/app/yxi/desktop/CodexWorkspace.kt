@@ -16,6 +16,7 @@ import kotlinx.coroutines.swing.Swing
 internal data class CodexTaskRecord(
     val hostKey: String, val threadId: String, val directory: String,
     val title: String, val createdAt: Long, val profileId: String = "", val profileScope: String = "",
+    val modelOverride: String? = null, val effortOverride: String? = null,
 ) {
     val key get() = "codex:" + contentHash((hostKey + "\n" + threadId).toByteArray())
 }
@@ -43,6 +44,7 @@ internal class CodexTaskRegistry(file: File) {
                 JSONObject().put("hostKey", task.hostKey).put("threadId", task.threadId)
                     .put("directory", task.directory).put("title", task.title).put("createdAt", task.createdAt)
                     .put("profileId", task.profileId).put("profileScope", task.profileScope)
+                    .put("modelOverride", task.modelOverride).put("effortOverride", task.effortOverride)
             })).toString(2))
             records = next; error = ""
         } catch (e: Exception) { error = "任务登记未保存：${e.message}"; throw e }
@@ -54,11 +56,19 @@ internal class CodexTaskRegistry(file: File) {
         val tasks = data.getJSONArray("tasks")
         val result = (0 until tasks.length()).map { index ->
             val task = tasks.getJSONObject(index)
+            fun optionalText(key: String): String? {
+                val value = task.opt(key)
+                require(value == null || value === JSONObject.NULL || value is String) { "任务配置字段 $key 不是文本" }
+                return (value as? String)?.takeIf { it.isNotBlank() }
+            }
             CodexTaskRecord(task.getString("hostKey"), task.getString("threadId"), task.getString("directory"),
-                task.getString("title"), task.getLong("createdAt"), task.optString("profileId"), task.optString("profileScope")).also {
+                task.getString("title"), task.getLong("createdAt"), optionalText("profileId").orEmpty(), optionalText("profileScope").orEmpty(),
+                optionalText("modelOverride"), optionalText("effortOverride")).also {
                 require(it.hostKey.isNotBlank() && it.threadId.isNotBlank() && it.directory.startsWith('/') && it.createdAt > 0)
                 require(it.profileId.length <= 200 && it.profileId.none { c -> c < ' ' })
                 require(it.profileScope.isEmpty() || it.profileScope.matches(Regex("[a-f0-9]{32}")))
+                require(it.modelOverride == null || it.modelOverride.length <= 512 && it.modelOverride.none { c -> c < ' ' || c == '\u007f' })
+                require(it.effortOverride == null || it.effortOverride.matches(Regex("[a-z]{1,20}")))
             }
         }
         require(result.map { it.key }.distinct().size == result.size)
@@ -140,10 +150,12 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File,
         busy = true
         val client = try { clientFor(conn, record.profileId, scopeFor(record)) } catch (e: Exception) { busy = false; throw e }
         try {
-            val result = resumeExistingThread(client, record.threadId)
+            val overrides = client.conversationOverrides(record.modelOverride, record.effortOverride)
+            val result = resumeExistingThread(client, record.threadId, overrides)
             val thread = result.getJSONObject("thread")
             check(thread.getString("id") == record.threadId) { "恢复响应不属于原任务" }
             client.verifyProfile(result, verifyModel = false)
+            check(overrides?.model == null || result.optString("model") == overrides.model) { "运行器未恢复此 Agent 已保存的模型选择" }
             attach(conn, record, client, autoRun = autoRun).also { it.recordSessionConfiguration(result) }
         } catch (e: Exception) { client.close(); throw e }
         finally { busy = false }
@@ -167,7 +179,7 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File,
                 val thread = result.getJSONObject("thread")
                 check(thread.getString("id") == record.threadId && normalizeProjectPath(thread.getString("cwd")) == normalizeProjectPath(record.directory)) { "恢复响应与原任务不一致" }
                 client.verifyProfile(result)
-                val updated = record.copy(profileId = profileId, profileScope = scopeFor(record))
+                val updated = record.copy(profileId = profileId, profileScope = scopeFor(record), modelOverride = null, effortOverride = null)
                 registry.save(updated)
                 attach(conn, updated, client, autoRun = false).also { it.recordSessionConfiguration(result) }
             } catch (e: Exception) {
@@ -207,9 +219,9 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File,
         finally { busy = false }
     }
 
-    private suspend fun resumeExistingThread(client: CodexAppServer, id: String): JSONObject {
+    private suspend fun resumeExistingThread(client: CodexAppServer, id: String, overrides: CodexResumeOverrides? = null): JSONObject {
         try {
-            return client.resumeThread(id).getJSONObject("result")
+            return client.resumeThread(id, overrides).getJSONObject("result")
         } catch (e: Exception) {
             if (e.message?.contains("no rollout found", ignoreCase = true) == true) {
                 throw IllegalStateException("服务器没有找到此任务的历史文件。尚未发送过内容的新任务，关闭后可能无法恢复；也请确认连接的是原服务器和账号。任务编号：$id。可保留此记录，手动新建任务后再使用原草稿。", e)
@@ -219,7 +231,14 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File,
     }
 
     private suspend fun attach(conn: Conn, record: CodexTaskRecord, client: CodexAppServer, createdThread: JSONObject? = null, autoRun: Boolean = true): CodexTaskController {
-        val controller = CodexTaskController(record.key, record.threadId, client, queue) { title -> onNotice(record, title) }
+        lateinit var controller: CodexTaskController
+        controller = CodexTaskController(record.key, record.threadId, client, queue,
+            initialModel = record.modelOverride, initialEffort = record.effortOverride,
+            onModelSelection = { model, effort ->
+                check(controllers[record.key] === controller) { "任务连接已变化，请重新打开模型菜单" }
+                val current = registry.records.single { it.key == record.key }
+                registry.save(current.copy(modelOverride = model, effortOverride = effort))
+            }) { title -> onNotice(record, title) }
         try { controller.reconcile(createdThread) } catch (e: Exception) { controller.close(); throw e }
         controllers[record.key] = controller; owners[record.key] = conn
         controller.setAutoDispatch(autoRun && QueuePreferences.enabled(record.key))
