@@ -203,6 +203,27 @@ class IsolatedNativeCliTest {
                         assertFalse(appRequest.contains("EDIT-container-second"))
                         assertFalse(appRequest.contains("SINGLE-container-edit"))
                         assertFalse(appRequest.contains("INTERACTIVE-container-followup"))
+                        val secondTarget = transcript.readLines().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+                            .last { it.optString("type") == "user" &&
+                                it.optJSONObject("message")?.toString()?.contains("APP-container-rewind") == true }
+                        val refreshed = SessionProbe.snapshot(bridge.conn.ssh).single { it.name == session.name }
+                        ConversationRewind.restore(bridge.conn, refreshed, secondTarget.getString("uuid"),
+                            "SECOND-app-rewind", gate) { stage ->
+                            root.resolve("application-progress.log").appendText("second: $stage\n")
+                            if (stage == "正在载入回退后的会话…" || stage == "正在确认运行器与历史上下文…") {
+                                assertTrue(gate.blocked(key), "Delivery must remain blocked during native restart")
+                            }
+                        }
+                        assertFalse(gate.blocked(key), "Second rewind must independently verify before clearing its gate")
+                        assertFalse(RewindDeliveryGate(root.resolve("application-gate.json")).blocked(key))
+                        val secondRequest = root.resolve("requests.jsonl").readLines().map(::JSONObject).last {
+                            it.getJSONArray("messages").toString().contains("SECOND-app-rewind")
+                        }.getJSONArray("messages").toString()
+                        assertTrue(secondRequest.contains("KEEP-container-first"))
+                        for (discarded in listOf("APP-container-rewind", "EDIT-container-second", "SINGLE-container-edit",
+                            "INTERACTIVE-container-followup", "DROP-container-third", "FOLLOWUP-container-second")) {
+                            assertFalse(secondRequest.contains(discarded), "Second rewind leaked $discarded")
+                        }
                     } catch (e: Exception) {
                         gate.pending(key)?.verification?.let { query ->
                             root.resolve("recovery-probe.txt").writeText(bridge.conn.ssh.exec(
