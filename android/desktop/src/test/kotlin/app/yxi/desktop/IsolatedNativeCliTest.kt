@@ -339,6 +339,18 @@ class IsolatedNativeCliTest {
                         fun messageUuid(marker: String) = transcript.readLines().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
                             .last { it.optString("type") == "user" && it.optJSONObject("message")?.toString()?.contains(marker) == true }.getString("uuid")
                         val imageTarget = RewindTargets.inspect(bridge.conn, recoveredSession, messageUuid("FOLLOWUP-container-image-source"))
+                        val beforeRejectedEdit = root.resolve("requests.jsonl").readLines().size
+                        kotlin.test.assertFailsWith<IllegalStateException> {
+                            ConversationRewind.restore(bridge.conn, recoveredSession, imageTarget.messageUuid, "EDIT-stale-selection",
+                                recoveredGate, imageSelection = RewindImageSelection(imageTarget.copy(size = imageTarget.size - 1), setOf(1)))
+                        }
+                        kotlin.test.assertFailsWith<IllegalArgumentException> {
+                            ConversationRewind.restore(bridge.conn, recoveredSession, imageTarget.messageUuid, "EDIT-invalid-selection",
+                                recoveredGate, imageSelection = RewindImageSelection(imageTarget, setOf(2)))
+                        }
+                        assertFalse(recoveredGate.blocked(key), "Rejected image selection must not start a history mutation")
+                        assertEquals(beforeRejectedEdit, root.resolve("requests.jsonl").readLines().size,
+                            "Stale or invalid image selections must be rejected before requesting a model")
                         ConversationRewind.restore(bridge.conn, recoveredSession, imageTarget.messageUuid, "EDIT-container-image-restored",
                             recoveredGate, imageSelection = RewindImageSelection(imageTarget, setOf(1)))
                         assertFalse(recoveredGate.blocked(key))
