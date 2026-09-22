@@ -14,7 +14,11 @@ Windows 公钥更新补强：不再直接覆盖 `authorized_keys`，先校验 Ed
 
 双方只交换公钥。Windows 安装脚本参考用户提供的 OpenSSH 脚本整理为内置非交互步骤，使用系统可选组件安装 OpenSSH Server，已有服务直接复用，不依赖用户桌面的固定绝对路径；没有照搬原脚本的 GitHub latest ZIP 下载路径。UAC 提权保留原用户 SID/配置目录，按普通用户或管理员组写入授权文件，输出可核对的结果文件；本机只读检查已用 Windows PowerShell 实跑，修复了非管理员读取主机公钥失败及 CLIXML 进度干扰 JSON 的问题。未实际运行提权安装或修改此电脑服务/公钥。macOS 分支要求用户先自行开启远程登录。Windows 密钥规则参考：https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh_keymanagement 。Windows 提权安装、另一管理员账号授权、macOS 实机仍待验收，Windows 功能下载不可用时没有离线安装回退。
 
-本地 Agent 当前为 Codex / Claude Code 单轮 CLI 任务，支持工作目录、输入、运行、停止、日志及任务结果记录；继承本机运行器登录和权限，不自动切换 bypass。本机 AI 协助入口预填只读部署诊断任务，固定安装步骤直接执行脚本。尚未接入本地多轮原生会话恢复、交互审批 UI、系统服务托管或 Windows npm `.cmd` 包装器；退出时停止本应用启动的 Agent 进程。
+本地 Agent 使用 Codex / Claude Code 原生 CLI，支持工作目录、输入、运行、停止、日志及任务结果记录，并已接入已完成会话的多轮续聊。会话 UUID、用户输入和结果持久化；重开记录后用明确的原生 ID 恢复，不使用 `--last`。续聊保留此会话的最新上下文，不能当作回退历史轮次；同一会话并发续发被拦截。运行结果和记录保存完成后才释放运行状态，未知结果不自动续发。继承本机运行器登录和权限，不自动切换 bypass。本机 AI 协助入口预填只读部署诊断任务，固定安装步骤直接执行脚本。崩溃后未确认轮次的核对恢复、交互审批 UI、系统服务托管及 Windows npm `.cmd` 包装器仍未接入；退出时停止本应用启动的 Agent 进程。
+
+续聊验证：`c0c26f0a7f1fd5359b41c2c5815b10d0bf720c31` 编译 `run.0rsw0Z`；Codex 原生进程完成后重新加载登记并续聊通过 `run.mqgyIy`，Claude 对应流程通过 `run.djbb2m`，各 1 项无跳过。验证原生 ID 不变、模型后续请求实际含上一轮上下文、输入/输出登记恢复及 Codex 重复续发拦截；属于隔离 API/CLI 测试，未代表完整 Windows GUI 重启验收。
+
+`2736e29879ad024305b76486f2a37365530dc08a` 补强了启动过程取消时的进程持有与退出检查，编译 `run.OLPV8z`，Codex 续聊及停止流程复测 `run.YXHrv9` 通过；未对取消发生的每个线程时序做穷举验证。
 
 真实隔离 SSH 测试发现 JSch Ed25519 可以生成但不能序列化私钥的问题；已在内存完成序列化后再落盘，必要时回退 RSA 4096，并校验已有公私钥，保留损坏/缺失情况下的原文件，不静默轮换身份。
 
