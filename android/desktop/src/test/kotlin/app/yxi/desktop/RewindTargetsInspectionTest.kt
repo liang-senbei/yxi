@@ -15,6 +15,26 @@ import kotlin.test.assertTrue
  * 选中项 parent/size 字段与真实文件一致。零网络、零真实凭据、零付费 CLI。
  */
 class RewindTargetsInspectionTest {
+    @Test fun `native interruption is neither an editable target nor a later user turn`() {
+        val dir = Files.createTempDirectory("yxi-interruption-target").toFile()
+        try {
+            val sid = "11111111-1111-1111-1111-111111111111"
+            val file = dir.resolve("$sid.jsonl")
+            val marker = JSONObject(user("stop", "a1", "unused"))
+                .put("session_id", sid).put("sessionId", sid).put("entrypoint", "cli").put("version", "2.1.278")
+                .put("message", JSONObject().put("role", "user").put("content", org.json.JSONArray()
+                    .put(JSONObject().put("type", "text").put("text", "[Request interrupted by user]"))))
+            file.writeText(user("u1", null, "first") + assistant("a1", "u1", "answer") + marker.toString() + "\n")
+            val root = inspect(file.path, "u1")
+            assertEquals(0, root.code, root.err)
+            assertEquals(0, JSONObject(root.out).getInt("later"))
+            assertNotEquals(0, inspect(file.path, "stop").code)
+            marker.put("origin", "user")
+            file.writeText(user("u1", null, "first") + assistant("a1", "u1", "answer") + marker.toString() + "\n")
+            assertEquals(1, JSONObject(inspect(file.path, "u1").out).getInt("later"))
+            assertEquals(0, inspect(file.path, "stop").code)
+        } finally { dir.deleteRecursively() }
+    }
     private class Run(val code: Int, val out: String, val err: String)
 
     private fun inspect(path: String, target: String): Run {

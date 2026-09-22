@@ -38,6 +38,7 @@ object NativeRootVerification {
 
     val chainScript = """
 import hashlib,json,os,sys,time
+${NativeControlMessages.pythonInterruptionFunction}
 path,old,expected=sys.argv[1:]
 session=os.path.splitext(os.path.basename(path))[0]
 nodes={}; leaf=None; started=time.monotonic()
@@ -59,10 +60,7 @@ with open(path,'rb') as f:
   human=kind=='user' and not item.get('isMeta') and not tool
   text=content if isinstance(content,str) else None
   if isinstance(content,list) and len(content)==1 and isinstance(content[0],dict) and content[0].get('type')=='text': text=content[0].get('text')
-  interrupted=(kind=='user' and parent is not None and isinstance(content,list) and len(content)==1
-   and text=='[Request interrupted by user]' and item.get('session_id')==session and item.get('sessionId')==session
-   and item.get('entrypoint')=='cli' and item.get('version')=='2.1.278'
-   and not any(k in item for k in ('origin','promptSource','turnOrigin')))
+  interrupted=yxi_native_interruption(item,session)
   if interrupted: human=False
   digest=hashlib.sha256(text.encode('utf-8')).hexdigest() if isinstance(text,str) else None
   fresh=uid not in nodes

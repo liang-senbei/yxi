@@ -1,6 +1,7 @@
 package app.yxi.desktop
 
 import app.yxi.agent.Session
+import app.yxi.agent.NativeControlMessages
 import app.yxi.agent.TranscriptStream
 import app.yxi.ssh.Shell
 import org.json.JSONObject
@@ -25,7 +26,9 @@ internal object RewindTargets {
 
     internal val messageScript = """
 import json,os,sys
+${NativeControlMessages.pythonInterruptionFunction}
 path,target,wanted_size,wanted_time=sys.argv[1:]
+session=os.path.splitext(os.path.basename(path))[0]
 limit=32*1024*1024
 message=None
 with open(path,'rb') as f:
@@ -39,7 +42,7 @@ with open(path,'rb') as f:
   try: item=json.loads(raw)
   except (ValueError,UnicodeDecodeError): continue
   if not isinstance(item,dict) or item.get('uuid')!=target: continue
-  if item.get('type')!='user' or item.get('isSidechain') or item.get('isMeta'): raise ValueError('Not an editable user message')
+  if item.get('type')!='user' or item.get('isSidechain') or item.get('isMeta') or yxi_native_interruption(item,session): raise ValueError('Not an editable user message')
   message=item.get('message')
  after=os.fstat(f.fileno()); current=os.stat(path)
  identity=lambda s:(s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns)
@@ -64,7 +67,9 @@ print(encoded)
 
     internal val inspectionScript = """
 import json,os,sys
+${NativeControlMessages.pythonInterruptionFunction}
 path,target=sys.argv[1:]
+session=os.path.splitext(os.path.basename(path))[0]
 nodes={}; leaf=None; target_unsupported=False
 injected=('teammate-message','agent-message','cross-session-message','task-notification','system-reminder','local-command-caveat','local-command-stdout','command-name')
 with open(path,'rb') as f:
@@ -88,7 +93,7 @@ with open(path,'rb') as f:
   text=any(t.strip() and not any('<'+tag in t for tag in injected) for t in texts)
   if uid==target:
    target_unsupported=(isinstance(content,list) and any(not isinstance(b,dict) or b.get('type')!='text' for b in content)) or sum(bool(t.strip()) and not any('<'+tag in t for tag in injected) for t in texts)>1
-  human=kind=='user' and not item.get('isMeta',False) and text
+  human=kind=='user' and not item.get('isMeta',False) and text and not yxi_native_interruption(item,session)
   nodes[uid]=(parent,kind,human)
   if kind in ('user','assistant'): leaf=uid
   if len(nodes)>500000: raise ValueError('History too large')
