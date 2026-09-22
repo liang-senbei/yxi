@@ -3,6 +3,10 @@ package app.yxi.desktop
 import app.yxi.agent.RewindLiveVerification
 import app.yxi.agent.NativeRootVerification
 import app.yxi.agent.Session
+import app.yxi.agent.Model
+import app.yxi.agent.Prompt
+import app.yxi.ssh.Shell
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.withLock
 
 /** Recheck persisted evidence without sending a prompt or restarting any process. */
@@ -13,10 +17,34 @@ internal suspend fun recheckRewindRecovery(conn: Conn, session: Session, gate: R
     val ticket = gate.pending(key) ?: error("没有可核对的回退记录")
     ticket.nativeRoot?.let { root ->
         check(root.runtime.sessionName == session.name && root.runtime.runtimeId == session.runtimeId) { "会话实例已变化，发送仍暂停" }
-        val result = runRewindCommand(conn.ssh, NativeRootVerification.command(root, rootTimeoutSec))
-        check(NativeRootVerification.verified(result)) { "首轮回退尚未确认，发送仍暂停。请核对终端状态。" }
-        conn.instructionDeliveryMutex.withLock { gate.finishVerified(ticket) }
-        return
+        val deadline = System.nanoTime() + rootTimeoutSec * 1_000_000_000L
+        while (System.nanoTime() < deadline) {
+            val remaining = ((deadline - System.nanoTime()) / 1_000_000_000L).toInt().coerceIn(1, 600)
+            val result = runRewindCommand(conn.ssh, NativeRootVerification.command(root, remaining))
+            if (NativeRootVerification.verified(result)) {
+                conn.instructionDeliveryMutex.withLock { gate.finishVerified(ticket) }
+                return
+            }
+            check(NativeRootVerification.needsIdleInputProof(result)) { "首轮回退尚未确认，发送仍暂停。请核对终端状态。" }
+            val idle = conn.instructionDeliveryMutex.withLock {
+                suspend fun emptyInput(): Boolean {
+                    val screen = conn.ssh.exec("tmux capture-pane -p -t ${Shell.q("=" + session.name + ":")}")
+                    return Model.borrowable(screen) && Prompt.parse(screen) == null
+                }
+                if (!emptyInput()) false else {
+                    delay(200)
+                    if (!emptyInput()) false else {
+                        val confirmed = runRewindCommand(conn.ssh, NativeRootVerification.command(root, 1))
+                        if (NativeRootVerification.verified(confirmed) || NativeRootVerification.needsIdleInputProof(confirmed)) {
+                            gate.finishVerified(ticket); true
+                        } else false
+                    }
+                }
+            }
+            if (idle) return
+            delay(200)
+        }
+        error("运行器尚未回到空闲输入状态，发送仍暂停。")
     }
     val query = ticket.verification ?: error("这次回退尚未进入恢复确认阶段")
     check(query.sessionName == session.name && query.runtimeId == session.runtimeId) { "会话实例已变化，发送仍暂停" }

@@ -558,8 +558,8 @@ class IsolatedNativeCliTest {
                                 root.resolve("native-stop-after.txt").writeText(tmux("capture-pane", "-p", "-t", "=" + promptPlan.sessionName + ":"))
                                 assertFalse(stoppedGate.blocked(stopKey))
                                 assertFalse(RewindDeliveryGate(stoppedGateFile).blocked(stopKey))
-                                assertTrue(stoppedFile.readLines().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
-                                    .any(app.yxi.agent.NativeControlMessages::isInterruption), "The CLI must emit the native interruption envelope")
+                                // Before its first response token the CLI can stop without appending an interruption record.
+                                assertTrue(Model.borrowable(tmux("capture-pane", "-p", "-t", "=" + promptPlan.sessionName + ":")))
                                 val branch = requireNotNull(TranscriptBranchStart.load(bridge.conn.ssh, stoppedFile.path, 2000))
                                 val visible = app.yxi.agent.Transcript.parse(requireNotNull(branch.lines).asSequence())
                                 assertEquals(listOf("ROOT-container-native-stop"), visible.filterIsInstance<ChatItem.UserText>().map { it.text })

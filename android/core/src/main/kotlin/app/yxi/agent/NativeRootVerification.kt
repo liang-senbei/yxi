@@ -21,25 +21,27 @@ object NativeRootVerification {
         require(registrationTimeoutSec in 1..600)
         val reg = RewindLiveVerification.registrationCommand(query.runtime, sameProcess = true)
         val chain = "python3 -c ${Shell.q(chainScript)} ${Shell.q(query.transcriptPath)} " +
-            "${Shell.q(query.originalMessageUuid)} ${Shell.q(query.editedTextSha256)}"
+            "${Shell.q(query.originalMessageUuid)} ${Shell.q(query.editedTextSha256)} allow-idle-user"
         val body = "deadline=\$((\$(date +%s) + $registrationTimeoutSec)); c=pending; " +
             "while :; do r=\$($reg) || r=probe-fail; " +
             "case \"\$r\" in identity|sid-mismatch) break;; " +
-            "READY*) c=\$($chain) || c=chain-fail; [ \"\$c\" != ok ] || break;; esac; " +
+            "READY*) c=\$($chain) || c=chain-fail; case \"\$c\" in ok|idle-user) break;; esac;; esac; " +
             "[ \$(date +%s) -lt \$deadline ] || break; sleep 2; done; " +
             "case \"\$r\" in READY*) c=\$($chain) || c=chain-fail; " +
-            "if [ \"\$c\" = ok ]; then r2=\$($reg) || r2=probe-fail; " +
-            "if [ \"\$r\" = \"\$r2\" ]; then echo '$TAG:ok'; else echo '$TAG:process-changed'; fi; " +
+            "if [ \"\$c\" = ok ] || [ \"\$c\" = idle-user ]; then r2=\$($reg) || r2=probe-fail; " +
+            "if [ \"\$r\" = \"\$r2\" ]; then printf '$TAG:%s\\n' \"\$c\"; else echo '$TAG:process-changed'; fi; " +
             "else printf '$TAG:%s\\n' \"\$c\"; fi;; *) printf '$TAG:%s\\n' \"\$r\";; esac"
         return "timeout ${registrationTimeoutSec + 30}s sh -c ${Shell.q(body)}"
     }
 
     fun verified(output: String): Boolean = output.lineSequence().lastOrNull { it.startsWith("$TAG:") } == "$TAG:ok"
+    fun needsIdleInputProof(output: String): Boolean = output.lineSequence().lastOrNull { it.startsWith("$TAG:") } == "$TAG:idle-user"
 
     val chainScript = """
 import hashlib,json,os,sys,time
 ${NativeControlMessages.pythonInterruptionFunction}
-path,old,expected=sys.argv[1:]
+path,old,expected=sys.argv[1:4]
+allow_user=sys.argv[4:]==['allow-idle-user']
 session=os.path.splitext(os.path.basename(path))[0]
 nodes={}; leaf=None; started=time.monotonic()
 with open(path,'rb') as f:
@@ -69,7 +71,7 @@ with open(path,'rb') as f:
  after=os.fstat(f.fileno()); current=os.stat(path)
  identity=lambda s:(s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns)
  if identity(before)!=identity(after) or identity(before)!=identity(current): raise ValueError('History changed')
-if leaf is None or nodes[leaf][1] not in ('assistant','interrupted'): raise ValueError('Reply not complete')
+if leaf is None or (nodes[leaf][1] not in ('assistant','interrupted') and not (allow_user and nodes[leaf][2])): raise ValueError('Reply not complete')
 cursor=leaf; seen=set(); humans=[]
 while cursor is not None:
  if cursor in seen or cursor not in nodes or cursor==old: raise ValueError('Wrong branch')
@@ -78,6 +80,6 @@ while cursor is not None:
  if human: humans.append((parent,digest))
  cursor=parent
 if humans!=[(None,expected)]: raise ValueError('Root message mismatch')
-print('ok')
+print('idle-user' if nodes[leaf][1]=='user' else 'ok')
 """.trimIndent()
 }
