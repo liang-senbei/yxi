@@ -8,6 +8,7 @@ import androidx.compose.ui.unit.dp
 
 /** Shared by the actual chat and isolated window verification. */
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 internal fun RewindMessageDialog(
     text: String,
     onTextChange: (String) -> Unit,
@@ -34,11 +35,11 @@ internal fun RewindMessageDialog(
             }
         },
         confirmButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onDismiss) { Text("取消") }
                 TextButton(onDraft, enabled = text.isNotBlank()) { Text("仅载入草稿") }
                 if (showRewind) Button(onRewind, enabled = canRewind && text.isNotBlank()) { Text("回到这里并继续") }
             }
         },
-        dismissButton = { TextButton(onDismiss) { Text("取消") } },
     )
 }
