@@ -161,6 +161,15 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
     val listState = remember(taskKey) { LazyListState() }
     val seen = remember(taskKey) { Seen() }
     val focus = remember { FocusRequester() }
+    LaunchedEffect(taskKey, rewindOperation) {
+        val completed = rewindOperation ?: return@LaunchedEffect
+        if (!completed.running && !completed.failed) {
+            stick = true
+            focus.requestFocus()
+            kotlinx.coroutines.delay(5_000)
+            if (ConversationRewind.state(taskKey) == completed) ConversationRewind.dismiss(taskKey)
+        }
+    }
     var editingMessage by remember(taskKey) { mutableStateOf<MessageEditTarget?>(null) }
     editingMessage?.let { target ->
         var editedText by remember(taskKey, target.key) { mutableStateOf(target.text) }
@@ -199,7 +208,8 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                     } catch (e: CancellationException) { throw e }
                     catch (e: Exception) { sendErr = e.message }
                 }
-            }, enabled = !target.queued && !session.isCodex && !live.busy && pending == null && session.runtimeId.isNotBlank()) { Text("打开 Claude 回退选择器") } })
+            }, enabled = !target.queued && !session.isCodex && !live.busy && pending == null && session.runtimeId.isNotBlank() &&
+                !rewindRunning && !RewindDelivery.gate.blocked(taskKey) && conn.ssh.isConnected) { Text("打开 Claude 回退选择器") } })
     }
     val staged = remember(taskKey) { mutableStateListOf<DraftAttach>() }
 
@@ -496,6 +506,16 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                 editingMessage = MessageEditTarget(rewindOperation.messageUuid, rewindOperation.editedText,
                     sourceUuid = rewindOperation.messageUuid)
             }) { Text("重新编辑") }
+        } else if (rewindOperation != null && !rewindBlocked) Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(Icons.Outlined.Check, null, Modifier.size(16.dp), tint = t.success)
+            Text(rewindOperation.message, Modifier.weight(1f), color = t.textSecondary, fontSize = 12.sp)
+            IconButton({ ConversationRewind.dismiss(taskKey) }, Modifier.size(28.dp)) {
+                Icon(Icons.Default.Close, "关闭回退完成提示", Modifier.size(14.dp), tint = t.textMuted)
+            }
         }
         if (rewindBlocked && !rewindRunning) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("回退尚未确认，发送已暂停。输入和排队消息已保留。", Modifier.weight(1f), color = t.warning, fontSize = 12.sp)
