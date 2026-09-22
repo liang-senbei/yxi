@@ -2,8 +2,12 @@
 
 状态：构建中，尚未发布。用户明确要求先上线可用权限配置版本，完整 PRD 继续推进。
 
-冻结提交：`996a6a492030f1710b8643cdfdc43bf68b76e67c`，分支 `codex/windows-release-1.4.12`。
-Windows CI：`35688684779`，https://github.com/liang-senbei/yxi/actions/runs/35688684779 。仅触发一次，沿用该任务观察。
+当前冻结提交：`d724032e8433ba8f8ac9e2f7b1da6b4e63f5e306`，分支 `codex/windows-release-1.4.12`。
+Windows CI：`35689962187`，https://github.com/liang-senbei/yxi/actions/runs/35689962187 。沿用该任务观察。
+
+前候选 `996a6a4` 的 `35688684779` CI 虽通过，但只读审查发现带启动提示词会话无法一键配置，故未发布。其暂存目录已标记 superseded；不能使用该产物。`d724032` 接受并丢弃已进入历史的初始位置提示词（绝不重发），使用绝对 Python 路径且等待敏感上下文文件被消费、超时清理，并兼容确认页已选中 Yes 的情况。
+
+`run.Q5QWh9` 对 `d724032` 的真实 CLI 整链测试通过（1 test、0 failures/errors/skipped），新增带启动提示词会话的一键配置、请求计数不增加、敏感重启文件无残留断言。1.4.11 回滚备份 `/var/www/yxi/desktop-rollback-1.4.11-before-1.4.12` 已完整校验，线上仍为 1.4.11。
 
 ## 本批交付
 
