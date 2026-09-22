@@ -568,6 +568,21 @@ class IsolatedNativeCliTest {
                                     !it.getString("path").contains("count_tokens") && it.getJSONArray("messages").toString().contains("ROOT-container-native-stop")
                                 }
                                 assertEquals(1, stopRequests.size, "Recovery must not resend the interrupted request")
+                                tmux("send-keys", "-t", "=" + promptPlan.sessionName + ":", "-l", "--", "FOLLOWUP-container-after-stop")
+                                tmux("send-keys", "-t", "=" + promptPlan.sessionName + ":", "Enter")
+                                var followup: JSONObject? = null
+                                withTimeout(10_000) {
+                                    while (followup == null) {
+                                        followup = root.resolve("requests.jsonl").readLines().map(::JSONObject).lastOrNull {
+                                            !it.getString("path").contains("count_tokens") && it.getJSONArray("messages").toString().contains("FOLLOWUP-container-after-stop")
+                                        }
+                                        if (followup == null) delay(100)
+                                    }
+                                }
+                                val contextAfterStop = requireNotNull(followup).getJSONArray("messages").toString()
+                                root.resolve("native-stop-followup-context.json").writeText(contextAfterStop)
+                                assertTrue(contextAfterStop.contains("ROOT-container-native-stop"), "Continue must retain the edited root in the actual model context")
+                                assertFalse(contextAfterStop.contains(promptPlan.initialPrompt), "Continue must not restore the abandoned original root")
                             } finally {
                                 runCatching { root.resolve("native-stop-before-cleanup-screen.txt").writeText(tmux("capture-pane", "-p", "-t", "=" + promptPlan.sessionName + ":")) }
                                 runCatching { stoppedFile.copyTo(root.resolve("native-stopped-transcript.jsonl"), overwrite = true) }
