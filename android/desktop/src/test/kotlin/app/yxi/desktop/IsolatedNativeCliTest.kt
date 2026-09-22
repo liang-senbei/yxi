@@ -420,6 +420,10 @@ class IsolatedNativeCliTest {
                             NativeFirstTurnController.restore(bridge.conn, recoveredSession, rootSource, rootText, failedGate)
                         }
                         assertTrue(failedRestore.isFailure, "A recovery record write failure must abort restore")
+                        val persistenceFailure = failedRestore.exceptionOrNull()
+                        root.resolve("root-persistence-failure.txt").writeText(persistenceFailure?.stackTraceToString().orEmpty())
+                        assertTrue(persistenceFailure is java.nio.file.FileSystemException && persistenceFailure.file == invalidGateParent.path,
+                            "The failure must come from persisting the recovery record, not an earlier preflight")
                         val cancelledScreen = captureUntil("root-failed-confirmation-cancelled") {
                             Model.borrowable(it) && app.yxi.agent.Prompt.parse(it) == null
                         }
