@@ -34,6 +34,12 @@ class AppState {
     var pluginMarketplace by mutableStateOf(true)
     var pluginMarketScope by mutableStateOf(0)
     var pluginMarketQuery by mutableStateOf("")
+    internal fun openServerPlugins(target: Conn) {
+        if (conn !== target) select(target, null)
+        pluginLocation = "服务器"
+        pluginMarketplace = false
+        page = Page.Plugins
+    }
     var showAndroidEmulator by mutableStateOf(false)
     internal val codexConversationViews = mutableMapOf<String, CodexConversationView>()
     internal var codexSelectedTaskKey by mutableStateOf<String?>(null)

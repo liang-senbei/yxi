@@ -53,6 +53,14 @@ class PluginMarketplaceUiTest {
                                 state.pluginMarketScope = 1; delay(500); shot("marketplace-local")
                                 state.pluginMarketScope = 2; state.pluginMarketQuery = "yxi-market-fixture"
                                 delay(1800); shot("marketplace-server-search")
+                                val other = Conn(Host("old-fixture", "old-fixture", "127.0.0.1"), NoHostKeys)
+                                state.select(other, app.yxi.agent.Session("cc-old", 1, false, "/old-project", 0,
+                                    app.yxi.agent.SessionState.Idle, "", 0.0))
+                                state.openServerPlugins(bridge.conn)
+                                assertSame(bridge.conn, state.conn)
+                                assertNull(state.session, "Do not carry a different server's project into plugin installation")
+                                assertFalse(state.pluginMarketplace)
+                                delay(1800); shot("plugins-installed-server")
                                 assertTrue(state.pluginOperations.entries.isEmpty(), "Browsing must not install plugins")
                                 assertFalse(state.showAndroidEmulator, "Browsing must not launch a local runtime")
                                 val inventory = PluginInventory.parse(bridge.conn.ssh.exec(PluginInventory.command()))

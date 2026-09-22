@@ -10,6 +10,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.yxi.ssh.Shell
 import kotlinx.coroutines.CancellationException
@@ -83,15 +84,15 @@ internal fun PluginCatalogPane(state: AppState, conn: Conn, embedded: Boolean = 
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Icon(Icons.Outlined.Extension, null, Modifier.size(26.dp), tint = t.accent)
-                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Text(p.name.ifBlank { p.id }, style = MaterialTheme.typography.titleMedium)
-                            Text(p.marketplace, style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(p.name.ifBlank { p.id }, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(p.marketplace, style = MaterialTheme.typography.bodySmall, color = t.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
+                        OutlinedButton({ selected = p }, enabled = conn.status == Conn.Status.Connected && !operations.unresolved(host) && operations.error.isBlank() && p.source !in setOf("command", "unknown")) { Text("安装到 ${conn.host.label}") }
                     }
                     if (p.description.isNotBlank()) Text(p.description, style = MaterialTheme.typography.bodySmall)
                     Text("版本：${p.version.ifBlank { "目录未提供" }} · 来源：${when(p.source) { "marketplace-path" -> "市场内目录"; "url", "git-subdir", "github" -> "代码仓库"; "npm", "pip" -> "软件包"; "command" -> "安装命令"; else -> "未识别" }}", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
                     if (p.location.isNotBlank()) Text(p.location, style = MaterialTheme.typography.bodySmall, color = t.textMuted)
-                    OutlinedButton({ selected = p }, enabled = conn.status == Conn.Status.Connected && !operations.unresolved(host) && operations.error.isBlank() && p.source !in setOf("command", "unknown")) { Text("安装到 ${conn.host.label}") }
                     if (p.source == "command") Text("此来源需要单独授权安装命令。", style = MaterialTheme.typography.bodySmall, color = t.warning)
                     if (p.source == "unknown") Text("暂不支持此插件来源。", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
                 }
