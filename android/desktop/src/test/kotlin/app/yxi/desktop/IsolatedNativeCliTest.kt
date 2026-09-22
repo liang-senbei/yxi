@@ -479,6 +479,29 @@ class IsolatedNativeCliTest {
                         } finally {
                             tmux("kill-session", "-t", "=" + bypassPlan.sessionName)
                         }
+                        val promptPlan = DesktopLaunchPlan(project.path, "claude", DesktopLaunchPlan.newRequestId(),
+                            initialPrompt = "ROOT-container-bootstrap-initial", permissionMode = app.yxi.agent.PermissionMode.Manual)
+                        try {
+                            assertTrue(bridge.conn.ssh.exec(promptPlan.command()).contains("__YXI_NEW__:ok"))
+                            var promptReady = false
+                            repeat(150) {
+                                if (!promptReady) {
+                                    val s = tmux("capture-pane", "-p", "-t", "=" + promptPlan.sessionName + ":")
+                                    promptReady = Model.borrowable(s) && "answer:ROOT-container-bootstrap-initial" in s
+                                    if (!promptReady) Thread.sleep(100)
+                                }
+                            }
+                            assertTrue(promptReady, "Initial prompt must finish before configuring its existing conversation")
+                            val count = root.resolve("requests.jsonl").readLines().size
+                            val launched = SessionProbe.snapshotFull(bridge.conn.ssh).sessions.single { it.name == promptPlan.sessionName }
+                            configureConversationBypass(bridge.conn, launched)
+                            assertEquals(app.yxi.agent.PermissionMode.Bypass,
+                                app.yxi.agent.PermissionMode.fromScreen(tmux("capture-pane", "-p", "-t", "=" + promptPlan.sessionName + ":")))
+                            assertEquals(count, root.resolve("requests.jsonl").readLines().size, "Do not replay the startup prompt on resume")
+                            assertTrue(File("/tmp").listFiles().orEmpty().none { it.name.startsWith("yxi-permission-") }, "Secret restart capsules must be consumed")
+                        } finally {
+                            tmux("kill-session", "-t", "=" + promptPlan.sessionName)
+                        }
                         bridge.conn.ssh.exec(Rewind.cleanupCommand(rootCapture))
                         assertTrue(config.resolve("sessions").listFiles().orEmpty().any {
                             it.extension == "json" && JSONObject(it.readText()).optString("sessionId") == sid

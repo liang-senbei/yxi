@@ -31,7 +31,7 @@ internal suspend fun configureConversationBypass(conn: Conn, session: Session) {
 }
 
 internal val permissionBootstrapScript = """
-import hashlib,json,os,pathlib,shlex,subprocess,sys,tempfile
+import hashlib,json,os,pathlib,shlex,subprocess,sys,tempfile,time
 name,runtime,pane,pid,exe,expected=sys.argv[1:]
 def tm(*args): return subprocess.check_output(['tmux',*args],text=True).rstrip('\n')
 def identity():
@@ -63,6 +63,9 @@ while i<len(argv):
   if arg in ('--model','--effort','--name'): retained.extend([arg,value])
   i+=2
  elif arg in ('--dangerously-skip-permissions','--allow-dangerously-skip-permissions'): i+=1
+ elif arg=='--' and i+2==len(argv):
+  # The initial prompt is already in the resumed history. Never submit it twice.
+  break
  else: raise ValueError('unsupported launch option')
 cwd=os.readlink(root/'cwd')
 environment['IS_SANDBOX']='1'
@@ -73,8 +76,12 @@ try:
   json.dump(payload,out);out.flush();os.fsync(out.fileno())
  identity()
  worker="import json,os,sys; p=sys.argv[1]; d=json.load(open(p)); os.unlink(p); os.chdir(d['cwd']); os.execve(d['exe'],d['argv'],d['env'])"
- command=shlex.join(['python3','-c',worker,path])
+ command=shlex.join([sys.executable,'-c',worker,path])
  subprocess.run(['tmux','respawn-pane','-k','-t',pane,'-c',cwd,command],check=True)
+ for _ in range(100):
+  if not os.path.exists(path):break
+  time.sleep(.1)
+ else:raise ValueError('restart worker did not consume context')
  print('__YXI_PERMISSION_RESTART__:'+sid)
 except BaseException:
  if os.path.exists(path):os.unlink(path)

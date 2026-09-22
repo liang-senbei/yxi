@@ -32,7 +32,7 @@ internal suspend fun confirmExplicitBypass(conn: Conn, session: Session) {
                 "Enter to confirm" in screen && "Yes, I accept" in screen && "No, exit" in screen
             val key = when {
                 warning && !moved && screen.lines().any { it.trim() == "❯ No, exit" } -> "Down"
-                warning && moved && !accepted && screen.lines().any { it.trim() == "❯ Yes, I accept" } -> "Enter"
+                warning && !accepted && screen.lines().any { it.trim() == "❯ Yes, I accept" } -> "Enter"
                 else -> null
             }
             if (key != null) {
