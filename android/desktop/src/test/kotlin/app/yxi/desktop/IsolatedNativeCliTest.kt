@@ -419,7 +419,7 @@ class IsolatedNativeCliTest {
                             root.resolve("root-controller-progress.txt").appendText(message + "\n")
                             if (nativeGate.blocked(key)) {
                                 val persisted = RewindDeliveryGate(nativeGateFile)
-                                assertNotNull(persisted.pending(key)?.nativeRoot)
+                                assertTrue(persisted.pending(key)?.nativeRoot != null)
                                 assertFalse(nativeGateFile.readText().contains("ROOT-container-restarted"))
                                 sawDurableRoot = true
                             }
