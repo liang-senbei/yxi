@@ -194,6 +194,10 @@ class IsolatedNativeCliTest {
                         ConversationRewind.restore(bridge.conn, session, target.getString("uuid"),
                             "APP-container-rewind", gate) { stage ->
                             root.resolve("application-progress.log").appendText("$stage\n")
+                            if (stage == "正在载入回退后的会话…") {
+                                assertTrue(RewindDeliveryGate(root.resolve("application-gate.json"))
+                                    .pending(key)?.verification != null, "Recovery identity must precede the model result")
+                            }
                         }
                         assertFalse(gate.blocked(key), "Gate must clear only after verified native resume")
                         val appRequest = root.resolve("requests.jsonl").readLines().map(::JSONObject).last {

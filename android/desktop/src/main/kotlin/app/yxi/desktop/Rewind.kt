@@ -1,6 +1,7 @@
 package app.yxi.desktop
 
 import app.yxi.agent.Rewind
+import app.yxi.agent.RewindLiveVerification
 import app.yxi.agent.SessionProbe
 import app.yxi.agent.SessionState
 import kotlinx.coroutines.CancellationException
@@ -202,7 +203,15 @@ internal class RewindController(private val conn: Conn, private val gate: Rewind
             //    只发出重启命令都不清票** —— 清票只有一条路：运行器与转录都核实同分支后 UI 调
             //    finishVerified（本控制器从不调）。
             val ticket = try {
-                gate.begin(taskKey, s.runtimeId, rewindGateTarget(plan))
+                // Persist enough identity to recheck a completed branch even if the
+                // connection is lost before the print result reaches the application.
+                val verification = inspected?.let {
+                    val serverTime = conn.ssh.exec("python3 -c 'import time; print(time.time())'")
+                        .trim().toDoubleOrNull() ?: error("Cannot establish rewind verification time")
+                    RewindLiveVerification.Query(sessionName, s.runtimeId, cap.paneId, cap.exe, cap.pid,
+                        plan.sessionId, plan.anchorUuid, plan.targetUuid, it.file, serverTime)
+                }
+                gate.begin(taskKey, s.runtimeId, rewindGateTarget(plan), verification)
             } catch (e: IllegalStateException) {
                 return@withLock Report(Rewind.Outcome.Failed("gate"), capture = cap, unpreserved = cap.others,
                     runtimeId = s.runtimeId, cwd = s.cwd)

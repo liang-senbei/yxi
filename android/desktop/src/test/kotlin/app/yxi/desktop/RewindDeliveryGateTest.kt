@@ -19,6 +19,15 @@ class RewindDeliveryGateTest {
             val initial = gate.begin("host/task", "1:\$2:3", target)
             val query = RewindLiveVerification.Query("cc-demo", initial.runtimeId, "%1", "/opt/claude", "123",
                 target.sessionId, target.anchorUuid, target.messageUuid, "/tmp/${target.sessionId}.jsonl", 1234.5)
+            val earlyFile = dir.resolve("early.json")
+            val earlyGate = RewindDeliveryGate(earlyFile)
+            assertFailsWith<IllegalArgumentException> {
+                earlyGate.begin("host/task", initial.runtimeId, target, query.copy(runtimeId = "1:\$3:4"))
+            }
+            assertFalse(earlyFile.exists(), "Invalid recovery identity must not create an unusable ticket")
+            val early = earlyGate.begin("host/task", initial.runtimeId, target, query)
+            assertEquals(query, RewindDeliveryGate(earlyFile).pending("host/task")?.verification)
+            assertTrue(RewindDeliveryGate(earlyFile).blocked("host/task"))
             assertFailsWith<IllegalArgumentException> { gate.prepareVerification(initial, query.copy(runtimeId = "1:\$3:4")) }
             val otherSession = "44444444-4444-4444-8444-444444444444"
             assertFailsWith<IllegalArgumentException> { gate.prepareVerification(initial,

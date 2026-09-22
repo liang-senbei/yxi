@@ -30,11 +30,13 @@ internal class RewindDeliveryGate(file: File) {
     @Synchronized fun pending(taskKey: String): Ticket? = tickets.firstOrNull { it.taskKey == taskKey }
 
     /** Caller holds the connection delivery mutex while obtaining this ticket. */
-    @Synchronized fun begin(taskKey: String, runtimeId: String, target: Target? = null): Ticket {
+    @Synchronized fun begin(taskKey: String, runtimeId: String, target: Target? = null,
+        verification: RewindLiveVerification.Query? = null): Ticket {
         check(readable) { "回退记录无法读取，发送已暂停，请先恢复记录" }
         require(taskKey.isNotBlank() && runtimeId.isNotBlank())
         check(!blocked(taskKey)) { "该会话的回退尚未确认，不能重复执行" }
-        val ticket = Ticket(taskKey, runtimeId, UUID.randomUUID().toString(), target)
+        val ticket = Ticket(taskKey, runtimeId, UUID.randomUUID().toString(), target, verification)
+        if (verification != null) validateVerification(ticket, verification)
         commit(tickets + ticket)
         return ticket
     }
@@ -48,14 +50,18 @@ internal class RewindDeliveryGate(file: File) {
     /** Persist the exact resume identity before sending restart keys; never contains prompt text or keys. */
     @Synchronized fun prepareVerification(ticket: Ticket, query: RewindLiveVerification.Query): Ticket {
         check(readable && tickets.contains(ticket)) { "回退记录已变化，发送保持暂停" }
+        validateVerification(ticket, query)
+        val next = ticket.copy(verification = query)
+        commit(tickets.map { if (it == ticket) next else it })
+        return next
+    }
+
+    private fun validateVerification(ticket: Ticket, query: RewindLiveVerification.Query) {
         require(RewindLiveVerification.validate(query) == null)
         require(query.sessionId == ticket.target?.sessionId &&
             query.runtimeId == ticket.runtimeId && query.anchorUuid == ticket.target?.anchorUuid &&
             query.targetUuid == ticket.target?.messageUuid)
         require(query.transcriptPath.endsWith("/${query.sessionId}.jsonl"))
-        val next = ticket.copy(verification = query)
-        commit(tickets.map { if (it == ticket) next else it })
-        return next
     }
 
     private fun commit(next: List<Ticket>) {
