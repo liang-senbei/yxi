@@ -42,7 +42,7 @@ class AppState {
             NativePluginStore(target, java.io.File(Store.dir, "plugin-installs/codex-$hash.json"))
         }.also { it.attach(target) }
     }
-    internal val nativePluginBusy get() = nativePluginStores.values.count { it.busy }
+    internal val nativePluginBusy get() = nativePluginStores.values.count { it.installing }
     internal fun openServerPlugins(target: Conn) {
         if (conn !== target) select(target, null)
         pluginLocation = "服务器"

@@ -134,6 +134,7 @@ internal class NativePluginStore(private var conn: Conn?, file: File) {
     private val reviewMarker = File(file.parentFile, file.name + ".needs-review")
     var entries by mutableStateOf<List<NativePlugin>>(emptyList()); private set
     var busy by mutableStateOf(false); private set
+    var installing by mutableStateOf(false); private set
     var message by mutableStateOf(""); private set
     var error by mutableStateOf(""); private set
     var pendingId by mutableStateOf<String?>(null); private set
@@ -166,7 +167,7 @@ internal class NativePluginStore(private var conn: Conn?, file: File) {
     }
     fun install(plugin: NativePlugin) {
         if (busy || !readable || pendingId != null || !plugin.installable || plugin.installed) return
-        busy = true; error = ""; message = ""; authLinks = emptyList()
+        busy = true; installing = true; error = ""; message = ""; authLinks = emptyList()
         scope.launch {
             try {
                 connect().use { rpc ->
@@ -188,7 +189,7 @@ internal class NativePluginStore(private var conn: Conn?, file: File) {
                 }
             } catch (e: Exception) {
                 error = if (pendingId != null) "安装结果待确认，请刷新核对；不会自动重复安装" else e.message.orEmpty()
-            } finally { busy = false }
+            } finally { busy = false; installing = false }
         }
     }
 }
