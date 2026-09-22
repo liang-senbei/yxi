@@ -71,16 +71,8 @@ internal fun ConfigurationHeader(state: AppState, conn: Conn, engine: String, bu
 private fun EngineSwitch(engine: String, busy: Boolean, select: (String) -> Unit) {
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         configurationEngines.forEach { (id, label) ->
-            val symbol = when (id) {
-                Lines.CLAUDE -> Icons.Outlined.AutoAwesome
-                Lines.CODEX -> Icons.Outlined.Terminal
-                "opencode" -> Icons.Outlined.Code
-                "gemini" -> Icons.Outlined.Hub
-                "grok" -> Icons.Outlined.Bolt
-                else -> Icons.Outlined.SmartToy
-            }
             FilterChip(engine == id, { select(id) }, enabled = !busy, label = { Text(label) },
-                leadingIcon = { Icon(symbol, null, Modifier.size(17.dp)) })
+                leadingIcon = { RunnerBrandIcon(id, Modifier.size(19.dp)) })
         }
     }
 }

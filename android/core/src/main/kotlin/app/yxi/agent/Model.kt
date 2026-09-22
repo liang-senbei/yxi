@@ -25,6 +25,8 @@ import app.yxi.ssh.SshSession
  * 在手机上顺手一点就把账号默认改掉，是那种事后想不起来为什么的坑。
  */
 object Model {
+    /** Provider-qualified IDs are common in discovered catalogs; keep terminal metacharacters excluded. */
+    fun selectableId(value: String): Boolean = Regex("^[A-Za-z0-9:/_\\[\\].-]{1,512}$").matches(value)
 
     data class Choice(
         val number: Int,
@@ -263,7 +265,7 @@ object Model {
      */
     suspend fun switchFast(ssh: SshSession, target: String, name: String): String? {
         val alias = canonical(name)
-        if (!Regex("""^[A-Za-z0-9\-\[\]._]+$""").matches(alias)) return "模型名有怪字符：$alias"
+        if (!selectableId(alias)) return "模型 ID 包含不支持的字符或过长"
         if (!borrowable(ssh.exec("tmux capture-pane -p -t ${app.yxi.ssh.Shell.q(target)}"))) return "它正忙着，或者输入框里有没发完的字 —— 等一下再点"
         val t = app.yxi.ssh.Shell.q(target)
         ssh.exec("tmux send-keys -t $t -l '/model $alias'; sleep 0.3; tmux send-keys -t $t Enter")
