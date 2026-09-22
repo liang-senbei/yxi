@@ -1,5 +1,13 @@
 # 对话历史回退验收记录
 
+## 真实停止与继续上下文
+
+真实停止探针发现此前静态脚本覆盖不足：首个回复片段之前按 Escape，CLI 可以只保留新用户转录、回到 idle 并把提交文字还到输入框，且不写 interruption 记录。仅核对磁盘新根与空闲并清草稿是不充分的：`run.oyrCnj` 的实际下一请求不含编辑后的根。先前 `run.uEBy9R` 的“停止/解锁通过”不能作为继续上下文正确的证明，自动清稿/放行路径已撤回。
+
+`32b4227` / `2e84a23` 在识别已恢复草稿时保留草稿与持久发送保护，返回明确停止状态。`run.mDNBxA` 对 `2e84a23` 的真实 CLI 整链通过（1 test、0 failures/errors/skipped）：测试专用步骤重新载入同一 sessionId，不产生额外模型请求；下一真实请求包含编辑后的 ROOT-container-native-stop、包含 FOLLOWUP-container-after-stop、不含放弃的 ROOT-container-bootstrap-initial。该能力探针尚未编排为应用内恢复按钮，不能视作完整功能交付。
+
+同期发现并处理的前置问题：`07baeb1` 等待权限模式稳定变化，`efd11a2` 仅重试明确未发送按键的 stale 屏幕回执；`72473cc` 精确匹配已知确认标题的折行形式，同时保留“代码不变/仅恢复对话”的内容约束。相关失败证据包括 run.H1bFPc、run.LTfYCi、run.xI9fiL、run.N3GEeJ、run.KfoNYx、run.L6oV8l、run.j6CwfT。所有实验均在隔离容器；线上 1.4.12 与首轮关闭开关不变。
+
 ## 原生中断记录核验
 
 `0a59d53` / `48ab5ca` 将远程脚本的中断识别集中到 NativeControlMessages.pythonInterruptionFunction，目标检查不再把中断算后续用户轮，也拒绝选它为目标；按快照直接读取原消息同样拒绝系统标记。`run.u2GVNN` 编译通过；`run.TUcWwG` 目标检查 7 项、`run.NLaXiq` 原消息读取 1 项、`run.bUxHoS` 根分支核验 1 项均无失败/错误/跳过。仍非实际停止按钮整链验收；未发布。
