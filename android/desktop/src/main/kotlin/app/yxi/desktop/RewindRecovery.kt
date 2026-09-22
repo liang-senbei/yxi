@@ -9,6 +9,8 @@ import app.yxi.ssh.Shell
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.withLock
 
+internal class NativeRootRecoveryFailure(val receipt: String) : IllegalStateException("首轮回退尚未确认，发送仍暂停。请核对终端状态。")
+
 /** Recheck persisted evidence without sending a prompt or restarting any process. */
 internal suspend fun recheckRewindRecovery(conn: Conn, session: Session, gate: RewindDeliveryGate = RewindDelivery.gate,
     rootTimeoutSec: Int = 20) {
@@ -25,7 +27,7 @@ internal suspend fun recheckRewindRecovery(conn: Conn, session: Session, gate: R
                 conn.instructionDeliveryMutex.withLock { gate.finishVerified(ticket) }
                 return
             }
-            check(NativeRootVerification.needsIdleInputProof(result)) { "首轮回退尚未确认，发送仍暂停。请核对终端状态。" }
+            if (!NativeRootVerification.needsIdleInputProof(result)) throw NativeRootRecoveryFailure(result)
             val idle = conn.instructionDeliveryMutex.withLock {
                 suspend fun emptyInput(): Boolean {
                     val screen = conn.ssh.exec("tmux capture-pane -p -t ${Shell.q("=" + session.name + ":")}")

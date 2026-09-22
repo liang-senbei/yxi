@@ -541,6 +541,7 @@ class IsolatedNativeCliTest {
                                         ConversationRewind.restore(bridge.conn, launched, requireNotNull(original.sourceUuid),
                                             "ROOT-container-native-stop", stoppedGate)
                                     } catch (e: Exception) {
+                                        if (e is NativeRootRecoveryFailure) root.resolve("native-stop-receipt.txt").writeText(e.receipt)
                                         runCatching {
                                             root.resolve("native-stop-restore-failure-screen.txt").writeText(tmux("capture-pane", "-p", "-t", "=" + promptPlan.sessionName + ":"))
                                         }.exceptionOrNull()?.let(e::addSuppressed)
@@ -568,6 +569,7 @@ class IsolatedNativeCliTest {
                                 }
                                 assertEquals(1, stopRequests.size, "Recovery must not resend the interrupted request")
                             } finally {
+                                runCatching { root.resolve("native-stop-before-cleanup-screen.txt").writeText(tmux("capture-pane", "-p", "-t", "=" + promptPlan.sessionName + ":")) }
                                 runCatching { stoppedFile.copyTo(root.resolve("native-stopped-transcript.jsonl"), overwrite = true) }
                                 runCatching {
                                     val records = config.resolve("sessions").listFiles().orEmpty()
