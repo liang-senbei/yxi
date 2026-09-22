@@ -173,10 +173,39 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
     var editingMessage by remember(taskKey) { mutableStateOf<MessageEditTarget?>(null) }
     editingMessage?.let { target ->
         var editedText by remember(taskKey, target.key) { mutableStateOf(target.text) }
+        var sourceLoading by remember(taskKey, target.key) { mutableStateOf(!target.queued && !session.isCodex && target.sourceUuid != null) }
+        var sourceError by remember(taskKey, target.key) { mutableStateOf<String?>(null) }
+        var sourceImages by remember(taskKey, target.key) { mutableStateOf<List<RewindImageDraft>>(emptyList()) }
+        val removedImages = remember(taskKey, target.key) { mutableStateListOf<Int>() }
+        LaunchedEffect(taskKey, target.key) {
+            val uuid = target.sourceUuid ?: return@LaunchedEffect
+            if (target.queued || session.isCodex) return@LaunchedEffect
+            try {
+                sourceImages = withContext(Dispatchers.IO) {
+                    val inspected = RewindTargets.inspect(conn, session, uuid)
+                    rewindImageDrafts(uuid, RewindTargets.loadMessage(conn, inspected))
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { sourceError = "原消息暂时无法读取或内容不受支持，请重新打开编辑或使用终端回退。" }
+            finally { sourceLoading = false }
+        }
+        val visibleImages = sourceImages.filterNot { it.originalIndex in removedImages }
         RewindMessageDialog(text = editedText, onTextChange = { editedText = it },
+            attachments = {
+                DraftAttachmentTray(visibleImages.map { it.attachment }, { attachment ->
+                    sourceImages.firstOrNull { it.attachment === attachment }?.let { removedImages += it.originalIndex }
+                }, labels = visibleImages.map { "图片${it.originalIndex + 1}" }, showTransferStatus = false)
+            },
+            status = when {
+                sourceLoading -> "正在读取原消息…"
+                sourceError != null -> sourceError
+                sourceImages.isNotEmpty() -> "图片可预览；带图片消息的自动回退传输尚未接入。"
+                else -> null
+            },
+            draftLabel = "仅载入文字",
             showRewind = !target.queued && !session.isCodex,
             canRewind = !rewindRunning && !RewindDelivery.gate.blocked(taskKey) && target.sourceUuid != null &&
-                !live.busy && pending == null && conn.ssh.isConnected,
+                !live.busy && pending == null && conn.ssh.isConnected && !sourceLoading && sourceError == null && sourceImages.isEmpty(),
             canOpenNative = !live.busy && pending == null && session.runtimeId.isNotBlank() &&
                 !rewindRunning && !RewindDelivery.gate.blocked(taskKey) && conn.ssh.isConnected,
             onDismiss = { editingMessage = null },

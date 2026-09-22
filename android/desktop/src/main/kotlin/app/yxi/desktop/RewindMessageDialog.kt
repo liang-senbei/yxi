@@ -20,13 +20,19 @@ internal fun RewindMessageDialog(
     onRewind: () -> Unit,
     onNative: () -> Unit,
     modifier: Modifier = Modifier,
+    attachments: @Composable () -> Unit = {},
+    status: String? = null,
+    draftLabel: String = "仅载入草稿",
 ) {
     WorkbenchDialog(onDismissRequest = onDismiss, modifier = modifier, title = { Text("编辑这条消息") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                attachments()
                 OutlinedTextField(text, onTextChange,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 320.dp),
                     label = { Text("消息内容") })
+                status?.let { Text(it, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 Text("回退对话上下文，然后发送编辑后的内容。已有文件修改不会自动撤销。",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (showRewind) TextButton(onNative, enabled = canOpenNative,
@@ -38,7 +44,7 @@ internal fun RewindMessageDialog(
         confirmButton = {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextButton(onDismiss) { Text("取消") }
-                TextButton(onDraft, enabled = text.isNotBlank()) { Text("仅载入草稿") }
+                TextButton(onDraft, enabled = text.isNotBlank()) { Text(draftLabel) }
                 if (showRewind) Button(onRewind, enabled = canRewind && text.isNotBlank()) { Text("回到这里并继续") }
             }
         },

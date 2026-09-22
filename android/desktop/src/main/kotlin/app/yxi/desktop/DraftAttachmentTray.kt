@@ -26,9 +26,10 @@ internal fun attachmentLabels(items: List<DraftAttach>): List<String> {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun DraftAttachmentTray(items: List<DraftAttach>, remove: (DraftAttach) -> Unit) {
+internal fun DraftAttachmentTray(items: List<DraftAttach>, remove: (DraftAttach) -> Unit,
+    labels: List<String> = attachmentLabels(items), showTransferStatus: Boolean = true) {
     if (items.isEmpty()) return
-    val labels = attachmentLabels(items)
+    require(labels.size == items.size)
     var preview by remember { mutableStateOf<DraftAttach?>(null) }
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         items.forEachIndexed { index, attachment -> key(attachment.stamp) {
@@ -44,7 +45,7 @@ internal fun DraftAttachmentTray(items: List<DraftAttach>, remove: (DraftAttach)
                         Icon(Icons.Outlined.InsertDriveFile, null, Modifier.size(22.dp))
                         Text(if (attachment.isImage) labels[index] else attachment.name, maxLines = 2, style = MaterialTheme.typography.labelSmall)
                     }
-                    when (val status = attachment.state) {
+                    if (showTransferStatus) when (val status = attachment.state) {
                         DraftState.Waiting -> CircularProgressIndicator(Modifier.align(Alignment.BottomStart).padding(5.dp).size(14.dp), strokeWidth = 2.dp)
                         is DraftState.Uploading -> LinearProgressIndicator(progress = { status.percent / 100f }, modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(3.dp))
                         is DraftState.Failed -> Text("上传失败", Modifier.align(Alignment.BottomCenter).background(Tokens.current.surface2).padding(3.dp), color = Tokens.current.danger, style = MaterialTheme.typography.labelSmall)
