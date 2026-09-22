@@ -2,6 +2,7 @@ package app.yxi.desktop
 
 import app.yxi.agent.Rewind
 import app.yxi.agent.Model
+import app.yxi.agent.ChatItem
 import app.yxi.agent.SessionProbe
 import app.yxi.agent.RewindLiveVerification
 import app.yxi.ssh.Shell
@@ -186,7 +187,22 @@ class IsolatedNativeCliTest {
                     val session = SessionProbe.snapshot(bridge.conn.ssh).single { it.name == "cc-native-check" }
                     val key = taskNavigationKey(bridge.conn.host, session)
                     val gate = RewindDeliveryGate(root.resolve("application-gate.json"))
-                    DesktopTranscriptMemory.put(key, DesktopTranscriptMemory.Entry(transcript.path, transcript.length()))
+                    val memory = DesktopTranscriptMemory.Entry(transcript.path, 0)
+                    val lease = memory.claim().first
+                    fun renderedUsers(): List<String> {
+                        val data = transcript.readBytes()
+                        val start = memory.view.offset.toInt()
+                        val end = data.indexOfLast { it == '\n'.code.toByte() } + 1
+                        check(end >= start)
+                        if (end > start) {
+                            val lines = data.copyOfRange(start, end).toString(Charsets.UTF_8).lineSequence()
+                                .filter { it.isNotBlank() }.toList()
+                            memory.append(lease, lines, (end - start).toLong())
+                        }
+                        return memory.view.items.filterIsInstance<ChatItem.UserText>().map { it.text }
+                    }
+                    renderedUsers()
+                    DesktopTranscriptMemory.put(key, memory)
                     try {
                         val target = transcript.readLines().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
                             .last { it.optString("type") == "user" &&
@@ -207,6 +223,8 @@ class IsolatedNativeCliTest {
                         assertFalse(appRequest.contains("EDIT-container-second"))
                         assertFalse(appRequest.contains("SINGLE-container-edit"))
                         assertFalse(appRequest.contains("INTERACTIVE-container-followup"))
+                        assertEquals(listOf("KEEP-container-first", "APP-container-rewind"), renderedUsers(),
+                            "The live conversation cache must discard the old branch")
                         val secondTarget = transcript.readLines().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
                             .last { it.optString("type") == "user" &&
                                 it.optJSONObject("message")?.toString()?.contains("APP-container-rewind") == true }
@@ -220,6 +238,7 @@ class IsolatedNativeCliTest {
                         }
                         assertFalse(gate.blocked(key), "Second rewind must independently verify before clearing its gate")
                         assertFalse(RewindDeliveryGate(root.resolve("application-gate.json")).blocked(key))
+                        assertEquals(listOf("KEEP-container-first", "SECOND-app-rewind"), renderedUsers())
                         val secondRequest = root.resolve("requests.jsonl").readLines().map(::JSONObject).last {
                             it.getJSONArray("messages").toString().contains("SECOND-app-rewind")
                         }.getJSONArray("messages").toString()
@@ -257,6 +276,12 @@ class IsolatedNativeCliTest {
                         assertEquals(1, root.resolve("requests.jsonl").readLines().map(::JSONObject).count {
                             it.getJSONArray("messages").toString().contains("RECOVERY-app-rewind")
                         })
+                        assertEquals(listOf("KEEP-container-first", "RECOVERY-app-rewind"), renderedUsers())
+                        val cold = requireNotNull(TranscriptBranchStart.load(bridge.conn.ssh, transcript.path, 400))
+                        val coldMemory = DesktopTranscriptMemory.Entry(transcript.path, cold.size)
+                        val coldView = requireNotNull(coldMemory.append(coldMemory.claim().first, requireNotNull(cold.lines), 0))
+                        assertEquals(renderedUsers(), coldView.items.filterIsInstance<ChatItem.UserText>().map { it.text },
+                            "Reopening the conversation must show the same branch as the live cache")
                     } catch (e: Exception) {
                         if (e is ConversationRewindFailure) root.resolve("application-failure.txt").writeText("${e.code}\n${e.detail}")
                         gate.pending(key)?.verification?.let { query ->
