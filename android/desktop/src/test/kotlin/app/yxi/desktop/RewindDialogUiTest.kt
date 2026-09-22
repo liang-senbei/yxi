@@ -1,6 +1,10 @@
 package app.yxi.desktop
 
 import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.*
 import kotlinx.coroutines.*
@@ -26,6 +30,7 @@ class RewindDialogUiTest {
             var text by mutableStateOf("请回到这条消息，保留前面的上下文。\n把登录页面改成清爽的布局，并检查保存后的状态。")
             var actions = 0
             var submitted: String? = null
+            var dialogBounds: Rect? = null
             var failure: Throwable? = null
             application(exitProcessOnExit = false) {
                 Window(onCloseRequest = ::exitApplication, title = "Yxi rewind dialog fixture",
@@ -33,7 +38,8 @@ class RewindDialogUiTest {
                     YxiTheme {
                         if (open) RewindMessageDialog(text, { text = it }, enabled, true, enabled,
                             onDismiss = { open = false }, onDraft = { actions++ },
-                            onRewind = { submitted = text; open = false }, onNative = { actions++ })
+                            onRewind = { submitted = text; open = false }, onNative = { actions++ },
+                            modifier = Modifier.onGloballyPositioned { dialogBounds = it.boundsInWindow() })
                     }
                     LaunchedEffect(Unit) {
                         try {
@@ -43,11 +49,11 @@ class RewindDialogUiTest {
                                 val bounds = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment().defaultScreenDevice.defaultConfiguration.bounds
                                 ImageIO.write(robot.createScreenCapture(Rectangle(bounds)), "png", File("/results/rewind-dialog-$width.png"))
                             }
-                            val dialog = java.awt.Window.getWindows().last { it.isShowing && it !== window }
-                            val origin = dialog.locationOnScreen
+                            val dialog = requireNotNull(dialogBounds)
+                            val origin = window.contentPane.locationOnScreen
                             withContext(Dispatchers.IO) {
                                 val robot = Robot()
-                                robot.mouseMove(origin.x + 80, origin.y + 125)
+                                robot.mouseMove(origin.x + dialog.left.toInt() + 80, origin.y + dialog.top.toInt() + 125)
                                 robot.mousePress(InputEvent.BUTTON1_DOWN_MASK); robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK)
                                 robot.keyPress(KeyEvent.VK_CONTROL); robot.keyPress(KeyEvent.VK_A)
                                 robot.keyRelease(KeyEvent.VK_A); robot.keyRelease(KeyEvent.VK_CONTROL)
@@ -57,7 +63,8 @@ class RewindDialogUiTest {
                             assertEquals("a", text, "Typing must update the actual editor")
                             withContext(Dispatchers.IO) {
                                 val robot = Robot()
-                                robot.mouseMove(origin.x + dialog.width - 90, origin.y + dialog.height - 48)
+                                val current = requireNotNull(dialogBounds)
+                                robot.mouseMove(origin.x + current.right.toInt() - 90, origin.y + current.bottom.toInt() - 48)
                                 robot.mousePress(InputEvent.BUTTON1_DOWN_MASK); robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK)
                             }
                             delay(400)

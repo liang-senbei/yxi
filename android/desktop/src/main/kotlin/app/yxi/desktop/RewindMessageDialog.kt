@@ -19,8 +19,9 @@ internal fun RewindMessageDialog(
     onDraft: () -> Unit,
     onRewind: () -> Unit,
     onNative: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    WorkbenchDialog(onDismissRequest = onDismiss, title = { Text("编辑这条消息") },
+    WorkbenchDialog(onDismissRequest = onDismiss, modifier = modifier, title = { Text("编辑这条消息") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(text, onTextChange,
