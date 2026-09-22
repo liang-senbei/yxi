@@ -15,6 +15,10 @@ fi
 tmp=$(mktemp -d)
 gh run download "$run" -R liang-senbei/yxi -n Yxi-windows -D "$tmp"
 ls -la "$tmp/Releases"
+# Review builds can carry the same packageVersion as production. Never replace an immutable version.
+curl --fail --silent --show-error --connect-timeout 10 --max-time 30 \
+  https://yxi.keuury.com/desktop/releases.win.json > "$tmp/published-releases.win.json"
+python3 "$(dirname "$0")/validate_release.py" "$tmp/Releases" "$tmp/published-releases.win.json"
 # --chmod=F644：rsync 会原样带过去本机的权限，0600 到了 nginx 就 403（TROUBLESHOOTING #318）
 rsync -av --chmod=D755,F644 "$tmp/Releases/" hk13:/var/www/yxi/desktop/
 # 公网真取一遍：要 200；404 = nginx 白名单（hk13 /etc/nginx/snippets/yxi-dl.conf 的 location /desktop/）没放行
