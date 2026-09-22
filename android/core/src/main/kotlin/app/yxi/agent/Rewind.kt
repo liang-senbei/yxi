@@ -172,6 +172,7 @@ object Rewind {
      */
     fun command(exe: String, cwd: String, cap: Capture, p: Plan): String {
         require(validate(p) == null && validateExe(exe) == null)
+        require(cap.resumeSessionId == null || cap.resumeSessionId == p.sessionId)
         val fork = if (p.fork) " --fork-session" else ""
         // ⚠️ 变量值一律「单引号包裹 + 转义」—— q() 只转义不加引号，裸值带空格会被 shell 裂开
         val args = buildString {
@@ -232,6 +233,10 @@ object Rewind {
             "[ -n \"\$e\" ] && echo \"$CAP_TAG:effort=\$e\"; " +
             "nn=\$(printf '%s\\n' \"\$a\" | awk 'p{print;p=0} /^(-n|--name)\$/{p=1}' | head -1); " +
             "[ -n \"\$nn\" ] && echo \"$CAP_TAG:name=\$nn\"; " +
+            "rc=\$(printf '%s\\n' \"\$a\" | grep -cE '^--resume(=|$)'); " +
+            "if [ \"\$rc\" = 1 ] && printf '%s\\n' \"\$a\" | grep -qx -- '--resume'; then " +
+            "rr=\$(printf '%s\\n' \"\$a\" | awk 'p{print;exit} /^--resume\$/{p=1}'); " +
+            "echo \"$CAP_TAG:resume=\$rr\"; fi; " +
             "o=\$(printf '%s\\n' \"\$a\" | grep -oE '^(-{1,2}[A-Za-z][A-Za-z0-9-]*)' | sort -u | " +
             "grep -vE '^--?(model|effort|n|name)\$' | tr '\\n' ' '); " +
             "[ -n \"\$o\" ] && echo \"$CAP_TAG:other=\$o\"; true"
@@ -256,6 +261,8 @@ object Rewind {
         val pid: String = "",
         /** 捕获到的 tmux pane id（`%N`）；relaunch 前复核用 —— pane 重建即变。 */
         val paneId: String = "",
+        /** Explicit original --resume UUID, checked against the target before execution. */
+        val resumeSessionId: String? = null,
     ) {
         /** 原地重启是否被允许（白名单全量可回放、其余一个没有）。 */
         val inPlaceAllowed: Boolean get() = others.isEmpty()
@@ -279,7 +286,7 @@ object Rewind {
         }
         var file = ""; var exe = ""
         var model = ""; var effort = ""; var name = ""
-        var pid = ""; var pane = ""
+        var pid = ""; var pane = ""; var resume: String? = null
         val others = ArrayList<String>()
         for (l in lines) {
             val body = l.removePrefix("$CAP_TAG:")
@@ -293,13 +300,15 @@ object Rewind {
                 "model" -> if (ARG_OK.matches(v)) model = v else others += "--model"
                 "effort" -> if (ARG_OK.matches(v)) effort = v else others += "--effort"
                 "name" -> if (ARG_OK.matches(v)) name = v else others += "--name"
+                "resume" -> if (UUID.matches(v)) resume = v else others += "--resume"
                 "other" -> v.split(' ').map { it.trim() }.filter { it.isNotEmpty() }.forEach { fl ->
                     if (fl !in others) others += fl
                 }
             }
         }
         if (file.isBlank() || validateExe(exe) != null) return Failed("badcap")
-        return Got(Capture(exe, file, model.ifBlank { null }, effort.ifBlank { null }, name.ifBlank { null }, others, pid, pane))
+        if (resume != null) others.removeAll { it == "--resume" }
+        return Got(Capture(exe, file, model.ifBlank { null }, effort.ifBlank { null }, name.ifBlank { null }, others, pid, pane, resume))
     }
 
     sealed interface CaptureResult
@@ -336,6 +345,7 @@ object Rewind {
     fun relaunchCommand(sessionName: String, c: Capture, sessionId: String, cwd: String, runtimeId: String): String {
         if (runtimeId.isBlank() || c.paneId.isBlank()) return "echo '$ID_TAG:identity'"
         require(UUID.matches(sessionId) && validateExe(c.exe) == null)
+        require(c.resumeSessionId == null || c.resumeSessionId == sessionId)
         val n = q(sessionName)
         // ⚠️ 同 [command]：变量值一律「单引号包裹 + 转义」（q() 只转义不加引号）
         val keys = buildString {

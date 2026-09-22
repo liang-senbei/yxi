@@ -183,6 +183,11 @@ internal class RewindController(private val conn: Conn, private val gate: Rewind
                 )
             }
 
+            if (cap.resumeSessionId != null && cap.resumeSessionId != plan.sessionId) {
+                return@withLock Report(Rewind.Outcome.Failed("sid-mismatch"), capture = cap,
+                    runtimeId = s.runtimeId, cwd = s.cwd)
+            }
+
             // ── 模式裁定（审查：拒绝必须发生在模型调用之前）——
             //    原地模式（fork=false）要求原启动参数可全量回放；回不去就明说，让用户选分支模式。
             if (!plan.fork && !cap.inPlaceAllowed) {

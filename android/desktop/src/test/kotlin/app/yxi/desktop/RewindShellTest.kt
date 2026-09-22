@@ -117,6 +117,33 @@ class RewindShellTest {
         p.destroyForcibly()
     }
 
+    @Test fun `resume UUID is captured but ambiguous selectors stay unsupported`() {
+        val variants = listOf(
+            listOf("--resume", sid) to sid,
+            listOf("--resume", "a session title") to null,
+            listOf("--resume") to null,
+            listOf("--resume=$sid") to null,
+            listOf("--resume", sid, "--resume", sid) to null,
+            listOf("--resume", sid, "--resume=$sid") to null,
+        )
+        for ((args, expected) in variants) {
+            val p = ProcessBuilder(listOf(claudeBin.toString(), "-c", "sleep 30; :") + args).start()
+            try {
+                val cap = (Rewind.parseCapture(run(Rewind.captureCommand("cc-test"),
+                    "YXI_PPID" to ProcessHandle.current().pid().toString())) as Rewind.Got).capture
+                assertEquals(expected, cap.resumeSessionId, args.toString())
+                assertEquals(expected == null, "--resume" in cap.others, args.toString())
+                if (expected != null) {
+                    val wrong = "11111111-1111-4111-8111-111111111111"
+                    kotlin.test.assertFailsWith<IllegalArgumentException> {
+                        Rewind.relaunchCommand("cc-test", cap, wrong, fakeHome.toString(), runtimeId)
+                    }
+                }
+                run(Rewind.cleanupCommand(cap))
+            } finally { killPane(p); p.waitFor(5, TimeUnit.SECONDS) }
+        }
+    }
+
     @Test
     fun `真bash里argv捕获全链_读的是真proc假claude`() {
         resetLog()
