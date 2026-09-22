@@ -17,27 +17,18 @@ import androidx.compose.ui.unit.dp
 internal fun PluginMarketplacePane(state: AppState, conn: Conn?) {
     val t = Tokens.current
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            @Composable fun filters() = PluginTabs(listOf("全部" to Icons.Outlined.Apps,
-                "本地" to Icons.Outlined.Computer, "服务器" to Icons.Outlined.Dns), state.pluginMarketScope) { state.pluginMarketScope = it }
-            @Composable fun search(modifier: Modifier) = OutlinedTextField(state.pluginMarketQuery,
-                { state.pluginMarketQuery = it }, modifier, singleLine = true,
-                placeholder = { Text("搜索插件、用途或市场") }, leadingIcon = { Icon(Icons.Outlined.Search, null, Modifier.size(18.dp)) })
-            if (maxWidth >= 720.dp) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                filters(); search(Modifier.weight(1f))
-            } else Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { filters(); search(Modifier.fillMaxWidth()) }
-        }
         val query = state.pluginMarketQuery.trim()
         val matchesLocal = "Android 模拟器 安卓模拟器 开发工具 本地 Windows".contains(query, ignoreCase = true)
-        if (state.pluginMarketScope != 2 && matchesLocal) {
+        if (state.pluginLocation == "本地" && matchesLocal) {
             LocalEmulatorPluginCard { state.showAndroidEmulator = true }
-        } else if (state.pluginMarketScope == 1) {
-            Text("没有匹配的本地插件", color = t.textMuted)
         }
-        if (state.pluginMarketScope != 1) {
+        if (state.pluginLocation == "本地") {
+            Box(Modifier.weight(1f).fillMaxWidth()) { NativePluginPane(state, null, installedOnly = false) }
+        } else {
             if (conn?.status == Conn.Status.Connected) {
                 Box(Modifier.weight(1f).fillMaxWidth()) {
-                    PluginCatalogPane(state, conn, embedded = true, searchText = state.pluginMarketQuery) {
+                    if (state.pluginCatalogRuntime == "codex") NativePluginPane(state, conn, installedOnly = false)
+                    else PluginCatalogPane(state, conn, embedded = true, searchText = state.pluginMarketQuery) {
                         state.pluginLocation = "服务器"; state.pluginMarketplace = false
                     }
                 }

@@ -34,6 +34,14 @@ class AppState {
     var pluginMarketplace by mutableStateOf(true)
     var pluginMarketScope by mutableStateOf(0)
     var pluginMarketQuery by mutableStateOf("")
+    var pluginCatalogRuntime by mutableStateOf("codex")
+    private val nativePluginStores = mutableMapOf<Conn?, NativePluginStore>()
+    internal fun nativePlugins(target: Conn?): NativePluginStore = nativePluginStores.getOrPut(target) {
+        val key = target?.let { projectKey(it.host, "/") } ?: "local"
+        val hash = java.security.MessageDigest.getInstance("SHA-256").digest(key.toByteArray()).joinToString("") { "%02x".format(it) }
+        NativePluginStore(target, java.io.File(Store.dir, "plugin-installs/codex-$hash.json"))
+    }
+    internal val nativePluginBusy get() = nativePluginStores.values.count { it.busy }
     internal fun openServerPlugins(target: Conn) {
         if (conn !== target) select(target, null)
         pluginLocation = "服务器"

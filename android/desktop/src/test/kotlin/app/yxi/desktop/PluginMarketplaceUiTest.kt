@@ -38,7 +38,7 @@ class PluginMarketplaceUiTest {
                     assertEquals("sample@yxi-market-fixture", entries.single().id)
                 }
                 bridge.conn.status = Conn.Status.Connected
-                val state = AppState().apply { conn = bridge.conn; pluginMarketplace = true }
+                val state = AppState().apply { conn = bridge.conn; pluginMarketplace = true; pluginLocation = "服务器"; pluginCatalogRuntime = "claude" }
                 application(exitProcessOnExit = false) {
                     Window(onCloseRequest = ::exitApplication, title = "Yxi marketplace preview",
                         state = rememberWindowState(width = 1040.dp, height = 860.dp)) {
@@ -50,8 +50,8 @@ class PluginMarketplaceUiTest {
                             }
                             try {
                                 delay(3000); shot("marketplace-all")
-                                state.pluginMarketScope = 1; delay(500); shot("marketplace-local")
-                                state.pluginMarketScope = 2; state.pluginMarketQuery = "yxi-market-fixture"
+                                state.pluginLocation = "本地"; delay(500); shot("marketplace-local")
+                                state.pluginLocation = "服务器"; state.pluginMarketQuery = "yxi-market-fixture"
                                 delay(1800); shot("marketplace-server-search")
                                 val other = Conn(Host("old-fixture", "old-fixture", "127.0.0.1"), NoHostKeys)
                                 state.select(other, app.yxi.agent.Session("cc-old", 1, false, "/old-project", 0,
