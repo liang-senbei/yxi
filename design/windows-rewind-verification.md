@@ -2,6 +2,8 @@
 
 ## 原生中断记录核验
 
+`5700c63` / `6c5f367` 将同一已验证原生信封形态接入 Transcript：作为系统消息展示，不产生 UserText，也不加入待发消息的已发送匹配集。`run.aOBkqe` 编译通过；`run.aCv2PX` NativeControlMessagesTest 2 tests、0 failures/errors/skipped，覆盖同文待发消息保留与手写/其他会话元数据的反例。可编辑目标识别和真实停止动作仍待补齐；未发布。
+
 读取 hk13 既有探针 `/tmp/yxi-rw-probe/home/.claude/projects/*/*.jsonl` 的实际记录：原生 `[Request interrupted by user]` 为单 text block，含一致的 `session_id`/`sessionId`、`entrypoint=cli`、`version=2.1.278`，没有普通输入的 origin/promptSource/turnOrigin；其 parent 实际也可能是 attachment，不能假定直接指向用户消息。
 
 `85418d4` / `428c668` 只按这组已核对的字段将其认作原生中断；普通用户文本、错误会话 ID 或带用户来源字段的记录仍拒绝作为完成依据。中断可以成为终止节点，但原消息必须已排除、唯一的新根正文摘要及全链完整性仍须通过，外层仍核对原生 idle 和运行身份。
