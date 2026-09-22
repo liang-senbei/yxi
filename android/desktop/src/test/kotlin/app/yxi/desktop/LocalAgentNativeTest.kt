@@ -56,6 +56,14 @@ http_headers = { Authorization = "Bearer fixture-key-0" }
                 assertFalse(root.resolve("not-a-command").exists())
                 assertTrue(root.resolve("requests.jsonl").readText().contains("YXI-LOCAL-FIXTURE"))
                 assertContentEquals(before, config.readBytes(), "Launching local agents must not rewrite their global configuration")
+                val canceled = withContext(Dispatchers.Swing) {
+                    state.localAgents.start("codex", root.path, "CANCEL-BEFORE-DELIVERY")
+                    state.localAgents.jobs.first().also { state.localAgents.stop(it) }
+                }
+                withTimeout(15000) { while (canceled.running) delay(50) }
+                assertEquals("已停止", canceled.status)
+                assertFalse(canceled.process?.isAlive == true)
+                assertFalse(root.resolve("requests.jsonl").readText().contains("CANCEL-BEFORE-DELIVERY"))
             }
             state.conn = Conn(Host("fixture-server", "hk13 · 测试", "192.0.2.1"), NoHostKeys)
             var page by androidx.compose.runtime.mutableStateOf(0)

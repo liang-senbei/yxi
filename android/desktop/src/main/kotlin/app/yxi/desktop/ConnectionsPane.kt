@@ -112,7 +112,7 @@ import kotlinx.coroutines.launch
             OutlinedCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row { Text("${job.engine} · ${job.status}", Modifier.weight(1f)); if (job.running) TextButton({ agents.stop(job) }) { Text("停止") } }
                 Text(job.directory.path, color = Tokens.current.textMuted)
-                SelectionContainer { Text(job.output.ifBlank { "等待运行器输出…" }, style = MaterialTheme.typography.bodySmall, maxLines = 30) }
+                SelectionContainer { Text(job.output.ifBlank { if (job.running) "等待运行器输出…" else "没有文本输出" }, style = MaterialTheme.typography.bodySmall, maxLines = 30) }
                 TextButton({ runCatching { java.awt.Desktop.getDesktop().open(job.log) } }, enabled = job.log.exists()) { Text("打开完整日志") }
             } }
         }
