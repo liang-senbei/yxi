@@ -16,6 +16,8 @@ import kotlinx.coroutines.swing.Swing
 import kotlinx.coroutines.sync.withLock
 
 /** App-lifetime operation: changing the selected conversation does not cancel a submitted rewind. */
+internal class ConversationRewindFailure(val code: String, val detail: String, message: String) : IllegalStateException(message)
+
 internal object ConversationRewind {
     data class State(val running: Boolean, val message: String, val failed: Boolean = false,
         val editedText: String? = null, val messageUuid: String? = null)
@@ -63,7 +65,7 @@ internal object ConversationRewind {
         val capture = report.capture
         try {
             val outcome = report.outcome
-            if (outcome is Rewind.Outcome.Failed) error(when (outcome.code) {
+            if (outcome is Rewind.Outcome.Failed) throw ConversationRewindFailure(outcome.code, outcome.detail, when (outcome.code) {
                 "unpreserved" -> "当前启动参数尚不能完整保留，未执行自动回退。请使用原生回退入口。"
                 "busy" -> "会话仍在运行或等待确认，请稍后再试。"
                 "pending" -> "已有回退等待核对，请先处理恢复状态。"

@@ -225,6 +225,7 @@ class IsolatedNativeCliTest {
                             assertFalse(secondRequest.contains(discarded), "Second rewind leaked $discarded")
                         }
                     } catch (e: Exception) {
+                        if (e is ConversationRewindFailure) root.resolve("application-failure.txt").writeText("${e.code}\n${e.detail}")
                         gate.pending(key)?.verification?.let { query ->
                             root.resolve("recovery-probe.txt").writeText(bridge.conn.ssh.exec(
                                 RewindLiveVerification.command(query, regTimeoutSec = 1)))
