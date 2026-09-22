@@ -32,7 +32,7 @@ internal class LocalAgents(private val root: File = File(Store.dir, "local-agent
                         it.status = saved.getString("status").let { status -> if (status in setOf("created", "准备启动", "正在运行", "正在停止")) "上次运行结果未确认" else status }
                         it.sessionId = saved.optString("sessionId").takeIf(::validSessionId)
                         it.active = false
-                        it.output = readableOutput(readTail(it.log))
+                        it.output = saved.optString("output").ifBlank { readableOutput(readTail(it.log)) }
                         jobs.add(it)
                     }
                 }
@@ -42,7 +42,7 @@ internal class LocalAgents(private val root: File = File(Store.dir, "local-agent
     fun continueSession(job: LocalAgentJob, prompt: String) {
         require(jobs.any { it === job } && !job.running && job.status == "已完成") { "只能继续已确认完成的会话" }
         val session = job.sessionId?.takeIf(::validSessionId) ?: error("运行器未提供可恢复的会话标识")
-        check(jobs.none { it.engine == job.engine && it.sessionId == session && (it.running || it.status == "上次运行结果未确认") }) { "此会话仍在运行或上次结果未确认" }
+        check(jobs.none { it.engine == job.engine && it.sessionId == session && (it.running || it.status in setOf("上次运行结果未确认", "结果未确认", "结果记录未保存，请保留日志核对")) }) { "此会话仍在运行或上次结果未确认" }
         launch(job.engine, job.directory.path, prompt, session)
     }
     private fun launch(engine: String, directory: String, prompt: String, resume: String?) {
@@ -75,14 +75,14 @@ internal class LocalAgents(private val root: File = File(Store.dir, "local-agent
                     delay(700)
                 }
                 job.output = readableOutput(tail(job.log))
-                val identity = withContext(Dispatchers.IO) { sessionIdentity(engine, job.log) }
-                check(resume == null || identity != null) { "运行器未确认恢复会话，结果需核对" }
-                if (identity != null) {
-                    check(resume == null || identity == resume) { "运行器返回了不同的会话，结果需核对" }
-                    job.sessionId = identity
+                val outcome = withContext(Dispatchers.IO) {
+                    check(job.log.length() <= 16 * 1024 * 1024) { "输出超过大小限制，结果需核对" }
+                    job.log.bufferedReader().use { LocalAgentOutcome.parse(engine, it.lineSequence(), process.exitValue(), resume) }
                 }
-                job.status = if (job.cancelRequested) "已停止" else if (process.exitValue() == 0) "已完成" else "运行失败 (${process.exitValue()})"
-            } catch (e: Exception) { job.status = if (job.cancelRequested) "已停止" else "启动失败"; job.output = e.message.orEmpty() }
+                job.sessionId = outcome.sessionId
+                job.status = if (job.cancelRequested) "已停止" else outcome.status
+                if (!job.cancelRequested && outcome.detail.isNotBlank()) job.output = (job.output + "\n" + outcome.detail).trim()
+            } catch (e: Exception) { job.status = if (job.cancelRequested) "已停止" else if (job.process != null) "结果未确认" else "启动失败"; job.output = e.message.orEmpty() }
             finally {
                 job.process?.takeIf { it.isAlive }?.let { terminate(it) }
                 val saved = withContext(NonCancellable + Dispatchers.IO) { runCatching { persist(job, job.status) } }
@@ -109,7 +109,7 @@ internal class LocalAgents(private val root: File = File(Store.dir, "local-agent
     override fun close() { jobs.filter { it.running }.forEach(::stop); scope.cancel() }
     private fun persist(job: LocalAgentJob, status: String) {
         DurableFile.replace(File(job.log.parentFile, "task.json"), JSONObject().put("engine", job.engine).put("directory", job.directory.path)
-            .put("status", status).put("prompt", job.prompt).put("sessionId", job.sessionId.orEmpty()).put("resumedFrom", job.resumedFrom.orEmpty()).toString())
+            .put("status", status).put("prompt", job.prompt).put("output", job.output.takeLast(68000)).put("sessionId", job.sessionId.orEmpty()).put("resumedFrom", job.resumedFrom.orEmpty()).toString())
     }
     companion object {
         private fun readTail(file: File): String = if (!file.isFile) "" else java.io.RandomAccessFile(file, "r").use { f ->
@@ -123,15 +123,6 @@ internal class LocalAgents(private val root: File = File(Store.dir, "local-agent
                 (if (resume != null) listOf("resume", "--skip-git-repo-check", "--json", resume, "-") else listOf("--skip-git-repo-check", "--json", "-"))
             else listOf(binary.path, "-p", "--output-format", "stream-json", "--verbose") +
                 (if (resume != null) listOf("--resume", resume) else emptyList())
-        }
-        private fun sessionIdentity(engine: String, log: File): String? {
-            if (!log.isFile) return null
-            return log.bufferedReader().use { reader -> reader.lineSequence().take(1000).mapNotNull { line ->
-                val event = runCatching { JSONObject(line) }.getOrNull() ?: return@mapNotNull null
-                val id = if (engine == "codex" && event.optString("type") == "thread.started") event.optString("thread_id")
-                    else if (engine == "claude" && event.optString("type") in setOf("system", "result")) event.optString("session_id") else ""
-                id.takeIf(::validSessionId)
-            }.firstOrNull() }
         }
         internal fun readableOutput(raw: String): String = raw.lineSequence().mapNotNull { line ->
             val event = runCatching { JSONObject(line) }.getOrNull() ?: return@mapNotNull line.takeIf { it.isNotBlank() }
