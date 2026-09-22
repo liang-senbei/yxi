@@ -76,11 +76,13 @@ fun approvalOf(screen: String?): Approval {
  * （PromptTest 里也记着这一条），所以标成「不再询问」，别写成本会话骗人；只有文案里明说 session 的才是本会话。
  */
 fun zhOption(label: String): String {
-    val l = label.lowercase()
+    val l = label.trim().lowercase().replace('’', '\'').replace('‘', '\'')
     return when {
+        l.startsWith("yes") && "switch to auto mode" in l -> "切换自动审批"
+        l.startsWith("yes") && ("bypass permissions" in l || "bypasspermissions" in l) -> "切换完全访问"
         l.startsWith("yes") && "session" in l -> "本会话允许"
         l.startsWith("yes") && ("don't ask" in l || "always" in l) -> "不再询问"
-        l.startsWith("yes") -> "允许一次"
+        l == "yes" || l == "yes, once" -> "允许一次"
         l.startsWith("no") || "(esc)" in l || "tell claude" in l -> "拒绝"
         else -> label
     }
