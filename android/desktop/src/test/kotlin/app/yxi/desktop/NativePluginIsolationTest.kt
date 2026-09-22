@@ -5,6 +5,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.*
 import app.yxi.ssh.Shell
 import kotlinx.coroutines.*
+import kotlinx.coroutines.swing.Swing
 import org.junit.jupiter.api.condition.*
 import java.awt.Robot
 import java.io.File
@@ -27,7 +28,7 @@ class NativePluginIsolationTest {
         market.resolve("plugins/sample/skills/sample").mkdirs()
         market.resolve("plugins/sample/skills/sample/SKILL.md").writeText("---\nname: sample\ndescription: Isolated fixture only\n---\nSay fixture.\n")
         market.resolve("plugins/sample/.codex-plugin/plugin.json").writeText("""{"name":"sample","version":"1.0.0","skills":"./skills/","interface":{"displayName":"隔离测试插件","shortDescription":"验证目标机器独立安装与目录展示","category":"Developer Tools"}}""")
-        market.resolve(".agents/plugins/marketplace.json").writeText("""{"name":"yxi-native-fixture","owner":{"name":"Yxi fixture"},"plugins":[{"name":"sample","source":"./plugins/sample","description":"Isolated test","version":"1.0.0"}]}""")
+        market.resolve(".agents/plugins/marketplace.json").writeText("""{"name":"yxi-native-fixture","plugins":[{"name":"sample","source":{"source":"local","path":"./plugins/sample"},"policy":{"installation":"AVAILABLE","authentication":"ON_USE"},"category":"Developer Tools"}]}""")
         var failure: Throwable? = null
         try {
             IsolatedSshBridge(root.resolve("ssh"), mapOf("HOME" to home.path, "CODEX_HOME" to home.resolve(".codex").path), root.resolve("unused.sock")).use { bridge ->
@@ -42,13 +43,26 @@ class NativePluginIsolationTest {
                         assertFalse(sample.installed)
                         assertTrue(sample.installable)
                         assertEquals("隔离测试插件", sample.title)
-                        val result = rpc.request("plugin/install", sample.installParams())
-                        assertEquals(0, result.getJSONArray("appsNeedingAuth").length())
+                        val store = NativePluginStore(bridge.conn, root.resolve("install-ledger.json"))
+                        withContext(Dispatchers.Swing) { store.install(sample) }
+                        withTimeout(30000) { while (store.busy) delay(100) }
+                        assertEquals("", store.error)
+                        assertNull(store.pendingId)
+                        assertTrue(store.message.contains("已安装"))
                         val after = NativePluginSnapshot.parse(rpc.request("plugin/list"))
                         assertTrue(after.entries.single { it.id == sample.id }.installed)
                     }
-                    // A distinct untouched HOME must not acquire a registry/cache from the install.
-                    assertFalse(root.resolve("other-home/.codex").exists())
+                    val otherHome = root.resolve("other-home").apply { mkdir() }
+                    IsolatedSshBridge(root.resolve("ssh-other"), mapOf("HOME" to otherHome.path,
+                        "CODEX_HOME" to otherHome.resolve(".codex").path), root.resolve("other.sock")).use { other ->
+                        Files.createSymbolicLink(root.resolve("ssh-other/bin/codex").toPath(), Path.of("/opt/native/claude"))
+                        other.conn.ssh.connect(); other.conn.status = Conn.Status.Connected
+                        other.conn.ssh.exec("codex plugin marketplace add ${Shell.q(market.path)}")
+                        PluginRpc.connect(other.conn).use { rpc ->
+                            val otherEntries = NativePluginSnapshot.parse(rpc.request("plugin/list")).entries
+                            assertFalse(otherEntries.single { it.name == "sample" }.installed, "Installing for A must not install for B")
+                        }
+                    }
                     assertFalse(File(System.getProperty("user.home"), ".codex/plugins/cache/yxi-native-fixture").exists())
                 }
                 val state = AppState().apply { conn = bridge.conn; pluginLocation = "服务器"; pluginCatalogRuntime = "codex" }

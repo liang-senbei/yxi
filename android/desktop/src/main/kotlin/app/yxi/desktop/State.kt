@@ -32,14 +32,15 @@ class AppState {
         else conns.firstOrNull { it.host.id == configurationHostId }
     var pluginLocation by mutableStateOf("本地")
     var pluginMarketplace by mutableStateOf(true)
-    var pluginMarketScope by mutableStateOf(0)
     var pluginMarketQuery by mutableStateOf("")
     var pluginCatalogRuntime by mutableStateOf("codex")
-    private val nativePluginStores = mutableMapOf<Conn?, NativePluginStore>()
-    internal fun nativePlugins(target: Conn?): NativePluginStore = nativePluginStores.getOrPut(target) {
+    private val nativePluginStores = mutableMapOf<String, NativePluginStore>()
+    internal fun nativePlugins(target: Conn?): NativePluginStore {
         val key = target?.let { projectKey(it.host, "/") } ?: "local"
-        val hash = java.security.MessageDigest.getInstance("SHA-256").digest(key.toByteArray()).joinToString("") { "%02x".format(it) }
-        NativePluginStore(target, java.io.File(Store.dir, "plugin-installs/codex-$hash.json"))
+        return nativePluginStores.getOrPut(key) {
+            val hash = java.security.MessageDigest.getInstance("SHA-256").digest(key.toByteArray()).joinToString("") { "%02x".format(it) }
+            NativePluginStore(target, java.io.File(Store.dir, "plugin-installs/codex-$hash.json"))
+        }.also { it.attach(target) }
     }
     internal val nativePluginBusy get() = nativePluginStores.values.count { it.busy }
     internal fun openServerPlugins(target: Conn) {

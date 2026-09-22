@@ -1,7 +1,6 @@
 package app.yxi.desktop
 
 import androidx.compose.runtime.*
-import app.yxi.ssh.SshSession
 import kotlinx.coroutines.*
 import kotlinx.coroutines.swing.Swing
 import org.json.JSONObject
@@ -121,10 +120,15 @@ internal data class NativePluginSnapshot(val entries: List<NativePlugin>, val er
 }
 
 /** One controller per machine, retained across navigation. Unknown writes are never retried implicitly. */
-internal class NativePluginStore(private val conn: Conn?, file: File,
-    private val connect: suspend () -> PluginRpc = { PluginRpc.connect(conn) }) {
+internal class NativePluginStore(private var conn: Conn?, file: File) {
+    private val targetKey = conn?.let { projectKey(it.host, "/") }
+    internal fun attach(next: Conn?) {
+        check(next?.let { projectKey(it.host, "/") } == targetKey)
+        conn = next
+    }
+    private suspend fun connect() = PluginRpc.connect(conn)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
-    private val ledger = DurableFile(file) { JSONObject(it).getInt("version") }
+    private val ledger = DurableFile(file) { check(JSONObject(it).getInt("version") == 1) }
     var entries by mutableStateOf<List<NativePlugin>>(emptyList()); private set
     var busy by mutableStateOf(false); private set
     var message by mutableStateOf(""); private set
