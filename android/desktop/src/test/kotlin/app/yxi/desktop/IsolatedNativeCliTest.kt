@@ -456,6 +456,8 @@ class IsolatedNativeCliTest {
                             permissionMode = app.yxi.agent.PermissionMode.Bypass)
                         try {
                             assertTrue(bridge.conn.ssh.exec(bypassPlan.command()).contains("__YXI_NEW__:ok"))
+                            val launched = SessionProbe.snapshotFull(bridge.conn.ssh).sessions.single { it.name == bypassPlan.sessionName }
+                            confirmBypassStartup(bridge.conn, launched, bypassPlan)
                             var bypassScreen = ""
                             var bypassReady = false
                             repeat(100) {

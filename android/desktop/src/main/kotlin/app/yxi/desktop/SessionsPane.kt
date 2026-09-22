@@ -176,7 +176,10 @@ private suspend fun createSession(conn: Conn, plan: DesktopLaunchPlan): Result<S
     }))
     repeat(5) {
         conn.refresh()
-        conn.sessions.firstOrNull { it.name == name }?.let { return Result.success(it) }
+        conn.sessions.firstOrNull { it.name == name }?.let {
+            if (plan.permissionMode == app.yxi.agent.PermissionMode.Bypass) confirmBypassStartup(conn, it, plan)
+            return Result.success(it)
+        }
         kotlinx.coroutines.delay(200)
     }
     return Result.failure(IllegalStateException("会话创建已返回，但尚未读到状态。请刷新核对：$name；在此窗口重试会复用同一请求。"))

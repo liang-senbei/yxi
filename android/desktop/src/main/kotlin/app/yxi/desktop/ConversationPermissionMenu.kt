@@ -14,6 +14,37 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 
+/** Called only after an explicit Bypass selection for this newly created launch plan. */
+internal suspend fun confirmBypassStartup(conn: Conn, session: Session, plan: DesktopLaunchPlan) {
+    check(plan.permissionMode == PermissionMode.Bypass && plan.agent == "claude" && plan.sessionName == session.name)
+    conn.instructionDeliveryMutex.withLock {
+        val target = Shell.q("=" + session.name + ":")
+        var moved = false
+        var accepted = false
+        repeat(80) {
+            val screen = conn.ssh.exec("tmux capture-pane -p -t $target")
+            if (PermissionMode.fromScreen(screen) == PermissionMode.Bypass) return@withLock
+            val warning = "WARNING: Claude Code running in Bypass Permissions mode" in screen &&
+                "Enter to confirm" in screen && "Yes, I accept" in screen && "No, exit" in screen
+            val key = when {
+                warning && !moved && screen.lines().any { it.trim() == "❯ No, exit" } -> "Down"
+                warning && moved && !accepted && screen.lines().any { it.trim() == "❯ Yes, I accept" } -> "Enter"
+                else -> null
+            }
+            if (key != null) {
+                val script = "pane=\$(tmux display-message -p -t $target '#{pane_id}') && " +
+                    "test \"\$(tmux display-message -p -t \"\$pane\" '#{pid}:#{session_id}:#{session_created}')\" = ${Shell.q(session.runtimeId)} && " +
+                    "test \"\$(tmux capture-pane -p -t \"\$pane\")\" = ${Shell.q(screen.trimEnd('\n'))} && " +
+                    "tmux send-keys -t \"\$pane\" $key && printf '__YXI_BYPASS_START__'"
+                check(conn.ssh.exec(script).trim() == "__YXI_BYPASS_START__") { "启动确认页已变化，请查看终端" }
+                if (key == "Down") moved = true else accepted = true
+            }
+            delay(250)
+        }
+        error("完全访问模式尚未确认，请在新会话终端查看启动提示")
+    }
+}
+
 internal suspend fun changeConversationPermission(conn: Conn, session: Session, desired: PermissionMode): PermissionMode {
     return conn.instructionDeliveryMutex.withLock {
         check(conn.ssh.isConnected && !session.isCodex && session.runtimeId.isNotBlank()) { "当前运行器暂不支持切换" }
