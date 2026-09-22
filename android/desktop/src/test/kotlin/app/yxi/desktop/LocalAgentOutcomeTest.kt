@@ -8,6 +8,7 @@ class LocalAgentOutcomeTest {
     @Test fun `clean exit without terminal receipt stays unknown`() {
         assertEquals("结果未确认", LocalAgentOutcome.parse("codex", sequenceOf(start), 0, null).status)
         assertEquals("结果未确认", LocalAgentOutcome.parse("codex", sequenceOf("{}"), 0, null).status)
+        assertEquals("结果未确认", LocalAgentOutcome.parse("claude", sequenceOf("""{"type":"result","session_id":"$id"}"""), 0, null).status)
     }
     @Test fun `native failure overrides zero exit code`() {
         val failed = LocalAgentOutcome.parse("codex", sequenceOf(start,

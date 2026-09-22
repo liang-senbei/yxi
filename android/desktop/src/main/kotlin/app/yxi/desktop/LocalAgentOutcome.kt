@@ -24,7 +24,11 @@ internal data class LocalAgentOutcome(val status: String, val sessionId: String?
                     "error" -> detail = event.optString("message")
                 }
                 if (engine == "claude" && type == "result") {
-                    terminal = event.opt("is_error") == false && event.optString("subtype") == "success"
+                    terminal = when {
+                        event.opt("is_error") == true -> false
+                        event.opt("is_error") == false && event.optString("subtype") == "success" -> true
+                        else -> null
+                    }
                     detail = if (terminal == true) "" else event.optString("result").ifBlank {
                         event.optJSONArray("errors")?.let { a -> (0 until a.length()).joinToString("\n") { a.optString(it) } }.orEmpty()
                     }
