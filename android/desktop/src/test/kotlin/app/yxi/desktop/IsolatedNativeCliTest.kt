@@ -33,6 +33,8 @@ class IsolatedNativeCliTest {
         val home = root.resolve("home").apply { mkdir() }
         val config = home.resolve(".claude").apply { mkdir() }
         val project = root.resolve("project").apply { mkdir() }
+        project.resolve("retained-tool.txt").writeText("RETAINED_TOOL_CONTENT\n")
+        project.resolve("discarded-tool.txt").writeText("DISCARDED_TOOL_CONTENT\n")
         val script = root.resolve("stub.py")
         javaClass.classLoader.getResourceAsStream("rewind/anthropic_stub.py")!!.use { input -> script.outputStream().use { input.copyTo(it) } }
         val server = ProcessBuilder("python3", script.path, root.path).redirectErrorStream(true).redirectOutput(root.resolve("stub.log")).start()
@@ -228,6 +230,11 @@ class IsolatedNativeCliTest {
                         assertEquals(listOf("KEEP-container-first", "APP-container-rewind"), renderedUsers(),
                             "The live conversation cache must discard the old branch")
                         assertEquals(listOf("answer:KEEP-container-first", "answer:APP-container-rewind"), memory.view.items.filterIsInstance<ChatItem.AssistantText>().map { it.markdown })
+                        val liveTools = memory.view.items.filterIsInstance<ChatItem.ToolCall>()
+                        assertEquals(1, liveTools.size)
+                        assertEquals("Read", liveTools.single().name)
+                        assertTrue(liveTools.single().result.orEmpty().contains("RETAINED_TOOL_CONTENT"))
+                        assertFalse(liveTools.single().isError)
                         val secondTarget = transcript.readLines().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
                             .last { it.optString("type") == "user" &&
                                 it.optJSONObject("message")?.toString()?.contains("APP-container-rewind") == true }
@@ -288,6 +295,10 @@ class IsolatedNativeCliTest {
                             "Reopening the conversation must show the same branch as the live cache")
                         assertEquals(listOf("answer:KEEP-container-first", "answer:RECOVERY-app-rewind"), coldView.items.filterIsInstance<ChatItem.AssistantText>().map { it.markdown },
                             "Abandoned assistant replies must not reappear when reopening")
+                        val coldTools = coldView.items.filterIsInstance<ChatItem.ToolCall>()
+                        assertEquals(1, coldTools.size)
+                        assertTrue(coldTools.single().result.orEmpty().contains("RETAINED_TOOL_CONTENT"))
+                        assertFalse(coldTools.single().result.orEmpty().contains("DISCARDED_TOOL_CONTENT"))
                     } catch (e: Exception) {
                         if (e is ConversationRewindFailure) root.resolve("application-failure.txt").writeText("${e.code}\n${e.detail}")
                         gate.pending(key)?.verification?.let { query ->

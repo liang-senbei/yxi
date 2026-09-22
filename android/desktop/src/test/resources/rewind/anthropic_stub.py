@@ -40,12 +40,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if "count_tokens" in self.path:
             self.reply_json({"input_tokens": 1})
             return
-        last_user = next((m.get("content", "") for m in reversed(body.get("messages", [])) if m.get("role") == "user"), "")
-        marker = re.search(r"(?:KEEP|FOLLOWUP|DROP|EDIT|VERIFY|SINGLE|INTERACTIVE|APP|SECOND|RECOVERY)-[A-Za-z-]+", json.dumps(last_user))
+        marker = next((found for m in reversed(body.get("messages", [])) if m.get("role") == "user"
+                       for found in [re.search(r"(?:KEEP|FOLLOWUP|DROP|EDIT|VERIFY|SINGLE|INTERACTIVE|APP|SECOND|RECOVERY)-[A-Za-z-]+", json.dumps(m.get("content", "")))] if found), None)
         answer = "answer:" + marker.group(0) if marker else "ok"
+        tool = None
+        if marker and marker.group(0) in ("KEEP-container-first", "DROP-container-third"):
+            tool_id = "tool_fixture_" + marker.group(0).replace("-", "_")
+            completed = any(block.get("type") == "tool_result" and block.get("tool_use_id") == tool_id
+                            for m in body.get("messages", []) if isinstance(m.get("content"), list)
+                            for block in m["content"] if isinstance(block, dict))
+            if not completed:
+                name = "retained-tool.txt" if marker.group(0).startswith("KEEP") else "discarded-tool.txt"
+                tool = {"type": "tool_use", "id": tool_id, "name": "Read", "input": {"file_path": str(root / "project" / name)}}
         message = {"id": "msg_fixture_" + str(time.time_ns()), "type": "message", "role": "assistant",
-                   "model": body.get("model", "fixture"), "content": [{"type": "text", "text": answer}],
-                   "stop_reason": "end_turn", "stop_sequence": None,
+                   "model": body.get("model", "fixture"), "content": [tool] if tool else [{"type": "text", "text": answer}],
+                   "stop_reason": "tool_use" if tool else "end_turn", "stop_sequence": None,
                    "usage": {"input_tokens": 1, "output_tokens": 2}}
         if not body.get("stream"):
             self.reply_json(message)
@@ -59,10 +68,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.wfile.flush()
 
         event("message_start", {"type": "message_start", "message": dict(message, content=[], stop_reason=None)})
-        event("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}})
-        event("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": answer}})
+        event("content_block_start", {"type": "content_block_start", "index": 0, "content_block": dict(tool, input={}) if tool else {"type": "text", "text": ""}})
+        delta = {"type": "input_json_delta", "partial_json": json.dumps(tool["input"])} if tool else {"type": "text_delta", "text": answer}
+        event("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": delta})
         event("content_block_stop", {"type": "content_block_stop", "index": 0})
-        event("message_delta", {"type": "message_delta", "delta": {"stop_reason": "end_turn", "stop_sequence": None}, "usage": {"output_tokens": 2}})
+        event("message_delta", {"type": "message_delta", "delta": {"stop_reason": message["stop_reason"], "stop_sequence": None}, "usage": {"output_tokens": 2}})
         event("message_stop", {"type": "message_stop"})
 
 
