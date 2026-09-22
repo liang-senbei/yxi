@@ -1,5 +1,8 @@
 package app.yxi.desktop
 import androidx.compose.material.icons.outlined.Extension
+import androidx.compose.material.icons.outlined.Explore
+import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.SystemUpdateAlt
 import androidx.compose.material.icons.outlined.Tune
@@ -237,6 +240,14 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
         }
         NavItem(Icons.Outlined.Extension, "插件", state.page == Page.Plugins, Modifier.fillMaxWidth().padding(horizontal = 10.dp)) { state.page = Page.Plugins }
         NavItem(Icons.Default.Tune, "配置", state.page == Page.Config, Modifier.fillMaxWidth().padding(horizontal = 10.dp)) { state.page = Page.Config }
+        var exploreOpen by remember { mutableStateOf(false) }
+        Box {
+            NavItem(Icons.Outlined.Explore, "探索", state.page in setOf(Page.Connections, Page.LocalAgents), Modifier.fillMaxWidth().padding(horizontal = 10.dp)) { exploreOpen = true }
+            DropdownMenu(exploreOpen, { exploreOpen = false }) {
+                DropdownMenuItem(text = { Text("连接") }, leadingIcon = { Icon(Icons.Outlined.Link, null, Modifier.size(18.dp)) }, onClick = { exploreOpen = false; state.page = Page.Connections })
+                DropdownMenuItem(text = { Text("本地 Agent") }, leadingIcon = { Icon(Icons.Outlined.Computer, null, Modifier.size(18.dp)) }, onClick = { exploreOpen = false; state.page = Page.LocalAgents })
+            }
+        }
         // 会话过滤（ZCode 的搜索框 / Codex 的过滤）：按会话名 / 主机名滤，主机全不匹配就整组藏掉
         if (searchVisible) Row(
             Modifier.fillMaxWidth().padding(10.dp, 2.dp, 10.dp, 6.dp).clip(RoundedCornerShape(8.dp)).background(t.border),

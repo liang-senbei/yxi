@@ -423,4 +423,23 @@ class SshSession(
         return PreviewForward(local, { owner.isConnected }) { runCatching { owner.delPortForwardingL("127.0.0.1", local) }; Unit }
     }
     val isConnected: Boolean get() = session?.isConnected == true
+
+    /** Separate ownership for a background link; disconnecting it cannot close the workspace. */
+    fun independentLink(privateKey: String? = null) = SshSession(
+        if (privateKey == null) cfg else cfg.copy(auth = HostConfig.Auth.PrivateKey(privateKey)), knownHosts, 30_000)
+
+    /** Both requests are owned by this exact transport. Never remove another session's forwarding. */
+    fun forwardLink(reversePort: Int, localPort: Int, localSshPort: Int = 22): AutoCloseable {
+        require(reversePort in 1024..65535 && localPort in 1024..65535 && localSshPort in 1..65535)
+        val owner = requireNotNull(session) { "SSH 未连接" }
+        check(owner.isConnected)
+        owner.setPortForwardingL("127.0.0.1", localPort, "127.0.0.1", 5901)
+        try { owner.setPortForwardingR("127.0.0.1", reversePort, "127.0.0.1", localSshPort) }
+        catch (e: Exception) { owner.delPortForwardingL("127.0.0.1", localPort); throw e }
+        val closed = java.util.concurrent.atomic.AtomicBoolean(false)
+        return AutoCloseable { if (closed.compareAndSet(false, true)) {
+            runCatching { owner.delPortForwardingR("127.0.0.1", reversePort) }
+            runCatching { owner.delPortForwardingL("127.0.0.1", localPort) }
+        } }
+    }
 }

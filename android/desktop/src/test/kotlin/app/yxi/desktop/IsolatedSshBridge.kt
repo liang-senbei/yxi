@@ -12,7 +12,8 @@ import java.util.Base64
 import java.util.concurrent.TimeUnit
 
 /** Private SSH bridge into an existing container fixture; never exposes host credentials or sockets. */
-internal class IsolatedSshBridge(private val root: File, environment: Map<String, String>, socket: File) : AutoCloseable {
+internal class IsolatedSshBridge(private val root: File, environment: Map<String, String>, socket: File,
+    allowForwarding: Boolean = false, additionalAuthorizedKeys: File? = null) : AutoCloseable {
     private var server: Process? = null
     lateinit var conn: Conn
         private set
@@ -48,7 +49,7 @@ internal class IsolatedSshBridge(private val root: File, environment: Map<String
                 ListenAddress 127.0.0.1
                 Port $port
                 HostKey ${root.resolve("host").path}
-                AuthorizedKeysFile ${root.resolve("client.pub").path}
+                AuthorizedKeysFile ${root.resolve("client.pub").path} ${additionalAuthorizedKeys?.path.orEmpty()}
                 PidFile ${root.resolve("pid").path}
                 PubkeyAuthentication yes
                 PasswordAuthentication no
@@ -56,7 +57,8 @@ internal class IsolatedSshBridge(private val root: File, environment: Map<String
                 PermitRootLogin prohibit-password
                 StrictModes yes
                 UsePAM no
-                AllowTcpForwarding no
+                AllowTcpForwarding ${if (allowForwarding) "yes" else "no"}
+                GatewayPorts no
                 AllowAgentForwarding no
                 X11Forwarding no
                 Subsystem sftp /usr/lib/openssh/sftp-server

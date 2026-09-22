@@ -19,7 +19,7 @@ import app.yxi.agent.SessionState
  * 主机分组 → 会话行都在侧栏里），所以这里只剩另外两个整页入口。
  * 它跟 [AppState.tab] 是两层：`page` 决定右边整块是什么，`tab` 只在工作区里选 对话/终端/文件。
  */
-enum class Page { Workspace, Config, Me, Routes, Codex, Plugins, ConfigFiles }
+enum class Page { Workspace, Config, Me, Routes, Codex, Plugins, ConfigFiles, Connections, LocalAgents }
 
 internal class CodexConversationView {
     val scroll = androidx.compose.foundation.lazy.LazyListState()
@@ -27,6 +27,17 @@ internal class CodexConversationView {
 }
 
 class AppState {
+    private val linksDelegate = lazy { DeviceLinks() }
+    internal val deviceLinks get() = linksDelegate.value
+    private val localAgentsDelegate = lazy { LocalAgents() }
+    internal val localAgents get() = localAgentsDelegate.value
+    var localAgentPrompt by mutableStateOf("")
+    internal val localOperations get() = (if (linksDelegate.isInitialized()) deviceLinks.busy.size else 0) +
+        (if (localAgentsDelegate.isInitialized()) localAgents.jobs.count { it.running } else 0)
+    internal fun closeLocalFeatures() {
+        if (linksDelegate.isInitialized()) deviceLinks.close()
+        if (localAgentsDelegate.isInitialized()) localAgents.close()
+    }
     var configurationHostId by mutableStateOf("")
     internal fun configurationConnection() = if (configurationHostId.isBlank()) conn
         else conns.firstOrNull { it.host.id == configurationHostId }

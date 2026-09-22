@@ -76,6 +76,8 @@ fun App(state: AppState) {
                     Page.Config -> RoutesPane(state)
                     Page.ConfigFiles -> ConfigPane(state)
                     Page.Plugins -> PluginsPane(state)
+                    Page.Connections -> ConnectionsPane(state)
+                    Page.LocalAgents -> LocalAgentsPane(state)
                     Page.Me -> MePane(state)
                     Page.Routes -> RoutesPane(state)
                     Page.Codex -> CodexWorkspacePane(state)
