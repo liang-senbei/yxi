@@ -1,5 +1,7 @@
 # Dedicated integration-test container
 
+Full builds now include the desktop JRE and CJK fonts for actual Compose window fixtures. To upgrade an older headless dependency image, explicitly set `YXI_TEST_INSTALL_GUI=1` together with `YXI_TEST_BASE_IMAGE_REVISION` for that one build. This enables package downloads during building only; runtime containers remain network-isolated. Subsequent builds from the upgraded image can use the normal offline incremental path. `RewindDialogUiTest` renders the actual shared editor at two widths and verifies Escape cancels without invoking an action; its screenshots are component evidence, not Windows application acceptance.
+
 This replacement runner is under validation. The quarantined host SSH tests remain disabled.
 
 The build uses a clean Git commit, not the working directory or host Gradle cache. Building downloads dependencies but does not run tests. Test execution uses a separate container with no network interfaces except loopback, private PID/IPC namespaces, no privileged mode, bounded CPU/memory/process count, and no host HOME, `/tmp`, or Docker socket mounts. Only a fresh results directory and an optional read-only native CLI executable are mounted.
