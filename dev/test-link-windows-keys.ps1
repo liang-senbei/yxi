@@ -49,7 +49,7 @@ Write-YxiAuthorizedKey TARGET PUBLICKEY $acl
 '@
         $worker = $worker.Replace('SOURCE', "'" + $source.Replace("'", "''") + "'").Replace('TARGET', "'" + $path.Replace("'", "''") + "'").Replace('PUBLICKEY', "'$key'")
         $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($worker))
-        $workers += Start-Process powershell.exe -WindowStyle Hidden -PassThru -ArgumentList "-NoProfile -NonInteractive -EncodedCommand $encoded"
+        $workers += Start-Process powershell.exe -WindowStyle Hidden -PassThru -ArgumentList "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded"
     }
     foreach ($worker in $workers) { Check ($worker.WaitForExit(20000)) 'Concurrent update timed out'; Check ($worker.ExitCode -eq 0) 'Concurrent update failed' }
     $merged = [IO.File]::ReadAllText($path)
