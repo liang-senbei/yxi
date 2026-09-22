@@ -552,7 +552,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
         }
         if (rewindBlocked && !rewindRunning) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("回退尚未确认，发送已暂停。输入和排队消息已保留。", Modifier.weight(1f), color = t.warning, fontSize = 12.sp)
-            if (RewindDelivery.gate.pending(taskKey)?.verification != null) TextButton({
+            if (RewindDelivery.gate.pending(taskKey)?.let { it.verification != null || it.nativeRoot != null } == true) TextButton({
                 rewindChecking = true; sendErr = null
                 scope.launch {
                     try { recheckRewindRecovery(conn, session); ConversationRewind.dismiss(taskKey) }

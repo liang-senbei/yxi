@@ -1,6 +1,7 @@
 package app.yxi.desktop
 
 import app.yxi.agent.RewindLiveVerification
+import app.yxi.agent.NativeRootVerification
 import app.yxi.agent.Session
 import kotlinx.coroutines.sync.withLock
 
@@ -9,6 +10,13 @@ internal suspend fun recheckRewindRecovery(conn: Conn, session: Session, gate: R
     check(conn.ssh.isConnected) { "请先重新连接服务器" }
     val key = taskNavigationKey(conn.host, session)
     val ticket = gate.pending(key) ?: error("没有可核对的回退记录")
+    ticket.nativeRoot?.let { root ->
+        check(root.runtime.sessionName == session.name && root.runtime.runtimeId == session.runtimeId) { "会话实例已变化，发送仍暂停" }
+        val result = runRewindCommand(conn.ssh, NativeRootVerification.command(root))
+        check(NativeRootVerification.verified(result)) { "首轮回退尚未确认，发送仍暂停。请核对终端状态。" }
+        conn.instructionDeliveryMutex.withLock { gate.finishVerified(ticket) }
+        return
+    }
     val query = ticket.verification ?: error("这次回退尚未进入恢复确认阶段")
     check(query.sessionName == session.name && query.runtimeId == session.runtimeId) { "会话实例已变化，发送仍暂停" }
     val result = RewindLiveVerification.parse(runRewindCommand(conn.ssh, RewindLiveVerification.command(query)))

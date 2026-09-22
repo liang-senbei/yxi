@@ -8,12 +8,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import app.yxi.agent.RewindLiveVerification
+import app.yxi.agent.NativeRootVerification
 
 /** Persist before the first history mutation. A restart or a lost reply must not resume delivery. */
 internal class RewindDeliveryGate(file: File) {
     data class Target(val sessionId: String, val anchorUuid: String, val messageUuid: String)
     data class Ticket(val taskKey: String, val runtimeId: String, val operationId: String, val target: Target? = null,
-        val verification: RewindLiveVerification.Query? = null)
+        val verification: RewindLiveVerification.Query? = null, val nativeRoot: NativeRootVerification.Query? = null)
     private val disk = DurableFile(file) { decode(it) }
     private var readable = true
     private var tickets by mutableStateOf<List<Ticket>>(try {
@@ -28,6 +29,17 @@ internal class RewindDeliveryGate(file: File) {
 
     @Synchronized fun blocked(taskKey: String): Boolean = !readable || tickets.any { it.taskKey == taskKey }
     @Synchronized fun pending(taskKey: String): Ticket? = tickets.firstOrNull { it.taskKey == taskKey }
+
+    /** Caller holds the delivery mutex. Persist before native restore can change in-memory context. */
+    @Synchronized fun beginNativeRoot(taskKey: String, query: NativeRootVerification.Query): Ticket {
+        check(readable) { "回退记录无法读取，发送已暂停，请先恢复记录" }
+        require(taskKey.isNotBlank())
+        NativeRootVerification.requireValid(query)
+        check(!blocked(taskKey)) { "该会话的回退尚未确认，不能重复执行" }
+        val ticket = Ticket(taskKey, query.runtime.runtimeId, UUID.randomUUID().toString(), nativeRoot = query)
+        commit(tickets + ticket)
+        return ticket
+    }
 
     /** Caller holds the connection delivery mutex while obtaining this ticket. */
     @Synchronized fun begin(taskKey: String, runtimeId: String, target: Target? = null,
@@ -57,6 +69,7 @@ internal class RewindDeliveryGate(file: File) {
     }
 
     private fun validateVerification(ticket: Ticket, query: RewindLiveVerification.Query) {
+        require(ticket.nativeRoot == null)
         require(RewindLiveVerification.validate(query) == null)
         require(query.sessionId == ticket.target?.sessionId &&
             query.runtimeId == ticket.runtimeId && query.anchorUuid == ticket.target?.anchorUuid &&
@@ -70,6 +83,7 @@ internal class RewindDeliveryGate(file: File) {
             .apply { t.target?.let { put("target", JSONObject().put("session", it.sessionId)
                 .put("anchor", it.anchorUuid).put("message", it.messageUuid)) }
                 t.verification?.let { put("verification", encodeVerification(it)) }
+                t.nativeRoot?.let { put("nativeRoot", encodeNativeRoot(it)) }
             }) } }.toString())
         tickets = next
     }
@@ -83,9 +97,12 @@ internal class RewindDeliveryGate(file: File) {
                 }
             }
             val verification = if (it.has("verification") && !it.isNull("verification")) decodeVerification(it.getJSONObject("verification")) else null
-            Ticket(it.getString("task"), it.getString("runtime"), it.getString("operation"), target, verification).also { t ->
+            val nativeRoot = if (it.has("nativeRoot") && !it.isNull("nativeRoot")) decodeNativeRoot(it.getJSONObject("nativeRoot")) else null
+            if (nativeRoot != null) require((!it.has("target") || it.isNull("target")) && verification == null)
+            Ticket(it.getString("task"), it.getString("runtime"), it.getString("operation"), target, verification, nativeRoot).also { t ->
                 require(t.taskKey.isNotBlank() && t.runtimeId.isNotBlank())
                 UUID.fromString(t.operationId)
+                nativeRoot?.let { root -> require(root.runtime.runtimeId == t.runtimeId) }
                 verification?.let { q -> require(q.sessionId == target?.sessionId &&
                     q.runtimeId == t.runtimeId && q.anchorUuid == target?.anchorUuid && q.targetUuid == target?.messageUuid) }
             }
@@ -97,6 +114,18 @@ internal class RewindDeliveryGate(file: File) {
         .put("exe", q.exe).put("oldPid", q.oldPid).put("sessionId", q.sessionId)
         .put("anchorUuid", q.anchorUuid).put("targetUuid", q.targetUuid)
         .put("transcriptPath", q.transcriptPath).put("notBeforeEpochSec", q.notBeforeEpochSec)
+
+    private fun encodeNativeRoot(q: NativeRootVerification.Query) = JSONObject()
+        .put("sessionName", q.runtime.sessionName).put("runtimeId", q.runtime.runtimeId).put("paneId", q.runtime.paneId)
+        .put("exe", q.runtime.exe).put("pid", q.runtime.pid).put("sessionId", q.runtime.sessionId)
+        .put("notBeforeEpochSec", q.runtime.notBeforeEpochSec).put("transcriptPath", q.transcriptPath)
+        .put("originalMessageUuid", q.originalMessageUuid).put("editedTextSha256", q.editedTextSha256)
+
+    private fun decodeNativeRoot(d: JSONObject) = NativeRootVerification.Query(
+        RewindLiveVerification.RuntimeIdentity(d.getString("sessionName"), d.getString("runtimeId"), d.getString("paneId"),
+            d.getString("exe"), d.getString("pid"), d.getString("sessionId"), d.getDouble("notBeforeEpochSec")),
+        d.getString("transcriptPath"), d.getString("originalMessageUuid"), d.getString("editedTextSha256"),
+    ).also { NativeRootVerification.requireValid(it) }
 
     private fun decodeVerification(d: JSONObject): RewindLiveVerification.Query = RewindLiveVerification.Query(
         d.getString("sessionName"), d.getString("runtimeId"), d.getString("paneId"), d.getString("exe"),

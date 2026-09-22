@@ -399,6 +399,13 @@ class IsolatedNativeCliTest {
                         val rootQuery = NativeRootVerification.Query(RewindLiveVerification.RuntimeIdentity(session.name,
                             session.runtimeId, rootCapture.paneId, rootCapture.exe, rootCapture.pid, sid, rootTime),
                             transcript.path, messageUuid("KEEP-container-first"), rootHash)
+                        val nativeGateFile = root.resolve("native-root-gate.json")
+                        val nativeGate = RewindDeliveryGate(nativeGateFile)
+                        nativeGate.beginNativeRoot(key, rootQuery)
+                        val reloadedNativeGate = RewindDeliveryGate(nativeGateFile)
+                        assertEquals(rootQuery, reloadedNativeGate.pending(key)?.nativeRoot)
+                        assertTrue(reloadedNativeGate.blocked(key))
+                        assertFalse(nativeGateFile.readText().contains("ROOT-container-restarted"), "Recovery record must not store the edited prompt")
                         tmux("send-keys", "-t", "=cc-native-check:", "-l", "--", "/rewind")
                         tmux("send-keys", "-t", "=cc-native-check:", "Enter")
                         captureUntil("root-menu") { s -> FirstTurnRewindMenu.parse(s, FirstTurnRewindMenu.VERSION)?.let {
@@ -427,6 +434,11 @@ class IsolatedNativeCliTest {
                         val rootProof = runRewindCommand(bridge.conn.ssh, NativeRootVerification.command(rootQuery))
                         root.resolve("root-proof.txt").writeText(rootProof)
                         assertTrue(NativeRootVerification.verified(rootProof), rootProof)
+                        val requestsBeforeRootRecheck = root.resolve("requests.jsonl").readLines().size
+                        recheckRewindRecovery(bridge.conn, recoveredSession, reloadedNativeGate)
+                        assertFalse(reloadedNativeGate.blocked(key))
+                        assertFalse(RewindDeliveryGate(nativeGateFile).blocked(key))
+                        assertEquals(requestsBeforeRootRecheck, root.resolve("requests.jsonl").readLines().size)
                         bridge.conn.ssh.exec(Rewind.cleanupCommand(rootCapture))
                         assertTrue(config.resolve("sessions").listFiles().orEmpty().any {
                             it.extension == "json" && JSONObject(it.readText()).optString("sessionId") == sid

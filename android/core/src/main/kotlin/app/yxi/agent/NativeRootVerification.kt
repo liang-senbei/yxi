@@ -8,10 +8,16 @@ object NativeRootVerification {
     data class Query(val runtime: RewindLiveVerification.RuntimeIdentity, val transcriptPath: String,
         val originalMessageUuid: String, val editedTextSha256: String)
 
-    fun command(query: Query): String {
+    fun requireValid(query: Query) {
         require(Regex("^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$").matches(query.originalMessageUuid))
         require(Regex("^[0-9a-f]{64}$").matches(query.editedTextSha256))
         require(query.transcriptPath.startsWith('/') && query.transcriptPath.endsWith("/${query.runtime.sessionId}.jsonl"))
+        require(query.transcriptPath.length <= 2048 && query.transcriptPath.none { it == '\u0000' || it == '\n' || it == '\r' })
+        RewindLiveVerification.registrationCommand(query.runtime, sameProcess = true)
+    }
+
+    fun command(query: Query): String {
+        requireValid(query)
         val reg = RewindLiveVerification.registrationCommand(query.runtime, sameProcess = true)
         val chain = "python3 -c ${Shell.q(chainScript)} ${Shell.q(query.transcriptPath)} " +
             "${Shell.q(query.originalMessageUuid)} ${Shell.q(query.editedTextSha256)}"
