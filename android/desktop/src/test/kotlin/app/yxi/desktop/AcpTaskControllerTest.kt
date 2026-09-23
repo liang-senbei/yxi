@@ -48,7 +48,17 @@ class AcpTaskControllerTest {
                     withTimeout(2000) { while (fixture.writes.count { it.optString("method") == "session/prompt" } < index) delay(10) }
                     fixture.text("answer-$index")
                     if (index == 2) {
+                        fixture.emit(JSONObject().put("id", "queued-permission").put("method", "session/request_permission").put("params", JSONObject()
+                            .put("sessionId", "session").put("options", org.json.JSONArray().put(JSONObject().put("optionId", "allow").put("kind", "allow_once")))))
+                        // Keep the UI consumer parked until the reader has queued the approval.
+                        val deadline = System.nanoTime() + 2_000_000_000L
+                        while (client.pendingPermissions().isEmpty() && System.nanoTime() < deadline) Thread.sleep(1)
+                        assertEquals(1, client.pendingPermissions().size)
                         controller.cancelTurn()
+                        client.synchronizeEvents()
+                        assertTrue(controller.pendingApprovals.isEmpty(), "A queued approval must not reappear after cancellation")
+                        assertEquals("cancelled", fixture.writes.single { it.optString("id") == "queued-permission" }
+                            .getJSONObject("result").getJSONObject("outcome").getString("outcome"))
                         assertFalse(send.isCompleted)
                         assertEquals(InstructionStatus.Delivering, queue.entries.last().status)
                     }

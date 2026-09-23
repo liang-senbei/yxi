@@ -64,8 +64,9 @@ internal class AcpTaskController(
         val method = event.optString("method")
         val params = event.optJSONObject("params") ?: JSONObject()
         if (method == "session/request_permission") {
-            // 取消中的会话由 AcpClient 代答 cancelled，不会到达这里。
             if (params.optString("sessionId") != sessionId) return
+            // The reader may have queued this event before cancel removed the native request.
+            if (cancelling || client.pendingPermissions().none { idKey(it.get("id")) == idKey(event.get("id")) }) return
             pendingApprovals[idKey(event.get("id"))] = event
             note = "运行器正在等待审批"
             return
