@@ -90,4 +90,26 @@ class AcpTaskControllerTest {
             }
         }
     }
+    @Test fun `terminal receipt dismisses obsolete approval without selecting an allow option`(): Unit = runBlocking(Dispatchers.Swing) {
+        val fixture = Fixture()
+        AcpClient(fixture).use { client ->
+            client.initialize(); client.newSession(root.path)
+            val queue = InstructionQueue(File(root, "terminal.json"))
+            AcpTaskController("task", "session", client, queue).use { controller ->
+                controller.enqueue("one")
+                val send = async { controller.sendNext() }
+                withTimeout(2000) { while (fixture.writes.none { it.optString("method") == "session/prompt" }) delay(10) }
+                fixture.emit(JSONObject().put("id", "obsolete").put("method", "session/request_permission").put("params", JSONObject()
+                    .put("sessionId", "session").put("options", org.json.JSONArray().put(JSONObject().put("optionId", "allow").put("kind", "allow_once")))))
+                fixture.result(fixture.writes.last { it.optString("method") == "session/prompt" }, JSONObject().put("stopReason", "end_turn"))
+                withTimeout(2000) { send.await() }
+                assertEquals(RuntimeTurnState.Completed, queue.entries.single().runtimeTurnState)
+                assertTrue(controller.pendingApprovals.isEmpty())
+                assertTrue(client.pendingPermissions().isEmpty())
+                val outcome = fixture.writes.single { it.optString("id") == "obsolete" }.getJSONObject("result").getJSONObject("outcome")
+                assertEquals("cancelled", outcome.getString("outcome"))
+                assertFalse(outcome.has("optionId"))
+            }
+        }
+    }
 }

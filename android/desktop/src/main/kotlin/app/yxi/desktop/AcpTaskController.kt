@@ -176,6 +176,15 @@ internal class AcpTaskController(
                 RuntimeTurnState.Failed -> "本轮以「$lastStopReason」结束，请核对结果"
                 else -> "轮次结束原因未识别：$lastStopReason"
             }
+            try {
+                client.pendingPermissions().filter { it.getJSONObject("params").optString("sessionId") == sessionId }.forEach {
+                    client.answerPermission(it.get("id"), sessionId, null)
+                }
+                pendingApprovals.clear()
+            } catch (_: Exception) {
+                pendingApprovals.clear(); ready = false; client.close()
+                note = "轮次已结束，但旧审批清理未确认，请核对连接"
+            }
         } catch (e: TimeoutCancellationException) {
             // prompt 超时后 AcpClient 不释放该会话的发送权：状态未知且必须人工核对后重建连接。
             markUnknownPreserving(started, "prompt 超时，原生轮次状态未知；未自动重发")
