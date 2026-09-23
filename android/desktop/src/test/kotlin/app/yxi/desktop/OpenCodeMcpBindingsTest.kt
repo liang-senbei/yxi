@@ -9,6 +9,15 @@ import java.net.InetSocketAddress
 import kotlin.test.*
 
 class OpenCodeMcpBindingsTest {
+    @Test fun `dynamic MCP inherits target environment instead of sending unexpanded references`() {
+        val definition = SharedMcpDefinition("machine", "echo", "test", "1", "echo", listOf("python3", "fixture.py"),
+            environmentNames = setOf("PLUGIN_TOKEN"))
+        assertFalse(OpenCodeMcpBindings.dynamicConfiguration(definition).has("environment"))
+        assertFailsWith<IllegalArgumentException> {
+            OpenCodeMcpBindings.dynamicConfiguration(definition.copy(command = emptyList(), environmentNames = emptySet(),
+                url = "https://example.com/mcp", headerVariables = mapOf("Authorization" to "PLUGIN_TOKEN")))
+        }
+    }
     @TempDir lateinit var root: File
     @Test fun `runtime MCP application reads status and cannot repeat an ambiguous write`() = runBlocking {
         var writes = 0

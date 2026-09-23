@@ -22,10 +22,12 @@ class OpenCodeSharedMcpNativeTest {
                     .put("options", JSONObject().put("baseURL", "http://127.0.0.1:${File(root, "port").readText().trim()}/v1").put("apiKey", "fixture"))
                     .put("models", JSONObject().put("fixture-model", JSONObject().put("name", "Fixture"))))).toString()) }
             val before = config.readBytes()
-            val definition = SharedMcpDefinition("machine", "shared-echo", "yxi-test", "0.1.0", "shared_echo", listOf("/usr/bin/python3", mcp.path))
+            val definition = SharedMcpDefinition("machine", "shared-echo", "yxi-test", "0.1.0", "shared_echo",
+                listOf("/usr/bin/python3", "-c", "import os,runpy,sys; assert os.environ.get('YXI_MCP_FIXTURE_VALUE') == 'fixture-inherited'; runpy.run_path(sys.argv[1], run_name='__main__')", mcp.path),
+                environmentNames = setOf("YXI_MCP_FIXTURE_VALUE"))
             val record = SharedMcpRegistry(File(root, "registry.json")).save(definition, setOf("claude", "codex", "opencode"), null)
             val runtime = LocalRuntimeInstallation("opencode", "isolated", listOf("/opt/native/claude"), "/sandbox/home/.local/share/opencode", "1.18.32")
-            LocalOpenCodeServer.start(runtime, root).use { server ->
+            LocalOpenCodeServer.start(runtime, root, System.getenv() + ("YXI_MCP_FIXTURE_VALUE" to "fixture-inherited")).use { server ->
                 assertEquals("connected", OpenCodeMcpBindings("machine", "owned", server.client, File(root, "binding.json")).apply(record))
                 val session = server.client.create("Native shared MCP call").getString("id")
                 val queue = InstructionQueue(File(root, "queue.json"))
