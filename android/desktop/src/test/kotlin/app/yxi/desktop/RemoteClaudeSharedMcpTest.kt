@@ -9,7 +9,7 @@ import java.nio.file.Path
 import kotlin.test.*
 
 class RemoteClaudeSharedMcpTest {
-    @Test fun `server launch prepares private MCP config and preserves literal argv across retry`() = runBlocking {
+    @Test fun `server launch prepares private MCP config and preserves literal argv across retry`(): Unit = runBlocking {
         check(!System.getenv("YXI_ISOLATED_TEST_RUN").isNullOrBlank())
         val root = Files.createTempDirectory(Path.of("/sandbox/tmp"), "claude-shared-launch-").toFile()
         val home = root.resolve("home").apply { mkdirs() }
