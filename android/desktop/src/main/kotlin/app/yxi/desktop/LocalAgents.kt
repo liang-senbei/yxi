@@ -8,7 +8,7 @@ import java.io.File
 import java.util.UUID
 
 internal class LocalAgentJob(val id: String, val engine: String, val directory: File, val prompt: String, val log: File,
-    val resumedFrom: String? = null) {
+    val resumedFrom: String? = null, val sharedMcp: List<SharedMcpDefinition> = emptyList()) {
     var status by mutableStateOf("准备启动"); internal set
     var output by mutableStateOf(""); internal set
     @Volatile internal var process: Process? = null
@@ -19,7 +19,7 @@ internal class LocalAgentJob(val id: String, val engine: String, val directory: 
 }
 
 /** Local CLI jobs are user-initiated; inherit native credentials and permission defaults. */
-internal class LocalAgents(private val root: File = File(Store.dir, "local-agents")) : AutoCloseable {
+internal class LocalAgents(private val root: File = File(Store.dir, "local-agents"), private val sharedMcp: SharedMcpRegistry? = null) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
     val jobs = mutableStateListOf<LocalAgentJob>()
     init {
@@ -27,8 +27,11 @@ internal class LocalAgents(private val root: File = File(Store.dir, "local-agent
             ?.sortedByDescending { it.lastModified() }?.take(100)?.forEach { folder ->
                 runCatching {
                     val saved = JSONObject(File(folder, "task.json").readText())
+                    require(!saved.has("sharedMcp") || saved.opt("sharedMcp") is org.json.JSONArray)
+                    val definitions = saved.optJSONArray("sharedMcp")?.let { rows -> (0 until rows.length()).map { SharedMcpDefinition.parse(rows.getJSONObject(it)) } }.orEmpty()
+                    require(definitions.all { it.hostKey == "@local" })
                     LocalAgentJob(folder.name, saved.getString("engine"), File(saved.getString("directory")), saved.optString("prompt"), File(folder, "output.log"),
-                        saved.optString("resumedFrom").takeIf(::validSessionId)).also {
+                        saved.optString("resumedFrom").takeIf(::validSessionId), definitions).also {
                         it.status = saved.getString("status").let { status -> if (status in setOf("created", "准备启动", "正在运行", "正在停止")) "上次运行结果未确认" else status }
                         it.sessionId = saved.optString("sessionId").takeIf(::validSessionId)
                         it.active = false
@@ -38,26 +41,32 @@ internal class LocalAgents(private val root: File = File(Store.dir, "local-agent
                 }
             }
     }
-    fun start(engine: String, directory: String, prompt: String) = launch(engine, directory, prompt, null)
+    fun start(engine: String, directory: String, prompt: String): LocalAgentJob {
+        check(sharedMcp?.problem.isNullOrBlank()) { sharedMcp?.problem.orEmpty() }
+        val definitions = if (engine == "claude") sharedMcp?.forHost("@local")?.filter { "claude" in it.desiredRunners }?.map { it.definition }.orEmpty() else emptyList()
+        return launch(engine, directory, prompt, null, definitions)
+    }
     fun continueSession(job: LocalAgentJob, prompt: String) {
         require(jobs.any { it === job } && !job.running && job.status == "已完成") { "只能继续已确认完成的会话" }
         val session = job.sessionId?.takeIf(::validSessionId) ?: error("运行器未提供可恢复的会话标识")
         check(jobs.none { it.engine == job.engine && it.sessionId == session && (it.running || it.status in setOf("上次运行结果未确认", "结果未确认", "结果记录未保存，请保留日志核对")) }) { "此会话仍在运行或上次结果未确认" }
-        launch(job.engine, job.directory.path, prompt, session)
+        launch(job.engine, job.directory.path, prompt, session, job.sharedMcp)
     }
-    private fun launch(engine: String, directory: String, prompt: String, resume: String?): LocalAgentJob {
+    private fun launch(engine: String, directory: String, prompt: String, resume: String?, definitions: List<SharedMcpDefinition>): LocalAgentJob {
         require(engine in setOf("codex", "claude") && prompt.isNotBlank())
         val cwd = File(directory).canonicalFile
         require(cwd.isDirectory) { "本机工作目录不存在" }
         check(jobs.count { it.running } < 4) { "最多同时运行 4 个本机任务" }
         val folder = File(root, UUID.randomUUID().toString()).apply { mkdirs() }
-        val job = LocalAgentJob(folder.name, engine, cwd, prompt, File(folder, "output.log"), resume)
+        val job = LocalAgentJob(folder.name, engine, cwd, prompt, File(folder, "output.log"), resume, definitions)
         persist(job, "created")
         jobs.add(0, job)
         scope.launch {
             try {
                 val binary = binary(engine) ?: error("本机未找到 $engine，请先安装并完成登录")
-                val args = command(binary, engine, resume)
+                val mcpArguments = if (engine == "claude") ClaudeSharedMcp.prepare(binary, cwd, definitions, File(folder, "mcp.json")) { job.cancelRequested } else emptyList()
+                if (job.cancelRequested) throw CancellationException("本地任务已取消")
+                val args = command(binary, engine, resume) + mcpArguments
                 val process = withContext(Dispatchers.IO) {
                     ProcessBuilder(args).directory(cwd).redirectErrorStream(true).redirectOutput(job.log).start().also {
                         // Retain ownership before crossing the cancellable dispatcher boundary.
@@ -110,7 +119,8 @@ internal class LocalAgents(private val root: File = File(Store.dir, "local-agent
     override fun close() { jobs.filter { it.running }.forEach(::stop); scope.cancel() }
     private fun persist(job: LocalAgentJob, status: String) {
         DurableFile.replace(File(job.log.parentFile, "task.json"), JSONObject().put("engine", job.engine).put("directory", job.directory.path)
-            .put("status", status).put("prompt", job.prompt).put("output", job.output.takeLast(68000)).put("sessionId", job.sessionId.orEmpty()).put("resumedFrom", job.resumedFrom.orEmpty()).toString())
+            .put("status", status).put("prompt", job.prompt).put("output", job.output.takeLast(68000)).put("sessionId", job.sessionId.orEmpty()).put("resumedFrom", job.resumedFrom.orEmpty())
+            .put("sharedMcp", org.json.JSONArray(job.sharedMcp.map { it.json() })).toString())
     }
     companion object {
         private fun readTail(file: File): String = if (!file.isFile) "" else java.io.RandomAccessFile(file, "r").use { f ->

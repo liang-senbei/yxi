@@ -51,7 +51,7 @@ class AppState {
     internal val scheduledTasks by lazy { ScheduledTasks(java.io.File(Store.dir, "scheduled-tasks.json")) }
     private val linksDelegate = lazy { DeviceLinks() }
     internal val deviceLinks get() = linksDelegate.value
-    private val localAgentsDelegate = lazy { LocalAgents() }
+    private val localAgentsDelegate = lazy { LocalAgents(sharedMcp = sharedMcp) }
     internal val localAgents get() = localAgentsDelegate.value
     var localAgentPrompt by mutableStateOf("")
     internal val localOperations get() = (if (linksDelegate.isInitialized()) deviceLinks.busy.size else 0) +

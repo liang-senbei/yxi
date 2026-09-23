@@ -20,7 +20,11 @@ class LocalClaudeAgentNativeTest {
         Files.createSymbolicLink(File(bin, "claude").toPath(), Path.of("/opt/native/claude"))
         val script = root.resolve("stub.py").apply { writeText(LocalClaudeAgentNativeTest::class.java.getResource("/rewind/anthropic_stub.py")!!.readText()) }
         val server = ProcessBuilder("python3", script.path, root.path).redirectErrorStream(true).redirectOutput(root.resolve("stub.log")).start()
-        val agents = LocalAgents(root.resolve("jobs"))
+        val shared = SharedMcpRegistry(root.resolve("shared.json"))
+        val mcp = root.resolve("shared_mcp_fixture.py").apply { writeBytes(requireNotNull(LocalClaudeAgentNativeTest::class.java.getResourceAsStream("/shared_mcp_fixture.py")).use { it.readBytes() }) }
+        val definition = SharedMcpDefinition("@local", "echo", "fixture", "1", "shared_echo", listOf("/usr/bin/python3", mcp.path))
+        val selection = shared.save(definition, setOf("claude"), null)
+        val agents = LocalAgents(root.resolve("jobs"), shared)
         try {
             withTimeout(10000) { while (!root.resolve("port").isFile) delay(50) }
             val settings = File(home, ".claude").apply { mkdirs() }.resolve("settings.json")
@@ -38,10 +42,14 @@ class LocalClaudeAgentNativeTest {
             val requests = root.resolve("requests.jsonl").readLines().map(::JSONObject)
             assertTrue(requests.any { it.getBoolean("fake_auth") && it.getJSONArray("messages").toString().contains("KEEP-local-claude") })
             assertNotNull(job.sessionId)
-            val reopened = LocalAgents(root.resolve("jobs"))
+            assertEquals(listOf(definition), job.sharedMcp)
+            assertTrue(File(job.log.parentFile, "mcp.json").readText().contains("shared_echo"))
+            shared.retire(selection.definition.key, selection.revision)
+            val reopened = LocalAgents(root.resolve("jobs"), shared)
             try {
                 val saved = reopened.jobs.single()
                 assertEquals(job.sessionId, saved.sessionId)
+                assertEquals(job.sharedMcp, saved.sharedMcp)
                 withContext(Dispatchers.Swing) { reopened.continueSession(saved, "FOLLOWUP-local-claude") }
                 val followup = reopened.jobs.first()
                 withTimeout(45000) { while (followup.running) delay(100) }
