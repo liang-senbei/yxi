@@ -20,10 +20,14 @@ class AcpTaskControllerTest {
             val request = JSONObject(text); writes.add(request)
             when (request.optString("method")) {
                 "initialize" -> result(request, JSONObject().put("protocolVersion", 1))
-                "session/new" -> result(request, JSONObject().put("sessionId", "session").put("modes", JSONObject().put("currentModeId", "ask")
+                "session/new" -> result(request, JSONObject().put("sessionId", "session").put("models", JSONObject().put("currentModelId", "a")
+                    .put("availableModels", org.json.JSONArray().put(JSONObject().put("modelId", "a").put("name", "A"))
+                        .put(JSONObject().put("modelId", "b").put("name", "B"))))
+                    .put("modes", JSONObject().put("currentModeId", "ask")
                     .put("availableModes", org.json.JSONArray().put(JSONObject().put("id", "ask").put("name", "Ask"))
                         .put(JSONObject().put("id", "plan").put("name", "Plan")))))
                 "session/set_mode" -> result(request, JSONObject())
+                "session/set_model" -> result(request, JSONObject())
             }
             return true
         }
@@ -32,6 +36,20 @@ class AcpTaskControllerTest {
         fun text(text: String) = emit(JSONObject().put("method", "session/update").put("params", JSONObject().put("sessionId", "session")
             .put("update", JSONObject().put("sessionUpdate", "agent_message_chunk").put("content", JSONObject().put("type", "text").put("text", text)))))
         override fun close() { pipe.close(); output.close() }
+    }
+    @Test fun `local persistence failure after model acknowledgement does not claim rejection`(): Unit = runBlocking(Dispatchers.Swing) {
+        val fixture = Fixture()
+        AcpClient(fixture).use { client ->
+            client.initialize(); client.newSession(root.path)
+            AcpTaskController("task", "session", client, InstructionQueue(File(root, "persistence.json")),
+                onModelChanged = { throw IllegalArgumentException("Invalid index record") }).use { controller ->
+                assertFailsWith<IllegalArgumentException> { controller.changeModel("b") }
+                assertFalse(controller.ready)
+                assertEquals("b", client.models("session")?.getString("currentModelId"))
+                assertTrue(controller.note.contains("已确认切换"))
+                assertFalse(controller.note.contains("未被接受"))
+            }
+        }
     }
     @Test fun `two turns preserve separate messages and cancelled notification is not completion`() = runBlocking(Dispatchers.Swing) {
         val fixture = Fixture()
