@@ -47,6 +47,13 @@ internal class PluginIconLoader(private val cache: File, private val now: () -> 
             plugin.name in setOf("google-drive", "google_drive", "googledrive") && hostMatches(plugin.websiteUrl, "google.com") -> "drive-productlogos-192.svg"
             plugin.name == "notion" && (hostMatches(plugin.websiteUrl, "notion.so") || hostMatches(plugin.websiteUrl, "notion.com")) -> "notion-logo-ios.png"
             plugin.name == "linear" && hostMatches(plugin.websiteUrl, "linear.app") -> "linear-apple-touch-icon.png"
+            plugin.name == "figma" && hostMatches(plugin.websiteUrl, "figma.com") -> "figma-icon-192.png"
+            plugin.name == "stripe" && hostMatches(plugin.websiteUrl, "stripe.com") -> "stripe-favicon-180.png"
+            plugin.name == "vercel" && hostMatches(plugin.websiteUrl, "vercel.com") -> "vercel-apple-touch-icon-180.png"
+            plugin.name == "supabase" && hostMatches(plugin.websiteUrl, "supabase.com") -> "supabase-favicon-196.png"
+            plugin.name in setOf("google-calendar", "google_calendar", "googlecalendar") && hostMatches(plugin.websiteUrl, "google.com") -> "gcalendar-play-icon.png"
+            plugin.name in setOf("outlook", "outlook-email", "outlook-calendar", "outlook_email", "outlook_calendar") &&
+                listOf("microsoft.com", "outlook.com", "office.com", "cloud.microsoft").any { hostMatches(plugin.websiteUrl, it) } -> "outlook-m365cloud.png"
             else -> null
         }
         if (bundled != null) javaClass.getResourceAsStream("/app/yxi/desktop/plugin-icons/$bundled")?.use { source ->

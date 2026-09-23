@@ -52,11 +52,20 @@ class PluginIconsTest {
         val loader = PluginIconLoader(root) { error("Bundled official icon should not need network") }
         for ((name, website) in listOf("canva" to "https://www.canva.com", "gmail" to "https://workspace.google.com/products/gmail/",
             "github" to "https://github.com", "slack" to "https://slack.com", "dropbox" to "https://www.dropbox.com",
-            "google-drive" to "https://drive.google.com", "notion" to "https://notion.so", "linear" to "https://linear.app")) {
+            "google-drive" to "https://drive.google.com", "notion" to "https://notion.so", "linear" to "https://linear.app",
+            "figma" to "https://www.figma.com", "stripe" to "https://stripe.com", "vercel" to "https://vercel.com",
+            "supabase" to "https://supabase.com", "google-calendar" to "https://calendar.google.com",
+            "outlook-email" to "https://outlook.com", "outlook-calendar" to "https://www.microsoft.com/microsoft-365/outlook")) {
             val bytes = assertNotNull(loader.load(plugin(name, website, "https://files.openai.com/unavailable"), false))
             assertTrue(bytes.size > 500)
             File("/results/plugin-$name.png").writeBytes(bytes)
             org.jetbrains.skia.Image.makeFromEncoded(bytes).use { assertEquals(64, it.width); assertEquals(64, it.height) }
+        }
+    }
+    @Test fun `matching names on unrelated domains never receive bundled brand icons`(): Unit = runBlocking {
+        val loader = PluginIconLoader(root) { error("unavailable") }
+        for (name in listOf("figma", "stripe", "vercel", "supabase", "google-calendar", "outlook-email")) {
+            assertNull(loader.load(plugin(name, "https://unrelated.example"), false))
         }
     }
     @Test fun `blocked catalog logo falls back to the publisher declared icon and then caches it`() = runBlocking {
