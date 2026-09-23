@@ -1,3 +1,11 @@
+## OpenCode 原生调用共享 MCP
+
+`8c59140`将共享MCP原生验证扩展到工具调用：回环Chat Completions fixture从真实请求工具列表选择yxi_echo，只有收到原生role=tool且含YXI_SHARED_MCP返回值后才输出成功标记。使用与Claude相同的shared_mcp_fixture.py资源，由OpenCodeMcpBindings动态加载；权限按ask处理，仅允许该共享测试工具。
+
+构建run.b0RJXY通过，OpenCodeSharedMcpNativeTest run.29rlTZ两项全部通过、无跳过。原生OpenCode1.18.32验证加载/握手/工具发现、实际调用与结果回传、持久队列Completed、项目配置完整字节不变。模型为本地fixture且容器无外网；不代表真实订阅调用。Claude与OpenCode已有同一测试资源的原生调用证据，但Codex及同机三运行器统一安装/启停/升级/卸载UI仍待完成，未发布。
+
+认证引用报告已返回；主线程发现“Codex项目层不承载MCP”可能混淆[projects]信任表与.codex/config.toml，已要求yxi_pilot沿loader重新核对并区分main与当前原生测试版本0.153.4。未采用该未经确认结论修改产品行为。
+
 ## Claude 原生调用共享 MCP 测试
 
 `dcbc660`新增ClaudeSharedMcpNativeTest与仅回环Anthropic模型fixture。使用与OpenCode相同的shared_mcp_fixture.py资源，经SharedMcpSettings生成Claude原生mcp-config；严格加载测试配置且仅允许mcp__shared_echo__yxi_echo。模型fixture只有收到实际tool_result内YXI_SHARED_MCP标记才返回SHARED_MCP_NATIVE_CONFIRMED，避免模型文本自行声称成功。
