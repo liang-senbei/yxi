@@ -1,3 +1,11 @@
+## Gemini 本机识别与官方订阅说明更正
+
+`e1205b9`新增Gemini本机/PATH/npm识别，Windows解析 @google/gemini-cli 的 bin 字段为明确Node+JS参数；GEMINI_CLI_HOME作为home根再追加.gemini，与本机0.34.0源码一致。缺少Node仍记录已发现安装并说明原因。本机实际定位D:/qianduantool/nodejs的npm包0.34.0；显式Node执行--version持续未返回，核对PID/父PID/命令后仅结束该探测进程。未据安装清单宣称运行可用，未改真实配置或认证。
+
+发现此前官方方案说明过时：Google 2026-05-19公告明确2026-06-18起个人免费/Pro/Ultra停止由Gemini CLI服务，迁至Antigravity CLI；企业Standard/Enterprise及付费API继续支持。旧geminicli.com/plans页面仍列个人方案，不能忽略更明确的迁移公告。官方配置卡与official-provider-defaults.md已修正为企业订阅及独立官方API项，不自动回退API或替换运行器。来源：https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/ 。
+
+构建run.ylMkKu、LocalWorkspaceReadOnlyTest run.W4R7nT五项通过，无跳过；覆盖Gemini npm带空格路径/自定义数据根/缺少Node及已有只读功能。官方ACP文档和本机源码确认--acp入口，但ACP适配尚未实现。Antigravity消费者订阅接入需继续核对原生能力，不把Gemini旧登录能力当成当前可用订阅。未发布。
+
 ## OpenCode 项目导航与待处理状态
 
 `5f5fc3f`将远端 OpenCode 任务纳入 ProjectTree 的项目分组/计数/搜索/折叠，加入小圆角灰底选中态、重命名、置顶、收藏、归档和移动显示分组；收藏/置顶区可进入同一登记会话。审批、提问或未知投递显示待处理；未完成轮次显示运行，已归档但需处理的任务不会被普通列表隐藏。补齐项目新建对话的OpenCode回调；协作组协议尚未适配时仍不开放组内创建，此处显示分组不是服务器协作成员登记。
