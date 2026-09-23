@@ -1,3 +1,9 @@
+## 服务器 Codex 共享 MCP 与任务快照
+
+`54df5c4`将SharedMcpRegistry注入CodexWorkspace新建路径，按服务器hostKey取活动Codex意向；启动前核对原生同名/内置服务，使用已验证的MCP参数生成器，兼容原有独立provider私有启动文件。每次线程/轮次变更前回读MCP配置，拒绝未经核对的会话MCP覆盖。CodexTaskRecord增加共享定义快照并严格解析；恢复任务和切换模型线路继续用任务快照，不自动采用后来修改的共享列表。共享页开放服务器Codex新会话选择；旧登记无快照字段仍按空列表读取。
+
+构建run.vCNe6b通过；CodexProfileLaunchTest run.0rulBQ 2项、CodexWorkspaceTest run.wP4AsU 14项、真实SSH+Codex独立线路回归run.SPgHon 1项全部通过，无跳过。原生回归增加共享定义快照保存/重读，在退役共享意向后重连旧任务并继续原线路/历史；同时保留API凭据隔离、模型切换和全局文件不变检查。测试用隔离容器和本地模型fixture。未完成Claude正式入口、所有MCP连接状态/授权流程/运行中生命周期与Windows验收，未发布。
+
 ## 本地官方 Codex 新会话接入共享 MCP
 
 `25bfb3b`将sharedMcp登记注入LocalCodexTasks；本地Codex新会话获取活动意向后，先用原生官方连接读取有效配置，拒绝已有同名服务和codex_apps保留名，再以进程级覆盖启动。每次写入前同时核对官方提供方/ChatGPT账号与共享MCP的command/args/url/enabled，并拒绝未声明的env/header/token覆盖；创建回执前后检查共享配置快照。共享页开放本地Codex选择，服务器Codex及Claude仍标接入中。
