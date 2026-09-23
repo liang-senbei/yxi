@@ -43,6 +43,13 @@ server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
                     bridge.conn.ssh.connect()
                     val models = ProviderModels.fetch(bridge.conn, url, "fixture-private-model-key")
                     assertEquals(listOf(ProviderModels.Model("provider/real-model", "fixture")), models)
+                    val line = app.yxi.agent.Lines.Line("fixture", "Provider", url, apiKey = "fixture-private-model-key", modelsUrl = "$url/catalog/models")
+                    assertNull(app.yxi.agent.Lines.saveList(bridge.conn.ssh, listOf(line), expected = emptyList()))
+                    val saved = app.yxi.agent.Lines.list(bridge.conn.ssh)!!.single()
+                    assertEquals(line.modelsUrl, saved.modelsUrl)
+                    assertFalse(saved.settingsJson().has("modelsUrl"), "Catalog URL is metadata, not a native runner setting")
+                    assertFalse(routeCatalogEqual(listOf(saved), listOf(saved.copy(modelsUrl = "$url/different"))))
+                    assertEquals(models, ProviderModels.fetch(bridge.conn, saved.baseUrl, saved.apiKey, saved.modelsUrl))
                     val error = runCatching { ProviderModels.fetch(bridge.conn, url, "wrong-fixture-key") }.exceptionOrNull()
                     assertNotNull(error)
                     assertFalse(error.message.orEmpty().contains("fixture-private-model-key"))
@@ -51,7 +58,7 @@ server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
                 } }
             }
             val calls = root.resolve("calls").readLines().map { org.json.JSONObject(it) }
-            assertEquals(listOf("/v1/models", "/v1/models"), calls.map { it.getString("path") })
+            assertEquals(listOf("/v1/models", "/catalog/models", "/v1/models"), calls.map { it.getString("path") })
             assertTrue(calls.first().getBoolean("authenticated"))
         } finally {
             server.destroy()
