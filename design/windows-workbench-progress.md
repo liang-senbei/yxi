@@ -1,3 +1,9 @@
+## 2026-09-23 ACP 会话模式基础
+
+- `fbb1c338755ebf8055d594c75baa538ecdbf57c8` 从 session/new 保存原生 availableModes/currentModeId，并提供 session/set_mode；拒绝未公布选项，等待切换确认期间阻止 prompt，超时保留未知状态以避免按错误权限模式继续发送。
+- 构建 `run.pCyrcM` 成功；AcpClientTest `run.4D8v5E` 6 项通过，无失败/跳过，覆盖模式确认、超时阻止发送及既有审批/取消。此为协议 fixture 验证，不是 Gemini/Grok/Hermes 原生实测。
+- 六运行器入口仍缺 ACP 会话控制器、原生模式变更通知同步、认证/模型/历史界面及各原生运行器端到端验收。未发布，未开放未完成的新建入口。
+
 ## 2026-09-23 远端缺失变量失败与恢复验收
 
 - `7fb7395b0cd690af64469be9a80af849dfd41946` 扩展真实 SSH + OpenCode HTTP 测试：先登记不存在的环境变量，任务创建明确返回服务器缺少变量，任务索引/控制器为空，恢复标记为空，SSH 仍可执行；修正引用后同一任务管理器成功创建。
