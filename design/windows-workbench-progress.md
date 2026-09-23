@@ -1,3 +1,9 @@
+## 2026-09-24 Windows 主机与凭据跨进程持久化
+
+- 首次本机 --host-smoke 在旧测试断言 HostStoreNativeSmoke.kt:38 失败：实际存储已迁移到用户目录 `.yxi`，测试仍要求 Local/Yxi。保留失败日志 `.artifacts/windows-storage-a04d50c/`；没有改动真实用户配置。
+- `33fbc32` 将原生检查对齐当前 `.yxi` 约定，同时核对旧主机明文清理、新加密文件存在及内容未泄漏。Windows createDistributable 重建通过（26秒，3任务执行）。
+- 新隔离 profile 下四个独立进程全部退出0且匹配预期标记：host-smoke、host-reopen、credential-smoke、credential-reopen。覆盖旧目录迁移、主机改名/偏好重读、DPAPI加密、篡改拒绝、凭据轮换及注销后重登录的本地持久化。结果 `.artifacts/windows-storage-33fbc32/results.json`。
+- 使用虚构主机和合成凭据，未连接服务器或真实登录；只证明Windows本地存储行为，不代表服务端授权、模型请求或完整升级验收。未发布。
 ## 2026-09-24 当前开发源码 Windows 本机构建与启动
 
 - 源码 `a04d50c` 在本机 Windows 完成 `:desktop:createDistributable`，13项任务执行，BUILD SUCCESSFUL（3m46s）。最初 PowerShell 未引用带点的 -P 参数导致任务名被拆分；加引号后发现 core 要求 JDK17、本机仅有JDK21。
