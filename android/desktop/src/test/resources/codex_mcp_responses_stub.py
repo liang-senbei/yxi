@@ -59,6 +59,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         response_id = 'resp_fixture_' + str(time.time_ns())
         completed = any(item.get('type') == 'function_call_output' and 'YXI_SHARED_MCP' in json.dumps(item.get('output'))
                         for item in body.get('input', []) if isinstance(item, dict))
+        if not completed and any(item.get('type') == 'function_call_output' for item in body.get('input', []) if isinstance(item, dict)):
+            self.send_error(400, 'Native MCP tool did not return the expected marker; fixture will not retry')
+            return
         def find_tool(items, namespace=None):
             for item in items:
                 if item.get('type') == 'function' and item.get('name', '').endswith('yxi_echo'):

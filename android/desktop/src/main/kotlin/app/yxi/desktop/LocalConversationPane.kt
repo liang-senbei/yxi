@@ -115,6 +115,7 @@ import org.json.JSONObject
                     Text("需要你处理", style = MaterialTheme.typography.titleSmall)
                     when (request.optString("method")) {
                         "item/tool/requestUserInput" -> CodexQuestionForm(controller, request)
+                        "mcpServer/elicitation/request" -> CodexMcpElicitationButtons(params, controller.ready) { response -> act { controller.answerRequest(request.get("id"), response) } }
                         "item/permissions/requestApproval" -> CodexPermissionRequest(params, controller.ready) { response -> act { controller.answerRequest(request.get("id"), response) } }
                         "item/commandExecution/requestApproval", "item/fileChange/requestApproval" -> {
                             SelectionContainer { Text(params.optString("command").ifBlank { params.optString("reason").ifBlank { "运行器请求修改文件" } }) }

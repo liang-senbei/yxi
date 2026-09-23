@@ -327,6 +327,8 @@ private fun CodexConversationPane(state: AppState) {
                                 CodexPermissionRequest(params, controller.ready) { response ->
                                     act { controller.answerRequest(request.get("id"), response) }
                                 }
+                            } else if (method == "mcpServer/elicitation/request" && controller != null) {
+                                CodexMcpElicitationButtons(params, controller.ready) { response -> act { controller.answerRequest(request.get("id"), response) } }
                             } else if (method == "item/tool/requestUserInput" && controller != null) {
                                 CodexQuestionForm(controller, request)
                             } else Text("此类输入暂未接入，可中断当前轮次后调整任务。", color = Tokens.current.textMuted)
