@@ -15,6 +15,30 @@ internal class LocalWorkspace : AutoCloseable {
     private var listing: Job? = null
     private var reading: Job? = null
     private var client: LocalCodexHistory? = null
+    private var modelsJob: Job? = null
+    var officialModels by mutableStateOf<List<LocalOfficialModel>>(emptyList()); private set
+    var officialModelId by mutableStateOf(""); private set
+    var officialModelsLoading by mutableStateOf(false); private set
+    var officialModelsError by mutableStateOf(""); private set
+    fun chooseOfficialModel(id: String) { officialModelId = id }
+    fun selectedOfficialModel() = officialModels.singleOrNull { it.id == officialModelId } ?: error("请从原生列表选择有效的官方模型")
+    fun refreshOfficialModels() {
+        val runtime = selectedRuntime ?: return
+        if (officialModelsLoading) return
+        val gen = generation
+        modelsJob = scope.launch {
+            officialModelsLoading = true; officialModelsError = ""
+            try {
+                val models = LocalCodexProfiles.connectOfficial(runtime).use { connection -> LocalOfficialModels.load { connection.listModels(it) } }
+                if (generation == gen) {
+                    officialModels = models
+                    if (models.none { it.id == officialModelId }) officialModelId = (models.firstOrNull { it.isDefault } ?: models.first()).id
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { if (generation == gen) officialModelsError = e.message ?: "官方模型列表读取失败" }
+            finally { if (generation == gen) officialModelsLoading = false }
+        }
+    }
     private var generation = 0
     private var readGeneration = 0
     var installations by mutableStateOf<List<LocalRuntimeInstallation>>(emptyList()); private set
@@ -136,6 +160,9 @@ internal class LocalWorkspace : AutoCloseable {
         }
     }
     fun backToList() { reading?.cancel(); selectedThread = null; readingHistory = false; readError = "" }
-    private fun disconnect() { generation++; readGeneration++; listing?.cancel(); reading?.cancel(); client?.close(); client = null; loading = false; readingHistory = false; next = null; nextTurns = null }
+    private fun disconnect() {
+        generation++; readGeneration++; modelsJob?.cancel(); officialModels = emptyList(); officialModelId = ""; officialModelsLoading = false; officialModelsError = ""
+        listing?.cancel(); reading?.cancel(); client?.close(); client = null; loading = false; readingHistory = false; next = null; nextTurns = null
+    }
     override fun close() { scan?.cancel(); disconnect(); scope.cancel() }
 }

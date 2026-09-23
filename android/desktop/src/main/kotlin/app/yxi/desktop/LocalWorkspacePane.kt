@@ -76,6 +76,15 @@ import javax.swing.JFileChooser
                     }
                 } }
                 if (configuration) item {
+                    Text("官方订阅模型", style = MaterialTheme.typography.titleMedium)
+                    TextButton(workspace::refreshOfficialModels, enabled = workspace.selectedRuntime != null && !workspace.officialModelsLoading) {
+                        Text(if (workspace.officialModelsLoading) "正在读取…" else "获取官方模型列表")
+                    }
+                    if (workspace.officialModels.isNotEmpty()) CompactModelInput(workspace.officialModelId,
+                        workspace.officialModels.map { ProviderModels.Model(it.id) }, workspace::chooseOfficialModel, "官方订阅模型", Modifier.fillMaxWidth())
+                    if (workspace.officialModelsError.isNotBlank()) Text(workspace.officialModelsError, color = t.danger)
+                    if (workspace.officialModels.isNotEmpty() && workspace.officialModels.none { it.id == workspace.officialModelId }) Text("请从原生列表选择有效的官方模型", color = t.danger)
+                    else if (workspace.officialModelId.isNotBlank()) Text("此选择用于后续新建本地官方会话，不改原生全局模型。", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
                     Text("此页读取本机状态。单 Agent 官方订阅与第三方配置切换仍在接入中。", color = t.textMuted)
                     TextButton({ state.page = Page.LocalWorkspace }) { Text("浏览本地历史") }
                 }
