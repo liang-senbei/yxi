@@ -1,3 +1,9 @@
+## 2026-09-24 Grok 官方原生 ACP 握手
+
+- 从官方安装器 https://x.ai/cli/install.sh 声明的 GCS 源获取稳定 1.0.41，仅缓存 ELF 到 /root/.cache/yxi-native-tests/grok-1.0.41/grok；未运行宿主安装器/程序。SHA256 9ce03ed23e16ea01072b4496263d6213a27899e1e3e107f008d36edf82e70407，165967424 字节，来源清单 `.artifacts/grok-native/source.json`。
+- `734083b66839d1cae065ad1d47455db4c64b5438` 原生测试在网络隔离空 HOME 运行产品 LocalAcpTransport：协议版本 1、agentCapabilities 与 authMethods 返回，未生成 auth.json，关闭后所属进程退出。构建 `run.ixHJJk`，GrokAcpNativeTest `run.eLVjlO` 1 项通过，无失败/跳过。
+- 原生返回 grok.com 认证方法；初始化 `_meta.modelState` 含模型/思考强度能力（`.artifacts/grok-native/initialize.json`），后续模型适配应读取能力，不能凭静态名称猜测。仅握手已证实，未登录、未创建会话、未调用模型，不代表订阅可用。未发布。
+
 ## 2026-09-24 ACP 取消与已排队审批竞态
 
 - `315672d37c7af6dd640a833fc4b2eb0c3f9e75ed` 展示审批前核对 cancelling 与客户端待审批表；已进入事件队列、但后来被取消的审批不会重新显示。
