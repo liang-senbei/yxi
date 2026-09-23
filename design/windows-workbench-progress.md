@@ -1,3 +1,8 @@
+## 2026-09-24 原生会话静音入口与 Windows 偏好验证
+
+- `551b5f69` 在共享远端原生会话行补齐静音/恢复任务通知入口，适用于OpenCode与ACP；使用现有完整taskKey存储，不按显示名称静音。
+- Windows 本机执行 `:desktop:test --tests app.yxi.desktop.WorkspaceNavigationTest`，7项通过，0失败/错误/跳过。新增原生会话跨服务器身份、静音重读、仅置顶通知及恢复通知持久化断言；原有归档待处理/损坏数据保护等回归一并通过。
+- 证据 `.artifacts/windows-notification-551b5f69/TEST-app.yxi.desktop.WorkspaceNavigationTest.xml`。测试仅使用临时文件，不启动AI或SSH，不代表菜单点击和Windows真实气泡已验收。未发布。
 ## 2026-09-24 远端 ACP 通知触发
 
 - `ee6742799c19d7a260aa04f7275318f596c6e583` 增加控制器通知回调，远端任务接入现有Notify偏好/静音过滤与完整taskKey定位。审批只在新增待处理项时提醒；原生轮次结束按完成/取消/需核对区分，超时及投递未知明确提醒，不冒充成功；关闭控制器不再发通知，通知异常不破坏队列结论。
