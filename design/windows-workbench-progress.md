@@ -1,3 +1,8 @@
+## 2026-09-23 远端缺失变量失败与恢复验收
+
+- `7fb7395b0cd690af64469be9a80af849dfd41946` 扩展真实 SSH + OpenCode HTTP 测试：先登记不存在的环境变量，任务创建明确返回服务器缺少变量，任务索引/控制器为空，恢复标记为空，SSH 仍可执行；修正引用后同一任务管理器成功创建。
+- 构建 `run.uZ6Pv5`；OpenCodeMcpHttpHeadersNativeTest `run.CW8in0` 1 项通过，无失败/跳过，包含此前本地/远端 HTTP 认证头与文件保持检查。测试全部在隔离容器中，未触及生产会话。尚未发布。
+
 ## 2026-09-23 服务器 OpenCode HTTP 共享任务创建
 
 - 行为 `e5fe39a`、测试修正 `0ef35d32ba934dff7345cbd79b4b160f774dfa01`：SSH supervisor 通过 stdin 接收引用配置和变量名，使用远端自身环境，明确报告缺失变量/已有 inline 配置。RemoteOpenCodeTasks 检查同名冲突，专属进程加载并核对连接后创建会话；UI 开放服务器 HTTP 引用。
