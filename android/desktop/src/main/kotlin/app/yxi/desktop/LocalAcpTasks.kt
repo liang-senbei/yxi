@@ -76,11 +76,16 @@ internal class LocalAcpTasks(private val queue: InstructionQueue, file: File,
             val id = result.getString("sessionId")
             recoverySessionId = id; journal.write(pending.put("sessionId", id).toString())
             check(!disposed && preparationGeneration.get() == generation) { "创建期间窗口已关闭，请核对原生会话" }
-            val model = result.optJSONObject("models")?.optString("currentModelId")?.takeIf { it.isNotBlank() } ?: "native-default"
+            val model = acpConfigSelectors(client.configOptions(id)).firstOrNull { it.category == "model" }?.current?.takeIf { it.isNotBlank() }
+                ?: result.optJSONObject("models")?.optString("currentModelId")?.takeIf { it.isNotBlank() } ?: "native-default"
             val record = LocalCodexTaskRecord(id, System.getProperty("user.name"), System.getProperty("os.name"),
                 File(installation.home).canonicalPath, directory, label, model, System.currentTimeMillis(), installation.engine, "native")
             registry.save(record)
-            val controller = AcpTaskController(record.key, id, client, queue)
+            val controller = AcpTaskController(record.key, id, client, queue, onConfigurationChanged = { options ->
+                val currentModel = acpConfigSelectors(options).firstOrNull { it.category == "model" }?.current?.takeIf { it.isNotBlank() }
+                val current = registry.records.singleOrNull { it.key == record.key }
+                if (current != null && currentModel != null && current.model != currentModel) registry.save(current.copy(model = currentModel))
+            })
             try {
                 check(!disposed)
                 journal.write(JSONObject().put("pending", false).toString())

@@ -23,6 +23,7 @@ internal class AcpTaskController(
     private val queue: InstructionQueue,
     private val promptTimeoutMillis: Long = 600_000,
     private val onRawEvent: (JSONObject) -> Unit = {},
+    private val onConfigurationChanged: (JSONArray) -> Unit = {},
 ) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
     private val mutation = Mutex()
@@ -76,7 +77,10 @@ internal class AcpTaskController(
         val update = params.optJSONObject("update") ?: return
         when (update.optString("sessionUpdate")) {
             "current_mode_update" -> modes = client.modes(sessionId)
-            "config_option_update" -> configOptions = client.configOptions(sessionId)
+            "config_option_update" -> {
+                configOptions = client.configOptions(sessionId)
+                onConfigurationChanged(configOptions)
+            }
             "agent_message_chunk" -> {
                 check(activeMessageId.isNotBlank()) { "收到未关联轮次的消息" }
                 agentText.append(update.optJSONObject("content")?.optString("text").orEmpty())
@@ -140,6 +144,7 @@ internal class AcpTaskController(
             client.setConfigOption(sessionId, configId, value)
             client.synchronizeEvents()
             configOptions = client.configOptions(sessionId)
+            onConfigurationChanged(configOptions)
             note = "会话配置已由运行器确认"
         } catch (e: Exception) {
             ready = false; note = "配置切换未确认，请核对原生会话后再发送"; throw e

@@ -17,13 +17,17 @@ class LocalAcpTasksTest {
         override val output = PipedInputStream(65536)
         private val pipe = PipedOutputStream(output)
         val methods = mutableListOf<String>()
+        fun options(model: String) = JSONArray().put(JSONObject().put("id", "model").put("name", "Model").put("category", "model").put("type", "select")
+            .put("currentValue", model).put("options", JSONArray().put(JSONObject().put("value", "fixture/a").put("name", "A"))
+                .put(JSONObject().put("value", "fixture/b").put("name", "B"))))
         override suspend fun write(text: String): Boolean {
             val request = JSONObject(text); val method = request.getString("method"); methods.add(method)
             if (method == "session/new" && failCreate) return false
             val result = when (method) {
                 "initialize" -> JSONObject().put("protocolVersion", 1).put("authMethods", JSONArray().put(JSONObject().put("id", "login").put("name", "Native login")))
                 "authenticate" -> JSONObject()
-                "session/new" -> JSONObject().put("sessionId", "fixture-session")
+                "session/new" -> JSONObject().put("sessionId", "fixture-session").put("configOptions", options("fixture/a"))
+                "session/set_config_option" -> JSONObject().put("configOptions", options(request.getJSONObject("params").getString("value")))
                 else -> error("Unexpected method")
             }
             pipe.write((JSONObject().put("jsonrpc", "2.0").put("id", request.get("id")).put("result", result).toString() + "\n").toByteArray()); pipe.flush()
@@ -63,8 +67,12 @@ class LocalAcpTasksTest {
                 val record = tasks.create("My task")
                 assertEquals(engine, record.engine)
                 assertEquals("native", record.provider)
+                assertEquals("fixture/a", record.model)
                 assertEquals(record, LocalCodexTaskRegistry(index).records.single())
                 assertTrue(tasks.controllers.getValue(record.key).ready)
+                tasks.controllers.getValue(record.key).changeConfig("model", "fixture/b")
+                assertEquals("fixture/b", LocalCodexTaskRegistry(index).records.single().model)
+                assertEquals(record.key, tasks.registry.records.single().key)
                 assertEquals("", tasks.recoverySessionId)
                 assertFalse("session/prompt" in fixture.methods)
             }
