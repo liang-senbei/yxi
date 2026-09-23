@@ -1,3 +1,9 @@
+## 2026-09-24 ACP 长回复滚动交互验证
+
+- 新增长回复 80 段 + 原生鼠标滚轮测试。首轮 `run.NZUmTO` 暴露底部定位不稳定；`45cc265` 改为带视口偏移的 footer 定位。`run.6MN28N` 与 `run.iesGnp` 继续暴露桌面滚轮上滚未停跟随，保留失败布局与截图。
+- 最终 `689d1a3e245beb6a2337fbfdaa668f8fe5c20cbb` 直接监听向上 Scroll 指针事件，并只在向下滚动到底时恢复跟随；结合已有位置/拖动观察。测试先确认第 80 段收到，再检查真实列表底部、上滚暂停、追加文字后 index/offset 不变以及恢复跟随后到底。
+- 构建 `run.bEfS6r`；AcpConversationUiTest `run.vPdhk6` 1 项通过，无失败/跳过，仍包含模型/审批/键盘回归。`.artifacts/acp-ui/acp-scroll-reading.png` 已目视，阅读状态显示回到最新入口。Windows 实机滚轮/输入法仍未验收，未发布。
+
 ## 2026-09-24 ACP Markdown 与滚动跟随
 
 - `211f43d9325de4a90eb1854837584b55e6325f39` 助手消息复用 AssistantBody（GFM/CJK/工作台字号），工具与用户正文保持文本。使用会话持久视图状态、底部锚点与仅用户滚动触发的跟随开关，提供回到最新消息；消息/审批项使用分开的 UI key 命名空间。
