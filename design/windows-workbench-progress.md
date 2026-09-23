@@ -1,3 +1,11 @@
+## Gemini/Hermes/Grok 本机 ACP 启动与六运行器检测
+
+`00410f6`新增 LocalAcpTransport，以明确 argv 启动自有进程并串行写stdin；关闭只回收自有进程，初始化失败会清理。不自动认证或切换计费；Gemini --acp、Hermes acp、Grok --no-auto-update agent stdio。Gemini/Hermes数据目录用各自原生环境变量，不复制认证。Grok本机检测补齐官方.grok/bin及GROK_BIN_DIR，排除npm包猜测；版本命令用--no-auto-update version，远程解析补.grok/bin。六种运行器均进入本机发现清单，但发现不等于完成会话适配。
+
+构建run.Uf8l8K通过；LocalAcpTransportTest run.hh8mAd 1项（循环三种引擎）、LocalWorkspaceReadOnlyTest run.AizQgd 6项通过，无跳过。子进程fixture验证参数、cwd、Gemini/Hermes数据根和只关闭自有进程；未验证三种真实原生ACP/登录/模型推理，未开放其新建或发布。
+
+服务器Agent报告已返回：grok-hermes-protocol.md的命令经官方Hermes ACP页及xAI headless-scripting.md复核，已用于本轮实现。shared-mcp-review.md存在OpenCode项目配置层级的过宽结论，已要求原Agent纠正并补OAuth删除行为依据；修订报告已取回待后续实施审查。yxi_pilot已继续收集六种插件官方图标，产物目录windows-test-reports/plugin-brand-assets/，仅审核后集成。
+
 ## ACP 通信基础与 yunxi Agent 分工
 
 `5238892`新增 AcpClient：JSON-RPC 2.0初始化、显式认证、session/new、prompt、cancel、原生权限选项回复；请求ID区分数字/文本，写入串行化，读帧限长，事件拥塞明确失败而非静默丢失。客户端未实现的文件/终端能力不声明，不支持请求返回method-not-found。prompt超时保持会话未确认，不自动重发；取消通知不冒充原生轮次结束。
