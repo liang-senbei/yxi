@@ -1,3 +1,9 @@
+## 2026-09-24 Hermes 真实 ACP 完整文本轮次
+
+- `47c88888d4af881c050a26cc964a80df448701ac` 新增真实 Hermes 0.21.4 回环模型测试。按固定源码的原生 config.yaml/.env 格式配置隔离 custom 提供方，LocalAcpTasks 识别原生认证方法、authenticate、创建会话，控制器发送并接收实际 ACP 回复。
+- 产品构建 `run.aTLmDv` 与 Hermes 变体成功；HermesAcpConversationNativeTest `run.O2cxsT` 1 项通过，无失败/跳过。HTTP 服务核对模型 fixture-hermes 与假 Bearer 头，实际请求2次，收到 HERMES_NATIVE_TURN_CONFIRMED，原生 stopReason=end_turn，队列 RuntimeTurnState.Completed，持久任务 key 一致。记录模型为 custom:fixture-hermes；证据 `.artifacts/hermes-native/native-turn.json`。
+- Hermes 本体与适配代码真实运行，模型端点是本地 fixture；不代表公网供应商、Nous Portal 登录、原生工具审批/模型切换或 Windows/macOS 已验收。未发布。
+
 ## 2026-09-24 Gemini 原生认证拒绝与创建恢复
 
 - `c3f6d8e1da5c49f567020a7b9496a8dad2f7d2be` 扩展真实 Gemini 0.34.0 测试：未登录 session/new 返回标准 -32000；通过实际 LocalAcpTasks 创建得到先登录提示，保留初始化/认证选项，任务索引为空，未知创建标记为空，未写 oauth_creds.json。
