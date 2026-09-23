@@ -78,6 +78,7 @@ internal val compactControlHeight: Dp
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable private fun ModelSearchPopup(models: List<ProviderModels.Model>, value: String, dismiss: () -> Unit, pick: (String) -> Unit) {
     val t = Tokens.current
     var query by remember { mutableStateOf(TextFieldValue()) }
@@ -118,6 +119,11 @@ internal val compactControlHeight: Dp
                     itemsIndexed(shown) { row, model ->
                         val interaction = remember { MutableInteractionSource() }
                         val hover by interaction.collectIsHoveredAsState()
+                        TooltipArea(tooltip = {
+                            Surface(Modifier.widthIn(max = 420.dp), color = t.surface3, shape = RoundedCornerShape(6.dp), shadowElevation = 4.dp) {
+                                Text(model.id, Modifier.padding(10.dp), color = t.textPrimary, fontSize = 13.sp)
+                            }
+                        }) {
                         Row(Modifier.fillMaxWidth().background(if (row == index || hover) t.hover else t.surface2, RoundedCornerShape(5.dp))
                             .hoverable(interaction).clickable { pick(model.id) }.padding(horizontal = 10.dp, vertical = 9.dp),
                             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -126,6 +132,7 @@ internal val compactControlHeight: Dp
                                 model.owner?.takeIf { it.isNotBlank() }?.let { Text(it, fontSize = 11.sp, color = t.textMuted, maxLines = 1) }
                             }
                             if (model.id == value) Icon(Icons.Outlined.Check, "当前模型", Modifier.size(16.dp), tint = t.accent)
+                        }
                         }
                     }
                 }

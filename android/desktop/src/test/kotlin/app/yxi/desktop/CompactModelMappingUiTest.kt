@@ -27,7 +27,8 @@ class CompactModelMappingUiTest {
     @Test fun `compact table renders and real popup keyboard selection does not grow form`() {
         check(File("/.dockerenv").isFile && File("/sys/class/net").list()?.toSet() == setOf("lo"))
         System.setProperty("skiko.renderApi", "SOFTWARE")
-        val models = listOf(ProviderModels.Model("glm-5.3-flash"), ProviderModels.Model("glm-5.3"), ProviderModels.Model("deepseek-chat"))
+        val longModel = "vendor/research-model-with-a-long-name-and-full-context-2026-09-23"
+        val models = listOf(ProviderModels.Model("glm-5.3-flash"), ProviderModels.Model("glm-5.3"), ProviderModels.Model("deepseek-chat"), ProviderModels.Model(longModel))
         val modelValues = mutableStateMapOf("SONNET" to "glm-5.3-flash[1m]", "OPUS" to "glm-5.3[1m]", "FABLE" to "", "HAIKU" to "glm-5.3-flash", "SUBAGENT" to "")
         val names = mutableStateMapOf("SONNET" to "glm-5.3-flash", "OPUS" to "glm-5.3", "FABLE" to "", "HAIKU" to "glm-5.3-flash")
         var interaction by mutableStateOf(false)
@@ -47,7 +48,7 @@ class CompactModelMappingUiTest {
                         })), remember { Conn(Host("fixture", "hk13 · 隔离预览", "192.0.2.1"), NoHostKeys) }, {}, {})
                     else {
                     Column(Modifier.fillMaxSize().background(Tokens.current.surface2).verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Text("编辑供应商 · Claude Code", style = MaterialTheme.typography.titleLarge)
+                        Text("编辑供应商 · Claude Code", style = MaterialTheme.typography.titleLarge, color = Tokens.current.textPrimary)
                         if (interaction) CompactModelInput(selected, models, { selected = it }, "测试模型",
                             Modifier.width(460.dp).onGloballyPositioned { bounds = it.boundsInWindow() })
                         else Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Tokens.current.border), color = Tokens.current.surface2) {
@@ -92,11 +93,22 @@ class CompactModelMappingUiTest {
                         assertEquals("deepseek-chat", selected)
                         openPicker(); key(KeyEvent.VK_UP); key(KeyEvent.VK_ESCAPE); delay(200)
                         assertEquals("deepseek-chat", selected, "Escape must not apply the highlighted item")
+                        openPicker(); key(KeyEvent.VK_V); key(KeyEvent.VK_E); key(KeyEvent.VK_N); delay(300)
+                        val b = requireNotNull(bounds)
+                        withContext(Dispatchers.IO) { Robot().mouseMove(window.locationOnScreen.x + b.right.toInt() - 120,
+                            window.locationOnScreen.y + b.bottom.toInt() + 72) }
+                        delay(900); screenshot("model-picker-long-id")
+                        key(KeyEvent.VK_ENTER); delay(300)
+                        assertEquals(longModel, selected, "The full model ID must survive visual ellipsis")
+                        assertEquals(before, bounds)
                         fullForm = true; delay(700)
                         withContext(Dispatchers.IO) { Robot().apply {
-                            mouseMove(window.locationOnScreen.x + 900, window.locationOnScreen.y + 600); mouseWheel(8)
+                            mouseMove(window.locationOnScreen.x + 900, window.locationOnScreen.y + 600); mouseWheel(7)
                         } }
                         delay(700); screenshot("provider-editor-production")
+                        Store.setPref("theme", "dark"); theme = "dark"; delay(600)
+                        withContext(Dispatchers.IO) { Robot().mouseWheel(7) }
+                        delay(700); screenshot("provider-editor-production-dark")
                     } catch (e: Throwable) { failure = e }
                     finally { exitApplication() }
                 }
