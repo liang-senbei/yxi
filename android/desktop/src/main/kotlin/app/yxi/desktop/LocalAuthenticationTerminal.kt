@@ -35,11 +35,15 @@ internal class LocalAuthenticationTerminal private constructor(private val proce
         }
     }
     companion object {
-        suspend fun start(plan: AcpTerminalAuthPlan): LocalAuthenticationTerminal = withContext(Dispatchers.IO) {
-            val environment = plan.environment.toMutableMap().apply { putIfAbsent("TERM", "xterm-256color") }
-            val process = PtyProcessBuilder(plan.command.toTypedArray()).setDirectory(plan.directory).setEnvironment(environment)
-                .setInitialColumns(120).setInitialRows(30).setUseWinConPty(true).start()
-            try { LocalAuthenticationTerminal(process) } catch (e: Exception) { LocalRuntimeDiscovery.stopOwnedProcess(process); throw e }
+        suspend fun start(plan: AcpTerminalAuthPlan): LocalAuthenticationTerminal {
+            var owned: LocalAuthenticationTerminal? = null
+            try { return withContext(Dispatchers.IO) {
+                val environment = plan.environment.toMutableMap().apply { putIfAbsent("TERM", "xterm-256color") }
+                val process = PtyProcessBuilder(plan.command.toTypedArray()).setDirectory(plan.directory).setEnvironment(environment)
+                    .setInitialColumns(120).setInitialRows(30).setUseWinConPty(true).start()
+                try { LocalAuthenticationTerminal(process).also { owned = it } }
+                catch (e: Exception) { LocalRuntimeDiscovery.stopOwnedProcess(process); throw e }
+            } } catch (e: Exception) { owned?.close(); throw e }
         }
     }
 }

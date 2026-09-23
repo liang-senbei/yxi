@@ -24,7 +24,8 @@ class LocalAcpTasksTest {
             val request = JSONObject(text); val method = request.getString("method"); methods.add(method)
             if (method == "session/new" && failCreate) return false
             val result = when (method) {
-                "initialize" -> JSONObject().put("protocolVersion", 1).put("authMethods", JSONArray().put(JSONObject().put("id", "login").put("name", "Native login")))
+                "initialize" -> JSONObject().put("protocolVersion", 1).put("authMethods", JSONArray().put(JSONObject().put("id", "login").put("name", "Native login"))
+                    .put(JSONObject().put("id", "setup").put("name", "Setup").put("type", "terminal").put("args", JSONArray().put("--setup"))))
                 "authenticate" -> JSONObject()
                 "session/new" -> JSONObject().put("sessionId", "fixture-session").put("configOptions", options("fixture/a"))
                 "session/set_config_option" -> JSONObject().put("configOptions", options(request.getJSONObject("params").getString("value")))
@@ -76,6 +77,28 @@ class LocalAcpTasksTest {
                 assertEquals("", tasks.recoverySessionId)
                 assertFalse("session/prompt" in fixture.methods)
             }
+        }
+    }
+    @Test fun `terminal authentication reconnects only after zero exit without authenticate RPC`(): Unit = runBlocking(Dispatchers.Swing) {
+        val fixtures = mutableListOf<Fixture>()
+        val runtime = LocalRuntimeInstallation("hermes", "fixture", listOf("fixture"), root.path, "1")
+        LocalAcpTasks(InstructionQueue(File(root, "terminal-queue.json")), File(root, "terminal-index.json")) { _, _ ->
+            val fixture = Fixture().also { fixtures.add(it) }
+            AcpClient(fixture).also { it.initialize() }
+        }.use { tasks ->
+            tasks.prepare(runtime, root.path)
+            tasks.authenticateTerminal("setup") { plan ->
+                assertEquals(listOf("fixture", "acp", "--setup"), plan.command)
+                assertTrue(fixtures.first().closed)
+                0
+            }
+            assertEquals(2, fixtures.size)
+            assertNotNull(tasks.initialization)
+            assertTrue(fixtures.all { "authenticate" !in it.methods })
+            assertFailsWith<IllegalStateException> { tasks.authenticateTerminal("setup") { 7 } }
+            assertEquals(2, fixtures.size)
+            assertNull(tasks.initialization)
+            assertTrue(fixtures.all { it.closed })
         }
     }
     @Test fun `unconfirmed native creation survives restart and cannot be retried implicitly`() = runBlocking(Dispatchers.Swing) {

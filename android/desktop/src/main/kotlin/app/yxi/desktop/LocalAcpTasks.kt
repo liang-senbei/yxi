@@ -61,6 +61,29 @@ internal class LocalAcpTasks(private val queue: InstructionQueue, file: File,
         try { checkNotNull(prepared.get()) { "请先选择并连接运行器" }.authenticate(methodId) }
         finally { busy = false }
     }
+    suspend fun authenticateTerminal(methodId: String, interactive: suspend (AcpTerminalAuthPlan) -> Int) = operation.withLock {
+        check(!disposed && recoverySessionId.isBlank())
+        val installation = checkNotNull(runtime)
+        val cwd = directory
+        val generation = preparationGeneration.get()
+        val methods = checkNotNull(initialization).getJSONArray("authMethods")
+        val method = (0 until methods.length()).map { methods.getJSONObject(it) }.single { it.getString("id") == methodId }
+        val plan = acpTerminalAuthPlan(installation, File(cwd), method)
+        busy = true
+        prepared.getAndSet(null)?.close()
+        var renewed: AcpClient? = null
+        try {
+            val exitCode = interactive(plan)
+            check(exitCode == 0) { "认证终端退出码为 $exitCode，未确认配置成功" }
+            check(!disposed && preparationGeneration.get() == generation) { "认证已取消" }
+            renewed = connect(installation, File(cwd))
+            check(!disposed && preparationGeneration.get() == generation) { "认证连接已取消" }
+            prepared.set(renewed)
+            initialization = JSONObject(checkNotNull(renewed.initialization).toString())
+        } catch (e: Exception) {
+            renewed?.close(); runtime = null; initialization = null; throw e
+        } finally { busy = false }
+    }
     suspend fun create(title: String): LocalCodexTaskRecord = operation.withLock {
         check(!disposed && recoverySessionId.isBlank()); registry.requireWritable()
         val client = checkNotNull(prepared.get()) { "请先连接运行器" }

@@ -22,6 +22,8 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import java.io.File
 
+private class AcpPendingAuthentication(val plan: AcpTerminalAuthPlan, val completion: kotlinx.coroutines.CompletableDeferred<Int>)
+
 @Composable internal fun NewAcpConversationDialog(state: AppState, runtime: LocalRuntimeInstallation, dismiss: () -> Unit, created: (LocalCodexTaskRecord) -> Unit) {
     val tasks = state.localAcpTasks
     val scope = rememberCoroutineScope()
@@ -30,7 +32,15 @@ import java.io.File
     var connectedDirectory by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
     var reviewed by remember(tasks.recoverySessionId) { mutableStateOf(false) }
+    var terminalAuthentication by remember { mutableStateOf<AcpPendingAuthentication?>(null) }
     DisposableEffect(tasks) { onDispose { tasks.abandonPreparation() } }
+    terminalAuthentication?.let { pending ->
+        AcpAuthenticationDialog(pending.plan) { code, message ->
+            if (code == null) pending.completion.completeExceptionally(IllegalStateException(message ?: "认证未完成"))
+            else pending.completion.complete(code)
+        }
+        return
+    }
     WorkbenchDialog(onDismissRequest = { if (!tasks.busy) dismiss() }, title = { Text("本地 · ${LocalRuntimeDiscovery.title(runtime.engine)}") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("ACP 接入预览 · 使用运行器自己的账号与配置；创建后不会自动发送消息。", style = MaterialTheme.typography.bodySmall)
@@ -45,7 +55,13 @@ import java.io.File
                 val methods = tasks.initialization?.optJSONArray("authMethods")
                 for (index in 0 until (methods?.length() ?: 0)) {
                     val method = methods!!.getJSONObject(index)
-                    TextButton({ scope.launch { error = ""; runCatching { tasks.authenticate(method.getString("id")) }.onFailure { error = it.message.orEmpty() } } }, enabled = !tasks.busy) {
+                    TextButton({ scope.launch { error = ""; runCatching {
+                        if (method.optString("type", "agent") == "terminal") tasks.authenticateTerminal(method.getString("id")) { plan ->
+                            val completion = kotlinx.coroutines.CompletableDeferred<Int>()
+                            terminalAuthentication = AcpPendingAuthentication(plan, completion)
+                            try { completion.await() } finally { terminalAuthentication = null }
+                        } else tasks.authenticate(method.getString("id"))
+                    }.onFailure { error = it.message.orEmpty(); if (tasks.initialization == null) connectedDirectory = "" } } }, enabled = !tasks.busy) {
                         Text(method.optString("name").ifBlank { method.getString("id") })
                     }
                 }

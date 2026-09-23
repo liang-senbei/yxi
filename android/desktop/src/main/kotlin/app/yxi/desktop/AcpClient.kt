@@ -110,9 +110,10 @@ internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
         } catch (e: Exception) { shutdown(e) }
     } }
 
-    suspend fun initialize(): JSONObject {
+    suspend fun initialize(terminalAuthentication: Boolean = false): JSONObject {
         check(!initialized)
-        val result = request("initialize", JSONObject().put("protocolVersion", 1).put("clientCapabilities", JSONObject())
+        val capabilities = JSONObject().apply { if (terminalAuthentication) put("auth", JSONObject().put("terminal", true)) }
+        val result = request("initialize", JSONObject().put("protocolVersion", 1).put("clientCapabilities", capabilities)
             .put("clientInfo", JSONObject().put("name", "yxi").put("version", "1")))
         if (result.optInt("protocolVersion") != 1) { close(); error("运行器 ACP 版本不兼容") }
         initialization = result; initialized = true

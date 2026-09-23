@@ -84,7 +84,7 @@ fun TermPane(conn: Conn, session: Session) {
 }
 
 /** JediTerm 外观：终端永远深底（手机端同一条规矩：ANSI 彩色是按深底配的），等宽字体要带 CJK。 */
-private class TermSettings : DefaultSettingsProvider() {
+internal class TermSettings : DefaultSettingsProvider() {
     private val win = System.getProperty("os.name").startsWith("Windows")
 
     override fun getTerminalFont(): Font = Font(if (win) "NSimSun" else "Monospaced", Font.PLAIN, 14)

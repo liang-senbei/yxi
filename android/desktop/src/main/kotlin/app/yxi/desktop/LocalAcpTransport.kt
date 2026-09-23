@@ -55,7 +55,7 @@ internal class LocalAcpTransport private constructor(private val process: Proces
         }
         suspend fun connect(runtime: LocalRuntimeInstallation, directory: File): AcpClient {
             val client = AcpClient(start(runtime, directory))
-            try { client.initialize(); return client } catch (e: Exception) { client.close(); throw e }
+            try { client.initialize(terminalAuthentication = true); return client } catch (e: Exception) { client.close(); throw e }
         }
     }
 }
