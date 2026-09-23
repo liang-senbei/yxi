@@ -1,3 +1,9 @@
+## 2026-09-24 ACP 审批页渲染与点击验收
+
+- `85cebe7` 新增真实 Compose 窗口+Robot 点击：同名允许选项展示不同权限范围，点击本次允许后必须返回原生 optionId=once。初版 `run.AGoKiW` 通过，但目视发现胶囊按钮过宽。
+- `040909db500745e104dff23017cc726ad7f8518e` 改为 8dp 小圆角、紧凑 FlowRow 可换行排列。构建 `run.qiTKFT`，AcpConversationUiTest `run.6alsZp` 1 项通过，无失败/跳过；截图 `.artifacts/acp-ui/acp-approval-compact.png` 已目视核对，无裁切，范围标签清楚。
+- 使用协议 fixture 和 Linux 隔离窗口；不代表 Windows DPI/IME 或 Hermes 原生审批已验收。未发布。
+
 ## 2026-09-24 ACP 对话模式菜单接入
 
 - `302dd04bf541da87a31571503b62853705c17ab5` 对话页读取原生 availableModes/currentModeId，菜单调用控制器 changeMode；切换与发送串行，等待 ACK 和事件 fence 后更新显示。未知结果禁用继续发送，原生模式通知同步到 Compose 状态，不提供虚构模式。
