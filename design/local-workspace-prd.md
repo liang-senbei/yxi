@@ -4,6 +4,8 @@
 
 输入：用户本轮五张截图及“先调研、出 PRD”要求。本 PRD 扩展原 [Windows 工作台 PRD](windows-workbench-prd.md)，不缩小原范围。事实及来源见 [调研报告](research/local-runtimes-2026-09-23.md)。配置视觉单列为 [模型映射 PRD](provider-editor-prd.md)。
 
+用户追加参考项目：[Golutra对照评估](research/golutra-reference-review.md)。仅参考适配、派发和协作交互，保持本PRD主机/运行器/供应商/会话四维方案及既定界面，不移植受限许可源码或替换技术栈。
+
 ## 1. 要交付的体验
 
 打开 Yxi，左上角就能选择“本地”。用户看到此电脑的项目和已有 Agent 会话，能继续原来的 Codex 对话；首次新建默认“官方订阅”，不必重新填写 API Key。用户仍可为不同 Agent 指定第三方供应商。
