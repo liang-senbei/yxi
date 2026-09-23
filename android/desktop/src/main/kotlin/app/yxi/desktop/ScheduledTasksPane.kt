@@ -31,13 +31,14 @@ import java.util.UUID
         } }
         items(store.tasks.sortedBy { it.next }, key = { it.id }) { task ->
             val active = store.runs.any { it.schedule == task.id && it.status == "执行中" }
+            val last = store.runs.lastOrNull { it.schedule == task.id }
             OutlinedCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row { Text(task.name, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium); Text(if (active) "执行中" else if (task.enabled) "已启用" else "已暂停", color = Tokens.current.textMuted) }
+                Row { Text(task.name, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium); Text(if (active) "执行中" else if (task.enabled) "已启用" else if (task.repeat == "一次" && last != null) last.status else "已暂停", color = Tokens.current.textMuted) }
                 Text(task.target.label)
                 Text("${task.repeat} · ${scheduleTime(task.next, task.zone)} · ${task.zone}", style = MaterialTheme.typography.bodySmall)
                 Text(task.prompt, maxLines = 3)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton({ action { if (task.enabled) store.pause(task.id) else store.resume(task.id, System.currentTimeMillis()) } }, enabled = !active) { Text(if (task.enabled) "暂停" else "恢复") }
+                    if (task.repeat != "一次" || last == null) TextButton({ action { if (task.enabled) store.pause(task.id) else store.resume(task.id, System.currentTimeMillis()) } }, enabled = !active) { Text(if (task.enabled) "暂停" else "恢复") }
                     TextButton({ editor = task }, enabled = !active) { Text("编辑") }
                     TextButton({ history = task.id }) { Text("执行记录") }
                     TextButton({ action { store.remove(task.id) } }, enabled = !active) { Text("删除") }
