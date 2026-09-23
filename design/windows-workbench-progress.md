@@ -1,3 +1,9 @@
+## 2026-09-23 共享 MCP 变量引用基础
+
+- 实现提交 `5a34d323ce139fae8e32dba790537ed26799a86a`：定义保存插件专用环境变量名及请求头变量名，按 Claude/Codex/OpenCode 格式生成配置；不保存变量实际值。注册时复制集合，Codex 读回只接受声明的引用并拒绝额外认证字段。
+- 隔离构建 `run.upcaT9` 成功；`LocalCodexProfilesTest` 5 项通过（`run.lJkGvT`），`SharedMcpRegistryTest` 4 项通过（`run.Ompk10`），均无失败和跳过。
+- 尚未完成：界面输入、三家真实运行器的变量展开和缺失变量行为验收。尤其需要验证 Codex 读回的 env_vars 规范化形态，以及 OpenCode 动态 MCP API 是否展开引用；当前测试只证明配置层校验，不代表原生认证可用。未发布。
+
 ## Codex 终端新建与项目层冲突检查
 
 `584fc75`统一DesktopLaunchPlan参数传递：权限、Claude配置路径、Codex MCP覆盖全部作为独立argv传入，不把值拼进内层shell代码。Codex原始终端新建读取同一共享意向；先准备实际目录/独立worktree，再按该cwd读取原生有效配置并拒绝同名/保留名，随后启动。准备阶段不创建tmux会话。
