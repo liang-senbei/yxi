@@ -1,3 +1,8 @@
+## 2026-09-24 本地 ACP 通知接线
+
+- `dfb5cc6c18a0f617cc82dbf23fbd3b0d0606c603` 本地ACP管理器将控制器通知连到Notify现有偏好过滤，使用完整taskKey和用户显示名称。Main新增本地登记优先的通知定位，支持本地Codex/OpenCode/ACP记录，否则查找远端，不新建或恢复原生会话。
+- Windows本机执行 LocalAcpTasksTest 4项及 AcpTaskControllerTest 4项，共8项通过，0失败/错误/跳过。三种ACP引擎的内存协议fixture均确认创建不通知、原生结束回执后通知携带正确taskKey；既有取消/未知/重连语义回归通过。
+- XML证据 `.artifacts/windows-local-acp-notifications/`。未启动原生AI或真实登录；本地通知点击路由本轮仅编译核对，实际Windows气泡与完整焦点/静音组合仍待验收。未发布。
 ## 2026-09-24 原生会话静音入口与 Windows 偏好验证
 
 - `551b5f69` 在共享远端原生会话行补齐静音/恢复任务通知入口，适用于OpenCode与ACP；使用现有完整taskKey存储，不按显示名称静音。
