@@ -9,6 +9,7 @@ import java.net.URI
 /** Machine-owned resource definition. Native credentials remain with each runtime. */
 internal data class SharedMcpDefinition(val hostKey: String, val pluginId: String, val sourceId: String, val version: String,
     val name: String, val command: List<String> = emptyList(), val url: String? = null) {
+    val identity get() = listOf(hostKey, pluginId, sourceId)
     val key get() = contentHash(JSONArray(listOf(hostKey, pluginId, sourceId, version)).toString().toByteArray())
     fun validate() {
         require(listOf(hostKey, pluginId, sourceId, version).all { it.isNotBlank() && it.length <= 2048 && it.none { c -> c < ' ' } })
@@ -36,7 +37,7 @@ internal data class SharedMcpDefinition(val hostKey: String, val pluginId: Strin
     }
 }
 
-internal data class SharedMcpRecord(val definition: SharedMcpDefinition, val desiredRunners: Set<String>, val revision: Long)
+internal data class SharedMcpRecord(val definition: SharedMcpDefinition, val desiredRunners: Set<String>, val revision: Long, val retired: Boolean = false)
 
 /** These are desired bindings, never a claim that a runtime loaded or authenticated the server. */
 internal class SharedMcpRegistry(file: File) {
@@ -53,7 +54,7 @@ internal class SharedMcpRegistry(file: File) {
             if (recoveryReviewRequired) problem = "共享插件索引从备份恢复，请核对后再修改"
         } catch (_: Exception) { problem = "共享插件索引无法读取，已保留原文件" }
     }
-    fun forHost(hostKey: String) = records.filter { it.definition.hostKey == hostKey }
+    fun forHost(hostKey: String, includeRetired: Boolean = false) = records.filter { it.definition.hostKey == hostKey && (includeRetired || !it.retired) }
     fun confirmRecoveryReviewed() {
         check(recoveryReviewRequired)
         check(recovery.delete()) { "核对标记无法更新" }
@@ -65,23 +66,64 @@ internal class SharedMcpRegistry(file: File) {
         require(desiredRunners.all { it in setOf("claude", "codex", "opencode") })
         val previous = records.singleOrNull { it.definition.key == definition.key }
         check(previous?.revision == expectedRevision) { "共享插件已变化，请刷新后重试" }
-        check(records.none { it.definition.key != definition.key && it.definition.hostKey == definition.hostKey && it.definition.name == definition.name }) { "此机器已登记同名 MCP，不能覆盖其它插件或版本" }
+        check(previous?.retired != true) { "历史版本不能直接修改，请选择恢复或替换版本" }
+        check(records.none { !it.retired && it.definition.key != definition.key &&
+            (it.definition.identity == definition.identity || (it.definition.hostKey == definition.hostKey && it.definition.name == definition.name)) }) { "此机器已登记同名 MCP 或其它活动版本，请使用版本替换" }
         val next = SharedMcpRecord(definition.copy(command = definition.command.toList()), desiredRunners.toSet(), (previous?.revision ?: -1) + 1)
         val updated = records.filterNot { it.definition.key == definition.key } + next
-        disk.write(JSONArray(updated.map { JSONObject().put("definition", it.definition.json()).put("runners", JSONArray(it.desiredRunners.sorted())).put("revision", it.revision) }).toString())
-        records = updated
+        commit(updated)
         return next
+    }
+    /** Desired version transition only; native binding receipts remain separate and may still reference the old version. */
+    @Synchronized fun replaceVersion(currentKey: String, expectedRevision: Long, definition: SharedMcpDefinition): SharedMcpRecord {
+        val current = current(currentKey, expectedRevision)
+        check(!current.retired)
+        definition.validate()
+        require(definition.identity == current.definition.identity && definition.name == current.definition.name && definition.key != currentKey) { "版本替换必须属于同一机器、插件、来源及名称" }
+        val historic = records.singleOrNull { it.definition.key == definition.key }
+        check(historic == null || (historic.retired && historic.definition == definition)) { "历史版本内容不一致，不能覆盖回滚记录" }
+        val next = SharedMcpRecord(definition.copy(command = definition.command.toList()), current.desiredRunners.toSet(), (historic?.revision ?: -1) + 1)
+        val updated = records.filterNot { it.definition.key == definition.key }.map {
+            if (it.definition.key == currentKey) it.copy(retired = true, revision = it.revision + 1) else it
+        } + next
+        commit(updated)
+        return next
+    }
+    @Synchronized fun retire(key: String, expectedRevision: Long) {
+        val current = current(key, expectedRevision)
+        check(!current.retired)
+        commit(records.map { if (it.definition.key == key) it.copy(retired = true, revision = it.revision + 1) else it })
+    }
+    @Synchronized fun restore(key: String, expectedRevision: Long): SharedMcpRecord {
+        val current = current(key, expectedRevision)
+        check(current.retired)
+        check(records.none { !it.retired && (it.definition.identity == current.definition.identity ||
+            (it.definition.hostKey == current.definition.hostKey && it.definition.name == current.definition.name)) }) { "已有活动版本或同名 MCP，未恢复" }
+        val next = current.copy(retired = false, revision = current.revision + 1)
+        commit(records.map { if (it.definition.key == key) next else it })
+        return next
+    }
+    private fun current(key: String, revision: Long): SharedMcpRecord {
+        check(problem.isBlank()) { problem }
+        return records.single { it.definition.key == key }.also { check(it.revision == revision) { "共享插件已变化，请刷新" } }
+    }
+    private fun commit(updated: List<SharedMcpRecord>) {
+        disk.write(JSONArray(updated.map { JSONObject().put("definition", it.definition.json()).put("runners", JSONArray(it.desiredRunners.sorted()))
+            .put("revision", it.revision).put("retired", it.retired) }).toString())
+        records = updated
     }
     private fun decode(raw: String): List<SharedMcpRecord> {
         require(raw.length <= 4 * 1024 * 1024)
         val rows = JSONArray(raw)
         return (0 until rows.length()).map { index ->
             val row = rows.getJSONObject(index); val runners = row.getJSONArray("runners")
-            SharedMcpRecord(SharedMcpDefinition.parse(row.getJSONObject("definition")), (0 until runners.length()).map { runners.getString(it) }.toSet(), row.getLong("revision"))
+            SharedMcpRecord(SharedMcpDefinition.parse(row.getJSONObject("definition")), (0 until runners.length()).map { runners.getString(it) }.toSet(), row.getLong("revision"), row.optBoolean("retired", false))
                 .also { require(it.revision >= 0 && it.desiredRunners.all { runner -> runner in setOf("claude", "codex", "opencode") }) }
         }.also { values ->
             require(values.map { it.definition.key }.distinct().size == values.size)
-            require(values.map { it.definition.hostKey to it.definition.name }.distinct().size == values.size)
+            val active = values.filterNot { it.retired }
+            require(active.map { it.definition.hostKey to it.definition.name }.distinct().size == active.size)
+            require(active.map { it.definition.identity }.distinct().size == active.size)
         }
     }
 }

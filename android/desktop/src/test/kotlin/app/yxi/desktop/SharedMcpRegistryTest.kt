@@ -6,6 +6,32 @@ import java.io.File
 import kotlin.test.*
 
 class SharedMcpRegistryTest {
+    @Test fun `version replacement rollback retirement and restore preserve history and current runner choices`() {
+        val file = File(root, "versions.json")
+        val registry = SharedMcpRegistry(file)
+        val first = registry.save(definition(), setOf("claude", "opencode"), null)
+        val secondDefinition = definition().copy(version = "2", command = listOf("version-two", "literal argument"))
+        val second = registry.replaceVersion(first.definition.key, first.revision, secondDefinition)
+        assertEquals(2, registry.records.size)
+        assertEquals(second, registry.forHost("local").single())
+        assertTrue(registry.records.single { it.definition.version == "1" }.retired)
+        assertFailsWith<IllegalStateException> { registry.replaceVersion(first.definition.key, first.revision, secondDefinition) }
+        val edited = registry.save(secondDefinition, setOf("codex"), second.revision)
+        val rollback = registry.replaceVersion(edited.definition.key, edited.revision, first.definition)
+        assertEquals(setOf("codex"), rollback.desiredRunners)
+        assertEquals(first.definition, rollback.definition)
+        assertFailsWith<IllegalStateException> { registry.replaceVersion(rollback.definition.key, rollback.revision, secondDefinition.copy(command = listOf("tampered"))) }
+        registry.retire(rollback.definition.key, rollback.revision)
+        assertTrue(registry.forHost("local").isEmpty())
+        val restoredStore = SharedMcpRegistry(file)
+        assertEquals(2, restoredStore.forHost("local", includeRetired = true).size)
+        val retired = restoredStore.records.single { it.definition.version == "1" }
+        val restored = restoredStore.restore(retired.definition.key, retired.revision)
+        assertEquals(setOf("codex"), restored.desiredRunners)
+        val otherVersion = restoredStore.records.single { it.definition.version == "2" }
+        assertFailsWith<IllegalStateException> { restoredStore.restore(otherVersion.definition.key, otherVersion.revision) }
+        assertEquals(1, SharedMcpRegistry(file).forHost("local").size)
+    }
     @TempDir lateinit var root: File
     private fun definition(host: String = "local") = SharedMcpDefinition(host, "fixture", "official-source", "1", "fixture",
         listOf("C:\\Program Files\\MCP\\server.exe", "argument with spaces", "literal;$(not-a-shell)"))

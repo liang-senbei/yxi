@@ -25,7 +25,7 @@ internal class OpenCodeMcpBindings(private val hostKey: String, private val serv
         check(problem == null) { problem.orEmpty() }
         val definition = record.definition
         definition.validate()
-        require(definition.hostKey == hostKey && "opencode" in record.desiredRunners) { "共享插件未选择此机器的 OpenCode" }
+        require(!record.retired && definition.hostKey == hostKey && "opencode" in record.desiredRunners) { "共享插件未选择此机器的 OpenCode 或已退役" }
         check(last == null) { "已有加载记录，请核对原操作；不覆盖记录或重复写入" }
         check(!client.mcpStatus().has(definition.name)) { "原生运行器已有同名 MCP，未覆盖" }
         val pending = JSONObject().put("operationId", UUID.randomUUID().toString()).put("serviceId", serviceId)
