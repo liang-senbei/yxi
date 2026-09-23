@@ -1,3 +1,9 @@
+## 2026-09-24 Gemini 真实 ACP 完整文本轮次
+
+- `db476e6e326b78b7f76fed057f1f9c05ba2a48ac` 使用真实 Gemini CLI 0.34.0、进程内假 GEMINI_API_KEY/回环 GOOGLE_GEMINI_BASE_URL/GEMINI_MODEL，实际 LocalAcpTasks 认证、新建和控制器发送；Google 协议 HTTP fixture 核对 x-goog-api-key，并返回固定 SSE 内容。
+- 产品构建 `run.ossZQ2` 与 Gemini 变体成功；GeminiAcpConversationNativeTest `run.Ty8gGR` 1 项通过，无失败/跳过。真实请求 /v1beta/models/gemini-2.5-flash:streamGenerateContent，收到 GEMINI_NATIVE_TURN_CONFIRMED、stopReason=end_turn、RuntimeTurnState.Completed，任务记录模型正确，未生成 OAuth 凭据。证据 `.artifacts/gemini-native/native-turn.json`。
+- 模型服务为本地 fixture，不是 Google 官方账号/配额验收；原生工具审批、模型切换与 Windows/macOS 仍待验证。未发布。
+
 ## 2026-09-24 ACP 明确模型拒绝后的继续发送
 
 - `8dfa00fb55fee03b686c2dd89a42c353140acaca` 对 session/set_model 的 -32601/-32602 明确拒绝释放设置操作占用，保留原模型；控制器提示选择未被接受而非停用会话。超时、内部错误继续按未知处理，不自动重发。
