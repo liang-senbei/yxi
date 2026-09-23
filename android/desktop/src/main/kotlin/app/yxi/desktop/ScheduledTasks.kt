@@ -104,7 +104,11 @@ internal class ScheduleDispatcher(private val state: AppState) : AutoCloseable {
         runCatching { state.scheduledTasks.claim(System.currentTimeMillis()) }.getOrNull()?.let { (task, run) ->
             launch {
                 try { execute(task, run) }
-                catch (e: Exception) { runCatching { state.scheduledTasks.finish(run.id, "结果未确认", e.message ?: "请核对目标任务") } }
+                catch (e: Exception) { runCatching {
+                    val queued = state.instructions.entries.firstOrNull { it.id == run.id }
+                    if (queued?.status == InstructionStatus.Local) state.instructions.cancel(queued.id, queued.revision)
+                    state.scheduledTasks.finish(run.id, if (queued?.status == InstructionStatus.Local) "跳过" else "结果未确认", e.message ?: "请核对目标任务")
+                } }
             }
         }
         delay(1000)
