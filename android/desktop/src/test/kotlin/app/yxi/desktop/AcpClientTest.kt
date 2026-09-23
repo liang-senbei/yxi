@@ -12,12 +12,17 @@ class AcpClientTest {
     @Test fun `mode selection uses native options and ambiguous changes block sending`() = runBlocking {
         val fixture = Fixture()
         var acknowledge = true
+        var notifyMode: String? = null
         fixture.handler = { request -> when (request.optString("method")) {
             "initialize" -> fixture.result(request, JSONObject().put("protocolVersion", 1))
             "session/new" -> fixture.result(request, JSONObject().put("sessionId", "fixture-session").put("modes", JSONObject()
                 .put("currentModeId", "ask").put("availableModes", JSONArray().put(JSONObject().put("id", "ask").put("name", "Ask"))
                     .put(JSONObject().put("id", "plan").put("name", "Plan")))))
-            "session/set_mode" -> if (acknowledge) fixture.result(request, JSONObject())
+            "session/set_mode" -> if (acknowledge) {
+                notifyMode?.let { mode -> fixture.emit(JSONObject().put("method", "session/update").put("params", JSONObject()
+                    .put("sessionId", "fixture-session").put("update", JSONObject().put("sessionUpdate", "current_mode_update").put("currentModeId", mode)))) }
+                fixture.result(request, JSONObject())
+            }
         } }
         AcpClient(fixture).use { client ->
             client.initialize(); client.newSession("/fixture")
@@ -26,6 +31,9 @@ class AcpClientTest {
             assertEquals("plan", client.modes("fixture-session")?.getString("currentModeId"))
             client.modes("fixture-session")?.put("currentModeId", "tampered")
             assertEquals("plan", client.modes("fixture-session")?.getString("currentModeId"))
+            notifyMode = "ask"
+            client.setMode("fixture-session", "plan")
+            assertEquals("ask", client.modes("fixture-session")?.getString("currentModeId"))
             acknowledge = false
             assertFailsWith<TimeoutCancellationException> { client.setMode("fixture-session", "ask", 100) }
             assertFailsWith<IllegalStateException> { client.prompt("fixture-session", "must not send", 100) }

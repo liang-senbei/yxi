@@ -25,6 +25,7 @@ internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
     private val approvals = ConcurrentHashMap<String, JSONObject>()
     private val sessions = ConcurrentHashMap.newKeySet<String>()
     private val sessionModes = ConcurrentHashMap<String, JSONObject>()
+    private val notifiedModes = ConcurrentHashMap<String, String>()
     private val activePrompts = ConcurrentHashMap.newKeySet<String>()
     private val cancellingSessions = ConcurrentHashMap.newKeySet<String>()
     private val closed = AtomicBoolean()
@@ -47,6 +48,17 @@ internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
                     val message = JSONObject(raw)
                     check(message.optString("jsonrpc") == "2.0") { "ACP 返回了无法识别的协议数据" }
                     if (message.has("method")) {
+                        if (message.optString("method") == "session/update") {
+                            val params = message.getJSONObject("params")
+                            val update = params.getJSONObject("update")
+                            if (update.optString("sessionUpdate") == "current_mode_update") {
+                                val session = params.getString("sessionId")
+                                val mode = update.getString("currentModeId")
+                                check(session.isNotBlank() && mode.isNotBlank() && (notifiedModes.containsKey(session) || notifiedModes.size < 256))
+                                notifiedModes[session] = mode
+                                sessionModes.computeIfPresent(session) { _, previous -> JSONObject(previous.toString()).put("currentModeId", mode) }
+                            }
+                        }
                         if (message.has("id")) {
                             if (message.getString("method") != "session/request_permission") {
                                 write(JSONObject().put("id", message.get("id")).put("error", JSONObject().put("code", -32601).put("message", "Client capability not supported")))
@@ -88,7 +100,9 @@ internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
         require(directory.isNotBlank() && directory.none { it < ' ' })
         return request("session/new", JSONObject().put("cwd", directory).put("mcpServers", JSONArray())).also {
             val id = it.getString("sessionId"); check(id.isNotBlank()); sessions.add(id)
-            it.optJSONObject("modes")?.let { modes -> sessionModes[id] = JSONObject(modes.toString()) }
+            it.optJSONObject("modes")?.let { modes -> sessionModes.compute(id) { _, _ ->
+                JSONObject(modes.toString()).apply { notifiedModes[id]?.let { current -> put("currentModeId", current) } }
+            } }
         }
     }
     fun modes(sessionId: String): JSONObject? = sessionModes[sessionId]?.let { JSONObject(it.toString()) }
@@ -101,7 +115,10 @@ internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
         check(activePrompts.add(sessionId)) { "会话仍有未确认操作，暂不能切换模式" }
         // An ambiguous mode change blocks sending: the permission semantics may have changed.
         request("session/set_mode", JSONObject().put("sessionId", sessionId).put("modeId", modeId), timeoutMillis)
-        sessionModes[sessionId] = JSONObject(modes.toString()).put("currentModeId", modeId)
+        // A native notification received while awaiting acknowledgement is more current than our request.
+        sessionModes.computeIfPresent(sessionId) { _, current ->
+            if (current === modes) JSONObject(current.toString()).put("currentModeId", modeId) else current
+        }
         activePrompts.remove(sessionId)
     }
     suspend fun prompt(sessionId: String, text: String, timeoutMillis: Long = 600_000): JSONObject {
