@@ -11,6 +11,8 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.*
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import java.io.File
@@ -64,11 +66,18 @@ import java.io.File
 @Composable internal fun AcpConversationPane(state: AppState, record: LocalCodexTaskRecord) {
     val controller = state.localAcpTasks.controllers[record.key]
     val scope = rememberCoroutineScope()
-    var draft by remember(record.key) { mutableStateOf("") }
+    val draft = remember(record.key) { state.chatDrafts.getOrPut(record.key) { mutableStateOf(TextFieldValue()) } }
     var error by remember(record.key) { mutableStateOf("") }
     var sending by remember(record.key) { mutableStateOf(false) }
     var modeMenu by remember(record.key) { mutableStateOf(false) }
     var configMenu by remember(record.key) { mutableStateOf<String?>(null) }
+    fun send() {
+        if (controller == null || !controller.ready || sending || controller.busy || controller.changingMode || controller.pendingApprovals.isNotEmpty() || draft.value.text.isBlank()) return
+        try { controller.enqueue(draft.value.text) } catch (e: Exception) { error = e.message.orEmpty(); return }
+        draft.value = TextFieldValue(); error = ""; sending = true
+        val delivery = controller.dispatchNext()
+        scope.launch { try { delivery.join() } finally { sending = false } }
+    }
     Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row {
             TextButton({ state.localSelectedTaskKey = null }) { Text("返回本地") }
@@ -125,12 +134,12 @@ import java.io.File
             }
         }
         if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
-        OutlinedTextField(draft, { draft = it }, Modifier.fillMaxWidth(), label = { Text("消息") }, minLines = 2, maxLines = 6)
+        OutlinedTextField(draft.value, { draft.value = it }, Modifier.fillMaxWidth().onPreviewKeyEvent { event ->
+            if (event.type == KeyEventType.KeyDown && draft.value.composition == null &&
+                (event.key == Key.Enter || event.key == Key.NumPadEnter) && !event.isShiftPressed) { send(); true } else false
+        }, label = { Text("消息 · Enter 发送，Shift+Enter 换行") }, minLines = 2, maxLines = 6)
         Row {
-            TextButton({ sending = true; val text = draft; scope.launch {
-                try { controller.enqueue(text); draft = ""; controller.dispatchNext().join() } catch (e: Exception) { error = e.message.orEmpty() }
-                finally { sending = false }
-            } }, enabled = controller.ready && !sending && !controller.busy && !controller.changingMode && controller.pendingApprovals.isEmpty() && draft.isNotBlank()) { Text("发送") }
+            TextButton(::send, enabled = controller.ready && !sending && !controller.busy && !controller.changingMode && controller.pendingApprovals.isEmpty() && draft.value.text.isNotBlank()) { Text("发送") }
             TextButton({ scope.launch { runCatching { controller.cancelTurn() }.onFailure { error = it.message.orEmpty() } } },
                 enabled = controller.busy && !controller.cancelling) { Text("停止") }
         }

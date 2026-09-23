@@ -32,6 +32,7 @@ class AcpConversationUiTest {
                 "session/new" -> JSONObject().put("sessionId", "ui-session").put("configOptions", config("provider/model-a")).put("modes", JSONObject().put("currentModeId", "ask")
                     .put("availableModes", JSONArray().put(JSONObject().put("id", "ask").put("name", "请求批准"))))
                 "session/set_config_option" -> JSONObject().put("configOptions", config(request.getJSONObject("params").getString("value")))
+                "session/prompt" -> JSONObject().put("stopReason", "end_turn")
                 else -> null
             }
             if (result != null) emit(JSONObject().put("id", request.get("id")).put("result", result))
@@ -86,6 +87,21 @@ class AcpConversationUiTest {
                             val reply = fixture.writes.single { it.optString("id") == "approval-1" }.getJSONObject("result").getJSONObject("outcome")
                             assertEquals("selected", reply.getString("outcome"))
                             assertEquals("once", reply.getString("optionId"))
+                            withTimeout(3000) { while (controller.pendingApprovals.isNotEmpty()) delay(20) }
+                            state.chatDrafts.getValue(record.key).value = androidx.compose.ui.text.input.TextFieldValue("键盘发送测试")
+                            click(300, 640)
+                            withContext(Dispatchers.IO) { Robot().apply {
+                                keyPress(java.awt.event.KeyEvent.VK_SHIFT); keyPress(java.awt.event.KeyEvent.VK_ENTER)
+                                keyRelease(java.awt.event.KeyEvent.VK_ENTER); keyRelease(java.awt.event.KeyEvent.VK_SHIFT)
+                            } }
+                            withTimeout(3000) { while (!state.chatDrafts.getValue(record.key).value.text.contains('\n')) delay(20) }
+                            assertTrue(fixture.writes.none { it.optString("method") == "session/prompt" })
+                            withContext(Dispatchers.IO) { Robot().apply {
+                                keyPress(java.awt.event.KeyEvent.VK_ENTER); keyRelease(java.awt.event.KeyEvent.VK_ENTER)
+                            } }
+                            withTimeout(3000) { while (state.instructions.entries.none { it.taskKey == record.key && it.runtimeTurnState == RuntimeTurnState.Completed }) delay(20) }
+                            assertEquals(1, fixture.writes.count { it.optString("method") == "session/prompt" })
+                            assertEquals("", state.chatDrafts.getValue(record.key).value.text)
                         } catch (e: Throwable) { failure = e }
                         finally { exitApplication() }
                     }
