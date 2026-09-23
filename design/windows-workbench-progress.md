@@ -1,3 +1,10 @@
+## 2026-09-24 远端交互认证终端与重连
+
+- `9f9d1c3` 增加 RemoteAuthenticationTerminal/Plan：SSH PTY 引导先关闭回显与规范行缓存，参数/env 通过有界 JSON stdin 传入，不放命令行；同一运行器 argv/env 执行、退出回执、计划所属通道取消。RemoteAcpTasks 退出码0后重新握手，远端表单接入统一认证窗口，并显示服务器身份。
+- openPtyCommand 补异常/协程取消时关闭已打开通道。首次远端测试 run.lvTIxB 通过，本地 GUI run.whR4x6 暴露共享窗口 start 工厂与控件方法重名导致重复启动；`f1082f06e514a8f0f573c3f2ac3a8637efb96c1c` 改为 openTerminal 和显式 this.start。
+- 最终构建 `run.50GiZl`，启用受控 SSH PTY 测试能力的 RemoteAcpTransportTest `run.JYmWRg` 1 项、本地认证窗口 `run.5n92PR` 2 项全部通过，无失败/跳过。6000字节环境值完整到达且不回显，终端成功后重连并创建任务，原有输入/取消回收回归通过。
+- 远端认证窗口本身的 GUI/真实 Hermes 配置、长延迟输入与 Windows/macOS 仍待验收；引导配置发送后的启动确认还需加强，未发布。
+
 ## 2026-09-24 SSH PTY 退出回执
 
 - `96073c9` 增加 Shell.exitCode/awaitExitCode：无原生退出回执为 null，不推断成功。测试先后在 run.Ckglrz/run.mUh40j/run.eqzQ0G 暴露 PTY 命令前退出255；DEBUG3 和 OpenSSH 9.6 audit-linux.c 定位到 root 登录审计权限要求，而非运行器问题。
