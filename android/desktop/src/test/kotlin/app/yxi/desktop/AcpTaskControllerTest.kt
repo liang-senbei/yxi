@@ -1,6 +1,7 @@
 package app.yxi.desktop
 
 import kotlinx.coroutines.*
+import kotlinx.coroutines.swing.Swing
 import org.json.JSONObject
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
@@ -29,7 +30,7 @@ class AcpTaskControllerTest {
             .put("update", JSONObject().put("sessionUpdate", "agent_message_chunk").put("content", JSONObject().put("type", "text").put("text", text)))))
         override fun close() { pipe.close(); output.close() }
     }
-    @Test fun `two turns preserve separate messages and cancelled notification is not completion`() = runBlocking {
+    @Test fun `two turns preserve separate messages and cancelled notification is not completion`() = runBlocking(Dispatchers.Swing) {
         val fixture = Fixture()
         AcpClient(fixture).use { client ->
             client.initialize(); client.newSession(root.path)
@@ -56,7 +57,7 @@ class AcpTaskControllerTest {
             }
         }
     }
-    @Test fun `timeout persists unknown and prevents resending or skipping`() = runBlocking {
+    @Test fun `timeout persists unknown and prevents resending or skipping`() = runBlocking(Dispatchers.Swing) {
         val fixture = Fixture()
         AcpClient(fixture).use { client ->
             client.initialize(); client.newSession(root.path)
