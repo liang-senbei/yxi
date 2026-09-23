@@ -1,3 +1,9 @@
+## OpenCode 项目导航与待处理状态
+
+`5f5fc3f`将远端 OpenCode 任务纳入 ProjectTree 的项目分组/计数/搜索/折叠，加入小圆角灰底选中态、重命名、置顶、收藏、归档和移动显示分组；收藏/置顶区可进入同一登记会话。审批、提问或未知投递显示待处理；未完成轮次显示运行，已归档但需处理的任务不会被普通列表隐藏。补齐项目新建对话的OpenCode回调；协作组协议尚未适配时仍不开放组内创建，此处显示分组不是服务器协作成员登记。
+
+构建 run.1jVQo5 通过；OpenCodeNavigationTest run.9GRzUj 1项、新建弹窗既有回归 run.T3Bcvh 2项通过，无跳过。验证未知投递/归档可见、接收与完成状态转换、导航重读及不同主机不串收藏。新行菜单全部点击与Windows视觉验收未在本轮完成；未发布。其余运行器、共享插件后端、官方账号应用等完整目标继续保留。
+
 ## 服务器 OpenCode 新建入口与任务工作台
 
 `7e65b84`接入 RemoteOpenCodeTasks/RemoteOpenCodePane，服务器主新建弹窗的OpenCode选择可进入模型读取与创建，创建提示词保存草稿而非立即运行。远端任务按 hostKey、用户、原生数据目录和会话 ID 登记；侧栏列出并搜索服务器OpenCode任务。复用本地OpenCodeConversationPane和控制器处理聊天/审批/问题/停止。关闭/断开连接释放所属服务。终端DesktopLaunchPlan仍只支持两种，未把OpenCode错误塞进Claude终端路径；独立worktree/协作组创建未开放。
