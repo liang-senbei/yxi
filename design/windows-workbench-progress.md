@@ -1,3 +1,11 @@
+## 共享 MCP 版本替换、回滚与退役记录
+
+`f49600a`补齐Agent审查指出的版本模型缺口：逻辑身份按机器/插件/来源，活动版本唯一；replaceVersion原子退役旧版本并激活新版本，保留历史定义；回滚不能覆盖历史内容，并继承当前desiredRunners。retire/restore修改意向记录，不删除历史或原生认证。历史版本不能直接save修改，同机同名/同逻辑身份活动版本仍互斥。OpenCode加载接口拒绝传入退役记录。旧索引缺少retired字段时默认活动，保持兼容。
+
+构建run.Rn7feq通过；SharedMcpRegistryTest run.0Xo1hL四项、OpenCodeMcpBindingsTest run.jv1vho一项通过，无跳过。覆盖升级、修改运行器选择后回滚、历史篡改拒绝、退役/重读/恢复、并行活动版本拒绝及既有隔离/加载保护。这里只完成登记生命周期，原生运行器的实际版本切换/停用/卸载、完整共享UI和三运行器工具调用仍待接入；未发布。
+
+yxi_pilot继续核对三运行器环境变量/HTTP认证引用及项目覆盖语义，报告目标windows-test-reports/shared-mcp-fixture/credential-references.md。不复制现有原生账号令牌。
+
 ## OpenCode 共享 MCP 动态加载与原生验证
 
 `b20f59e`接入OpenCode /mcp状态和动态add，并新增OpenCodeMcpBindings。限定机器及desiredRunner、检查原生同名冲突；服务级互斥保护检查/写入/读回；发送前写独立操作记录，失败持久化unknown，禁止用旧记录重发或覆盖旧进程记录。只读observedStatus不会自动确认或重试。当前为自有进程内动态配置，不改原生全局配置，不把connected当作OAuth成功或模型调用证明。
