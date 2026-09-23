@@ -125,6 +125,20 @@ for line in sys.stdin:
                                 assertEquals(1, marker.readLines().count { it == "session/new" })
                                 delay(500)
                                 ImageIO.write(Robot().createScreenCapture(java.awt.Rectangle(window.locationOnScreen, window.size)), "png", File("/results/server-acp-project-loading.png"))
+                                val pending = state.instructions.enqueue(record.key, "Do not send: status recovery fixture")
+                                val delivering = state.instructions.beginDelivery(pending.id, pending.revision)
+                                assertEquals(app.yxi.agent.SessionState.Working, acpTaskState(state, record))
+                                val unknown = state.instructions.markUnknown(delivering.id, delivering.revision, "Fixture connection result unknown")
+                                assertEquals(app.yxi.agent.SessionState.NeedsYou, acpTaskState(state, record))
+                                state.navigation.setArchived(record.key, true)
+                                state.navigation.setMode("待处理")
+                                assertTrue(state.navigation.visible(record.key, acpTaskState(state, record)), "Unknown results must remain findable even for archived tasks")
+                                state.instructions.resolveManually(unknown.id, unknown.revision)
+                                assertEquals(app.yxi.agent.SessionState.Idle, acpTaskState(state, record))
+                                assertFalse(state.navigation.visible(record.key, acpTaskState(state, record)))
+                                state.navigation.setMode("归档")
+                                assertTrue(state.navigation.visible(record.key, acpTaskState(state, record)))
+                                assertFalse(marker.readText().contains("session/prompt"))
                             } catch (e: Throwable) { failure = e }
                             finally { exitApplication() }
                         }

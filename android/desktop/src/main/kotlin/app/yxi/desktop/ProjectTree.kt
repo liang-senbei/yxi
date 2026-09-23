@@ -187,6 +187,7 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
         }
         val openCodeMembers = openCodeTasks.filter { nav.group(it.key).takeIf { group -> group in conn.projectGroups.groups.keys }.orEmpty() == name }
         val acpMembers = acpTasks.filter { nav.group(it.key).takeIf { group -> group in conn.projectGroups.groups.keys }.orEmpty() == name }
+        val directories = (members.map { it.cwd } + managedMembers.map { it.directory } + openCodeMembers.map { it.directory } + acpMembers.map { it.directory }).filter { it.isNotBlank() }.distinct()
         if ((searching || name.isEmpty()) && members.isEmpty() && managedMembers.isEmpty() && openCodeMembers.isEmpty() && acpMembers.isEmpty()) return@forEach
         val groupKey = "server-group:" + projectKey(conn.host, "/") + ":" + name
         val closed = !searching && nav.collapsed(groupKey, false)
@@ -197,12 +198,12 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
             Icon(Icons.Outlined.Folder, null, Modifier.padding(horizontal = 6.dp).size(16.dp), tint = t.textSecondary)
             Text(name.ifEmpty { "未分组" }, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text((members.size + managedMembers.size + openCodeMembers.size + acpMembers.size).toString(), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
-            IconButton({ creatingGroup = name; creatingDirectory = members.firstOrNull()?.cwd.orEmpty() }, Modifier.size(28.dp)) { Icon(Icons.Outlined.Add, "在组内新建 Agent", Modifier.size(16.dp)) }
+            IconButton({ creatingGroup = name; creatingDirectory = directories.firstOrNull().orEmpty() }, Modifier.size(28.dp)) { Icon(Icons.Outlined.Add, "在组内新建 Agent", Modifier.size(16.dp)) }
             Box {
                 IconButton({ menu = true }, Modifier.size(28.dp)) { Icon(Icons.Default.MoreHoriz, "分组操作", Modifier.size(16.dp)) }
                 DropdownMenu(menu, { menu = false }) {
                     Text(conn.host.label + " · " + name.ifEmpty { "未分组" }, Modifier.padding(16.dp, 8.dp), style = MaterialTheme.typography.titleSmall)
-                    members.map { it.cwd }.distinct().filter { it.isNotBlank() }.forEach { path ->
+                    directories.forEach { path ->
                         DropdownMenuItem(text = { Text(path) }, onClick = { runCatching { java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(java.awt.datatransfer.StringSelection(path), null) }; menu = false })
                     }
                     DropdownMenuItem(text = { Text("编辑分组与组规") }, onClick = { selectedGroup = name; projectGroups = true; menu = false })
