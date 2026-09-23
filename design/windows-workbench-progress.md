@@ -1,3 +1,9 @@
+## 本地官方 Codex 新会话接入共享 MCP
+
+`25bfb3b`将sharedMcp登记注入LocalCodexTasks；本地Codex新会话获取活动意向后，先用原生官方连接读取有效配置，拒绝已有同名服务和codex_apps保留名，再以进程级覆盖启动。每次写入前同时核对官方提供方/ChatGPT账号与共享MCP的command/args/url/enabled，并拒绝未声明的env/header/token覆盖；创建回执前后检查共享配置快照。共享页开放本地Codex选择，服务器Codex及Claude仍标接入中。
+
+构建run.HTVfTG通过；LocalCodexProfilesTest run.d4HsPT四项、LocalOfficialCodexNativeTest run.0JvjOK一项通过，无跳过。原生测试使用隔离合成ChatGPT身份，验证覆盖配置回读、官方提供方保持、共享登记参与实际新建，以及原生全局配置/登录文件不变。此轮核对配置和新建，不等于所有MCP服务器连接状态/真实订阅推理均已验证；旧同名配置拒绝覆盖，尚无导入接管流程。未发布。
+
 ## 共享配置页与 OpenCode 新会话自动加载
 
 `25a9c45`将共享登记接入产品：Plugins增加共享配置页，按本地@local或当前服务器hostKey分别添加URL/stdio定义、选择OpenCode新会话、退役/恢复并查看历史。初次保存不启用任何运行器；Claude/Codex正式应用入口仍标接入中。LocalOpenCodeTasks和RemoteOpenCodeTasks在创建时读取当前机器的活动意向、通过独立服务加载MCP并保存回执；非connected阻止创建；创建前后核对配置快照，变化时保留原生创建记录供核对。已运行会话不随意向编辑自动变更。
