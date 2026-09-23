@@ -137,7 +137,12 @@ class AcpConversationUiTest {
                             val prompt = fixture.writes.last { it.optString("method") == "session/prompt" }
                             fixture.emit(JSONObject().put("id", prompt.get("id")).put("result", JSONObject().put("stopReason", "end_turn")))
                             withTimeout(3000) { streaming.join() }
-                        } catch (e: Throwable) { failure = e }
+                        } catch (e: Throwable) {
+                            val view = state.codexConversationViews[record.key]
+                            File("/results/acp-scroll-failure.txt").writeText("follow=${view?.followLatest?.value}; index=${view?.scroll?.firstVisibleItemIndex}; offset=${view?.scroll?.firstVisibleItemScrollOffset}; forward=${view?.scroll?.canScrollForward}; backward=${view?.scroll?.canScrollBackward}; messages=${controller.messages.size}; items=${view?.scroll?.layoutInfo?.totalItemsCount}; note=${controller.note}")
+                            ImageIO.write(Robot().createScreenCapture(java.awt.Rectangle(window.locationOnScreen, window.size)), "png", File("/results/acp-failure.png"))
+                            failure = e
+                        }
                         finally { exitApplication() }
                     }
                 }

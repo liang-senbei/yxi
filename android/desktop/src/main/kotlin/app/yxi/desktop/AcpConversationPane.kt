@@ -88,7 +88,7 @@ import java.io.File
         }
     } }
     LaunchedEffect(messages, approvals.size, followLatest) {
-        if (followLatest) view.scroll.requestScrollToItem(messages.size + approvals.size)
+        if (followLatest) view.scroll.scrollToItem(messages.size + approvals.size, view.scroll.layoutInfo.viewportSize.height.coerceAtLeast(1))
     }
     fun send() {
         if (controller == null || !controller.ready || sending || controller.busy || controller.changingMode || controller.pendingApprovals.isNotEmpty() || draft.value.text.isBlank()) return
