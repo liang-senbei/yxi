@@ -49,16 +49,26 @@ requires_openai_auth = false
             .put("access_token", "fixture-access").put("refresh_token", "fixture-refresh").put("account_id", "fixture-account"))
             .put("last_refresh", java.time.Instant.now().toString()).toString())
         val chatgptBefore = auth.readBytes()
+        var nativeModel = ""
         LocalCodexProfiles.connectOfficial(runtime).use { client ->
             assertTrue(client.authenticationSummary().contains("ChatGPT"))
             val models = LocalOfficialModels.load { client.listModels(it) }
             assertTrue(models.isNotEmpty())
+            nativeModel = models.first().id
             assertTrue(models.none { it.id == "fixture" }, "Native model discovery must not substitute a configured provider ID")
             val overrideDenied = assertFailsWith<IllegalStateException> { client.request("thread/start", JSONObject()
                 .put("cwd", "/sandbox/home").put("config", JSONObject().put("openai_base_url", "http://127.0.0.1:9/wrong"))) }
             assertTrue(overrideDenied.message.orEmpty().contains("未经核对"))
             val resumeDenied = assertFailsWith<IllegalStateException> { client.request("thread/resume", JSONObject().put("threadId", "not-a-real-thread")) }
             assertTrue(resumeDenied.message.orEmpty().contains("显式核对"))
+        }
+        val index = File("/sandbox/tmp/official-local-tasks.json")
+        val queue = InstructionQueue(File("/sandbox/tmp/official-local-queue.json"))
+        LocalCodexTasks(queue, index).use { tasks ->
+            val record = tasks.create(runtime, "/sandbox/home", "Local official fixture", nativeModel)
+            assertEquals(record, LocalCodexTaskRegistry(index).records.single())
+            assertTrue(tasks.controllers.getValue(record.key).ready)
+            assertEquals("", tasks.recoveryThreadId)
         }
         assertContentEquals(beforeConfig, config.readBytes())
         assertContentEquals(chatgptBefore, auth.readBytes())

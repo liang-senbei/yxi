@@ -28,6 +28,8 @@ internal class CodexConversationView {
 
 class AppState {
     private val localWorkspaceDelegate = lazy { LocalWorkspace() }
+    private val localCodexTasksDelegate = lazy { LocalCodexTasks(instructions, java.io.File(Store.dir, "local-codex-tasks.json")) }
+    internal val localCodexTasks get() = localCodexTasksDelegate.value
     internal val localWorkspace get() = localWorkspaceDelegate.value
     internal val isLocal get() = hostScope == LOCAL_HOST_SCOPE
     internal fun selectLocal() {
@@ -43,6 +45,7 @@ class AppState {
     internal val localOperations get() = (if (linksDelegate.isInitialized()) deviceLinks.busy.size else 0) +
         (if (localAgentsDelegate.isInitialized()) localAgents.jobs.count { it.running } else 0)
     internal fun closeLocalFeatures() {
+        if (localCodexTasksDelegate.isInitialized()) localCodexTasks.close()
         if (localWorkspaceDelegate.isInitialized()) localWorkspace.close()
         if (linksDelegate.isInitialized()) deviceLinks.close()
         if (localAgentsDelegate.isInitialized()) localAgents.close()
