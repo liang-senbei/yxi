@@ -56,7 +56,8 @@ class AcpTaskControllerTest {
         AcpClient(fixture).use { client ->
             client.initialize(); client.newSession(root.path)
             val queue = InstructionQueue(File(root, "queue.json"))
-            AcpTaskController("task", "session", client, queue).use { controller ->
+            val notices = mutableListOf<String>()
+            AcpTaskController("task", "session", client, queue, onNotification = { notices.add(it) }).use { controller ->
                 controller.changeMode("plan")
                 assertEquals("plan", controller.modes?.getString("currentModeId"))
                 assertFalse(controller.changingMode)
@@ -88,6 +89,7 @@ class AcpTaskControllerTest {
                     assertTrue(controller.messages.any { it.text == "answer-$index" }, "Final streamed text must be consumed before the turn completes")
                 }
                 assertEquals(listOf("answer-1", "answer-2"), controller.messages.filter { it.author == "Assistant" }.map { it.text })
+                assertEquals(listOf("本轮处理结束", "本轮已取消"), notices, "Cancelled queued approvals must not notify")
                 assertEquals(listOf(RuntimeTurnState.Completed, RuntimeTurnState.Interrupted), queue.entries.map { it.runtimeTurnState })
                 assertEquals(queue.entries, InstructionQueue(File(root, "queue.json")).entries)
             }
@@ -99,12 +101,14 @@ class AcpTaskControllerTest {
             client.initialize(); client.newSession(root.path)
             val queueFile = File(root, "unknown.json")
             val queue = InstructionQueue(queueFile)
-            AcpTaskController("task", "session", client, queue, promptTimeoutMillis = 100).use { controller ->
+            val notices = mutableListOf<String>()
+            AcpTaskController("task", "session", client, queue, promptTimeoutMillis = 100, onNotification = { notices.add(it); error("Notification unavailable") }).use { controller ->
                 controller.enqueue("first"); controller.enqueue("second")
                 assertFailsWith<TimeoutCancellationException> { controller.sendNext() }
                 assertEquals(InstructionStatus.Unknown, InstructionQueue(queueFile).entries.first().status)
                 assertFailsWith<IllegalStateException> { controller.sendNext() }
                 assertEquals(1, fixture.writes.count { it.optString("method") == "session/prompt" })
+                assertEquals(listOf("投递结果未确认"), notices)
             }
         }
     }
@@ -113,12 +117,15 @@ class AcpTaskControllerTest {
         AcpClient(fixture).use { client ->
             client.initialize(); client.newSession(root.path)
             val queue = InstructionQueue(File(root, "terminal.json"))
-            AcpTaskController("task", "session", client, queue).use { controller ->
+            val notices = mutableListOf<String>()
+            AcpTaskController("task", "session", client, queue, onNotification = { notices.add(it) }).use { controller ->
                 controller.enqueue("one")
                 val send = async { controller.sendNext() }
                 withTimeout(2000) { while (fixture.writes.none { it.optString("method") == "session/prompt" }) delay(10) }
                 fixture.emit(JSONObject().put("id", "obsolete").put("method", "session/request_permission").put("params", JSONObject()
                     .put("sessionId", "session").put("options", org.json.JSONArray().put(JSONObject().put("optionId", "allow").put("kind", "allow_once")))))
+                withTimeout(2000) { while (controller.pendingApprovals.isEmpty()) delay(10) }
+                assertEquals(listOf("等待批准"), notices)
                 fixture.result(fixture.writes.last { it.optString("method") == "session/prompt" }, JSONObject().put("stopReason", "end_turn"))
                 withTimeout(2000) { send.await() }
                 assertEquals(RuntimeTurnState.Completed, queue.entries.single().runtimeTurnState)
@@ -127,6 +134,7 @@ class AcpTaskControllerTest {
                 val outcome = fixture.writes.single { it.optString("id") == "obsolete" }.getJSONObject("result").getJSONObject("outcome")
                 assertEquals("cancelled", outcome.getString("outcome"))
                 assertFalse(outcome.has("optionId"))
+                assertEquals(listOf("等待批准", "本轮处理结束"), notices)
             }
         }
     }

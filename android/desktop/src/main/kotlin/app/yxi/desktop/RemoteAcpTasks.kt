@@ -10,7 +10,8 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 /** UI-dispatcher owner; creation uncertainty and task identity are scoped to the selected host. */
-internal class RemoteAcpTasks(private val queue: InstructionQueue, private val file: File) : AutoCloseable {
+internal class RemoteAcpTasks(private val queue: InstructionQueue, private val file: File,
+    private val onNotification: (LocalCodexTaskRecord, String) -> Unit = { _, _ -> }) : AutoCloseable {
     private data class Prepared(val conn: Conn, val engine: String, val directory: String, val home: String, val client: AcpClient)
     private class Creation(file: File, val hostKey: String) {
         val disk = DurableFile(file) { require(JSONObject(it).getString("hostKey") == hostKey && JSONObject(it).opt("pending") is Boolean) }
@@ -104,7 +105,8 @@ internal class RemoteAcpTasks(private val queue: InstructionQueue, private val f
             registry.save(record)
             fun saveModel(value: String) { registry.records.singleOrNull { it.key == record.key }?.let { if (it.model != value) registry.save(it.copy(model = value)) } }
             val controller = AcpTaskController(record.key, id, current.client, queue,
-                onConfigurationChanged = { options -> acpConfigSelectors(options).firstOrNull { it.category == "model" }?.current?.let(::saveModel) }, onModelChanged = ::saveModel)
+                onConfigurationChanged = { options -> acpConfigSelectors(options).firstOrNull { it.category == "model" }?.current?.let(::saveModel) }, onModelChanged = ::saveModel,
+                onNotification = { title -> onNotification(record, title) })
             try { pending.clear(); controllers[record.key] = controller; owners[record.key] = conn }
             catch (e: Exception) { controller.close(); throw e }
             prepared.compareAndSet(current, null); initialization = null

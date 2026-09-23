@@ -25,6 +25,7 @@ internal class AcpTaskController(
     private val onRawEvent: (JSONObject) -> Unit = {},
     private val onConfigurationChanged: (JSONArray) -> Unit = {},
     private val onModelChanged: (String) -> Unit = {},
+    private val onNotification: (String) -> Unit = {},
 ) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
     private val mutation = Mutex()
@@ -71,8 +72,9 @@ internal class AcpTaskController(
             if (params.optString("sessionId") != sessionId) return
             // The reader may have queued this event before cancel removed the native request.
             if (cancelling || client.pendingPermissions().none { idKey(it.get("id")) == idKey(event.get("id")) }) return
-            pendingApprovals[idKey(event.get("id"))] = event
+            val previous = pendingApprovals.put(idKey(event.get("id")), event)
             note = "运行器正在等待审批"
+            if (previous == null) notify("等待批准")
             return
         }
         if (params.optString("sessionId") != sessionId || method != "session/update") return
@@ -212,18 +214,26 @@ internal class AcpTaskController(
                 pendingApprovals.clear(); ready = false; client.close()
                 note = "轮次已结束，但旧审批清理未确认，请核对连接"
             }
+            notify(when (outcome) {
+                RuntimeTurnState.Completed -> "本轮处理结束"
+                RuntimeTurnState.Interrupted -> "本轮已取消"
+                else -> "本轮需要核对"
+            })
         } catch (e: TimeoutCancellationException) {
             // prompt 超时后 AcpClient 不释放该会话的发送权：状态未知且必须人工核对后重建连接。
             markUnknownPreserving(started, "prompt 超时，原生轮次状态未知；未自动重发")
             ready = false; note = "轮次超时未确认，请核对原生会话后重建连接"
+            notify("投递结果未确认")
             throw e
         } catch (e: CancellationException) {
             markUnknownPreserving(started, "投递等待被取消，原生轮次状态未知；未自动重发")
             note = "投递结果未确认，请核对原生会话"
+            notify("投递结果未确认")
             throw e
         } catch (e: Exception) {
             markUnknownPreserving(started, "投递结果未确认：${e.message}；不会自动重发")
             ready = false; note = "投递结果未确认，请核对原生会话"
+            notify("投递结果未确认")
             throw e
         } finally { busy = false; cancelling = false }
     }
@@ -236,6 +246,8 @@ internal class AcpTaskController(
                 queue.markUnknown(current.id, current.revision, detail)
         }
     }
+
+    private fun notify(title: String) { if (!disposed) runCatching { onNotification(title) } }
 
     /** stopReason → 队列轮次结论。end_turn 之外的一切非取消原因（含 max_tokens、refused、
      * max_turn_requests、auth_required 及未来新增的未识别值）都按失败保留回执，不猜成功。 */

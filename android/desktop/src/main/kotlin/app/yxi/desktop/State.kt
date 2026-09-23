@@ -30,7 +30,9 @@ class AppState {
     internal val sharedMcp by lazy { SharedMcpRegistry(java.io.File(Store.dir, "shared-mcp.json")) }
     internal var sharedMcpPage by mutableStateOf(false)
     internal val remoteOpenCodeTasks by lazy { RemoteOpenCodeTasks(instructions, java.io.File(Store.dir, "remote-opencode-tasks.json"), sharedMcp) }
-    internal val remoteAcpTasks by lazy { RemoteAcpTasks(instructions, java.io.File(Store.dir, "remote-acp-tasks.json")) }
+    internal val remoteAcpTasks by lazy { RemoteAcpTasks(instructions, java.io.File(Store.dir, "remote-acp-tasks.json")) { task, title ->
+        Notify.notify(title, "任务：" + (navigation.title(task.key) ?: task.title), taskKey = task.key)
+    } }
     internal var remoteAcpSelectedKey by mutableStateOf<String?>(null)
     internal var remoteAcpEngine by mutableStateOf("gemini")
     internal var remoteAcpDirectory by mutableStateOf("")
