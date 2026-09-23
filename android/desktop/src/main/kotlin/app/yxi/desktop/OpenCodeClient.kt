@@ -61,10 +61,11 @@ internal class OpenCodeClient(port: Int, password: String, private val directory
             check(it.optString("id").isNotBlank()) { "OpenCode 创建结果缺少会话 ID，请核对原生历史" }
         }
     }
-    suspend fun send(id: String, text: String, provider: String, model: String) {
+    suspend fun send(id: String, text: String, provider: String, model: String, messageId: String? = null) {
         require(text.isNotBlank() && text.length <= 100_000)
         require(provider.isNotBlank() && model.isNotBlank())
-        request("POST", "/session/${segment(id)}/prompt_async", JSONObject()
+        require(messageId == null || Regex("msg_[a-zA-Z0-9]{26}").matches(messageId))
+        request("POST", "/session/${segment(id)}/prompt_async", JSONObject().apply { messageId?.let { put("messageID", it) } }
             .put("model", JSONObject().put("providerID", provider).put("modelID", model))
             .put("parts", JSONArray().put(JSONObject().put("type", "text").put("text", text))))
     }
