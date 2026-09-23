@@ -1,3 +1,9 @@
+## 2026-09-24 ACP 会话控制器初步接入
+
+- yxi_pilot 交付控制器草案后触发 429，主线程停止其重试并接手测试。`0695159` 引入控制器，修正多轮助手文本共用 ID 和 ACP 嵌套工具文本解析；支持队列、流式文字、工具状态、原生审批、取消等待 stopReason、未知投递持久化与禁止重发。
+- 第一轮 `run.f6I4Af`：超时测试通过，多轮测试因测试线程跨 Swing 读取 Compose 列表失败。`b9ee5d6ac278991c279c08d5fc91cdccd85ea0ac` 将测试与 UI 状态统一到 Swing 调度器；构建 `run.JkYYWV`，AcpTaskControllerTest `run.Ebyp9Z` 2 项通过，无失败/跳过。
+- 控制器调用与状态读取应在 Swing/UI 调度器；尚待最终流式事件与 prompt 回执的排空顺序、审批竞态专项验证、持久会话管理与 UI 接入。未运行真实 Gemini/Grok/Hermes，不算六运行器入口完成。未发布。
+
 ## 2026-09-24 ACP 审批卡片组件
 
 - `5979e8ac59350eb6eb295d0eb00e3a0aa9ff848e` 添加 AcpPermissionCard，保留原生按钮名称并显示 allow_once/allow_always/reject_once/reject_always 的不同范围，回传原始 optionId；重复 ID 或未知类型只显示错误与取消，不生成批准选项。
