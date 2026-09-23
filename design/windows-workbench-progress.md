@@ -1,3 +1,10 @@
+## 2026-09-24 Hermes 原生模型切换
+
+- `7e39714` 为无 configOptions 的运行器补 models/session/set_model 客户端、控制器、灰色菜单和任务记录同步；新配置接口仍优先。原生 Hermes 0.21.4 的 config handler 不是模型切换接口，不能替代其 set_session_model。
+- 测试改用原生 providers 命名端点声明两模型。`run.P9r0OL` 暴露同模型后缀跨供应商有多条记录，测试选择有歧义；`2236a2a05a9a300b87a509c4941c5bcbafad82b0` 选择列表中的完整 custom:fixture:fixture-hermes-alt ID 后，原生测试 `run.VXGz31` 1 项通过，无失败/跳过。
+- 构建 `run.idTEx7`，切换前 HTTP 请求 fixture-hermes，切换后请求 fixture-hermes-alt；两轮完成，持久模型为完整原生 ID。证据 `.artifacts/hermes-native/model-switch.json` 与 models.json。模型服务仍是回环 fixture，不是公网账号验收。
+- 磁盘保护触发后仅移除 29 个无容器引用、标签/源版本/专属标签匹配的旧测试镜像，保留最新5个和两固定基线；清单 removed-images-20260924-model-switch.json。未发布。
+
 ## 2026-09-24 Hermes 真实 ACP 完整文本轮次
 
 - `47c88888d4af881c050a26cc964a80df448701ac` 新增真实 Hermes 0.21.4 回环模型测试。按固定源码的原生 config.yaml/.env 格式配置隔离 custom 提供方，LocalAcpTasks 识别原生认证方法、authenticate、创建会话，控制器发送并接收实际 ACP 回复。
