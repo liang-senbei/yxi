@@ -1,3 +1,9 @@
+## 2026-09-24 SSH PTY 退出回执
+
+- `96073c9` 增加 Shell.exitCode/awaitExitCode：无原生退出回执为 null，不推断成功。测试先后在 run.Ckglrz/run.mUh40j/run.eqzQ0G 暴露 PTY 命令前退出255；DEBUG3 和 OpenSSH 9.6 audit-linux.c 定位到 root 登录审计权限要求，而非运行器问题。
+- runner `2b8792f` 为显式 YXI_TEST_SSH_PTY=1 加入 AUDIT_WRITE + 专属标签，其他边界不变。代码/测试镜像 `23c9af59fa3d15dc20acb9646f19b98a1d099354` 在 `run.07sK0c` 1 项通过，无失败/跳过：真实提示+输入后退出码7，主动关闭无回执为null，并通过既有ACP隔离/清理验证。
+- `b23ad90` 的纯 Python 隔离校验测试8项通过，审计能力默认拒绝，缺标签拒绝，显式模式下 SYS_ADMIN 仍拒绝。运行要求写入 isolated-tests README。尚未接远端认证界面，未发布。
+
 ## 2026-09-24 服务器表单连接、认证、创建点击验收
 
 - `defb3aaee810d917c138266352ce3680c7cbbc8e` 扩展 RemoteAcpCreationUiTest，使用真实隔离 SSH 与协议 fixture，实际点击连接、认证、创建，断言只调用一次 session/new，进入对应远端会话，草稿保留、发送队列为空、没有 session/prompt。

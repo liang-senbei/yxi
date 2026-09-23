@@ -1,3 +1,7 @@
+## SSH PTY accounting tests
+
+Tests that allocate a PTY through the private OpenSSH daemon (currently RemoteAcpTransportTest) require `YXI_TEST_SSH_PTY=1` on the run command. Ubuntu OpenSSH's root login-accounting path exits 255 when `audit_log_acct_message` is denied. This flag adds only AUDIT_WRITE and an explicit org.yxi.ssh-pty label. The verifier rejects that capability without both the explicit mode and label, and continues rejecting SYS_ADMIN, host namespaces, extra mounts and networking. Ordinary exec/ACP tests do not need the flag.
+
 ## PTY dependency baseline (2026-09-24)
 
 For source requiring Pty4J 0.13.4, use the fixed image `ea6f75eeda4495d588db7f6d6fffec683c630acc` as `YXI_TEST_BASE_IMAGE_REVISION`. It was built once from the prior 27a1a26 baseline with explicit `YXI_TEST_REFRESH_DEPENDENCIES=1`; subsequent builds should omit that flag and remain offline. Do not chain each new application image as another dependency base.
