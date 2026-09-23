@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       transfer_only:
-        description: 'Only transfer the verified 1.4.13 artifact to its temporary restricted receiver'
+        description: 'Only transfer the verified 1.4.14 artifact to its temporary restricted receiver'
         type: boolean
         default: false
   push:
@@ -158,15 +158,15 @@ jobs:
           headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'}
           def api(path):
               with urllib.request.urlopen(urllib.request.Request(base+path,headers=headers),timeout=30) as r:return json.load(r)
-          run=api('/actions/runs/35745571188')
-          assert run['head_sha']=='e97b02835a1409bda664496e25585cf05ac29ae0' and run['conclusion']=='success'
-          meta=api('/actions/artifacts/10702793843')
-          digest='792ada1e0886803cee5a41df0b34dc32e4e8743ecd6392b6531c7776503f6f13'
-          assert meta['name']=='Yxi-windows' and meta['size_in_bytes']==910629866 and meta['digest']=='sha256:'+digest
+          run=api('/actions/runs/35816868110')
+          assert run['head_sha']=='cc422150d795fc58448adca6bd0a85a183b7a1cd' and run['conclusion']=='success'
+          meta=api('/actions/artifacts/10731554456')
+          digest='41b2280adc09e43f7c1da80a286e6f91abbd1f2ab2028e6b4c523fae66911738'
+          assert meta['name']=='Yxi-windows' and meta['size_in_bytes']==910634830 and meta['digest']=='sha256:'+digest
           class NoRedirect(urllib.request.HTTPRedirectHandler):
               def redirect_request(self,*args):return None
           try:
-              urllib.request.build_opener(NoRedirect).open(urllib.request.Request(base+'/actions/artifacts/10702793843/zip',headers=headers),timeout=30)
+              urllib.request.build_opener(NoRedirect).open(urllib.request.Request(base+'/actions/artifacts/10731554456/zip',headers=headers),timeout=30)
               raise RuntimeError('Expected a download redirect')
           except urllib.error.HTTPError as response:
               assert response.code==302
@@ -178,14 +178,14 @@ jobs:
               while True:
                   chunk=response.read(1024*1024)
                   if not chunk:break
-                  size+=len(chunk);assert size<=910629866
+                  size+=len(chunk);assert size<=910634830
                   output.write(chunk);h.update(chunk)
-          assert size==910629866 and h.hexdigest()==digest
+          assert size==910634830 and h.hexdigest()==digest
           print('Frozen artifact size and SHA256 verified')
           PY
       - name: Transfer using the one-time forced-command key
         env:
-          TRANSFER_KEY: ${{ secrets.YXI_RELEASE_TRANSFER_35745571188 }}
+          TRANSFER_KEY: ${{ secrets.YXI_RELEASE_TRANSFER_35816868110 }}
         shell: bash
         run: |
           python3 - <<'PY'
