@@ -12,7 +12,7 @@ import java.io.InputStreamReader
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** Owned interactive PTY. Output stays in the terminal; it is never treated as a login receipt. */
-internal class LocalAuthenticationTerminal private constructor(private val process: PtyProcess) : TtyConnector {
+internal class LocalAuthenticationTerminal private constructor(private val process: PtyProcess) : TtyConnector, AutoCloseable {
     private val closed = AtomicBoolean()
     private val reader = InputStreamReader(process.inputStream, Charsets.UTF_8)
     private val output = process.outputStream
