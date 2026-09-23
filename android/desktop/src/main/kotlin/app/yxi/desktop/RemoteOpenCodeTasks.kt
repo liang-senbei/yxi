@@ -36,14 +36,25 @@ internal class RemoteOpenCodeTasks(private val queue: InstructionQueue, private 
         busy = true
         var server: RemoteOpenCodeServer? = null
         try {
-            val connection = RemoteOpenCodeServer.start(conn.ssh, directory); server = connection; starting.set(connection); check(!disposed)
+            var connection = RemoteOpenCodeServer.start(conn.ssh, directory); server = connection; starting.set(connection); check(!disposed)
             check(connection.client.availableModels().any { it.providerId == model.providerId && it.modelId == model.modelId }) { "所选服务器模型当前不可用" }
             val hostKey = projectKey(conn.host, "/")
             val scopeId = UUID.randomUUID().toString()
             val resources = sharedMcp?.forHost(hostKey)?.filter { "opencode" in it.desiredRunners }.orEmpty()
+            val startupResources = resources.filter { it.definition.headerVariables.isNotEmpty() }
+            if (startupResources.isNotEmpty()) {
+                val existing = connection.client.mcpStatus()
+                check(resources.none { existing.has(it.definition.name) }) { "服务器原生运行器已有同名 MCP，未覆盖" }
+                connection.close(); starting.compareAndSet(connection, null)
+                check(!disposed && conn.ssh.isConnected)
+                connection = RemoteOpenCodeServer.start(conn.ssh, directory, startupResources.map { it.definition })
+                server = connection; starting.set(connection); check(!disposed)
+                check(connection.client.availableModels().any { it.providerId == model.providerId && it.modelId == model.modelId }) { "所选服务器模型当前不可用" }
+            }
             resources.forEach { resource ->
-                val binding = OpenCodeMcpBindings(hostKey, scopeId, connection.client, File(file.parentFile, "mcp-bindings/$scopeId/${resource.definition.key}.json"))
-                check(binding.apply(resource) == "connected") { "共享插件 ${resource.definition.name} 尚未连接，请核对服务器授权或服务" }
+                val status = if (resource in startupResources) connection.client.mcpStatus().optJSONObject(resource.definition.name)?.optString("status")
+                else OpenCodeMcpBindings(hostKey, scopeId, connection.client, File(file.parentFile, "mcp-bindings/$scopeId/${resource.definition.key}.json")).apply(resource)
+                check(status == "connected") { "共享插件 ${resource.definition.name} 尚未连接，请核对服务器授权或服务" }
                 check(sharedMcp?.records?.any { it == resource } == true) { "共享插件配置在创建期间发生变化，请重新核对" }
             }
             val pending = JSONObject().put("pending", true).put("hostKey", hostKey).put("directory", connection.directory)

@@ -18,8 +18,10 @@ internal class RemoteOpenCodeServer private constructor(private val channel: Ssh
     override fun close() { if (closed.compareAndSet(false, true)) { forward.close(); channel.close() } }
 
     companion object {
-        suspend fun start(ssh: SshSession, directory: String): RemoteOpenCodeServer {
+        suspend fun start(ssh: SshSession, directory: String, sharedMcp: List<SharedMcpDefinition> = emptyList()): RemoteOpenCodeServer {
             require(directory.startsWith('/') && directory.none { it < ' ' })
+            val mcpConfig = if (sharedMcp.isEmpty()) null else OpenCodeStartupMcp.configuration(sharedMcp)
+            val requiredVariables = sharedMcp.flatMap { it.environmentNames + it.headerVariables.values }.distinct()
             val password = Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32).also { SecureRandom().nextBytes(it) })
             var channel: SshSession.Shell? = null
             var forward: SshSession.PreviewForward? = null
@@ -40,6 +42,8 @@ internal class RemoteOpenCodeServer private constructor(private val channel: Ssh
                                     if (ch == 10) {
                                         if (!overflow) {
                                             val text = line.toString().trimEnd('\r')
+                                            if (text == "YXI_OPENCODE_ERROR:missing-variables") error("服务器运行器启动环境缺少共享 MCP 所需变量")
+                                            if (text == "YXI_OPENCODE_ERROR:inline-config") error("服务器已有 OPENCODE_CONFIG_CONTENT，请先核对进程配置")
                                             if (text.startsWith("YXI_OPENCODE_STARTED:")) identity.complete(JSONObject(text.substringAfter(':')))
                                             LocalOpenCodeServer.listeningPort(text)?.let { port.complete(it) }
                                         }
@@ -50,7 +54,8 @@ internal class RemoteOpenCodeServer private constructor(private val channel: Ssh
                             error("OpenCode 远端服务已退出")
                         } catch (e: Exception) { identity.completeExceptionally(e); port.completeExceptionally(e) }
                     }
-                    check(stream.write(JSONObject().put("password", password).toString() + "\n")) { "未能发送服务启动配置" }
+                    check(stream.write(JSONObject().put("password", password).put("mcpConfig", mcpConfig ?: JSONObject.NULL)
+                        .put("requiredVariables", org.json.JSONArray(requiredVariables)).toString() + "\n")) { "未能发送服务启动配置" }
                     val owner = identity.await()
                     val cwd = owner.getString("directory")
                     val pid = owner.getLong("pid")
@@ -72,13 +77,22 @@ def stop(*args):
 signal.signal(signal.SIGHUP, stop)
 signal.signal(signal.SIGTERM, stop)
 try:
-    raw = sys.stdin.buffer.readline(8193)
-    if len(raw) > 8192: raise ValueError('invalid startup input')
+    raw = sys.stdin.buffer.readline(262145)
+    if len(raw) > 262144: raise ValueError('invalid startup input')
     config = json.loads(raw)
     password = config['password']
     if not isinstance(password, str) or not 32 <= len(password) <= 128: raise ValueError('invalid startup input')
     os.chdir(sys.argv[2])
     env = os.environ.copy()
+    mcp_config = config.get('mcpConfig')
+    if mcp_config is not None:
+        if env.get('OPENCODE_CONFIG_CONTENT', '').strip():
+            print('YXI_OPENCODE_ERROR:inline-config', flush=True)
+            raise SystemExit(1)
+        if any(not env.get(name, '').strip() for name in config['requiredVariables']):
+            print('YXI_OPENCODE_ERROR:missing-variables', flush=True)
+            raise SystemExit(1)
+        env['OPENCODE_CONFIG_CONTENT'] = mcp_config
     env['OPENCODE_SERVER_USERNAME'] = 'opencode'
     env['OPENCODE_SERVER_PASSWORD'] = password
     process = subprocess.Popen([sys.argv[1], 'serve', '--hostname', '127.0.0.1', '--port', '0', '--no-mdns'],

@@ -58,6 +58,25 @@ class OpenCodeMcpHttpHeadersNativeTest {
                 assertTrue(withTimeout(20000) { received.await() }, "MCP must receive the complete header value")
             }
             assertContentEquals(original, config.readBytes())
+            val remoteHome = File(root, "remote-home").apply { mkdirs() }
+            val bin = File(remoteHome, ".local/bin").apply { mkdirs() }
+            java.nio.file.Files.createSymbolicLink(File(bin, "opencode").toPath(), java.nio.file.Path.of("/opt/native/claude"))
+            val remoteEnvironment = mapOf("HOME" to remoteHome.path, "XDG_DATA_HOME" to File(remoteHome, ".local/share").path,
+                "XDG_CONFIG_HOME" to File(remoteHome, ".config").path, "XDG_CACHE_HOME" to File(remoteHome, ".cache").path,
+                "YXI_TEST_MCP_AUTH" to "Bearer fixture-http-token")
+            IsolatedSshBridge(File(root, "ssh"), remoteEnvironment, File(root, "unused.sock"), allowForwarding = true).use { bridge ->
+                bridge.conn.ssh.connect()
+                val remoteRegistry = SharedMcpRegistry(File(root, "remote-shared.json"))
+                remoteRegistry.save(definition.copy(hostKey = projectKey(bridge.conn.host, "/")), setOf("opencode"), null)
+                RemoteOpenCodeTasks(InstructionQueue(File(root, "remote-queue.json")), File(root, "remote-tasks.json"), remoteRegistry).use { tasks ->
+                    val model = tasks.models(bridge.conn, root.path).single { it.providerId == "fixture" && it.modelId == "fixture-model" }
+                    val record = tasks.create(bridge.conn, root.path, "Remote HTTP shared task", model)
+                    assertTrue(tasks.controllers.getValue(record.key).ready)
+                    assertEquals(record, tasks.registry.records.single())
+                    assertEquals("", tasks.recoverySessionId)
+                }
+            }
+            assertContentEquals(original, config.readBytes())
             assertFalse(definition.json().toString().contains("fixture-http-token"))
             val shared = SharedMcpRegistry(File(root, "shared.json"))
             shared.save(definition, setOf("opencode"), null)

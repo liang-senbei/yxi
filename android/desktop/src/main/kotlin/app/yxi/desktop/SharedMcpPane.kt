@@ -65,7 +65,7 @@ internal fun parseMcpHeaderVariables(text: String): Map<String, String> {
                     if (remote) {
                         OutlinedTextField(headers, { headers = it }, label = { Text("请求头=变量名，每行一项") },
                             placeholder = { Text("Authorization=MY_PLUGIN_AUTH") }, minLines = 2, maxLines = 4)
-                        Text("变量的值应包含完整请求头，例如 Bearer 加令牌。此处只填写变量名。OpenCode 服务器端的请求头引用尚未接入。", style = MaterialTheme.typography.bodySmall)
+                        Text("变量的值应包含完整请求头，例如 Bearer 加令牌。此处只填写变量名。变量需要在目标机器的运行器启动环境中设置。", style = MaterialTheme.typography.bodySmall)
                     } else OutlinedTextField(variables, { variables = it }, label = { Text("环境变量名，每行一个") },
                         placeholder = { Text("MY_PLUGIN_TOKEN") }, minLines = 2, maxLines = 4)
                     Text(if (hostKey == "@local") "请先在本机为运行器进程配置这些变量；Yxi 不保存变量值。" else "请在当前服务器的运行器启动环境中配置这些变量；本机变量不会传到服务器。",
@@ -106,7 +106,7 @@ internal fun parseMcpHeaderVariables(text: String): Map<String, String> {
                         QuietChoice("opencode" in record.desiredRunners, { change {
                             val runners = if ("opencode" in record.desiredRunners) record.desiredRunners - "opencode" else record.desiredRunners + "opencode"
                             registry.save(record.definition, runners, record.revision)
-                        } }, enabled = registry.problem.isBlank() && (hostKey == "@local" || record.definition.headerVariables.isEmpty()), label = { Text("OpenCode 新会话") })
+                        } }, enabled = registry.problem.isBlank(), label = { Text("OpenCode 新会话") })
                         QuietChoice("claude" in record.desiredRunners, { change {
                             val runners = if ("claude" in record.desiredRunners) record.desiredRunners - "claude" else record.desiredRunners + "claude"
                             registry.save(record.definition, runners, record.revision)
@@ -116,7 +116,6 @@ internal fun parseMcpHeaderVariables(text: String): Map<String, String> {
                             registry.save(record.definition, runners, record.revision)
                         } }, enabled = registry.problem.isBlank(), label = { Text("Codex 新会话") })
                     }
-                    if (hostKey != "@local" && record.definition.headerVariables.isNotEmpty()) Text("此配置含请求头引用，服务器 OpenCode 暂不可选。", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
                     Text("已打开的会话保留其已加载版本。", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
                     TextButton({ change { registry.retire(record.definition.key, record.revision) } }, enabled = registry.problem.isBlank()) { Text("从新会话配置中移除") }
                 } else TextButton({ change { registry.restore(record.definition.key, record.revision) } }, enabled = registry.problem.isBlank()) { Text("恢复配置") }
