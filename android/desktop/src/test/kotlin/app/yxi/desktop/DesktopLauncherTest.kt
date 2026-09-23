@@ -17,6 +17,15 @@ class DesktopLauncherTest {
             assertFailsWith<IllegalArgumentException> { DesktopLaunchPlan(it, "claude", id) }
         }
         assertFailsWith<IllegalArgumentException> { DesktopLaunchPlan("/work", "sh", id) }
+        RunnerCatalog.entries.filterNot { it.serverCreation }.forEach { runner ->
+            val rejected = assertFailsWith<IllegalArgumentException> { DesktopLaunchPlan("/work", runner.id, id) }
+            assertTrue(rejected.message.orEmpty().contains("尚未完成"))
+        }
         assertFailsWith<IllegalArgumentException> { DesktopLaunchPlan("/work", "codex", "bad;id") }
+    }
+    @Test fun `discovery does not accept arbitrary executable strings`() {
+        assertFailsWith<IllegalArgumentException> { RunnerCatalog.probeCommand("claude; touch bad") }
+        assertFailsWith<IllegalArgumentException> { RunnerCatalog.probeCommand("grok") }
+        assertTrue(RunnerCatalog.probeCommand("opencode").contains("command -v"))
     }
 }

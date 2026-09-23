@@ -20,10 +20,7 @@ import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material.icons.outlined.Hub
 
-internal val configurationEngines = listOf(
-    Lines.CLAUDE to "Claude Code", Lines.CODEX to "Codex", "opencode" to "OpenCode",
-    "gemini" to "Gemini", "grok" to "Grok Build", "hermes" to "Hermes",
-)
+internal val configurationEngines = RunnerCatalog.entries.map { it.id to it.title }
 
 @Composable
 internal fun ConfigurationHeader(state: AppState, conn: Conn, engine: String, busy: Boolean,

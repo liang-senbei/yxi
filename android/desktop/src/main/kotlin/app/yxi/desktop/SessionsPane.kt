@@ -19,6 +19,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -98,7 +99,16 @@ fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: Stri
     var path by remember { mutableStateOf(initialDirectory ?: Dirs.parentsOf(conn.sessions.map { it.cwd }).firstOrNull()?.let { "$it/" }.orEmpty()) }
     var err by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    var agent by remember { mutableStateOf(initialAgent?.takeIf { it in listOf("claude", "codex") } ?: "claude") }
+    var agent by remember { mutableStateOf(initialAgent?.takeIf { RunnerCatalog.find(it) != null } ?: "claude") }
+    val selectedRunner = RunnerCatalog.find(agent)!!
+    var installation by remember(conn, agent) { mutableStateOf("checking") }
+    LaunchedEffect(conn, agent) {
+        installation = if (selectedRunner.command == null) "unknown" else try {
+            kotlinx.coroutines.withTimeout(10000) { conn.ssh.exec(RunnerCatalog.probeCommand(agent)).trim() }.takeIf { it in setOf("available", "missing") } ?: "unknown"
+        } catch (e: kotlinx.coroutines.TimeoutCancellationException) { "unknown" }
+        catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (_: Exception) { "unknown" }
+    }
     var initialPrompt by remember { mutableStateOf(groupContext) }
     var isolatedWorktree by remember { mutableStateOf(false) }
     var permissionMode by remember { mutableStateOf(app.yxi.agent.PermissionMode.Manual) }
@@ -109,7 +119,21 @@ fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: Stri
         title = { Text("在 ${conn.host.label} 上新建会话") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                WorkbenchTabs(listOf("Claude Code", "Codex"), if (agent == "codex") "Codex" else "Claude Code", { if (!busy) agent = if (it == "Codex") "codex" else "claude" })
+                RunnerCatalog.entries.chunked(2).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        row.forEach { runner ->
+                            androidx.compose.material3.FilterChip(selected = agent == runner.id, onClick = { agent = runner.id; err = "" }, enabled = !busy,
+                                modifier = Modifier.weight(1f), leadingIcon = { RunnerBrandIcon(runner.id, Modifier.size(20.dp)) },
+                                label = { Column { Text(runner.title); if (!runner.serverCreation) Text("创建接入中", style = MaterialTheme.typography.labelSmall) } })
+                        }
+                    }
+                }
+                Text(when (installation) {
+                    "checking" -> "正在检查 ${conn.host.label} 上的 ${selectedRunner.title}…"
+                    "available" -> "${selectedRunner.title} 已安装" + if (selectedRunner.serverCreation) "，可创建会话" else "；启动和会话状态适配尚未完成"
+                    "missing" -> "服务器未找到 ${selectedRunner.title}" + if (selectedRunner.serverCreation) "，请先安装并登录" else "；创建适配也尚未完成"
+                    else -> if (selectedRunner.serverCreation) "无法确认服务器安装状态，请检查连接后重新选择运行器" else "该运行器的创建接入尚未完成，暂不能启动"
+                }, style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 if (initialDirectory != null) Text("已填入所选目录，可在创建前调整。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 Text("先检查运行器，再创建独立会话。目录不存在会创建；已有任务继续运行。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 OutlinedTextField(path, { path = it }, enabled = !busy, singleLine = true, label = { Text("服务器工作目录") }, placeholder = { Text("/opt/workspace/…") }, modifier = Modifier.fillMaxWidth())
@@ -142,7 +166,7 @@ fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: Stri
             }
         },
         confirmButton = {
-            TextButton(enabled = path.isNotBlank() && !busy, onClick = {
+            TextButton(enabled = path.isNotBlank() && !busy && selectedRunner.serverCreation && installation == "available", onClick = {
                 busy = true
                 scope.launch {
                     try { createSession(conn, DesktopLaunchPlan(path.trim(), agent, requestId, initialPrompt, collaborationGroup, isolatedWorktree,

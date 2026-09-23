@@ -8,7 +8,7 @@ import java.util.UUID
 data class DesktopLaunchPlan(val directory: String, val agent: String, val requestId: String, val initialPrompt: String = "", val collaborationGroup: String = "", val isolatedWorktree: Boolean = false,
     val permissionMode: PermissionMode? = null) {
     init {
-        require(agent in listOf("claude", "codex")) { "不支持的运行器" }
+        require(RunnerCatalog.find(agent)?.serverCreation == true) { "此运行器的会话创建适配尚未完成" }
         require(directory.startsWith('/') && directory.none { it < ' ' || it == '\u007f' }) { "请输入服务器上的绝对路径，不含控制字符" }
         require(Regex("[a-f0-9]{32}").matches(requestId)) { "启动请求标识无效" }
         require(initialPrompt.length <= 16000 && '\u0000' !in initialPrompt) { "启动提示词最多 16000 字符，不能包含空字符" }
