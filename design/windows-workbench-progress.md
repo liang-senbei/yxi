@@ -1,3 +1,9 @@
+## 2026-09-24 Hermes 官方原生 ACP 握手
+
+- `e7e0f8a` 增加专用 Dockerfile.hermes、受标签/源码 pin 校验的 Hermes run variant、HermesAcpNativeTest；固定官方源码 5a3e03ef37462000b5b13d03915eb3e7b1633b6f（0.21.4），仅在构建镜像安装 core+acp 依赖。首次普通 wheel 安装失败，官方 setup.py 明确禁止普通 wheel；`38b7abb` 改为其支持的 editable 安装并保留完整日志。
+- Kotlin 测试镜像源 e7e0f8ab0b178c1734dbc7386004eb740edf19a1，构建 `run.TZ9fJB`；Hermes 变体基于同一已编译镜像，runner/配方为 38b7abb，原生测试 `run.guwlk9` 1 项通过，无失败/跳过。实际产品 LocalAcpTransport 启动 /opt/hermes/bin/hermes acp，协议1握手成功，关闭后进程退出，测试网络隔离。
+- 原生返回 load/resume/fork/list、image 能力以及 type=terminal 的 hermes-setup（args --setup）认证方法，说明当前通用 RPC 登录按钮仍需要专门的终端认证适配；不能算登录或模型调用完成。证据 `.artifacts/hermes-native/initialize.json`、build.log，依赖冻结清单在测试镜像 /opt/hermes-packages.txt。未改宿主安装、未登录真实账号、未发布。
+
 ## 2026-09-24 ACP 已确认模型记录同步
 
 - `c870cc53455bf94b38005066c528d260044bf1d8` 创建时优先读取 configOptions 中 model 类别，其次旧 models.currentModelId，无原生证据才记 native-default。原生配置通知/切换确认后通过控制器回调更新任务索引，任务 key 保持不变。
