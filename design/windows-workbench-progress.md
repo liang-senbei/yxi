@@ -1,3 +1,9 @@
+## 2026-09-24 六款新增官方插件图标
+
+- `9222c501e017c9a39dbb1a1ae7e8aabf0b33f6d4` 接入 Figma、Stripe、Vercel、Supabase、Google Calendar、Outlook 官方资源；cc-yxi 收集，主线程核对 manifest 哈希及图形，来源记录于 plugin-icons/SOURCES.md，名称与官网域名同时匹配。内置覆盖从8款扩到14款。
+- 首跑 `run.M8O8A5` 7项中1失败：旧测试要求PNG超过500字节，对简单图形压缩不适用。`84eda53bdf484b6b572ab82b0bbeb4276a0c428d` 改为实际可见像素及非单色图案验证。
+- 最终构建 `run.dSx7Yz`，PluginIconsTest `run.MKzQON` 7项全部通过，0失败/错误/跳过；包括离线渲染与同名非官方域名拒绝套图。`.artifacts/plugin-brand-wave2/plugin-*.png` 六款64px渲染已目视，无裁切。
+- Outlook官方源仅48px，Windows高DPI仍待确认；尚未覆盖全市场，也未发布。
 ## 2026-09-24 插件图标失败退避
 
 - `8a2510b8c9c638a219835fc9c38f8458878335c5` 对目录及官网图标全部失败的请求增加60秒内存退避（最多4096项），到期可重试；取消异常直接传播，不再继续抓取官网备用地址。
