@@ -18,6 +18,13 @@ if test "$mode" = run && test -n "${YXI_TEST_IMAGE_REVISION:-}"; then
     git -C "$repo" cat-file -e "$image_revision^{commit}"
 fi
 image="yxi-isolated-tests:$image_revision"
+variant=${YXI_TEST_VARIANT:-}
+if test -n "$variant"; then
+    test "$mode" = run && test "$variant" = hermes || { echo 'Only the explicit Hermes run variant is supported.' >&2; exit 2; }
+    image="$image-hermes"
+    test "$(docker_local image inspect --format '{{ index .Config.Labels "org.yxi.native-runtime" }}' "$image")" = hermes
+    test "$(docker_local image inspect --format '{{ index .Config.Labels "org.yxi.native-source" }}' "$image")" = 5a3e03ef37462000b5b13d03915eb3e7b1633b6f
+fi
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/yxi-isolated-tests"
 mkdir -p "$cache"
 chmod 700 "$cache"
