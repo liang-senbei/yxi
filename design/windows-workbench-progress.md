@@ -1,3 +1,9 @@
+## 2026-09-24 Hermes 原生终端配置入口
+
+- `cd0adf1d3805d33d8d6a5d901ab6b7586cb2b00b` 原生测试声明 auth.terminal，从固定 Hermes 0.21.4 的 initialize 读取 terminal 方法，使用产品 acpTerminalAuthPlan 与 LocalAuthenticationTerminal 启动同一运行器。实际显示 Select provider 菜单并保持交互等待，随后关闭；未选择供应商、未填写凭据。
+- 产品构建 `run.riiF5o`；专用 Hermes 镜像配方成功（日志 /root/.cache/yxi-isolated-tests/hermes-terminal-build.log）；HermesAcpNativeTest `run.ZHKq8t` 1 项通过，无失败/跳过。菜单记录 `.artifacts/hermes-native/terminal-setup.txt`，包含 Nous Portal、OpenAI 等原生选项，不代表这些账号已登录。
+- 仅验证真实入口与 PTY 通路；实际配置成功后的会话/模型请求，以及 Windows/macOS 仍未验收。未发布。
+
 ## 2026-09-24 认证窗口取消与进程树回收
 
 - `3acf5073f6c1fd8dc616c0038cf4a085aa78d1b3` 扩展真实窗口测试：PTY 程序启动等待子进程，发送 WINDOW_CLOSING 后必须返回取消而非成功，并等待父/子 ProcessHandle 均不再存活。
