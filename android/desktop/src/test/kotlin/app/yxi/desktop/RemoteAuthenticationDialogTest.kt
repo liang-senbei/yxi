@@ -12,11 +12,13 @@ import javax.imageio.ImageIO
 import kotlin.test.*
 
 class RemoteAuthenticationDialogTest {
-    @Test fun `server authentication window accepts keyboard input through its SSH PTY`() {
+    @Test fun `server authentication window accepts keyboard input through its SSH PTY`() = runDialog(false)
+    @Test fun `closing server authentication cancels without closing SSH`() = runDialog(true)
+    private fun runDialog(cancel: Boolean) {
         check(!System.getenv("YXI_ISOLATED_TEST_RUN").isNullOrBlank())
         check(System.getProperty("user.home") == "/sandbox/home")
         System.setProperty("skiko.renderApi", "SOFTWARE")
-        val root = File("/sandbox/tmp/remote-auth-ui").apply { mkdirs() }
+        val root = File("/sandbox/tmp/remote-auth-ui-${if (cancel) "cancel" else "success"}").apply { mkdirs() }
         val home = File(root, "home").apply { mkdirs() }
         val ready = File(root, "ready"); val answer = File(root, "answer")
         val bin = File(home, ".local/bin").apply { mkdirs() }
@@ -28,7 +30,7 @@ assert sys.argv[1:] == ['acp','--setup']
 assert os.environ['TERM'] == 'xterm-256color'
 assert os.environ['AUTH_FIXTURE'] == 'private-fixture-value'
 print('服务器认证测试：输入 ok 后按 Enter',flush=True)
-pathlib.Path('${ready.path}').write_text('ready')
+pathlib.Path('${ready.path}').write_text(str(os.getpid()))
 value=input()
 pathlib.Path('${answer.path}').write_text(value)
 sys.exit(0 if value == 'ok' else 7)
@@ -52,20 +54,25 @@ sys.exit(0 if value == 'ok' else 7)
                             delay(700)
                             val dialog = java.awt.Window.getWindows().filterIsInstance<java.awt.Dialog>().single { it.isShowing && it.title == title }
                             ImageIO.write(Robot().createScreenCapture(java.awt.Rectangle(dialog.locationOnScreen, dialog.size)), "png", File("/results/remote-auth-terminal.png"))
-                            withContext(Dispatchers.IO) { Robot().apply {
+                            if (cancel) dialog.dispatchEvent(java.awt.event.WindowEvent(dialog, java.awt.event.WindowEvent.WINDOW_CLOSING))
+                            else withContext(Dispatchers.IO) { Robot().apply {
                                 mouseMove(dialog.locationOnScreen.x + 200, dialog.locationOnScreen.y + 160)
                                 mousePress(InputEvent.BUTTON1_DOWN_MASK); mouseRelease(InputEvent.BUTTON1_DOWN_MASK)
                                 keyPress(KeyEvent.VK_O); keyRelease(KeyEvent.VK_O); keyPress(KeyEvent.VK_K); keyRelease(KeyEvent.VK_K)
                                 keyPress(KeyEvent.VK_ENTER); keyRelease(KeyEvent.VK_ENTER)
                             } }
-                            delay(5000); if (code == null) error("远端认证未返回退出结果")
+                            delay(5000); if (code == null && problem == null) error("远端认证未返回退出结果")
                         } catch (e: CancellationException) { throw e }
                         catch (e: Throwable) { failure = e; exitApplication() }
                     }
                 }
             } finally { plan.close() }
             failure?.let { throw it }
-            assertNull(problem); assertEquals(0, code); assertEquals("ok", answer.readText())
+            if (cancel) {
+                assertNull(code); assertEquals("认证已取消", problem); assertFalse(answer.exists())
+                val pid = ready.readText().toLong()
+                runBlocking { withTimeout(5000) { while (ProcessHandle.of(pid).map { it.isAlive }.orElse(false)) delay(20) } }
+            } else { assertNull(problem); assertEquals(0, code); assertEquals("ok", answer.readText()) }
             assertEquals("alive", runBlocking { bridge.conn.ssh.exec("printf alive").trim() })
         }
     }
