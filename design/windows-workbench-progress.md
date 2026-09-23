@@ -1,3 +1,9 @@
+## 2026-09-24 服务器 ACP 会话管理基础
+
+- `158dd99e5e1a25913575c2171b1871c9483374df` 新增 RemoteAcpTasks：远端目录/home 身份、每主机独立创建日志、显式认证、原生 session/new、持久任务记录、模型记录回调，以及按 Conn 关闭所属控制器。明确认证拒绝保留连接，其余未知创建要求核对。
+- 构建 `run.XJDVT5`；RemoteAcpTransportTest `run.saIk0E` 1 项通过，无失败/跳过。真实隔离 SSH + fixture 新增 Grok 任务创建/磁盘索引/远端路径/恢复标记/断开清理断言，并保留 Gemini/Hermes 通道互不干扰验证。
+- 尚未接 AppState/新建 UI、远端终端认证和真实运行器会话请求，不开放未完成入口。未发布。
+
 ## 2026-09-24 服务器 ACP 专属通道基础
 
 - `8e13a41`/`9ee5c6a2da8a6a520d5d58f883af76474c155bad` 增加 RemoteAcpTransport：先核对可执行入口，Shell.q 保留目录/argv，经独立 SSH exec 和 Python supervisor 转发协议；EOF/信号清理所属进程组，不接管现有 Agent；原生 stderr 不进入通道日志。
