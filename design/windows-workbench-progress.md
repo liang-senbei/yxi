@@ -1,3 +1,9 @@
+## 2026-09-24 认证终端窗口真实键盘验收
+
+- `8436b93716cde4f18081144d75c8237edfbb3337` 增加 AcpAuthenticationDialogTest：真实 PTY fixture 要求 stdin/stdout 为 TTY，在实际 JediTerm 窗口显示中文+ANSI 颜色，Robot 点击并输入 ok/Enter，断言原生接收 ok 和窗口回传退出码0。
+- 构建 `run.orL5ur`，窗口测试 `run.ybNjcC` 1 项通过，无失败/跳过；截图 `.artifacts/acp-auth/terminal.png` 已目视，中文无方块/乱码，终端区域显示正常。
+- 仅 Linux 隔离窗口和测试程序，不是 Hermes 真实配置或 Windows/macOS 安装包验收。未发布。
+
 ## 2026-09-24 ACP 终端认证窗口与重连接入
 
 - `5a401d51ab8db1fd0fbbc1f85edd5155291d255c` 新增 JediTerm+本地 PTY 的认证 DialogWindow；选择 terminal 方法后关闭旧 ACP 连接，终端退出码0才重新连接/初始化，取消或非零退出不继续。LocalAcpTransport 连接声明 auth.terminal 能力；普通 ACP Client 默认仍不声明。
