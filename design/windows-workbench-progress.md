@@ -1,3 +1,8 @@
+## 2026-09-24 ACP 已确认模型记录同步
+
+- `c870cc53455bf94b38005066c528d260044bf1d8` 创建时优先读取 configOptions 中 model 类别，其次旧 models.currentModelId，无原生证据才记 native-default。原生配置通知/切换确认后通过控制器回调更新任务索引，任务 key 保持不变。
+- 构建 `run.ZQ1rNj`；LocalAcpTasksTest `run.gBeT4n` 3 项、AcpTaskControllerTest `run.Bs3g6R` 3 项通过，无失败/跳过。三引擎 fixture 都验证初始具体模型和切换后的磁盘记录。真实运行器模型切换仍待验证，未发布。
+
 ## 2026-09-24 ACP 结束轮次的过期审批清理
 
 - `9045cd5e26f4e755db544f35821433798a29fd6b` 原生终止回执确认后，以 cancelled 答复该会话残留审批并清空界面；不选择 allow 选项。清理失败关闭连接并提示核对，同时保留已确认的轮次完成结果。
