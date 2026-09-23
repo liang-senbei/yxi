@@ -194,6 +194,12 @@ class SshSession(
             runCatching { channel.disconnect() }
         }
         val isConnected: Boolean get() = channel.isConnected
+        /** Null means no native exit-status receipt, including a locally cancelled channel. */
+        val exitCode: Int? get() = channel.exitStatus.takeIf { it >= 0 }
+        suspend fun awaitExitCode(): Int? {
+            while (channel.isConnected) kotlinx.coroutines.delay(20)
+            return exitCode
+        }
     }
 
     suspend fun connect(timeoutMs: Int = 15_000): Unit = withContext(Dispatchers.IO) {

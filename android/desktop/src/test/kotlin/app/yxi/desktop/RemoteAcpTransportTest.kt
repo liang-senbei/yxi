@@ -25,6 +25,16 @@ for line in sys.stdin:
         }
         IsolatedSshBridge(File(root, "ssh"), mapOf("HOME" to home.path), File(root, "unused.sock")).use { bridge ->
             bridge.conn.ssh.connect()
+            val exited = bridge.conn.ssh.openPtyCommand("printf terminal-exit; exit 7")
+            try {
+                val text = withContext(Dispatchers.IO) { exited.output.readBytes().toString(Charsets.UTF_8) }
+                assertTrue(text.contains("terminal-exit"))
+                assertEquals(7, withTimeout(5000) { exited.awaitExitCode() })
+            } finally { exited.close() }
+            val cancelled = bridge.conn.ssh.openPtyCommand("sleep 30")
+            assertNull(cancelled.exitCode)
+            cancelled.close()
+            assertNull(withTimeout(5000) { cancelled.awaitExitCode() }, "Disconnect without receipt must not mean success")
             val index = File(root, "tasks.json")
             RemoteAcpTasks(InstructionQueue(File(root, "queue.json")), index).use { tasks ->
                 tasks.prepare(bridge.conn, "grok", directory.path)
