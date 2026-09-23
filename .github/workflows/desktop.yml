@@ -32,6 +32,15 @@ jobs:
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v4
 
+      - name: Windows native tray Chinese font check
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force tray-font-check | Out-Null
+          & javac -encoding UTF-8 -d tray-font-check android/desktop/src/main/java/app/yxi/desktop/TrayMenuFont.java dev/TrayMenuFontCheck.java
+          if ($LASTEXITCODE -ne 0) { throw 'Tray font check compilation failed' }
+          & java -cp tray-font-check TrayMenuFontCheck | Tee-Object smoke-tray-font.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Native tray Chinese font check failed' }
+
       - name: Windows SSH key update contract (isolated temporary files)
         shell: pwsh
         timeout-minutes: 2

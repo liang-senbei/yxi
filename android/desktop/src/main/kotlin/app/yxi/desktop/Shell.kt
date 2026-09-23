@@ -173,6 +173,7 @@ fun YxiTray(state: AppState, tray: TrayState, onQuit: () -> Unit) {
             item("设置…") { Shell.show(); state.showSettings = true }
             addSeparator()
             item("退出 Yxi", onQuit)
+            TrayMenuFont.apply(this)
         }
         icon.addMouseListener(object : MouseAdapter() { override fun mouseClicked(e: MouseEvent) { if (e.button == MouseEvent.BUTTON1) Shell.show() } })
         // 点气泡/Toast（Windows 上就是系统通知）= 叫回窗口 + 跳到通知说的那个会话（ZCode 同款，目标在 Notify.clicked 里）
