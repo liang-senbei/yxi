@@ -96,7 +96,7 @@ fun CollaborationDialog(state: AppState, conn: Conn, initialGroup: String = "", 
                 if (data.groups.isEmpty()) Text("此服务器尚未配置协作组。", color = Tokens.current.textMuted)
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     data.groups.keys.sorted().forEach { name ->
-                        FilterChip(selected == name, { selected = name; section = "成员" }, label = { Text("$name · ${data.groups[name].orEmpty().size} 位成员") })
+                        QuietChoice(selected == name, { selected = name; section = "成员" }, label = { Text("$name · ${data.groups[name].orEmpty().size} 位成员") })
                     }
                 }
                 if (selected in data.groups) {

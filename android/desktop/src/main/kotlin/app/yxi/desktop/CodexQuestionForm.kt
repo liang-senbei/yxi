@@ -32,7 +32,7 @@ internal fun CodexQuestionForm(controller: CodexTaskController, request: JSONObj
             if (options != null) for (index in 0 until options.length()) {
                 val option = options.optJSONObject(index) ?: continue
                 val label = option.optString("label")
-                FilterChip(answers[id] == label, { answers[id] = label }, enabled = !sending && controller.ready,
+                QuietChoice(answers[id] == label, { answers[id] = label }, enabled = !sending && controller.ready,
                     label = { Column { Text(label); Text(option.optString("description"), style = MaterialTheme.typography.bodySmall) } })
             }
             if (options == null || options.length() == 0 || question.optBoolean("isOther")) {

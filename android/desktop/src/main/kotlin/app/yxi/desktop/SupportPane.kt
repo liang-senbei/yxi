@@ -94,7 +94,7 @@ internal fun SupportPane(owner: String, api: SupportApi, workspace: SupportWorks
                         Text(if (draft.ticketId == null) "告诉我们遇到的问题" else "补充工单 ${draft.ticketId}", style = MaterialTheme.typography.headlineSmall, color = t.textPrimary)
                         if (draft.ticketId == null) {
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                supportLabels.forEach { (key, label) -> FilterChip(selected = edit.category == key, onClick = { edit.category = key; edit.save() }, enabled = editable, label = { Text(label) }) }
+                                supportLabels.forEach { (key, label) -> QuietChoice(selected = edit.category == key, onClick = { edit.category = key; edit.save() }, enabled = editable, label = { Text(label) }) }
                             }
                         }
                         OutlinedTextField(edit.text, { edit.text = it; edit.save() }, modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp, max = 300.dp), readOnly = !editable, label = { Text("问题说明") })

@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -28,6 +29,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -63,7 +65,7 @@ fun SessionRow(s: Session, selected: Boolean, displayName: String? = null, onCli
     val hovered by src.collectIsHoveredAsState()
     val badgeColor = when (b) { Badge.Approval -> t.warning; Badge.Input -> t.accent; Badge.Running -> t.success; else -> t.textMuted }
     Column(
-        Modifier.fillMaxWidth().hoverable(src)
+        Modifier.fillMaxWidth().hoverable(src).clip(RoundedCornerShape(8.dp))
             .background(if (selected) t.selected else if (hovered) t.hover else Color.Transparent)
             .clickable(interactionSource = src, indication = null, onClick = onClick)
             .padding(start = 24.dp, end = 10.dp, top = 5.dp, bottom = 5.dp),
@@ -123,11 +125,8 @@ fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: Stri
                 RunnerCatalog.entries.chunked(2).forEach { row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         row.forEach { runner ->
-                            androidx.compose.material3.FilterChip(selected = agent == runner.id, onClick = { agent = runner.id; err = "" }, enabled = !busy,
+                            QuietChoice(selected = agent == runner.id, onClick = { agent = runner.id; err = "" }, enabled = !busy,
                                 modifier = Modifier.weight(1f).heightIn(min = 44.dp),
-                                colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(selectedContainerColor = Tokens.current.accent.copy(alpha = 0.12f)),
-                                border = androidx.compose.material3.FilterChipDefaults.filterChipBorder(enabled = !busy, selected = agent == runner.id,
-                                    borderColor = Tokens.current.border, selectedBorderColor = Tokens.current.accent.copy(alpha = 0.45f)),
                                 leadingIcon = { RunnerBrandIcon(runner.id, Modifier.size(20.dp)) },
                                 label = { Column { Text(runner.title); if (!runner.serverCreation) Text("创建接入中", style = MaterialTheme.typography.labelSmall) } })
                         }

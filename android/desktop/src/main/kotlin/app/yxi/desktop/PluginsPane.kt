@@ -1,7 +1,6 @@
 package app.yxi.desktop
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -43,7 +42,7 @@ internal fun PluginsPane(state: AppState) {
                 Text(if (state.pluginMarketplace) "目录来源" else "原生安装记录", Modifier.align(Alignment.CenterVertically),
                     style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
                 listOf("codex" to "Codex", "claude" to "Claude Code").forEach { (engine, label) ->
-                    FilterChip(state.pluginCatalogRuntime == engine, { state.pluginCatalogRuntime = engine },
+                    QuietChoice(state.pluginCatalogRuntime == engine, { state.pluginCatalogRuntime = engine },
                         label = { Text(label) }, leadingIcon = { RunnerBrandIcon(engine, Modifier.size(18.dp)) })
                 }
             }
@@ -71,21 +70,20 @@ internal fun PluginsPane(state: AppState) {
 @Composable
 internal fun PluginTabs(options: List<Pair<String, ImageVector>>, selected: Int, select: (Int) -> Unit) {
     val t = Tokens.current
-    Row(Modifier.selectableGroup().background(t.surface1, RoundedCornerShape(12.dp)).padding(4.dp),
+    Row(Modifier.selectableGroup().padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         options.forEachIndexed { index, (label, icon) ->
             val active = selected == index
-            Surface(shape = RoundedCornerShape(9.dp),
-                color = if (active) t.accent.copy(alpha = if (t.dark) 0.12f else 0.07f) else Color.Transparent,
-                contentColor = if (active) t.accent else t.textMuted,
-                border = BorderStroke(1.dp, if (active) t.accent.copy(alpha = 0.20f) else Color.Transparent),
+            Surface(shape = RoundedCornerShape(8.dp),
+                color = if (active) t.selected else Color.Transparent,
+                contentColor = if (active) t.textPrimary else t.textSecondary,
                 shadowElevation = 0.dp) {
                 Row(Modifier.selectable(active, role = Role.Tab, onClick = { select(index) })
                     .padding(horizontal = 14.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     Icon(icon, null, Modifier.size(17.dp))
                     Text(label, style = MaterialTheme.typography.labelLarge,
-                        fontWeight = if (active) FontWeight.Medium else FontWeight.Normal)
+                        fontWeight = FontWeight.Normal)
                 }
             }
         }

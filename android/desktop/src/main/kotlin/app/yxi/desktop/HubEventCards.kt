@@ -44,13 +44,13 @@ internal fun HubEventCards(raw: String, query: String, group: String = "", reque
         listOf(message.id, message.sender, message.recipient, message.body, message.replyTo).any { it.contains(query.trim(), ignoreCase = true) }) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(!inboxOnly, { inboxOnly = false }, label = { Text("全部消息") })
-            FilterChip(inboxOnly, { inboxOnly = true }, label = { Text("回给用户 · ${scopedMessages.count { it.recipientKind == "user" }}") })
+            QuietChoice(!inboxOnly, { inboxOnly = false }, label = { Text("全部消息") })
+            QuietChoice(inboxOnly, { inboxOnly = true }, label = { Text("回给用户 · ${scopedMessages.count { it.recipientKind == "user" }}") })
         }
         if (group.isNotBlank()) Row {
-            FilterChip(!allGroups, { allGroups = false }, label = { Text("当前组 · $group") })
+            QuietChoice(!allGroups, { allGroups = false }, label = { Text("当前组 · $group") })
             Spacer(Modifier.width(8.dp))
-            FilterChip(allGroups, { allGroups = true }, label = { Text("服务器全部组") })
+            QuietChoice(allGroups, { allGroups = true }, label = { Text("服务器全部组") })
         }
         if (group.isNotBlank() && !allGroups && parsed.first.any { it.groups.isEmpty() }) Text("部分旧记录没有分组信息，可在服务器全部组中查看。", style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
         Text("${messages.size} 条消息" + if (parsed.second > 0) " · ${parsed.second} 行不完整或无法识别" else "", style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)

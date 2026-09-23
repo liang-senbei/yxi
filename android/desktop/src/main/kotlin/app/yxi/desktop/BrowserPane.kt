@@ -170,7 +170,7 @@ internal fun BrowserPane(state: AppState, conn: Conn, key: String, directory: St
                 }
             }, singleLine = true, label = { Text("查找网页文字") })
             Row(verticalAlignment = Alignment.CenterVertically) {
-                FilterChip(selected = matchCase, onClick = { matchCase = !matchCase; lastSearch = null }, label = { Text("区分大小写") })
+                QuietChoice(selected = matchCase, onClick = { matchCase = !matchCase; lastSearch = null }, label = { Text("区分大小写") })
                 TextButton({ findInPage(false) }, enabled = pageSearch.text.isNotBlank()) { Text("上一个") }
                 TextButton({ findInPage(true) }, enabled = pageSearch.text.isNotBlank()) { Text("下一个") }
                 TextButton(::closePageSearch) { Text("关闭") }
@@ -201,7 +201,7 @@ internal fun BrowserPane(state: AppState, conn: Conn, key: String, directory: St
         }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             previewViewports.forEach { viewport ->
-                FilterChip(selected = preview.viewportMode == viewport.id, onClick = {
+                QuietChoice(selected = preview.viewportMode == viewport.id, onClick = {
                     if (preview.viewportMode != viewport.id) {
                         preview.viewportMode = viewport.id
                         preview.viewportStatus = if (preview.handle == null) "打开页面后应用所选尺寸" else "正在切换视口…"
@@ -214,7 +214,7 @@ internal fun BrowserPane(state: AppState, conn: Conn, key: String, directory: St
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("网页主题", style = MaterialTheme.typography.labelSmall, color = t.textMuted)
             listOf("system" to "跟随系统", "light" to "亮色", "dark" to "暗色").forEach { (value, label) ->
-                FilterChip(selected = preview.colorScheme == value, onClick = {
+                QuietChoice(selected = preview.colorScheme == value, onClick = {
                     if (preview.colorScheme != value) {
                         preview.colorScheme = value
                         if (preview.selection != null) preview.selectionStale = true

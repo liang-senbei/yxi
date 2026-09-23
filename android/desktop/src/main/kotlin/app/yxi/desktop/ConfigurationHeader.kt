@@ -68,7 +68,7 @@ internal fun ConfigurationHeader(state: AppState, conn: Conn, engine: String, bu
 private fun EngineSwitch(engine: String, busy: Boolean, select: (String) -> Unit) {
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         configurationEngines.forEach { (id, label) ->
-            FilterChip(engine == id, { select(id) }, enabled = !busy, label = { Text(label) },
+            QuietChoice(engine == id, { select(id) }, enabled = !busy, label = { Text(label) },
                 leadingIcon = { RunnerBrandIcon(id, Modifier.size(19.dp)) })
         }
     }

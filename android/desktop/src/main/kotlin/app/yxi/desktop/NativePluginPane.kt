@@ -52,7 +52,7 @@ internal fun NativePluginPane(state: AppState, conn: Conn?, installedOnly: Boole
         LaunchedEffect(counts.keys) { if (category != "全部" && category !in counts) category = "全部" }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             (listOf("全部") + PluginCategories.order.filter { it in counts }).forEach { label ->
-                FilterChip(category == label, { category = label }, label = { Text("$label ${if (label == "全部") total else counts[label] ?: 0}") })
+                QuietChoice(category == label, { category = label }, label = { Text("$label ${if (label == "全部") total else counts[label] ?: 0}") })
             }
         }
         val shown = matching.filter { category == "全部" || categoryLabel(it.category) == category }

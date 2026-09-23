@@ -93,9 +93,9 @@ internal fun VoiceInputDialog(conn: Conn, close: () -> Unit, useText: (String) -
         Column(Modifier.fillMaxWidth().heightIn(max = 460.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val canSwitch = !checking && !recording && !transcribing && pendingAudio == null
-                FilterChip(!systemVoice && !localVoice, { systemVoice = false; localVoice = false }, enabled = canSwitch, label = { Text("服务器") })
-                FilterChip(localVoice, { localVoice = true; systemVoice = false }, enabled = canSwitch, label = { Text("本机离线") })
-                if (windows) FilterChip(systemVoice, { systemVoice = true; localVoice = false; editorShown = true }, enabled = canSwitch, label = { Text("Windows 语音") })
+                QuietChoice(!systemVoice && !localVoice, { systemVoice = false; localVoice = false }, enabled = canSwitch, label = { Text("服务器") })
+                QuietChoice(localVoice, { localVoice = true; systemVoice = false }, enabled = canSwitch, label = { Text("本机离线") })
+                if (windows) QuietChoice(systemVoice, { systemVoice = true; localVoice = false; editorShown = true }, enabled = canSwitch, label = { Text("Windows 语音") })
             }
             if (systemVoice) {
                 Text("点击下方文本框，按 Win + H 开始系统语音输入。", style = MaterialTheme.typography.titleSmall)

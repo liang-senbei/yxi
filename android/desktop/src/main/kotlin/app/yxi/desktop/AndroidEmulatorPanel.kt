@@ -153,7 +153,7 @@ internal fun AndroidEmulatorPanel(open: Boolean, close: () -> Unit) {
                 Text("安装与运行应用", style = MaterialTheme.typography.titleMedium)
                 result.error?.let { Text(it, color = Tokens.current.warning) }
                 result.devices.forEach { device ->
-                    FilterChip(selectedSerial == device.serial, { selectedSerial = device.serial }, enabled = device.online && !deviceBusy,
+                    QuietChoice(selectedSerial == device.serial, { selectedSerial = device.serial }, enabled = device.online && !deviceBusy,
                         label = { Text("${device.model.ifBlank { device.serial }} · ${device.serial} · " + when {
                             device.online -> "已连接"
                             device.unauthorized -> "等待设备授权"

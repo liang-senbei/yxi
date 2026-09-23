@@ -86,7 +86,7 @@ internal fun MailPane(owner: String, api: MailApi, onBack: () -> Unit, onCounter
         if (notice.isNotBlank()) Text(notice, color = t.success, style = MaterialTheme.typography.bodySmall)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf("全部", "未读", "已读").forEach { value ->
-                FilterChip(filter == value, { filter = value; selected = null }, enabled = !busy,
+                QuietChoice(filter == value, { filter = value; selected = null }, enabled = !busy,
                     label = { Text(value + if (value == "未读" && unreadTotal != null) " $unreadTotal" else "") })
             }
         }

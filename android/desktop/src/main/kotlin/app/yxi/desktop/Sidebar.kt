@@ -517,10 +517,10 @@ private fun AccountRow(state: AppState) {
 @Composable
 private fun NavItem(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, on: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val t = Tokens.current
-    val fg = if (on) t.accent else t.textSecondary
+    val fg = if (on) t.textPrimary else t.textSecondary
     Row(
         modifier.clip(RoundedCornerShape(8.dp))
-            .background(if (on) t.surface2 else androidx.compose.ui.graphics.Color.Transparent)
+            .background(if (on) t.selected else androidx.compose.ui.graphics.Color.Transparent)
             .clickable(onClick = onClick)
             .padding(10.dp, 8.dp),
         verticalAlignment = Alignment.CenterVertically,

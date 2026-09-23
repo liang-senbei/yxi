@@ -38,7 +38,7 @@ internal fun AndroidDeviceSetupCard(onCreated: (String) -> Unit) {
         }, enabled = !busy) { Text("选择系统镜像") }
         if (showImages) {
             images.take(20).forEach { image ->
-                FilterChip(selected?.path == image.path, {
+                QuietChoice(selected?.path == image.path, {
                     selected = image; installed = false; showImages = false; name = "Yxi_API_${image.apiLevel}"
                 }, label = { Text("Android API ${image.apiLevel} · ${image.abi} · ${image.sizeBytes / 1024 / 1024} MB") })
             }

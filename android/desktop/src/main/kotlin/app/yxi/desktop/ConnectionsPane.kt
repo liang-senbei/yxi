@@ -103,7 +103,7 @@ import kotlinx.coroutines.launch
         item { Text("任务在这台电脑运行，使用本机运行器的登录与权限设置。系统管理员操作仍由系统授权。", color = Tokens.current.textMuted) }
         item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf("codex" to "Codex", "claude" to "Claude Code").forEach { (id, title) ->
-                FilterChip(engine == id, { engine = id }, label = { Text(title) }, leadingIcon = { RunnerBrandIcon(id, Modifier.size(18.dp)) })
+                QuietChoice(engine == id, { engine = id }, label = { Text(title) }, leadingIcon = { RunnerBrandIcon(id, Modifier.size(18.dp)) })
             }
         } }
         item { OutlinedTextField(directory, { directory = it }, Modifier.fillMaxWidth(), label = { Text("本机工作目录") }, singleLine = true) }

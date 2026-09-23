@@ -83,9 +83,9 @@ print('__YXI_HUB_LOG__:' + json.dumps({'text': text, 'clipped': clipped}, ensure
     WorkbenchDialog(onDismissRequest = close, title = { Text("协作记录 · ${conn.host.label}") }, text = {
         Column(Modifier.widthIn(max = 700.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row {
-                FilterChip(!structured, { structured = false }, label = { Text("传统消息日志") })
+                QuietChoice(!structured, { structured = false }, label = { Text("传统消息日志") })
                 Spacer(Modifier.width(8.dp))
-                FilterChip(structured, { structured = true }, label = { Text("带 ID 的投递事件") })
+                QuietChoice(structured, { structured = true }, label = { Text("带 ID 的投递事件") })
             }
             Text(if (structured) "需服务器安装新版 yxi-hub。attempting 为开始投递，terminal-written 为终端写入，unknown 为结果待确认；均不是 Agent 处理回执。" else "服务器 hub.log 原始记录；终端投递不代表 Agent 已处理。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
             OutlinedTextField(query, { query = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("搜索成员、组名或消息文字") })

@@ -15,7 +15,7 @@ internal fun AgentProfileChoices(engine: String, profileId: String, profiles: Li
     configurationEngines.chunked(2).forEach { row ->
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             row.forEach { (id, label) ->
-                FilterChip(engine == id, { onEngine(id) }, enabled = !loading && !busy, modifier = Modifier.weight(1f),
+                QuietChoice(engine == id, { onEngine(id) }, enabled = !loading && !busy, modifier = Modifier.weight(1f),
                     label = { Text(label) }, leadingIcon = { RunnerBrandIcon(id, Modifier.size(20.dp)) })
             }
         }
