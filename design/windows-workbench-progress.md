@@ -1,3 +1,11 @@
+## OpenCode 1.18.32 原生建会话验证
+
+`023678a`：使用官方发布包 opencode-linux-x64-baseline.tar.gz（SHA256 763af386ef88a8cab18df00fcf055690e5a55e31a7088beabe02307142a6adce），仅缓存到服务器 /root/.cache/yxi-native-tests/opencode-1.18.32，再只读挂入无网络隔离测试容器；没有在宿主启动或安装到用户 PATH。
+
+构建 run.6YvzOa 通过，OpenCodeNativeTest 在 run.3ZI5sY 1 项通过、无跳过。原生 health 回报 1.18.32；使用 LocalOpenCodeServer 和 OpenCodeClient 实际创建空会话，回读同一 ID、工作目录、会话列表和空消息，确认不处于运行状态。使用独立 HOME/XDG 路径，无真实账号、无模型请求。证据证明原生启动/认证/空会话读写链路，不证明推理、审批、Windows进程、服务器会话集成或界面完成。
+
+后续继续连接审批/提问、模型选择、持久化投递与新建界面；六运行器完整可用仍未达到，未发布。
+
 ## OpenCode 本机服务进程管理（开发中）
 
 `d36c475`新增 LocalOpenCodeServer：显式 loopback/动态端口/关闭 mDNS、独立随机 Basic Auth 密码，只启动选定的可用运行器。限长读取启动输出、认证健康检查后返回客户端；失败、超时及关闭只回收自有进程。未修改原生配置或认证文件。
