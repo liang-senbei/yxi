@@ -32,6 +32,7 @@ class CompactModelMappingUiTest {
         val names = mutableStateMapOf("SONNET" to "glm-5.3-flash", "OPUS" to "glm-5.3", "FABLE" to "", "HAIKU" to "glm-5.3-flash")
         var interaction by mutableStateOf(false)
         var theme by mutableStateOf("light")
+        var fullForm by mutableStateOf(false)
         var selected by mutableStateOf("glm-5.3-flash")
         var bounds: Rect? = null
         var failure: Throwable? = null
@@ -39,6 +40,12 @@ class CompactModelMappingUiTest {
             val windowState = rememberWindowState(width = 1180.dp, height = 760.dp)
             Window(onCloseRequest = ::exitApplication, state = windowState, title = "Yxi model mapping preview") {
                 key(theme) { YxiTheme {
+                    if (fullForm) RouteForm(app.yxi.agent.Lines.Line("fixture", "Zhipu GLM", "https://open.bigmodel.cn/api/anthropic",
+                        apiKey = "fixture-only", extra = org.json.JSONObject().put("env", org.json.JSONObject().apply {
+                            modelValues.forEach { (id, model) -> if (id != "SUBAGENT") put("ANTHROPIC_DEFAULT_${id}_MODEL", model) }
+                            names.forEach { (id, name) -> put("ANTHROPIC_DEFAULT_${id}_MODEL_NAME", name) }
+                        })), remember { Conn(Host("fixture", "hk13 · 隔离预览", "192.0.2.1"), NoHostKeys) }, {}, {})
+                    else {
                     Column(Modifier.fillMaxSize().background(Tokens.current.surface2).verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         Text("编辑供应商 · Claude Code", style = MaterialTheme.typography.titleLarge)
                         if (interaction) CompactModelInput(selected, models, { selected = it }, "测试模型",
@@ -52,6 +59,7 @@ class CompactModelMappingUiTest {
                                 }, models, { id, value -> modelValues[id] = value }, { id, value -> names[id] = value }, "glm-5.3-flash", {})
                             }
                         }
+                    }
                     }
                 } }
                 LaunchedEffect(Unit) {
@@ -84,6 +92,11 @@ class CompactModelMappingUiTest {
                         assertEquals("deepseek-chat", selected)
                         openPicker(); key(KeyEvent.VK_UP); key(KeyEvent.VK_ESCAPE); delay(200)
                         assertEquals("deepseek-chat", selected, "Escape must not apply the highlighted item")
+                        fullForm = true; delay(700)
+                        withContext(Dispatchers.IO) { Robot().apply {
+                            mouseMove(window.locationOnScreen.x + 900, window.locationOnScreen.y + 600); mouseWheel(8)
+                        } }
+                        delay(700); screenshot("provider-editor-production")
                     } catch (e: Throwable) { failure = e }
                     finally { exitApplication() }
                 }

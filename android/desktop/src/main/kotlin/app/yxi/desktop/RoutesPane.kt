@@ -295,7 +295,7 @@ private val RoleRows = listOf(
 
 @Composable
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-private fun RouteForm(original: Lines.Line, conn: Conn, onClose: () -> Unit, onSave: suspend (Lines.Line) -> Unit) {
+internal fun RouteForm(original: Lines.Line, conn: Conn, onClose: () -> Unit, onSave: suspend (Lines.Line) -> Unit) {
     val scope = rememberCoroutineScope()
     var name by remember { mutableStateOf(original.name) }
     var website by remember { mutableStateOf(original.website) }
