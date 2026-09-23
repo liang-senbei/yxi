@@ -19,12 +19,18 @@ class RemoteOpenCodeServerTest {
             "XDG_CONFIG_HOME" to home.resolve(".config").path, "XDG_CACHE_HOME" to home.resolve(".cache").path)
         IsolatedSshBridge(root.resolve("ssh"), environment, root.resolve("unused.sock"), allowForwarding = true).use { bridge ->
             bridge.conn.ssh.connect()
-            RemoteOpenCodeTasks(InstructionQueue(root.resolve("queue.json")), root.resolve("tasks.json")).use { tasks ->
+            val shared = SharedMcpRegistry(root.resolve("shared.json"))
+            val script = root.resolve("shared_mcp_fixture.py").apply { writeBytes(requireNotNull(RemoteOpenCodeServerTest::class.java.getResourceAsStream("/shared_mcp_fixture.py")).use { it.readBytes() }) }
+            val definition = SharedMcpDefinition(projectKey(bridge.conn.host, "/"), "echo", "fixture", "1", "shared_echo", listOf("/usr/bin/python3", script.path))
+            shared.save(definition, setOf("opencode"), null)
+            RemoteOpenCodeTasks(InstructionQueue(root.resolve("queue.json")), root.resolve("tasks.json"), shared).use { tasks ->
                 val model = tasks.models(bridge.conn, project.path).single { it.providerId == "fixture" && it.modelId == "fixture-model" }
                 val record = tasks.create(bridge.conn, project.path, "Registered remote fixture", model)
                 assertEquals(projectKey(bridge.conn.host, "/"), record.hostKey)
                 assertEquals(record, LocalCodexTaskRegistry(root.resolve("tasks.json")).records.single())
                 assertTrue(tasks.controllers.getValue(record.key).ready)
+                val binding = root.resolve("mcp-bindings").walkTopDown().single { it.isFile && it.name == "${definition.key}.json" }
+                assertEquals("connected", org.json.JSONObject(binding.readText()).getString("phase"))
                 assertTrue(tasks.tasks(bridge.conn.host.copy(id = "other", hostname = "other-host")).isEmpty())
                 tasks.disconnect(bridge.conn)
                 assertTrue(tasks.controllers.isEmpty())

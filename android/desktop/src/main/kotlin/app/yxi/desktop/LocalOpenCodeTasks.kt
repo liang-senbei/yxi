@@ -6,7 +6,7 @@ import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import java.io.File
 
-internal class LocalOpenCodeTasks(private val queue: InstructionQueue, file: File) : AutoCloseable {
+internal class LocalOpenCodeTasks(private val queue: InstructionQueue, private val file: File, private val sharedMcp: SharedMcpRegistry? = null) : AutoCloseable {
     val registry = LocalCodexTaskRegistry(file)
     val controllers = mutableStateMapOf<String, OpenCodeTaskController>()
     private val servers = mutableMapOf<String, LocalOpenCodeServer>()
@@ -35,6 +35,7 @@ internal class LocalOpenCodeTasks(private val queue: InstructionQueue, file: Fil
     }
     suspend fun create(runtime: LocalRuntimeInstallation, directory: String, title: String, model: OpenCodeModel): LocalCodexTaskRecord = operation.withLock {
         check(!disposed); registry.requireWritable(); check(recoverySessionId.isBlank()) { "上次创建结果待核对：$recoverySessionId" }
+        check(sharedMcp?.problem.isNullOrBlank()) { sharedMcp?.problem.orEmpty() }
         require(File(directory).isAbsolute && File(directory).isDirectory)
         val cwd = File(directory).canonicalPath
         val label = title.trim().ifBlank { File(cwd).name.ifBlank { "新对话" } }
@@ -45,11 +46,19 @@ internal class LocalOpenCodeTasks(private val queue: InstructionQueue, file: Fil
             val connection = LocalOpenCodeServer.start(runtime, File(cwd)); server = connection; starting.set(connection)
             check(!disposed)
             check(connection.client.availableModels().any { it.providerId == model.providerId && it.modelId == model.modelId }) { "所选模型当前不可用" }
+            val scopeId = java.util.UUID.randomUUID().toString()
+            val resources = sharedMcp?.forHost("@local")?.filter { "opencode" in it.desiredRunners }.orEmpty()
+            resources.forEach { resource ->
+                val binding = OpenCodeMcpBindings("@local", scopeId, connection.client, File(file.parentFile, "mcp-bindings/$scopeId/${resource.definition.key}.json"))
+                check(binding.apply(resource) == "connected") { "共享插件 ${resource.definition.name} 尚未连接，请先核对插件授权或服务" }
+                check(sharedMcp?.records?.any { it == resource } == true) { "共享插件配置在创建期间发生变化，请重新核对" }
+            }
             val pending = JSONObject().put("pending", true).put("directory", cwd).put("runtimeHome", runtime.home)
             journal.write(pending.toString()); recoverySessionId = "创建请求结果尚未确认"
             val session = connection.client.create(label)
             val id = session.getString("id"); recoverySessionId = id
             journal.write(pending.put("sessionId", id).toString())
+            check(sharedMcp?.forHost("@local")?.filter { "opencode" in it.desiredRunners }.orEmpty() == resources) { "共享插件配置在创建期间发生变化，请核对已创建会话" }
             check(session.getString("directory") == cwd) { "运行器返回不同工作目录，未启用发送" }
             val record = LocalCodexTaskRecord(id, System.getProperty("user.name"), System.getProperty("os.name"),
                 File(runtime.home).canonicalPath, cwd, label, model.modelId, System.currentTimeMillis(), "opencode", model.providerId)

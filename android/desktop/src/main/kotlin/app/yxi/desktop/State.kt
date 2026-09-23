@@ -27,7 +27,9 @@ internal class CodexConversationView {
 }
 
 class AppState {
-    internal val remoteOpenCodeTasks by lazy { RemoteOpenCodeTasks(instructions, java.io.File(Store.dir, "remote-opencode-tasks.json")) }
+    internal val sharedMcp by lazy { SharedMcpRegistry(java.io.File(Store.dir, "shared-mcp.json")) }
+    internal var sharedMcpPage by mutableStateOf(false)
+    internal val remoteOpenCodeTasks by lazy { RemoteOpenCodeTasks(instructions, java.io.File(Store.dir, "remote-opencode-tasks.json"), sharedMcp) }
     internal var remoteOpenCodeSelectedKey by mutableStateOf<String?>(null)
     internal var remoteOpenCodeDirectory by mutableStateOf("")
     internal var remoteOpenCodePrompt by mutableStateOf("")
@@ -37,7 +39,7 @@ class AppState {
     private val localWorkspaceDelegate = lazy { LocalWorkspace() }
     private val localCodexTasksDelegate = lazy { LocalCodexTasks(instructions, java.io.File(Store.dir, "local-codex-tasks.json")) }
     internal val localCodexTasks get() = localCodexTasksDelegate.value
-    private val localOpenCodeTasksDelegate = lazy { LocalOpenCodeTasks(instructions, java.io.File(Store.dir, "local-opencode-tasks.json")) }
+    private val localOpenCodeTasksDelegate = lazy { LocalOpenCodeTasks(instructions, java.io.File(Store.dir, "local-opencode-tasks.json"), sharedMcp) }
     internal val localOpenCodeTasks get() = localOpenCodeTasksDelegate.value
     internal var localSelectedTaskKey by mutableStateOf<String?>(null)
     internal val localWorkspace get() = localWorkspaceDelegate.value

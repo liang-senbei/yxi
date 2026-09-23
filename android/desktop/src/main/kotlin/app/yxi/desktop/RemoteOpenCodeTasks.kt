@@ -5,8 +5,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import java.io.File
+import java.util.UUID
 
-internal class RemoteOpenCodeTasks(private val queue: InstructionQueue, file: File) : AutoCloseable {
+internal class RemoteOpenCodeTasks(private val queue: InstructionQueue, private val file: File, private val sharedMcp: SharedMcpRegistry? = null) : AutoCloseable {
     val registry = LocalCodexTaskRegistry(file)
     val controllers = mutableStateMapOf<String, OpenCodeTaskController>()
     private val servers = mutableMapOf<String, Pair<Conn, RemoteOpenCodeServer>>()
@@ -30,6 +31,7 @@ internal class RemoteOpenCodeTasks(private val queue: InstructionQueue, file: Fi
     }
     suspend fun create(conn: Conn, directory: String, title: String, model: OpenCodeModel): LocalCodexTaskRecord = operation.withLock {
         check(!disposed && conn.ssh.isConnected); registry.requireWritable(); check(recoverySessionId.isBlank()) { "上次创建需要核对：$recoverySessionId" }
+        check(sharedMcp?.problem.isNullOrBlank()) { sharedMcp?.problem.orEmpty() }
         require(title.length <= 500 && title.none { it < ' ' })
         busy = true
         var server: RemoteOpenCodeServer? = null
@@ -37,10 +39,18 @@ internal class RemoteOpenCodeTasks(private val queue: InstructionQueue, file: Fi
             val connection = RemoteOpenCodeServer.start(conn.ssh, directory); server = connection; starting.set(connection); check(!disposed)
             check(connection.client.availableModels().any { it.providerId == model.providerId && it.modelId == model.modelId }) { "所选服务器模型当前不可用" }
             val hostKey = projectKey(conn.host, "/")
+            val scopeId = UUID.randomUUID().toString()
+            val resources = sharedMcp?.forHost(hostKey)?.filter { "opencode" in it.desiredRunners }.orEmpty()
+            resources.forEach { resource ->
+                val binding = OpenCodeMcpBindings(hostKey, scopeId, connection.client, File(file.parentFile, "mcp-bindings/$scopeId/${resource.definition.key}.json"))
+                check(binding.apply(resource) == "connected") { "共享插件 ${resource.definition.name} 尚未连接，请核对服务器授权或服务" }
+                check(sharedMcp?.records?.any { it == resource } == true) { "共享插件配置在创建期间发生变化，请重新核对" }
+            }
             val pending = JSONObject().put("pending", true).put("hostKey", hostKey).put("directory", connection.directory)
             journal.write(pending.toString()); recoverySessionId = "服务器创建请求尚未确认"
             val session = connection.client.create(title.ifBlank { "OpenCode 新对话" })
             val id = session.getString("id"); recoverySessionId = id; journal.write(pending.put("sessionId", id).toString())
+            check(sharedMcp?.forHost(hostKey)?.filter { "opencode" in it.desiredRunners }.orEmpty() == resources) { "共享插件配置在创建期间发生变化，请核对已创建会话" }
             check(session.getString("directory") == connection.directory)
             val record = LocalCodexTaskRecord(id, conn.host.username, "remote", connection.runtimeHome, connection.directory,
                 session.getString("title"), model.modelId, System.currentTimeMillis(), "opencode", model.providerId, hostKey)

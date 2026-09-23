@@ -36,9 +36,9 @@ internal fun PluginsPane(state: AppState) {
             else conn?.host?.label?.let { "当前服务器 · $it" } ?: "先在侧边栏选择服务器",
             style = MaterialTheme.typography.bodyMedium, color = Tokens.current.textMuted)
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            PluginTabs(listOf("插件市场" to Icons.Outlined.Storefront, "已安装" to Icons.Outlined.Extension),
-                if (state.pluginMarketplace) 0 else 1) { state.pluginMarketplace = it == 0 }
-            if (state.pluginLocation != "本地") Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PluginTabs(listOf("插件市场" to Icons.Outlined.Storefront, "已安装" to Icons.Outlined.Extension, "共享配置" to Icons.Outlined.Apps),
+                if (state.sharedMcpPage) 2 else if (state.pluginMarketplace) 0 else 1) { state.sharedMcpPage = it == 2; if (it != 2) state.pluginMarketplace = it == 0 }
+            if (!state.sharedMcpPage && state.pluginLocation != "本地") Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(if (state.pluginMarketplace) "目录来源" else "原生安装记录", Modifier.align(Alignment.CenterVertically),
                     style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
                 listOf("codex" to "Codex", "claude" to "Claude Code").forEach { (engine, label) ->
@@ -49,6 +49,10 @@ internal fun PluginsPane(state: AppState) {
         }
         OutlinedTextField(state.pluginMarketQuery, { state.pluginMarketQuery = it }, Modifier.fillMaxWidth(),
             placeholder = { Text("搜索插件、用途或市场") }, singleLine = true)
+        if (state.sharedMcpPage) {
+            Box(Modifier.weight(1f).fillMaxWidth()) { SharedMcpPane(state, conn) }
+            return@Column
+        }
         if (state.pluginMarketplace) {
             Box(Modifier.weight(1f).fillMaxWidth()) { PluginMarketplacePane(state, conn) }
             return@Column

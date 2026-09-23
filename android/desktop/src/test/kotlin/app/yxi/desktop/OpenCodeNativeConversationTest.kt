@@ -54,14 +54,20 @@ class OpenCodeNativeConversationTest {
         val queueFile = File(project, "yxi-queue.json")
         val registryFile = File(project, "yxi-tasks.json")
         val queue = InstructionQueue(queueFile)
+        val shared = SharedMcpRegistry(File(project, "shared-mcp.json"))
+        val sharedScript = File(project, "shared_mcp_fixture.py").apply { writeBytes(requireNotNull(OpenCodeNativeConversationTest::class.java.getResourceAsStream("/shared_mcp_fixture.py")).use { it.readBytes() }) }
+        val sharedDefinition = SharedMcpDefinition("@local", "shared-fixture", "yxi-test", "1", "shared_echo", listOf("/usr/bin/python3", sharedScript.path))
+        shared.save(sharedDefinition, setOf("opencode"), null)
         val runtime = LocalRuntimeInstallation("opencode", "isolated", listOf("/opt/native/claude"), "/sandbox/home/.local/share/opencode", "1.18.32")
         try {
-            LocalOpenCodeTasks(queue, registryFile).use { tasks ->
+            LocalOpenCodeTasks(queue, registryFile, shared).use { tasks ->
                 val models = tasks.models(runtime, project.path)
                 val model = models.single { it.providerId == "fixture" && it.modelId == "fixture-model" }
                 val record = tasks.create(runtime, project.path, "Native approval fixture", model)
                 assertEquals(record, LocalCodexTaskRegistry(registryFile).records.single())
                 assertEquals("", tasks.recoverySessionId)
+                val binding = File(project, "mcp-bindings").walkTopDown().single { it.isFile && it.name == "${sharedDefinition.key}.json" }
+                assertEquals("connected", JSONObject(binding.readText()).getString("phase"))
                 val controller = tasks.controllers.getValue(record.key)
                 val instruction = controller.enqueue("Run the bash fixture and report completion.")
                 try {
