@@ -30,6 +30,7 @@ class AppState {
     private val localWorkspaceDelegate = lazy { LocalWorkspace() }
     private val localCodexTasksDelegate = lazy { LocalCodexTasks(instructions, java.io.File(Store.dir, "local-codex-tasks.json")) }
     internal val localCodexTasks get() = localCodexTasksDelegate.value
+    internal var localSelectedTaskKey by mutableStateOf<String?>(null)
     internal val localWorkspace get() = localWorkspaceDelegate.value
     internal val isLocal get() = hostScope == LOCAL_HOST_SCOPE
     internal fun selectLocal() {

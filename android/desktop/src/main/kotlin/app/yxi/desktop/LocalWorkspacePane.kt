@@ -19,6 +19,13 @@ import javax.swing.JFileChooser
 @Composable internal fun LocalWorkspacePane(state: AppState, configuration: Boolean = false) {
     val workspace = state.localWorkspace
     val t = Tokens.current
+    var creating by remember { mutableStateOf(false) }
+    if (creating) NewLocalConversationDialog(state, { creating = false }) { record -> creating = false; state.localSelectedTaskKey = record.key }
+    val owned = state.localSelectedTaskKey?.let { key -> state.localCodexTasks.registry.records.singleOrNull { it.key == key } }
+    if (!configuration && owned != null) {
+        Surface(Modifier.fillMaxSize(), color = t.surface0, contentColor = t.textPrimary) { LocalConversationPane(state, owned) }
+        return
+    }
     LaunchedEffect(workspace) { if (!workspace.scanned) workspace.refresh() }
     var search by remember { mutableStateOf(workspace.query) }
     var projectError by remember { mutableStateOf("") }
@@ -32,7 +39,10 @@ import javax.swing.JFileChooser
                         Text("此电脑 · ${System.getProperty("os.name")}", color = t.textMuted)
                     }
                     if (selected != null) TextButton(workspace::backToList) { Text("返回历史") }
-                    else TextButton(workspace::refresh, enabled = !workspace.detecting) { Text(if (workspace.detecting) "检测中…" else "重新检测") }
+                    else {
+                        if (!configuration) TextButton({ creating = true }, enabled = workspace.selectedRuntime?.ready == true) { Text("新建对话") }
+                        TextButton(workspace::refresh, enabled = !workspace.detecting) { Text(if (workspace.detecting) "检测中…" else "重新检测") }
+                    }
                 }
             }
             if (selected == null) {
@@ -101,6 +111,10 @@ import javax.swing.JFileChooser
                             TextButton({ state.page = Page.LocalAgents }) { Text("已有本地任务") }
                         }
                         if (projectError.isNotBlank()) Text(projectError, color = t.danger)
+                    }
+                    items(state.localCodexTasks.registry.records.filter { it.user == System.getProperty("user.name") && it.platform == System.getProperty("os.name") &&
+                        it.runtimeHome == workspace.selectedRuntime?.home?.let { home -> File(home).canonicalPath } }, key = { "owned:${it.key}" }) { record ->
+                        TextButton({ state.localSelectedTaskKey = record.key }) { Text("${record.title} · ${record.model}") }
                     }
                     if (workspace.projects.isNotEmpty()) item { Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         workspace.projects.forEach { path -> Text(path + if (File(path).isDirectory) "" else " · 目录已不可用", color = t.textMuted) }
