@@ -13,8 +13,8 @@ internal data class LocalRuntimeInstallation(val engine: String, val source: Str
 
 /** Discovery never executes npm/PowerShell shims or installs anything. Only version probes run. */
 internal object LocalRuntimeDiscovery {
-    val engines = listOf("codex", "claude", "opencode", "hermes")
-    fun title(engine: String) = when (engine) { "codex" -> "Codex"; "claude" -> "Claude Code"; "opencode" -> "OpenCode"; "hermes" -> "Hermes"; else -> engine }
+    val engines = listOf("codex", "claude", "opencode", "gemini", "hermes")
+    fun title(engine: String) = when (engine) { "codex" -> "Codex"; "claude" -> "Claude Code"; "opencode" -> "OpenCode"; "gemini" -> "Gemini"; "hermes" -> "Hermes"; else -> engine }
 
     internal fun candidates(userHome: File = File(System.getProperty("user.home")), env: Map<String, String> = System.getenv(),
         windows: Boolean = System.getProperty("os.name").startsWith("Windows")): List<LocalRuntimeInstallation> {
@@ -25,6 +25,7 @@ internal object LocalRuntimeDiscovery {
         fun dataHome(engine: String) = when (engine) {
             "codex" -> env["CODEX_HOME"] ?: File(userHome, ".codex").path
             "claude" -> env["CLAUDE_CONFIG_DIR"] ?: File(userHome, ".claude").path
+            "gemini" -> File(env["GEMINI_CLI_HOME"]?.takeIf { it.isNotBlank() } ?: userHome.path, ".gemini").path
             "hermes" -> env["HERMES_HOME"] ?: if (windows && env["LOCALAPPDATA"] != null) File(env.getValue("LOCALAPPDATA"), "hermes").path else File(userHome, ".hermes").path
             else -> File(env["XDG_DATA_HOME"] ?: File(userHome, ".local/share").path, "opencode").path
         }
@@ -43,7 +44,7 @@ internal object LocalRuntimeDiscovery {
                 if (windows || binary.canExecute()) add(engine, "本机安装", listOf(binary))
             }
             if (windows && engine != "hermes") {
-                val packageName = when (engine) { "codex" -> "@openai/codex"; "claude" -> "@anthropic-ai/claude-code"; else -> "opencode-ai" }
+                val packageName = when (engine) { "codex" -> "@openai/codex"; "claude" -> "@anthropic-ai/claude-code"; "gemini" -> "@google/gemini-cli"; else -> "opencode-ai" }
                 roots.forEach { dir ->
                     val packageDir = File(dir, "node_modules/$packageName")
                     val manifest = File(packageDir, "package.json")
@@ -91,6 +92,7 @@ internal object LocalRuntimeDiscovery {
         val dataHome = when (engine) {
             "codex" -> System.getenv("CODEX_HOME") ?: File(home, ".codex").path
             "claude" -> System.getenv("CLAUDE_CONFIG_DIR") ?: File(home, ".claude").path
+            "gemini" -> File(System.getenv("GEMINI_CLI_HOME")?.takeIf { it.isNotBlank() } ?: home.path, ".gemini").path
             "hermes" -> System.getenv("HERMES_HOME") ?: if (windows && System.getenv("LOCALAPPDATA") != null) File(System.getenv("LOCALAPPDATA"), "hermes").path else File(home, ".hermes").path
             else -> File(System.getenv("XDG_DATA_HOME") ?: File(home, ".local/share").path, "opencode").path
         }

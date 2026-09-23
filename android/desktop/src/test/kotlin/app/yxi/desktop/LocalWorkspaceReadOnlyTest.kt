@@ -11,6 +11,23 @@ import kotlin.test.*
 @EnabledIfEnvironmentVariable(named = "YXI_ISOLATED_TEST_RUN", matches = "[0-9a-f-]{36}")
 class LocalWorkspaceReadOnlyTest {
     @TempDir lateinit var root: File
+    @Test fun `Gemini npm discovery uses explicit Node argv and its native home override`() {
+        val home = File(root, "user").apply { mkdirs() }
+        val npm = File(root, "Node with spaces").apply { mkdirs() }
+        val node = File(npm, "node.exe").apply { writeText("fixture") }
+        val packageDir = File(npm, "node_modules/@google/gemini-cli").apply { mkdirs() }
+        val entry = File(packageDir, "dist/index.js").apply { parentFile.mkdirs(); writeText("fixture") }
+        File(packageDir, "package.json").writeText("""{"name":"@google/gemini-cli","bin":{"gemini":"dist/index.js"}}""")
+        File(npm, "gemini.ps1").writeText("This wrapper must never execute")
+        val customHome = File(root, "Gemini home")
+        val environment = mapOf("PATH" to npm.path, "GEMINI_CLI_HOME" to customHome.path)
+        val found = LocalRuntimeDiscovery.candidates(home, environment, windows = true).single { it.engine == "gemini" }
+        assertEquals(listOf(node.canonicalPath, entry.canonicalPath), found.command)
+        assertEquals(File(customHome, ".gemini").absolutePath, found.home)
+        assertEquals(File(home, ".gemini").absolutePath, LocalRuntimeDiscovery.candidates(home, mapOf("PATH" to npm.path), windows = true).single { it.engine == "gemini" }.home)
+        node.delete()
+        assertTrue(LocalRuntimeDiscovery.candidates(home, environment, windows = true).single { it.engine == "gemini" }.problem.contains("Node.js"))
+    }
     @Test fun `Windows npm manifests resolve to argv without executing wrappers or path traversal`() {
         val home = File(root, "用户 home").apply { mkdirs() }
         val npm = File(root, "Node tools").apply { mkdirs() }
