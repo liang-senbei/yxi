@@ -11,6 +11,40 @@ import javax.imageio.ImageIO
 import kotlin.test.*
 
 class AcpAuthenticationDialogTest {
+    @Test fun `closing authentication window cancels its process tree without reporting success`() {
+        check(!System.getenv("YXI_ISOLATED_TEST_RUN").isNullOrBlank())
+        check(System.getProperty("user.home") == "/sandbox/home")
+        System.setProperty("skiko.renderApi", "SOFTWARE")
+        val identities = File("/sandbox/tmp/auth-cancel-pids")
+        val script = File("/sandbox/tmp/auth-cancel.py").apply { writeText("""
+import os,sys,pathlib,subprocess
+child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(300)'])
+pathlib.Path('${identities.path}').write_text(str(os.getpid()) + ',' + str(child.pid))
+print('等待用户配置；关闭窗口测试取消。',flush=True)
+input()
+""".trimIndent()) }
+        val plan = AcpTerminalAuthPlan(listOf("/usr/bin/python3", script.path), "/sandbox/home", System.getenv())
+        var code: Int? = null
+        var problem: String? = null
+        var failure: Throwable? = null
+        application(exitProcessOnExit = false) {
+            YxiTheme { AcpAuthenticationDialog(plan) { exit, error -> code = exit; problem = error; exitApplication() } }
+            LaunchedEffect(Unit) {
+                try {
+                    withTimeout(5000) { while (!identities.isFile) delay(20) }
+                    delay(400)
+                    val window = java.awt.Window.getWindows().filterIsInstance<java.awt.Dialog>().single { it.isShowing && it.title == "运行器认证" }
+                    window.dispatchEvent(java.awt.event.WindowEvent(window, java.awt.event.WindowEvent.WINDOW_CLOSING))
+                } catch (e: CancellationException) { throw e }
+                catch (e: Throwable) { failure = e; exitApplication() }
+            }
+        }
+        failure?.let { throw it }
+        assertNull(code)
+        assertEquals("认证已取消", problem)
+        val pids = identities.readText().split(',').map(String::toLong)
+        runBlocking { withTimeout(5000) { while (pids.any { ProcessHandle.of(it).map { process -> process.isAlive }.orElse(false) }) delay(20) } }
+    }
     @Test fun `embedded authentication terminal accepts keyboard input and reports actual exit`() {
         check(!System.getenv("YXI_ISOLATED_TEST_RUN").isNullOrBlank())
         check(System.getProperty("user.home") == "/sandbox/home")
