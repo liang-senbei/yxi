@@ -1,3 +1,9 @@
+## 2026-09-24 服务器新建预览路由点击验收
+
+- `0524ca1` 新增真实 SSH+Compose 点击测试；首次 `run.Fhbbv1` 因测试把 Compose 内绘弹窗当作 AWT Dialog 而失败。`4eee8b8386250161bc6351c516f32b6d565ac7ed` 调整定位后，构建 `run.ytIQVy`，RemoteAcpCreationUiTest `run.1pU0Ir` 1 项通过，无失败/跳过。
+- 实际点击 Gemini 预览确认后 Page.Acp、Conn、engine、远端目录和提示词均正确；任务索引仍空、探测用运行器标记未生成，证明跳转不启动 Agent 或发送草稿。`.artifacts/server-acp-ui/create.png` 与 preview.png 已目视核对。
+- 随后仅将产品入口/说明里的 ACP 改为对话预览文字；此文案更新未重新截图。服务器表单连接/认证/创建全程与 Windows 实机仍待验收，未发布。
+
 ## 2026-09-24 服务器 ACP 界面与新建入口接入
 
 - `cd2645f23b0322d8343ce0c8d791077ddad85228` 新增 Page.Acp/RemoteAcpPane，接入侧栏和项目树 NewSessionDialog 的 ACP 预览回调；任务使用远端控制器与返回目标，提示词仅存草稿，已有目录约束明确。协作组/worktree 尚不支持；远端 terminal 认证显示原因且不误发 RPC。
