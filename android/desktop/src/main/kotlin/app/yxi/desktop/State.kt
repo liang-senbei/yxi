@@ -38,6 +38,26 @@ class AppState {
     internal fun prepareAcpTask(c: Conn, engine: String, directory: String, prompt: String) {
         select(c, null); remoteAcpSelectedKey = null; remoteAcpEngine = engine; remoteAcpDirectory = directory; remoteAcpPrompt = prompt; page = Page.Acp
     }
+    /** Route by the complete persisted task key; never guess from a display name or create a replacement. */
+    internal fun openRemoteTask(key: String): Boolean {
+        for (c in conns) {
+            c.sessions.firstOrNull { taskNavigationKey(c.host, it) == key }?.let { select(c, it); return true }
+            val codex = codexWorkspace.tasks(c.host).any { it.key == key }
+            val openCode = remoteOpenCodeTasks.tasks(c.host).any { it.key == key }
+            val acp = remoteAcpTasks.tasks(c).singleOrNull { it.key == key }
+            if (!codex && !openCode && acp == null) continue
+            select(c, null)
+            when {
+                codex -> { codexSelectedTaskKey = key; page = Page.Codex }
+                openCode -> { remoteOpenCodeSelectedKey = key; page = Page.OpenCode }
+                acp != null -> { remoteAcpEngine = acp.engine; remoteAcpSelectedKey = key; page = Page.Acp }
+            }
+            if (navigation.archived(key)) navigation.setMode("归档")
+            else if (navigation.mode == "归档") navigation.setMode("全部")
+            return true
+        }
+        return false
+    }
     internal var remoteOpenCodeSelectedKey by mutableStateOf<String?>(null)
     internal var remoteOpenCodeDirectory by mutableStateOf("")
     internal var remoteOpenCodePrompt by mutableStateOf("")

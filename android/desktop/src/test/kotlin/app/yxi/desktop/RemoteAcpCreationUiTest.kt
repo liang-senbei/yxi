@@ -138,6 +138,17 @@ for line in sys.stdin:
                                 assertFalse(state.navigation.visible(record.key, acpTaskState(state, record)))
                                 state.navigation.setMode("归档")
                                 assertTrue(state.navigation.visible(record.key, acpTaskState(state, record)))
+                                state.conns.add(bridge.conn)
+                                state.page = Page.Config; state.remoteAcpSelectedKey = null
+                                assertFalse(state.openRemoteTask("missing-task"))
+                                assertEquals(Page.Config, state.page)
+                                assertTrue(state.openRemoteTask(record.key))
+                                assertEquals(Page.Acp, state.page)
+                                assertEquals("归档", state.navigation.mode)
+                                assertEquals(record.key, state.remoteAcpSelectedKey)
+                                assertSame(controller, state.remoteAcpTasks.controllers[record.key])
+                                assertSame(bridge.conn, state.conn)
+                                assertEquals(1, marker.readLines().count { it == "session/new" })
                                 assertFalse(marker.readText().contains("session/prompt"))
                             } catch (e: Throwable) { failure = e }
                             finally { exitApplication() }

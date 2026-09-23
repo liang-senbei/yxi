@@ -60,13 +60,7 @@ fun main(args: Array<String>) {
         LaunchedEffect(Unit) {
             Notify.taskAllowed = { key -> state.navigation.shouldNotify(key, Store.pref("notifyOnlyPinned", "0") == "1") }
             Notify.openTask = { key ->
-                val terminal = state.conns.firstNotNullOfOrNull { c -> c.sessions.firstOrNull { taskNavigationKey(c.host, it) == key }?.let { c to it } }
-                if (terminal != null) state.select(terminal.first, terminal.second)
-                else state.conns.firstOrNull { c -> state.codexWorkspace.tasks(c.host).any { it.key == key } }?.let { c ->
-                    state.select(c, null)
-                    state.codexSelectedTaskKey = key
-                    state.page = Page.Codex
-                }
+                state.openRemoteTask(key)
             }
             Notify.open = { hostId, name ->
                 val c = state.conns.firstOrNull { it.host.id == hostId }
