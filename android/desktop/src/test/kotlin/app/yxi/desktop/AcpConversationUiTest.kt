@@ -118,7 +118,9 @@ class AcpConversationUiTest {
                                 .put("update", JSONObject().put("sessionUpdate", "agent_message_chunk").put("content", JSONObject().put("type", "text").put("text", text)))))
                             chunk((1..80).joinToString("\n\n", prefix = "\n\n") { "第 $it 段：正在验证长回复滚动位置。" })
                             val view = state.codexConversationViews.getValue(record.key)
+                            withTimeout(3000) { while (controller.messages.none { it.text.contains("第 80 段") }) delay(20) }
                             withTimeout(5000) { while (!view.scroll.canScrollBackward || view.scroll.canScrollForward) delay(30) }
+                            delay(200)
                             withContext(Dispatchers.IO) { Robot().apply {
                                 mouseMove(window.locationOnScreen.x + 400, window.locationOnScreen.y + 400); mouseWheel(-8)
                             } }

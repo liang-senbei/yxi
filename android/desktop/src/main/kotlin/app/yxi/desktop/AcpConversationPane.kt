@@ -16,6 +16,8 @@ import androidx.compose.ui.input.key.*
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.nestedscroll.*
+import androidx.compose.ui.input.pointer.*
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import java.io.File
@@ -66,6 +68,7 @@ import java.io.File
         dismissButton = { TextButton(dismiss, enabled = !tasks.busy) { Text("取消") } })
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable internal fun AcpConversationPane(state: AppState, record: LocalCodexTaskRecord) {
     val controller = state.localAcpTasks.controllers[record.key]
     val scope = rememberCoroutineScope()
@@ -95,7 +98,7 @@ import java.io.File
             return Offset.Zero
         }
         override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-            if (source == NestedScrollSource.UserInput && !view.scroll.canScrollForward) followLatest = true
+            if (source == NestedScrollSource.UserInput && consumed.y < 0f && !view.scroll.canScrollForward) followLatest = true
             return Offset.Zero
         }
     } }
@@ -151,7 +154,9 @@ import java.io.File
                 }
             }
         }
-        LazyColumn(Modifier.weight(1f).fillMaxWidth().nestedScroll(scrollWatch), state = view.scroll, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        LazyColumn(Modifier.weight(1f).fillMaxWidth().nestedScroll(scrollWatch).onPointerEvent(PointerEventType.Scroll, PointerEventPass.Initial) { event ->
+            if (event.changes.any { it.scrollDelta.y < 0f }) followLatest = false
+        }, state = view.scroll, verticalArrangement = Arrangement.spacedBy(12.dp)) {
             items(messages, key = { "message:${it.id}" }) { message ->
                 Column {
                     Text(message.author + if (message.status.isBlank()) "" else " · ${message.status}", style = MaterialTheme.typography.labelLarge)
