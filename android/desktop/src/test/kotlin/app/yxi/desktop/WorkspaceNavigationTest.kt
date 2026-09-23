@@ -63,4 +63,19 @@ class WorkspaceNavigationTest {
         nav.setMuted("b", false)
         assertTrue(nav.shouldNotify("b", true)); assertFalse(nav.shouldNotify("a", true))
     }
+    @Test fun `native task notification preferences persist without affecting another server`() = fixture { nav, file ->
+        val first = LocalCodexTaskRecord("same-session", "root", "remote", "/home/runner", "/work", "Task", "native", 1L,
+            "gemini", "native", projectKey(host, "/"))
+        val other = first.copy(hostKey = projectKey(host.copy(id = "other-server", hostname = "other.example"), "/"))
+        assertNotEquals(first.key, other.key)
+        nav.togglePin(first.key)
+        nav.setMuted(first.key, true)
+        val reopened = WorkspaceNavigation(file)
+        assertFalse(reopened.shouldNotify(first.key, false))
+        assertFalse(reopened.shouldNotify(first.key, true))
+        assertTrue(reopened.shouldNotify(other.key, false))
+        assertFalse(reopened.shouldNotify(other.key, true))
+        reopened.setMuted(first.key, false)
+        assertTrue(WorkspaceNavigation(file).shouldNotify(first.key, true))
+    }
 }

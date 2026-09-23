@@ -74,6 +74,8 @@ internal fun acpTaskState(state: AppState, task: LocalCodexTaskRecord): SessionS
                 DropdownMenuItem(text = { Text(if (nav.pinned(task.key)) "取消置顶" else "置顶") }, onClick = { nav.togglePin(task.key); menu = false })
                 DropdownMenuItem(text = { Text(if (nav.favorite(task.key)) "取消收藏" else "收藏") }, onClick = { nav.setNativeFavorite(task.key, !nav.favorite(task.key)); menu = false })
                 DropdownMenuItem(text = { Text("修改显示名称") }, onClick = { rename = true; menu = false })
+                DropdownMenuItem(text = { Text(if (nav.muted(task.key)) "恢复任务通知" else "静音此任务") },
+                    onClick = { nav.setMuted(task.key, !nav.muted(task.key)); menu = false })
                 DropdownMenuItem(text = { Text(if (nav.archived(task.key)) "恢复到项目列表" else "归档") }, enabled = status == SessionState.Idle,
                     onClick = { nav.setArchived(task.key, !nav.archived(task.key)); menu = false })
                 HorizontalDivider()
