@@ -13,7 +13,18 @@ internal object RunnerCatalog {
     )
     fun find(id: String) = entries.singleOrNull { it.id == id }
     fun probeCommand(id: String): String {
+        return resolveCommand(id) + "\nif [ -f \"\$bin\" ] && [ -x \"\$bin\" ]; then printf available; else printf missing; fi"
+    }
+    fun resolveCommand(id: String): String {
         val command = requireNotNull(find(id)?.command) { "此运行器的启动命令尚未核对" }
-        return "p=\$(command -v ${app.yxi.ssh.Shell.q(command)} 2>/dev/null || true); if [ -f \"\$p\" ] && [ -x \"\$p\" ]; then printf available; else printf missing; fi"
+        val candidates = listOf(".local/bin/$command") + when (id) {
+            "opencode" -> listOf(".opencode/bin/opencode")
+            "hermes" -> listOf(".hermes/bin/hermes", ".hermes/hermes-agent/venv/bin/hermes")
+            else -> emptyList()
+        }
+        val paths = candidates.joinToString(" ") { "\"\$HOME/$it\"" }
+        return "bin=\$(command -v ${app.yxi.ssh.Shell.q(command)} 2>/dev/null || true)\n" +
+            "if [ ! -f \"\$bin\" ] || [ ! -x \"\$bin\" ]; then for candidate in $paths; do " +
+            "if [ -f \"\$candidate\" ] && [ -x \"\$candidate\" ]; then bin=\"\$candidate\"; break; fi; done; fi"
     }
 }

@@ -69,7 +69,7 @@ if member not in members:
         return """
 d=${Shell.q(directory)}; n=${Shell.q(sessionName)}; agent=${Shell.q(agent)}; prompt=${Shell.q(initialPrompt)}
 command -v tmux >/dev/null 2>&1 || { echo '$tag:missing-tmux'; exit 0; }
-bin=${'$'}(command -v "${'$'}agent")
+${RunnerCatalog.resolveCommand(agent)}
 [ -f "${'$'}bin" ] && [ -x "${'$'}bin" ] || { echo '$tag:missing-runtime'; exit 0; }
 $prepareDirectory
 want=${'$'}(cd -- "${'$'}d" 2>/dev/null && pwd -P) || { echo '$tag:nodir'; exit 0; }
