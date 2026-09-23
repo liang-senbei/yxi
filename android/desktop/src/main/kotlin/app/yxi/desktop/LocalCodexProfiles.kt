@@ -39,14 +39,14 @@ internal object LocalCodexProfiles {
 
     suspend fun connectOfficial(runtime: LocalRuntimeInstallation): CodexAppServer = connect(runtime, emptyList())
 
-    suspend fun connectOfficialWithSharedMcp(runtime: LocalRuntimeInstallation, records: List<SharedMcpRecord>): CodexAppServer {
+    suspend fun connectOfficialWithSharedMcp(runtime: LocalRuntimeInstallation, records: List<SharedMcpRecord>, directory: String): CodexAppServer {
         require(records.all { !it.retired && it.definition.hostKey == "@local" && "codex" in it.desiredRunners })
         connectOfficial(runtime).use { probe ->
-            val config = probe.request("config/read", JSONObject().put("includeLayers", false)).getJSONObject("result").getJSONObject("config")
+            val config = probe.request("config/read", JSONObject().put("includeLayers", false).put("cwd", directory)).getJSONObject("result").getJSONObject("config")
             val existing = config.optJSONObject("mcp_servers")
             check(records.none { it.definition.name == "codex_apps" || existing?.has(it.definition.name) == true }) { "原生 Codex 已有同名或内置 MCP，未覆盖" }
         }
-        return connect(runtime, records)
+        return connect(runtime, records, directory)
     }
     internal fun verifySharedMcp(config: JSONObject, records: List<SharedMcpRecord>) {
         records.forEach { record ->
@@ -64,14 +64,14 @@ internal object LocalCodexProfiles {
             }
         }
     }
-    private suspend fun connect(runtime: LocalRuntimeInstallation, records: List<SharedMcpRecord>): CodexAppServer {
+    private suspend fun connect(runtime: LocalRuntimeInstallation, records: List<SharedMcpRecord>, directory: String? = null): CodexAppServer {
         val arguments = officialArguments().dropLast(1) + SharedMcpSettings.codexArguments(records, "@local") + "app-server"
         val transport = LocalCodexTransport.start(runtime, arguments, officialEnvironment(System.getenv()))
         val client = CodexAppServer(transport, profileLabel = "官方订阅 · ChatGPT")
         try {
             client.initializeLocal()
             suspend fun verify() {
-                val config = client.request("config/read", JSONObject().put("includeLayers", false)).getJSONObject("result").getJSONObject("config")
+                val config = client.request("config/read", JSONObject().put("includeLayers", false).apply { directory?.let { put("cwd", it) } }).getJSONObject("result").getJSONObject("config")
                 val account = client.request("account/read", JSONObject().put("refreshToken", false)).getJSONObject("result")
                 verifyOfficial(config, account)
                 verifySharedMcp(config, records)

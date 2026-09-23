@@ -96,7 +96,7 @@ internal class LocalCodexTasks(private val queue: InstructionQueue, file: File, 
         var client: CodexAppServer? = null
         try {
             val resources = sharedMcp?.forHost("@local")?.filter { "codex" in it.desiredRunners }.orEmpty()
-            val connection = if (resources.isEmpty()) connect(runtime) else LocalCodexProfiles.connectOfficialWithSharedMcp(runtime, resources)
+            val connection = if (resources.isEmpty()) connect(runtime) else LocalCodexProfiles.connectOfficialWithSharedMcp(runtime, resources, cwd)
             client = connection
             startingClient.set(connection)
             check(!disposed) { "应用已关闭，未继续创建" }

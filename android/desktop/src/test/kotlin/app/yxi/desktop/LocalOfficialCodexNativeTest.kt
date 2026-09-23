@@ -68,7 +68,7 @@ requires_openai_auth = false
         val fixture = File("/sandbox/home/shared_mcp_fixture.py").apply { writeBytes(requireNotNull(LocalOfficialCodexNativeTest::class.java.getResourceAsStream("/shared_mcp_fixture.py")).use { it.readBytes() }) }
         val definition = SharedMcpDefinition("@local", "echo", "fixture", "1", "shared_echo", listOf("/usr/bin/python3", fixture.path))
         shared.save(definition, setOf("codex"), null)
-        LocalCodexProfiles.connectOfficialWithSharedMcp(runtime, shared.forHost("@local")).use { client ->
+        LocalCodexProfiles.connectOfficialWithSharedMcp(runtime, shared.forHost("@local"), "/sandbox/home").use { client ->
             val configWithMcp = client.request("config/read", JSONObject().put("includeLayers", false)).getJSONObject("result").getJSONObject("config")
             LocalCodexProfiles.verifySharedMcp(configWithMcp, shared.forHost("@local"))
             assertEquals("openai", configWithMcp.getString("model_provider"))
@@ -80,6 +80,24 @@ requires_openai_auth = false
             assertEquals("", tasks.recoveryThreadId)
         }
         assertContentEquals(beforeConfig, config.readBytes())
+        assertContentEquals(chatgptBefore, auth.readBytes())
+        val project = File("/sandbox/home/project-with-mcp").apply { mkdirs() }
+        val git = ProcessBuilder("git", "init", project.path).redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD).start()
+        check(git.waitFor(10, java.util.concurrent.TimeUnit.SECONDS) && git.exitValue() == 0)
+        val projectConfig = File(project, ".codex/config.toml").apply {
+            parentFile.mkdirs(); writeText("[mcp_servers.shared_echo]\ncommand = \"/bin/false\"\nargs = []\nenabled = false\n")
+        }
+        config.appendText("\n[projects.\"${project.path}\"]\ntrust_level = \"trusted\"\n")
+        val configWithTrust = config.readBytes()
+        val projectBefore = projectConfig.readBytes()
+        LocalCodexProfiles.connectOfficial(runtime).use { client ->
+            val effective = client.request("config/read", JSONObject().put("includeLayers", false).put("cwd", project.path)).getJSONObject("result").getJSONObject("config")
+            assertEquals("/bin/false", effective.getJSONObject("mcp_servers").getJSONObject("shared_echo").getString("command"))
+        }
+        val collision = assertFailsWith<IllegalStateException> { LocalCodexProfiles.connectOfficialWithSharedMcp(runtime, shared.forHost("@local"), project.path) }
+        assertTrue(collision.message.orEmpty().contains("同名"))
+        assertContentEquals(configWithTrust, config.readBytes())
+        assertContentEquals(projectBefore, projectConfig.readBytes())
         assertContentEquals(chatgptBefore, auth.readBytes())
     }
 }

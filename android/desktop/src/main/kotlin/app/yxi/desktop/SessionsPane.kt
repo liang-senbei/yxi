@@ -117,7 +117,7 @@ internal fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGr
     var isolatedWorktree by remember { mutableStateOf(false) }
     var permissionMode by remember { mutableStateOf(app.yxi.agent.PermissionMode.Manual) }
     var permissionsOpen by remember { mutableStateOf(false) }
-    val sharedResources = if (agent == "claude") sharedMcpRegistry?.forHost(projectKey(conn.host, "/"))?.filter { "claude" in it.desiredRunners }.orEmpty() else emptyList()
+    val sharedResources = if (agent in setOf("claude", "codex")) sharedMcpRegistry?.forHost(projectKey(conn.host, "/"))?.filter { agent in it.desiredRunners }.orEmpty() else emptyList()
     val requestId = remember(path, agent, initialPrompt, collaborationGroup, isolatedWorktree, permissionMode, sharedResources) { DesktopLaunchPlan.newRequestId() }
     WorkbenchDialog(
         onDismissRequest = { if (!busy) onDismiss() },
@@ -197,8 +197,18 @@ internal fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGr
 
 /** 只有刷新取得真实会话后才进入任务，启动回执不能替代运行状态。 */
 private suspend fun createSession(conn: Conn, original: DesktopLaunchPlan, sharedResources: List<SharedMcpRecord> = emptyList()): Result<Session> {
-    val plan = if (sharedResources.isEmpty()) original else RemoteClaudeSharedMcp.stage(conn, sharedResources, original.requestId).let {
+    val plan = if (sharedResources.isEmpty()) original else if (original.agent == "claude") RemoteClaudeSharedMcp.stage(conn, sharedResources, original.requestId).let {
         original.copy(mcpConfigPath = it.path, mcpConfigHash = it.hash)
+    } else {
+        val arguments = SharedMcpSettings.codexArguments(sharedResources, projectKey(conn.host, "/"))
+        val preparation = conn.ssh.exec(original.preparationCommand())
+        val directory = preparation.lineSequence().lastOrNull { it.startsWith(Dirs.TAG + ":prepared:") }?.removePrefix(Dirs.TAG + ":prepared:")
+            ?: error("无法准备 Codex 工作目录，未启动会话")
+        CodexAppServer.connect(conn.ssh).use { probe ->
+            val servers = probe.request("config/read", org.json.JSONObject().put("includeLayers", false).put("cwd", directory)).getJSONObject("result").getJSONObject("config").optJSONObject("mcp_servers")
+            check(sharedResources.none { it.definition.name == "codex_apps" || servers?.has(it.definition.name) == true }) { "Codex 原生配置已有同名或内置 MCP，未覆盖" }
+        }
+        original.copy(codexMcpArguments = arguments)
     }
     val name = plan.sessionName
     val raw = conn.ssh.exec(plan.command())

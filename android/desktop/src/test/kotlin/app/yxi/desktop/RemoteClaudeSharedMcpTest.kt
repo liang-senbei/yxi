@@ -48,6 +48,19 @@ time.sleep(60)
                 assertTrue(JSONObject(file.readText()).getJSONObject("mcpServers").has("echo"))
                 val changed = record.copy(definition = definition.copy(command = listOf("/different")))
                 assertFailsWith<IllegalStateException> { RemoteClaudeSharedMcp.stage(bridge.conn, listOf(changed), id) }
+                val codexBinary = home.resolve(".local/bin/codex")
+                home.resolve(".local/bin/claude").copyTo(codexBinary); codexBinary.setExecutable(true)
+                val codexRecord = record.copy(definition = definition.copy(command = listOf("/bin/echo", "literal ${'$'}(touch codex-injected)", "quoted \"value\"")), desiredRunners = setOf("codex"))
+                val overrides = SharedMcpSettings.codexArguments(listOf(codexRecord), projectKey(bridge.conn.host, "/"))
+                val codexPlan = DesktopLaunchPlan(root.resolve("codex new directory").path, "codex", DesktopLaunchPlan.newRequestId(), prompt, codexMcpArguments = overrides)
+                assertTrue(bridge.conn.ssh.exec(codexPlan.preparationCommand()).contains(":prepared:"))
+                assertFalse(bridge.conn.ssh.exec("tmux list-sessions -F '#{session_name}'").contains(codexPlan.sessionName))
+                captured.delete()
+                assertTrue(bridge.conn.ssh.exec(codexPlan.command()).contains(":ok"))
+                withTimeout(5000) { while (!captured.isFile) delay(50) }
+                val codexArgv = JSONArray(captured.readText())
+                assertEquals(overrides + listOf("--", prompt), (0 until codexArgv.length()).map { codexArgv.getString(it) })
+                assertFalse(root.resolve("codex new directory/codex-injected").exists())
             } finally { bridge.conn.ssh.exec("tmux -S ${Shell.q(socket.path)} kill-server 2>/dev/null || true") }
         }
     }
