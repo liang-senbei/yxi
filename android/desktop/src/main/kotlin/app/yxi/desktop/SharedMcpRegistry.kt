@@ -130,6 +130,22 @@ internal class SharedMcpRegistry(file: File) {
 
 /** Native configuration fragments only. Applying them requires native read-back and conflict checks. */
 internal object SharedMcpSettings {
+    /** Process-only Codex overrides. Callers must reject existing native name conflicts before launch. */
+    fun codexArguments(records: List<SharedMcpRecord>, hostKey: String): List<String> {
+        require(records.all { !it.retired && it.definition.hostKey == hostKey && "codex" in it.desiredRunners })
+        require(records.map { it.definition.name }.distinct().size == records.size)
+        fun literal(value: Any): String = when (value) {
+            is String -> JSONObject.quote(value).replace("\\/", "/")
+            is Boolean -> value.toString()
+            is JSONArray -> (0 until value.length()).joinToString(prefix = "[", postfix = "]") { literal(value.get(it)) }
+            else -> error("不支持的 MCP 覆盖字段")
+        }
+        return records.flatMap { record ->
+            val entry = forRunner(record.definition, "codex").getJSONObject("mcp_servers").getJSONObject(record.definition.name)
+            val table = entry.keys().asSequence().toList().sorted().joinToString(prefix = "{", postfix = "}") { key -> "${JSONObject.quote(key)} = ${literal(entry.get(key))}" }
+            listOf("-c", "mcp_servers.${record.definition.name}=$table")
+        }
+    }
     fun forRunner(definition: SharedMcpDefinition, runner: String): JSONObject {
         definition.validate()
         val local = definition.command.isNotEmpty()
