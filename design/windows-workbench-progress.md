@@ -1,3 +1,9 @@
+## 2026-09-24 Grok 原生认证拒绝与界面恢复
+
+- 真实 1.0.41 未登录 session/new 返回 ACP -32000 Authentication required（首次探索 `run.WlH63j`）；并非会话已创建。`f718ddf` 引入 AcpRpcException，LocalAcpTasks 对明确认证拒绝清理 pending 日志并保留连接/登录选项，提示先登录；其他未知失败继续保护。
+- `b6d2dbffce425438097e5527562af7aadda7103c` 清理重试时旧错误提示并显式指定原生测试 Unit（此前 `run.3M3abi` 无测试被发现，不算通过）。最终构建 `run.WgqdXl`，原生 Grok `run.zDGtGT` 1 项、管理器 `run.Aixfy6` 3 项通过，无失败/跳过，真实拒绝后没有任务记录和未知创建标记，登录选项仍保留。
+- 为恢复构建空间，删除 44 个标签/源版本吻合且无容器引用的旧 Yxi 测试镜像，保留最新 5 个及固定基线，报告未删；清单 /root/.cache/yxi-isolated-tests/removed-images-20260924-acp.json。未登录真实账号、未发模型请求、未发布。
+
 ## 2026-09-24 Grok 官方原生 ACP 握手
 
 - 从官方安装器 https://x.ai/cli/install.sh 声明的 GCS 源获取稳定 1.0.41，仅缓存 ELF 到 /root/.cache/yxi-native-tests/grok-1.0.41/grok；未运行宿主安装器/程序。SHA256 9ce03ed23e16ea01072b4496263d6213a27899e1e3e107f008d36edf82e70407，165967424 字节，来源清单 `.artifacts/grok-native/source.json`。
