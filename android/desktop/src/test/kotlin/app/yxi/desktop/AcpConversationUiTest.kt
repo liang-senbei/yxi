@@ -21,6 +21,7 @@ class AcpConversationUiTest {
         override val output = PipedInputStream(65536)
         private val pipe = PipedOutputStream(output)
         val writes = CopyOnWriteArrayList<JSONObject>()
+        var deferPrompt = false
         fun config(model: String) = JSONArray().put(JSONObject().put("id", "model").put("name", "模型").put("category", "model")
             .put("type", "select").put("currentValue", model).put("options", JSONArray()
                 .put(JSONObject().put("value", "provider/model-a").put("name", "Model A"))
@@ -36,7 +37,7 @@ class AcpConversationUiTest {
                     emit(JSONObject().put("method", "session/update").put("params", JSONObject().put("sessionId", "ui-session")
                         .put("update", JSONObject().put("sessionUpdate", "agent_message_chunk").put("content", JSONObject().put("type", "text")
                             .put("text", "## 验证结果\n\n**模型选择与审批通过。**\n\n- Enter 发送一次\n- Shift+Enter 换行\n\n```kotlin\nprintln(\"ACP\")\n```")))))
-                    JSONObject().put("stopReason", "end_turn")
+                    if (deferPrompt) null else JSONObject().put("stopReason", "end_turn")
                 }
                 else -> null
             }
@@ -109,6 +110,33 @@ class AcpConversationUiTest {
                             assertEquals("", state.chatDrafts.getValue(record.key).value.text)
                             delay(500)
                             ImageIO.write(Robot().createScreenCapture(java.awt.Rectangle(window.locationOnScreen, window.size)), "png", File("/results/acp-markdown.png"))
+                            fixture.deferPrompt = true
+                            controller.enqueue("滚动跟随验证")
+                            val streaming = controller.dispatchNext()
+                            withTimeout(3000) { while (fixture.writes.count { it.optString("method") == "session/prompt" } != 2) delay(20) }
+                            fun chunk(text: String) = fixture.emit(JSONObject().put("method", "session/update").put("params", JSONObject().put("sessionId", "ui-session")
+                                .put("update", JSONObject().put("sessionUpdate", "agent_message_chunk").put("content", JSONObject().put("type", "text").put("text", text)))))
+                            chunk((1..80).joinToString("\n\n", prefix = "\n\n") { "第 $it 段：正在验证长回复滚动位置。" })
+                            val view = state.codexConversationViews.getValue(record.key)
+                            withTimeout(5000) { while (!view.scroll.canScrollBackward || view.scroll.canScrollForward) delay(30) }
+                            withContext(Dispatchers.IO) { Robot().apply {
+                                mouseMove(window.locationOnScreen.x + 400, window.locationOnScreen.y + 400); mouseWheel(-8)
+                            } }
+                            withTimeout(3000) { while (view.followLatest.value) delay(20) }
+                            delay(300)
+                            val position = view.scroll.firstVisibleItemIndex to view.scroll.firstVisibleItemScrollOffset
+                            chunk("\n\n新增流式尾部，不应抢走正在阅读的位置。")
+                            withTimeout(3000) { while (controller.messages.none { it.text.endsWith("位置。") && it.text.contains("新增流式尾部") }) delay(20) }
+                            delay(300)
+                            assertFalse(view.followLatest.value)
+                            assertEquals(position, view.scroll.firstVisibleItemIndex to view.scroll.firstVisibleItemScrollOffset)
+                            assertTrue(view.scroll.canScrollForward)
+                            ImageIO.write(Robot().createScreenCapture(java.awt.Rectangle(window.locationOnScreen, window.size)), "png", File("/results/acp-scroll-reading.png"))
+                            view.followLatest.value = true
+                            withTimeout(3000) { while (view.scroll.canScrollForward) delay(20) }
+                            val prompt = fixture.writes.last { it.optString("method") == "session/prompt" }
+                            fixture.emit(JSONObject().put("id", prompt.get("id")).put("result", JSONObject().put("stopReason", "end_turn")))
+                            withTimeout(3000) { streaming.join() }
                         } catch (e: Throwable) { failure = e }
                         finally { exitApplication() }
                     }
