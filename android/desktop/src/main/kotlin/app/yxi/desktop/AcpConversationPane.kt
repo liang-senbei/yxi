@@ -1,6 +1,8 @@
 package app.yxi.desktop
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -64,6 +66,7 @@ import java.io.File
     var error by remember(record.key) { mutableStateOf("") }
     var sending by remember(record.key) { mutableStateOf(false) }
     var modeMenu by remember(record.key) { mutableStateOf(false) }
+    var configMenu by remember(record.key) { mutableStateOf<String?>(null) }
     Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row {
             TextButton({ state.localSelectedTaskKey = null }) { Text("返回本地") }
@@ -75,7 +78,20 @@ import java.io.File
             return@Column
         }
         Text(controller.note, style = MaterialTheme.typography.bodySmall)
-        controller.modes?.let { modes ->
+        if (controller.configOptions.length() > 0) Column(Modifier.heightIn(max = 180.dp).verticalScroll(rememberScrollState())) {
+            acpConfigSelectors(controller.configOptions).forEach { selector -> Box {
+                TextButton({ configMenu = selector.id }, enabled = controller.ready && !controller.busy && !controller.changingMode && controller.pendingApprovals.isEmpty()) {
+                    Text(selector.name + " · " + (selector.values.firstOrNull { it.id == selector.current }?.name ?: selector.current))
+                }
+                DropdownMenu(configMenu == selector.id, { configMenu = null }) {
+                    selector.values.forEach { option -> DropdownMenuItem(text = { Text(option.name) }, onClick = {
+                        configMenu = null
+                        scope.launch { runCatching { controller.changeConfig(selector.id, option.id) }.onFailure { error = it.message.orEmpty() } }
+                    }) }
+                }
+            } }
+        }
+        if (controller.configOptions.length() == 0) controller.modes?.let { modes ->
             val available = modes.optJSONArray("availableModes")
             val current = modes.optString("currentModeId")
             val options = (0 until (available?.length() ?: 0)).map { available!!.getJSONObject(it) }

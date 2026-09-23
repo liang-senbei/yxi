@@ -35,6 +35,7 @@ internal class AcpTaskController(
     var cancelling by mutableStateOf(false); private set
     var changingMode by mutableStateOf(false); private set
     var modes by mutableStateOf(client.modes(sessionId)); private set
+    var configOptions by mutableStateOf(client.configOptions(sessionId)); private set
     var lastStopReason by mutableStateOf(""); private set
     var note by mutableStateOf("已连接 ACP 会话"); private set
     private var disposed = false
@@ -75,6 +76,7 @@ internal class AcpTaskController(
         val update = params.optJSONObject("update") ?: return
         when (update.optString("sessionUpdate")) {
             "current_mode_update" -> modes = client.modes(sessionId)
+            "config_option_update" -> configOptions = client.configOptions(sessionId)
             "agent_message_chunk" -> {
                 check(activeMessageId.isNotBlank()) { "收到未关联轮次的消息" }
                 agentText.append(update.optJSONObject("content")?.optString("text").orEmpty())
@@ -128,6 +130,18 @@ internal class AcpTaskController(
         } catch (e: Exception) {
             ready = false; note = "模式切换未确认，请核对原生会话后再发送"
             throw e
+        } finally { changingMode = false }
+    }
+    suspend fun changeConfig(configId: String, value: String) = mutation.withLock {
+        check(ready && !disposed && !busy && pendingApprovals.isEmpty()) { "当前会话暂不能修改配置" }
+        changingMode = true
+        try {
+            client.setConfigOption(sessionId, configId, value)
+            client.synchronizeEvents()
+            configOptions = client.configOptions(sessionId)
+            note = "会话配置已由运行器确认"
+        } catch (e: Exception) {
+            ready = false; note = "配置切换未确认，请核对原生会话后再发送"; throw e
         } finally { changingMode = false }
     }
 

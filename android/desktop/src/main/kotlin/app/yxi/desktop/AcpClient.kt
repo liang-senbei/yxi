@@ -27,6 +27,7 @@ internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
     private val sessions = ConcurrentHashMap.newKeySet<String>()
     private val sessionModes = ConcurrentHashMap<String, JSONObject>()
     private val notifiedModes = ConcurrentHashMap<String, String>()
+    private val sessionConfigurations = ConcurrentHashMap<String, JSONArray>()
     private val activePrompts = ConcurrentHashMap.newKeySet<String>()
     private val cancellingSessions = ConcurrentHashMap.newKeySet<String>()
     private val closed = AtomicBoolean()
@@ -73,6 +74,12 @@ internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
                         if (message.optString("method") == "session/update") {
                             val params = message.getJSONObject("params")
                             val update = params.getJSONObject("update")
+                            if (update.optString("sessionUpdate") == "config_option_update") {
+                                check(sessionConfigurations.size < 256 || sessionConfigurations.containsKey(params.getString("sessionId")))
+                                val options = update.getJSONArray("configOptions")
+                                acpConfigSelectors(options)
+                                sessionConfigurations[params.getString("sessionId")] = JSONArray(options.toString())
+                            }
                             if (update.optString("sessionUpdate") == "current_mode_update") {
                                 val session = params.getString("sessionId")
                                 val mode = update.getString("currentModeId")
@@ -122,12 +129,28 @@ internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
         require(directory.isNotBlank() && directory.none { it < ' ' })
         return request("session/new", JSONObject().put("cwd", directory).put("mcpServers", JSONArray())).also {
             val id = it.getString("sessionId"); check(id.isNotBlank()); sessions.add(id)
+            it.optJSONArray("configOptions")?.let { options ->
+                acpConfigSelectors(options); sessionConfigurations.putIfAbsent(id, JSONArray(options.toString()))
+            }
             it.optJSONObject("modes")?.let { modes -> sessionModes.compute(id) { _, _ ->
                 JSONObject(modes.toString()).apply { notifiedModes[id]?.let { current -> put("currentModeId", current) } }
             } }
         }
     }
     fun modes(sessionId: String): JSONObject? = sessionModes[sessionId]?.let { JSONObject(it.toString()) }
+    fun configOptions(sessionId: String): JSONArray = sessionConfigurations[sessionId]?.let { JSONArray(it.toString()) } ?: JSONArray()
+    suspend fun setConfigOption(sessionId: String, configId: String, value: String, timeoutMillis: Long = 30_000) {
+        check(sessionId in sessions)
+        val previous = sessionConfigurations[sessionId] ?: error("运行器没有提供配置选项")
+        val selector = acpConfigSelectors(previous).singleOrNull { it.id == configId } ?: error("配置选项已失效")
+        require(selector.values.any { it.id == value }) { "请选择运行器提供的值" }
+        check(activePrompts.add(sessionId)) { "会话仍有未确认操作" }
+        val result = request("session/set_config_option", JSONObject().put("sessionId", sessionId).put("configId", configId).put("value", value), timeoutMillis)
+        val confirmed = result.getJSONArray("configOptions")
+        acpConfigSelectors(confirmed)
+        sessionConfigurations.compute(sessionId) { _, current -> if (current === previous) JSONArray(confirmed.toString()) else current }
+        activePrompts.remove(sessionId)
+    }
 
     suspend fun setMode(sessionId: String, modeId: String, timeoutMillis: Long = 30_000) {
         check(sessionId in sessions)

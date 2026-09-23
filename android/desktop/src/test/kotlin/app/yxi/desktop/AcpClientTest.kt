@@ -9,6 +9,28 @@ import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.*
 
 class AcpClientTest {
+    @Test fun `configuration selection uses grouped native values and replaces dependent options`(): Unit = runBlocking {
+        fun config(model: String, effort: String) = JSONArray().put(JSONObject().put("id", "model").put("name", "模型").put("type", "select").put("category", "model")
+            .put("currentValue", model).put("options", JSONArray().put(JSONObject().put("group", "provider").put("name", "Provider")
+                .put("options", JSONArray().put(JSONObject().put("value", "a").put("name", "Model A")).put(JSONObject().put("value", "b").put("name", "Model B"))))))
+            .put(JSONObject().put("id", "effort").put("name", "思考强度").put("type", "select").put("currentValue", effort)
+                .put("options", JSONArray().put(JSONObject().put("value", effort).put("name", effort))))
+        val fixture = Fixture()
+        fixture.handler = { request -> when (request.optString("method")) {
+            "initialize" -> fixture.result(request, JSONObject().put("protocolVersion", 1))
+            "session/new" -> fixture.result(request, JSONObject().put("sessionId", "fixture-session").put("configOptions", config("a", "low")))
+            "session/set_config_option" -> fixture.result(request, JSONObject().put("configOptions", config("b", "high")))
+        } }
+        AcpClient(fixture).use { client ->
+            client.initialize(); client.newSession("/fixture")
+            assertFailsWith<IllegalArgumentException> { client.setConfigOption("fixture-session", "model", "invented") }
+            client.setConfigOption("fixture-session", "model", "b")
+            val selectors = acpConfigSelectors(client.configOptions("fixture-session"))
+            assertEquals(listOf("b", "high"), selectors.map { it.current })
+            assertEquals(listOf("high"), selectors.last().values.map { it.id })
+            assertEquals("b", fixture.writes.last().getJSONObject("params").getString("value"))
+        }
+    }
     @Test fun `mode selection uses native options and ambiguous changes block sending`() = runBlocking {
         val fixture = Fixture()
         var acknowledge = true
