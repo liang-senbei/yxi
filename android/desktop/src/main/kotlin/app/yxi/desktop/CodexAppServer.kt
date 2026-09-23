@@ -17,10 +17,13 @@ internal data class CodexResumeOverrides(val provider: String?, val model: Strin
  * Notifications and server approval requests remain raw events for the workspace controller.
  * Protocol: https://learn.chatgpt.com/docs/app-server
  */
-internal class CodexAppServer internal constructor(private val shell: SshSession.Shell,
+internal class CodexAppServer internal constructor(private val transport: CodexTransport,
     private val profileOverrides: CodexResumeOverrides? = null,
     private val providerModelLoader: (suspend () -> List<ProviderModels.Model>)? = null,
     internal val profileLabel: String? = null) : AutoCloseable {
+    internal constructor(shell: SshSession.Shell, profileOverrides: CodexResumeOverrides? = null,
+        providerModelLoader: (suspend () -> List<ProviderModels.Model>)? = null, profileLabel: String? = null) :
+        this(SshCodexTransport(shell), profileOverrides, providerModelLoader, profileLabel)
     internal val hasIndependentProfile get() = profileOverrides != null
     internal suspend fun independentModels(): List<String> {
         check(!closed.get() && providerModelLoader != null) { "独立配置连接已关闭" }
@@ -36,7 +39,7 @@ internal class CodexAppServer internal constructor(private val shell: SshSession
     init {
         scope.launch {
             try {
-                shell.output.bufferedReader(Charsets.UTF_8).use { reader ->
+                transport.output.bufferedReader(Charsets.UTF_8).use { reader ->
                     while (isActive) {
                         val line = reader.readLine() ?: break
                         if (line.isBlank()) continue
@@ -76,7 +79,7 @@ internal class CodexAppServer internal constructor(private val shell: SshSession
         pending[id] = result
         try {
             return withTimeout(timeoutMs) {
-                check(shell.write(JSONObject().put("id", id).put("method", method).put("params", params).toString() + "\n")) {
+                check(transport.write(JSONObject().put("id", id).put("method", method).put("params", params).toString() + "\n")) {
                     "运行器写入未确认；不要自动重发"
                 }
                 val response = result.await()
@@ -94,12 +97,12 @@ internal class CodexAppServer internal constructor(private val shell: SshSession
         val key = idKey(serverRequestId)
         check(!closed.get() && serverRequests.remove(key) != null) { "审批请求不存在、已处理或连接已失效" }
         check(withTimeout(10000) {
-            shell.write(JSONObject().put("id", serverRequestId).put("result", result).toString() + "\n")
+            transport.write(JSONObject().put("id", serverRequestId).put("result", result).toString() + "\n")
         }) { "审批响应写入未确认；请重新查询运行器状态" }
     }
 
     suspend fun startThread(directory: String): JSONObject {
-        require(directory.startsWith('/') && '\u0000' !in directory)
+        require(validDirectory(directory))
         // Keep the server's configured approval, sandbox, model and provider defaults.
         return request("thread/start", JSONObject().put("cwd", directory).apply { applyProfile(this, profileOverrides) })
     }
@@ -128,7 +131,7 @@ internal class CodexAppServer internal constructor(private val shell: SshSession
     }
 
     suspend fun readResumeOverrides(directory: String): CodexResumeOverrides {
-        require(directory.startsWith('/') && directory.none { it < ' ' }) { "项目目录无效" }
+        require(validDirectory(directory)) { "项目目录无效" }
         profileOverrides?.let { return it }
         val config = request("config/read", JSONObject().put("cwd", directory).put("includeLayers", false))
             .getJSONObject("result").getJSONObject("config")
@@ -159,7 +162,7 @@ internal class CodexAppServer internal constructor(private val shell: SshSession
 
     private fun shutdown(error: Throwable) {
         if (!closed.compareAndSet(false, true)) return
-        shell.close() // Unblocks the blocking reader as well as stopping outbound writes.
+        transport.close() // Unblocks the blocking reader as well as stopping outbound writes.
         pending.values.forEach { it.completeExceptionally(error) }
         pending.clear(); serverRequests.clear()
         incoming.close(error)
@@ -167,6 +170,15 @@ internal class CodexAppServer internal constructor(private val shell: SshSession
     }
 
     override fun close() = shutdown(CancellationException("运行器连接已关闭"))
+
+    private fun validDirectory(path: String) = path.none { it < ' ' } &&
+        if (transport.local) java.io.File(path).isAbsolute && java.io.File(path).isDirectory else path.startsWith('/')
+
+    internal suspend fun initializeLocal() {
+        check(transport.local)
+        request("initialize", JSONObject().put("clientInfo", JSONObject().put("name", "yxi_desktop_local").put("version", "1")))
+        check(transport.write("{\"method\":\"initialized\",\"params\":{}}\n")) { "本地运行器初始化未确认" }
+    }
 
     class RpcFailure(val code: Int, message: String) : IllegalStateException(message)
 

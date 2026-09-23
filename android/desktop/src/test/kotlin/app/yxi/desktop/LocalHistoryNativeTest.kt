@@ -61,6 +61,15 @@ http_headers = { Authorization = "Bearer fixture-key-0" }
             fun transcripts() = File(codexHome, "sessions").walkTopDown().filter { it.isFile && it.extension == "jsonl" }
                 .associate { it.relativeTo(codexHome).path to MessageDigest.getInstance("SHA-256").digest(it.readBytes()).toList() }
             val beforeTranscripts = transcripts(); assertTrue(beforeTranscripts.isNotEmpty())
+            runBlocking {
+                val runtime = LocalRuntimeInstallation("codex", "fixture", listOf("/opt/native/claude"), codexHome.path, "0.153.4")
+                val transport = LocalCodexTransport.start(runtime, listOf("app-server"), System.getenv())
+                CodexAppServer(transport).use { client ->
+                    client.initializeLocal()
+                    assertEquals(nativeId, client.readThread(nativeId).getJSONObject("result").getJSONObject("thread").getString("id"))
+                    assertFailsWith<IllegalArgumentException> { client.startThread(root.resolve("missing").path) }
+                }
+            }
             application(exitProcessOnExit = false) {
                 Window(onCloseRequest = ::exitApplication, state = rememberWindowState(width = 1180.dp, height = 960.dp), title = "Yxi local history") {
                     YxiTheme { Row { Box(Modifier.width(250.dp)) { LocalWorkspaceSidebar(state, "") }; Box(Modifier.weight(1f)) { LocalWorkspacePane(state) } } }
