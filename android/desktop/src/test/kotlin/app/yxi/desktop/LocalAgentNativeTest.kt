@@ -84,17 +84,29 @@ http_headers = { Authorization = "Bearer fixture-key-0" }
                 assertEquals("已停止", canceled.status)
                 assertFalse(canceled.process?.isAlive == true)
                 assertFalse(root.resolve("requests.jsonl").readText().contains("CANCEL-BEFORE-DELIVERY"))
+                val dispatcher = ScheduleDispatcher(state)
+                try {
+                    withContext(Dispatchers.Swing) {
+                        state.scheduledTasks.put(ScheduledTask("native-schedule", "定时整理项目", "YXI-SCHEDULED-ONCE",
+                            ScheduleTarget("local", "本地 · Codex", directory = root.path), System.currentTimeMillis() - 1000, "一次", "Asia/Shanghai"))
+                        dispatcher.start()
+                    }
+                    withTimeout(45000) { while (state.scheduledTasks.runs.none { it.schedule == "native-schedule" && it.status == "已完成" }) delay(100) }
+                    assertFalse(state.scheduledTasks.tasks.single().enabled)
+                    assertEquals(1, state.scheduledTasks.runs.size)
+                    assertTrue(root.resolve("requests.jsonl").readText().contains("YXI-SCHEDULED-ONCE"))
+                } finally { dispatcher.close() }
             }
             state.conn = Conn(Host("fixture-server", "hk13 · 测试", "192.0.2.1"), NoHostKeys)
             var page by androidx.compose.runtime.mutableStateOf(0)
             application(exitProcessOnExit = false) {
                 Window(onCloseRequest = ::exitApplication, title = "Yxi Explore preview", state = rememberWindowState(width = 1100.dp, height = 880.dp)) {
-                    YxiTheme { if (page == 0) ConnectionsPane(state) else LocalAgentsPane(state) }
+                    YxiTheme { when (page) { 0 -> ConnectionsPane(state); 1 -> LocalAgentsPane(state); else -> ScheduledTasksPane(state) } }
                     LaunchedEffect(Unit) {
                         suspend fun shot(name: String) = withContext(Dispatchers.IO) {
                             check(ImageIO.write(Robot().createScreenCapture(java.awt.Rectangle(window.locationOnScreen, window.size)), "png", File("/results/$name.png")))
                         }
-                        try { delay(1200); shot("explore-connections"); page = 1; delay(700); shot("explore-local-agent") }
+                        try { delay(1200); shot("explore-connections"); page = 1; delay(700); shot("explore-local-agent"); page = 2; delay(700); shot("explore-scheduled-tasks") }
                         catch (e: Throwable) { failure = e }
                         finally { exitApplication() }
                     }

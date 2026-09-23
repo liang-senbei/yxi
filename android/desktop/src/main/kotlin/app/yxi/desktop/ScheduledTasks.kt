@@ -42,6 +42,7 @@ internal class ScheduledTasks(file: File) {
         require(task.repeat in setOf("一次", "每小时", "每天", "每周")); ZoneId.of(task.zone)
         require(task.target.kind in setOf("local", "terminal", "codex"))
         check(runs.none { it.schedule == task.id && it.status == "执行中" }) { "请等待本次执行结束" }
+        check(!task.enabled || runs.none { it.schedule == task.id && it.status == "结果未确认" }) { "请先核对未确认执行，再启用计划" }
         save(tasks.filterNot { it.id == task.id } + task)
     }
     fun pause(id: String) = save(tasks.map { if (it.id == id) it.copy(enabled = false) else it })
@@ -127,12 +128,16 @@ internal class ScheduleDispatcher(private val state: AppState) : AutoCloseable {
         } else {
             val record = state.codexWorkspace.tasks(conn.host).firstOrNull { it.key == target.task }
             if (record == null) { state.scheduledTasks.finish(run.id, "失败", "原 Codex 会话不存在"); return }
-            val controller = state.codexWorkspace.open(conn, record, autoRun = false)
+            val controller = state.codexWorkspace.controllers[record.key]
+            if (controller == null || !controller.ready) { state.scheduledTasks.finish(run.id, "跳过", "请先打开目标 Codex 会话以建立运行器连接"); return }
             if (controller.activeTurnId != null || controller.sending || controller.pendingRequests.isNotEmpty()) { state.scheduledTasks.finish(run.id, "跳过", "目标会话正在运行或等待批准"); return }
             state.instructions.enqueue(target.task, task.prompt, id = run.id)
             controller.sendNext(run.id)
+            while (state.instructions.entries.single { it.id == run.id }.runtimeTurnState == RuntimeTurnState.InProgress) delay(500)
         }
         val item = state.instructions.entries.single { it.id == run.id }
+        if (item.runtimeTurnState == RuntimeTurnState.Completed) { state.scheduledTasks.finish(run.id, "已完成", "指令 ${run.id} · 运行器已确认本轮完成"); return }
+        if (item.runtimeTurnState in setOf(RuntimeTurnState.Failed, RuntimeTurnState.Interrupted)) { state.scheduledTasks.finish(run.id, "失败", "指令 ${run.id} · ${item.runtimeCompletion}"); return }
         val delivered = item.status in setOf(InstructionStatus.Sent, InstructionStatus.Accepted)
         if (item.status == InstructionStatus.Local) state.instructions.cancel(item.id, item.revision)
         state.scheduledTasks.finish(run.id, if (delivered) "已投递" else if (item.status == InstructionStatus.Local) "跳过" else "结果未确认", "指令 ${run.id} · ${item.detail}；已投递不代表 Agent 已完成")
