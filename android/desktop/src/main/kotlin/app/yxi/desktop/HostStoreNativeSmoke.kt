@@ -13,10 +13,11 @@ internal fun runHostStoreNativeSmoke(reopen: Boolean) {
     check(File(System.getenv("LOCALAPPDATA") ?: "").canonicalFile == File(root, "Local").canonicalFile)
     val roaming = File(root, "Roaming/Yxi")
     val local = File(root, "Local/Yxi")
+    val current = File(root, ".yxi")
     val marker = File(root, "host-store-fixture")
     if (!reopen) {
         check(!marker.exists())
-        check(listOf(roaming, local).all { directory -> directory.listFiles().orEmpty().none { it.name.startsWith("hosts.json") } })
+        check(listOf(roaming, local, current).all { directory -> directory.listFiles().orEmpty().none { it.name.startsWith("hosts.json") } })
         roaming.mkdirs()
         val hosts = JSONArray((1..2).map { number -> JSONObject()
             .put("id", "host-fixture-$number").put("alias", "测试主机$number")
@@ -35,8 +36,9 @@ internal fun runHostStoreNativeSmoke(reopen: Boolean) {
     }
     check(File(roaming, "hosts.json").readText() == "[]")
     check(File(roaming, "hosts.json.bak").readText() == "[]")
-    check(File(local, "hosts.json.protected").isFile)
-    check(local.listFiles().orEmpty().filter { it.name.startsWith("hosts.json") }.none { it.readText().contains("synthetic-host-") })
+    check(Store.dir.canonicalFile == current.canonicalFile)
+    check(File(current, "hosts.json.protected").isFile)
+    check(listOf(local, current).flatMap { it.listFiles().orEmpty().toList() }.filter { it.name.startsWith("hosts.json") }.none { it.readText().contains("synthetic-host-") })
     if (reopen) {
         check(loaded.first().alias == "已保存测试")
         check(Store.pref("lastHost", "") == "host-fixture-2")
