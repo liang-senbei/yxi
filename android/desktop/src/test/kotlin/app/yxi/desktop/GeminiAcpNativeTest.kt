@@ -20,7 +20,18 @@ class GeminiAcpNativeTest {
             assertTrue(hello.getJSONArray("authMethods").length() > 0)
             File("/results/gemini-acp-initialize.json").writeText(hello.toString(2))
             assertFalse(File(home, "oauth_creds.json").exists())
+            val denied = assertFailsWith<AcpRpcException> { client.newSession("/sandbox/home") }
+            assertEquals(-32000, denied.code)
         }
         withTimeout(5000) { while (ProcessHandle.of(pid).map { it.isAlive }.orElse(false)) delay(20) }
+        LocalAcpTasks(InstructionQueue(File("/sandbox/tmp/gemini-queue.json")), File("/sandbox/tmp/gemini-tasks.json")).use { tasks ->
+            tasks.prepare(runtime, "/sandbox/home")
+            val denied = assertFailsWith<IllegalStateException> { tasks.create("Unauthenticated Gemini") }
+            assertTrue(denied.message.orEmpty().contains("先登录"))
+            assertEquals("", tasks.recoverySessionId)
+            assertTrue(tasks.registry.records.isEmpty())
+            assertNotNull(tasks.initialization)
+        }
+        assertFalse(File(home, "oauth_creds.json").exists())
     }
 }
