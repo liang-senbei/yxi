@@ -75,7 +75,7 @@ class HermesAcpConversationNativeTest {
                     val models = checkNotNull(controller.models)
                     File("/results/hermes-models.json").writeText(models.toString(2))
                     val options = models.getJSONArray("availableModels")
-                    val alternative = (0 until options.length()).map { options.getJSONObject(it).getString("modelId") }.single { it.endsWith("fixture-hermes-alt") }
+                    val alternative = (0 until options.length()).map { options.getJSONObject(it).getString("modelId") }.single { it == "custom:fixture:fixture-hermes-alt" }
                     withTimeout(60000) { controller.changeModel(alternative) }
                     assertEquals(alternative, LocalCodexTaskRegistry(index).records.single().model)
                     controller.enqueue("Confirm the second model.")
