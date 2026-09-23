@@ -1,3 +1,9 @@
+## 2026-09-24 服务器真实 Gemini ACP 与工具审批
+
+- `843c54742b0a44c7551c849e7576873edd441ced` 扩展 Gemini 原生测试到真实隔离 SSH：远端 HOME/GEMINI_CLI_HOME 与假 API 配置独立，RemoteAcpTasks 认证/新建/发送，批准前文件不存在，allow_once 后实际 shell 写标记、functionResponse 回传、end_turn/Completed。
+- 构建 `run.tDKxgH` 与 Gemini 变体成功；GeminiAcpConversationNativeTest `run.uUuEe4` 1 项通过，无失败/跳过，包含本地与远端两套原生流程。远端 hostKey/home/任务索引正确，关闭任务后 SSH 仍可执行。证据 `.artifacts/gemini-native/remote-turn.json`。
+- 运行器、SSH、工具执行真实，模型 HTTP 为回环 fixture。服务器 UI 与终端认证、公网账号、Windows/macOS 仍待完成，未发布。
+
 ## 2026-09-24 服务器 ACP 会话管理基础
 
 - `158dd99e5e1a25913575c2171b1871c9483374df` 新增 RemoteAcpTasks：远端目录/home 身份、每主机独立创建日志、显式认证、原生 session/new、持久任务记录、模型记录回调，以及按 Conn 关闭所属控制器。明确认证拒绝保留连接，其余未知创建要求核对。
