@@ -1,3 +1,8 @@
+## 2026-09-24 Windows 内嵌浏览器原生验收
+
+- 使用源码 `33fbc32073c6cdd50a41f35540c8e41019e2e576` 本机构建的 Yxi.exe，在全新隔离 profile 执行 --browser-smoke；测试入口位于账号、Updater 和服务器连接初始化之前，仅访问一次性127.0.0.1页面。
+- 退出码0；browser native pixels ok、browser native render and live style ok、browser native shutdown ok 三个标记齐全。CJK标题与 LIVE_STYLE=40px 的 Chromium 表面截图已目视，非空白，样式修改生效。
+- 证据 `.artifacts/windows-browser-33fbc32/result.json`、browser.png、stdout.txt、stderr.txt。这证明Windows原生Chromium提取/启动/渲染/脚本修改/关闭基础路径；不代表真实远端端口转发、右侧面板布局与页面选择回传完整验收。未发布。
 ## 2026-09-24 Windows 主机与凭据跨进程持久化
 
 - 首次本机 --host-smoke 在旧测试断言 HostStoreNativeSmoke.kt:38 失败：实际存储已迁移到用户目录 `.yxi`，测试仍要求 Local/Yxi。保留失败日志 `.artifacts/windows-storage-a04d50c/`；没有改动真实用户配置。
