@@ -6,7 +6,7 @@ import java.io.File
 import kotlin.test.*
 
 class GrokAcpNativeTest {
-    @Test fun `official Grok executable negotiates ACP with an isolated unauthenticated home`() = runBlocking {
+    @Test fun `official Grok executable negotiates ACP with an isolated unauthenticated home`(): Unit = runBlocking {
         check(!System.getenv("YXI_ISOLATED_TEST_RUN").isNullOrBlank())
         check(System.getProperty("user.home") == "/sandbox/home")
         val home = File("/sandbox/home/.grok")

@@ -34,7 +34,7 @@ import java.io.File
                 val methods = tasks.initialization?.optJSONArray("authMethods")
                 for (index in 0 until (methods?.length() ?: 0)) {
                     val method = methods!!.getJSONObject(index)
-                    TextButton({ scope.launch { runCatching { tasks.authenticate(method.getString("id")) }.onFailure { error = it.message.orEmpty() } } }, enabled = !tasks.busy) {
+                    TextButton({ scope.launch { error = ""; runCatching { tasks.authenticate(method.getString("id")) }.onFailure { error = it.message.orEmpty() } } }, enabled = !tasks.busy) {
                         Text(method.optString("name").ifBlank { method.getString("id") })
                     }
                 }
@@ -52,7 +52,7 @@ import java.io.File
             if (tasks.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         }
     }, confirmButton = { TextButton({ scope.launch {
-        runCatching { tasks.create(title) }.onSuccess(created).onFailure { error = it.message.orEmpty() }
+        error = ""; runCatching { tasks.create(title) }.onSuccess(created).onFailure { error = it.message.orEmpty() }
     } }, enabled = !tasks.busy && connectedDirectory == directory && connectedDirectory.isNotBlank() && tasks.recoverySessionId.isBlank()) { Text("创建对话") } },
         dismissButton = { TextButton(dismiss, enabled = !tasks.busy) { Text("取消") } })
 }
