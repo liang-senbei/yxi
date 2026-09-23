@@ -143,7 +143,7 @@ internal class CodexAppServer internal constructor(private val transport: CodexT
     }
 
     suspend fun startTurn(threadId: String, text: String, attachments: List<InstructionAttachment> = emptyList(), model: String? = null, effort: String? = null): JSONObject = request("turn/start",
-        JSONObject().put("threadId", requiredId(threadId)).put("input", userInput(text, attachments)).apply {
+        JSONObject().put("threadId", requiredId(threadId)).put("input", userInput(text, attachments, transport.local)).apply {
             model?.let { put("model", it) }; effort?.let { put("effort", it) }
         })
 
@@ -151,7 +151,7 @@ internal class CodexAppServer internal constructor(private val transport: CodexT
         JSONObject().put("limit", 100).put("includeHidden", false).apply { cursor?.let { put("cursor", it) } })
 
     suspend fun steer(threadId: String, turnId: String, text: String, attachments: List<InstructionAttachment> = emptyList()): JSONObject = request("turn/steer",
-        JSONObject().put("threadId", requiredId(threadId)).put("expectedTurnId", requiredId(turnId)).put("input", userInput(text, attachments)))
+        JSONObject().put("threadId", requiredId(threadId)).put("expectedTurnId", requiredId(turnId)).put("input", userInput(text, attachments, transport.local)))
 
     suspend fun interrupt(threadId: String, turnId: String): JSONObject = request("turn/interrupt",
         JSONObject().put("threadId", requiredId(threadId)).put("turnId", requiredId(turnId)))
@@ -187,18 +187,18 @@ internal class CodexAppServer internal constructor(private val transport: CodexT
     companion object {
         private fun idKey(id: Any) = JSONObject().put("id", id).toString()
         private fun requiredId(id: String) = id.also { require(it.isNotBlank()) { "缺少运行器任务或轮次 ID" } }
-        internal fun userInput(text: String, attachments: List<InstructionAttachment>): JSONArray {
+        internal fun userInput(text: String, attachments: List<InstructionAttachment>, local: Boolean = false): JSONArray {
             require(text.isNotBlank() || attachments.isNotEmpty()) { "输入不能为空" }
             val input = JSONArray()
             if (text.isNotBlank()) input.put(JSONObject().put("type", "text").put("text", text))
             attachments.forEach { attachment ->
-                require(attachment.remotePath.startsWith('/') && attachment.remotePath.none { it < ' ' }) { "附件路径无效" }
+                require((if (local) java.io.File(attachment.remotePath).let { it.isAbsolute && it.isFile && it.canRead() } else attachment.remotePath.startsWith('/')) && attachment.remotePath.none { it < ' ' }) { "附件路径无效" }
                 if (attachment.remotePath.substringAfterLast('.', "").lowercase() in setOf("png", "jpg", "jpeg", "webp")) {
                     input.put(JSONObject().put("type", "localImage").put("path", attachment.remotePath))
                 } else {
                     val reference = JSONObject().put("name", attachment.name).put("path", attachment.remotePath)
                     input.put(JSONObject().put("type", "text").put("text",
-                        "用户上传的服务器文件（内容未内嵌，请按任务需要使用文件工具读取）：\n$reference"))
+                        "用户上传的${if (local) "本机" else "服务器"}文件（内容未内嵌，请按任务需要使用文件工具读取）：\n$reference"))
                 }
             }
             return input
