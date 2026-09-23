@@ -1,3 +1,8 @@
+## 2026-09-24 ACP 已确认模型切换的保存失败语义
+
+- `eea1f73`/`2a3e2b6cf14f14f841c61a17880167e6cf7b063c` 记录原生模型切换 ACK 阶段。ACK 后本地状态/索引保存异常不再被错误分类为选项拒绝；明确提示原生已确认、本地同步失败，并暂停发送。
+- 构建 `run.j47XCt`，AcpTaskControllerTest `run.dSo0k6` 4 项通过，无失败/跳过。新增回调抛 IllegalArgumentException 时原生缓存仍为新模型、控制器未就绪且不宣称拒绝的断言。未发布。
+
 ## 2026-09-24 Gemini 真实 ACP 完整文本轮次
 
 - `db476e6e326b78b7f76fed057f1f9c05ba2a48ac` 使用真实 Gemini CLI 0.34.0、进程内假 GEMINI_API_KEY/回环 GOOGLE_GEMINI_BASE_URL/GEMINI_MODEL，实际 LocalAcpTasks 认证、新建和控制器发送；Google 协议 HTTP fixture 核对 x-goog-api-key，并返回固定 SSE 内容。
