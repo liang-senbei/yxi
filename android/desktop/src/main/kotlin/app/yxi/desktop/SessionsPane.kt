@@ -96,7 +96,7 @@ fun SessionRow(s: Session, selected: Boolean, displayName: String? = null, onCli
  * 出错留在弹窗里显示，成了才关；成了把新会话交给 [onCreated]。
  */
 @Composable
-fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: String = "", groupContext: String = "", onCodexConversation: ((String, String) -> Unit)? = null, initialDirectory: String? = null, initialAgent: String? = null, onCreated: (Session) -> Unit) {
+fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: String = "", groupContext: String = "", onCodexConversation: ((String, String) -> Unit)? = null, initialDirectory: String? = null, initialAgent: String? = null, onOpenCodeConversation: ((String, String) -> Unit)? = null, onCreated: (Session) -> Unit) {
     val scope = rememberCoroutineScope()
     // 预填现有会话的父目录（工作区），只用补项目名；不写死路径，换台机器就不一样
     var path by remember { mutableStateOf(initialDirectory ?: Dirs.parentsOf(conn.sessions.map { it.cwd }).firstOrNull()?.let { "$it/" }.orEmpty()) }
@@ -104,6 +104,7 @@ fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: Stri
     var busy by remember { mutableStateOf(false) }
     var agent by remember { mutableStateOf(initialAgent?.takeIf { RunnerCatalog.find(it) != null } ?: "claude") }
     val selectedRunner = RunnerCatalog.find(agent)!!
+    val structuredOpenCode = agent == "opencode" && onOpenCodeConversation != null && collaborationGroup.isBlank()
     var installation by remember(conn, agent) { mutableStateOf("checking") }
     LaunchedEffect(conn, agent) {
         installation = if (selectedRunner.command == null) "unknown" else try {
@@ -125,16 +126,16 @@ fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: Stri
                 RunnerCatalog.entries.chunked(2).forEach { row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         row.forEach { runner ->
-                            QuietChoice(selected = agent == runner.id, onClick = { agent = runner.id; err = "" }, enabled = !busy,
+                            QuietChoice(selected = agent == runner.id, onClick = { agent = runner.id; err = ""; if (agent == "opencode") isolatedWorktree = false }, enabled = !busy,
                                 modifier = Modifier.weight(1f).heightIn(min = 44.dp),
                                 leadingIcon = { RunnerBrandIcon(runner.id, Modifier.size(20.dp)) },
-                                label = { Column { Text(runner.title); if (!runner.serverCreation) Text("创建接入中", style = MaterialTheme.typography.labelSmall) } })
+                                label = { Column { Text(runner.title); if (!runner.serverCreation && !(runner.id == "opencode" && onOpenCodeConversation != null && collaborationGroup.isBlank())) Text("创建接入中", style = MaterialTheme.typography.labelSmall) } })
                         }
                     }
                 }
                 Text(when (installation) {
                     "checking" -> "正在检查 ${conn.host.label} 上的 ${selectedRunner.title}…"
-                    "available" -> "${selectedRunner.title} 已安装" + if (selectedRunner.serverCreation) "，可创建会话" else "；启动和会话状态适配尚未完成"
+                    "available" -> "${selectedRunner.title} 已安装" + if (selectedRunner.serverCreation || structuredOpenCode) "，可创建会话" else "；启动和会话状态适配尚未完成"
                     "missing" -> "服务器未找到 ${selectedRunner.title}" + if (selectedRunner.serverCreation) "，请先安装并登录" else "；创建适配也尚未完成"
                     else -> if (selectedRunner.serverCreation) "无法确认服务器安装状态，请检查连接后重新选择运行器" else "该运行器的创建接入尚未完成，暂不能启动"
                 }, style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
@@ -165,12 +166,17 @@ fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: Stri
                     Text(if (isolatedWorktree) "对话工作台暂需使用已存在的目录；独立工作树可通过下方终端入口创建。" else "支持排队、引导和侧栏预览；提示词先进入草稿，由你确认发送。",
                         style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 }
+                if (agent == "opencode" && onOpenCodeConversation != null && collaborationGroup.isBlank()) {
+                    TextButton({ onOpenCodeConversation(path, initialPrompt) }, enabled = !busy && !isolatedWorktree && installation == "available" && path.isNotBlank()) { Text("选择模型并新建 OpenCode 对话") }
+                    Text("使用已存在的目录进入结构化对话；独立 worktree 与协作组接入仍待完成。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                }
                 if (collaborationGroup.isNotBlank()) Text("创建前加入「$collaborationGroup」；启动失败可能留下未在线成员，可在组编辑中移除。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 if (err.isNotBlank()) Text(err, style = MaterialTheme.typography.bodySmall, color = Tokens.current.danger)
             }
         },
         confirmButton = {
-            TextButton(enabled = path.isNotBlank() && !busy && selectedRunner.serverCreation && installation == "available", onClick = {
+            TextButton(enabled = path.isNotBlank() && !busy && (selectedRunner.serverCreation || (structuredOpenCode && !isolatedWorktree)) && installation == "available", onClick = {
+                if (structuredOpenCode) { onOpenCodeConversation?.invoke(path, initialPrompt); return@TextButton }
                 busy = true
                 scope.launch {
                     try { createSession(conn, DesktopLaunchPlan(path.trim(), agent, requestId, initialPrompt, collaborationGroup, isolatedWorktree,
@@ -179,7 +185,7 @@ fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: Stri
                     catch (e: Exception) { err = e.message.orEmpty() }
                     finally { busy = false }
                 }
-            }) { Text(if (busy) "正在开…" else "开起来") }
+            }) { Text(if (busy) "正在开…" else if (structuredOpenCode) "选择模型并继续" else "开起来") }
         },
         dismissButton = { TextButton(onDismiss, enabled = !busy) { Text("取消") } },
     )

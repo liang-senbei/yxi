@@ -13,6 +13,11 @@ class LocalCodexTaskRegistryTest {
         registry.save(codex); registry.save(openCode)
         assertEquals(listOf(codex, openCode), LocalCodexTaskRegistry(file).records.toList())
         assertNotEquals(codex.key, openCode.key)
+        val remote = openCode.copy(hostKey = "server-a")
+        registry.save(remote)
+        assertNotEquals(openCode.key, remote.key)
+        assertNotEquals(remote.key, remote.copy(hostKey = "server-b").key)
+        assertEquals(remote, LocalCodexTaskRegistry(file).records.last())
     }
     @TempDir lateinit var directory: File
     private fun record() = LocalCodexTaskRecord("native-thread", "fixture-user", "fixture-os", "/native/home", "/project", "Task", "native-model", 1)

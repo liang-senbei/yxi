@@ -19,7 +19,7 @@ import app.yxi.agent.SessionState
  * 主机分组 → 会话行都在侧栏里），所以这里只剩另外两个整页入口。
  * 它跟 [AppState.tab] 是两层：`page` 决定右边整块是什么，`tab` 只在工作区里选 对话/终端/文件。
  */
-enum class Page { Workspace, Config, Me, Routes, Codex, Plugins, ConfigFiles, Connections, LocalAgents, LocalWorkspace, ScheduledTasks }
+enum class Page { Workspace, Config, Me, Routes, Codex, OpenCode, Plugins, ConfigFiles, Connections, LocalAgents, LocalWorkspace, ScheduledTasks }
 
 internal class CodexConversationView {
     val scroll = androidx.compose.foundation.lazy.LazyListState()
@@ -27,6 +27,13 @@ internal class CodexConversationView {
 }
 
 class AppState {
+    internal val remoteOpenCodeTasks by lazy { RemoteOpenCodeTasks(instructions, java.io.File(Store.dir, "remote-opencode-tasks.json")) }
+    internal var remoteOpenCodeSelectedKey by mutableStateOf<String?>(null)
+    internal var remoteOpenCodeDirectory by mutableStateOf("")
+    internal var remoteOpenCodePrompt by mutableStateOf("")
+    internal fun prepareOpenCodeTask(c: Conn, directory: String, prompt: String) {
+        select(c, null); remoteOpenCodeSelectedKey = null; remoteOpenCodeDirectory = directory; remoteOpenCodePrompt = prompt; page = Page.OpenCode
+    }
     private val localWorkspaceDelegate = lazy { LocalWorkspace() }
     private val localCodexTasksDelegate = lazy { LocalCodexTasks(instructions, java.io.File(Store.dir, "local-codex-tasks.json")) }
     internal val localCodexTasks get() = localCodexTasksDelegate.value
@@ -99,7 +106,9 @@ class AppState {
         page = Page.Codex
     }
     internal fun codexRouteBusy(c: Conn): Boolean {
-        val keys = codexWorkspace.tasks(c.host).map { it.key }.toSet()
+        val keys = (codexWorkspace.tasks(c.host).map { it.key } + remoteOpenCodeTasks.tasks(c.host).map { it.key }).toSet()
+        if (remoteOpenCodeTasks.busy || remoteOpenCodeTasks.controllers.any { (key, controller) -> key in keys &&
+                (controller.busy || controller.nativeBusy || controller.permissions.isNotEmpty() || controller.questions.isNotEmpty()) }) return true
         return codexWorkspace.controllers.any { (key, controller) -> key in keys &&
             (controller.activeTurnId != null || controller.sending || controller.pendingRequests.isNotEmpty()) } ||
             instructions.entries.any { it.taskKey in keys && (it.status in setOf(InstructionStatus.Delivering, InstructionStatus.Unknown) || it.runtimeTurnState == RuntimeTurnState.InProgress) }

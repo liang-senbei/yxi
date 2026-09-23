@@ -53,7 +53,7 @@ fun main(args: Array<String>) {
             if ("--smoke" !in args) schedules.start()
             onDispose { schedules.close() }
         }
-        DisposableEffect(state) { onDispose { state.codexWorkspace.close(); state.closeLocalFeatures() } }
+        DisposableEffect(state) { onDispose { state.codexWorkspace.close(); state.remoteOpenCodeTasks.close(); state.closeLocalFeatures() } }
         val tray = remember { TrayState().also { Notify.tray = it } }
         val scope = rememberCoroutineScope()
         // 点通知跳会话（ZCode 同款）：按 hostId + 会话名选中，select 会把页面拉回工作区；叫回窗口归 Notify.clicked

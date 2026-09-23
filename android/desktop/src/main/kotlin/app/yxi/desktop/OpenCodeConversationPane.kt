@@ -66,8 +66,9 @@ import org.json.JSONObject
         dismissButton = { TextButton(close, enabled = !tasks.busy && !submitting) { Text("取消") } })
 }
 
-@Composable internal fun OpenCodeConversationPane(state: AppState, record: LocalCodexTaskRecord) {
-    val controller = state.localOpenCodeTasks.controllers[record.key]
+@Composable internal fun OpenCodeConversationPane(state: AppState, record: LocalCodexTaskRecord,
+    controller: OpenCodeTaskController? = state.localOpenCodeTasks.controllers[record.key],
+    backLabel: String = "返回本地", back: () -> Unit = { state.localSelectedTaskKey = null }) {
     val scope = rememberCoroutineScope()
     val draft = remember(record.key) { state.chatDrafts.getOrPut(record.key) { mutableStateOf(TextFieldValue()) } }
     var error by remember(record.key) { mutableStateOf("") }
@@ -87,7 +88,7 @@ import org.json.JSONObject
         }
     }
     Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row { Text(record.title, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge); TextButton({ state.localSelectedTaskKey = null }) { Text("返回本地") } }
+        Row { Text(record.title, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge); TextButton(back) { Text(backLabel) } }
         Text("OpenCode · ${record.provider} · ${record.model}\n${record.directory}", style = MaterialTheme.typography.bodySmall)
         if (controller == null) { Text("此会话未由当前 Yxi 进程持有。原生会话与本地登记已保留，跨重启接管仍待接入。"); return@Column }
         Text(controller.note)

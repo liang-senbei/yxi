@@ -127,6 +127,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
         keys.pending?.takeIf { it.host == keys.jschHost(h) }?.answer?.complete(false)
         val c = connOf(h) ?: return
         state.codexWorkspace.disconnect(c)
+        state.remoteOpenCodeTasks.disconnect(c)
         c.close(); state.conns.remove(c)
         if (state.conn === c) { state.rememberTaskView(); state.conn = null; state.session = null }
     }
@@ -299,7 +300,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
                     (hostMatch || favorite.title.contains(f, true) || favorite.directory.contains(f, true)) &&
                         c?.sessions?.none { taskNavigationKey(h, it) == favorite.key } != false
                 } else emptyList()
-                val managedMatch = state.codexWorkspace.tasks(h).any { record ->
+                val managedMatch = state.remoteOpenCodeTasks.tasks(h).any { it.title.contains(f, true) || it.directory.contains(f, true) } || state.codexWorkspace.tasks(h).any { record ->
                     listOf(record.title, record.directory, state.navigation.title(record.key).orEmpty(), state.navigation.group(record.key)).any { it.contains(f, true) }
                 }
                 if (!hostMatch && sessions.isEmpty() && favorites.isEmpty() && !managedMatch) return@forEachIndexed
@@ -322,7 +323,10 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
                         // 断线重连中列表照旧摆着（服务器上的会话还在），不清；搜索时只画滤剩下的
                         if (c != null) {
                             ProjectTree(state, c, sessions, searching = f.isNotEmpty(), query = f)
-                            if (f.isEmpty() && c.status == Conn.Status.Connected && c.sessions.isEmpty() && state.codexWorkspace.tasks(h).isEmpty())
+                            state.remoteOpenCodeTasks.tasks(h).filter { f.isEmpty() || it.title.contains(f, true) || it.directory.contains(f, true) }.forEach { task ->
+                                TextButton({ state.select(c, null); state.remoteOpenCodeSelectedKey = task.key; state.page = Page.OpenCode }) { Text("${task.title} · OpenCode") }
+                            }
+                            if (f.isEmpty() && c.status == Conn.Status.Connected && c.sessions.isEmpty() && state.codexWorkspace.tasks(h).isEmpty() && state.remoteOpenCodeTasks.tasks(h).isEmpty())
                                 Text("这台机器上还没有会话", Modifier.padding(start = 24.dp, bottom = 6.dp), style = MaterialTheme.typography.bodySmall, color = t.textMuted)
                         }
                         if (favorites.isNotEmpty()) Text("收藏 · 未启用", Modifier.padding(start = 18.dp, top = 8.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
@@ -381,6 +385,8 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
         creatingOn = null
         creatingFavorite = null
         state.prepareCodexTask(c, directory, prompt)
+    }, onOpenCodeConversation = { directory, prompt ->
+        creatingOn = null; creatingFavorite = null; state.prepareOpenCodeTask(c, directory, prompt)
     }, initialDirectory = creatingFavorite?.directory, initialAgent = creatingFavorite?.agent) { s ->
         val key = taskNavigationKey(c.host, s)
         if (state.navigation.title(key) == null) state.navigation.rename(key, creatingFavorite?.title ?: ("新对话 · " + if (s.isCodex) "Codex" else "Claude Code"))

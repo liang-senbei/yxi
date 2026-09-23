@@ -83,6 +83,7 @@ fun App(state: AppState) {
                     Page.Me -> MePane(state)
                     Page.Routes -> RoutesPane(state)
                     Page.Codex -> CodexWorkspacePane(state)
+                    Page.OpenCode -> RemoteOpenCodePane(state)
                     Page.Workspace -> {
                         val conn = state.conn; val sess = state.session
                         if (conn == null || sess == null) {

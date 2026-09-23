@@ -14,10 +14,21 @@ class RemoteOpenCodeServerTest {
         val bin = home.resolve(".local/bin").apply { mkdirs() }
         Files.createSymbolicLink(bin.resolve("opencode").toPath(), Path.of("/opt/native/claude"))
         val project = home.resolve("project").apply { mkdirs() }
+        project.resolve("opencode.json").writeText("""{"provider":{"fixture":{"npm":"@ai-sdk/openai-compatible","options":{"baseURL":"http://127.0.0.1:9/v1","apiKey":"fixture"},"models":{"fixture-model":{"name":"Fixture"}}}}}""")
         val environment = mapOf("HOME" to home.path, "XDG_DATA_HOME" to home.resolve(".local/share").path,
             "XDG_CONFIG_HOME" to home.resolve(".config").path, "XDG_CACHE_HOME" to home.resolve(".cache").path)
         IsolatedSshBridge(root.resolve("ssh"), environment, root.resolve("unused.sock"), allowForwarding = true).use { bridge ->
             bridge.conn.ssh.connect()
+            RemoteOpenCodeTasks(InstructionQueue(root.resolve("queue.json")), root.resolve("tasks.json")).use { tasks ->
+                val model = tasks.models(bridge.conn, project.path).single { it.providerId == "fixture" && it.modelId == "fixture-model" }
+                val record = tasks.create(bridge.conn, project.path, "Registered remote fixture", model)
+                assertEquals(projectKey(bridge.conn.host, "/"), record.hostKey)
+                assertEquals(record, LocalCodexTaskRegistry(root.resolve("tasks.json")).records.single())
+                assertTrue(tasks.controllers.getValue(record.key).ready)
+                assertTrue(tasks.tasks(bridge.conn.host.copy(id = "other", hostname = "other-host")).isEmpty())
+                tasks.disconnect(bridge.conn)
+                assertTrue(tasks.controllers.isEmpty())
+            }
             val first = RemoteOpenCodeServer.start(bridge.conn.ssh, project.path)
             try {
                 val second = RemoteOpenCodeServer.start(bridge.conn.ssh, project.path)

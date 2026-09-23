@@ -12,7 +12,7 @@ import kotlin.concurrent.thread
 
 /** Dedicated SSH exec channel and forwarding lease; never attaches to an existing server. */
 internal class RemoteOpenCodeServer private constructor(private val channel: SshSession.Shell,
-    private val forward: SshSession.PreviewForward, val client: OpenCodeClient, val directory: String, internal val processId: Long) : AutoCloseable {
+    private val forward: SshSession.PreviewForward, val client: OpenCodeClient, val directory: String, val runtimeHome: String, internal val processId: Long) : AutoCloseable {
     private val closed = AtomicBoolean()
     val alive get() = !closed.get() && channel.isConnected && forward.active
     override fun close() { if (closed.compareAndSet(false, true)) { forward.close(); channel.close() } }
@@ -59,7 +59,7 @@ internal class RemoteOpenCodeServer private constructor(private val channel: Ssh
                     val client = OpenCodeClient(lease.localPort, password, cwd)
                     val health = client.health()
                     check(stream.isConnected && lease.active && health.optBoolean("healthy") && health.optString("version").isNotBlank()) { "OpenCode 远端健康检查未通过" }
-                    RemoteOpenCodeServer(stream, lease, client, cwd, pid)
+                    RemoteOpenCodeServer(stream, lease, client, cwd, owner.getString("runtimeHome"), pid)
                 }
             } catch (e: Exception) { forward?.close(); channel?.close(); throw e }
         }
@@ -83,7 +83,8 @@ try:
     env['OPENCODE_SERVER_PASSWORD'] = password
     process = subprocess.Popen([sys.argv[1], 'serve', '--hostname', '127.0.0.1', '--port', '0', '--no-mdns'],
         stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, start_new_session=True)
-    print('YXI_OPENCODE_STARTED:' + json.dumps({'pid': process.pid, 'directory': os.getcwd()}), flush=True)
+    data_home = env.get('XDG_DATA_HOME') or os.path.join(os.path.expanduser('~'), '.local', 'share')
+    print('YXI_OPENCODE_STARTED:' + json.dumps({'pid': process.pid, 'directory': os.getcwd(), 'runtimeHome': os.path.join(data_home, 'opencode')}), flush=True)
     while process.poll() is None:
         readable, _, _ = select.select([0], [], [], 0.2)
         if readable:
