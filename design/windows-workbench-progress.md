@@ -1,3 +1,9 @@
+## 2026-09-23 ACP 原生模式通知同步
+
+- `97a0519dddbd4759e7f909ef9603fedd13336e22` 接入 session/update.current_mode_update，保存原生当前模式；切换 ACK 不覆盖等待期间收到的较新通知，并兼容 session/new 完成附近到达的模式通知。
+- 构建 `run.9xGG9A`，AcpClientTest `run.XsQ2SK` 6 项通过，无失败/跳过。包含请求 plan 期间原生通知 ask 后仍显示 ask 的断言。
+- 已将独立 AcpTaskController 草案与 fixture 测试任务派给 yunxi/yxi_pilot，输出目录 windows-test-reports/acp-controller；尚未接收审核，不计完成。未发布。
+
 ## 2026-09-23 ACP 会话模式基础
 
 - `fbb1c338755ebf8055d594c75baa538ecdbf57c8` 从 session/new 保存原生 availableModes/currentModeId，并提供 session/set_mode；拒绝未公布选项，等待切换确认期间阻止 prompt，超时保留未知状态以避免按错误权限模式继续发送。
