@@ -1,3 +1,13 @@
+## Codex 原生共享 MCP 调用与审批补齐
+
+`7ca899b`新增SharedMcpSettings.codexArguments，生成进程级-c MCP覆盖，argv仍独立，不写原生全局配置。首次exec测试run.VqagDd失败：原生已发现/尝试工具，但approval_policy=never拒绝需要批准的MCP；模型fixture错误重复相同调用直至超时。未将失败当成通过。
+
+`5e4ba9a`改用原生app-server、on-request与既有CodexTaskController，等待真实mcpServer/elicitation/request后明确批准一次；模型fixture遇到失败工具结果立即报错，不循环。产品本地/服务器Codex会话补CodexMcpElicitationButtons，普通空form支持仅本次/拒绝/取消，不发送persist元数据；需要字段输入或URL授权的其它表单仍禁用空批准并显示未接入。
+
+构建run.rekJti、CodexSharedMcpNativeTest run.SIwHwO一项通过、无跳过。原生请求证据codex-mcp-approval.json包含serverName=shared_echo、mode=form、tool_params=codex-native-call；批准后实际tool_result含YXI_SHARED_MCP，轮次完成且全局配置逐字节不变。使用隔离容器和本地Responses模型fixture，不是用户真实账号/付费模型。Claude、OpenCode、Codex分别已有同一测试资源的原生调用证明，但尚非同一目标机器一次安装后三者完整启停/升级/卸载和产品UI验收，未发布。
+
+yxi_entertainment后续Responses fixture任务因其额度429未交付，主线程已接手完成；未重试其配额或切换账号。yxi_pilot的配置层级复核仍在进行。
+
 ## OpenCode 原生调用共享 MCP
 
 `8c59140`将共享MCP原生验证扩展到工具调用：回环Chat Completions fixture从真实请求工具列表选择yxi_echo，只有收到原生role=tool且含YXI_SHARED_MCP返回值后才输出成功标记。使用与Claude相同的shared_mcp_fixture.py资源，由OpenCodeMcpBindings动态加载；权限按ask处理，仅允许该共享测试工具。
