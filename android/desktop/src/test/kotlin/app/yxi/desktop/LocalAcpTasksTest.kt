@@ -28,6 +28,7 @@ class LocalAcpTasksTest {
                     .put(JSONObject().put("id", "setup").put("name", "Setup").put("type", "terminal").put("args", JSONArray().put("--setup"))))
                 "authenticate" -> JSONObject()
                 "session/new" -> JSONObject().put("sessionId", "fixture-session").put("configOptions", options("fixture/a"))
+                "session/prompt" -> JSONObject().put("stopReason", "end_turn")
                 "session/set_config_option" -> JSONObject().put("configOptions", options(request.getJSONObject("params").getString("value")))
                 else -> error("Unexpected method")
             }
@@ -60,7 +61,8 @@ class LocalAcpTasksTest {
             val fixture = Fixture()
             val index = File(root, "$engine.json")
             val queue = InstructionQueue(File(root, "$engine-queue.json"))
-            LocalAcpTasks(queue, index) { _, _ -> AcpClient(fixture).also { it.initialize() } }.use { tasks ->
+            val notices = mutableListOf<Pair<String, String>>()
+            LocalAcpTasks(queue, index, onNotification = { task, title -> notices.add(task.key to title) }) { _, _ -> AcpClient(fixture).also { it.initialize() } }.use { tasks ->
                 val runtime = LocalRuntimeInstallation(engine, "fixture", listOf("fixture"), root.path, "1")
                 tasks.prepare(runtime, root.path)
                 assertFalse("authenticate" in fixture.methods)
@@ -76,6 +78,10 @@ class LocalAcpTasksTest {
                 assertEquals(record.key, tasks.registry.records.single().key)
                 assertEquals("", tasks.recoverySessionId)
                 assertFalse("session/prompt" in fixture.methods)
+                assertTrue(notices.isEmpty())
+                tasks.controllers.getValue(record.key).enqueue("notification fixture")
+                tasks.controllers.getValue(record.key).sendNext()
+                assertEquals(listOf(record.key to "本轮处理结束"), notices)
             }
         }
     }

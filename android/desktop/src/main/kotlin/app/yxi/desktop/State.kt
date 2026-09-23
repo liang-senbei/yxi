@@ -71,11 +71,22 @@ class AppState {
     internal val localCodexTasks get() = localCodexTasksDelegate.value
     private val localOpenCodeTasksDelegate = lazy { LocalOpenCodeTasks(instructions, java.io.File(Store.dir, "local-opencode-tasks.json"), sharedMcp) }
     internal val localOpenCodeTasks get() = localOpenCodeTasksDelegate.value
-    private val localAcpTasksDelegate = lazy { LocalAcpTasks(instructions, java.io.File(Store.dir, "local-acp-tasks.json")) }
+    private val localAcpTasksDelegate = lazy { LocalAcpTasks(instructions, java.io.File(Store.dir, "local-acp-tasks.json"), onNotification = { task, title ->
+        Notify.notify(title, "任务：" + (navigation.title(task.key) ?: task.title), taskKey = task.key)
+    }) }
     internal val localAcpTasks get() = localAcpTasksDelegate.value
     internal var localSelectedTaskKey by mutableStateOf<String?>(null)
     internal val localWorkspace get() = localWorkspaceDelegate.value
     internal val isLocal get() = hostScope == LOCAL_HOST_SCOPE
+    internal fun openNotifiedTask(key: String): Boolean {
+        if (listOf(localAcpTasks.registry, localOpenCodeTasks.registry, localCodexTasks.registry).any { registry -> registry.records.any { it.key == key } }) {
+            selectLocal(); localSelectedTaskKey = key
+            if (navigation.archived(key)) navigation.setMode("归档")
+            else if (navigation.mode == "归档") navigation.setMode("全部")
+            return true
+        }
+        return openRemoteTask(key)
+    }
     internal fun selectLocal() {
         rememberTaskView(); conn = null; session = null; restoreSession = null; restoreRuntime = null
         configurationHostId = ""; pluginLocation = "本地"; scopeHost(LOCAL_HOST_SCOPE); page = Page.LocalWorkspace

@@ -9,6 +9,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 /** UI dispatcher owner. Authentication is explicit; only sessions created by this owner are writable. */
 internal class LocalAcpTasks(private val queue: InstructionQueue, file: File,
+    private val onNotification: (LocalCodexTaskRecord, String) -> Unit = { _, _ -> },
     private val connect: suspend (LocalRuntimeInstallation, File) -> AcpClient = LocalAcpTransport::connect) : AutoCloseable {
     val registry = LocalCodexTaskRegistry(file)
     val controllers = mutableStateMapOf<String, AcpTaskController>()
@@ -111,7 +112,7 @@ internal class LocalAcpTasks(private val queue: InstructionQueue, file: File,
             }, onModelChanged = { model ->
                 val current = registry.records.singleOrNull { it.key == record.key }
                 if (current != null && current.model != model) registry.save(current.copy(model = model))
-            })
+            }, onNotification = { title -> onNotification(record, title) })
             try {
                 check(!disposed)
                 journal.write(JSONObject().put("pending", false).toString())

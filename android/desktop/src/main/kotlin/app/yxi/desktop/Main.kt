@@ -60,7 +60,7 @@ fun main(args: Array<String>) {
         LaunchedEffect(Unit) {
             Notify.taskAllowed = { key -> state.navigation.shouldNotify(key, Store.pref("notifyOnlyPinned", "0") == "1") }
             Notify.openTask = { key ->
-                state.openRemoteTask(key)
+                state.openNotifiedTask(key)
             }
             Notify.open = { hostId, name ->
                 val c = state.conns.firstOrNull { it.host.id == hostId }
