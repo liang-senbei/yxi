@@ -1,11 +1,58 @@
 package app.yxi.desktop
 
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.*
 import org.json.JSONObject
 import java.io.File
 import kotlin.test.*
 
 class OpenCodeSharedMcpNativeTest {
+    @Test fun `native OpenCode invokes dynamically shared MCP and returns the actual result to its model`() = runBlocking {
+        check(!System.getenv("YXI_ISOLATED_TEST_RUN").isNullOrBlank())
+        check(System.getProperty("user.home") == "/sandbox/home")
+        val root = File("/sandbox/home/shared-mcp-call").apply { mkdirs() }
+        fun resource(name: String) = File(root, name).apply { writeBytes(requireNotNull(OpenCodeSharedMcpNativeTest::class.java.getResourceAsStream("/$name")).use { it.readBytes() }) }
+        val mcp = resource("shared_mcp_fixture.py")
+        val stub = resource("opencode_mcp_stub.py")
+        val provider = ProcessBuilder("python3", stub.path, root.path).redirectErrorStream(true).redirectOutput(File(root, "provider.log")).start()
+        try {
+            withTimeout(10000) { while (!File(root, "port").isFile) delay(50) }
+            val config = File(root, "opencode.json").apply { writeText(JSONObject().put("${'$'}schema", "https://opencode.ai/config.json")
+                .put("model", "fixture/fixture-model").put("small_model", "fixture/fixture-model").put("permission", JSONObject().put("*", "ask"))
+                .put("provider", JSONObject().put("fixture", JSONObject().put("npm", "@ai-sdk/openai-compatible")
+                    .put("options", JSONObject().put("baseURL", "http://127.0.0.1:${File(root, "port").readText().trim()}/v1").put("apiKey", "fixture"))
+                    .put("models", JSONObject().put("fixture-model", JSONObject().put("name", "Fixture"))))).toString()) }
+            val before = config.readBytes()
+            val definition = SharedMcpDefinition("machine", "shared-echo", "yxi-test", "0.1.0", "shared_echo", listOf("/usr/bin/python3", mcp.path))
+            val record = SharedMcpRegistry(File(root, "registry.json")).save(definition, setOf("claude", "codex", "opencode"), null)
+            val runtime = LocalRuntimeInstallation("opencode", "isolated", listOf("/opt/native/claude"), "/sandbox/home/.local/share/opencode", "1.18.32")
+            LocalOpenCodeServer.start(runtime, root).use { server ->
+                assertEquals("connected", OpenCodeMcpBindings("machine", "owned", server.client, File(root, "binding.json")).apply(record))
+                val session = server.client.create("Native shared MCP call").getString("id")
+                val queue = InstructionQueue(File(root, "queue.json"))
+                val controller = OpenCodeTaskController("fixture-task", session, root.path, "fixture", "fixture-model", server.client, queue)
+                controller.enqueue("Call shared echo with opencode-native-call.")
+                try {
+                    controller.sendNext()
+                    withTimeout(45000) {
+                        while (queue.entries.single().runtimeTurnState != RuntimeTurnState.Completed) {
+                            delay(150); controller.refresh()
+                            controller.permissions.toList().forEach { permission ->
+                                check(permission.getString("permission").contains("shared_echo")) { "Unexpected permission: $permission" }
+                                controller.replyPermission(permission.getString("id"), OpenCodePermissionReply.Once)
+                            }
+                        }
+                    }
+                    assertTrue(File(root, "calls.jsonl").readLines().map(::JSONObject).any { it.optBoolean("result_confirmed") })
+                    assertTrue(controller.messages.any { it.toString().contains("SHARED_MCP_NATIVE_CONFIRMED") })
+                    assertContentEquals(before, config.readBytes())
+                    println("Real OpenCode called shared MCP, received its echo result, and completed the native turn.")
+                } catch (e: Throwable) {
+                    File("/results/shared-mcp-call-diagnostics.json").writeText(controller.messages.toString())
+                    throw e
+                }
+            }
+        } finally { LocalRuntimeDiscovery.stopOwnedProcess(provider) }
+    }
     @Test fun `native OpenCode loads the shared stdio resource without changing project configuration`() = runBlocking {
         check(!System.getenv("YXI_ISOLATED_TEST_RUN").isNullOrBlank())
         check(System.getProperty("user.home") == "/sandbox/home")
