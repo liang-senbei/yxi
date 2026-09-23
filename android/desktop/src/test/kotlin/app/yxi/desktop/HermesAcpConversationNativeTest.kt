@@ -52,7 +52,7 @@ class HermesAcpConversationNativeTest {
         val home = File("/sandbox/home/.hermes").apply { mkdirs() }
         val url = "http://127.0.0.1:${server.address.port}/v1"
         File(home, ".env").writeText("OPENAI_API_KEY=fixture-hermes-key\nOPENAI_BASE_URL=$url\n")
-        File(home, "config.yaml").writeText("model:\n  provider: custom\n  default: fixture-hermes\n  base_url: $url\n  api_mode: chat_completions\n")
+        File(home, "config.yaml").writeText("model:\n  provider: custom:fixture\n  default: fixture-hermes\nproviders:\n  fixture:\n    name: Fixture\n    base_url: $url\n    key_env: OPENAI_API_KEY\n    api_mode: chat_completions\n    models:\n      fixture-hermes: {}\n      fixture-hermes-alt: {}\n")
         val runtime = LocalRuntimeInstallation("hermes", "pinned official source", listOf("/opt/hermes/bin/hermes"), home.path, "0.21.4")
         val queue = InstructionQueue(File("/sandbox/tmp/hermes-queue.json"))
         val index = File("/sandbox/tmp/hermes-tasks.json")
