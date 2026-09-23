@@ -323,9 +323,6 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
                         // 断线重连中列表照旧摆着（服务器上的会话还在），不清；搜索时只画滤剩下的
                         if (c != null) {
                             ProjectTree(state, c, sessions, searching = f.isNotEmpty(), query = f)
-                            state.remoteOpenCodeTasks.tasks(h).filter { f.isEmpty() || it.title.contains(f, true) || it.directory.contains(f, true) }.forEach { task ->
-                                TextButton({ state.select(c, null); state.remoteOpenCodeSelectedKey = task.key; state.page = Page.OpenCode }) { Text("${task.title} · OpenCode") }
-                            }
                             if (f.isEmpty() && c.status == Conn.Status.Connected && c.sessions.isEmpty() && state.codexWorkspace.tasks(h).isEmpty() && state.remoteOpenCodeTasks.tasks(h).isEmpty())
                                 Text("这台机器上还没有会话", Modifier.padding(start = 24.dp, bottom = 6.dp), style = MaterialTheme.typography.bodySmall, color = t.textMuted)
                         }

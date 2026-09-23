@@ -73,6 +73,16 @@ internal fun SidebarSavedSessions(state: AppState, hosts: List<Host>, query: Str
                 }
             }
         }
+        state.remoteOpenCodeTasks.tasks(host).filter { task ->
+            (if (choice == "置顶") nav.pinned(task.key) else nav.favorite(task.key)) && nav.visible(task.key, openCodeTaskState(state, task)) &&
+                listOf(nav.title(task.key).orEmpty(), task.title, task.directory, host.label).any { it.contains(query, true) }
+        }.sortedBy { nav.pinOrder(it.key) }.forEach { task ->
+            count++
+            SavedSessionRow(nav.title(task.key) ?: task.title, "${host.label} · OpenCode · ${task.directory}", conn != null,
+                selected = state.page == Page.OpenCode && state.conn === conn && state.remoteOpenCodeSelectedKey == task.key) {
+                if (conn != null) { state.select(conn, null); state.remoteOpenCodeSelectedKey = task.key; state.page = Page.OpenCode }
+            }
+        }
         if (choice == "收藏" && nav.mode == "全部") nav.favorites(host).filter { favorite ->
             conn?.sessions?.none { taskNavigationKey(host, it) == favorite.key } != false &&
                 listOf(favorite.title, favorite.directory, host.label).any { it.contains(query, true) }

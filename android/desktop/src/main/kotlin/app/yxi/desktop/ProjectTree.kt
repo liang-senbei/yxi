@@ -27,6 +27,10 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
     val t = Tokens.current
     val scope = rememberCoroutineScope()
     var openError by remember(conn) { mutableStateOf("") }
+    val openCodeTasks = state.remoteOpenCodeTasks.tasks(conn.host).filter { record ->
+        nav.visible(record.key, openCodeTaskState(state, record)) &&
+            listOf(nav.title(record.key).orEmpty(), record.title, record.directory, conn.host.label, nav.group(record.key)).any { it.contains(query, true) }
+    }
     val codexTasks = state.codexWorkspace.tasks(conn.host).filter { record ->
         val controller = state.codexWorkspace.controllers[record.key]
         nav.visible(record.key, if (controller?.pendingRequests?.isNotEmpty() == true) SessionState.NeedsYou
@@ -93,7 +97,9 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
     if (projectGroups) CollaborationDialog(state, conn, initialGroup = selectedGroup) { projectGroups = false }
     creatingDirectory?.let { directory ->
         NewSessionDialog(conn, onDismiss = { creatingDirectory = null; creatingGroup = "" }, initialDirectory = directory.takeIf { it.isNotBlank() }, collaborationGroup = creatingGroup,
-            onCodexConversation = { path, prompt ->
+            onOpenCodeConversation = { path, prompt ->
+                creatingDirectory = null; creatingGroup = ""; state.prepareOpenCodeTask(conn, path, prompt)
+            }, onCodexConversation = { path, prompt ->
                 creatingDirectory = null
                 state.prepareCodexTask(conn, path, prompt, creatingGroup)
                 creatingGroup = ""
@@ -159,6 +165,7 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
             Text("暂列出全部 Agent，分组恢复后自动整理", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
             visible.forEach { task(it) }
             codexTasks.forEach { codexTask(it) }
+            openCodeTasks.forEach { OpenCodeTaskRow(state, conn, it) }
         }
         return
     }
@@ -171,7 +178,8 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
             val group = nav.group(record.key).takeIf { it in conn.projectGroups.groups.keys }.orEmpty()
             group == name
         }
-        if ((searching || name.isEmpty()) && members.isEmpty() && managedMembers.isEmpty()) return@forEach
+        val openCodeMembers = openCodeTasks.filter { nav.group(it.key).takeIf { group -> group in conn.projectGroups.groups.keys }.orEmpty() == name }
+        if ((searching || name.isEmpty()) && members.isEmpty() && managedMembers.isEmpty() && openCodeMembers.isEmpty()) return@forEach
         val groupKey = "server-group:" + projectKey(conn.host, "/") + ":" + name
         val closed = !searching && nav.collapsed(groupKey, false)
         var menu by remember(groupKey) { mutableStateOf(false) }
@@ -180,7 +188,7 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
             Icon(if (closed) Icons.Default.ChevronRight else Icons.Default.ExpandMore, "展开分组", Modifier.size(16.dp), tint = t.textMuted)
             Icon(Icons.Outlined.Folder, null, Modifier.padding(horizontal = 6.dp).size(16.dp), tint = t.textSecondary)
             Text(name.ifEmpty { "未分组" }, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text((members.size + managedMembers.size).toString(), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+            Text((members.size + managedMembers.size + openCodeMembers.size).toString(), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
             IconButton({ creatingGroup = name; creatingDirectory = members.firstOrNull()?.cwd.orEmpty() }, Modifier.size(28.dp)) { Icon(Icons.Outlined.Add, "在组内新建 Agent", Modifier.size(16.dp)) }
             Box {
                 IconButton({ menu = true }, Modifier.size(28.dp)) { Icon(Icons.Default.MoreHoriz, "分组操作", Modifier.size(16.dp)) }
@@ -195,6 +203,7 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
         }
         if (!closed) members.sortedBy { s -> val k = taskNavigationKey(conn.host, s); if (nav.pinned(k)) nav.pinOrder(k) else Int.MAX_VALUE }.forEach { task(it) }
         if (!closed) managedMembers.sortedBy { nav.pinOrder(it.key) }.forEach { codexTask(it) }
+        if (!closed) openCodeMembers.sortedBy { nav.pinOrder(it.key) }.forEach { OpenCodeTaskRow(state, conn, it) }
     }
     if (conn.groupsError.isNotBlank()) Text(conn.groupsError, color = t.warning, style = MaterialTheme.typography.bodySmall)
     if (openError.isNotBlank()) Text(openError, color = t.warning, style = MaterialTheme.typography.bodySmall)
