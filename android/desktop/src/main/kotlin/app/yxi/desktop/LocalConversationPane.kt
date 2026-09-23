@@ -20,6 +20,7 @@ import org.json.JSONObject
     var directory by remember { mutableStateOf(workspace.projects.firstOrNull() ?: System.getProperty("user.home")) }
     var title by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
+    var submitting by remember { mutableStateOf(false) }
     var reviewCreation by remember { mutableStateOf(false) }
     var reviewed by remember { mutableStateOf(false) }
     if (reviewCreation) WorkbenchDialog(onDismissRequest = { reviewCreation = false }, title = { Text("核对上次创建") }, text = {
@@ -47,14 +48,18 @@ import org.json.JSONObject
             }
             if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
         }
-    }, confirmButton = { TextButton({ scope.launch {
+    }, confirmButton = { TextButton(click@{
+        if (submitting || tasks.busy) return@click
+        submitting = true
+        scope.launch {
         error = ""
         try {
             val runtime = workspace.selectedRuntime ?: throw IllegalStateException("请先选择可用的本机 Codex")
             created(tasks.create(runtime, directory.trim(), title, workspace.selectedOfficialModel().id))
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { error = e.message ?: "创建未完成" }
-    } }, enabled = !tasks.busy && !workspace.officialModelsLoading && workspace.officialModels.any { it.id == workspace.officialModelId } && tasks.recoveryThreadId.isBlank() && tasks.registry.problem.isBlank()) {
+        finally { submitting = false }
+    } }, enabled = !submitting && !tasks.busy && !workspace.officialModelsLoading && workspace.officialModels.any { it.id == workspace.officialModelId } && tasks.recoveryThreadId.isBlank() && tasks.registry.problem.isBlank()) {
         Text(if (tasks.busy) "正在创建…" else "创建对话")
     } }, dismissButton = { TextButton(close, enabled = !tasks.busy) { Text("取消") } })
 }
@@ -67,6 +72,15 @@ import org.json.JSONObject
     fun act(block: suspend () -> Unit) { scope.launch {
         try { error = ""; block() } catch (e: CancellationException) { throw e } catch (e: Exception) { error = e.message ?: "操作未完成" }
     } }
+    fun submitDraft() {
+        val text = draft.value.text.takeIf { it.isNotBlank() } ?: return
+        if (controller == null || !controller.ready || controller.sending) return
+        try {
+            state.instructions.enqueue(record.key, text)
+            draft.value = TextFieldValue()
+        } catch (e: Exception) { error = e.message ?: "草稿未能保存，未发送"; return }
+        act { if (controller.activeTurnId == null && controller.pendingRequests.isEmpty()) controller.sendNext() }
+    }
     Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row {
             Text(record.title, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
@@ -118,11 +132,7 @@ import org.json.JSONObject
         if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
         OutlinedTextField(draft.value, { draft.value = it }, Modifier.fillMaxWidth(), minLines = 2, maxLines = 5, label = { Text("给本地 Agent 的任务") })
         Row {
-            Button({ act {
-                state.instructions.enqueue(record.key, draft.value.text)
-                draft.value = TextFieldValue()
-                if (controller.activeTurnId == null && controller.pendingRequests.isEmpty()) controller.sendNext()
-            } }, enabled = draft.value.text.isNotBlank() && controller.ready && !controller.sending) { Text(if (controller.activeTurnId == null) "发送" else "加入队列") }
+            Button(::submitDraft, enabled = draft.value.text.isNotBlank() && controller.ready && !controller.sending) { Text(if (controller.activeTurnId == null) "发送" else "加入队列") }
             if (pending.any { it.status == InstructionStatus.Local }) TextButton({ act { controller.sendNext() } }, enabled = controller.ready && !controller.sending && controller.activeTurnId == null && controller.pendingRequests.isEmpty()) { Text("发送下一条") }
             TextButton({ act { controller.reconcile() } }, enabled = !controller.sending && state.instructions.entries.any { it.taskKey == record.key && it.status != InstructionStatus.Local }) { Text("核对状态") }
             if (controller.activeTurnId != null) TextButton({ act { controller.interrupt() } }) { Text("停止") }

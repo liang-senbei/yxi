@@ -40,6 +40,7 @@ class LocalConversationUiTest {
                                 withContext(Dispatchers.IO) { Robot().apply {
                                     mouseMove(window.locationOnScreen.x + 60, window.locationOnScreen.y + window.height - 48)
                                     mousePress(InputEvent.BUTTON1_DOWN_MASK); mouseRelease(InputEvent.BUTTON1_DOWN_MASK)
+                                    mousePress(InputEvent.BUTTON1_DOWN_MASK); mouseRelease(InputEvent.BUTTON1_DOWN_MASK)
                                 } }
                                 withTimeout(8000) { while (state.instructions.entries.none { it.runtimeTurnState == RuntimeTurnState.Completed }) delay(50) }
                                 assertEquals("", state.chatDrafts.getValue(record.key).value.text)
