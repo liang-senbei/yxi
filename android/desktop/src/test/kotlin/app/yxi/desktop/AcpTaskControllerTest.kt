@@ -41,7 +41,6 @@ class AcpTaskControllerTest {
                     val send = async { controller.sendNext() }
                     withTimeout(2000) { while (fixture.writes.count { it.optString("method") == "session/prompt" } < index) delay(10) }
                     fixture.text("answer-$index")
-                    withTimeout(2000) { while (controller.messages.none { it.text == "answer-$index" }) delay(10) }
                     if (index == 2) {
                         controller.cancelTurn()
                         assertFalse(send.isCompleted)
@@ -50,6 +49,7 @@ class AcpTaskControllerTest {
                     fixture.result(fixture.writes.last { it.optString("method") == "session/prompt" },
                         JSONObject().put("stopReason", if (index == 1) "end_turn" else "cancelled"))
                     withTimeout(2000) { send.await() }
+                    assertTrue(controller.messages.any { it.text == "answer-$index" }, "Final streamed text must be consumed before the turn completes")
                 }
                 assertEquals(listOf("answer-1", "answer-2"), controller.messages.filter { it.author == "Assistant" }.map { it.text })
                 assertEquals(listOf(RuntimeTurnState.Completed, RuntimeTurnState.Interrupted), queue.entries.map { it.runtimeTurnState })

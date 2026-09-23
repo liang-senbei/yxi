@@ -41,7 +41,7 @@ internal class AcpTaskController(
         require(taskKey.isNotBlank() && sessionId.isNotBlank())
         scope.launch {
             try {
-                client.events.collect { event -> onRawEvent(event); receive(event) }
+                client.consumeEvents { event -> onRawEvent(event); receive(event) }
                 ready = false
                 if (!disposed) note = "运行器连接已结束，未确认指令不会自动重发"
             } catch (e: CancellationException) { throw e }
@@ -125,6 +125,7 @@ internal class AcpTaskController(
         busy = true
         try {
             val result = client.prompt(sessionId, started.text, promptTimeoutMillis)
+            client.synchronizeEvents()
             lastStopReason = result.optString("stopReason")
             val (outcome, failure) = decodeStop(lastStopReason)
             val receipt = result.toString()

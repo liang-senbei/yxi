@@ -30,8 +30,29 @@ internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
     private val cancellingSessions = ConcurrentHashMap.newKeySet<String>()
     private val closed = AtomicBoolean()
     private val writing = Mutex()
-    private val incoming = Channel<JSONObject>(64)
-    val events = incoming.receiveAsFlow()
+    private sealed interface Event {
+        data class Message(val value: JSONObject) : Event
+        data class Fence(val completion: CompletableDeferred<Unit>) : Event
+    }
+    private val incoming = Channel<Event>(64)
+    private val consuming = AtomicBoolean()
+    private val fences = ConcurrentHashMap.newKeySet<CompletableDeferred<Unit>>()
+    suspend fun consumeEvents(handler: suspend (JSONObject) -> Unit) {
+        check(consuming.compareAndSet(false, true)) { "ACP 事件只能由一个会话控制器消费" }
+        try {
+            for (event in incoming) when (event) {
+                is Event.Message -> handler(event.value)
+                is Event.Fence -> event.completion.complete(Unit)
+            }
+        } finally { consuming.set(false) }
+    }
+    suspend fun synchronizeEvents() {
+        check(consuming.get() && !closed.get()) { "ACP 事件处理器尚未就绪" }
+        val completion = CompletableDeferred<Unit>()
+        fences.add(completion)
+        try { withTimeout(30_000) { incoming.send(Event.Fence(completion)); completion.await() } }
+        finally { fences.remove(completion) }
+    }
     @Volatile private var initialized = false
     @Volatile var initialization: JSONObject? = null; private set
 
@@ -70,7 +91,7 @@ internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
                             val sessionId = message.getJSONObject("params").getString("sessionId")
                             if (sessionId in cancellingSessions) { cancelPermission(key, sessionId); continue }
                         }
-                        check(incoming.trySend(message).isSuccess) { "ACP 事件消费未跟上，请核对会话" }
+                        check(incoming.trySend(Event.Message(message)).isSuccess) { "ACP 事件消费未跟上，请核对会话" }
                     } else {
                         val id = message.opt("id") as? String ?: continue
                         pending.remove(id)?.complete(message)
@@ -180,6 +201,7 @@ internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
     private fun shutdown(error: Exception) {
         if (!closed.compareAndSet(false, true)) return
         pending.values.forEach { it.completeExceptionally(error) }; pending.clear(); approvals.clear()
+        fences.forEach { it.completeExceptionally(error) }; fences.clear()
         incoming.close(error); transport.close(); scope.cancel()
     }
     override fun close() = shutdown(IllegalStateException("ACP 连接已关闭"))
