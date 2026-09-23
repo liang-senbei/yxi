@@ -1,3 +1,8 @@
+## 2026-09-24 原生会话目录与待处理筛选
+
+- `17f7fff9e259ddc5065cb4345ec883ff4136f25b` 将 Codex/OpenCode/ACP 目录并入项目分组的默认新建目录和复制菜单，避免只有原生登记会话的分组丢失工作路径。
+- 构建 `run.Ly5Bh4`；RemoteAcpCreationUiTest `run.AQaEYe` 1 项通过，0 失败/错误/跳过。新增队列投递中 Working、未知 NeedsYou、归档后仍进待处理、人工核对后 Idle 并退出待处理的断言，无 session/prompt。
+- 目录菜单仅编译核对，本轮未增加其实际点击验收；状态测试为隔离 Linux SSH/协议 fixture，Windows 实机与整体发布仍未完成。
 ## 2026-09-24 分组加载期间保留原生会话
 
 - `c142867fd9c19996cfa324626314e7580b371a4f` 修正已登记 ACP 会话仍显示服务器无会话的错误提示；分组尚未加载时，Codex/OpenCode/ACP 登记会话保持可见，不再等待分组读取完成。
