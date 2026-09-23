@@ -1,3 +1,9 @@
+## 2026-09-23 变量输入界面与 Codex HTTP 认证头验证
+
+- UI `a39a6d3`：添加可折叠的变量输入，按 stdio/HTTP 区分变量名和请求头映射；说明目标机器与完整头值语义，拒绝大小写重复头名；含 HTTP 头引用时禁用尚未接通的 OpenCode 选择。构建 `run.DQVENR`、现有机器隔离 UI 回归 `run.4XjPH0` 1 项通过；新增表单交互与 Windows 目视验收仍待完成。
+- 原生测试 `79c5002d552fb4616aa9fe7c46a144ce2d65fa23`：真实 Codex 0.153.4 通过生成的进程覆盖读取环境变量，回环 HTTP MCP 服务实际收到完整 Bearer 假令牌；config/read 与启动参数无令牌字面量，原配置文件字节不变。
+- 构建 `run.qOjnxq` 成功，CodexMcpHttpHeadersNativeTest `run.wdCRa8` 1 项通过，无失败/跳过。仅证明初始化 HTTP 请求头传递；未覆盖缺失变量、Claude HTTP、OpenCode HTTP、实际第三方 OAuth 或真实订阅推理。未发布。
+
 ## 2026-09-23 OpenCode 动态变量引用修正
 
 - 实现 `8e215a99e5def96f92b93f1db78929248fc234e9`：OpenCode 1.18.32 动态 POST /mcp 不做文件配置插值。程序型共享 MCP 改为继承目标服务器进程环境，不再注入字面占位符；HTTP 头变量在动态写入前明确拒绝，待启动配置路径接入。生成器仍保留原生文件配置格式。
