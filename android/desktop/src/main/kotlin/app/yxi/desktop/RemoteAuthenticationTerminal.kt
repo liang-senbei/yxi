@@ -54,15 +54,17 @@ internal class RemoteAuthenticationTerminal private constructor(private val chan
                     "exec python3 -c ${Shell.q(bootstrap)} \"\$bin\" ${Shell.q(plan.directory)} " + baseArgs.joinToString(" ") { Shell.q(it) }
                 val opened = plan.ssh.openPtyCommand(command, 120, 30); channel = opened
                 plan.own(opened)
-                withTimeout(10000) { runInterruptible(Dispatchers.IO) {
+                suspend fun awaitMarker(expected: String) = withTimeout(10000) { runInterruptible(Dispatchers.IO) {
                     val line = StringBuilder()
                     while (true) {
                         val byte = opened.output.read(); check(byte >= 0 && line.length < 4096) { "服务器认证终端未就绪" }
-                        if (byte == 10) { if (line.toString().trimEnd('\r') == "YXI_AUTH_READY") break; line.setLength(0) }
+                        if (byte == 10) { if (line.toString().trimEnd('\r') == expected) break; line.setLength(0) }
                         else line.append(byte.toChar())
                     }
                 } }
+                awaitMarker("YXI_AUTH_READY")
                 check(opened.write(payload)) { "未能传入服务器认证配置" }
+                awaitMarker("YXI_AUTH_STARTING")
                 return RemoteAuthenticationTerminal(opened)
             } catch (e: Exception) { channel?.close(); throw e }
         }
@@ -81,6 +83,7 @@ try:
     termios.tcsetattr(0,termios.TCSANOW,original)
     os.chdir(sys.argv[2])
     env=os.environ.copy(); env.update(config['env'])
+    print('YXI_AUTH_STARTING',flush=True)
     os.execvpe(sys.argv[1],[sys.argv[1]]+sys.argv[3:]+config['args'],env)
 except Exception:
     print('Authentication terminal startup failed',file=sys.stderr)

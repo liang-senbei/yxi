@@ -62,6 +62,7 @@ for line in sys.stdin:
                             text.toString()
                         } }
                         assertFalse(output.contains("fixture-secret"), "Authentication environment must not be echoed by the PTY")
+                        assertFalse(output.contains("YXI_AUTH_"), "Bootstrap control messages must not enter the visible terminal")
                         terminal.write("confirm\n")
                         withTimeout(5000) { terminal.awaitExit() }
                     }
