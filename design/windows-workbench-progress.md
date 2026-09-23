@@ -1,3 +1,9 @@
+## 2026-09-24 Gemini 原生工具审批与结果回传
+
+- `91c5c69269921ff6988dc5525e7f014563ccbfbd` 扩展真实 Gemini 0.34.0 会话：HTTP fixture 从原生 functionDeclarations 选择 run_shell_command，要求写容器内标记。确认批准前文件不存在，从实际 options 选择 kind=allow_once 的原始 proceed_once，之后必须文件内容正确、functionResponse 回到模型，最终 end_turn/Completed。
+- 构建 `run.mXHtQw`，GeminiAcpConversationNativeTest `run.sN9AXL` 1 项通过，无失败/跳过。原生审批 ID 为数字0，选项分别为 allow_always、allow_once、reject_once，验证了原始 ID 与范围映射。证据 `.artifacts/gemini-native/approval.json`、approved-turn.json。
+- 原生 CLI、工具执行与 ACP 真实；模型 HTTP 为回环 fixture，未消耗额度或操作宿主文件。Windows/macOS 与真实账号仍待验收，未发布。
+
 ## 2026-09-24 ACP 已确认模型切换的保存失败语义
 
 - `eea1f73`/`2a3e2b6cf14f14f841c61a17880167e6cf7b063c` 记录原生模型切换 ACK 阶段。ACK 后本地状态/索引保存异常不再被错误分类为选项拒绝；明确提示原生已确认、本地同步失败，并暂停发送。
