@@ -20,10 +20,15 @@ fi
 image="yxi-isolated-tests:$image_revision"
 variant=${YXI_TEST_VARIANT:-}
 if test -n "$variant"; then
-    test "$mode" = run && test "$variant" = hermes || { echo 'Only the explicit Hermes run variant is supported.' >&2; exit 2; }
-    image="$image-hermes"
-    test "$(docker_local image inspect --format '{{ index .Config.Labels "org.yxi.native-runtime" }}' "$image")" = hermes
-    test "$(docker_local image inspect --format '{{ index .Config.Labels "org.yxi.native-source" }}' "$image")" = 5a3e03ef37462000b5b13d03915eb3e7b1633b6f
+    test "$mode" = run || exit 2
+    case "$variant" in
+        hermes) native_source=5a3e03ef37462000b5b13d03915eb3e7b1633b6f ;;
+        gemini) native_source=npm:@google/gemini-cli@0.34.0 ;;
+        *) echo 'Unknown native runtime test variant.' >&2; exit 2 ;;
+    esac
+    image="$image-$variant"
+    test "$(docker_local image inspect --format '{{ index .Config.Labels "org.yxi.native-runtime" }}' "$image")" = "$variant"
+    test "$(docker_local image inspect --format '{{ index .Config.Labels "org.yxi.native-source" }}' "$image")" = "$native_source"
 fi
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/yxi-isolated-tests"
 mkdir -p "$cache"

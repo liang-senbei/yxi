@@ -1,0 +1,10 @@
+ARG BASE_IMAGE
+FROM node:22.14.0-bookworm-slim AS node_runtime
+FROM ${BASE_IMAGE}
+COPY --from=node_runtime /usr/local/bin/node /opt/gemini/node
+COPY --from=node_runtime /usr/local/lib/node_modules/npm /opt/gemini/npm
+RUN mkdir -p /opt/gemini/runtime \
+    && PATH="/opt/gemini:$PATH" /opt/gemini/node /opt/gemini/npm/bin/npm-cli.js install \
+        --prefix /opt/gemini/runtime --omit=dev --no-audit --no-fund @google/gemini-cli@0.34.0 \
+    && /opt/gemini/node --version > /opt/gemini/node-version.txt
+LABEL org.yxi.native-runtime="gemini" org.yxi.native-source="npm:@google/gemini-cli@0.34.0"
