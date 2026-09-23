@@ -1,3 +1,9 @@
+## OpenCode 原生任务管理、审批与完成链路
+
+`d474de3`新增 OpenCodeNativeConversationTest。无网络容器中使用真实 OpenCode 1.18.32，通过本机 OpenAI-compatible fixture 返回 bash 工具调用及最终文本，运行 LocalOpenCodeTasks.models/create 和 OpenCodeTaskController.enqueue/sendNext/replyPermission/refresh 完整链路。配置和标记文件仅位于 /sandbox/home/native-conversation。
+
+构建 run.7Bad8t 通过；原生测试 run.23XWtX 1 项通过、无跳过，13.5 秒。核对保存的原生任务身份、审批前文件不存在、once后原生bash产生文件、最终回复和 Completed、重新读取 InstructionQueue 仍为 Completed；模型接口收到2次请求。测试使用真实运行器与工具执行，但模型响应为本地fixture，不代表真实订阅/第三方在线推理、Windows进程及完整GUI均已验收。未发布。
+
 ## OpenCode 本地任务登记与界面接线
 
 `34633de`接入 LocalOpenCodeTasks、原生模型读取/新建弹窗、OpenCodeConversationPane。任务记录加入 engine/provider，旧 Codex 默认值和 key 保持兼容；OpenCode 使用独立索引文件及 key。创建写前日志、保存原生 ID/工作目录后才开放控制器；未知创建与索引恢复需要人工核对。AppState 管理服务关闭，检测到本机 OpenCode 的安装行提供新建按钮。
