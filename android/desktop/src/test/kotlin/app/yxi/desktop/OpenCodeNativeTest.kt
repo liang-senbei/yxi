@@ -30,6 +30,10 @@ class OpenCodeNativeTest {
             val sessions = server.client.sessions()
             assertTrue((0 until sessions.length()).any { sessions.getJSONObject(it).getString("id") == id })
             assertEquals(0, server.client.messages(id).length())
+            assertTrue(server.client.permissions(id).isEmpty())
+            assertTrue(server.client.questions(id).isEmpty())
+            val models = server.client.availableModels()
+            assertTrue(models.all { it.providerId.isNotBlank() && it.modelId.isNotBlank() })
             assertFalse(server.client.status().has(id), "An empty session must not be treated as a running model turn")
             println("Created and reread empty native session; no prompt sent.")
         }

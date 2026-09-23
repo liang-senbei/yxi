@@ -24,6 +24,30 @@ internal class OpenCodeClient(port: Int, password: String, private val directory
 
     suspend fun health(): JSONObject = JSONObject(request("GET", "/global/health"))
     suspend fun providers(): JSONObject = JSONObject(request("GET", "/provider"))
+    suspend fun availableModels(): List<OpenCodeModel> = OpenCodeModel.fromProviders(providers())
+    suspend fun permissions(sessionId: String): List<JSONObject> = pending("/permission", sessionId)
+    suspend fun questions(sessionId: String): List<JSONObject> = pending("/question", sessionId)
+    suspend fun replyPermission(sessionId: String, requestId: String, reply: OpenCodePermissionReply) {
+        check(permissions(sessionId).any { it.getString("id") == requestId }) { "审批请求已变化或不属于当前会话，请刷新" }
+        booleanReply(request("POST", "/permission/${segment(requestId)}/reply", JSONObject().put("reply", reply.native)))
+    }
+    suspend fun replyQuestion(sessionId: String, requestId: String, answers: List<List<String>>) {
+        val question = questions(sessionId).singleOrNull { it.getString("id") == requestId }
+            ?: error("提问已变化或不属于当前会话，请刷新")
+        require(answers.size == question.getJSONArray("questions").length()) { "请按顺序回答全部问题" }
+        require(answers.all { row -> row.isNotEmpty() && row.all { it.isNotBlank() && it.length <= 16_000 } })
+        booleanReply(request("POST", "/question/${segment(requestId)}/reply", JSONObject().put("answers", JSONArray(answers.map { JSONArray(it) }))))
+    }
+    suspend fun rejectQuestion(sessionId: String, requestId: String) {
+        check(questions(sessionId).any { it.getString("id") == requestId }) { "提问已变化或不属于当前会话，请刷新" }
+        booleanReply(request("POST", "/question/${segment(requestId)}/reject"))
+    }
+    private suspend fun pending(path: String, sessionId: String): List<JSONObject> {
+        segment(sessionId)
+        val items = JSONArray(request("GET", path))
+        return (0 until items.length()).map { items.getJSONObject(it) }.filter { it.getString("sessionID") == sessionId }
+    }
+    private fun booleanReply(response: String) { check(response.trim() == "true") { "OpenCode 未确认处理成功，请刷新核对" } }
     suspend fun sessions(): JSONArray = JSONArray(request("GET", "/session"))
     suspend fun status(): JSONObject = JSONObject(request("GET", "/session/status"))
     suspend fun session(id: String): JSONObject = JSONObject(request("GET", "/session/${segment(id)}"))
@@ -77,5 +101,32 @@ internal class OpenCodeClient(port: Int, password: String, private val directory
                 bytes.toString(Charsets.UTF_8)
             }
         } finally { connection.disconnect() }
+    }
+}
+
+internal enum class OpenCodePermissionReply(val native: String, val label: String) {
+    Once("once", "仅允许本次"), Always("always", "始终允许匹配规则"), Reject("reject", "拒绝")
+}
+
+internal data class OpenCodeModel(val providerId: String, val modelId: String, val name: String) {
+    companion object {
+        /** Connected describes native provider configuration, not paid subscription entitlement. */
+        fun fromProviders(response: JSONObject): List<OpenCodeModel> {
+            val connected = response.getJSONArray("connected").let { values -> (0 until values.length()).map { values.getString(it) }.toSet() }
+            val all = response.getJSONArray("all")
+            return (0 until all.length()).flatMap { index ->
+                val provider = all.getJSONObject(index)
+                val id = provider.getString("id")
+                if (id !in connected) emptyList() else {
+                    val models = provider.getJSONObject("models")
+                    models.keys().asSequence().map { key ->
+                        val model = models.getJSONObject(key)
+                        val modelId = model.getString("id")
+                        require(id.isNotBlank() && modelId.isNotBlank())
+                        OpenCodeModel(id, modelId, model.optString("name").ifBlank { modelId })
+                    }.toList()
+                }
+            }.distinctBy { it.providerId to it.modelId }.sortedWith(compareBy({ it.providerId }, { it.modelId }))
+        }
     }
 }

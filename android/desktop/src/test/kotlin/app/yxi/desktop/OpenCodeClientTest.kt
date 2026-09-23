@@ -8,6 +8,55 @@ import java.util.Base64
 import kotlin.test.*
 
 class OpenCodeClientTest {
+    @Test fun `approval and question replies cannot target another session`() = runBlocking {
+        val writes = mutableListOf<Pair<String, JSONObject>>()
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/") { exchange ->
+            val path = exchange.requestURI.path
+            val response = if (exchange.requestMethod == "GET") when (path) {
+                "/permission" -> """[{"id":"perm-mine","sessionID":"mine"},{"id":"perm-other","sessionID":"other"}]"""
+                "/question" -> """[{"id":"question-mine","sessionID":"mine","questions":[{},{}]}]"""
+                else -> "[]"
+            } else {
+                val body = exchange.requestBody.readAllBytes().toString(Charsets.UTF_8)
+                writes += path to JSONObject(body.ifBlank { "{}" })
+                "true"
+            }
+            val bytes = response.toByteArray()
+            exchange.sendResponseHeaders(200, bytes.size.toLong()); exchange.responseBody.write(bytes); exchange.close()
+        }
+        server.start()
+        try {
+            val client = OpenCodeClient(server.address.port, "fixture", "/tmp")
+            assertEquals(1, client.permissions("mine").size)
+            assertFailsWith<IllegalStateException> { client.replyPermission("mine", "perm-other", OpenCodePermissionReply.Once) }
+            assertTrue(writes.isEmpty())
+            for (reply in OpenCodePermissionReply.entries) client.replyPermission("mine", "perm-mine", reply)
+            assertEquals(listOf("once", "always", "reject"), writes.map { it.second.getString("reply") })
+            assertFailsWith<IllegalArgumentException> { client.replyQuestion("mine", "question-mine", listOf(listOf("incomplete"))) }
+            assertFailsWith<IllegalStateException> { client.replyQuestion("other", "question-mine", listOf(listOf("a"), listOf("b"))) }
+            client.replyQuestion("mine", "question-mine", listOf(listOf("自定义答案"), listOf("选项A", "选项B")))
+            val answers = writes.last().second.getJSONArray("answers")
+            assertEquals("自定义答案", answers.getJSONArray(0).getString(0))
+            assertEquals(2, answers.getJSONArray(1).length())
+            client.rejectQuestion("mine", "question-mine")
+            assertEquals("/question/question-mine/reject", writes.last().first)
+            assertEquals(5, writes.size)
+        } finally { server.stop(0) }
+    }
+
+    @Test fun `models come only from connected providers and keep actual native ids`() {
+        val catalog = JSONObject("""{"connected":["official","custom"],"all":[
+          {"id":"official","models":{"alias":{"id":"actual-model","name":"Official model"}}},
+          {"id":"custom","models":{"same":{"id":"actual-model","name":"Custom model"}}},
+          {"id":"unconnected","models":{"hidden":{"id":"hidden"}}}
+        ]}""")
+        val models = OpenCodeModel.fromProviders(catalog)
+        assertEquals(listOf("custom", "official"), models.map { it.providerId })
+        assertTrue(models.all { it.modelId == "actual-model" })
+        assertEquals("Official model", models.last().name)
+    }
+
     @Test fun `native session lifecycle uses directory auth and explicit model`() = runBlocking {
         val calls = mutableListOf<Pair<String, String>>()
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
