@@ -25,6 +25,20 @@ for line in sys.stdin:
         }
         IsolatedSshBridge(File(root, "ssh"), mapOf("HOME" to home.path), File(root, "unused.sock")).use { bridge ->
             bridge.conn.ssh.connect()
+            val index = File(root, "tasks.json")
+            RemoteAcpTasks(InstructionQueue(File(root, "queue.json")), index).use { tasks ->
+                tasks.prepare(bridge.conn, "grok", directory.path)
+                val record = tasks.create(bridge.conn, "Remote ACP fixture")
+                assertEquals("grok", record.engine)
+                assertEquals(projectKey(bridge.conn.host, "/"), record.hostKey)
+                assertEquals(directory.canonicalPath, record.directory)
+                assertEquals(record, LocalCodexTaskRegistry(index).records.single())
+                assertEquals("", tasks.recoverySessionId(bridge.conn))
+                assertTrue(tasks.controllers.getValue(record.key).ready)
+                tasks.disconnect(bridge.conn)
+                assertTrue(tasks.controllers.isEmpty())
+                assertEquals("still-connected", bridge.conn.ssh.exec("printf still-connected").trim())
+            }
             val first = RemoteAcpTransport.connect(bridge.conn.ssh, "gemini", directory.path)
             val second = RemoteAcpTransport.connect(bridge.conn.ssh, "hermes", directory.path)
             try {
