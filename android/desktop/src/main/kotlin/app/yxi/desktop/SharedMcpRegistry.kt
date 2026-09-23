@@ -8,13 +8,20 @@ import java.net.URI
 
 /** Machine-owned resource definition. Native credentials remain with each runtime. */
 internal data class SharedMcpDefinition(val hostKey: String, val pluginId: String, val sourceId: String, val version: String,
-    val name: String, val command: List<String> = emptyList(), val url: String? = null) {
+    val name: String, val command: List<String> = emptyList(), val url: String? = null,
+    val environmentNames: Set<String> = emptySet(), val headerVariables: Map<String, String> = emptyMap()) {
     val identity get() = listOf(hostKey, pluginId, sourceId)
     val key get() = contentHash(JSONArray(listOf(hostKey, pluginId, sourceId, version)).toString().toByteArray())
     fun validate() {
         require(listOf(hostKey, pluginId, sourceId, version).all { it.isNotBlank() && it.length <= 2048 && it.none { c -> c < ' ' } })
         require(Regex("[A-Za-z0-9_-]{1,64}").matches(name)) { "MCP 名称只能包含字母、数字、下划线或短横线" }
         require((url != null) != command.isNotEmpty()) { "请选择命令或远程 URL 其中一种连接方式" }
+        require(environmentNames.size <= 64 && headerVariables.size <= 64)
+        require(environmentNames.isEmpty() || command.isNotEmpty()) { "子进程环境变量仅用于程序型 MCP" }
+        require(headerVariables.isEmpty() || url != null) { "认证头引用仅用于远程 MCP" }
+        val reserved = setOf("OPENAI_API_KEY", "CODEX_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "XAI_API_KEY", "GEMINI_API_KEY")
+        require((environmentNames + headerVariables.values).all { Regex("[A-Za-z_][A-Za-z0-9_]{0,127}").matches(it) && it.uppercase() !in reserved }) { "请填写插件专用环境变量名，不使用运行器账号变量" }
+        require(headerVariables.keys.all { Regex("[A-Za-z0-9_-]{1,128}").matches(it) }) { "请求头名称格式无效" }
         if (command.isNotEmpty()) {
             require(command.size <= 128 && command.first().isNotBlank())
             require(command.all { it.length <= 16_384 && '\u0000' !in it })
@@ -28,11 +35,17 @@ internal data class SharedMcpDefinition(val hostKey: String, val pluginId: Strin
     }
     fun json() = JSONObject().put("hostKey", hostKey).put("pluginId", pluginId).put("sourceId", sourceId).put("version", version)
         .put("name", name).put("command", JSONArray(command)).put("url", url ?: JSONObject.NULL)
+        .put("environmentNames", JSONArray(environmentNames.sorted())).put("headerVariables", JSONObject(headerVariables))
     companion object {
         fun parse(json: JSONObject): SharedMcpDefinition {
             val command = json.getJSONArray("command")
+            require(!json.has("environmentNames") || json.opt("environmentNames") is JSONArray)
+            require(!json.has("headerVariables") || json.opt("headerVariables") is JSONObject)
+            val environment = json.optJSONArray("environmentNames") ?: JSONArray()
+            val headers = json.optJSONObject("headerVariables") ?: JSONObject()
             return SharedMcpDefinition(json.getString("hostKey"), json.getString("pluginId"), json.getString("sourceId"), json.getString("version"), json.getString("name"),
-                (0 until command.length()).map { command.getString(it) }, if (json.isNull("url")) null else json.getString("url")).also { it.validate() }
+                (0 until command.length()).map { command.getString(it) }, if (json.isNull("url")) null else json.getString("url"),
+                (0 until environment.length()).map { environment.getString(it) }.toSet(), headers.keys().asSequence().associateWith { headers.getString(it) }).also { it.validate() }
         }
     }
 }
@@ -69,7 +82,7 @@ internal class SharedMcpRegistry(file: File) {
         check(previous?.retired != true) { "历史版本不能直接修改，请选择恢复或替换版本" }
         check(records.none { !it.retired && it.definition.key != definition.key &&
             (it.definition.identity == definition.identity || (it.definition.hostKey == definition.hostKey && it.definition.name == definition.name)) }) { "此机器已登记同名 MCP 或其它活动版本，请使用版本替换" }
-        val next = SharedMcpRecord(definition.copy(command = definition.command.toList()), desiredRunners.toSet(), (previous?.revision ?: -1) + 1)
+        val next = SharedMcpRecord(definition.copy(command = definition.command.toList(), environmentNames = definition.environmentNames.toSet(), headerVariables = definition.headerVariables.toMap()), desiredRunners.toSet(), (previous?.revision ?: -1) + 1)
         val updated = records.filterNot { it.definition.key == definition.key } + next
         commit(updated)
         return next
@@ -82,7 +95,7 @@ internal class SharedMcpRegistry(file: File) {
         require(definition.identity == current.definition.identity && definition.name == current.definition.name && definition.key != currentKey) { "版本替换必须属于同一机器、插件、来源及名称" }
         val historic = records.singleOrNull { it.definition.key == definition.key }
         check(historic == null || (historic.retired && historic.definition == definition)) { "历史版本内容不一致，不能覆盖回滚记录" }
-        val next = SharedMcpRecord(definition.copy(command = definition.command.toList()), current.desiredRunners.toSet(), (historic?.revision ?: -1) + 1)
+        val next = SharedMcpRecord(definition.copy(command = definition.command.toList(), environmentNames = definition.environmentNames.toSet(), headerVariables = definition.headerVariables.toMap()), current.desiredRunners.toSet(), (historic?.revision ?: -1) + 1)
         val updated = records.filterNot { it.definition.key == definition.key }.map {
             if (it.definition.key == currentKey) it.copy(retired = true, revision = it.revision + 1) else it
         } + next
@@ -138,6 +151,7 @@ internal object SharedMcpSettings {
             is String -> JSONObject.quote(value).replace("\\/", "/")
             is Boolean -> value.toString()
             is JSONArray -> (0 until value.length()).joinToString(prefix = "[", postfix = "]") { literal(value.get(it)) }
+            is JSONObject -> value.keys().asSequence().toList().sorted().joinToString(prefix = "{", postfix = "}") { "${JSONObject.quote(it)} = ${literal(value.get(it))}" }
             else -> error("不支持的 MCP 覆盖字段")
         }
         return records.flatMap { record ->
@@ -154,14 +168,20 @@ internal object SharedMcpSettings {
             "claude" -> {
                 if (local) entry.put("type", "stdio").put("command", definition.command.first()).put("args", JSONArray(definition.command.drop(1)))
                 else entry.put("type", "http").put("url", definition.url)
+                if (definition.environmentNames.isNotEmpty()) entry.put("env", JSONObject(definition.environmentNames.associateWith { "${'$'}{$it}" }))
+                if (definition.headerVariables.isNotEmpty()) entry.put("headers", JSONObject(definition.headerVariables.mapValues { "${'$'}{${it.value}}" }))
                 JSONObject().put("mcpServers", JSONObject().put(definition.name, entry))
             }
             "codex" -> {
                 if (local) entry.put("command", definition.command.first()).put("args", JSONArray(definition.command.drop(1))) else entry.put("url", definition.url)
+                if (definition.environmentNames.isNotEmpty()) entry.put("env_vars", JSONArray(definition.environmentNames.sorted()))
+                if (definition.headerVariables.isNotEmpty()) entry.put("env_http_headers", JSONObject(definition.headerVariables))
                 JSONObject().put("mcp_servers", JSONObject().put(definition.name, entry.put("enabled", true)))
             }
             "opencode" -> {
                 if (local) entry.put("type", "local").put("command", JSONArray(definition.command)) else entry.put("type", "remote").put("url", definition.url)
+                if (definition.environmentNames.isNotEmpty()) entry.put("environment", JSONObject(definition.environmentNames.associateWith { "{env:$it}" }))
+                if (definition.headerVariables.isNotEmpty()) entry.put("headers", JSONObject(definition.headerVariables.mapValues { "{env:${it.value}}" }))
                 JSONObject().put("mcp", JSONObject().put(definition.name, entry.put("enabled", true)))
             }
             else -> error("此运行器的共享 MCP 配置尚未适配")

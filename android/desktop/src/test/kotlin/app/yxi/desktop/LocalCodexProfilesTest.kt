@@ -4,6 +4,24 @@ import org.json.JSONObject
 import kotlin.test.*
 
 class LocalCodexProfilesTest {
+    @Test fun `shared MCP allows declared variable references and rejects additional credentials`() {
+        val definition = SharedMcpDefinition("@local", "echo", "test", "1", "echo",
+            url = "https://example.com/mcp", headerVariables = mapOf("Authorization" to "YXI_PLUGIN_TOKEN"))
+        val records = listOf(SharedMcpRecord(definition, setOf("codex"), 0))
+        val config = SharedMcpSettings.forRunner(definition, "codex")
+        LocalCodexProfiles.verifySharedMcp(config, records)
+        val entry = config.getJSONObject("mcp_servers").getJSONObject("echo")
+        entry.getJSONObject("env_http_headers").put("Authorization", "OTHER_TOKEN")
+        assertFailsWith<IllegalStateException> { LocalCodexProfiles.verifySharedMcp(config, records) }
+        entry.put("env_http_headers", JSONObject(definition.headerVariables)).put("http_headers_helper", "secret-helper")
+        assertFailsWith<IllegalStateException> { LocalCodexProfiles.verifySharedMcp(config, records) }
+        val stdio = definition.copy(url = null, command = listOf("echo"), headerVariables = emptyMap(), environmentNames = setOf("YXI_PLUGIN_TOKEN"))
+        val stdioRecords = listOf(SharedMcpRecord(stdio, setOf("codex"), 0))
+        val stdioConfig = SharedMcpSettings.forRunner(stdio, "codex")
+        LocalCodexProfiles.verifySharedMcp(stdioConfig, stdioRecords)
+        stdioConfig.getJSONObject("mcp_servers").getJSONObject("echo").getJSONArray("env_vars").put("UNDECLARED")
+        assertFailsWith<IllegalStateException> { LocalCodexProfiles.verifySharedMcp(stdioConfig, stdioRecords) }
+    }
     @Test fun `shared MCP verification rejects changed endpoints disabled entries and inherited credentials`() {
         val definition = SharedMcpDefinition("@local", "echo", "test", "1", "echo", listOf("/bin/echo"))
         val records = listOf(SharedMcpRecord(definition, setOf("codex"), 0))

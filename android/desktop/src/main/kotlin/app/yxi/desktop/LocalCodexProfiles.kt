@@ -57,7 +57,17 @@ internal object LocalCodexProfiles {
                 check(entry.optString("command") == definition.command.first() && entry.isNull("url") &&
                     (entry.optJSONArray("args") ?: org.json.JSONArray()).similar(org.json.JSONArray(definition.command.drop(1)))) { "共享 MCP 启动配置不一致：${definition.name}" }
             } else check(entry.optString("url") == definition.url && entry.isNull("command")) { "共享 MCP 地址不一致：${definition.name}" }
-            for (key in listOf("env", "env_vars", "http_headers", "env_http_headers", "bearer_token_env_var", "bearer_token")) {
+            val environment = entry.optJSONArray("env_vars") ?: org.json.JSONArray()
+            check((entry.isNull("env_vars") || entry.opt("env_vars") is org.json.JSONArray) &&
+                environment.similar(org.json.JSONArray(definition.environmentNames.sorted()))) {
+                "共享 MCP 环境变量引用不一致：${definition.name}"
+            }
+            val headers = entry.optJSONObject("env_http_headers") ?: JSONObject()
+            check((entry.isNull("env_http_headers") || entry.opt("env_http_headers") is JSONObject) &&
+                headers.similar(JSONObject(definition.headerVariables))) {
+                "共享 MCP 请求头变量引用不一致：${definition.name}"
+            }
+            for (key in listOf("env", "http_headers", "bearer_token_env_var", "bearer_token", "http_headers_helper")) {
                 val value = entry.opt(key)
                 check(value == null || value === JSONObject.NULL || value == "" || (value is JSONObject && value.length() == 0) ||
                     (value is org.json.JSONArray && value.length() == 0)) { "共享 MCP 混入了未声明的认证或环境覆盖：${definition.name}" }
