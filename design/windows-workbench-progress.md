@@ -1,3 +1,10 @@
+## 2026-09-23 服务器 OpenCode HTTP 共享任务创建
+
+- 行为 `e5fe39a`、测试修正 `0ef35d32ba934dff7345cbd79b4b160f774dfa01`：SSH supervisor 通过 stdin 接收引用配置和变量名，使用远端自身环境，明确报告缺失变量/已有 inline 配置。RemoteOpenCodeTasks 检查同名冲突，专属进程加载并核对连接后创建会话；UI 开放服务器 HTTP 引用。
+- 首轮 `run.eiKMx1` 因 SSH fixture 路径不在 /sandbox/tmp 被隔离检查拒绝，未到产品流程；修正路径并增强所有 HTTP 请求头检查后重跑。
+- 构建 `run.F4QHrz`，HTTP 本机+真实 SSH 任务创建 `run.AkQEJD` 1 项，SSH 生命周期回归 `run.4QDW1u` 1 项全部通过，无失败/跳过。使用隔离 OpenCode 1.18.32 与假凭据；未动生产服务。
+- 仍待缺失远端变量/已有 inline 配置的原生错误路径专项测试、配置变化竞态处理、启动绑定持久审计、Windows 表单验收及 Claude HTTP 验证。未发布。
+
 ## 2026-09-23 本地 OpenCode HTTP 共享任务创建
 
 - `14b1cbcb11d3e40af565cca0e3c30c330696c615` 接入 LocalOpenCodeTasks：基线进程检查原生同名 MCP；有 HTTP 头引用时关闭基线、以私有配置启动专属进程，重新核对模型与连接，再创建和持久化会话。其他 MCP 仍用动态登记。界面开放本地 OpenCode 头引用，服务器保持明确限制。
