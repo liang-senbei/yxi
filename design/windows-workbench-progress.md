@@ -1,5 +1,11 @@
 # Windows 工作台实施记录
 
+## 本地续聊 L2：通道接入与认证边界（开发中）
+
+`49443b6`将`CodexAppServer`的传输抽象为SSH/本机进程两种通道，保留SSH调用兼容；本地通道只持有自己启动的进程，参数数组与显式环境启动，不经过shell。本机目录按本机路径语义校验，后续可复用已有会话控制器的审批/取消/投递状态。构建`run.EoM1XZ`通过；真实本机Codex通道与历史保持测试`run.XOb2iI`1项、原SSH接口回归`run.JINHBq`6项全部通过，无跳过。只读页面尚未开放发送，L2未完成。
+
+官方订阅接入前对测试版本0.153.4源码进行核对，发现强制登录类型不匹配会执行注销。因此不会仅硬加`forced_login_method=chatgpt`或硬写普通API地址。后续需验证进程级端点覆盖、原生账号类型、环境变量隔离、每Agent模型及原会话控制权；完整依据和下一步门槛见[认证边界复核](research/native-codex-auth-boundary.md)。未改用户共享登录或配置，也未对真实历史执行恢复/新建。
+
 ## 本地工作台 L1 开工（2026-09-23，开发分支未发布）
 
 用户授权复核后直接实施，并将机械任务交hk13的yunxi分组Agent。`cc-yxi_entertainment`完成紧凑映射只读审查；报告提出的Codex列表URL无法编辑、失效列表弹层未关闭已修复。`cc-yxi_pilot`完成安装路径与离线样例矩阵；据此补正npm原生PE入口直接执行和Windows Hermes目录。两者没有改共享代码或发布产物。报告保存在hk13 `windows-test-reports/local-workspace-l1/`，本地副本在工作区`.artifacts/local-workspace-l1/`。

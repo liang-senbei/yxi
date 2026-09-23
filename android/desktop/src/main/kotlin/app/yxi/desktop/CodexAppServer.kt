@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 internal data class CodexResumeOverrides(val provider: String?, val model: String?, val effort: String?)
 
-/** Codex app-server stdio over SSH. RPC IDs correlate responses; they are NOT idempotency keys.
+/** Codex app-server stdio over SSH or an owned local process. RPC IDs are NOT idempotency keys.
  * Callers must persist their outbox before sending and never retry an uncertain write automatically.
  * Notifications and server approval requests remain raw events for the workspace controller.
  * Protocol: https://learn.chatgpt.com/docs/app-server
