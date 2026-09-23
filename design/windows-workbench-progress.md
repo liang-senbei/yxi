@@ -1,3 +1,11 @@
+## 本地 Claude 任务接入共享 MCP 快照
+
+`23d3f65`新增ClaudeSharedMcp预检：用当前目录下的原生claude mcp get逐项核对名字，已存在或未知错误均不覆盖；输出限长、限时、仅在内存检查，不持久化原生配置内容。通过后生成任务私有mcp.json，以--mcp-config添加，保留原有其它原生设置。LocalAgents读取本地Claude意向并保存定义快照，继续旧任务使用原快照，取消预检可清理自有进程。共享页开放本地Claude任务选择，服务器Claude仍未开放。
+
+首次原生回归run.aIjjSq在预检失败：2.1.280的missing文本改为No MCP server named，而非原预期found with name。主线程只读核对官方二进制字符串后，`4158fab`兼容明确带目标名的两种缺失提示，并关闭预检过程自动更新。未知名/权限错误/连接失败不会被当成可用名称。
+
+最终构建run.zr62oe通过；ClaudeSharedMcpTest run.gdpc1o 1项、真实LocalClaudeAgentNativeTest run.q6cqNa 1项、LocalAgentOutcomeTest run.IP5vVB 4项通过，无跳过。原生测试确认任务加载共享配置文件、快照保存重读及退役意向后续聊、模型原配置不变；测试使用隔离Claude2.1.280与本地模型fixture。当前接入的是既有本地CLI任务入口，不代表完整Claude本地原生历史/交互式审批工作台已完成；服务器Claude、共享授权/生命周期与Windows完整验收仍待完成，未发布。
+
 ## 服务器 Codex 共享 MCP 与任务快照
 
 `54df5c4`将SharedMcpRegistry注入CodexWorkspace新建路径，按服务器hostKey取活动Codex意向；启动前核对原生同名/内置服务，使用已验证的MCP参数生成器，兼容原有独立provider私有启动文件。每次线程/轮次变更前回读MCP配置，拒绝未经核对的会话MCP覆盖。CodexTaskRecord增加共享定义快照并严格解析；恢复任务和切换模型线路继续用任务快照，不自动采用后来修改的共享列表。共享页开放服务器Codex新会话选择；旧登记无快照字段仍按空列表读取。
