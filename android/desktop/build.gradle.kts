@@ -24,6 +24,7 @@ dependencies {
     // 仓库坐标见 settings.gradle.kts（JetBrains intellij-dependencies，Central 没有）。
     implementation("org.jetbrains.jediterm:jediterm-core:3.3")   // ⚠️ ui 的 POM 没声明 core，必须两个都显式引
     implementation("org.jetbrains.jediterm:jediterm-ui:3.3")
+    implementation("org.jetbrains.pty4j:pty4j:0.13.4")
     implementation("org.slf4j:slf4j-api:2.0.16")                 // ⚠️ jediterm 内部打日志用，POM 同样没声明（真机/运行时才炸）
     runtimeOnly("org.slf4j:slf4j-nop:2.0.16")                    // 终端库的日志静默掉
     implementation(libs.org.json)

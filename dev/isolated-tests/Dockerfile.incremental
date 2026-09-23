@@ -8,8 +8,10 @@ RUN if [ "$INSTALL_GUI" = 1 ]; then apt-get update && \
 RUN rm -rf /workspace && mkdir /workspace
 COPY . /workspace
 WORKDIR /workspace
-RUN cd android && bash gradlew -Pyxi.desktopOnly=true :core:testClasses :desktop:testClasses :desktop:cacheIsolatedRuntime \
-    -I /workspace/dev/isolated-tests/cache.init.gradle --offline --no-daemon --max-workers=1 \
+ARG REFRESH_DEPENDENCIES=0
+RUN cd android && if [ "$REFRESH_DEPENDENCIES" = 1 ]; then set --; else set -- --offline; fi \
+    && bash gradlew -Pyxi.desktopOnly=true :core:testClasses :desktop:testClasses :desktop:cacheIsolatedRuntime \
+    -I /workspace/dev/isolated-tests/cache.init.gradle "$@" --no-daemon --max-workers=1 \
     -Dorg.gradle.jvmargs=-Xmx1536m -Pkotlin.compiler.execution.strategy=in-process
 ARG SOURCE_REVISION
 LABEL org.yxi.test-isolation="1" org.yxi.source-revision=$SOURCE_REVISION

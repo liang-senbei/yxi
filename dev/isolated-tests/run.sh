@@ -49,6 +49,11 @@ if test "$mode" = build; then
             # Explicit build-only package bootstrap; test execution remains --network none.
             build_args=(--build-arg "BASE_IMAGE=$base_image" --build-arg INSTALL_GUI=1)
         fi
+        if test "${YXI_TEST_REFRESH_DEPENDENCIES:-0}" = 1; then
+            # Explicit build-only dependency bootstrap; runtime containers still have no network.
+            build_args=(--build-arg "BASE_IMAGE=$base_image" --build-arg REFRESH_DEPENDENCIES=1)
+            if test "${YXI_TEST_INSTALL_GUI:-0}" = 1; then build_args+=(--build-arg INSTALL_GUI=1); fi
+        fi
     fi
     docker_local build --builder default --platform linux/amd64 -f "$dockerfile" "${build_args[@]}" \
         --build-arg "SOURCE_REVISION=$revision" -t "$image" "$run_root/context"
