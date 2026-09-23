@@ -41,6 +41,8 @@ class AppState {
     internal val localCodexTasks get() = localCodexTasksDelegate.value
     private val localOpenCodeTasksDelegate = lazy { LocalOpenCodeTasks(instructions, java.io.File(Store.dir, "local-opencode-tasks.json"), sharedMcp) }
     internal val localOpenCodeTasks get() = localOpenCodeTasksDelegate.value
+    private val localAcpTasksDelegate = lazy { LocalAcpTasks(instructions, java.io.File(Store.dir, "local-acp-tasks.json")) }
+    internal val localAcpTasks get() = localAcpTasksDelegate.value
     internal var localSelectedTaskKey by mutableStateOf<String?>(null)
     internal val localWorkspace get() = localWorkspaceDelegate.value
     internal val isLocal get() = hostScope == LOCAL_HOST_SCOPE
@@ -59,10 +61,13 @@ class AppState {
         (if (localCodexTasksDelegate.isInitialized()) (if (localCodexTasks.busy) 1 else 0) +
             localCodexTasks.controllers.values.count { it.sending || it.activeTurnId != null || it.pendingRequests.isNotEmpty() } else 0) +
         (if (localOpenCodeTasksDelegate.isInitialized()) (if (localOpenCodeTasks.busy) 1 else 0) +
-            localOpenCodeTasks.controllers.values.count { it.busy || it.nativeBusy || it.permissions.isNotEmpty() || it.questions.isNotEmpty() } else 0)
+            localOpenCodeTasks.controllers.values.count { it.busy || it.nativeBusy || it.permissions.isNotEmpty() || it.questions.isNotEmpty() } else 0) +
+        (if (localAcpTasksDelegate.isInitialized()) (if (localAcpTasks.busy) 1 else 0) +
+            localAcpTasks.controllers.values.count { it.busy || it.pendingApprovals.isNotEmpty() } else 0)
     internal fun closeLocalFeatures() {
         if (localCodexTasksDelegate.isInitialized()) localCodexTasks.close()
         if (localOpenCodeTasksDelegate.isInitialized()) localOpenCodeTasks.close()
+        if (localAcpTasksDelegate.isInitialized()) localAcpTasks.close()
         if (localWorkspaceDelegate.isInitialized()) localWorkspace.close()
         if (linksDelegate.isInitialized()) deviceLinks.close()
         if (localAgentsDelegate.isInitialized()) localAgents.close()

@@ -53,6 +53,10 @@ internal class AcpTaskController(
         require(text.isNotBlank() && text.length <= 100_000)
         return queue.enqueue(taskKey, text)
     }
+    fun dispatchNext(): Job = scope.launch {
+        try { sendNext() } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { note = e.message ?: "发送未确认，请核对会话" }
+    }
 
     private fun receive(event: JSONObject) {
         val method = event.optString("method")

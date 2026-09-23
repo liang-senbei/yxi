@@ -21,6 +21,15 @@ import javax.swing.JFileChooser
     val t = Tokens.current
     var creating by remember { mutableStateOf(false) }
     var openCodeRuntime by remember { mutableStateOf<LocalRuntimeInstallation?>(null) }
+    var acpRuntime by remember { mutableStateOf<LocalRuntimeInstallation?>(null) }
+    acpRuntime?.let { runtime -> NewAcpConversationDialog(state, runtime, { acpRuntime = null }) {
+        acpRuntime = null; state.localSelectedTaskKey = it.key
+    } }
+    val acpOwned = state.localSelectedTaskKey?.let { key -> state.localAcpTasks.registry.records.singleOrNull { it.key == key } }
+    if (!configuration && acpOwned != null) {
+        AcpConversationPane(state, acpOwned)
+        return
+    }
     openCodeRuntime?.let { runtime -> NewOpenCodeConversationDialog(state, runtime, { openCodeRuntime = null }) {
         openCodeRuntime = null; state.localSelectedTaskKey = it.key
     } }
@@ -81,6 +90,8 @@ import javax.swing.JFileChooser
                                         Text(if (workspace.selectedRuntime?.id == runtime.id) "已选择" else "读取历史")
                                     }
                                     if (engine == "opencode" && runtime.ready && !configuration) TextButton({ openCodeRuntime = runtime }) { Text("新建对话") }
+                                    if (engine in setOf("gemini", "grok", "hermes") && runtime.ready && !configuration)
+                                        TextButton({ acpRuntime = runtime }) { Text("连接 ACP（预览）") }
                                 }
                             }
                         }
@@ -128,6 +139,9 @@ import javax.swing.JFileChooser
                     }
                     items(state.localOpenCodeTasks.registry.records.filter { it.user == System.getProperty("user.name") && it.platform == System.getProperty("os.name") }, key = { "owned:${it.key}" }) { record ->
                         TextButton({ state.localSelectedTaskKey = record.key }) { Text("${record.title} · OpenCode · ${record.model}") }
+                    }
+                    items(state.localAcpTasks.registry.records.filter { it.user == System.getProperty("user.name") && it.platform == System.getProperty("os.name") }, key = { "owned:${it.key}" }) { record ->
+                        TextButton({ state.localSelectedTaskKey = record.key }) { Text("${record.title} · ${LocalRuntimeDiscovery.title(record.engine)}") }
                     }
                     if (workspace.projects.isNotEmpty()) item { Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         workspace.projects.forEach { path -> Text(path + if (File(path).isDirectory) "" else " · 目录已不可用", color = t.textMuted) }
