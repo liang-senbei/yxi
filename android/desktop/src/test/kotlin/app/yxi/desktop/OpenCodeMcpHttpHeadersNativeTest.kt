@@ -70,9 +70,20 @@ class OpenCodeMcpHttpHeadersNativeTest {
             IsolatedSshBridge(File("/sandbox/tmp/http-mcp-ssh"), remoteEnvironment, File("/sandbox/tmp/http-mcp-unused.sock"), allowForwarding = true).use { bridge ->
                 bridge.conn.ssh.connect()
                 val remoteRegistry = SharedMcpRegistry(File(root, "remote-shared.json"))
-                remoteRegistry.save(definition.copy(hostKey = projectKey(bridge.conn.host, "/")), setOf("opencode"), null)
+                val missingDefinition = definition.copy(hostKey = projectKey(bridge.conn.host, "/"),
+                    headerVariables = mapOf("Authorization" to "YXI_FIXTURE_DELIBERATELY_MISSING"))
+                val missingRecord = remoteRegistry.save(missingDefinition, setOf("opencode"), null)
                 RemoteOpenCodeTasks(InstructionQueue(File(root, "remote-queue.json")), File(root, "remote-tasks.json"), remoteRegistry).use { tasks ->
                     val model = tasks.models(bridge.conn, root.path).single { it.providerId == "fixture" && it.modelId == "fixture-model" }
+                    val failure = assertFailsWith<IllegalStateException> {
+                        tasks.create(bridge.conn, root.path, "Missing credential fixture", model)
+                    }
+                    assertTrue(failure.message.orEmpty().contains("缺少共享 MCP 所需变量"))
+                    assertTrue(tasks.registry.records.isEmpty())
+                    assertTrue(tasks.controllers.isEmpty())
+                    assertEquals("", tasks.recoverySessionId)
+                    assertEquals("ssh-still-alive", bridge.conn.ssh.exec("printf ssh-still-alive").trim())
+                    remoteRegistry.save(definition.copy(hostKey = projectKey(bridge.conn.host, "/")), setOf("opencode"), missingRecord.revision)
                     val record = tasks.create(bridge.conn, root.path, "Remote HTTP shared task", model)
                     assertTrue(tasks.controllers.getValue(record.key).ready)
                     assertEquals(record, tasks.registry.records.single())
