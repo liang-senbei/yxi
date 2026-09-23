@@ -140,7 +140,11 @@ internal class LocalWorkspace : AutoCloseable {
         }
     }
     fun openThread(thread: NativeHistoryThread, more: Boolean = false) {
-        val connected = client ?: return
+        val connected = client ?: run {
+            selectedThread = thread; turns = emptyList(); nextTurns = null; readingHistory = false
+            readError = "原生历史连接不可用，请返回本地工作台刷新运行器后重试"
+            return
+        }
         reading?.cancel()
         val gen = ++readGeneration
         if (!more) { selectedThread = thread; turns = emptyList(); nextTurns = null }
