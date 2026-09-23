@@ -1,3 +1,10 @@
+## 2026-09-24 服务器 ACP 界面与新建入口接入
+
+- `cd2645f23b0322d8343ce0c8d791077ddad85228` 新增 Page.Acp/RemoteAcpPane，接入侧栏和项目树 NewSessionDialog 的 ACP 预览回调；任务使用远端控制器与返回目标，提示词仅存草稿，已有目录约束明确。协作组/worktree 尚不支持；远端 terminal 认证显示原因且不误发 RPC。
+- AppState 接入主机运行状态判断，侧栏断开与应用退出清理所属 ACP 任务。新建页对 ACP/OpenCode 不再提示自动发送草稿。
+- 构建 `run.GxPCyP`；SSH 管理/通道 `run.UFf1BR` 1 项、共享对话 GUI `run.Db0fQZ` 1 项通过，无失败/跳过。服务器新表单和新建跳转本身尚待点击/截图验收。
+- 构建保护触发后仅删除14个无容器引用的旧专用测试镜像，固定基线和最近镜像/报告保留；清单 removed-images-20260924-server-ui.json。未发布。
+
 ## 2026-09-24 服务器真实 Gemini ACP 与工具审批
 
 - `843c54742b0a44c7551c849e7576873edd441ced` 扩展 Gemini 原生测试到真实隔离 SSH：远端 HOME/GEMINI_CLI_HOME 与假 API 配置独立，RemoteAcpTasks 认证/新建/发送，批准前文件不存在，allow_once 后实际 shell 写标记、functionResponse 回传、end_turn/Completed。
