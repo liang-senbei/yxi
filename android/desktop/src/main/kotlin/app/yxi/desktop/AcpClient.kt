@@ -24,6 +24,7 @@ internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
     private val pending = ConcurrentHashMap<String, CompletableDeferred<JSONObject>>()
     private val approvals = ConcurrentHashMap<String, JSONObject>()
     private val sessions = ConcurrentHashMap.newKeySet<String>()
+    private val sessionModes = ConcurrentHashMap<String, JSONObject>()
     private val activePrompts = ConcurrentHashMap.newKeySet<String>()
     private val cancellingSessions = ConcurrentHashMap.newKeySet<String>()
     private val closed = AtomicBoolean()
@@ -87,7 +88,21 @@ internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
         require(directory.isNotBlank() && directory.none { it < ' ' })
         return request("session/new", JSONObject().put("cwd", directory).put("mcpServers", JSONArray())).also {
             val id = it.getString("sessionId"); check(id.isNotBlank()); sessions.add(id)
+            it.optJSONObject("modes")?.let { modes -> sessionModes[id] = JSONObject(modes.toString()) }
         }
+    }
+    fun modes(sessionId: String): JSONObject? = sessionModes[sessionId]?.let { JSONObject(it.toString()) }
+
+    suspend fun setMode(sessionId: String, modeId: String, timeoutMillis: Long = 30_000) {
+        check(sessionId in sessions)
+        val modes = sessionModes[sessionId] ?: error("运行器没有提供会话模式")
+        val available = modes.getJSONArray("availableModes")
+        require((0 until available.length()).any { available.getJSONObject(it).getString("id") == modeId }) { "请选择运行器提供的模式" }
+        check(activePrompts.add(sessionId)) { "会话仍有未确认操作，暂不能切换模式" }
+        // An ambiguous mode change blocks sending: the permission semantics may have changed.
+        request("session/set_mode", JSONObject().put("sessionId", sessionId).put("modeId", modeId), timeoutMillis)
+        sessionModes[sessionId] = JSONObject(modes.toString()).put("currentModeId", modeId)
+        activePrompts.remove(sessionId)
     }
     suspend fun prompt(sessionId: String, text: String, timeoutMillis: Long = 600_000): JSONObject {
         require(text.isNotBlank() && text.length <= 100_000)
