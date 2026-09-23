@@ -13,6 +13,7 @@ class OpenCodeMcpHttpHeadersNativeTest {
         check(!System.getenv("YXI_ISOLATED_TEST_RUN").isNullOrBlank())
         check(System.getProperty("user.home") == "/sandbox/home")
         val received = CompletableDeferred<Boolean>()
+        val invalidHeaders = java.util.concurrent.atomic.AtomicInteger()
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/mcp") { exchange ->
             try {
@@ -20,6 +21,7 @@ class OpenCodeMcpHttpHeadersNativeTest {
                     exchange.sendResponseHeaders(405, -1)
                 } else {
                     val request = JSONObject(exchange.requestBody.readAllBytes().toString(Charsets.UTF_8))
+                    if (exchange.requestHeaders.getFirst("Authorization") != "Bearer fixture-http-token") invalidHeaders.incrementAndGet()
                     if (request.optString("method") == "initialize") received.complete(
                         exchange.requestHeaders.getFirst("Authorization") == "Bearer fixture-http-token")
                     if (!request.has("id")) exchange.sendResponseHeaders(202, -1)
@@ -57,6 +59,7 @@ class OpenCodeMcpHttpHeadersNativeTest {
                 assertEquals("connected", owned.client.mcpStatus().getJSONObject("http_fixture").getString("status"))
                 assertTrue(withTimeout(20000) { received.await() }, "MCP must receive the complete header value")
             }
+            assertEquals(0, invalidHeaders.get())
             assertContentEquals(original, config.readBytes())
             val remoteHome = File(root, "remote-home").apply { mkdirs() }
             val bin = File(remoteHome, ".local/bin").apply { mkdirs() }
@@ -64,7 +67,7 @@ class OpenCodeMcpHttpHeadersNativeTest {
             val remoteEnvironment = mapOf("HOME" to remoteHome.path, "XDG_DATA_HOME" to File(remoteHome, ".local/share").path,
                 "XDG_CONFIG_HOME" to File(remoteHome, ".config").path, "XDG_CACHE_HOME" to File(remoteHome, ".cache").path,
                 "YXI_TEST_MCP_AUTH" to "Bearer fixture-http-token")
-            IsolatedSshBridge(File(root, "ssh"), remoteEnvironment, File(root, "unused.sock"), allowForwarding = true).use { bridge ->
+            IsolatedSshBridge(File("/sandbox/tmp/http-mcp-ssh"), remoteEnvironment, File("/sandbox/tmp/http-mcp-unused.sock"), allowForwarding = true).use { bridge ->
                 bridge.conn.ssh.connect()
                 val remoteRegistry = SharedMcpRegistry(File(root, "remote-shared.json"))
                 remoteRegistry.save(definition.copy(hostKey = projectKey(bridge.conn.host, "/")), setOf("opencode"), null)
@@ -76,6 +79,7 @@ class OpenCodeMcpHttpHeadersNativeTest {
                     assertEquals("", tasks.recoverySessionId)
                 }
             }
+            assertEquals(0, invalidHeaders.get())
             assertContentEquals(original, config.readBytes())
             assertFalse(definition.json().toString().contains("fixture-http-token"))
             val shared = SharedMcpRegistry(File(root, "shared.json"))
@@ -89,6 +93,7 @@ class OpenCodeMcpHttpHeadersNativeTest {
                 assertTrue(tasks.controllers.containsKey(record.key))
                 assertEquals("", tasks.recoverySessionId)
             }
+            assertEquals(0, invalidHeaders.get())
             assertContentEquals(original, config.readBytes())
         } finally { server.stop(0) }
     }
