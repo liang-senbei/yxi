@@ -26,23 +26,45 @@ internal fun openCodeTaskState(state: AppState, task: LocalCodexTaskRecord): Ses
 }
 
 @Composable internal fun OpenCodeTaskRow(state: AppState, conn: Conn, task: LocalCodexTaskRecord) {
+    RemoteNativeTaskRow(state, conn, task, false)
+}
+
+internal fun acpTaskState(state: AppState, task: LocalCodexTaskRecord): SessionState {
+    val controller = state.remoteAcpTasks.controllers[task.key]
+    val pending = state.instructions.entries.filter { it.taskKey == task.key }
+    return when {
+        controller?.pendingApprovals?.isNotEmpty() == true || pending.any { it.status == InstructionStatus.Unknown } -> SessionState.NeedsYou
+        controller?.busy == true || controller?.changingMode == true || pending.any { it.status == InstructionStatus.Delivering || it.runtimeTurnState == RuntimeTurnState.InProgress } -> SessionState.Working
+        else -> SessionState.Idle
+    }
+}
+
+@Composable internal fun AcpTaskRow(state: AppState, conn: Conn, task: LocalCodexTaskRecord) {
+    RemoteNativeTaskRow(state, conn, task, true)
+}
+
+@Composable private fun RemoteNativeTaskRow(state: AppState, conn: Conn, task: LocalCodexTaskRecord, acp: Boolean) {
     val nav = state.navigation; val t = Tokens.current
     var menu by remember(task.key) { mutableStateOf(false) }
     var rename by remember(task.key) { mutableStateOf(false) }
     var title by remember(task.key, rename) { mutableStateOf(nav.title(task.key) ?: task.title) }
-    val status = openCodeTaskState(state, task)
-    val selected = state.page == Page.OpenCode && state.remoteOpenCodeSelectedKey == task.key && state.conn === conn
+    val status = if (acp) acpTaskState(state, task) else openCodeTaskState(state, task)
+    val selected = state.conn === conn && if (acp) state.page == Page.Acp && state.remoteAcpSelectedKey == task.key
+        else state.page == Page.OpenCode && state.remoteOpenCodeSelectedKey == task.key
+    val ready = if (acp) state.remoteAcpTasks.controllers[task.key]?.ready == true else state.remoteOpenCodeTasks.controllers[task.key]?.ready == true
     NativeOverlay(menu)
     Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 4.dp).clip(RoundedCornerShape(8.dp))
         .background(if (selected) t.selected else Color.Transparent), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f).clickable {
-            state.select(conn, null); state.remoteOpenCodeSelectedKey = task.key; state.page = Page.OpenCode
+            state.select(conn, null)
+            if (acp) { state.remoteAcpEngine = task.engine; state.remoteAcpSelectedKey = task.key; state.page = Page.Acp }
+            else { state.remoteOpenCodeSelectedKey = task.key; state.page = Page.OpenCode }
         }.padding(vertical = 8.dp, horizontal = 8.dp)) {
             Text(nav.title(task.key) ?: task.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("OpenCode · " + when {
+            Text(LocalRuntimeDiscovery.title(task.engine) + " · " + when {
                 status == SessionState.NeedsYou -> "需要你处理"
                 status == SessionState.Working -> "正在运行"
-                state.remoteOpenCodeTasks.controllers[task.key]?.ready == true -> "空闲"
+                ready -> "空闲"
                 else -> "未连接"
             }, style = MaterialTheme.typography.labelSmall, color = t.textMuted)
         }

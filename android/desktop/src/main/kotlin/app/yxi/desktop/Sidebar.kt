@@ -301,7 +301,9 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
                     (hostMatch || favorite.title.contains(f, true) || favorite.directory.contains(f, true)) &&
                         c?.sessions?.none { taskNavigationKey(h, it) == favorite.key } != false
                 } else emptyList()
-                val managedMatch = state.remoteOpenCodeTasks.tasks(h).any { it.title.contains(f, true) || it.directory.contains(f, true) } || state.codexWorkspace.tasks(h).any { record ->
+                val managedMatch = state.remoteAcpTasks.tasks(h).any { record ->
+                    listOf(record.title, record.directory, state.navigation.title(record.key).orEmpty(), state.navigation.group(record.key), LocalRuntimeDiscovery.title(record.engine)).any { it.contains(f, true) }
+                } || state.remoteOpenCodeTasks.tasks(h).any { it.title.contains(f, true) || it.directory.contains(f, true) } || state.codexWorkspace.tasks(h).any { record ->
                     listOf(record.title, record.directory, state.navigation.title(record.key).orEmpty(), state.navigation.group(record.key)).any { it.contains(f, true) }
                 }
                 if (!hostMatch && sessions.isEmpty() && favorites.isEmpty() && !managedMatch) return@forEachIndexed

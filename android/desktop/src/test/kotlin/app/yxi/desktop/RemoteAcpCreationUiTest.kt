@@ -42,11 +42,13 @@ for line in sys.stdin:
                 application(exitProcessOnExit = false) {
                     Window(onCloseRequest = ::exitApplication, state = rememberWindowState(width = 1180.dp, height = 960.dp)) {
                         var creating by remember { mutableStateOf(true) }
+                        var sidebar by remember { mutableStateOf(false) }
                         YxiTheme { Surface {
                             if (creating) NewSessionDialog(bridge.conn, { creating = false }, initialDirectory = directory.path,
                                 initialAgent = "gemini", groupContext = "Do not send this draft automatically", onAcpConversation = { engine, path, prompt ->
                                     state.prepareAcpTask(bridge.conn, engine, path, prompt); routed = true; creating = false
                                 }) { failure = AssertionError("ACP must not use the tmux creation path") }
+                            else if (sidebar) AcpTaskRow(state, bridge.conn, state.remoteAcpTasks.tasks(bridge.conn).single())
                             else RemoteAcpPane(state)
                         } }
                         LaunchedEffect(Unit) {
@@ -92,6 +94,25 @@ for line in sys.stdin:
                                 assertTrue(state.instructions.entries.none { it.taskKey == record.key })
                                 assertFalse(marker.readText().contains("session/prompt"))
                                 assertEquals(1, marker.readLines().count { it == "session/new" })
+                                val controller = state.remoteAcpTasks.controllers.getValue(record.key)
+                                assertEquals(app.yxi.agent.SessionState.Idle, acpTaskState(state, record))
+                                assertTrue(state.remoteAcpTasks.tasks(bridge.conn.host.copy(id = "other-host", hostname = "192.0.2.2")).isEmpty())
+                                state.navigation.rename(record.key, "服务器 Gemini 会话")
+                                state.navigation.togglePin(record.key)
+                                state.navigation.setNativeFavorite(record.key, true)
+                                assertTrue(state.navigation.pinned(record.key))
+                                assertTrue(state.navigation.favorite(record.key))
+                                state.page = Page.Workspace; state.remoteAcpSelectedKey = null
+                                sidebar = true; delay(500)
+                                click(140, 24)
+                                withTimeout(2000) { while (state.remoteAcpSelectedKey != record.key) delay(20) }
+                                assertEquals(Page.Acp, state.page)
+                                assertEquals(record.engine, state.remoteAcpEngine)
+                                assertSame(controller, state.remoteAcpTasks.controllers[record.key])
+                                assertSame(bridge.conn, state.conn)
+                                assertEquals(1, marker.readLines().count { it == "session/new" })
+                                assertFalse(marker.readText().contains("session/prompt"))
+                                ImageIO.write(Robot().createScreenCapture(java.awt.Rectangle(window.locationOnScreen, window.size)), "png", File("/results/server-acp-sidebar.png"))
                             } catch (e: Throwable) { failure = e }
                             finally { exitApplication() }
                         }

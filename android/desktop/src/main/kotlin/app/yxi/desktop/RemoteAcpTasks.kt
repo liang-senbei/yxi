@@ -41,7 +41,8 @@ internal class RemoteAcpTasks(private val queue: InstructionQueue, private val f
     }
     fun recoverySessionId(conn: Conn) = creation(conn).recovery
     fun confirmCreationReviewed(conn: Conn) { check(!busy); creation(conn).clear() }
-    fun tasks(conn: Conn) = registry.records.filter { it.hostKey == projectKey(conn.host, "/") }
+    fun tasks(host: Host) = registry.records.filter { it.hostKey == projectKey(host, "/") }
+    fun tasks(conn: Conn) = tasks(conn.host)
     fun abandonPreparation() { generation.incrementAndGet(); prepared.getAndSet(null)?.client?.close(); authenticating.getAndSet(null)?.close(); initialization = null }
     suspend fun prepare(conn: Conn, engine: String, directory: String): JSONObject = operation.withLock {
         check(!disposed && conn.ssh.isConnected); registry.requireWritable()
