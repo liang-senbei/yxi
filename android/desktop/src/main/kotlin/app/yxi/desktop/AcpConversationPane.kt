@@ -13,6 +13,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.*
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import java.io.File
@@ -71,6 +73,23 @@ import java.io.File
     var sending by remember(record.key) { mutableStateOf(false) }
     var modeMenu by remember(record.key) { mutableStateOf(false) }
     var configMenu by remember(record.key) { mutableStateOf<String?>(null) }
+    val view = remember(record.key) { state.codexConversationViews.getOrPut(record.key) { CodexConversationView() } }
+    var followLatest by view.followLatest
+    val messages = controller?.messages?.toList().orEmpty()
+    val approvals = controller?.pendingApprovals?.values?.toList().orEmpty()
+    val scrollWatch = remember(record.key) { object : NestedScrollConnection {
+        override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+            if (source == NestedScrollSource.UserInput && available.y > 0f) followLatest = false
+            return Offset.Zero
+        }
+        override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+            if (source == NestedScrollSource.UserInput && !view.scroll.canScrollForward) followLatest = true
+            return Offset.Zero
+        }
+    } }
+    LaunchedEffect(messages, approvals.size, followLatest) {
+        if (followLatest) view.scroll.requestScrollToItem(messages.size + approvals.size)
+    }
     fun send() {
         if (controller == null || !controller.ready || sending || controller.busy || controller.changingMode || controller.pendingApprovals.isNotEmpty() || draft.value.text.isBlank()) return
         try { controller.enqueue(draft.value.text) } catch (e: Exception) { error = e.message.orEmpty(); return }
@@ -120,19 +139,22 @@ import java.io.File
                 }
             }
         }
-        LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(controller.messages, key = { it.id }) { message ->
+        LazyColumn(Modifier.weight(1f).fillMaxWidth().nestedScroll(scrollWatch), state = view.scroll, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(messages, key = { "message:${it.id}" }) { message ->
                 Column {
                     Text(message.author + if (message.status.isBlank()) "" else " · ${message.status}", style = MaterialTheme.typography.labelLarge)
-                    SelectionContainer { Text(message.text) }
+                    if (message.author == "Assistant" && message.kind == "message") AssistantBody(message.text)
+                    else SelectionContainer { Text(message.text) }
                 }
             }
-            items(controller.pendingApprovals.values.toList(), key = { org.json.JSONArray().put(it.get("id")).toString() }) { request ->
+            items(approvals, key = { "approval:" + org.json.JSONArray().put(it.get("id")).toString() }) { request ->
                 AcpPermissionCard(request.getJSONObject("params"), controller.ready && !controller.cancelling) { option ->
                     scope.launch { runCatching { controller.answerPermission(request.get("id"), option) }.onFailure { error = it.message.orEmpty() } }
                 }
             }
+            item(key = "acp-end") { Spacer(Modifier.height(1.dp)) }
         }
+        if (!followLatest) TextButton({ followLatest = true }) { Text("回到最新消息 ↓") }
         if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
         OutlinedTextField(draft.value, { draft.value = it }, Modifier.fillMaxWidth().onPreviewKeyEvent { event ->
             if (event.type == KeyEventType.KeyDown && draft.value.composition == null &&

@@ -32,7 +32,12 @@ class AcpConversationUiTest {
                 "session/new" -> JSONObject().put("sessionId", "ui-session").put("configOptions", config("provider/model-a")).put("modes", JSONObject().put("currentModeId", "ask")
                     .put("availableModes", JSONArray().put(JSONObject().put("id", "ask").put("name", "请求批准"))))
                 "session/set_config_option" -> JSONObject().put("configOptions", config(request.getJSONObject("params").getString("value")))
-                "session/prompt" -> JSONObject().put("stopReason", "end_turn")
+                "session/prompt" -> {
+                    emit(JSONObject().put("method", "session/update").put("params", JSONObject().put("sessionId", "ui-session")
+                        .put("update", JSONObject().put("sessionUpdate", "agent_message_chunk").put("content", JSONObject().put("type", "text")
+                            .put("text", "## 验证结果\n\n**模型选择与审批通过。**\n\n- Enter 发送一次\n- Shift+Enter 换行\n\n```kotlin\nprintln(\"ACP\")\n```")))))
+                    JSONObject().put("stopReason", "end_turn")
+                }
                 else -> null
             }
             if (result != null) emit(JSONObject().put("id", request.get("id")).put("result", result))
@@ -102,6 +107,8 @@ class AcpConversationUiTest {
                             withTimeout(3000) { while (state.instructions.entries.none { it.taskKey == record.key && it.runtimeTurnState == RuntimeTurnState.Completed }) delay(20) }
                             assertEquals(1, fixture.writes.count { it.optString("method") == "session/prompt" })
                             assertEquals("", state.chatDrafts.getValue(record.key).value.text)
+                            delay(500)
+                            ImageIO.write(Robot().createScreenCapture(java.awt.Rectangle(window.locationOnScreen, window.size)), "png", File("/results/acp-markdown.png"))
                         } catch (e: Throwable) { failure = e }
                         finally { exitApplication() }
                     }
