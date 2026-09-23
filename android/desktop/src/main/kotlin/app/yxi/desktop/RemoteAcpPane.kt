@@ -36,7 +36,7 @@ import kotlinx.coroutines.launch
             }
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("${conn.host.label} · ${LocalRuntimeDiscovery.title(engine)}", style = MaterialTheme.typography.headlineMedium)
-                Text("服务器 ACP 预览 · 使用服务器原生配置，提示词仅保存为草稿。")
+                Text("服务器对话预览 · 使用服务器原生配置，提示词仅保存为草稿。")
                 OutlinedTextField(directory, { directory = it; connected = false }, Modifier.fillMaxWidth(), label = { Text("已存在的服务器工作目录") }, enabled = !working && !tasks.busy)
                 OutlinedTextField(title, { title = it }, Modifier.fillMaxWidth(), label = { Text("对话名称") }, enabled = !working && !tasks.busy)
                 TextButton({ act { connected = false; tasks.prepare(conn, engine, directory); connected = true } }, enabled = conn.ssh.isConnected && !working && !tasks.busy) { Text("连接服务器运行器") }

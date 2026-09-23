@@ -43,7 +43,7 @@ private class AcpPendingAuthentication(val plan: AcpTerminalAuthPlan, val comple
     }
     WorkbenchDialog(onDismissRequest = { if (!tasks.busy) dismiss() }, title = { Text("本地 · ${LocalRuntimeDiscovery.title(runtime.engine)}") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("ACP 接入预览 · 使用运行器自己的账号与配置；创建后不会自动发送消息。", style = MaterialTheme.typography.bodySmall)
+            Text("对话接入预览 · 使用运行器自己的账号与配置；创建后不会自动发送消息。", style = MaterialTheme.typography.bodySmall)
             OutlinedTextField(directory, { directory = it }, label = { Text("本机工作目录") }, enabled = !tasks.busy, singleLine = true)
             OutlinedTextField(title, { title = it }, label = { Text("对话名称") }, enabled = !tasks.busy, singleLine = true)
             TextButton({ scope.launch {

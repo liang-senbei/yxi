@@ -91,7 +91,7 @@ import javax.swing.JFileChooser
                                     }
                                     if (engine == "opencode" && runtime.ready && !configuration) TextButton({ openCodeRuntime = runtime }) { Text("新建对话") }
                                     if (engine in setOf("gemini", "grok", "hermes") && runtime.ready && !configuration)
-                                        TextButton({ acpRuntime = runtime }) { Text("连接 ACP（预览）") }
+                                        TextButton({ acpRuntime = runtime }) { Text("连接并继续（预览）") }
                                 }
                             }
                         }

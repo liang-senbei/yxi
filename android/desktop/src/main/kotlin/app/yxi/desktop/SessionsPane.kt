@@ -191,7 +191,7 @@ internal fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGr
                     catch (e: Exception) { err = e.message.orEmpty() }
                     finally { busy = false }
                 }
-            }) { Text(if (busy) "正在开…" else if (structuredAcp) "连接 ACP（预览）" else if (structuredOpenCode) "选择模型并继续" else "开起来") }
+            }) { Text(if (busy) "正在开…" else if (structuredAcp) "连接并继续（预览）" else if (structuredOpenCode) "选择模型并继续" else "开起来") }
         },
         dismissButton = { TextButton(onDismiss, enabled = !busy) { Text("取消") } },
     )
