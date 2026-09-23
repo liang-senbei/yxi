@@ -10,7 +10,9 @@ class OpenCodeSharedMcpNativeTest {
         check(!System.getenv("YXI_ISOLATED_TEST_RUN").isNullOrBlank())
         check(System.getProperty("user.home") == "/sandbox/home")
         val project = File("/sandbox/home/shared-mcp-native").apply { mkdirs() }
-        val config = File(project, "opencode.json").apply { writeText("{}") }
+        // OpenCode automatically adds its schema to schema-less files at startup.
+        // Start with a complete config so byte equality isolates MCP apply writes.
+        val config = File(project, "opencode.json").apply { writeText(JSONObject().put("${'$'}schema", "https://opencode.ai/config.json").put("share", "disabled").toString()) }
         val original = config.readBytes()
         val script = File(project, "shared_mcp_fixture.py").apply {
             writeBytes(requireNotNull(OpenCodeSharedMcpNativeTest::class.java.getResourceAsStream("/shared_mcp_fixture.py")).use { it.readBytes() })
