@@ -1,3 +1,9 @@
+## 2026-09-24 服务器 ACP 专属通道基础
+
+- `8e13a41`/`9ee5c6a2da8a6a520d5d58f883af76474c155bad` 增加 RemoteAcpTransport：先核对可执行入口，Shell.q 保留目录/argv，经独立 SSH exec 和 Python supervisor 转发协议；EOF/信号清理所属进程组，不接管现有 Agent；原生 stderr 不进入通道日志。
+- 构建 `run.1at9hN`；RemoteAcpTransportTest `run.33JtwH` 1 项通过，无失败/跳过。真实隔离 SSH + ACP fixture 验证引号/空格目录、Gemini/Hermes argv、关闭一客户端保留另一个和 SSH、断连回收进程。
+- 尚未接服务器会话管理/新建 UI/终端认证，也未验证远端真实运行器；不开放未完成入口。未发布。
+
 ## 2026-09-24 Gemini 原生工具审批与结果回传
 
 - `91c5c69269921ff6988dc5525e7f014563ccbfbd` 扩展真实 Gemini 0.34.0 会话：HTTP fixture 从原生 functionDeclarations 选择 run_shell_command，要求写容器内标记。确认批准前文件不存在，从实际 options 选择 kind=allow_once 的原始 proceed_once，之后必须文件内容正确、functionResponse 回到模型，最终 end_turn/Completed。
