@@ -1,3 +1,9 @@
+## 2026-09-24 ACP 终端认证窗口与重连接入
+
+- `5a401d51ab8db1fd0fbbc1f85edd5155291d255c` 新增 JediTerm+本地 PTY 的认证 DialogWindow；选择 terminal 方法后关闭旧 ACP 连接，终端退出码0才重新连接/初始化，取消或非零退出不继续。LocalAcpTransport 连接声明 auth.terminal 能力；普通 ACP Client 默认仍不声明。
+- 修正 PTY 启动跨协程取消的所属进程回收，窗口销毁关闭 widget/连接器；复用原 TermSettings 的中文字体配置。认证 UI 不记录终端输出，不以文本推断登录成功。
+- 新固定 PTY 依赖基线下离线构建 `run.xvlM3D` 成功；管理器 `run.SJmUxT` 4 项、真实 PTY `run.JSuZeU` 1 项、启动传输 `run.JaPC3u` 1 项通过，无失败/跳过。尚未完成认证窗口 GUI 点击、Hermes 实际配置以及 Windows/macOS 打包/原生终端验收。未发布。
+
 ## 2026-09-24 本地交互 PTY 连接器
 
 - 引入固定 Pty4J 0.13.4，LocalAuthenticationTerminal 复用 JediTerm TtyConnector，直接 argv/env 启动、UTF-8 输入输出、窗口尺寸、真实退出码与所属进程清理。初次测试编译发现 TtyConnector 非 AutoCloseable，`ea6f75eeda4495d588db7f6d6fffec683c630acc` 补齐生命周期接口。
