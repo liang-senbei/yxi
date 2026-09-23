@@ -25,7 +25,7 @@ internal object LocalRuntimeDiscovery {
         fun dataHome(engine: String) = when (engine) {
             "codex" -> env["CODEX_HOME"] ?: File(userHome, ".codex").path
             "claude" -> env["CLAUDE_CONFIG_DIR"] ?: File(userHome, ".claude").path
-            "hermes" -> env["HERMES_HOME"] ?: File(userHome, ".hermes").path
+            "hermes" -> env["HERMES_HOME"] ?: if (windows && env["LOCALAPPDATA"] != null) File(env.getValue("LOCALAPPDATA"), "hermes").path else File(userHome, ".hermes").path
             else -> File(env["XDG_DATA_HOME"] ?: File(userHome, ".local/share").path, "opencode").path
         }
         fun add(engine: String, source: String, command: List<File>, problem: String = "") {
@@ -35,7 +35,7 @@ internal object LocalRuntimeDiscovery {
         for (engine in engines) {
             val nativeDirs = roots + when (engine) {
                 "opencode" -> listOf(File(userHome, ".opencode/bin"))
-                "hermes" -> listOf(File(userHome, if (windows) ".hermes/hermes-agent/venv/Scripts" else ".hermes/hermes-agent/venv/bin"))
+                "hermes" -> listOf(File(dataHome(engine), "bin"), File(dataHome(engine), if (windows) "hermes-agent/venv/Scripts" else "hermes-agent/venv/bin"))
                 else -> emptyList()
             }
             nativeDirs.forEach { dir ->
@@ -53,6 +53,16 @@ internal object LocalRuntimeDiscovery {
                     val bin = (json.opt("bin") as? String) ?: json.optJSONObject("bin")?.optString(engine).orEmpty()
                     val entry = File(packageDir, bin).canonicalFile
                     if (bin.isBlank() || !entry.toPath().startsWith(packageDir.canonicalFile.toPath()) || !entry.isFile) return@forEach
+                    fun pe(file: File) = file.isFile && runCatching { file.inputStream().use { it.read() == 77 && it.read() == 90 } }.getOrDefault(false)
+                    if (pe(entry)) { add(engine, "npm", listOf(entry)); return@forEach }
+                    if (engine == "codex") {
+                        val arm = System.getProperty("os.arch").lowercase() in setOf("aarch64", "arm64")
+                        val target = if (arm) "aarch64" else "x86_64"
+                        val platformPackage = "@openai/codex-win32-" + if (arm) "arm64" else "x64"
+                        val native = listOf(File(dir, "node_modules/$platformPackage/vendor"), File(packageDir, "node_modules/$platformPackage/vendor"), File(packageDir, "vendor"))
+                            .map { File(it, "$target-pc-windows-msvc/bin/codex.exe") }.firstOrNull(::pe)
+                        if (native != null) { add(engine, "npm", listOf(native)); return@forEach }
+                    }
                     val node = (listOf(dir) + paths).map { File(it, "node.exe") }.firstOrNull { it.isFile }
                     if (node != null) add(engine, "npm", listOf(node, entry))
                     else add(engine, "npm", listOf(entry), "已找到 npm 安装，但未找到 Node.js")
@@ -81,7 +91,7 @@ internal object LocalRuntimeDiscovery {
         val dataHome = when (engine) {
             "codex" -> System.getenv("CODEX_HOME") ?: File(home, ".codex").path
             "claude" -> System.getenv("CLAUDE_CONFIG_DIR") ?: File(home, ".claude").path
-            "hermes" -> System.getenv("HERMES_HOME") ?: File(home, ".hermes").path
+            "hermes" -> System.getenv("HERMES_HOME") ?: if (windows && System.getenv("LOCALAPPDATA") != null) File(System.getenv("LOCALAPPDATA"), "hermes").path else File(home, ".hermes").path
             else -> File(System.getenv("XDG_DATA_HOME") ?: File(home, ".local/share").path, "opencode").path
         }
         return LocalRuntimeInstallation(engine, "用户指定", listOf(file.canonicalPath), File(dataHome).absolutePath)

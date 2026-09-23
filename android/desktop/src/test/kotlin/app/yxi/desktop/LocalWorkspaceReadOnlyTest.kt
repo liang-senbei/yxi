@@ -26,6 +26,11 @@ class LocalWorkspaceReadOnlyTest {
         File(npm, "evil.js").writeText("fixture")
         manifest.writeText("""{"name":"@openai/codex","bin":{"codex":"../../../evil.js"}}""")
         assertTrue(LocalRuntimeDiscovery.candidates(home, env, windows = true).none { it.source == "npm" })
+        val claude = File(npm, "node_modules/@anthropic-ai/claude-code").apply { mkdirs() }
+        File(claude, "bin").mkdirs(); File(claude, "bin/claude.exe").writeBytes(byteArrayOf(77, 90, 0))
+        File(claude, "package.json").writeText("""{"name":"@anthropic-ai/claude-code","bin":{"claude":"bin/claude.exe"}}""")
+        val native = LocalRuntimeDiscovery.candidates(home, env, windows = true).single { it.engine == "claude" }
+        assertEquals(listOf(File(claude, "bin/claude.exe").canonicalPath), native.command, "A native npm entry must not run through Node")
     }
     @Test fun `version detection distinguishes executable failures and bounds output`() = runBlocking {
         val script = File(root, "version-fixture").apply { writeText("#!/bin/sh\nprintf 'codex-cli 0.155.0-alpha.16\\n'\n"); setExecutable(true) }
