@@ -40,6 +40,8 @@ internal fun PluginsPane(state: AppState) {
             PluginTabs(listOf("插件市场" to Icons.Outlined.Storefront, "已安装" to Icons.Outlined.Extension),
                 if (state.pluginMarketplace) 0 else 1) { state.pluginMarketplace = it == 0 }
             if (state.pluginLocation != "本地") Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(if (state.pluginMarketplace) "目录来源" else "原生安装记录", Modifier.align(Alignment.CenterVertically),
+                    style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
                 listOf("codex" to "Codex", "claude" to "Claude Code").forEach { (engine, label) ->
                     FilterChip(state.pluginCatalogRuntime == engine, { state.pluginCatalogRuntime = engine },
                         label = { Text(label) }, leadingIcon = { RunnerBrandIcon(engine, Modifier.size(18.dp)) })
