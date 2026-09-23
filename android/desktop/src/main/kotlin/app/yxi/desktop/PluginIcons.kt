@@ -1,0 +1,124 @@
+package app.yxi.desktop
+
+import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import org.jetbrains.skia.Data
+import org.jetbrains.skia.EncodedImageFormat
+import org.jetbrains.skia.Image
+import org.jetbrains.skia.Surface
+import org.jetbrains.skia.svg.SVGDOM
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URI
+import java.security.MessageDigest
+
+/** Only catalog publisher assets and icons declared by the publisher website are used. */
+internal class PluginIconLoader(private val cache: File, private val fetch: (String) -> ByteArray = ::download) {
+    private val slots = Semaphore(4)
+    suspend fun load(plugin: NativePlugin, dark: Boolean): ByteArray? = slots.withPermit { withContext(Dispatchers.IO) {
+        val urls = listOfNotNull(if (dark) plugin.iconUrlDark else null, plugin.iconUrl, plugin.composerIconUrl).distinct()
+        val key = MessageDigest.getInstance("SHA-256").digest((urls.joinToString() + plugin.name + plugin.websiteUrl + dark).toByteArray())
+            .joinToString("") { "%02x".format(it) }
+        val saved = File(cache, "$key.png")
+        if (saved.isFile && saved.length() <= 512 * 1024 && System.currentTimeMillis() - saved.lastModified() < 7L * 86400000) {
+            runCatching { render(saved.readBytes()) }.getOrNull()?.let { return@withContext it }
+        }
+        fun store(bytes: ByteArray): ByteArray {
+            runCatching {
+                cache.mkdirs(); saved.writeBytes(bytes)
+                var size = 0L
+                cache.listFiles().orEmpty().filter { it.name.matches(Regex("[a-f0-9]{64}\\.png")) }.sortedByDescending { it.lastModified() }.forEach {
+                    size += it.length(); if (size > 32 * 1024 * 1024) it.delete()
+                }
+            }
+            return bytes
+        }
+        val bundled = when {
+            plugin.name == "canva" && hostMatches(plugin.websiteUrl, "canva.com") -> "canva.ico"
+            plugin.name == "gmail" && hostMatches(plugin.websiteUrl, "google.com") -> "gmail.ico"
+            else -> null
+        }
+        if (bundled != null) javaClass.getResourceAsStream("/app/yxi/desktop/plugin-icons/$bundled")?.use { source ->
+            runCatching { render(source.readBytes()) }.getOrNull()?.let { return@withContext store(it) }
+        }
+        for (url in urls) {
+            currentCoroutineContext().ensureActive()
+            runCatching { render(fetch(checkedUrl(url).toString())) }.getOrNull()?.let { return@withContext store(it) }
+        }
+        val website = runCatching { checkedUrl(plugin.websiteUrl ?: return@withContext null) }.getOrNull() ?: return@withContext null
+        val declared = runCatching { websiteIcons(website, fetch(website.toString()).toString(Charsets.UTF_8)) }.getOrDefault(emptyList())
+        for (url in (declared + website.resolve("/favicon.ico").toString()).distinct().take(5)) {
+            currentCoroutineContext().ensureActive()
+            runCatching { render(fetch(checkedUrl(url).toString())) }.getOrNull()?.let { return@withContext store(it) }
+        }
+        null
+    } }
+    companion object {
+        internal fun hostMatches(url: String?, domain: String): Boolean {
+            val host = runCatching { checkedUrl(url ?: return false).host.lowercase() }.getOrNull() ?: return false
+            return host == domain || host.endsWith(".$domain")
+        }
+        internal fun checkedUrl(value: String): URI = URI(value).also {
+            require(it.scheme == "https" && !it.host.isNullOrBlank() && it.userInfo == null)
+            require(it.host.lowercase() !in setOf("localhost", "127.0.0.1", "[::1]"))
+        }
+        internal fun websiteIcons(base: URI, html: String): List<String> {
+            fun attribute(tag: String, key: String) = Regex("\\b$key\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))", RegexOption.IGNORE_CASE)
+                .find(tag)?.groupValues?.drop(1)?.firstOrNull { it.isNotEmpty() }
+            return Regex("<link\\b[^>]*>", RegexOption.IGNORE_CASE).findAll(html).mapNotNull { match ->
+                val rel = attribute(match.value, "rel").orEmpty().lowercase().split(Regex("\\s+"))
+                if (rel.none { it == "icon" || it.startsWith("apple-touch-icon") }) return@mapNotNull null
+                val href = attribute(match.value, "href")?.replace("&amp;", "&") ?: return@mapNotNull null
+                runCatching { checkedUrl(base.resolve(href).toString()).toString() }.getOrNull()?.let { url ->
+                    (if (rel.any { it.startsWith("apple-touch-icon") }) 0 else 1) to url
+                }
+            }.sortedBy { it.first }.map { it.second }.distinct().take(4).toList()
+        }
+        private fun download(url: String): ByteArray {
+            var uri = checkedUrl(url)
+            repeat(4) {
+                val connection = uri.toURL().openConnection() as HttpURLConnection
+                connection.instanceFollowRedirects = false; connection.connectTimeout = 4000; connection.readTimeout = 4000
+                connection.setRequestProperty("User-Agent", "Yxi/1.0 (plugin icon loader)")
+                try {
+                    val status = connection.responseCode
+                    if (status in setOf(301, 302, 303, 307, 308)) {
+                        uri = checkedUrl(uri.resolve(connection.getHeaderField("Location") ?: error("Missing redirect")).toString())
+                    } else {
+                        check(status == 200) { "Icon HTTP $status" }
+                        val bytes = connection.inputStream.use { stream -> stream.readNBytes(512 * 1024 + 1) }
+                        require(bytes.size <= 512 * 1024) { "Icon too large" }
+                        return bytes
+                    }
+                } finally { connection.disconnect() }
+            }
+            error("Too many icon redirects")
+        }
+        internal fun render(bytes: ByteArray): ByteArray {
+            require(bytes.size <= 512 * 1024)
+            val prefix = bytes.take(1024).toByteArray().toString(Charsets.UTF_8)
+            return Surface.makeRasterN32Premul(64, 64).use { surface ->
+                surface.canvas.clear(0)
+                if (prefix.contains("<svg", ignoreCase = true)) {
+                    val svg = bytes.toString(Charsets.UTF_8)
+                    require(!svg.contains("<!DOCTYPE", true) && !svg.contains("<!ENTITY", true))
+                    require(Regex("(?:\\b|:)href\\s*=\\s*[\"']([^\"']+)", RegexOption.IGNORE_CASE).findAll(svg)
+                        .all { it.groupValues[1].startsWith('#') || it.groupValues[1].startsWith("data:image/") })
+                    Data.makeFromBytes(bytes).use { data -> SVGDOM(data).use { dom ->
+                        require(dom.root != null)
+                        dom.setContainerSize(64f, 64f); dom.render(surface.canvas)
+                    } }
+                } else Image.makeFromEncoded(bytes).use { image ->
+                    require(image.width in 1..2048 && image.height in 1..2048)
+                    val scale = minOf(64f / image.width, 64f / image.height)
+                    surface.canvas.translate((64 - image.width * scale) / 2, (64 - image.height * scale) / 2)
+                    surface.canvas.scale(scale, scale); surface.canvas.drawImage(image, 0f, 0f)
+                }
+                surface.makeImageSnapshot().use { image -> image.encodeToData(EncodedImageFormat.PNG)!!.use { it.bytes } }
+            }
+        }
+    }
+}
+
+internal object PluginIcons { val loader by lazy { PluginIconLoader(File(Store.dir, "plugin-icons")) } }

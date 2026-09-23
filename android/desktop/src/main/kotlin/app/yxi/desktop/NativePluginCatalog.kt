@@ -84,7 +84,8 @@ internal class PluginRpc private constructor(output: InputStream,
 internal data class NativePlugin(val id: String, val name: String, val title: String, val description: String,
     val category: String, val marketplace: String, val marketplacePath: String?, val version: String,
     val installed: Boolean, val enabled: Boolean, val installable: Boolean, val iconUrl: String?,
-    val source: String, val authPolicy: String, val fingerprint: String) {
+    val source: String, val authPolicy: String, val fingerprint: String,
+    val websiteUrl: String? = null, val iconUrlDark: String? = null, val composerIconUrl: String? = null) {
     fun installParams() = JSONObject().put("pluginName", name).put("installAttemptId", UUID.randomUUID().toString()).apply {
         if (marketplacePath != null) put("marketplacePath", marketplacePath) else put("remoteMarketplaceName", marketplace)
     }
@@ -111,7 +112,8 @@ internal data class NativePluginSnapshot(val entries: List<NativePlugin>, val er
                                 p.optString("installPolicy") in setOf("AVAILABLE", "INSTALLED_BY_DEFAULT") &&
                                 !p.optBoolean("mustShowInstallationInterstitial"),
                             ui.text("logoUrl") ?: ui.text("composerIconUrl"), source, p.optString("authPolicy"),
-                            listOf(name, market.getString("name"), market.text("path"), source, version).joinToString("\n")))
+                            listOf(name, market.getString("name"), market.text("path"), source, version).joinToString("\n"),
+                            websiteUrl = ui.text("websiteUrl"), iconUrlDark = ui.text("logoUrlDark"), composerIconUrl = ui.text("composerIconUrl")))
                     }
                 }
             }

@@ -17,7 +17,7 @@ class NativePluginCatalogTest {
     }
     @Test fun `catalog preserves machine-local install state and policy`() {
         val raw = JSONObject("""{"marketplaces":[{"name":"fixture","path":"/tmp/market/.agents/plugins/marketplace.json","plugins":[
-            {"id":"gmail@fixture","name":"gmail","installed":false,"enabled":false,"installPolicy":"AVAILABLE","authPolicy":"ON_INSTALL","source":{"type":"remote"},"interface":{"displayName":"Gmail","shortDescription":"Mail","category":"Communication","logoUrl":"https://example.org/logo.png"}},
+            {"id":"gmail@fixture","name":"gmail","installed":false,"enabled":false,"installPolicy":"AVAILABLE","authPolicy":"ON_INSTALL","source":{"type":"remote"},"interface":{"displayName":"Gmail","shortDescription":"Mail","category":"Communication","logoUrl":"https://example.org/logo.png","websiteUrl":"https://workspace.google.com/products/gmail/","logoUrlDark":"https://example.org/dark.svg","composerIconUrl":"https://example.org/composer.png"}},
             {"id":"blocked@fixture","name":"blocked","installed":false,"enabled":false,"installPolicy":"AVAILABLE","availability":"DISABLED_BY_ADMIN","source":{"type":"remote"}},
             {"id":"interstitial@fixture","name":"interstitial","installed":false,"enabled":false,"installPolicy":"AVAILABLE","mustShowInstallationInterstitial":true,"source":{"type":"remote"}},
             {"id":"sample@fixture","name":"sample","installed":true,"enabled":false,"installPolicy":"AVAILABLE","source":{"type":"local","path":"/tmp/sample"}}
@@ -25,6 +25,9 @@ class NativePluginCatalogTest {
         val snapshot = NativePluginSnapshot.parse(raw)
         assertEquals(1, snapshot.errors)
         assertEquals("Gmail", snapshot.entries[0].title)
+        assertEquals("https://workspace.google.com/products/gmail/", snapshot.entries[0].websiteUrl)
+        assertEquals("https://example.org/dark.svg", snapshot.entries[0].iconUrlDark)
+        assertEquals("https://example.org/composer.png", snapshot.entries[0].composerIconUrl)
         assertTrue(snapshot.entries[0].installable)
         assertFalse(snapshot.entries[1].installable)
         assertFalse(snapshot.entries[2].installable)

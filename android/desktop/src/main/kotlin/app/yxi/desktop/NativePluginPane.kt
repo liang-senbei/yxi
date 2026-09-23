@@ -29,7 +29,7 @@ internal fun NativePluginPane(state: AppState, conn: Conn?, installedOnly: Boole
         Row(verticalAlignment = Alignment.CenterVertically) {
             RunnerBrandIcon("codex", Modifier.size(20.dp))
             Spacer(Modifier.width(8.dp))
-            Text("$target · Codex", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+            Text("适用于 Codex", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
             TextButton({ store.refresh() }, enabled = !store.busy) { Text("刷新") }
         }
         if (store.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -59,7 +59,7 @@ internal fun NativePluginPane(state: AppState, conn: Conn?, installedOnly: Boole
                             row.forEach { p ->
                                 Surface(onClick = { selected = p }, modifier = Modifier.weight(1f), shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp), color = t.surface1) {
                                     Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                        CatalogLogo(p.iconUrl)
+                                        CatalogLogo(p)
                                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                             Text(p.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                             Text(p.description.ifBlank { p.marketplace }, style = MaterialTheme.typography.bodySmall,
@@ -81,7 +81,10 @@ internal fun NativePluginPane(state: AppState, conn: Conn?, installedOnly: Boole
         AlertDialog(onDismissRequest = { selected = null }, title = { Text(p.title) }, text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(p.description.ifBlank { p.name })
-                Text("应用位置：$target\n运行器：Codex\n来源：${p.marketplace}\n版本：${p.version.ifBlank { "未提供" }}")
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    CatalogLogo(p); Text(p.title)
+                }
+                Text("安装位置：$target\n供 Codex 会话使用\n来源：${p.marketplace}\n版本：${p.version.ifBlank { "未提供" }}")
                 Text(if (conn == null) "本地插件供这台电脑共用，不随服务器切换。" else "安装到当前服务器的 Codex。其他服务器需分别安装。")
                 Text("服务插件可能还需账号授权。同一账号的云端连接可能共享；已安装不代表服务已连接。", color = t.textMuted)
                 if (!p.installable && !p.installed) Text("此插件需在原生 Codex 中处理权限或安装说明。", color = t.warning)
@@ -105,25 +108,18 @@ internal fun categoryLabel(value: String) = when (value.lowercase()) {
 }
 
 /** Publisher URLs from the live catalog; never substitute an unrelated brand asset. */
-@Composable private fun CatalogLogo(url: String?) {
-    var bitmap by remember(url) { mutableStateOf<ImageBitmap?>(null) }
-    LaunchedEffect(url) {
+@Composable internal fun CatalogLogo(plugin: NativePlugin) {
+    val dark = Tokens.current.dark
+    var bitmap by remember(plugin, dark) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(plugin, dark) {
         bitmap = withContext(Dispatchers.IO) {
             runCatching {
-                val uri = java.net.URI(url ?: return@withContext null)
-                require(uri.scheme == "https" && uri.host != null && uri.userInfo == null)
-                val connection = uri.toURL().openConnection() as java.net.HttpURLConnection
-                connection.instanceFollowRedirects = false; connection.connectTimeout = 5000; connection.readTimeout = 5000
-                try {
-                    require(connection.responseCode == 200)
-                    val bytes = connection.inputStream.use { it.readNBytes(1024 * 1024 + 1) }
-                    require(bytes.size <= 1024 * 1024)
-                    org.jetbrains.skia.Image.makeFromEncoded(bytes).use { it.toComposeImageBitmap() }
-                } finally { connection.disconnect() }
+                val bytes = PluginIcons.loader.load(plugin, dark) ?: return@withContext null
+                org.jetbrains.skia.Image.makeFromEncoded(bytes).use { it.toComposeImageBitmap() }
             }.getOrNull()
         }
     }
     val image = bitmap
-    if (image != null) Image(image, null, Modifier.size(28.dp))
-    else Icon(Icons.Outlined.Extension, null, Modifier.size(28.dp), tint = Tokens.current.textMuted)
+    if (image != null) Image(image, "${plugin.title} 图标", Modifier.size(28.dp))
+    else Icon(Icons.Outlined.Extension, "${plugin.title} 图标暂不可用", Modifier.size(28.dp), tint = Tokens.current.textMuted)
 }
