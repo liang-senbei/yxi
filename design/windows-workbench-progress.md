@@ -1,3 +1,11 @@
+## OpenCode 共享 MCP 动态加载与原生验证
+
+`b20f59e`接入OpenCode /mcp状态和动态add，并新增OpenCodeMcpBindings。限定机器及desiredRunner、检查原生同名冲突；服务级互斥保护检查/写入/读回；发送前写独立操作记录，失败持久化unknown，禁止用旧记录重发或覆盖旧进程记录。只读observedStatus不会自动确认或重试。当前为自有进程内动态配置，不改原生全局配置，不把connected当作OAuth成功或模型调用证明。
+
+构建run.Grx8nD、OpenCodeMcpBindingsTest run.DT5qsp 1项通过。`15e9bb8`纳入yxi_entertainment交付并经主线程审读的标准库stdio MCP echo fixture及原生测试。第一次run.BDp539已连接成功，但项目配置字节不变断言失败：OpenCode启动时给空配置自动补schema。`be95867`改为初始完整schema配置，继续保留完整字节比较；构建run.xu5Qlu与真实OpenCode1.18.32测试run.E64fGi 1项通过、无跳过，验证握手/工具发现、操作记录connected、拒绝重复加载、项目配置未改变。未进行模型工具调用。
+
+官方实现核对：OpenCode v1.18.32的server/routes/instance/httpapi/handlers/mcp.ts与mcp/index.ts，add更新InstanceState.config而非调用全局配置写入。仍需Claude/Codex接入、三者实际调用同一资源、升级/停用/卸载及共享插件UI。yxi_pilot审查确认版本替换/回滚模型缺口；其enabled覆盖风险已由当前拒绝原生同名覆盖防住，后续更新适配仍需保留用户原生状态。未发布。
+
 ## 共享 MCP 资源登记与原生配置投影
 
 `a301384`新增 SharedMcpDefinition/SharedMcpRegistry/SharedMcpSettings。资源身份包含主机、插件、来源及版本，同机名称冲突和过期revision禁止覆盖；定义保存一次，desiredRunners分别登记Claude/Codex/OpenCode意向。提供stdio argv和HTTP URL到三家配置字段的投影，不拼接shell命令，不读取或复制原生账号令牌。索引损坏保留原件，备份恢复后要求核对。当前没有把desired称为applied/verified。
