@@ -1,6 +1,8 @@
 package app.yxi.desktop
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
@@ -84,7 +86,8 @@ import java.io.File
                     Text(selector.name + " · " + (selector.values.firstOrNull { it.id == selector.current }?.name ?: selector.current))
                 }
                 DropdownMenu(configMenu == selector.id, { configMenu = null }) {
-                    selector.values.forEach { option -> DropdownMenuItem(text = { Text(option.name) }, onClick = {
+                    selector.values.forEach { option -> DropdownMenuItem(text = { Text(option.name) },
+                        modifier = if (option.id == selector.current) Modifier.background(Tokens.current.surface2, RoundedCornerShape(8.dp)) else Modifier, onClick = {
                         configMenu = null
                         scope.launch { runCatching { controller.changeConfig(selector.id, option.id) }.onFailure { error = it.message.orEmpty() } }
                     }) }
@@ -100,7 +103,8 @@ import java.io.File
                     Text("模式 · " + (options.firstOrNull { it.optString("id") == current }?.optString("name")?.takeIf { it.isNotBlank() } ?: current))
                 }
                 DropdownMenu(modeMenu, { modeMenu = false }) {
-                    options.forEach { option -> DropdownMenuItem(text = { Text(option.optString("name").ifBlank { option.getString("id") }) }, onClick = {
+                    options.forEach { option -> DropdownMenuItem(text = { Text(option.optString("name").ifBlank { option.getString("id") }) },
+                        modifier = if (option.optString("id") == current) Modifier.background(Tokens.current.surface2, RoundedCornerShape(8.dp)) else Modifier, onClick = {
                         modeMenu = false
                         scope.launch { runCatching { controller.changeMode(option.getString("id")) }.onFailure { error = it.message.orEmpty() } }
                     }) }

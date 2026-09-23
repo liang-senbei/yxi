@@ -21,12 +21,17 @@ class AcpConversationUiTest {
         override val output = PipedInputStream(65536)
         private val pipe = PipedOutputStream(output)
         val writes = CopyOnWriteArrayList<JSONObject>()
+        fun config(model: String) = JSONArray().put(JSONObject().put("id", "model").put("name", "模型").put("category", "model")
+            .put("type", "select").put("currentValue", model).put("options", JSONArray()
+                .put(JSONObject().put("value", "provider/model-a").put("name", "Model A"))
+                .put(JSONObject().put("value", "provider/model-b").put("name", "Model B"))))
         override suspend fun write(text: String): Boolean {
             val request = JSONObject(text); writes.add(request)
             val result = when (request.optString("method")) {
                 "initialize" -> JSONObject().put("protocolVersion", 1)
-                "session/new" -> JSONObject().put("sessionId", "ui-session").put("modes", JSONObject().put("currentModeId", "ask")
+                "session/new" -> JSONObject().put("sessionId", "ui-session").put("configOptions", config("provider/model-a")).put("modes", JSONObject().put("currentModeId", "ask")
                     .put("availableModes", JSONArray().put(JSONObject().put("id", "ask").put("name", "请求批准"))))
+                "session/set_config_option" -> JSONObject().put("configOptions", config(request.getJSONObject("params").getString("value")))
                 else -> null
             }
             if (result != null) emit(JSONObject().put("id", request.get("id")).put("result", result))
@@ -53,6 +58,18 @@ class AcpConversationUiTest {
                     YxiTheme { Surface { AcpConversationPane(state, record) } }
                     LaunchedEffect(Unit) {
                         try {
+                            delay(700)
+                            suspend fun click(x: Int, y: Int) = withContext(Dispatchers.IO) { Robot().apply {
+                                mouseMove(window.locationOnScreen.x + x, window.locationOnScreen.y + y)
+                                mousePress(InputEvent.BUTTON1_DOWN_MASK); mouseRelease(InputEvent.BUTTON1_DOWN_MASK)
+                            }; Unit }
+                            click(100, 155); delay(200)
+                            ImageIO.write(Robot().createScreenCapture(java.awt.Rectangle(window.locationOnScreen, window.size)), "png", File("/results/acp-model-menu.png"))
+                            click(100, 250)
+                            withTimeout(3000) { while (acpConfigSelectors(controller.configOptions).single().current != "provider/model-b") delay(20) }
+                            val selection = fixture.writes.single { it.optString("method") == "session/set_config_option" }.getJSONObject("params")
+                            assertEquals("model", selection.getString("configId"))
+                            assertEquals("provider/model-b", selection.getString("value"))
                             fixture.emit(JSONObject().put("id", "approval-1").put("method", "session/request_permission").put("params", JSONObject()
                                 .put("sessionId", "ui-session").put("toolCall", JSONObject().put("title", "允许读取项目文件？"))
                                 .put("options", JSONArray().put(JSONObject().put("optionId", "once").put("name", "允许").put("kind", "allow_once"))
