@@ -1,3 +1,9 @@
+## 2026-09-24 Gemini 官方原生 ACP 握手
+
+- `87171ee142a532405e0c5f468b061c14123af41c` 增加 Gemini 原生测试镜像：固定 Node 22.14.0 与官方 npm @google/gemini-cli 0.34.0，包锁保存在镜像 /opt/gemini/runtime/package-lock.json；runner 校验专属 runtime/source 标签。用户已安装版本的官方 config.ts 确认 --acp 为当前入口。
+- 产品构建 `run.2o1a5T`，Gemini 变体构建成功，GeminiAcpNativeTest `run.gD3tSz` 1 项通过，无失败/跳过。真实 Node+官方入口经 LocalAcpTransport 协商协议1，返回认证方法与能力，未创建 oauth_creds.json，关闭后所属进程退出。
+- 原生提供 Google 登录、Gemini API Key、Vertex AI、Gateway；仅表示运行器可提供的认证方式，不证明订阅权益/登录成功。证据 `.artifacts/gemini-native/initialize.json` 与 build.log。三种 ACP 运行器现均有真实握手证据，但真实账号登录、完整模型请求和 Windows/macOS 仍待验收。未发布。
+
 ## 2026-09-24 Hermes 原生终端配置入口
 
 - `cd0adf1d3805d33d8d6a5d901ab6b7586cb2b00b` 原生测试声明 auth.terminal，从固定 Hermes 0.21.4 的 initialize 读取 terminal 方法，使用产品 acpTerminalAuthPlan 与 LocalAuthenticationTerminal 启动同一运行器。实际显示 Select provider 菜单并保持交互等待，随后关闭；未选择供应商、未填写凭据。
