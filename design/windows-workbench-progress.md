@@ -1,3 +1,9 @@
+## 服务器 OpenCode 新建入口与任务工作台
+
+`7e65b84`接入 RemoteOpenCodeTasks/RemoteOpenCodePane，服务器主新建弹窗的OpenCode选择可进入模型读取与创建，创建提示词保存草稿而非立即运行。远端任务按 hostKey、用户、原生数据目录和会话 ID 登记；侧栏列出并搜索服务器OpenCode任务。复用本地OpenCodeConversationPane和控制器处理聊天/审批/问题/停止。关闭/断开连接释放所属服务。终端DesktopLaunchPlan仍只支持两种，未把OpenCode错误塞进Claude终端路径；独立worktree/协作组创建未开放。
+
+构建 run.h90CmK 通过。原生SSH任务模型读取/创建/保存/主机过滤与生命周期 run.KN4hTk 1项、含主机身份隔离的旧索引回归 run.IMfVzb 6项、新建弹窗既有回归 run.EJaucu 2项、共享聊天真实窗口回归 run.o16Lbw 1项全部通过，无跳过。原生运行器1.18.32在隔离容器中执行；新远端模型选择页完整GUI点击、Windows实机、真实订阅推理以及跨重启继续仍待验收。项目分组新建入口的OpenCode回调尚需统一，当前主侧栏入口已接通。未发布。
+
 ## OpenCode 远端 SSH 服务与转发
 
 `fecb50b`新增 RemoteOpenCodeServer，独立 SSH exec 启动监督进程、通过stdin传递随机服务密码、只监听远端回环地址，再租用独立本地转发。检查启动身份/工作目录及认证health。关闭只释放此次服务/转发，stdin断开或SSH关闭触发监督进程清理自有进程组。尚未挂到服务器新建入口。
