@@ -53,7 +53,6 @@ internal fun PluginsPane(state: AppState) {
             return@Column
         }
         if (state.pluginLocation == "本地") {
-            if ("Android 模拟器 安卓".contains(state.pluginMarketQuery.trim(), true)) LocalEmulatorPluginCard { state.showAndroidEmulator = true }
             Box(Modifier.weight(1f)) { NativePluginPane(state, null, installedOnly = true) }
         } else {
             if (conn?.status == Conn.Status.Connected) {

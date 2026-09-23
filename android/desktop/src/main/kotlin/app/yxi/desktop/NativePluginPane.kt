@@ -44,26 +44,32 @@ internal fun NativePluginPane(state: AppState, conn: Conn?, installedOnly: Boole
         val query = state.pluginMarketQuery.trim()
         val matching = store.entries.filter { (!installedOnly || it.installed) &&
             "${it.title} ${it.name} ${it.description} ${it.category} ${categoryLabel(it.category)} ${it.marketplace}".contains(query, true) }
-        val counts = matching.groupingBy { categoryLabel(it.category) }.eachCount()
+        val builtinMatches = conn == null && "Android 模拟器 安卓模拟器 开发工具 本地 Windows".contains(query, true)
+        val total = matching.size + (if (builtinMatches) 1 else 0)
+        val counts = matching.groupingBy { categoryLabel(it.category) }.eachCount().toMutableMap().apply {
+            if (builtinMatches) this["开发工具"] = getOrDefault("开发工具", 0) + 1
+        }
         LaunchedEffect(counts.keys) { if (category != "全部" && category !in counts) category = "全部" }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             (listOf("全部") + PluginCategories.order.filter { it in counts }).forEach { label ->
-                FilterChip(category == label, { category = label }, label = { Text("$label ${if (label == "全部") matching.size else counts[label] ?: 0}") })
+                FilterChip(category == label, { category = label }, label = { Text("$label ${if (label == "全部") total else counts[label] ?: 0}") })
             }
         }
         val shown = matching.filter { category == "全部" || categoryLabel(it.category) == category }
-        Text("${shown.size} 个插件", style = MaterialTheme.typography.labelMedium, color = t.textMuted)
+        val showBuiltin = builtinMatches && category in setOf("全部", "开发工具")
+        Text("${shown.size + (if (showBuiltin) 1 else 0)} 个插件", style = MaterialTheme.typography.labelMedium, color = t.textMuted)
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
             val columns = if (maxWidth >= 760.dp) 2 else 1
             val grouped = shown.groupBy { categoryLabel(it.category) }
-            val groups = PluginCategories.order.filter { it in grouped }.associateWith { grouped.getValue(it) }
+            val groups = PluginCategories.order.filter { it in grouped || it == "开发工具" && showBuiltin }.associateWith { grouped[it].orEmpty() }
             LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (!store.busy && shown.isEmpty()) item {
+                if (!store.busy && shown.isEmpty() && !showBuiltin) item {
                     Text(if (installedOnly) "这台机器暂无匹配的已安装 Codex 插件" else "暂无匹配插件；目录由这台机器的 Codex 登录和市场配置提供",
                         color = t.textMuted, modifier = Modifier.padding(vertical = 20.dp))
                 }
                 groups.forEach { (category, plugins) ->
                     item("category:$category") { Text(category, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 14.dp, bottom = 6.dp)) }
+                    if (category == "开发工具" && showBuiltin) item("builtin:android") { LocalEmulatorPluginCard { state.showAndroidEmulator = true } }
                     items(plugins.sortedBy { it.title.lowercase() }.chunked(columns), key = { row -> row.joinToString { it.id } }) { row ->
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                             row.forEach { p ->

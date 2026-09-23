@@ -17,11 +17,6 @@ import androidx.compose.ui.unit.dp
 internal fun PluginMarketplacePane(state: AppState, conn: Conn?) {
     val t = Tokens.current
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        val query = state.pluginMarketQuery.trim()
-        val matchesLocal = "Android 模拟器 安卓模拟器 开发工具 本地 Windows".contains(query, ignoreCase = true)
-        if (state.pluginLocation == "本地" && matchesLocal) {
-            LocalEmulatorPluginCard { state.showAndroidEmulator = true }
-        }
         if (state.pluginLocation == "本地") {
             Box(Modifier.weight(1f).fillMaxWidth()) { NativePluginPane(state, null, installedOnly = false) }
         } else {
