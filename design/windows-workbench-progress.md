@@ -1,3 +1,8 @@
+## 2026-09-24 认证窗口取消与进程树回收
+
+- `3acf5073f6c1fd8dc616c0038cf4a085aa78d1b3` 扩展真实窗口测试：PTY 程序启动等待子进程，发送 WINDOW_CLOSING 后必须返回取消而非成功，并等待父/子 ProcessHandle 均不再存活。
+- 构建 `run.sSJmcj`，AcpAuthenticationDialogTest `run.t0zPhP` 2 项通过，无失败/跳过，正常键盘确认和取消回收分别覆盖。测试在隔离 Linux 环境；Windows/macOS 进程树与真实 Hermes 配置仍待验收。未发布。
+
 ## 2026-09-24 认证终端窗口真实键盘验收
 
 - `8436b93716cde4f18081144d75c8237edfbb3337` 增加 AcpAuthenticationDialogTest：真实 PTY fixture 要求 stdin/stdout 为 TTY，在实际 JediTerm 窗口显示中文+ANSI 颜色，Robot 点击并输入 ok/Enter，断言原生接收 ok 和窗口回传退出码0。
