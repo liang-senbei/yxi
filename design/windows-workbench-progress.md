@@ -1,3 +1,9 @@
+## 2026-09-24 ACP 草稿与键盘发送
+
+- `7f0a50610c37ef95685003b59be3bedf781337c8` 输入框改用共享 chatDrafts/TextFieldValue，保留页面切换草稿；Enter/NumPadEnter 发送、Shift+Enter 换行、composition 非空时不截获确认键。发送先同步入持久队列，成功后清空草稿并交由控制器作用域执行。
+- 构建 `run.g9K2nO`；AcpConversationUiTest `run.Wya9P4` 1 项通过，无失败/跳过：真实模型菜单点击、审批 once、Shift+Enter 未发请求、Enter 仅发送一次并完成队列。Windows 真实输入法尚未验证。
+- `.artifacts/acp-ui/acp-model-menu-selected.png` 已目视核对，确认入口和选中行均为灰色小圆角，补齐上轮颜色修改的截图验证。未发布。
+
 ## 2026-09-24 ACP 模型菜单点击与选中态
 
 - `482e0db` 扩展 GUI fixture：实际点开模型菜单并选择 Model B，断言请求 configId=model/value=provider/model-b，随后继续审批 once 点击。首次截图未覆盖弹出层且触发器仍有蓝色点击背景。
