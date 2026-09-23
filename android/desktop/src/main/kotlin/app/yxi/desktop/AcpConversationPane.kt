@@ -87,7 +87,7 @@ import java.io.File
                 })
                 DropdownMenu(configMenu == selector.id, { configMenu = null }) {
                     selector.values.forEach { option -> DropdownMenuItem(text = { Text(option.name) },
-                        modifier = if (option.id == selector.current) Modifier.background(Tokens.current.surface2, RoundedCornerShape(8.dp)) else Modifier, onClick = {
+                        modifier = if (option.id == selector.current) Modifier.background(Tokens.current.selected, RoundedCornerShape(8.dp)) else Modifier, onClick = {
                         configMenu = null
                         scope.launch { runCatching { controller.changeConfig(selector.id, option.id) }.onFailure { error = it.message.orEmpty() } }
                     }) }
@@ -104,7 +104,7 @@ import java.io.File
                 })
                 DropdownMenu(modeMenu, { modeMenu = false }) {
                     options.forEach { option -> DropdownMenuItem(text = { Text(option.optString("name").ifBlank { option.getString("id") }) },
-                        modifier = if (option.optString("id") == current) Modifier.background(Tokens.current.surface2, RoundedCornerShape(8.dp)) else Modifier, onClick = {
+                        modifier = if (option.optString("id") == current) Modifier.background(Tokens.current.selected, RoundedCornerShape(8.dp)) else Modifier, onClick = {
                         modeMenu = false
                         scope.launch { runCatching { controller.changeMode(option.getString("id")) }.onFailure { error = it.message.orEmpty() } }
                     }) }
