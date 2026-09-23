@@ -53,6 +53,7 @@ import kotlinx.coroutines.launch
                         else OutlinedButton({ links.connect(conn) }, enabled = record?.ready == true && key !in links.busy) { Text("连接") }
                         TextButton({
                             state.localAgentPrompt = "请检查此电脑连接 ${conn.host.label} 的部署环境。只做诊断并说明修复步骤，不修改系统、SSH 公钥、服务或防火墙。\n当前状态：${links.status[key].orEmpty()}\n需要 OpenSSH Server、本机 22 端口，以及反向端口 ${record?.reversePort ?: 2222}。"
+                            state.selectLocal()
                             state.page = Page.LocalAgents
                         }) { Text("本机 AI 协助") }
                     }

@@ -28,7 +28,7 @@ class LocalHistoryNativeTest {
         val root = Files.createTempDirectory(Path.of("/sandbox/tmp"), "local-history-").toFile()
         val bin = File(home, ".local/bin").apply { mkdirs() }
         Files.createSymbolicLink(File(bin, "codex").toPath(), Path.of("/opt/native/claude"))
-        val stub = root.resolve("server.py").apply { writeText(javaClass.getResource("/codex_responses_stub.py")!!.readText()) }
+        val stub = root.resolve("server.py").apply { writeText(LocalHistoryNativeTest::class.java.getResource("/codex_responses_stub.py")!!.readText()) }
         val server = ProcessBuilder("python3", stub.path, root.path, "fixture-key-0").redirectErrorStream(true).redirectOutput(root.resolve("server.log")).start()
         var cli: Process? = null
         val state = AppState()
