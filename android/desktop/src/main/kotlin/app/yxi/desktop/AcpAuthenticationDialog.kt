@@ -15,7 +15,7 @@ import kotlinx.coroutines.CancellationException
     AuthenticationTerminalDialog(plan, "运行器认证", { LocalAuthenticationTerminal.start(plan) }, finish)
 }
 
-@Composable internal fun AuthenticationTerminalDialog(identity: Any, title: String, start: suspend () -> AuthenticationTerminal, finish: (Int?, String?) -> Unit) {
+@Composable internal fun AuthenticationTerminalDialog(identity: Any, title: String, openTerminal: suspend () -> AuthenticationTerminal, finish: (Int?, String?) -> Unit) {
     var terminal by remember(identity) { mutableStateOf<AuthenticationTerminal?>(null) }
     var widget by remember(identity) { mutableStateOf<JediTermWidget?>(null) }
     DisposableEffect(identity) { onDispose { widget?.close(); terminal?.close() } }
@@ -28,9 +28,9 @@ import kotlinx.coroutines.CancellationException
         } }
         LaunchedEffect(identity) {
             try {
-                val owned = start()
+                val owned = openTerminal()
                 terminal = owned
-                widget = JediTermWidget(120, 30, TermSettings()).apply { setTtyConnector(owned); start() }
+                widget = JediTermWidget(120, 30, TermSettings()).apply { setTtyConnector(owned); this.start() }
                 finish(owned.awaitExit(), null)
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { finish(null, e.message ?: "无法打开认证终端") }
