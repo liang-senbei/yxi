@@ -11,6 +11,14 @@ import kotlin.test.*
 @EnabledIfEnvironmentVariable(named = "YXI_ISOLATED_TEST_RUN", matches = "[0-9a-f-]{36}")
 class LocalWorkspaceReadOnlyTest {
     @TempDir lateinit var root: File
+    @Test fun `Grok uses official native directory and does not confuse an npm package with the runtime`() {
+        val home = File(root, "user").apply { mkdirs() }
+        val binary = File(home, ".grok/bin/grok.exe").apply { parentFile.mkdirs(); writeText("fixture") }
+        val found = LocalRuntimeDiscovery.candidates(home, emptyMap(), windows = true).single { it.engine == "grok" }
+        assertEquals(listOf(binary.canonicalPath), found.command)
+        assertEquals(File(home, ".grok").path, found.home)
+        assertEquals("Grok Build", LocalRuntimeDiscovery.title("grok"))
+    }
     @Test fun `Gemini npm discovery uses explicit Node argv and its native home override`() {
         val home = File(root, "user").apply { mkdirs() }
         val npm = File(root, "Node with spaces").apply { mkdirs() }

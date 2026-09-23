@@ -19,6 +19,7 @@ internal object RunnerCatalog {
         val command = requireNotNull(find(id)?.command) { "此运行器的启动命令尚未核对" }
         val candidates = listOf(".local/bin/$command") + when (id) {
             "opencode" -> listOf(".opencode/bin/opencode")
+            "grok" -> listOf(".grok/bin/grok")
             "hermes" -> listOf(".hermes/bin/hermes", ".hermes/hermes-agent/venv/bin/hermes")
             else -> emptyList()
         }

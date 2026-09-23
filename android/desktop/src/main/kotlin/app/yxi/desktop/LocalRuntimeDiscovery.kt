@@ -13,8 +13,8 @@ internal data class LocalRuntimeInstallation(val engine: String, val source: Str
 
 /** Discovery never executes npm/PowerShell shims or installs anything. Only version probes run. */
 internal object LocalRuntimeDiscovery {
-    val engines = listOf("codex", "claude", "opencode", "gemini", "hermes")
-    fun title(engine: String) = when (engine) { "codex" -> "Codex"; "claude" -> "Claude Code"; "opencode" -> "OpenCode"; "gemini" -> "Gemini"; "hermes" -> "Hermes"; else -> engine }
+    val engines = listOf("codex", "claude", "opencode", "gemini", "grok", "hermes")
+    fun title(engine: String) = when (engine) { "codex" -> "Codex"; "claude" -> "Claude Code"; "opencode" -> "OpenCode"; "gemini" -> "Gemini"; "grok" -> "Grok Build"; "hermes" -> "Hermes"; else -> engine }
 
     internal fun candidates(userHome: File = File(System.getProperty("user.home")), env: Map<String, String> = System.getenv(),
         windows: Boolean = System.getProperty("os.name").startsWith("Windows")): List<LocalRuntimeInstallation> {
@@ -26,6 +26,7 @@ internal object LocalRuntimeDiscovery {
             "codex" -> env["CODEX_HOME"] ?: File(userHome, ".codex").path
             "claude" -> env["CLAUDE_CONFIG_DIR"] ?: File(userHome, ".claude").path
             "gemini" -> File(env["GEMINI_CLI_HOME"]?.takeIf { it.isNotBlank() } ?: userHome.path, ".gemini").path
+            "grok" -> File(userHome, ".grok").path
             "hermes" -> env["HERMES_HOME"] ?: if (windows && env["LOCALAPPDATA"] != null) File(env.getValue("LOCALAPPDATA"), "hermes").path else File(userHome, ".hermes").path
             else -> File(env["XDG_DATA_HOME"] ?: File(userHome, ".local/share").path, "opencode").path
         }
@@ -36,6 +37,7 @@ internal object LocalRuntimeDiscovery {
         for (engine in engines) {
             val nativeDirs = roots + when (engine) {
                 "opencode" -> listOf(File(userHome, ".opencode/bin"))
+                "grok" -> listOfNotNull(File(userHome, ".grok/bin"), env["GROK_BIN_DIR"]?.let { File(it).takeIf { file -> file.isAbsolute } })
                 "hermes" -> listOf(File(dataHome(engine), "bin"), File(dataHome(engine), if (windows) "hermes-agent/venv/Scripts" else "hermes-agent/venv/bin"))
                 else -> emptyList()
             }
@@ -43,7 +45,7 @@ internal object LocalRuntimeDiscovery {
                 val binary = File(dir, engine + if (windows) ".exe" else "")
                 if (windows || binary.canExecute()) add(engine, "本机安装", listOf(binary))
             }
-            if (windows && engine != "hermes") {
+            if (windows && engine in setOf("codex", "claude", "opencode", "gemini")) {
                 val packageName = when (engine) { "codex" -> "@openai/codex"; "claude" -> "@anthropic-ai/claude-code"; "gemini" -> "@google/gemini-cli"; else -> "opencode-ai" }
                 roots.forEach { dir ->
                     val packageDir = File(dir, "node_modules/$packageName")
@@ -93,6 +95,7 @@ internal object LocalRuntimeDiscovery {
             "codex" -> System.getenv("CODEX_HOME") ?: File(home, ".codex").path
             "claude" -> System.getenv("CLAUDE_CONFIG_DIR") ?: File(home, ".claude").path
             "gemini" -> File(System.getenv("GEMINI_CLI_HOME")?.takeIf { it.isNotBlank() } ?: home.path, ".gemini").path
+            "grok" -> File(home, ".grok").path
             "hermes" -> System.getenv("HERMES_HOME") ?: if (windows && System.getenv("LOCALAPPDATA") != null) File(System.getenv("LOCALAPPDATA"), "hermes").path else File(home, ".hermes").path
             else -> File(System.getenv("XDG_DATA_HOME") ?: File(home, ".local/share").path, "opencode").path
         }
@@ -103,7 +106,7 @@ internal object LocalRuntimeDiscovery {
         var process: Process? = null
         val output = kotlin.io.path.createTempFile("yxi-version-", ".txt").toFile()
         try {
-            process = ProcessBuilder(candidate.command + "--version").directory(File(System.getProperty("user.home")))
+            process = ProcessBuilder(candidate.command + if (candidate.engine == "grok") listOf("--no-auto-update", "version") else listOf("--version")).directory(File(System.getProperty("user.home")))
                 .redirectError(ProcessBuilder.Redirect.DISCARD).redirectOutput(output).start()
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
             while (!process.waitFor(100, TimeUnit.MILLISECONDS)) {
