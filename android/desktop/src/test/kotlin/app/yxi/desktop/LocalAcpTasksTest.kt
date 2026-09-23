@@ -13,6 +13,7 @@ import kotlin.test.*
 class LocalAcpTasksTest {
     @TempDir lateinit var root: File
     private class Fixture(val failCreate: Boolean = false) : AcpTransport {
+        var closed = false
         override val output = PipedInputStream(65536)
         private val pipe = PipedOutputStream(output)
         val methods = mutableListOf<String>()
@@ -28,7 +29,26 @@ class LocalAcpTasksTest {
             pipe.write((JSONObject().put("jsonrpc", "2.0").put("id", request.get("id")).put("result", result).toString() + "\n").toByteArray()); pipe.flush()
             return true
         }
-        override fun close() { pipe.close(); output.close() }
+        override fun close() { closed = true; pipe.close(); output.close() }
+    }
+    @Test fun `abandoning a preparation closes only its client and not an owned conversation`() = runBlocking(Dispatchers.Swing) {
+        val fixtures = mutableListOf<Fixture>()
+        val runtime = LocalRuntimeInstallation("hermes", "fixture", listOf("fixture"), root.path, "1")
+        LocalAcpTasks(InstructionQueue(File(root, "cancel-queue.json")), File(root, "cancel-index.json")) { _, _ ->
+            val fixture = Fixture().also { fixtures.add(it) }
+            AcpClient(fixture).also { it.initialize() }
+        }.use { tasks ->
+            tasks.prepare(runtime, root.path)
+            tasks.abandonPreparation()
+            assertTrue(fixtures.first().closed)
+            assertNull(tasks.initialization)
+            tasks.prepare(runtime, root.path)
+            val record = tasks.create("Owned")
+            tasks.abandonPreparation()
+            assertFalse(fixtures.last().closed)
+            assertTrue(tasks.controllers.getValue(record.key).ready)
+        }
+        assertTrue(fixtures.all { it.closed })
     }
     @Test fun `all ACP engines persist owned sessions without automatic login or prompt`() = runBlocking(Dispatchers.Swing) {
         for (engine in listOf("gemini", "grok", "hermes")) {

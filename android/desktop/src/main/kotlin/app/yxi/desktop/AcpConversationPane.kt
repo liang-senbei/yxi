@@ -18,6 +18,8 @@ import java.io.File
     var title by remember { mutableStateOf("") }
     var connectedDirectory by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
+    var reviewed by remember(tasks.recoverySessionId) { mutableStateOf(false) }
+    DisposableEffect(tasks) { onDispose { tasks.abandonPreparation() } }
     WorkbenchDialog(onDismissRequest = { if (!tasks.busy) dismiss() }, title = { Text("本地 · ${LocalRuntimeDiscovery.title(runtime.engine)}") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("ACP 接入预览 · 使用运行器自己的账号与配置；创建后不会自动发送消息。", style = MaterialTheme.typography.bodySmall)
@@ -37,7 +39,15 @@ import java.io.File
                     }
                 }
             }
-            if (tasks.recoverySessionId.isNotBlank()) Text("上次创建需要核对：${tasks.recoverySessionId}", color = MaterialTheme.colorScheme.error)
+            if (tasks.recoverySessionId.isNotBlank()) {
+                Text("上次创建需要核对：${tasks.recoverySessionId}", color = MaterialTheme.colorScheme.error)
+                Row {
+                    Checkbox(reviewed, { reviewed = it }, enabled = !tasks.busy)
+                    Text("我已在原运行器核对历史，允许重新创建；不会重发旧消息。", style = MaterialTheme.typography.bodySmall)
+                }
+                TextButton({ runCatching { tasks.confirmCreationReviewed(); connectedDirectory = "" }.onFailure { error = it.message.orEmpty() } },
+                    enabled = reviewed && !tasks.busy) { Text("确认已核对") }
+            }
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
             if (tasks.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         }
