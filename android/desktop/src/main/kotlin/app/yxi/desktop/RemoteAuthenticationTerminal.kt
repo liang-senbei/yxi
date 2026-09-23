@@ -83,6 +83,7 @@ try:
     termios.tcsetattr(0,termios.TCSANOW,original)
     os.chdir(sys.argv[2])
     env=os.environ.copy(); env.update(config['env'])
+    env.setdefault('TERM','xterm-256color')
     print('YXI_AUTH_STARTING',flush=True)
     os.execvpe(sys.argv[1],[sys.argv[1]]+sys.argv[3:]+config['args'],env)
 except Exception:
