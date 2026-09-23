@@ -1,3 +1,13 @@
+## 共享 MCP 资源登记与原生配置投影
+
+`a301384`新增 SharedMcpDefinition/SharedMcpRegistry/SharedMcpSettings。资源身份包含主机、插件、来源及版本，同机名称冲突和过期revision禁止覆盖；定义保存一次，desiredRunners分别登记Claude/Codex/OpenCode意向。提供stdio argv和HTTP URL到三家配置字段的投影，不拼接shell命令，不读取或复制原生账号令牌。索引损坏保留原件，备份恢复后要求核对。当前没有把desired称为applied/verified。
+
+构建run.Q5reVQ与SharedMcpRegistryTest run.Z39IrK三项通过，无跳过。覆盖同插件本地/两服务器隔离、多个运行器意向、过期写/同名冲突、参数原样保留、HTTP配置及损坏索引保护。仍缺配置应用/回读、环境与授权引用、版本升级/回滚、用户界面和三运行器实际调用共享资源验收；URL暂不接受查询参数，不能宣称全部MCP兼容或插件共享完成，未发布。
+
+yunxi组继续协作：yxi_entertainment准备最小stdio MCP测试服务（仅echo，无文件/网络/命令执行）；yxi_pilot独立审查本轮登记模型及原生格式。产物写到windows-test-reports/shared-mcp-fixture/，尚未验收。
+
+构建前磁盘门槛再次触发。检查所有目标标签/来源revision和容器引用后，移除62个未被容器引用的旧Yxi测试镜像，保留最近4个与两个基础版本；再按精确cache ID及Yxi Gradle描述过滤清理77个旧缓存记录，保留报告与清理清单。空闲恢复至13,962,051,584字节。清理清单位于/root/.cache/yxi-isolated-tests/removed-image-inventory-20260923.json和removed-cache-inventory-20260923.json；未全局prune或触碰生产容器。
+
 ## 官方插件图标扩充与 SVG 视口修复
 
 `68f43b7`整合 yxi_pilot 收集的 GitHub、Slack、Dropbox、Google Drive、Notion、Linear 官方资源。主线程逐项核对 manifest 的 SHA256，保留原始文件和 SOURCES.md 来源记录；按插件名称与官方域名双重匹配，加上原有 Canva/Gmail 共8个内置官方图标。构建run.HUp0vH、图标回归run.q0U8K5通过后实际看图发现SVG尺寸问题，未将解码成功当成视觉成功。
