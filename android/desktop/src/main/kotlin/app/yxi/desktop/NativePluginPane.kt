@@ -1,6 +1,8 @@
 package app.yxi.desktop
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -23,13 +25,12 @@ internal fun NativePluginPane(state: AppState, conn: Conn?, installedOnly: Boole
     val store = remember(state, conn) { state.nativePlugins(conn) }
     val target = conn?.host?.label ?: "本地电脑"
     var selected by remember(store) { mutableStateOf<NativePlugin?>(null) }
+    var category by remember(store) { mutableStateOf("全部") }
     LaunchedEffect(store) { store.refresh() }
     val t = Tokens.current
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            RunnerBrandIcon("codex", Modifier.size(20.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("适用于 Codex", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+            Text(if (installedOnly) "已安装插件" else "发现插件", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
             TextButton({ store.refresh() }, enabled = !store.busy) { Text("刷新") }
         }
         if (store.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -41,12 +42,21 @@ internal fun NativePluginPane(state: AppState, conn: Conn?, installedOnly: Boole
             TextButton({ runCatching { uriHandler.openUri(url) } }) { Text("连接 $name") }
         }
         val query = state.pluginMarketQuery.trim()
-        val shown = store.entries.filter { (!installedOnly || it.installed) &&
-            "${it.title} ${it.name} ${it.description} ${it.category} ${it.marketplace}".contains(query, true) }
+        val matching = store.entries.filter { (!installedOnly || it.installed) &&
+            "${it.title} ${it.name} ${it.description} ${it.category} ${categoryLabel(it.category)} ${it.marketplace}".contains(query, true) }
+        val counts = matching.groupingBy { categoryLabel(it.category) }.eachCount()
+        LaunchedEffect(counts.keys) { if (category != "全部" && category !in counts) category = "全部" }
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            (listOf("全部") + PluginCategories.order.filter { it in counts }).forEach { label ->
+                FilterChip(category == label, { category = label }, label = { Text("$label ${if (label == "全部") matching.size else counts[label] ?: 0}") })
+            }
+        }
+        val shown = matching.filter { category == "全部" || categoryLabel(it.category) == category }
         Text("${shown.size} 个插件", style = MaterialTheme.typography.labelMedium, color = t.textMuted)
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
             val columns = if (maxWidth >= 760.dp) 2 else 1
-            val groups = shown.groupBy { categoryLabel(it.category) }.toSortedMap()
+            val grouped = shown.groupBy { categoryLabel(it.category) }
+            val groups = PluginCategories.order.filter { it in grouped }.associateWith { grouped.getValue(it) }
             LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (!store.busy && shown.isEmpty()) item {
                     Text(if (installedOnly) "这台机器暂无匹配的已安装 Codex 插件" else "暂无匹配插件；目录由这台机器的 Codex 登录和市场配置提供",
@@ -84,7 +94,8 @@ internal fun NativePluginPane(state: AppState, conn: Conn?, installedOnly: Boole
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     CatalogLogo(p); Text(p.title)
                 }
-                Text("安装位置：$target\n供 Codex 会话使用\n来源：${p.marketplace}\n版本：${p.version.ifBlank { "未提供" }}")
+                Text("安装位置：$target\n分类：${categoryLabel(p.category)}\n来源：${p.marketplace}\n版本：${p.version.ifBlank { "未提供" }}")
+                Text("运行器接入：Codex 已接入；Claude Code、OpenCode 等共享接入尚未完成。", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
                 Text(if (conn == null) "本地插件供这台电脑共用，不随服务器切换。" else "安装到当前服务器的 Codex。其他服务器需分别安装。")
                 Text("服务插件可能还需账号授权。同一账号的云端连接可能共享；已安装不代表服务已连接。", color = t.textMuted)
                 if (!p.installable && !p.installed) Text("此插件需在原生 Codex 中处理权限或安装说明。", color = t.warning)
@@ -97,15 +108,7 @@ internal fun NativePluginPane(state: AppState, conn: Conn?, installedOnly: Boole
     }
 }
 
-internal fun categoryLabel(value: String) = when (value.lowercase()) {
-    "productivity" -> "效率"; "developer tools", "development" -> "开发工具"; "communication" -> "沟通协作"
-    "design", "creative", "creativity" -> "创意"; "research", "science", "scientific research" -> "科学研究"
-    "business", "business & operations" -> "业务与运营"; "finance" -> "金融"; "security" -> "安全"
-    "travel" -> "旅行"; "entertainment" -> "娱乐"; "health", "health & fitness" -> "医疗健康"
-    "healthcare" -> "医疗健康"; "education & research" -> "教育与研究"; "data & analytics" -> "数据与分析"
-    "engineering" -> "工程"; "other" -> "其他"
-    else -> value
-}
+internal fun categoryLabel(value: String) = PluginCategories.label(value)
 
 /** Publisher URLs from the live catalog; never substitute an unrelated brand asset. */
 @Composable internal fun CatalogLogo(plugin: NativePlugin) {
