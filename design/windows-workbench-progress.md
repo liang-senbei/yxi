@@ -1,3 +1,9 @@
+## 2026-09-24 ACP 原生配置选项与模型选择
+
+- `2e13ed650f5e14022a8603e75d6fa3beeac374be` 依据 https://agentclientprotocol.com/protocol/v1/session-config-options 接入 configOptions、session/set_config_option 与 config_option_update。支持原生顺序、分组 select 值、完整依赖配置替换，忽略未支持类型；不宣称 boolean 能力。有 configOptions 时优先显示该菜单而非重复 modes。
+- 控制器切换与发送串行并等待事件 fence；未知结果停止发送。UI 使用运行器名称和值，未返回选项时不补造模型。
+- 构建 `run.WtcU7D`；客户端 `run.IcuvCk` 7 项与审批 UI `run.6eWEyh` 1 项通过，无失败/跳过。新测试覆盖分组模型及模型改变后思考强度可选值替换。模型菜单本身的 GUI 点击与原生配置切换仍待验收。未发布。
+
 ## 2026-09-24 Grok 原生认证拒绝与界面恢复
 
 - 真实 1.0.41 未登录 session/new 返回 ACP -32000 Authentication required（首次探索 `run.WlH63j`）；并非会话已创建。`f718ddf` 引入 AcpRpcException，LocalAcpTasks 对明确认证拒绝清理 pending 日志并保留连接/登录选项，提示先登录；其他未知失败继续保护。
