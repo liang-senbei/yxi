@@ -64,7 +64,16 @@ requires_openai_auth = false
         }
         val index = File("/sandbox/tmp/official-local-tasks.json")
         val queue = InstructionQueue(File("/sandbox/tmp/official-local-queue.json"))
-        LocalCodexTasks(queue, index).use { tasks ->
+        val shared = SharedMcpRegistry(File("/sandbox/tmp/official-shared-mcp.json"))
+        val fixture = File("/sandbox/home/shared_mcp_fixture.py").apply { writeBytes(requireNotNull(LocalOfficialCodexNativeTest::class.java.getResourceAsStream("/shared_mcp_fixture.py")).use { it.readBytes() }) }
+        val definition = SharedMcpDefinition("@local", "echo", "fixture", "1", "shared_echo", listOf("/usr/bin/python3", fixture.path))
+        shared.save(definition, setOf("codex"), null)
+        LocalCodexProfiles.connectOfficialWithSharedMcp(runtime, shared.forHost("@local")).use { client ->
+            val configWithMcp = client.request("config/read", JSONObject().put("includeLayers", false)).getJSONObject("result").getJSONObject("config")
+            LocalCodexProfiles.verifySharedMcp(configWithMcp, shared.forHost("@local"))
+            assertEquals("openai", configWithMcp.getString("model_provider"))
+        }
+        LocalCodexTasks(queue, index, shared).use { tasks ->
             val record = tasks.create(runtime, "/sandbox/home", "Local official fixture", nativeModel)
             assertEquals(record, LocalCodexTaskRegistry(index).records.single())
             assertTrue(tasks.controllers.getValue(record.key).ready)

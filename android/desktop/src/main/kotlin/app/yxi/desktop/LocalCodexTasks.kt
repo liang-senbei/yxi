@@ -61,7 +61,7 @@ internal class LocalCodexTaskRegistry(file: File) {
 }
 
 /** Only newly created, currently owned local sessions are writable. Existing history stays read-only. */
-internal class LocalCodexTasks(private val queue: InstructionQueue, file: File) : AutoCloseable {
+internal class LocalCodexTasks(private val queue: InstructionQueue, file: File, private val sharedMcp: SharedMcpRegistry? = null) : AutoCloseable {
     val registry = LocalCodexTaskRegistry(file)
     val controllers = mutableStateMapOf<String, CodexTaskController>()
     private val operation = Mutex()
@@ -87,6 +87,7 @@ internal class LocalCodexTasks(private val queue: InstructionQueue, file: File) 
     suspend fun create(runtime: LocalRuntimeInstallation, directory: String, title: String, model: String): LocalCodexTaskRecord = operation.withLock {
         check(!disposed) { "本地会话管理器已关闭" }
         registry.requireWritable()
+        check(sharedMcp?.problem.isNullOrBlank()) { sharedMcp?.problem.orEmpty() }
         check(recoveryThreadId.isBlank()) { "上次创建结果待核对，原生会话：$recoveryThreadId" }
         require(File(directory).isAbsolute && File(directory).isDirectory) { "请选择存在的本机绝对目录" }
         val cwd = File(directory).canonicalPath
@@ -94,7 +95,9 @@ internal class LocalCodexTasks(private val queue: InstructionQueue, file: File) 
         busy = true
         var client: CodexAppServer? = null
         try {
-            val connection = connect(runtime); client = connection
+            val resources = sharedMcp?.forHost("@local")?.filter { "codex" in it.desiredRunners }.orEmpty()
+            val connection = if (resources.isEmpty()) connect(runtime) else LocalCodexProfiles.connectOfficialWithSharedMcp(runtime, resources)
+            client = connection
             startingClient.set(connection)
             check(!disposed) { "应用已关闭，未继续创建" }
             val available = LocalOfficialModels.load { connection.listModels(it) }
@@ -106,6 +109,7 @@ internal class LocalCodexTasks(private val queue: InstructionQueue, file: File) 
             val thread = result.getJSONObject("thread")
             val id = thread.getString("id"); recoveryThreadId = id
             creationJournal.write(pending.put("threadId", id).toString())
+            check(sharedMcp?.forHost("@local")?.filter { "codex" in it.desiredRunners }.orEmpty() == resources) { "共享插件配置在创建期间发生变化，请核对已创建会话" }
             check(result.optString("modelProvider") == "openai" && result.optString("model") == model) { "运行器返回的实际线路或模型不匹配，未启用发送" }
             check(File(thread.getString("cwd")).canonicalPath == cwd) { "运行器返回了不同工作目录" }
             val record = LocalCodexTaskRecord(id, System.getProperty("user.name"), System.getProperty("os.name"),

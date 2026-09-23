@@ -4,6 +4,19 @@ import org.json.JSONObject
 import kotlin.test.*
 
 class LocalCodexProfilesTest {
+    @Test fun `shared MCP verification rejects changed endpoints disabled entries and inherited credentials`() {
+        val definition = SharedMcpDefinition("@local", "echo", "test", "1", "echo", listOf("/bin/echo"))
+        val records = listOf(SharedMcpRecord(definition, setOf("codex"), 0))
+        val config = SharedMcpSettings.forRunner(definition, "codex")
+        LocalCodexProfiles.verifySharedMcp(config, records)
+        val entry = config.getJSONObject("mcp_servers").getJSONObject("echo")
+        entry.put("enabled", false)
+        assertFailsWith<IllegalStateException> { LocalCodexProfiles.verifySharedMcp(config, records) }
+        entry.put("enabled", true).put("env", JSONObject().put("SECRET", "fixture"))
+        assertFailsWith<IllegalStateException> { LocalCodexProfiles.verifySharedMcp(config, records) }
+        entry.remove("env"); entry.put("command", "/different")
+        assertFailsWith<IllegalStateException> { LocalCodexProfiles.verifySharedMcp(config, records) }
+    }
     private fun config() = JSONObject().put("model_provider", "openai").put("openai_base_url", "").put("chatgpt_base_url", LocalCodexProfiles.chatgptBase)
     private fun account(type: String) = JSONObject().put("requiresOpenaiAuth", true).put("account", JSONObject().put("type", type))
     @Test fun `official selection removes inherited credentials without forcing logout or changing data home`() {

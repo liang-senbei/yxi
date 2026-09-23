@@ -37,7 +37,7 @@ class AppState {
         select(c, null); remoteOpenCodeSelectedKey = null; remoteOpenCodeDirectory = directory; remoteOpenCodePrompt = prompt; page = Page.OpenCode
     }
     private val localWorkspaceDelegate = lazy { LocalWorkspace() }
-    private val localCodexTasksDelegate = lazy { LocalCodexTasks(instructions, java.io.File(Store.dir, "local-codex-tasks.json")) }
+    private val localCodexTasksDelegate = lazy { LocalCodexTasks(instructions, java.io.File(Store.dir, "local-codex-tasks.json"), sharedMcp) }
     internal val localCodexTasks get() = localCodexTasksDelegate.value
     private val localOpenCodeTasksDelegate = lazy { LocalOpenCodeTasks(instructions, java.io.File(Store.dir, "local-opencode-tasks.json"), sharedMcp) }
     internal val localOpenCodeTasks get() = localOpenCodeTasksDelegate.value

@@ -44,7 +44,7 @@ import java.util.UUID
                     OutlinedTextField(program, { program = it }, label = { Text("目标机器上的程序路径或命令名") }, singleLine = true)
                     OutlinedTextField(arguments, { arguments = it }, label = { Text("参数，每行一个，空格按原样保留") }, minLines = 2, maxLines = 5)
                 }
-                Text("保存后可为 OpenCode 新会话启用。Claude、Codex 的应用入口仍在接入。", style = MaterialTheme.typography.bodySmall)
+                Text("保存后可为 OpenCode 和本地 Codex 新会话启用。Claude 的应用入口仍在接入。", style = MaterialTheme.typography.bodySmall)
                 if (message.isNotBlank()) Text(message, color = t.danger)
             }
         }, confirmButton = { TextButton({
@@ -63,7 +63,7 @@ import java.util.UUID
                 TextButton({ adding = true }, enabled = registry.problem.isBlank()) { Text("添加") }
                 TextButton({ showHistory = !showHistory }) { Text(if (showHistory) "隐藏历史" else "版本历史") }
             }
-            Text("同一机器登记一次，分别选择运行器。当前 OpenCode 会在新建会话时加载并核对连接；配置保存不代表已安装或已授权。", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+            Text("同一机器登记一次，分别选择运行器。OpenCode 和本地 Codex 会在新建时核对并加载；配置保存不代表已授权。", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
             if (registry.problem.isNotBlank()) Text(registry.problem, color = t.danger)
             if (registry.recoveryReviewRequired) TextButton({ reviewed = false; reviewing = true }) { Text("核对恢复的配置") }
             if (error.isNotBlank()) Text(error, color = t.danger)
@@ -79,7 +79,10 @@ import java.util.UUID
                             registry.save(record.definition, runners, record.revision)
                         } }, enabled = registry.problem.isBlank(), label = { Text("OpenCode 新会话") })
                         QuietChoice("claude" in record.desiredRunners, {}, enabled = false, label = { Text("Claude · 接入中") })
-                        QuietChoice("codex" in record.desiredRunners, {}, enabled = false, label = { Text("Codex · 接入中") })
+                        QuietChoice("codex" in record.desiredRunners, { change {
+                            val runners = if ("codex" in record.desiredRunners) record.desiredRunners - "codex" else record.desiredRunners + "codex"
+                            registry.save(record.definition, runners, record.revision)
+                        } }, enabled = hostKey == "@local" && registry.problem.isBlank(), label = { Text(if (hostKey == "@local") "Codex 新会话" else "Codex · 接入中") })
                     }
                     Text("已打开的会话保留其已加载版本。", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
                     TextButton({ change { registry.retire(record.definition.key, record.revision) } }, enabled = registry.problem.isBlank()) { Text("从新会话配置中移除") }

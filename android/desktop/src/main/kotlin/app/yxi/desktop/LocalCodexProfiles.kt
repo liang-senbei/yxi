@@ -37,8 +37,36 @@ internal object LocalCodexProfiles {
         }
     }
 
-    suspend fun connectOfficial(runtime: LocalRuntimeInstallation): CodexAppServer {
-        val transport = LocalCodexTransport.start(runtime, officialArguments(), officialEnvironment(System.getenv()))
+    suspend fun connectOfficial(runtime: LocalRuntimeInstallation): CodexAppServer = connect(runtime, emptyList())
+
+    suspend fun connectOfficialWithSharedMcp(runtime: LocalRuntimeInstallation, records: List<SharedMcpRecord>): CodexAppServer {
+        require(records.all { !it.retired && it.definition.hostKey == "@local" && "codex" in it.desiredRunners })
+        connectOfficial(runtime).use { probe ->
+            val config = probe.request("config/read", JSONObject().put("includeLayers", false)).getJSONObject("result").getJSONObject("config")
+            val existing = config.optJSONObject("mcp_servers")
+            check(records.none { it.definition.name == "codex_apps" || existing?.has(it.definition.name) == true }) { "原生 Codex 已有同名或内置 MCP，未覆盖" }
+        }
+        return connect(runtime, records)
+    }
+    internal fun verifySharedMcp(config: JSONObject, records: List<SharedMcpRecord>) {
+        records.forEach { record ->
+            val definition = record.definition
+            val entry = config.optJSONObject("mcp_servers")?.optJSONObject(definition.name) ?: error("运行器未确认共享 MCP：${definition.name}")
+            check(entry.optBoolean("enabled", true)) { "共享 MCP 被原生规则禁用：${definition.name}" }
+            if (definition.command.isNotEmpty()) {
+                check(entry.optString("command") == definition.command.first() && entry.isNull("url") &&
+                    (entry.optJSONArray("args") ?: org.json.JSONArray()).similar(org.json.JSONArray(definition.command.drop(1)))) { "共享 MCP 启动配置不一致：${definition.name}" }
+            } else check(entry.optString("url") == definition.url && entry.isNull("command")) { "共享 MCP 地址不一致：${definition.name}" }
+            for (key in listOf("env", "env_vars", "http_headers", "env_http_headers", "bearer_token_env_var", "bearer_token")) {
+                val value = entry.opt(key)
+                check(value == null || value === JSONObject.NULL || value == "" || (value is JSONObject && value.length() == 0) ||
+                    (value is org.json.JSONArray && value.length() == 0)) { "共享 MCP 混入了未声明的认证或环境覆盖：${definition.name}" }
+            }
+        }
+    }
+    private suspend fun connect(runtime: LocalRuntimeInstallation, records: List<SharedMcpRecord>): CodexAppServer {
+        val arguments = officialArguments().dropLast(1) + SharedMcpSettings.codexArguments(records, "@local") + "app-server"
+        val transport = LocalCodexTransport.start(runtime, arguments, officialEnvironment(System.getenv()))
         val client = CodexAppServer(transport, profileLabel = "官方订阅 · ChatGPT")
         try {
             client.initializeLocal()
@@ -46,6 +74,7 @@ internal object LocalCodexProfiles {
                 val config = client.request("config/read", JSONObject().put("includeLayers", false)).getJSONObject("result").getJSONObject("config")
                 val account = client.request("account/read", JSONObject().put("refreshToken", false)).getJSONObject("result")
                 verifyOfficial(config, account)
+                verifySharedMcp(config, records)
             }
             verify()
             client.beforeLocalMutation = { method, params ->
