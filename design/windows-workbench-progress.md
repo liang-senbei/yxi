@@ -1,3 +1,8 @@
+## 2026-09-24 远端任务通知定位
+
+- `ac1c813ef98f340be166b07ed567551a8a42ef9c` 提取 AppState.openRemoteTask，Main 通知点击按完整持久任务key定位终端/Codex/OpenCode/ACP，保留服务器和现有控制器；归档任务切到归档视图，未知key不改变当前页面，不猜同名任务或创建替代会话。
+- 构建 `run.1RSESK`；RemoteAcpCreationUiTest `run.RfF7qg` 1项通过，0失败/错误/跳过。新增未知key保持页面、ACP归档任务定位、同一Conn/控制器、没有额外session/new的断言。
+- 这是隔离SSH fixture下的回调定位验证，未点击Windows真实通知气泡；ACP通知触发/去重/完整本地通知仍待接入和验收。未发布。
 ## 2026-09-24 Windows 内嵌浏览器原生验收
 
 - 使用源码 `33fbc32073c6cdd50a41f35540c8e41019e2e576` 本机构建的 Yxi.exe，在全新隔离 profile 执行 --browser-smoke；测试入口位于账号、Updater 和服务器连接初始化之前，仅访问一次性127.0.0.1页面。
