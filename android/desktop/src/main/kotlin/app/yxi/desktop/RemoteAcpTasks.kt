@@ -29,6 +29,7 @@ internal class RemoteAcpTasks(private val queue: InstructionQueue, private val f
     private val owners = mutableMapOf<String, Conn>()
     private val creations = mutableMapOf<String, Creation>()
     private val prepared = AtomicReference<Prepared?>()
+    private val authenticating = AtomicReference<RemoteAuthenticationPlan?>()
     private val generation = AtomicLong()
     private val operation = Mutex()
     @Volatile private var disposed = false
@@ -41,7 +42,7 @@ internal class RemoteAcpTasks(private val queue: InstructionQueue, private val f
     fun recoverySessionId(conn: Conn) = creation(conn).recovery
     fun confirmCreationReviewed(conn: Conn) { check(!busy); creation(conn).clear() }
     fun tasks(conn: Conn) = registry.records.filter { it.hostKey == projectKey(conn.host, "/") }
-    fun abandonPreparation() { generation.incrementAndGet(); prepared.getAndSet(null)?.client?.close(); initialization = null }
+    fun abandonPreparation() { generation.incrementAndGet(); prepared.getAndSet(null)?.client?.close(); authenticating.getAndSet(null)?.close(); initialization = null }
     suspend fun prepare(conn: Conn, engine: String, directory: String): JSONObject = operation.withLock {
         check(!disposed && conn.ssh.isConnected); registry.requireWritable()
         check(creation(conn).recovery.isBlank()) { "请先核对上次服务器创建结果" }
@@ -51,7 +52,7 @@ internal class RemoteAcpTasks(private val queue: InstructionQueue, private val f
         var client: AcpClient? = null
         try {
             val metadata = JSONObject(conn.ssh.exec("python3 -c ${Shell.q(identityScript)} ${Shell.q(engine)} ${Shell.q(directory)}").trim())
-            client = RemoteAcpTransport.connect(conn.ssh, engine, metadata.getString("directory"))
+            client = RemoteAcpTransport.connect(conn.ssh, engine, metadata.getString("directory"), terminalAuthentication = true)
             check(!disposed && generation.get() == epoch && conn.ssh.isConnected) { "服务器连接准备已取消" }
             prepared.set(Prepared(conn, engine, metadata.getString("directory"), metadata.getString("home"), client))
             val hello = JSONObject(checkNotNull(client.initialization).toString()); initialization = hello
@@ -63,6 +64,26 @@ internal class RemoteAcpTasks(private val queue: InstructionQueue, private val f
         val current = checkNotNull(prepared.get()); check(!disposed && current.conn === conn)
         busy = true
         try { current.client.authenticate(methodId) } finally { busy = false }
+    }
+    suspend fun authenticateTerminal(conn: Conn, methodId: String, interactive: suspend (RemoteAuthenticationPlan) -> Int?) = operation.withLock {
+        val current = checkNotNull(prepared.get()); check(!disposed && current.conn === conn)
+        val methods = checkNotNull(current.client.initialization).getJSONArray("authMethods")
+        val method = (0 until methods.length()).map { methods.getJSONObject(it) }.single { it.getString("id") == methodId }
+        require(method.optString("type") == "terminal")
+        val epoch = generation.get(); busy = true
+        prepared.compareAndSet(current, null); current.client.close()
+        val plan = RemoteAuthenticationPlan(conn.ssh, current.engine, current.directory, JSONObject(method.toString()))
+        authenticating.set(plan)
+        var renewed: AcpClient? = null
+        try {
+            val code = interactive(plan)
+            check(code == 0) { "服务器认证未成功结束：${code ?: "退出状态未知"}" }
+            check(!disposed && generation.get() == epoch && conn.ssh.isConnected) { "服务器认证已取消" }
+            renewed = RemoteAcpTransport.connect(conn.ssh, current.engine, current.directory, terminalAuthentication = true)
+            check(!disposed && generation.get() == epoch && conn.ssh.isConnected) { "服务器认证连接已取消" }
+            prepared.set(current.copy(client = renewed)); initialization = JSONObject(checkNotNull(renewed.initialization).toString())
+        } catch (e: Exception) { renewed?.close(); initialization = null; throw e }
+        finally { authenticating.compareAndSet(plan, null); plan.close(); busy = false }
     }
     suspend fun create(conn: Conn, title: String): LocalCodexTaskRecord = operation.withLock {
         check(!disposed && conn.ssh.isConnected); registry.requireWritable()
@@ -95,7 +116,7 @@ internal class RemoteAcpTasks(private val queue: InstructionQueue, private val f
         } finally { busy = false }
     }
     fun disconnect(conn: Conn) {
-        if (prepared.get()?.conn === conn) abandonPreparation()
+        if (prepared.get()?.conn === conn || authenticating.get()?.ssh === conn.ssh) abandonPreparation()
         owners.filterValues { it === conn }.keys.toList().forEach { key -> controllers.remove(key)?.close(); owners.remove(key) }
     }
     override fun close() { disposed = true; abandonPreparation(); controllers.values.toList().forEach { it.close() }; controllers.clear(); owners.clear() }

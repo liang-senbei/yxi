@@ -269,10 +269,12 @@ class SshSession(
      *     字节会被 tty 回显然后冲掉（实测踩过：命令回显了但没执行）
      *   · 远端进程就是 tmux 本身，退出即通道结束，语义清楚
      */
-    suspend fun openPtyCommand(command: String, cols: Int = 80, rows: Int = 24): Shell =
-        withContext(Dispatchers.IO) { chanLock.withLock {
+    suspend fun openPtyCommand(command: String, cols: Int = 80, rows: Int = 24): Shell {
+        var opened: com.jcraft.jsch.ChannelExec? = null
+        try { return withContext(Dispatchers.IO) { chanLock.withLock {
             val s = requireNotNull(session) { "还没 connect()" }
             val ch = s.openChannel("exec") as com.jcraft.jsch.ChannelExec
+            opened = ch
             ch.setPty(true)
             ch.setPtyType("xterm-256color")   // 要彩色就不能是 dumb
             ch.setPtySize(cols, rows, 0, 0)
@@ -295,7 +297,8 @@ class SshSession(
                 }
             }.apply { isDaemon = true }.start()
             Shell(ch, out, inp)
-        } }
+        } } } catch (e: Exception) { runCatching { opened?.disconnect() }; throw e }
+    }
 
     /**
      * 开一条**不带 PTY** 的 exec 流，用来跟随长期输出（`tail -f` 之类）。

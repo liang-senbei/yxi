@@ -9,14 +9,14 @@ internal class RemoteAcpTransport private constructor(private val channel: SshSe
     override suspend fun write(text: String) = channel.write(text)
     override fun close() = channel.close()
     companion object {
-        suspend fun connect(ssh: SshSession, engine: String, directory: String): AcpClient {
+        suspend fun connect(ssh: SshSession, engine: String, directory: String, terminalAuthentication: Boolean = false): AcpClient {
             val arguments = AcpLaunch.arguments(engine)
             require(directory.startsWith('/') && directory.none { it < ' ' })
             check(ssh.exec(RunnerCatalog.probeCommand(engine)).trim() == "available") { "服务器未找到可执行的 ${LocalRuntimeDiscovery.title(engine)}" }
             val command = RunnerCatalog.resolveCommand(engine) + "\n[ -f \"\$bin\" ] && [ -x \"\$bin\" ] || exit 127\n" +
                 "exec python3 -c ${Shell.q(supervisor)} \"\$bin\" ${Shell.q(directory)} " + arguments.joinToString(" ") { Shell.q(it) }
             val client = AcpClient(RemoteAcpTransport(ssh.openExecStream(command)))
-            try { client.initialize(); return client } catch (e: Exception) { client.close(); throw e }
+            try { client.initialize(terminalAuthentication); return client } catch (e: Exception) { client.close(); throw e }
         }
         private val supervisor = """
 import os, select, signal, subprocess, sys

@@ -12,7 +12,8 @@ import java.io.InputStreamReader
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** Owned interactive PTY. Output stays in the terminal; it is never treated as a login receipt. */
-internal class LocalAuthenticationTerminal private constructor(private val process: PtyProcess) : TtyConnector, AutoCloseable {
+internal interface AuthenticationTerminal : TtyConnector, AutoCloseable { suspend fun awaitExit(): Int? }
+internal class LocalAuthenticationTerminal private constructor(private val process: PtyProcess) : AuthenticationTerminal {
     private val closed = AtomicBoolean()
     private val reader = InputStreamReader(process.inputStream, Charsets.UTF_8)
     private val output = process.outputStream
@@ -27,7 +28,7 @@ internal class LocalAuthenticationTerminal private constructor(private val proce
         if (!closed.get() && process.isAlive) process.setWinSize(WinSize(termSize.columns.coerceAtLeast(1), termSize.rows.coerceAtLeast(1)))
     }
     override fun waitFor() = process.waitFor()
-    suspend fun awaitExit(): Int = withContext(Dispatchers.IO) { process.waitFor() }
+    override suspend fun awaitExit(): Int = withContext(Dispatchers.IO) { process.waitFor() }
     override fun close() {
         if (closed.compareAndSet(false, true)) {
             LocalRuntimeDiscovery.stopOwnedProcess(process)

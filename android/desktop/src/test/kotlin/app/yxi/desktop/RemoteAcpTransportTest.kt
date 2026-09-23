@@ -15,10 +15,15 @@ class RemoteAcpTransportTest {
         for (engine in listOf("gemini", "grok", "hermes")) File(bin, engine).apply {
             writeText("""#!/usr/bin/python3
 import json,os,sys
+if '--setup' in sys.argv:
+    assert os.isatty(0) and os.isatty(1)
+    assert os.environ['AUTH_TEST_TOKEN'] == 'fixture-secret-' * 400
+    print('AUTH_PROMPT',flush=True)
+    sys.exit(0 if input() == 'confirm' else 7)
 for line in sys.stdin:
     request=json.loads(line)
     method=request.get('method')
-    result={'protocolVersion':1,'agentCapabilities':{},'authMethods':[], '_meta':{'pid':os.getpid(),'cwd':os.getcwd(),'args':sys.argv[1:]}} if method=='initialize' else {'sessionId':'fixture-session'}
+    result={'protocolVersion':1,'agentCapabilities':{},'authMethods':[{'id':'setup','name':'Setup','type':'terminal','args':['--setup'],'env':{'AUTH_TEST_TOKEN':'fixture-secret-' * 400}}], '_meta':{'pid':os.getpid(),'cwd':os.getcwd(),'args':sys.argv[1:]}} if method=='initialize' else {'sessionId':'fixture-session'}
     print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':result}),flush=True)
 """)
             setExecutable(true)
@@ -46,6 +51,21 @@ for line in sys.stdin:
             val index = File(root, "tasks.json")
             RemoteAcpTasks(InstructionQueue(File(root, "queue.json")), index).use { tasks ->
                 tasks.prepare(bridge.conn, "grok", directory.path)
+                tasks.authenticateTerminal(bridge.conn, "setup") { plan ->
+                    RemoteAuthenticationTerminal.start(plan).use { terminal ->
+                        val output = withTimeout(5000) { runInterruptible(Dispatchers.IO) {
+                            val text = StringBuilder(); val chars = CharArray(256)
+                            while (!text.contains("AUTH_PROMPT")) {
+                                val count = terminal.read(chars, 0, chars.size); check(count >= 0 && text.length < 16384)
+                                text.append(chars, 0, count)
+                            }
+                            text.toString()
+                        } }
+                        assertFalse(output.contains("fixture-secret"), "Authentication environment must not be echoed by the PTY")
+                        terminal.write("confirm\n")
+                        withTimeout(5000) { terminal.awaitExit() }
+                    }
+                }
                 val record = tasks.create(bridge.conn, "Remote ACP fixture")
                 assertEquals("grok", record.engine)
                 assertEquals(projectKey(bridge.conn.host, "/"), record.hostKey)

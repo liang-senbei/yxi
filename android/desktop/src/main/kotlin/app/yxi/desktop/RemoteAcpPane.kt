@@ -11,11 +11,19 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
+private class PendingRemoteAuthentication(val plan: RemoteAuthenticationPlan, val completion: kotlinx.coroutines.CompletableDeferred<Int?>)
+
 @Composable internal fun RemoteAcpPane(state: AppState) {
     val conn = state.conn ?: run { Text("请先选择服务器"); return }
     val tasks = state.remoteAcpTasks
     val engine = state.remoteAcpEngine
+    var authentication by remember(conn, engine) { mutableStateOf<PendingRemoteAuthentication?>(null) }
     DisposableEffect(conn, engine) { onDispose { tasks.abandonPreparation() } }
+    authentication?.let { pending ->
+        AuthenticationTerminalDialog(pending.plan, "${conn.host.label} · ${LocalRuntimeDiscovery.title(engine)} 认证", { RemoteAuthenticationTerminal.start(pending.plan) }) { code, error ->
+            if (error != null) pending.completion.completeExceptionally(IllegalStateException(error)) else pending.completion.complete(code)
+        }
+    }
     val record = tasks.tasks(conn).singleOrNull { it.key == state.remoteAcpSelectedKey }
     val t = Tokens.current
     Surface(Modifier.fillMaxSize(), color = t.surface0, contentColor = t.textPrimary) {
@@ -31,7 +39,7 @@ import kotlinx.coroutines.launch
             fun act(block: suspend () -> Unit) {
                 if (working) return
                 working = true; error = ""
-                scope.launch { try { block() } catch (e: CancellationException) { throw e } catch (e: Exception) { error = e.message.orEmpty() }
+                scope.launch { try { block() } catch (e: CancellationException) { throw e } catch (e: Exception) { error = e.message.orEmpty(); if (tasks.initialization == null) connected = false }
                     finally { working = false } }
             }
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -45,8 +53,14 @@ import kotlinx.coroutines.launch
                     for (i in 0 until (methods?.length() ?: 0)) {
                         val method = methods!!.getJSONObject(i)
                         val terminal = method.optString("type", "agent") == "terminal"
-                        TextButton({ act { tasks.authenticate(conn, method.getString("id")) } }, enabled = !terminal && !working && !tasks.busy) { Text(method.optString("name").ifBlank { method.getString("id") }) }
-                        if (terminal) Text("服务器交互认证尚未接入；请先在服务器原生终端配置，再重新连接。", style = MaterialTheme.typography.bodySmall)
+                        TextButton({ act {
+                            if (terminal) tasks.authenticateTerminal(conn, method.getString("id")) { plan ->
+                                val completion = kotlinx.coroutines.CompletableDeferred<Int?>()
+                                authentication = PendingRemoteAuthentication(plan, completion)
+                                try { completion.await() } finally { authentication = null }
+                            } else tasks.authenticate(conn, method.getString("id"))
+                        } }, enabled = !working && !tasks.busy) { Text(method.optString("name").ifBlank { method.getString("id") }) }
+                        if (terminal) Text("在 ${conn.host.label} 的交互终端完成配置，成功退出后重新连接。", style = MaterialTheme.typography.bodySmall)
                     }
                 }
                 val recovery = tasks.recoverySessionId(conn)
