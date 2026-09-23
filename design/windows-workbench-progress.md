@@ -1,3 +1,11 @@
+## Claude 原生调用共享 MCP 测试
+
+`dcbc660`新增ClaudeSharedMcpNativeTest与仅回环Anthropic模型fixture。使用与OpenCode相同的shared_mcp_fixture.py资源，经SharedMcpSettings生成Claude原生mcp-config；严格加载测试配置且仅允许mcp__shared_echo__yxi_echo。模型fixture只有收到实际tool_result内YXI_SHARED_MCP标记才返回SHARED_MCP_NATIVE_CONFIRMED，避免模型文本自行声称成功。
+
+构建run.ARxLQA、原生Claude2.1.280测试run.Qqw8qN一项通过、无跳过。验证MCP配置被原生接受（含type:stdio）、工具真实执行并返回结果、最终确认文本及配置文件字节不变。使用无外网容器、虚拟密钥和本地模型回复，不是用户真实账号或付费模型请求。此轮证明Claude配置/工具调用路径；生产Claude应用入口、Codex接入、OpenCode模型调用以及同机三运行器完整共享仍待验收，未发布。
+
+yxi_entertainment已接下一项独立工作：准备Codex Responses SSE的共享MCP调用fixture，主线程审核后才在隔离容器执行。
+
 ## 共享 MCP 版本替换、回滚与退役记录
 
 `f49600a`补齐Agent审查指出的版本模型缺口：逻辑身份按机器/插件/来源，活动版本唯一；replaceVersion原子退役旧版本并激活新版本，保留历史定义；回滚不能覆盖历史内容，并继承当前desiredRunners。retire/restore修改意向记录，不删除历史或原生认证。历史版本不能直接save修改，同机同名/同逻辑身份活动版本仍互斥。OpenCode加载接口拒绝传入退役记录。旧索引缺少retired字段时默认活动，保持兼容。
