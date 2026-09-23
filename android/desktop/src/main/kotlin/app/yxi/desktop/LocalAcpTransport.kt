@@ -8,6 +8,16 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal object AcpLaunch {
+    fun environment(runtime: LocalRuntimeInstallation, inherited: Map<String, String>): Map<String, String> = inherited.toMutableMap().apply {
+        when (runtime.engine) {
+            "gemini" -> {
+                val home = File(runtime.home).absoluteFile
+                require(home.name == ".gemini") { "Gemini 数据目录无法识别" }
+                put("GEMINI_CLI_HOME", home.parent)
+            }
+            "hermes" -> put("HERMES_HOME", runtime.home)
+        }
+    }
     fun arguments(engine: String): List<String> = when (engine) {
         "gemini" -> listOf("--acp")
         "hermes" -> listOf("acp")
@@ -37,15 +47,7 @@ internal class LocalAcpTransport private constructor(private val process: Proces
                 return withContext(Dispatchers.IO) {
                     val process = ProcessBuilder(runtime.command + arguments).directory(directory.canonicalFile)
                         .redirectError(ProcessBuilder.Redirect.DISCARD).apply {
-                            environment().clear(); environment().putAll(environment)
-                            when (runtime.engine) {
-                                "gemini" -> {
-                                    val home = File(runtime.home).absoluteFile
-                                    require(home.name == ".gemini") { "Gemini 数据目录无法识别" }
-                                    environment()["GEMINI_CLI_HOME"] = home.parent
-                                }
-                                "hermes" -> environment()["HERMES_HOME"] = runtime.home
-                            }
+                            environment().clear(); environment().putAll(AcpLaunch.environment(runtime, environment))
                         }.start().also { owned = it }
                     LocalAcpTransport(process)
                 }

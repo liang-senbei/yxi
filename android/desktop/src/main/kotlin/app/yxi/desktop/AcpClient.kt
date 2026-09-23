@@ -121,7 +121,9 @@ internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
     suspend fun authenticate(methodId: String): JSONObject {
         check(initialized)
         val methods = initialization?.optJSONArray("authMethods") ?: JSONArray()
-        require((0 until methods.length()).any { methods.getJSONObject(it).getString("id") == methodId }) { "请选择运行器提供的认证方式" }
+        val method = (0 until methods.length()).map { methods.getJSONObject(it) }.singleOrNull { it.getString("id") == methodId }
+            ?: error("请选择运行器提供的唯一认证方式")
+        require(method.optString("type", "agent") == "agent") { "此认证需要独立交互终端，不能通过普通登录请求执行" }
         return request("authenticate", JSONObject().put("methodId", methodId), 120_000)
     }
     suspend fun newSession(directory: String): JSONObject {
