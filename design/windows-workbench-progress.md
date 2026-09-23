@@ -1,3 +1,9 @@
+## 2026-09-24 当前开发源码 Windows 本机构建与启动
+
+- 源码 `a04d50c` 在本机 Windows 完成 `:desktop:createDistributable`，13项任务执行，BUILD SUCCESSFUL（3m46s）。最初 PowerShell 未引用带点的 -P 参数导致任务名被拆分；加引号后发现 core 要求 JDK17、本机仅有JDK21。
+- 从 Adoptium 官方API下载 Temurin17 ZIP，按API返回SHA256验证，解压到 `.artifacts/windows-toolchain/jdk17`，通过命令行 `-Porg.gradle.java.installations.paths=...` 传入；未更改系统Java和用户环境变量。元数据见 `.artifacts/windows-toolchain/temurin17.json`。
+- 产物 `android/desktop/build/compose/binaries/main/app/Yxi/Yxi.exe` 在新建 `.artifacts/windows-native-a04d50c/profile` 下运行 --smoke，退出码0且日志有 smoke ok。HOME/USERPROFILE/APPDATA/LOCALAPPDATA/user.home 均隔离，父进程环境在 finally 恢复；未安装或覆盖现有应用。
+- 证据 `.artifacts/windows-native-a04d50c/result.json`、stdout.txt、stderr.txt。仅验证 Windows 打包启动器/Compose/Skia 基础启动，不能扩张为模型、真实账号、插件安装或完整UI验收。开发包仍使用当前源码版本号，未发布。
 ## 2026-09-24 六款新增官方插件图标
 
 - `9222c501e017c9a39dbb1a1ae7e8aabf0b33f6d4` 接入 Figma、Stripe、Vercel、Supabase、Google Calendar、Outlook 官方资源；cc-yxi 收集，主线程核对 manifest 哈希及图形，来源记录于 plugin-icons/SOURCES.md，名称与官网域名同时匹配。内置覆盖从8款扩到14款。
