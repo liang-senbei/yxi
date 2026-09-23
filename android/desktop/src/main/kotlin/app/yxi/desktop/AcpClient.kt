@@ -25,6 +25,7 @@ internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
     private val approvals = ConcurrentHashMap<String, JSONObject>()
     private val sessions = ConcurrentHashMap.newKeySet<String>()
     private val activePrompts = ConcurrentHashMap.newKeySet<String>()
+    private val cancellingSessions = ConcurrentHashMap.newKeySet<String>()
     private val closed = AtomicBoolean()
     private val writing = Mutex()
     private val incoming = Channel<JSONObject>(64)
@@ -53,6 +54,8 @@ internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
                             check(approvals.size < 64)
                             val key = idKey(message.get("id"))
                             check(approvals.putIfAbsent(key, message) == null) { "ACP 重复审批标识" }
+                            val sessionId = message.getJSONObject("params").getString("sessionId")
+                            if (sessionId in cancellingSessions) { cancelPermission(key, sessionId); continue }
                         }
                         check(incoming.trySend(message).isSuccess) { "ACP 事件消费未跟上，请核对会话" }
                     } else {
@@ -89,6 +92,7 @@ internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
     suspend fun prompt(sessionId: String, text: String, timeoutMillis: Long = 600_000): JSONObject {
         require(text.isNotBlank() && text.length <= 100_000)
         check(sessionId in sessions && activePrompts.add(sessionId)) { "会话未登记或仍有未确认轮次" }
+        cancellingSessions.remove(sessionId)
         // A timeout leaves this session blocked until native state is reconciled by its owner.
         val result = request("session/prompt", JSONObject().put("sessionId", sessionId)
             .put("prompt", JSONArray().put(JSONObject().put("type", "text").put("text", text))), timeoutMillis)
@@ -98,22 +102,32 @@ internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
     }
     suspend fun cancel(sessionId: String) {
         check(sessionId in sessions)
-        write(JSONObject().put("method", "session/cancel").put("params", JSONObject().put("sessionId", sessionId)))
+        writing.withLock {
+            cancellingSessions.add(sessionId)
+            writeLocked(JSONObject().put("method", "session/cancel").put("params", JSONObject().put("sessionId", sessionId)))
+        }
         pendingPermissions().filter { it.getJSONObject("params").optString("sessionId") == sessionId }.forEach {
-            answerPermission(it.get("id"), sessionId, null)
+            cancelPermission(idKey(it.get("id")), sessionId)
         }
     }
     fun pendingPermissions(): List<JSONObject> = approvals.values.map { JSONObject(it.toString()) }
-    suspend fun answerPermission(requestId: Any, sessionId: String, optionId: String?) {
+    suspend fun answerPermission(requestId: Any, sessionId: String, optionId: String?) = writing.withLock {
         val key = idKey(requestId)
         val request = approvals[key] ?: error("审批已处理或连接已失效")
         val params = request.getJSONObject("params")
         check(sessionId in sessions && params.getString("sessionId") == sessionId) { "审批不属于当前会话" }
+        check(optionId == null || sessionId !in cancellingSessions) { "会话正在取消，不能继续批准" }
         val options = params.getJSONArray("options")
         require(optionId == null || (0 until options.length()).any { options.getJSONObject(it).getString("optionId") == optionId }) { "审批选项不在原生列表中" }
         check(approvals.remove(key, request))
         val outcome = JSONObject().put("outcome", if (optionId == null) "cancelled" else "selected").apply { optionId?.let { put("optionId", it) } }
-        write(JSONObject().put("id", requestId).put("result", JSONObject().put("outcome", outcome)))
+        writeLocked(JSONObject().put("id", requestId).put("result", JSONObject().put("outcome", outcome)))
+    }
+    private suspend fun cancelPermission(key: String, sessionId: String) = writing.withLock {
+        val request = approvals[key] ?: return@withLock
+        check(request.getJSONObject("params").getString("sessionId") == sessionId)
+        if (approvals.remove(key, request)) writeLocked(JSONObject().put("id", request.get("id")).put("result",
+            JSONObject().put("outcome", JSONObject().put("outcome", "cancelled"))))
     }
     private suspend fun request(method: String, params: JSONObject, timeout: Long = 30_000): JSONObject {
         check(!closed.get()) { "ACP 连接已关闭" }
@@ -126,6 +140,9 @@ internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
         } } finally { pending.remove(id) }
     }
     private suspend fun write(message: JSONObject) = writing.withLock {
+        writeLocked(message)
+    }
+    private suspend fun writeLocked(message: JSONObject) {
         check(!closed.get() && transport.write(message.put("jsonrpc", "2.0").toString() + "\n")) { "ACP 写入未确认，请核对会话" }
     }
     private fun shutdown(error: Exception) {

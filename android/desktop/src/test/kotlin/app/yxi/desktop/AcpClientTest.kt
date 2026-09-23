@@ -9,6 +9,19 @@ import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.*
 
 class AcpClientTest {
+    @Test fun `permission arriving after cancellation receives cancelled without approval`() = runBlocking {
+        val fixture = Fixture().apply { setup() }
+        AcpClient(fixture).use { client ->
+            client.initialize(); client.newSession("/fixture")
+            client.cancel("fixture-session")
+            fixture.emit(JSONObject().put("id", "late-permission").put("method", "session/request_permission").put("params", JSONObject()
+                .put("sessionId", "fixture-session").put("options", JSONArray().put(JSONObject().put("optionId", "allow").put("kind", "allow_once")))))
+            withTimeout(2000) { while (fixture.writes.none { it.optString("id") == "late-permission" }) delay(10) }
+            val reply = fixture.writes.single { it.optString("id") == "late-permission" }
+            assertEquals("cancelled", reply.getJSONObject("result").getJSONObject("outcome").getString("outcome"))
+            assertTrue(client.pendingPermissions().isEmpty())
+        }
+    }
     private class Fixture : AcpTransport {
         override val output = PipedInputStream(65536)
         private val pipe = PipedOutputStream(output)
