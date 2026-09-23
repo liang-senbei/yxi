@@ -20,11 +20,18 @@ class GrokAcpNativeTest {
             assertNotNull(hello.optJSONArray("authMethods"))
             File("/results/grok-acp-initialize.json").writeText(hello.toString(2))
             assertFalse(File(home, "auth.json").exists(), "Protocol initialization must not synthesize a login")
-            val session = withTimeout(30000) { client.newSession("/sandbox/home") }
-            assertTrue(session.getString("sessionId").isNotBlank())
-            File("/results/grok-acp-session.json").writeText(session.toString(2))
+            val denial = assertFailsWith<AcpRpcException> { client.newSession("/sandbox/home") }
+            assertEquals(-32000, denial.code)
         }
         withTimeout(5000) { while (ProcessHandle.of(processId).map { it.isAlive }.orElse(false)) delay(20) }
         assertFalse(File(home, "auth.json").exists())
+        LocalAcpTasks(InstructionQueue(File("/sandbox/tmp/grok-queue.json")), File("/sandbox/tmp/grok-tasks.json")).use { tasks ->
+            tasks.prepare(runtime, "/sandbox/home")
+            val denied = assertFailsWith<IllegalStateException> { tasks.create("Unauthenticated task") }
+            assertTrue(denied.message.orEmpty().contains("先登录"))
+            assertEquals("", tasks.recoverySessionId)
+            assertTrue(tasks.registry.records.isEmpty())
+            assertNotNull(tasks.initialization, "Keep native authentication methods available after explicit auth refusal")
+        }
     }
 }

@@ -17,6 +17,7 @@ internal interface AcpTransport : AutoCloseable {
     val output: InputStream
     suspend fun write(text: String): Boolean
 }
+internal class AcpRpcException(val code: Int, detail: String) : IllegalStateException("ACP $code: $detail")
 
 /** ACP v1 JSON-RPC. Timeouts are unknown writes and are never retried here. */
 internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
@@ -188,7 +189,7 @@ internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
         try { return withTimeout(timeout) {
             write(JSONObject().put("id", id).put("method", method).put("params", params))
             val reply = response.await()
-            reply.optJSONObject("error")?.let { throw IllegalStateException("ACP ${it.optInt("code")}: ${it.optString("message")}") }
+            reply.optJSONObject("error")?.let { throw AcpRpcException(it.getInt("code"), it.optString("message")) }
             reply.getJSONObject("result")
         } } finally { pending.remove(id) }
     }

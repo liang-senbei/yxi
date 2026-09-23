@@ -88,7 +88,13 @@ internal class LocalAcpTasks(private val queue: InstructionQueue, file: File,
                 prepared.compareAndSet(client, null); runtime = null; initialization = null; recoverySessionId = ""
                 record
             } catch (e: Exception) { controller.close(); throw e }
-        } catch (e: Exception) { prepared.compareAndSet(client, null); client.close(); runtime = null; initialization = null; throw e }
+        } catch (e: Exception) {
+            if (e is AcpRpcException && e.code == -32000 && !disposed && preparationGeneration.get() == generation) {
+                journal.write(JSONObject().put("pending", false).toString()); recoverySessionId = ""
+                throw IllegalStateException("运行器要求先登录，请选择上方原生认证方式后重试", e)
+            }
+            prepared.compareAndSet(client, null); client.close(); runtime = null; initialization = null; throw e
+        }
         finally { busy = false }
     }
     override fun close() {
