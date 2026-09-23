@@ -1,3 +1,8 @@
+## 2026-09-24 远端认证窗口取消回归
+
+- 源码 `00f0de01095554edb82f863a2a6edcc05d187de8` 增加实际关闭认证窗口的回归：认证进程退出、取消结果无成功退出码、不生成输入结果文件，原 SSH 连接仍可执行命令。
+- 构建 `run.LiPAyO`，显式 SSH PTY 模式测试 `run.fHCMPM`：RemoteAuthenticationDialogTest 2 项通过，0 失败、0 错误、0 跳过，包含键盘成功与窗口取消。
+- 仍为隔离 Linux SSH 与测试认证程序；Windows/macOS、真实账号认证尚未完成，未发布。
 ## 2026-09-24 远端认证窗口实际键盘验收
 
 - `5ddb2581174342b213d183a8c417bcba9b9daf06` 为缺失 TERM 的远端环境提供 xterm-256color 缺省值；新增真实 SSH PTY + JediTerm 窗口测试，核对原始 argv、环境值、TTY 状态，实际点击输入 ok/Enter，返回退出码0且原 SSH 连接仍可执行。
