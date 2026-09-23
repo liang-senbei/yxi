@@ -1,3 +1,11 @@
+## Codex 终端新建与项目层冲突检查
+
+`584fc75`统一DesktopLaunchPlan参数传递：权限、Claude配置路径、Codex MCP覆盖全部作为独立argv传入，不把值拼进内层shell代码。Codex原始终端新建读取同一共享意向；先准备实际目录/独立worktree，再按该cwd读取原生有效配置并拒绝同名/保留名，随后启动。准备阶段不创建tmux会话。
+
+同时修正本地官方Codex和服务器结构化Codex的共享预检/回读，config/read带目标cwd，包含项目配置层。LocalOfficialCodexNativeTest新增可信项目.codex/config.toml中已禁用的同名MCP，确认原生读回后拒绝覆盖，项目/全局/登录文件不变。
+
+构建run.o0JmYT通过；启动与argv隔离run.k5yTMl 1项（扩展Codex覆盖值含空格/引号/命令替换字面量、目录准备不启动会话）、真实Codex项目冲突run.itLU33 1项、DesktopLauncherTest run.03BIE6 3项均通过，无跳过。尚未验证新增Codex TUI入口完整人工审批/Windows流程，本地旧CLI Codex任务入口与结构化工作台仍需统一；完整共享授权和生命周期、其余运行器目标均保留，未发布。
+
 ## 服务器 Claude 新建接入共享 MCP
 
 `b74b0cb`新增RemoteClaudeSharedMcp：定义通过SFTP写入请求专属600配置，校验回读与摘要；DesktopLaunchPlan在实际工作目录/独立worktree准备后执行限时限长原生同名检查，再把配置路径作为独立argv传给Claude，保留权限模式和提示词字面量。主侧栏/项目/协作组新建入口传入当前服务器意向，配置变化会更换启动请求ID；旧请求文件不被覆盖。共享页开放服务器Claude。线路切换脚本仅接受Yxi管理的私有MCP文件，并保留其参数；其它自定义配置路径仍不自动接管。
