@@ -19,12 +19,24 @@ internal data class LocalCodexTaskRecord(val threadId: String, val user: String,
 internal class LocalCodexTaskRegistry(file: File) {
     val records = mutableStateListOf<LocalCodexTaskRecord>()
     private val storage = DurableFile(file) { decode(it) }
+    private val reviewMarker = File(file.parentFile, file.name + ".needs-review")
+    var recoveryReviewRequired by mutableStateOf(false); private set
     var problem by mutableStateOf(""); private set
     init {
-        try { storage.read()?.let { records.addAll(decode(it)) }; if (storage.recovered) problem = "本地任务索引已从备份恢复，请核对后再新建" }
+        try {
+            storage.read()?.let { records.addAll(decode(it)) }
+            if (storage.recovered) DurableFile.replace(reviewMarker, "Native task index recovered; review before new writes")
+            recoveryReviewRequired = reviewMarker.exists()
+            if (recoveryReviewRequired) problem = "本地任务索引已从备份恢复，请核对后再新建"
+        }
         catch (_: Exception) { problem = "本地任务索引损坏，原文件已保留；请先恢复索引" }
     }
     fun requireWritable() { check(problem.isBlank()) { problem } }
+    fun confirmRecoveryReviewed() {
+        check(recoveryReviewRequired)
+        check(reviewMarker.delete()) { "核对标记未能更新，尚未解除保护" }
+        recoveryReviewRequired = false; problem = ""
+    }
     fun save(record: LocalCodexTaskRecord) {
         requireWritable()
         val next = records.filterNot { it.key == record.key } + record

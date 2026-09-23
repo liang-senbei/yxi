@@ -41,4 +41,16 @@ class LocalCodexTaskRegistryTest {
         }
         assertTrue(failure.message.orEmpty().contains("已关闭"))
     }
+    @Test fun `backup recovery remains blocked after another restart until explicit review`() {
+        val file = File(directory, "tasks.json")
+        LocalCodexTaskRegistry(file).apply { save(record()); save(record().copy(title = "newer")) }
+        file.writeText("damaged")
+        assertTrue(LocalCodexTaskRegistry(file).recoveryReviewRequired)
+        val reopened = LocalCodexTaskRegistry(file)
+        assertTrue(reopened.recoveryReviewRequired)
+        assertFailsWith<IllegalStateException> { reopened.save(record()) }
+        reopened.confirmRecoveryReviewed()
+        reopened.save(record().copy(title = "reviewed"))
+        assertEquals("reviewed", LocalCodexTaskRegistry(file).records.single().title)
+    }
 }

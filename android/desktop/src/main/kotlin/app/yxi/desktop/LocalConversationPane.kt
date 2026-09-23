@@ -22,15 +22,19 @@ import org.json.JSONObject
     var error by remember { mutableStateOf("") }
     var submitting by remember { mutableStateOf(false) }
     var reviewCreation by remember { mutableStateOf(false) }
+    var reviewIndex by remember { mutableStateOf(false) }
     var reviewed by remember { mutableStateOf(false) }
-    if (reviewCreation) WorkbenchDialog(onDismissRequest = { reviewCreation = false }, title = { Text("核对上次创建") }, text = {
+    if (reviewCreation || reviewIndex) WorkbenchDialog(onDismissRequest = { reviewCreation = false; reviewIndex = false }, title = { Text(if (reviewIndex) "核对恢复的任务索引" else "核对上次创建") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("原生会话：${tasks.recoveryThreadId}\n请先在原生 Codex 或只读历史中核对。解除记录只允许下一次新建，不会重发消息或删除原会话。")
-            Row { Checkbox(reviewed, { reviewed = it }); Text("我已人工核对上次创建结果") }
+            Text(if (reviewIndex) "索引已从备份恢复，可能缺少最近的登记。请对照原生历史核对；解除保护不会自动接管会话或重发消息。"
+                else "原生会话：${tasks.recoveryThreadId}\n请先在原生 Codex 或只读历史中核对。解除记录只允许下一次新建，不会重发消息或删除原会话。")
+            Row { Checkbox(reviewed, { reviewed = it }); Text("我已对照原生历史完成人工核对") }
         }
     }, confirmButton = { TextButton({
-        runCatching { tasks.confirmCreationReviewed(); reviewCreation = false }.onFailure { error = it.message.orEmpty(); reviewCreation = false }
-    }, enabled = reviewed && !tasks.busy) { Text("解除创建占用") } }, dismissButton = { TextButton({ reviewCreation = false }) { Text("取消") } })
+        runCatching { if (reviewIndex) tasks.registry.confirmRecoveryReviewed() else tasks.confirmCreationReviewed() }
+            .onFailure { error = it.message.orEmpty() }
+        reviewCreation = false; reviewIndex = false
+    }, enabled = reviewed && !tasks.busy) { Text("确认核对") } }, dismissButton = { TextButton({ reviewCreation = false; reviewIndex = false }) { Text("取消") } })
     WorkbenchDialog(onDismissRequest = { if (!tasks.busy) close() }, title = { Text("在本地新建对话") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Codex · 官方订阅", style = MaterialTheme.typography.titleMedium)
@@ -42,6 +46,7 @@ import org.json.JSONObject
             Text("使用所选本机运行器的官方登录；创建后由你发送第一条消息。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
             if (workspace.officialModelsError.isNotBlank()) Text(workspace.officialModelsError, color = Tokens.current.danger)
             if (tasks.registry.problem.isNotBlank()) Text(tasks.registry.problem, color = Tokens.current.danger)
+            if (tasks.registry.recoveryReviewRequired) TextButton({ reviewed = false; reviewIndex = true }, enabled = !tasks.busy) { Text("核对恢复的任务索引") }
             if (tasks.recoveryThreadId.isNotBlank()) {
                 Text("上次创建结果需要核对：${tasks.recoveryThreadId}", color = Tokens.current.warning)
                 TextButton({ reviewed = false; reviewCreation = true }, enabled = !tasks.busy) { Text("已检查原生历史，继续核对") }
