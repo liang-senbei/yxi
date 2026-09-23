@@ -1,3 +1,9 @@
+## 2026-09-23 Codex 原生变量引用读回验证
+
+- 提交 `4167bf25ef976b3631db9e327345dffda33e2fcb`：在现有隔离原生测试中为共享 stdio MCP 声明 PATH 引用，实际启动 Codex 0.153.4 app-server，校验 config/read 并通过本地任务创建路径；继续验证项目同名冲突与配置/登录文件未被改写。
+- 构建 `run.O3ihJl` 成功；`LocalOfficialCodexNativeTest`（`run.FWvr2I`）1 项通过，无失败/跳过。这证明当前 env_vars 字符串数组读回与我们的校验兼容；不证明 HTTP 认证头、变量缺失或真实订阅推理。
+- yxi_pilot 已交付变量验收矩阵，继续追踪 OpenCode 动态 POST /mcp 是否执行变量插值。此结论确认前暂不开放变量输入 UI，避免保存后原样发送占位符。yxi 已交付 Windows 发布验收清单，尚待主线程逐项复核。
+
 ## 2026-09-23 共享 MCP 变量引用基础
 
 - 实现提交 `5a34d323ce139fae8e32dba790537ed26799a86a`：定义保存插件专用环境变量名及请求头变量名，按 Claude/Codex/OpenCode 格式生成配置；不保存变量实际值。注册时复制集合，Codex 读回只接受声明的引用并拒绝额外认证字段。
