@@ -66,7 +66,7 @@ requires_openai_auth = false
         val queue = InstructionQueue(File("/sandbox/tmp/official-local-queue.json"))
         val shared = SharedMcpRegistry(File("/sandbox/tmp/official-shared-mcp.json"))
         val fixture = File("/sandbox/home/shared_mcp_fixture.py").apply { writeBytes(requireNotNull(LocalOfficialCodexNativeTest::class.java.getResourceAsStream("/shared_mcp_fixture.py")).use { it.readBytes() }) }
-        val definition = SharedMcpDefinition("@local", "echo", "fixture", "1", "shared_echo", listOf("/usr/bin/python3", fixture.path))
+        val definition = SharedMcpDefinition("@local", "echo", "fixture", "1", "shared_echo", listOf("/usr/bin/python3", fixture.path), environmentNames = setOf("PATH"))
         shared.save(definition, setOf("codex"), null)
         LocalCodexProfiles.connectOfficialWithSharedMcp(runtime, shared.forHost("@local"), "/sandbox/home").use { client ->
             val configWithMcp = client.request("config/read", JSONObject().put("includeLayers", false)).getJSONObject("result").getJSONObject("config")
