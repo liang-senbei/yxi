@@ -18,7 +18,7 @@ internal class PluginIconLoader(private val cache: File, private val fetch: (Str
     private val slots = Semaphore(4)
     suspend fun load(plugin: NativePlugin, dark: Boolean): ByteArray? = slots.withPermit { withContext(Dispatchers.IO) {
         val urls = listOfNotNull(if (dark) plugin.iconUrlDark else null, plugin.iconUrl, plugin.composerIconUrl).distinct()
-        val key = MessageDigest.getInstance("SHA-256").digest((urls.joinToString() + plugin.name + plugin.websiteUrl + dark).toByteArray())
+        val key = MessageDigest.getInstance("SHA-256").digest(("viewport-v2:" + urls.joinToString() + plugin.name + plugin.websiteUrl + dark).toByteArray())
             .joinToString("") { "%02x".format(it) }
         val saved = File(cache, "$key.png")
         if (saved.isFile && saved.length() <= 512 * 1024 && System.currentTimeMillis() - saved.lastModified() < 7L * 86400000) {
@@ -113,7 +113,17 @@ internal class PluginIconLoader(private val cache: File, private val fetch: (Str
                         .all { it.groupValues[1].startsWith('#') || it.groupValues[1].startsWith("data:image/") })
                     Data.makeFromBytes(bytes).use { data -> SVGDOM(data).use { dom ->
                         require(dom.root != null)
-                        dom.setContainerSize(64f, 64f); dom.render(surface.canvas)
+                        val tag = Regex("<svg\\b[^>]*>", RegexOption.IGNORE_CASE).find(svg)?.value ?: error("Missing SVG root")
+                        fun attribute(name: String) = Regex("\\s$name\\s*=\\s*[\"']([^\"']+)[\"']", RegexOption.IGNORE_CASE).find(tag)?.groupValues?.get(1)
+                        fun length(name: String) = attribute(name)?.trim()?.removeSuffix("px")?.toFloatOrNull()
+                        val viewBox = attribute("viewBox")?.trim()?.split(Regex("[\\s,]+"))?.map { it.toFloatOrNull() }
+                        val width = length("width") ?: viewBox?.takeIf { it.size == 4 }?.get(2) ?: 64f
+                        val height = length("height") ?: viewBox?.takeIf { it.size == 4 }?.get(3) ?: 64f
+                        require(width.isFinite() && height.isFinite() && width in 1f..2048f && height in 1f..2048f)
+                        val scale = minOf(64f / width, 64f / height)
+                        surface.canvas.translate((64 - width * scale) / 2, (64 - height * scale) / 2)
+                        surface.canvas.scale(scale, scale)
+                        dom.setContainerSize(width, height); dom.render(surface.canvas)
                     } }
                 } else Image.makeFromEncoded(bytes).use { image ->
                     require(image.width in 1..2048 && image.height in 1..2048)

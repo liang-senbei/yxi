@@ -1,3 +1,4 @@
 *.sh text eol=lf
 android/gradlew text eol=lf
 *.yml text eol=lf
+android/desktop/src/main/resources/app/yxi/desktop/plugin-icons/*.svg -text

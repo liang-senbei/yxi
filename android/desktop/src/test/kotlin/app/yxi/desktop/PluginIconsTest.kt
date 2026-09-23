@@ -10,6 +10,16 @@ import kotlin.test.*
 @EnabledOnOs(OS.LINUX)
 @EnabledIfEnvironmentVariable(named = "YXI_ISOLATED_TEST_RUN", matches = "[0-9a-f-]{36}")
 class PluginIconsTest {
+    @Test fun `SVG intrinsic dimensions are scaled into the icon viewport without clipping`() {
+        fun pixels(svg: String) = javax.imageio.ImageIO.read(java.io.ByteArrayInputStream(PluginIconLoader.render(svg.toByteArray())))
+        for (size in listOf(34, 192)) {
+            val image = pixels("""<svg xmlns="http://www.w3.org/2000/svg" width="$size" height="$size"><rect width="$size" height="$size" fill="#0055ff"/></svg>""")
+            assertEquals(0xff0055ff.toInt(), image.getRGB(62, 62))
+        }
+        val image = pixels("""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100"><rect width="200" height="100" fill="#0055ff"/></svg>""")
+        assertEquals(0, image.getRGB(32, 1) ushr 24)
+        assertEquals(0xff0055ff.toInt(), image.getRGB(32, 32))
+    }
     @TempDir lateinit var root: File
     private fun plugin(name: String, website: String, logo: String? = null) = NativePlugin(name, name, name, "", "", "fixture", null,
         "", false, false, true, logo, "fixture", "", "fixture", websiteUrl = website)
