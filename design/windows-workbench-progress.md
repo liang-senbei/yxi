@@ -1,3 +1,13 @@
+## 官方插件图标扩充与 SVG 视口修复
+
+`68f43b7`整合 yxi_pilot 收集的 GitHub、Slack、Dropbox、Google Drive、Notion、Linear 官方资源。主线程逐项核对 manifest 的 SHA256，保留原始文件和 SOURCES.md 来源记录；按插件名称与官方域名双重匹配，加上原有 Canva/Gmail 共8个内置官方图标。构建run.HUp0vH、图标回归run.q0U8K5通过后实际看图发现SVG尺寸问题，未将解码成功当成视觉成功。
+
+`83388f7`按SVG原始宽高/viewBox等比居中缩放，修复Dropbox偏小、192px Drive被裁切；更新缓存版本，SVG资源禁用Git换行转换以保留原字节。构建run.n54MiA、PluginIconsTest run.faEf1n四项通过（含8个官方图标、尺寸像素检查、官网回退/缓存及资源边界），无跳过。渲染结果已查看，修正图位于.artifacts/plugin-brand-fixed/。不宣称整个4230条目录均有离线图标，也不等于插件共享后端完成；未发布。
+
+## ACP 取消与晚到审批
+
+`1a67d05`串行处理取消与权限回复，取消后到达的session/request_permission回复cancelled；已取消会话不再批准新请求。仍等待原生prompt终态，不把cancel通知当结束。构建run.OMo7vD、AcpClientTest run.Q4kpQj五项通过，无跳过；属于协议fixture，三运行器原生ACP验收仍待完成。
+
 ## Gemini/Hermes/Grok 本机 ACP 启动与六运行器检测
 
 `00410f6`新增 LocalAcpTransport，以明确 argv 启动自有进程并串行写stdin；关闭只回收自有进程，初始化失败会清理。不自动认证或切换计费；Gemini --acp、Hermes acp、Grok --no-auto-update agent stdio。Gemini/Hermes数据目录用各自原生环境变量，不复制认证。Grok本机检测补齐官方.grok/bin及GROK_BIN_DIR，排除npm包猜测；版本命令用--no-auto-update version，远程解析补.grok/bin。六种运行器均进入本机发现清单，但发现不等于完成会话适配。
