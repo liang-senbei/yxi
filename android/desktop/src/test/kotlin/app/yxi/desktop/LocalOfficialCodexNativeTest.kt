@@ -51,6 +51,11 @@ requires_openai_auth = false
         val chatgptBefore = auth.readBytes()
         LocalCodexProfiles.connectOfficial(runtime).use { client ->
             assertTrue(client.authenticationSummary().contains("ChatGPT"))
+            val overrideDenied = assertFailsWith<IllegalStateException> { client.request("thread/start", JSONObject()
+                .put("cwd", "/sandbox/home").put("config", JSONObject().put("openai_base_url", "http://127.0.0.1:9/wrong"))) }
+            assertTrue(overrideDenied.message.orEmpty().contains("未经核对"))
+            val resumeDenied = assertFailsWith<IllegalStateException> { client.request("thread/resume", JSONObject().put("threadId", "not-a-real-thread")) }
+            assertTrue(resumeDenied.message.orEmpty().contains("显式核对"))
         }
         assertContentEquals(beforeConfig, config.readBytes())
         assertContentEquals(chatgptBefore, auth.readBytes())

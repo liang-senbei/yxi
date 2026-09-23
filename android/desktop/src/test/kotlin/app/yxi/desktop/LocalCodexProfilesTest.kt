@@ -24,6 +24,8 @@ class LocalCodexProfilesTest {
     @Test fun `official process must not silently inherit a third party thread provider`() {
         LocalCodexProfiles.verifyMutation("thread/start", JSONObject())
         LocalCodexProfiles.verifyMutation("thread/fork", JSONObject().put("modelProvider", "openai"))
+        LocalCodexProfiles.verifyMutation("thread/start", JSONObject().put("config", JSONObject().put("model_reasoning_effort", "high")))
+        assertFailsWith<IllegalStateException> { LocalCodexProfiles.verifyMutation("thread/start", JSONObject().put("config", JSONObject().put("openai_base_url", "https://example.com"))) }
         assertFailsWith<IllegalStateException> { LocalCodexProfiles.verifyMutation("thread/fork", JSONObject()) }
         assertFailsWith<IllegalStateException> { LocalCodexProfiles.verifyMutation("thread/start", JSONObject().put("modelProvider", "glm")) }
         assertFailsWith<IllegalStateException> { LocalCodexProfiles.verifyMutation("turn/start", JSONObject(), JSONObject().put("modelProvider", "glm")) }

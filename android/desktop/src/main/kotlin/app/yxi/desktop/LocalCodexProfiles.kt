@@ -23,6 +23,10 @@ internal object LocalCodexProfiles {
     }
 
     internal fun verifyMutation(method: String, params: JSONObject, thread: JSONObject? = null) {
+        val overrides = params.optJSONObject("config")
+        check(overrides == null || overrides.keys().asSequence().all { it == "model_reasoning_effort" }) {
+            "官方订阅不接受未经核对的会话配置覆盖"
+        }
         val requested = params.optString("modelProvider")
         check(requested.isEmpty() || requested == "openai") { "官方订阅不能向第三方提供方发送" }
         if (method in setOf("thread/resume", "thread/fork")) check(requested == "openai") {
