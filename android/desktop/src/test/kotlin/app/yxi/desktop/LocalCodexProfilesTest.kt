@@ -21,4 +21,12 @@ class LocalCodexProfilesTest {
         assertFailsWith<IllegalStateException> { LocalCodexProfiles.verifyOfficial(config().apply { remove("openai_base_url") }, account("chatgpt")) }
         assertFailsWith<IllegalStateException> { LocalCodexProfiles.verifyOfficial(config().put("chatgpt_base_url", "https://example.com"), account("chatgpt")) }
     }
+    @Test fun `official process must not silently inherit a third party thread provider`() {
+        LocalCodexProfiles.verifyMutation("thread/start", JSONObject())
+        LocalCodexProfiles.verifyMutation("thread/fork", JSONObject().put("modelProvider", "openai"))
+        assertFailsWith<IllegalStateException> { LocalCodexProfiles.verifyMutation("thread/fork", JSONObject()) }
+        assertFailsWith<IllegalStateException> { LocalCodexProfiles.verifyMutation("thread/start", JSONObject().put("modelProvider", "glm")) }
+        assertFailsWith<IllegalStateException> { LocalCodexProfiles.verifyMutation("turn/start", JSONObject(), JSONObject().put("modelProvider", "glm")) }
+        LocalCodexProfiles.verifyMutation("turn/start", JSONObject(), JSONObject().put("modelProvider", "openai"))
+    }
 }

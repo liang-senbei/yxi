@@ -25,7 +25,7 @@ internal class CodexAppServer internal constructor(private val transport: CodexT
         providerModelLoader: (suspend () -> List<ProviderModels.Model>)? = null, profileLabel: String? = null) :
         this(SshCodexTransport(shell), profileOverrides, providerModelLoader, profileLabel)
     internal val hasIndependentProfile get() = profileOverrides != null
-    internal var beforeLocalMutation: (suspend () -> Unit)? = null
+    internal var beforeLocalMutation: (suspend (String, JSONObject) -> Unit)? = null
     internal suspend fun independentModels(): List<String> {
         check(!closed.get() && providerModelLoader != null) { "独立配置连接已关闭" }
         return providerModelLoader.invoke().map { it.id }
@@ -75,7 +75,7 @@ internal class CodexAppServer internal constructor(private val transport: CodexT
 
     suspend fun request(method: String, params: JSONObject, timeoutMs: Long = 30000): JSONObject {
         check(!closed.get()) { "运行器连接已关闭" }
-        if (transport.local && method in setOf("thread/start", "thread/resume", "thread/fork", "turn/start", "turn/steer")) beforeLocalMutation?.invoke()
+        if (transport.local && method in setOf("thread/start", "thread/resume", "thread/fork", "turn/start", "turn/steer")) beforeLocalMutation?.invoke(method, params)
         val id = "yxi-" + UUID.randomUUID().toString()
         val result = CompletableDeferred<JSONObject>()
         pending[id] = result

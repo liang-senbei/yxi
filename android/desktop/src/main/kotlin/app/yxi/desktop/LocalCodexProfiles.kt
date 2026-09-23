@@ -22,6 +22,17 @@ internal object LocalCodexProfiles {
         }
     }
 
+    internal fun verifyMutation(method: String, params: JSONObject, thread: JSONObject? = null) {
+        val requested = params.optString("modelProvider")
+        check(requested.isEmpty() || requested == "openai") { "官方订阅不能向第三方提供方发送" }
+        if (method in setOf("thread/resume", "thread/fork")) check(requested == "openai") {
+            "继续历史必须显式核对目标提供方，不能隐式沿用旧第三方配置"
+        }
+        if (method in setOf("turn/start", "turn/steer")) check(thread?.optString("modelProvider") == "openai") {
+            "会话的实际提供方尚未确认为官方，未启用发送"
+        }
+    }
+
     suspend fun connectOfficial(runtime: LocalRuntimeInstallation): CodexAppServer {
         val transport = LocalCodexTransport.start(runtime, officialArguments(), officialEnvironment(System.getenv()))
         val client = CodexAppServer(transport, profileLabel = "官方订阅 · ChatGPT")
@@ -33,7 +44,13 @@ internal object LocalCodexProfiles {
                 verifyOfficial(config, account)
             }
             verify()
-            client.beforeLocalMutation = { verify() }
+            client.beforeLocalMutation = { method, params ->
+                verify()
+                val thread = if (method in setOf("turn/start", "turn/steer")) client.request("thread/read",
+                    JSONObject().put("threadId", params.getString("threadId")).put("includeTurns", false))
+                    .getJSONObject("result").getJSONObject("thread") else null
+                verifyMutation(method, params, thread)
+            }
             return client
         } catch (e: Exception) { client.close(); throw e }
     }
