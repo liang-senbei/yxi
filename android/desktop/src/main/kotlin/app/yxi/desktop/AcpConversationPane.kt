@@ -63,6 +63,7 @@ import java.io.File
     var draft by remember(record.key) { mutableStateOf("") }
     var error by remember(record.key) { mutableStateOf("") }
     var sending by remember(record.key) { mutableStateOf(false) }
+    var modeMenu by remember(record.key) { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row {
             TextButton({ state.localSelectedTaskKey = null }) { Text("返回本地") }
@@ -74,6 +75,22 @@ import java.io.File
             return@Column
         }
         Text(controller.note, style = MaterialTheme.typography.bodySmall)
+        controller.modes?.let { modes ->
+            val available = modes.optJSONArray("availableModes")
+            val current = modes.optString("currentModeId")
+            val options = (0 until (available?.length() ?: 0)).map { available!!.getJSONObject(it) }
+            Box {
+                TextButton({ modeMenu = true }, enabled = controller.ready && !controller.busy && !controller.changingMode && controller.pendingApprovals.isEmpty()) {
+                    Text("模式 · " + (options.firstOrNull { it.optString("id") == current }?.optString("name")?.takeIf { it.isNotBlank() } ?: current))
+                }
+                DropdownMenu(modeMenu, { modeMenu = false }) {
+                    options.forEach { option -> DropdownMenuItem(text = { Text(option.optString("name").ifBlank { option.getString("id") }) }, onClick = {
+                        modeMenu = false
+                        scope.launch { runCatching { controller.changeMode(option.getString("id")) }.onFailure { error = it.message.orEmpty() } }
+                    }) }
+                }
+            }
+        }
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             items(controller.messages, key = { it.id }) { message ->
                 Column {
@@ -93,7 +110,7 @@ import java.io.File
             TextButton({ sending = true; val text = draft; scope.launch {
                 try { controller.enqueue(text); draft = ""; controller.dispatchNext().join() } catch (e: Exception) { error = e.message.orEmpty() }
                 finally { sending = false }
-            } }, enabled = controller.ready && !sending && !controller.busy && controller.pendingApprovals.isEmpty() && draft.isNotBlank()) { Text("发送") }
+            } }, enabled = controller.ready && !sending && !controller.busy && !controller.changingMode && controller.pendingApprovals.isEmpty() && draft.isNotBlank()) { Text("发送") }
             TextButton({ scope.launch { runCatching { controller.cancelTurn() }.onFailure { error = it.message.orEmpty() } } },
                 enabled = controller.busy && !controller.cancelling) { Text("停止") }
         }

@@ -20,7 +20,10 @@ class AcpTaskControllerTest {
             val request = JSONObject(text); writes.add(request)
             when (request.optString("method")) {
                 "initialize" -> result(request, JSONObject().put("protocolVersion", 1))
-                "session/new" -> result(request, JSONObject().put("sessionId", "session"))
+                "session/new" -> result(request, JSONObject().put("sessionId", "session").put("modes", JSONObject().put("currentModeId", "ask")
+                    .put("availableModes", org.json.JSONArray().put(JSONObject().put("id", "ask").put("name", "Ask"))
+                        .put(JSONObject().put("id", "plan").put("name", "Plan")))))
+                "session/set_mode" -> result(request, JSONObject())
             }
             return true
         }
@@ -36,6 +39,9 @@ class AcpTaskControllerTest {
             client.initialize(); client.newSession(root.path)
             val queue = InstructionQueue(File(root, "queue.json"))
             AcpTaskController("task", "session", client, queue).use { controller ->
+                controller.changeMode("plan")
+                assertEquals("plan", controller.modes?.getString("currentModeId"))
+                assertFalse(controller.changingMode)
                 for (index in 1..2) {
                     controller.enqueue("question-$index")
                     val send = async { controller.sendNext() }

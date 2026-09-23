@@ -33,6 +33,8 @@ internal class AcpTaskController(
     var ready by mutableStateOf(true); private set
     var busy by mutableStateOf(false); private set
     var cancelling by mutableStateOf(false); private set
+    var changingMode by mutableStateOf(false); private set
+    var modes by mutableStateOf(client.modes(sessionId)); private set
     var lastStopReason by mutableStateOf(""); private set
     var note by mutableStateOf("已连接 ACP 会话"); private set
     private var disposed = false
@@ -71,6 +73,7 @@ internal class AcpTaskController(
         if (params.optString("sessionId") != sessionId || method != "session/update") return
         val update = params.optJSONObject("update") ?: return
         when (update.optString("sessionUpdate")) {
+            "current_mode_update" -> modes = client.modes(sessionId)
             "agent_message_chunk" -> {
                 check(activeMessageId.isNotBlank()) { "收到未关联轮次的消息" }
                 agentText.append(update.optJSONObject("content")?.optString("text").orEmpty())
@@ -112,6 +115,20 @@ internal class AcpTaskController(
 
     private fun firstPending() = queue.entries.firstOrNull { it.taskKey == taskKey &&
         it.status !in setOf(InstructionStatus.Sent, InstructionStatus.Accepted, InstructionStatus.Cancelled, InstructionStatus.Resolved) }
+
+    suspend fun changeMode(modeId: String) = mutation.withLock {
+        check(ready && !disposed && !busy && pendingApprovals.isEmpty()) { "当前会话暂不能切换模式" }
+        changingMode = true
+        try {
+            client.setMode(sessionId, modeId)
+            client.synchronizeEvents()
+            modes = client.modes(sessionId)
+            note = "会话模式已由运行器确认"
+        } catch (e: Exception) {
+            ready = false; note = "模式切换未确认，请核对原生会话后再发送"
+            throw e
+        } finally { changingMode = false }
+    }
 
     /** 提交下一条本地指令并等待原生轮次结束。prompt 响应携带 stopReason，是唯一可接受的
      * 轮次回执；超时/断连一律记 Unknown，不重发。 */
