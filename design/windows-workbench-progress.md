@@ -1,3 +1,11 @@
+## 服务器 Claude 新建接入共享 MCP
+
+`b74b0cb`新增RemoteClaudeSharedMcp：定义通过SFTP写入请求专属600配置，校验回读与摘要；DesktopLaunchPlan在实际工作目录/独立worktree准备后执行限时限长原生同名检查，再把配置路径作为独立argv传给Claude，保留权限模式和提示词字面量。主侧栏/项目/协作组新建入口传入当前服务器意向，配置变化会更换启动请求ID；旧请求文件不被覆盖。共享页开放服务器Claude。线路切换脚本仅接受Yxi管理的私有MCP文件，并保留其参数；其它自定义配置路径仍不自动接管。
+
+首次run.lzv5QU没有发现测试，原因是Kotlin方法推断返回异常对象；`c63f3cb`明确Unit返回后，构建run.mH80RV通过。RemoteClaudeSharedMcpTest run.BVC8Gq 1项（私有SSH+假CLI+真实tmux，验证600文件、重试身份、argv字面量/防注入、配置冲突）、真实Claude2.1.280线路回归ConversationRouteApplyTest run.NzjyMh 1项（重启参数保留MCP、原文件不变）、DesktopLauncherTest run.NnvdG3 3项全部通过，无跳过。
+
+尚未完成此新增服务器入口的完整真实模型/Windows GUI验收；带MCP参数的原地回退兼容仍需核对，当前严格上下文保护不会静默丢旗标。Codex原始终端创建路径与结构化工作台的共享配置覆盖范围也需继续统一。授权/升级/停用/卸载及完整共享市场导入仍未完成，未发布。
+
 ## 本地 Claude 任务接入共享 MCP 快照
 
 `23d3f65`新增ClaudeSharedMcp预检：用当前目录下的原生claude mcp get逐项核对名字，已存在或未知错误均不覆盖；输出限长、限时、仅在内存检查，不持久化原生配置内容。通过后生成任务私有mcp.json，以--mcp-config添加，保留原有其它原生设置。LocalAgents读取本地Claude意向并保存定义快照，继续旧任务使用原快照，取消预检可清理自有进程。共享页开放本地Claude任务选择，服务器Claude仍未开放。
