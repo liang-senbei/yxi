@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -123,7 +124,11 @@ fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: Stri
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         row.forEach { runner ->
                             androidx.compose.material3.FilterChip(selected = agent == runner.id, onClick = { agent = runner.id; err = "" }, enabled = !busy,
-                                modifier = Modifier.weight(1f), leadingIcon = { RunnerBrandIcon(runner.id, Modifier.size(20.dp)) },
+                                modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+                                colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(selectedContainerColor = Tokens.current.accent.copy(alpha = 0.12f)),
+                                border = androidx.compose.material3.FilterChipDefaults.filterChipBorder(enabled = !busy, selected = agent == runner.id,
+                                    borderColor = Tokens.current.border, selectedBorderColor = Tokens.current.accent.copy(alpha = 0.45f)),
+                                leadingIcon = { RunnerBrandIcon(runner.id, Modifier.size(20.dp)) },
                                 label = { Column { Text(runner.title); if (!runner.serverCreation) Text("创建接入中", style = MaterialTheme.typography.labelSmall) } })
                         }
                     }
