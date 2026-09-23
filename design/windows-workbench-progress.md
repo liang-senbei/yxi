@@ -1,3 +1,8 @@
+## 2026-09-24 远端 ACP 会话侧栏入口
+
+- `e4374d71e40472b344f8255730d2858e9349bb1b` 将 Gemini/Grok/Hermes 已登记远端会话接入项目树、主机搜索、置顶与收藏；复用原生会话行，支持显示名称、归档、移组与灰色8dp选中态。按控制器审批/运行状态及队列未知状态显示待处理，断开的会话不冒充空闲。
+- 构建 `run.ADp3K5`；RemoteAcpCreationUiTest `run.hAKJ87` 1 项通过，0 失败/错误/跳过。真实隔离 SSH + 协议 fixture 中，创建后点击会话行返回同一 Conn/控制器，session/new 仍仅一次，无 session/prompt，异主机查询为空，置顶/收藏登记成功。
+- `.artifacts/server-acp-ui/sidebar.png` 已目视；这是单行组件截图，不能作为完整项目树/分组/收藏菜单布局验收。完整侧栏交互、Windows/macOS 实机及重启后原生会话恢复仍待完成，未发布。
 ## 2026-09-24 原生 Hermes 远端认证入口
 
 - `18181682c11915284c9738c4fe600d61f9ea3be2` 新增 HermesRemoteAuthenticationTest：固定官方 Hermes 0.21.4 源码，在隔离 HOME 下经真实 SSH 完成 ACP 握手，使用原生 hermes-setup 描述启动 SSH PTY，实际出现 Select provider 菜单。关闭认证通道后无成功回执，原 SSH 仍可执行命令。
