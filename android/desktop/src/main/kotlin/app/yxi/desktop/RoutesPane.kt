@@ -24,6 +24,7 @@ import androidx.compose.material.icons.outlined.DeleteOutline
 /** Server-side route settings: configuration confirmation is deliberately separate from request verification. */
 @Composable
 fun RoutesPane(state: AppState) {
+    if (state.isLocal) { LocalWorkspacePane(state, configuration = true); return }
     val conn = state.configurationConnection()
     if (conn == null) {
         Column(Modifier.fillMaxSize().padding(28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -438,6 +439,13 @@ internal fun RouteForm(original: Lines.Line, conn: Conn, onClose: () -> Unit, on
             OutlinedTextField(secret, { secret = it }, label = { Text("API Key") }, singleLine = true, modifier = Modifier.fillMaxWidth(), visualTransformation = if (showSecret) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(), trailingIcon = { TextButton({ showSecret = !showSecret }) { Text(if (showSecret) "隐藏" else "显示") } })
             if (!original.isCodex) OutlinedTextField(authToken, { authToken = it }, label = { Text("Auth token（按提供方要求填写）") }, singleLine = true, modifier = Modifier.fillMaxWidth(), visualTransformation = if (showSecret) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation())
             if (original.isCodex) OutlinedTextField(model, { model = it }, label = { Text("模型 ID（可留空）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            if (original.isCodex) {
+                TextButton({ requestOptionsOpen = !requestOptionsOpen }) { Text(if (requestOptionsOpen) "收起请求选项" else "更多请求选项") }
+                if (requestOptionsOpen) Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("模型列表 URL（可选）", fontSize = 12.sp, color = Tokens.current.textMuted)
+                    CompactTextInput(modelsUrl, { modelsUrl = it }, "模型列表 URL", Modifier.fillMaxWidth(), placeholder = "留空按 Base URL 尝试")
+                }
+            }
             if (!original.isCodex) {
                 Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp), color = Tokens.current.surface2,
                     border = androidx.compose.foundation.BorderStroke(1.dp, Tokens.current.border)) {

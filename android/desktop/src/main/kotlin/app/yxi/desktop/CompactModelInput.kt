@@ -62,6 +62,7 @@ internal val compactControlHeight: Dp
     label: String, modifier: Modifier = Modifier, height: Dp = compactControlHeight) {
     var open by remember { mutableStateOf(false) }
     val fieldFocus = remember { FocusRequester() }
+    LaunchedEffect(models.isEmpty()) { if (models.isEmpty()) open = false }
     val t = Tokens.current
     Box(modifier) {
         CompactTextInput(value, change, label, Modifier.fillMaxWidth().testTag("model:$label"),

@@ -19,7 +19,7 @@ import app.yxi.agent.SessionState
  * 主机分组 → 会话行都在侧栏里），所以这里只剩另外两个整页入口。
  * 它跟 [AppState.tab] 是两层：`page` 决定右边整块是什么，`tab` 只在工作区里选 对话/终端/文件。
  */
-enum class Page { Workspace, Config, Me, Routes, Codex, Plugins, ConfigFiles, Connections, LocalAgents, ScheduledTasks }
+enum class Page { Workspace, Config, Me, Routes, Codex, Plugins, ConfigFiles, Connections, LocalAgents, LocalWorkspace, ScheduledTasks }
 
 internal class CodexConversationView {
     val scroll = androidx.compose.foundation.lazy.LazyListState()
@@ -27,6 +27,13 @@ internal class CodexConversationView {
 }
 
 class AppState {
+    private val localWorkspaceDelegate = lazy { LocalWorkspace() }
+    internal val localWorkspace get() = localWorkspaceDelegate.value
+    internal val isLocal get() = hostScope == LOCAL_HOST_SCOPE
+    internal fun selectLocal() {
+        rememberTaskView(); conn = null; session = null; restoreSession = null; restoreRuntime = null
+        configurationHostId = ""; pluginLocation = "本地"; scopeHost(LOCAL_HOST_SCOPE); page = Page.LocalWorkspace
+    }
     internal val scheduledTasks by lazy { ScheduledTasks(java.io.File(Store.dir, "scheduled-tasks.json")) }
     private val linksDelegate = lazy { DeviceLinks() }
     internal val deviceLinks get() = linksDelegate.value
@@ -36,11 +43,12 @@ class AppState {
     internal val localOperations get() = (if (linksDelegate.isInitialized()) deviceLinks.busy.size else 0) +
         (if (localAgentsDelegate.isInitialized()) localAgents.jobs.count { it.running } else 0)
     internal fun closeLocalFeatures() {
+        if (localWorkspaceDelegate.isInitialized()) localWorkspace.close()
         if (linksDelegate.isInitialized()) deviceLinks.close()
         if (localAgentsDelegate.isInitialized()) localAgents.close()
     }
     var configurationHostId by mutableStateOf("")
-    internal fun configurationConnection() = if (configurationHostId.isBlank()) conn
+    internal fun configurationConnection() = if (isLocal) null else if (configurationHostId.isBlank()) conn
         else conns.firstOrNull { it.host.id == configurationHostId }
     var pluginLocation by mutableStateOf("本地")
     var pluginMarketplace by mutableStateOf(true)
@@ -138,7 +146,7 @@ class AppState {
         documentSelection[taskNavigationKey(c.host, task)] = canonical
         if (conn === c && session?.name == task.name) { filePanelOpen = true; browserPanelOpen = false; tab = 0 }
     }
-    var hostScope by mutableStateOf(Store.pref("hostScope", ""))
+    var hostScope by mutableStateOf(Store.pref("hostScope", if (Store.pref("lastHost", "").isBlank()) LOCAL_HOST_SCOPE else ""))
     internal var startupRestored = false
     internal var restoreSession by mutableStateOf<String?>(null)
     internal var restoreRuntime by mutableStateOf<String?>(null)
@@ -153,7 +161,7 @@ class AppState {
         val task = session ?: return
         taskViews[taskNavigationKey(host, task)] = TaskView(tab, filePanelOpen, browserPanelOpen, previewExpanded)
     }
-    var page by mutableStateOf(Page.Workspace)             // 左栏底部的「配置」「我的」切这个
+    var page by mutableStateOf(if (hostScope == LOCAL_HOST_SCOPE) Page.LocalWorkspace else Page.Workspace)
     var sidebarOpen by mutableStateOf(true)                // Ctrl+B；窗口 < 700 时自动收起
     var newSessionRequest by mutableStateOf(0)             // Ctrl+N：+1 一次，侧栏看到就弹「新建会话」
     /** 侧栏上一次处理过的 [newSessionRequest] 值。放 AppState 里而不是 Sidebar 的 remember：

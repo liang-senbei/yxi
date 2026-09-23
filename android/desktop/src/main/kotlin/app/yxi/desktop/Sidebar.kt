@@ -148,8 +148,8 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
     LaunchedEffect(Unit) {
         if (!state.startupRestored) {
             state.startupRestored = true
-            if (hosts.none { it.id == state.hostScope }) state.scopeHost("")
-            if (Store.pref("reconnectOnStart", "1") == "1") {
+            if (!state.isLocal && hosts.none { it.id == state.hostScope }) state.scopeHost("")
+            if (!state.isLocal && Store.pref("reconnectOnStart", "1") == "1") {
                 hosts.firstOrNull { it.id == Store.pref("lastHost", "") }?.let { h ->
                     val previousSession = Store.pref("lastSession", "")
                     connect(h)
@@ -170,6 +170,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
     LaunchedEffect(state.newSessionRequest) {
         if (state.newSessionRequest == state.newSessionSeen) return@LaunchedEffect
         state.newSessionSeen = state.newSessionRequest
+        if (state.isLocal) { state.page = Page.LocalWorkspace; return@LaunchedEffect }
         creatingOn = state.conn?.takeIf { it.status == Conn.Status.Connected } ?: state.conns.firstOrNull { it.status == Conn.Status.Connected }
         if (creatingOn == null) note = "先连上一台主机，再新建会话"
     }
@@ -179,6 +180,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
     val searchFocus = remember { FocusRequester() }
     LaunchedEffect(searchVisible) { if (searchVisible) searchFocus.requestFocus() }
     fun newConversation() {
+        if (state.isLocal) { state.page = Page.LocalWorkspace; return }
         val c = if (state.hostScope.isEmpty()) state.conn else state.conns.firstOrNull { it.host.id == state.hostScope }
         if (c?.status == Conn.Status.Connected) creatingOn = c else note = "先选择并连接要运行 Agent 的主机"
     }
@@ -187,11 +189,13 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
         Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.weight(1f)) {
                 Row(Modifier.clip(RoundedCornerShape(9.dp)).clickable { hostMenu = true }.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(hosts.firstOrNull { it.id == state.hostScope }?.label ?: "所有主机", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, color = t.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    Text(if (state.isLocal) "本地" else hosts.firstOrNull { it.id == state.hostScope }?.label ?: "所有主机", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, color = t.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                     Text("⌄", Modifier.padding(start = 6.dp), color = t.textMuted)
                 }
                 DropdownMenu(hostMenu, { hostMenu = false }) {
-                    DropdownMenuItem(text = { Text("所有主机") }, onClick = { state.scopeHost(""); hostMenu = false })
+                    DropdownMenuItem(text = { Text("本地 · 此电脑") }, leadingIcon = { Icon(Icons.Outlined.Computer, null) }, onClick = { state.selectLocal(); hostMenu = false })
+                    DropdownMenuItem(text = { Text("所有主机") }, onClick = { state.scopeHost(""); state.page = Page.Workspace; hostMenu = false })
+                    HorizontalDivider()
                     hosts.forEach { h ->
                         DropdownMenuItem(text = { Text(h.label + (if (h.region.isBlank()) "" else " · ${h.region}") + " · " + (connOf(h)?.status?.label?.ifBlank { "未连接" } ?: "未连接")) }, onClick = {
                             hostMenu = false; state.scopeHost(h.id)
@@ -231,7 +235,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
         if (Store.hostRecoveryNeeded()) TextButton({ recoveringHosts = true }, enabled = state.conns.isEmpty()) { Text(if (state.conns.isEmpty()) "从受保护副本恢复服务器" else "恢复前请先断开连接") }
         Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp).clip(RoundedCornerShape(8.dp)).clickable { newConversation() }.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Icon(Icons.Outlined.Edit, null, Modifier.size(18.dp), tint = t.textSecondary)
-            Text("新对话", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = t.textPrimary)
+            Text(if (state.isLocal) "本地工作台" else "新对话", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = t.textPrimary)
             Icon(Icons.Default.Add, null, Modifier.size(16.dp), tint = t.textMuted)
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp).clip(RoundedCornerShape(8.dp)).clickable { state.showTaskSwitcher = true }.padding(horizontal = 10.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -247,7 +251,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
             DropdownMenu(exploreOpen, { exploreOpen = false }) {
                 DropdownMenuItem(text = { Text("定时任务") }, leadingIcon = { Icon(Icons.Outlined.Schedule, null, Modifier.size(18.dp)) }, onClick = { exploreOpen = false; state.page = Page.ScheduledTasks })
                 DropdownMenuItem(text = { Text("连接") }, leadingIcon = { Icon(Icons.Outlined.Link, null, Modifier.size(18.dp)) }, onClick = { exploreOpen = false; state.page = Page.Connections })
-                DropdownMenuItem(text = { Text("本地 Agent") }, leadingIcon = { Icon(Icons.Outlined.Computer, null, Modifier.size(18.dp)) }, onClick = { exploreOpen = false; state.page = Page.LocalAgents })
+                DropdownMenuItem(text = { Text("本地 Agent") }, leadingIcon = { Icon(Icons.Outlined.Computer, null, Modifier.size(18.dp)) }, onClick = { exploreOpen = false; state.selectLocal() })
             }
         }
         // 会话过滤（ZCode 的搜索框 / Codex 的过滤）：按会话名 / 主机名滤，主机全不匹配就整组藏掉
@@ -264,12 +268,13 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
                 decorationBox = { inner -> Box { if (filter.isEmpty()) Text("搜索会话", style = MaterialTheme.typography.bodySmall, color = t.textMuted); inner() } },
             )
         }
-        if (hosts.isEmpty()) Text("尚未添加设备，点 + 加一台", Modifier.padding(14.dp, 8.dp), style = MaterialTheme.typography.bodySmall, color = t.textMuted)
-        if (hosts.isNotEmpty()) WorkbenchTabs(listOf("全部", "待处理", "归档"), state.navigation.mode, { state.navigation.setMode(it) }, Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
+        if (!state.isLocal && hosts.isEmpty()) Text("尚未添加服务器", Modifier.padding(14.dp, 8.dp), style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+        if (!state.isLocal && hosts.isNotEmpty()) WorkbenchTabs(listOf("全部", "待处理", "归档"), state.navigation.mode, { state.navigation.setMode(it) }, Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
         if (state.navigation.error.isNotBlank()) Text(state.navigation.error, Modifier.padding(10.dp), color = t.danger, style = MaterialTheme.typography.bodySmall)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             val f = filter.trim()
-            if (hosts.isNotEmpty()) SidebarSavedSessions(state, hosts, f) { c, favorite ->
+            if (state.isLocal) LocalWorkspaceSidebar(state, f)
+            if (!state.isLocal && hosts.isNotEmpty()) SidebarSavedSessions(state, hosts, f) { c, favorite ->
                 if (!openingFavorite) {
                     openingFavorite = true
                     scope.launch {
