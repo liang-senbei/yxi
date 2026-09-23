@@ -1,3 +1,9 @@
+## OpenCode 原生协议客户端（开发中，未开放创建）
+
+`bceaa03`新增 OpenCodeClient，支持供应商、会话/消息/状态读取以及创建、异步发送、停止。请求明确携带工作目录和模型，使用 loopback Basic Auth，禁止重定向，写操作不做应用层自动重试。资料与待接入层见 research/opencode-session-adapter.md。
+
+隔离构建 run.4EbLvh 通过，OpenCodeClientTest 在 run.uOocyO 两项通过；HTTP fixture 覆盖认证、Windows目录传递、模型/文本、创建/发送/停止以及拒绝重定向和重复写入。尚未验证真实 OpenCode 运行器；自有进程、原生审批/事件、持久队列与界面接入仍未完成，serverCreation 保持关闭。本轮不代表六运行器新建完成，未发布。
+
 ## 本地附件发送路径（2026-09-23）
 
 `a70aa89`：turn/start 与 turn/steer 根据实际传输位置校验附件。本机要求当前系统可读取的绝对文件路径，图片使用 localImage；其他文件引用明确标为本机。服务器路径仍由远端使用，不错误检查本机是否存在。
