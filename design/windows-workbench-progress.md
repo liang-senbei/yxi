@@ -1,3 +1,13 @@
+## ACP 通信基础与 yunxi Agent 分工
+
+`5238892`新增 AcpClient：JSON-RPC 2.0初始化、显式认证、session/new、prompt、cancel、原生权限选项回复；请求ID区分数字/文本，写入串行化，读帧限长，事件拥塞明确失败而非静默丢失。客户端未实现的文件/终端能力不声明，不支持请求返回method-not-found。prompt超时保持会话未确认，不自动重发；取消通知不冒充原生轮次结束。
+
+构建run.fPjXdq、AcpClientTest run.0P5R3r四项通过，无跳过。验证权限归属/选项、不同类型ID、取消后等待原生响应、超时不重发、拒绝未实现能力。仍为内存协议fixture，尚无Gemini/Hermes生产transport及原生验证、认证/界面接入，未发布。
+
+用户再次明确可派任务给yunxi组。核对tmux归属后派给cc-yxi_entertainment(%9)共享MCP适配只读检查，cc-yxi_pilot(%10)Grok/Hermes原生协议官方资料核对。要求不改共享源码、不构建/安装/操作其它会话，独立报告到 /root/src/workspace/yunxi/windows-test-reports/acp-and-plugins/；已确认两者开始工作，报告尚未返回，不视为验收完成。
+
+本轮构建因可用磁盘不足4GiB在启动前被拦住；检查后仅删除65份已完成且image.json带Yxi隔离标签的run.*/context副本（约1.74GB），保留报告、镜像和基础缓存。清理后空闲约5.73GB并完成构建。未清理其他应用镜像或生产数据。
+
 ## Gemini 本机识别与官方订阅说明更正
 
 `e1205b9`新增Gemini本机/PATH/npm识别，Windows解析 @google/gemini-cli 的 bin 字段为明确Node+JS参数；GEMINI_CLI_HOME作为home根再追加.gemini，与本机0.34.0源码一致。缺少Node仍记录已发现安装并说明原因。本机实际定位D:/qianduantool/nodejs的npm包0.34.0；显式Node执行--version持续未返回，核对PID/父PID/命令后仅结束该探测进程。未据安装清单宣称运行可用，未改真实配置或认证。
