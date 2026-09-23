@@ -13,7 +13,7 @@ import java.util.concurrent.TimeUnit
 
 /** Private SSH bridge into an existing container fixture; never exposes host credentials or sockets. */
 internal class IsolatedSshBridge(private val root: File, environment: Map<String, String>, socket: File,
-    allowForwarding: Boolean = false, additionalAuthorizedKeys: File? = null) : AutoCloseable {
+    allowForwarding: Boolean = false, additionalAuthorizedKeys: File? = null, debug: Boolean = false) : AutoCloseable {
     private var server: Process? = null
     lateinit var conn: Conn
         private set
@@ -57,6 +57,7 @@ internal class IsolatedSshBridge(private val root: File, environment: Map<String
                 PermitRootLogin prohibit-password
                 StrictModes yes
                 UsePAM no
+                LogLevel ${if (debug) "DEBUG3" else "INFO"}
                 AllowTcpForwarding ${if (allowForwarding) "yes" else "no"}
                 GatewayPorts no
                 AllowAgentForwarding no

@@ -23,14 +23,14 @@ for line in sys.stdin:
 """)
             setExecutable(true)
         }
-        IsolatedSshBridge(File(root, "ssh"), mapOf("HOME" to home.path), File(root, "unused.sock")).use { bridge ->
+        IsolatedSshBridge(File(root, "ssh"), mapOf("HOME" to home.path), File(root, "unused.sock"), debug = true).use { bridge ->
             bridge.conn.ssh.connect()
             val exited = bridge.conn.ssh.openPtyCommand("printf terminal-exit; read answer; exit 7")
             try {
                 val text = withContext(Dispatchers.IO) {
                     val received = StringBuilder()
                     while (!received.contains("terminal-exit")) {
-                        val byte = exited.output.read(); check(byte >= 0) { "PTY closed before its prompt" }
+                        val byte = exited.output.read(); check(byte >= 0) { "PTY closed before its prompt; exit=${exited.exitCode}; connected=${exited.isConnected}" }
                         received.append(byte.toChar())
                     }
                     received.toString()
