@@ -1,3 +1,9 @@
+## 2026-09-24 ACP 审批卡片组件
+
+- `5979e8ac59350eb6eb295d0eb00e3a0aa9ff848e` 添加 AcpPermissionCard，保留原生按钮名称并显示 allow_once/allow_always/reject_once/reject_always 的不同范围，回传原始 optionId；重复 ID 或未知类型只显示错误与取消，不生成批准选项。
+- 构建 `run.BU3TH8`，AcpPermissionCardTest `run.yD6x0i` 1 项通过，无失败/跳过。只证明选项映射与校验，未做组件截图或真实审批点击验证。
+- 组件尚待 ACP 控制器和会话页接入；yxi_pilot 的控制器草案已开始落盘，完整测试/说明尚未交付，未计为完成。未发布。
+
 ## 2026-09-23 ACP 原生模式通知同步
 
 - `97a0519dddbd4759e7f909ef9603fedd13336e22` 接入 session/update.current_mode_update，保存原生当前模式；切换 ACK 不覆盖等待期间收到的较新通知，并兼容 session/new 完成附近到达的模式通知。
