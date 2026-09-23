@@ -62,7 +62,7 @@ http_headers = { Authorization = "Bearer fixture-key-0" }
                 .associate { it.relativeTo(codexHome).path to MessageDigest.getInstance("SHA-256").digest(it.readBytes()).toList() }
             val beforeTranscripts = transcripts(); assertTrue(beforeTranscripts.isNotEmpty())
             application(exitProcessOnExit = false) {
-                Window(onCloseRequest = ::exitApplication, state = rememberWindowState(width = 1360.dp, height = 960.dp), title = "Yxi local history") {
+                Window(onCloseRequest = ::exitApplication, state = rememberWindowState(width = 1180.dp, height = 960.dp), title = "Yxi local history") {
                     YxiTheme { Row { Box(Modifier.width(250.dp)) { LocalWorkspaceSidebar(state, "") }; Box(Modifier.weight(1f)) { LocalWorkspacePane(state) } } }
                     LaunchedEffect(Unit) {
                         try {
