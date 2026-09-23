@@ -20,17 +20,19 @@ internal class LocalOpenCodeServer private constructor(private val process: Proc
 
     companion object {
         suspend fun start(runtime: LocalRuntimeInstallation, directory: File,
-            environment: Map<String, String> = System.getenv(), startupTimeoutMillis: Long = 30_000): LocalOpenCodeServer {
+            environment: Map<String, String> = System.getenv(), startupTimeoutMillis: Long = 30_000,
+            sharedMcp: List<SharedMcpDefinition> = emptyList()): LocalOpenCodeServer {
             require(runtime.engine == "opencode" && runtime.ready) { "请选择可用的 OpenCode 安装" }
             require(directory.isAbsolute && directory.isDirectory) { "本机工作目录不存在" }
             require(startupTimeoutMillis in 100..60_000)
+            val launchEnvironment = OpenCodeStartupMcp.environment(environment, sharedMcp)
             val password = Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32).also { SecureRandom().nextBytes(it) })
             var owned: Process? = null
             try {
                 val process = withContext(Dispatchers.IO) {
                     ProcessBuilder(runtime.command + listOf("serve", "--hostname", "127.0.0.1", "--port", "0", "--no-mdns"))
                         .directory(directory.canonicalFile).redirectErrorStream(true).apply {
-                            environment().clear(); environment().putAll(environment)
+                            environment().clear(); environment().putAll(launchEnvironment)
                             environment()["OPENCODE_SERVER_USERNAME"] = "opencode"
                             environment()["OPENCODE_SERVER_PASSWORD"] = password
                         }.start().also { owned = it }
