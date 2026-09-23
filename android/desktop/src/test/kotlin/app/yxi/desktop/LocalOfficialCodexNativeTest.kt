@@ -51,6 +51,9 @@ requires_openai_auth = false
         val chatgptBefore = auth.readBytes()
         LocalCodexProfiles.connectOfficial(runtime).use { client ->
             assertTrue(client.authenticationSummary().contains("ChatGPT"))
+            val models = LocalOfficialModels.load { client.listModels(it) }
+            assertTrue(models.isNotEmpty())
+            assertTrue(models.none { it.id == "fixture" }, "Native model discovery must not substitute a configured provider ID")
             val overrideDenied = assertFailsWith<IllegalStateException> { client.request("thread/start", JSONObject()
                 .put("cwd", "/sandbox/home").put("config", JSONObject().put("openai_base_url", "http://127.0.0.1:9/wrong"))) }
             assertTrue(overrideDenied.message.orEmpty().contains("未经核对"))
