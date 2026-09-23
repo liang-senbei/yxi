@@ -1,5 +1,11 @@
 # Windows 工作台实施记录
 
+## 选中态统一为小圆角中性加深（开发分支，未发布）
+
+用户指定参考Codex侧栏的小圆角灰底选中态。新增共享`QuietChoice`，桌面筛选选择统一8dp圆角、中性选中背景、正常文字/图标色，无彩色选中描边、阴影或额外加粗。侧栏导航、会话行、WorkbenchTabs、插件切换、分类、运行器及其他同类FilterChip入口一并更新；交互回调、禁用状态和原有可访问性语义继续沿用。业务状态提示和输入焦点样式不是选中态，本次不混改。
+
+`a388e02`构建`run.6FXOKr`通过，既有新建弹窗/路径回归`run.LM8mzw`2项、原生插件安装隔离/界面回归`run.SVpYbX`1项通过。新建弹窗和插件页实际截图已人工核对，选中灰底、小圆角、正常字重且无蓝色选中边框；截图在`.artifacts/quiet-selection/`。本轮是可逆样式调整，不新增镜像样式常量的单元测试；完整Windows DPI验收仍待完成。
+
 ## 六种运行器的内置官方配置（开发分支，未发布）
 
 用户要求默认提供官方订阅，OpenCode/Hermes若有官方服务也加入。已核对官方资料并落实[官方默认项规则](official-provider-defaults.md)：Claude、ChatGPT、Google账号/订阅、Grok、OpenCode Go和Nous Portal均提供首选内置项；OpenCode Zen作为单独按量服务，不冒充订阅。Grok Build官方启动命令已确认为`grok`，只更新探测命令，不据此开放未完成的会话适配。
