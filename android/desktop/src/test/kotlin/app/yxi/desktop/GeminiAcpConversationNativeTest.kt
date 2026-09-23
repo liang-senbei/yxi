@@ -92,6 +92,52 @@ class GeminiAcpConversationNativeTest {
                         .put("issuedTool", issuedTool.get()).put("sawToolResult", sawToolResult.get()).toString(2))
                 }
             }
+            issuedTool.set(false); sawToolResult.set(false); check(marker.delete())
+            val remote = File("/sandbox/tmp/remote-gemini").apply { mkdirs() }
+            val home = File(remote, "home").apply { mkdirs() }
+            val bin = File(home, ".local/bin").apply { mkdirs() }
+            File(bin, "gemini").apply {
+                writeText("#!/bin/sh\nexec /opt/gemini/node /opt/gemini/runtime/node_modules/@google/gemini-cli/dist/index.js \"${'$'}@\"\n")
+                setExecutable(true)
+            }
+            val project = File(home, "project").apply { mkdirs() }
+            val remoteEnvironment = mapOf("HOME" to home.path, "GEMINI_CLI_HOME" to home.path,
+                "GEMINI_API_KEY" to "fixture-gemini-key", "GOOGLE_GEMINI_BASE_URL" to "http://127.0.0.1:${server.address.port}", "GEMINI_MODEL" to "gemini-2.5-flash")
+            IsolatedSshBridge(File(remote, "ssh"), remoteEnvironment, File(remote, "unused.sock")).use { bridge ->
+                bridge.conn.ssh.connect()
+                val remoteQueue = InstructionQueue(File(remote, "queue.json"))
+                val remoteIndex = File(remote, "tasks.json")
+                RemoteAcpTasks(remoteQueue, remoteIndex).use { tasks ->
+                    tasks.prepare(bridge.conn, "gemini", project.path)
+                    tasks.authenticate(bridge.conn, "gemini-api-key")
+                    val record = tasks.create(bridge.conn, "Remote Gemini verification")
+                    val controller = tasks.controllers.getValue(record.key)
+                    try {
+                        controller.enqueue("Execute the verification command and report completion.")
+                        val delivery = controller.dispatchNext()
+                        withTimeout(30000) { while (controller.pendingApprovals.isEmpty()) delay(20) }
+                        assertFalse(marker.exists())
+                        val approval = controller.pendingApprovals.values.single()
+                        assertTrue(approval.toString().contains("gemini-approved.txt"))
+                        val options = approval.getJSONObject("params").getJSONArray("options")
+                        val once = (0 until options.length()).map { options.getJSONObject(it) }.single { it.getString("kind") == "allow_once" }
+                        controller.answerPermission(approval.get("id"), once.getString("optionId"))
+                        withTimeout(60000) { delivery.join() }
+                        assertEquals(RuntimeTurnState.Completed, remoteQueue.entries.single().runtimeTurnState)
+                        assertEquals("approved", marker.readText())
+                        assertTrue(sawToolResult.get())
+                        assertEquals(projectKey(bridge.conn.host, "/"), record.hostKey)
+                        assertEquals(File(home, ".gemini").canonicalPath, record.runtimeHome)
+                        assertEquals(record.key, LocalCodexTaskRegistry(remoteIndex).records.single().key)
+                        tasks.disconnect(bridge.conn)
+                        assertTrue(tasks.controllers.isEmpty())
+                        assertEquals("alive", bridge.conn.ssh.exec("printf alive").trim())
+                    } finally {
+                        File("/results/gemini-remote-turn.json").writeText(JSONObject().put("stopReason", controller.lastStopReason)
+                            .put("model", record.model).put("sawToolResult", sawToolResult.get()).put("hostKey", record.hostKey).toString(2))
+                    }
+                }
+            }
         } finally { server.stop(0) }
     }
 }
