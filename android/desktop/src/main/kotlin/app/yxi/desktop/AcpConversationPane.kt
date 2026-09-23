@@ -159,7 +159,8 @@ import java.io.File
         }, state = view.scroll, verticalArrangement = Arrangement.spacedBy(12.dp)) {
             items(messages, key = { "message:${it.id}" }) { message ->
                 Column {
-                    Text(message.author + if (message.status.isBlank()) "" else " · ${message.status}", style = MaterialTheme.typography.labelLarge)
+                    val author = when (message.author) { "User" -> "你"; "Assistant" -> LocalRuntimeDiscovery.title(record.engine); else -> message.author }
+                    Text(author + if (message.status.isBlank()) "" else " · ${message.status}", style = MaterialTheme.typography.labelLarge)
                     if (message.author == "Assistant" && message.kind == "message") AssistantBody(message.text)
                     else SelectionContainer { Text(message.text) }
                 }

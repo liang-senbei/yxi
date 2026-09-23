@@ -119,6 +119,7 @@ class AcpConversationUiTest {
                             chunk((1..80).joinToString("\n\n", prefix = "\n\n") { "第 $it 段：正在验证长回复滚动位置。" })
                             val view = state.codexConversationViews.getValue(record.key)
                             withTimeout(3000) { while (controller.messages.none { it.text.contains("第 80 段") }) delay(20) }
+                            assertEquals("正在生成回复", controller.note)
                             withTimeout(5000) { while (!view.scroll.canScrollBackward || view.scroll.canScrollForward) delay(30) }
                             delay(200)
                             withContext(Dispatchers.IO) { Robot().apply {

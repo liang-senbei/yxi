@@ -82,6 +82,7 @@ internal class AcpTaskController(
                 agentText.append(update.optJSONObject("content")?.optString("text").orEmpty())
                 check(agentText.length <= 4_000_000) { "运行器回复过长，请核对原生会话" }
                 putMessage(AcpMessage(activeMessageId, "Assistant", agentText.toString()))
+                if (!cancelling && pendingApprovals.isEmpty()) note = "正在生成回复"
             }
             "tool_call", "tool_call_update" -> {
                 val toolCallId = update.optString("toolCallId")
@@ -159,6 +160,8 @@ internal class AcpTaskController(
         activeMessageId = "assistant-${started.id}"
         messages.add(AcpMessage("user-${started.id}", "User", started.text))
         busy = true
+        lastStopReason = ""
+        note = "正在等待运行器回复"
         try {
             val result = client.prompt(sessionId, started.text, promptTimeoutMillis)
             client.synchronizeEvents()

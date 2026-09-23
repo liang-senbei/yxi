@@ -46,6 +46,8 @@ class AcpTaskControllerTest {
                     controller.enqueue("question-$index")
                     val send = async { controller.sendNext() }
                     withTimeout(2000) { while (fixture.writes.count { it.optString("method") == "session/prompt" } < index) delay(10) }
+                    assertEquals("", controller.lastStopReason)
+                    assertEquals("正在等待运行器回复", controller.note)
                     fixture.text("answer-$index")
                     if (index == 2) {
                         fixture.emit(JSONObject().put("id", "queued-permission").put("method", "session/request_permission").put("params", JSONObject()
