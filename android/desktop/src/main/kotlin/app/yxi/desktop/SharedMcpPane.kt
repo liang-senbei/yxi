@@ -17,7 +17,16 @@ import java.util.UUID
     var adding by remember(hostKey) { mutableStateOf(false) }
     var error by remember(hostKey) { mutableStateOf("") }
     var showHistory by remember(hostKey) { mutableStateOf(false) }
+    var reviewing by remember(hostKey) { mutableStateOf(false) }
+    var reviewed by remember(hostKey) { mutableStateOf(false) }
     fun change(action: () -> Unit) { runCatching { action(); error = "" }.onFailure { error = it.message.orEmpty() } }
+    if (reviewing) WorkbenchDialog(onDismissRequest = { reviewing = false }, title = { Text("核对恢复的共享配置") }, text = {
+        Column {
+            Text("请核对本地及服务器的共享配置列表。确认后允许编辑，连接状态会在新建会话时重新核对。")
+            Row { Checkbox(reviewed, { reviewed = it }); Text("我已核对恢复的共享配置") }
+        }
+    }, confirmButton = { TextButton({ change { registry.confirmRecoveryReviewed(); reviewing = false } }, enabled = reviewed) { Text("确认核对") } },
+        dismissButton = { TextButton({ reviewing = false }) { Text("取消") } })
     if (adding) {
         var name by remember { mutableStateOf("") }
         var remote by remember { mutableStateOf(true) }
@@ -28,7 +37,7 @@ import java.util.UUID
         val id = remember { UUID.randomUUID().toString() }
         WorkbenchDialog(onDismissRequest = { adding = false }, title = { Text("添加通用 MCP 配置") }, text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(name, { name = it }, label = { Text("名称") }, singleLine = true)
+                OutlinedTextField(name, { name = it }, label = { Text("名称（字母、数字、短横线或下划线）") }, singleLine = true)
                 Row { QuietChoice(remote, { remote = true }, label = { Text("服务地址") }); QuietChoice(!remote, { remote = false }, label = { Text("启动程序") }) }
                 if (remote) OutlinedTextField(endpoint, { endpoint = it }, label = { Text("MCP 服务 URL") }, singleLine = true)
                 else {
@@ -56,12 +65,13 @@ import java.util.UUID
             }
             Text("同一机器登记一次，分别选择运行器。当前 OpenCode 会在新建会话时加载并核对连接；配置保存不代表已安装或已授权。", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
             if (registry.problem.isNotBlank()) Text(registry.problem, color = t.danger)
+            if (registry.recoveryReviewRequired) TextButton({ reviewed = false; reviewing = true }) { Text("核对恢复的配置") }
             if (error.isNotBlank()) Text(error, color = t.danger)
         }
         items(registry.forHost(hostKey, showHistory).filter { it.definition.name.contains(state.pluginMarketQuery, true) }, key = { it.definition.key }) { record ->
             OutlinedCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("${record.definition.name} · ${record.definition.version}" + if (record.retired) " · 历史记录" else "", style = MaterialTheme.typography.titleSmall)
-                Text(if (record.definition.url != null) "远程 MCP 服务" else "本机程序 / stdio MCP", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+                Text(if (record.definition.url != null) "远程 MCP 服务" else "目标机器上的程序 / stdio MCP", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
                 if (!record.retired) {
                     Row {
                         QuietChoice("opencode" in record.desiredRunners, { change {

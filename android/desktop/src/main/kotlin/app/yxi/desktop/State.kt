@@ -86,6 +86,7 @@ class AppState {
     internal fun openServerPlugins(target: Conn) {
         if (conn !== target) select(target, null)
         pluginLocation = "服务器"
+        sharedMcpPage = false
         pluginMarketplace = false
         page = Page.Plugins
     }

@@ -24,7 +24,7 @@ internal fun PluginMarketplacePane(state: AppState, conn: Conn?) {
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     if (state.pluginCatalogRuntime == "codex") NativePluginPane(state, conn, installedOnly = false)
                     else PluginCatalogPane(state, conn, embedded = true, searchText = state.pluginMarketQuery) {
-                        state.pluginLocation = "服务器"; state.pluginMarketplace = false
+                        state.pluginLocation = "服务器"; state.sharedMcpPage = false; state.pluginMarketplace = false
                     }
                 }
             } else {
