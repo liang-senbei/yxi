@@ -1,6 +1,7 @@
 package app.yxi.desktop
 import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Explore
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.AccountCircle
@@ -242,8 +243,9 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
         NavItem(Icons.Default.Tune, "配置", state.page == Page.Config, Modifier.fillMaxWidth().padding(horizontal = 10.dp)) { state.page = Page.Config }
         var exploreOpen by remember { mutableStateOf(false) }
         Box {
-            NavItem(Icons.Outlined.Explore, "探索", state.page in setOf(Page.Connections, Page.LocalAgents), Modifier.fillMaxWidth().padding(horizontal = 10.dp)) { exploreOpen = true }
+            NavItem(Icons.Outlined.Explore, "探索", state.page in setOf(Page.Connections, Page.LocalAgents, Page.ScheduledTasks), Modifier.fillMaxWidth().padding(horizontal = 10.dp)) { exploreOpen = true }
             DropdownMenu(exploreOpen, { exploreOpen = false }) {
+                DropdownMenuItem(text = { Text("定时任务") }, leadingIcon = { Icon(Icons.Outlined.Schedule, null, Modifier.size(18.dp)) }, onClick = { exploreOpen = false; state.page = Page.ScheduledTasks })
                 DropdownMenuItem(text = { Text("连接") }, leadingIcon = { Icon(Icons.Outlined.Link, null, Modifier.size(18.dp)) }, onClick = { exploreOpen = false; state.page = Page.Connections })
                 DropdownMenuItem(text = { Text("本地 Agent") }, leadingIcon = { Icon(Icons.Outlined.Computer, null, Modifier.size(18.dp)) }, onClick = { exploreOpen = false; state.page = Page.LocalAgents })
             }

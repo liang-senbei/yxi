@@ -48,6 +48,11 @@ fun main(args: Array<String>) {
         // --smoke：开窗口 3 秒就退并打印 smoke ok —— CI / Mac 上证明 Compose + Skia 在那个平台起得来（application 退出时 exitProcess(0)）
         if ("--smoke" in args) LaunchedEffect(Unit) { delay(3000); println("smoke ok"); exitApplication() }
         val state = remember { AppState() }
+        DisposableEffect(state) {
+            val schedules = ScheduleDispatcher(state)
+            if ("--smoke" !in args) schedules.start()
+            onDispose { schedules.close() }
+        }
         DisposableEffect(state) { onDispose { state.codexWorkspace.close(); state.closeLocalFeatures() } }
         val tray = remember { TrayState().also { Notify.tray = it } }
         val scope = rememberCoroutineScope()

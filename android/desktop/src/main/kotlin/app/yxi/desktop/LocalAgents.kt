@@ -45,7 +45,7 @@ internal class LocalAgents(private val root: File = File(Store.dir, "local-agent
         check(jobs.none { it.engine == job.engine && it.sessionId == session && (it.running || it.status in setOf("上次运行结果未确认", "结果未确认", "结果记录未保存，请保留日志核对")) }) { "此会话仍在运行或上次结果未确认" }
         launch(job.engine, job.directory.path, prompt, session)
     }
-    private fun launch(engine: String, directory: String, prompt: String, resume: String?) {
+    private fun launch(engine: String, directory: String, prompt: String, resume: String?): LocalAgentJob {
         require(engine in setOf("codex", "claude") && prompt.isNotBlank())
         val cwd = File(directory).canonicalFile
         require(cwd.isDirectory) { "本机工作目录不存在" }
@@ -90,6 +90,7 @@ internal class LocalAgents(private val root: File = File(Store.dir, "local-agent
                 job.active = false
             }
         }
+        return job
     }
     fun stop(job: LocalAgentJob) {
         if (!job.running || job.status !in setOf("准备启动", "正在运行", "正在停止")) return
