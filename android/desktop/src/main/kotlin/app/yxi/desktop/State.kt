@@ -139,7 +139,7 @@ class AppState {
     internal val pluginOperations = PluginOperations(java.io.File(Store.dir, "plugin-operations.json"))
     internal val instructions = InstructionQueue(java.io.File(Store.dir, "instructions.json"))
     internal val modelSwitches = ModelChangeStore(java.io.File(Store.dir, "model-changes.json"))
-    internal val codexWorkspace = CodexWorkspace(instructions, java.io.File(Store.dir, "codex-tasks.json")) { task, title ->
+    internal val codexWorkspace = CodexWorkspace(instructions, java.io.File(Store.dir, "codex-tasks.json"), sharedMcp) { task, title ->
         Notify.notify(title, "任务：" + (navigation.title(task.key) ?: task.title), taskKey = task.key)
     }
     internal val support = SupportWorkspace(java.io.File(Store.dir, "support-drafts.json"))

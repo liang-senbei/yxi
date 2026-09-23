@@ -52,11 +52,17 @@ trust_level = "trusted"
                 runBlocking { withTimeout(150_000) {
                     bridge.conn.ssh.connect()
                     assertNull(Lines.saveList(bridge.conn.ssh, profiles))
-                    val ws = CodexWorkspace(queue, registryFile).also { workspace = it }
+                    val shared = SharedMcpRegistry(root.resolve("shared.json"))
+                    val mcpScript = root.resolve("shared_mcp_fixture.py").apply { writeBytes(requireNotNull(CodexProfileNativeTest::class.java.getResourceAsStream("/shared_mcp_fixture.py")).use { it.readBytes() }) }
+                    val definition = SharedMcpDefinition(projectKey(bridge.conn.host, "/"), "echo", "fixture", "1", "shared_echo", listOf("/usr/bin/python3", mcpScript.path))
+                    val sharedRecord = shared.save(definition, setOf("codex"), null)
+                    val ws = CodexWorkspace(queue, registryFile, shared).also { workspace = it }
                     val a = ws.create(bridge.conn, project.path, "Agent A", profiles[0].id)
                     val b = ws.create(bridge.conn, project.path, "Agent B", profiles[1].id)
                     assertNotEquals(a.threadId, b.threadId)
                     assertNotEquals(a.profileScope, b.profileScope)
+                    assertEquals(listOf(definition), a.sharedMcp)
+                    assertEquals(listOf(definition), CodexTaskRegistry(registryFile).records.single { it.key == a.key }.sharedMcp)
                     val controlA = ws.controllers.getValue(a.key).apply { setAutoDispatch(false) }
                     val controlB = ws.controllers.getValue(b.key).apply { setAutoDispatch(false) }
                     assertEquals("fixture-model-0", controlA.configuredModel)
@@ -98,9 +104,10 @@ trust_level = "trusted"
                     switched.chooseModel("provider/alternative:1")
                     send(switched, "CODEX-PROFILE-A-NEW-MODEL")
                     assertEquals("provider/alternative:1", requests(1).last().getString("model"))
+                    shared.retire(sharedRecord.definition.key, sharedRecord.revision)
                     ws.close()
                     bridge.conn.ssh.disconnect(); bridge.conn.ssh.connect()
-                    val reopened = CodexWorkspace(queue, registryFile).also { workspace = it }
+                    val reopened = CodexWorkspace(queue, registryFile, shared).also { workspace = it }
                     val savedA = reopened.registry.records.single { it.key == a.key }
                     assertEquals(profiles[1].id, savedA.profileId)
                     assertEquals(a.profileScope, savedA.profileScope)

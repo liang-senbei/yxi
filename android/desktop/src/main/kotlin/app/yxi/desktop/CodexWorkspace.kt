@@ -17,6 +17,7 @@ internal data class CodexTaskRecord(
     val hostKey: String, val threadId: String, val directory: String,
     val title: String, val createdAt: Long, val profileId: String = "", val profileScope: String = "",
     val modelOverride: String? = null, val effortOverride: String? = null,
+    val sharedMcp: List<SharedMcpDefinition> = emptyList(),
 ) {
     val key get() = "codex:" + contentHash((hostKey + "\n" + threadId).toByteArray())
 }
@@ -45,6 +46,7 @@ internal class CodexTaskRegistry(file: File) {
                     .put("directory", task.directory).put("title", task.title).put("createdAt", task.createdAt)
                     .put("profileId", task.profileId).put("profileScope", task.profileScope)
                     .put("modelOverride", task.modelOverride).put("effortOverride", task.effortOverride)
+                    .put("sharedMcp", JSONArray(task.sharedMcp.map { it.json() }))
             })).toString(2))
             records = next; error = ""
         } catch (e: Exception) { error = "任务登记未保存：${e.message}"; throw e }
@@ -56,6 +58,7 @@ internal class CodexTaskRegistry(file: File) {
         val tasks = data.getJSONArray("tasks")
         val result = (0 until tasks.length()).map { index ->
             val task = tasks.getJSONObject(index)
+            require(!task.has("sharedMcp") || task.opt("sharedMcp") is JSONArray) { "任务共享 MCP 快照格式无效" }
             fun optionalText(key: String): String? {
                 val value = task.opt(key)
                 require(value == null || value === JSONObject.NULL || value is String) { "任务配置字段 $key 不是文本" }
@@ -63,7 +66,10 @@ internal class CodexTaskRegistry(file: File) {
             }
             CodexTaskRecord(task.getString("hostKey"), task.getString("threadId"), task.getString("directory"),
                 task.getString("title"), task.getLong("createdAt"), optionalText("profileId").orEmpty(), optionalText("profileScope").orEmpty(),
-                optionalText("modelOverride"), optionalText("effortOverride")).also {
+                optionalText("modelOverride"), optionalText("effortOverride"), task.optJSONArray("sharedMcp")?.let { definitions ->
+                    (0 until definitions.length()).map { SharedMcpDefinition.parse(definitions.getJSONObject(it)) }
+                }.orEmpty()).also {
+                require(it.sharedMcp.all { definition -> definition.hostKey == it.hostKey } && it.sharedMcp.map { definition -> definition.name }.distinct().size == it.sharedMcp.size)
                 require(it.hostKey.isNotBlank() && it.threadId.isNotBlank() && it.directory.startsWith('/') && it.createdAt > 0)
                 require(it.profileId.length <= 200 && it.profileId.none { c -> c < ' ' })
                 require(it.profileScope.isEmpty() || it.profileScope.matches(Regex("[a-f0-9]{32}")))
@@ -76,7 +82,7 @@ internal class CodexTaskRegistry(file: File) {
     }
 }
 
-internal class CodexWorkspace(private val queue: InstructionQueue, file: File,
+internal class CodexWorkspace(private val queue: InstructionQueue, file: File, private val sharedMcp: SharedMcpRegistry? = null,
     private val onNotice: (CodexTaskRecord, String) -> Unit = { _, _ -> }) : AutoCloseable {
     private val uploadScope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
     val attachments = mutableStateMapOf<String, androidx.compose.runtime.snapshots.SnapshotStateList<DraftAttach>>()
@@ -107,29 +113,48 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File,
     internal var connected: (Conn) -> Boolean = { it.ssh.isConnected }
 
     private fun scopeFor(record: CodexTaskRecord) = record.profileScope.ifBlank { contentHash(record.key.toByteArray()).take(32) }
-    private suspend fun clientFor(conn: Conn, profileId: String, scope: String): CodexAppServer {
-        if (profileId.isBlank()) return clientFactory(conn)
-        val line = app.yxi.agent.Lines.list(conn.ssh)?.singleOrNull { it.id == profileId && it.agent == app.yxi.agent.Lines.CODEX }
-            ?: error("此 Agent 的供应商配置无法读取或已删除，请先恢复该配置；不会改用全局配置")
-        return profileClientFactory(conn, line, scope)
+    private suspend fun clientFor(conn: Conn, profileId: String, scope: String, definitions: List<SharedMcpDefinition> = emptyList()): CodexAppServer {
+        val line = if (profileId.isBlank()) null else (app.yxi.agent.Lines.list(conn.ssh)?.singleOrNull { it.id == profileId && it.agent == app.yxi.agent.Lines.CODEX }
+            ?: error("此 Agent 的供应商配置无法读取或已删除，请先恢复该配置；不会改用全局配置"))
+        suspend fun baseline() = if (line == null) clientFactory(conn) else profileClientFactory(conn, line, scope)
+        if (definitions.isEmpty()) return baseline()
+        val records = definitions.map { SharedMcpRecord(it, setOf("codex"), 0) }
+        val arguments = SharedMcpSettings.codexArguments(records, projectKey(conn.host, "/"))
+        baseline().use { probe ->
+            val existing = probe.request("config/read", JSONObject().put("includeLayers", false)).getJSONObject("result").getJSONObject("config").optJSONObject("mcp_servers")
+            check(definitions.none { it.name == "codex_apps" || existing?.has(it.name) == true }) { "服务器原生 Codex 已有同名或内置 MCP，未覆盖" }
+        }
+        val client = CodexAppServer.connect(conn.ssh, line, scope, arguments)
+        try {
+            suspend fun verify() = LocalCodexProfiles.verifySharedMcp(client.request("config/read", JSONObject().put("includeLayers", false)).getJSONObject("result").getJSONObject("config"), records)
+            verify()
+            client.beforeMutation = { _, params ->
+                check(params.optJSONObject("config")?.keys()?.asSequence()?.none { it == "mcp_servers" || it.startsWith("mcp_servers.") } != false) { "会话 MCP 覆盖未经核对" }
+                verify()
+            }
+            return client
+        } catch (e: Exception) { client.close(); throw e }
     }
 
     fun tasks(host: Host) = registry.records.filter { it.hostKey == projectKey(host, "/") }.sortedByDescending { it.createdAt }
 
     suspend fun create(conn: Conn, directory: String, title: String, profileId: String = ""): CodexTaskRecord = operations.withLock {
         registry.requireWritable()
+        check(sharedMcp?.problem.isNullOrBlank()) { sharedMcp?.problem.orEmpty() }
         check(connected(conn)) { "请先连接服务器" }
         require(directory.startsWith('/') && directory.none { it < ' ' }) { "请输入服务器绝对目录" }
         busy = true; recoveryThreadId = ""
         val profileScope = java.util.UUID.randomUUID().toString().replace("-", "")
-        val client = try { clientFor(conn, profileId, profileScope) } catch (e: Exception) { busy = false; throw e }
+        val resources = sharedMcp?.forHost(projectKey(conn.host, "/"))?.filter { "codex" in it.desiredRunners }.orEmpty()
+        val client = try { clientFor(conn, profileId, profileScope, resources.map { it.definition }) } catch (e: Exception) { busy = false; throw e }
         try {
             val result = client.startThread(directory).getJSONObject("result")
             val thread = result.getJSONObject("thread")
             val id = thread.getString("id")
             recoveryThreadId = id // Retain the server ID if local metadata cannot be written.
+            check(sharedMcp?.forHost(projectKey(conn.host, "/"))?.filter { "codex" in it.desiredRunners }.orEmpty() == resources) { "共享插件配置在创建期间发生变化，请核对原生会话" }
             val record = CodexTaskRecord(projectKey(conn.host, "/"), id, thread.optString("cwd").ifBlank { directory },
-                title.trim().ifBlank { directory.substringAfterLast('/').ifBlank { "新任务" } }, System.currentTimeMillis(), profileId, profileScope)
+                title.trim().ifBlank { directory.substringAfterLast('/').ifBlank { "新任务" } }, System.currentTimeMillis(), profileId, profileScope, sharedMcp = resources.map { it.definition })
             registry.save(record)
             client.verifyProfile(result)
             recoveryThreadId = ""
@@ -148,7 +173,7 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File,
         check(connected(conn)) { "服务器未连接" }
         controllers.remove(record.key)?.close(); owners.remove(record.key)
         busy = true
-        val client = try { clientFor(conn, record.profileId, scopeFor(record)) } catch (e: Exception) { busy = false; throw e }
+        val client = try { clientFor(conn, record.profileId, scopeFor(record), record.sharedMcp) } catch (e: Exception) { busy = false; throw e }
         try {
             val overrides = client.conversationOverrides(record.modelOverride, record.effortOverride)
             val result = resumeExistingThread(client, record.threadId, overrides)
@@ -168,7 +193,7 @@ internal class CodexWorkspace(private val queue: InstructionQueue, file: File,
         check(previous != null && owners[record.key] === conn) { "请先打开原任务" }
         busy = true
         try {
-            val client = clientFor(conn, profileId, scopeFor(record))
+            val client = clientFor(conn, profileId, scopeFor(record), record.sharedMcp)
             var originalClosed = false
             try {
                 val overrides = client.readResumeOverrides(record.directory)

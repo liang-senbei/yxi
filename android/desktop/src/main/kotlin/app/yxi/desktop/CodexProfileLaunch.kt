@@ -16,7 +16,7 @@ internal object CodexProfileLaunch {
     data class Prepared(val command: String, val path: String, val overrides: CodexResumeOverrides)
     private fun tomlString(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
-    internal fun configuration(line: Lines.Line, id: String): Pair<JSONObject, CodexResumeOverrides> {
+    internal fun configuration(line: Lines.Line, id: String, mcpArguments: List<String> = emptyList()): Pair<JSONObject, CodexResumeOverrides> {
         require(line.agent == Lines.CODEX) { "请选择 Codex 的已保存配置" }
         require(id.matches(Regex("[a-f0-9]{32}")))
         val url = URI(line.baseUrl.trim())
@@ -35,15 +35,17 @@ internal object CodexProfileLaunch {
         val args = mutableListOf("-c", "model_providers.$provider=$definition", "-c", "model_provider=${tomlString(provider)}")
         // Model/effort are thread/start or explicit configuration-change overrides.
         // CLI defaults here would reset a conversation's later model choice on reconnect.
+        require(mcpArguments.size % 2 == 0 && mcpArguments.chunked(2).all { it[0] == "-c" && it[1].startsWith("mcp_servers.") })
+        args += mcpArguments
         args += "app-server"
         require(args.none { it.contains(line.apiKey) }) { "请求地址、模型或配置名称中不能包含 API Key" }
         val payload = JSONObject().put("args", JSONArray(args)).put("key", line.apiKey)
         return payload to CodexResumeOverrides(provider, model, effort)
     }
 
-    suspend fun prepare(ssh: SshSession, line: Lines.Line, scopeId: String? = null): Prepared {
+    suspend fun prepare(ssh: SshSession, line: Lines.Line, scopeId: String? = null, mcpArguments: List<String> = emptyList()): Prepared {
         val id = UUID.randomUUID().toString().replace("-", "")
-        val (payload, overrides) = configuration(line, scopeId ?: id)
+        val (payload, overrides) = configuration(line, scopeId ?: id, mcpArguments)
         val home = ssh.exec("printf %s \"\$HOME\"").trim()
         check(home.startsWith('/') && home.none { it < ' ' }) { "无法确认服务器家目录" }
         val path = "$home/.yxi/launch-contexts/codex-$id.json"

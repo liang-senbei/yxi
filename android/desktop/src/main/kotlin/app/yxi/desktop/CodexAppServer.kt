@@ -26,6 +26,7 @@ internal class CodexAppServer internal constructor(private val transport: CodexT
         this(SshCodexTransport(shell), profileOverrides, providerModelLoader, profileLabel)
     internal val hasIndependentProfile get() = profileOverrides != null
     internal var beforeLocalMutation: (suspend (String, JSONObject) -> Unit)? = null
+    internal var beforeMutation: (suspend (String, JSONObject) -> Unit)? = null
     internal suspend fun independentModels(): List<String> {
         check(!closed.get() && providerModelLoader != null) { "独立配置连接已关闭" }
         return providerModelLoader.invoke().map { it.id }
@@ -75,6 +76,7 @@ internal class CodexAppServer internal constructor(private val transport: CodexT
 
     suspend fun request(method: String, params: JSONObject, timeoutMs: Long = 30000): JSONObject {
         check(!closed.get()) { "运行器连接已关闭" }
+        if (method in setOf("thread/start", "thread/resume", "thread/fork", "turn/start", "turn/steer")) beforeMutation?.invoke(method, params)
         if (transport.local && method in setOf("thread/start", "thread/resume", "thread/fork", "turn/start", "turn/steer")) beforeLocalMutation?.invoke(method, params)
         val id = "yxi-" + UUID.randomUUID().toString()
         val result = CompletableDeferred<JSONObject>()
@@ -204,13 +206,14 @@ internal class CodexAppServer internal constructor(private val transport: CodexT
             return input
         }
 
-        suspend fun connect(ssh: SshSession, profile: app.yxi.agent.Lines.Line? = null, profileScope: String? = null): CodexAppServer {
-            val prepared = profile?.let { CodexProfileLaunch.prepare(ssh, it, profileScope) }
+        suspend fun connect(ssh: SshSession, profile: app.yxi.agent.Lines.Line? = null, profileScope: String? = null, mcpArguments: List<String> = emptyList()): CodexAppServer {
+            require(mcpArguments.size % 2 == 0 && mcpArguments.chunked(2).all { it[0] == "-c" && it[1].startsWith("mcp_servers.") })
+            val prepared = profile?.let { CodexProfileLaunch.prepare(ssh, it, profileScope, mcpArguments) }
             val shell = try { ssh.openExecStream(prepared?.command ?: """
 bin=${'$'}(command -v codex || true)
 if [ -z "${'$'}bin" ] && [ -x "${'$'}HOME/.local/bin/codex" ]; then bin="${'$'}HOME/.local/bin/codex"; fi
 [ -n "${'$'}bin" ] || exit 127
-exec "${'$'}bin" app-server
+exec "${'$'}bin" ${mcpArguments.joinToString(" ") { app.yxi.ssh.Shell.q(it) }} app-server
 """.trimIndent()) } catch (e: Exception) {
                 if (prepared != null) CodexProfileLaunch.cleanup(ssh, prepared)
                 throw e
