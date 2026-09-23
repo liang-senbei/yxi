@@ -1,3 +1,9 @@
+## 2026-09-24 原生 Hermes 远端认证入口
+
+- `18181682c11915284c9738c4fe600d61f9ea3be2` 新增 HermesRemoteAuthenticationTest：固定官方 Hermes 0.21.4 源码，在隔离 HOME 下经真实 SSH 完成 ACP 握手，使用原生 hermes-setup 描述启动 SSH PTY，实际出现 Select provider 菜单。关闭认证通道后无成功回执，原 SSH 仍可执行命令。
+- 专用 Hermes 镜像与显式 SSH PTY 模式下 `run.jE4lWd`：1 项通过，0 失败、0 错误、0 跳过。原生终端输出保存在 `.artifacts/hermes-native/remote-terminal-setup.txt`，启动内部标记未泄漏。
+- 本次仅证明真实 CLI 的远端配置入口和取消语义，未选择供应商、未完成真实账号认证、未验收 Windows/macOS，未发布。
+- cc-yxi 已交付验收清单刷新草案；主线程发现将三家握手概括为三家完整文本轮次及旧截图状态的表述不准确，已退回修订，不将草案当作完成证明。
 ## 2026-09-24 远端认证窗口取消回归
 
 - 源码 `00f0de01095554edb82f863a2a6edcc05d187de8` 增加实际关闭认证窗口的回归：认证进程退出、取消结果无成功退出码、不生成输入结果文件，原 SSH 连接仍可执行命令。
