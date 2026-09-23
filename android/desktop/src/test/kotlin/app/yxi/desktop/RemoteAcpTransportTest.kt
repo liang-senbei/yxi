@@ -25,10 +25,18 @@ for line in sys.stdin:
         }
         IsolatedSshBridge(File(root, "ssh"), mapOf("HOME" to home.path), File(root, "unused.sock")).use { bridge ->
             bridge.conn.ssh.connect()
-            val exited = bridge.conn.ssh.openPtyCommand("printf terminal-exit; exit 7")
+            val exited = bridge.conn.ssh.openPtyCommand("printf terminal-exit; read answer; exit 7")
             try {
-                val text = withContext(Dispatchers.IO) { exited.output.readBytes().toString(Charsets.UTF_8) }
+                val text = withContext(Dispatchers.IO) {
+                    val received = StringBuilder()
+                    while (!received.contains("terminal-exit")) {
+                        val byte = exited.output.read(); check(byte >= 0) { "PTY closed before its prompt" }
+                        received.append(byte.toChar())
+                    }
+                    received.toString()
+                }
                 assertTrue(text.contains("terminal-exit"))
+                assertTrue(exited.write("confirm\n"))
                 assertEquals(7, withTimeout(5000) { exited.awaitExitCode() })
             } finally { exited.close() }
             val cancelled = bridge.conn.ssh.openPtyCommand("sleep 30")
