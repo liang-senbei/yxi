@@ -1,3 +1,11 @@
+## OpenCode 本机服务进程管理（开发中）
+
+`d36c475`新增 LocalOpenCodeServer：显式 loopback/动态端口/关闭 mDNS、独立随机 Basic Auth 密码，只启动选定的可用运行器。限长读取启动输出、认证健康检查后返回客户端；失败、超时及关闭只回收自有进程。未修改原生配置或认证文件。
+
+隔离构建 run.URXqfr 通过；LocalOpenCodeServerTest 在 run.vkuGl5 三项通过、零跳过。真实子进程 fixture 验证认证/参数/健康、正常关闭、启动超时清理，以及无关进程仍存活；启动公告只接受精确 loopback 地址。不是原生 OpenCode 验收，尚缺原生版本验证、审批事件、持久队列、新建/对话界面及远程服务生命周期，未开放创建或发布。
+
+启动格式核对官方源码 https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/opencode/src/cli/cmd/serve.ts 和 cli/network.ts（2026-09-23）；实际安装版本仍需实测。
+
 ## OpenCode 原生协议客户端（开发中，未开放创建）
 
 `bceaa03`新增 OpenCodeClient，支持供应商、会话/消息/状态读取以及创建、异步发送、停止。请求明确携带工作目录和模型，使用 loopback Basic Auth，禁止重定向，写操作不做应用层自动重试。资料与待接入层见 research/opencode-session-adapter.md。
