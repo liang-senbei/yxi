@@ -64,5 +64,6 @@ class LocalAcpTasksTest {
             assertTrue(recovered.recoverySessionId.isNotBlank())
             assertFailsWith<IllegalStateException> { recovered.prepare(runtime, root.path) }
         }
+        Unit
     }
 }
