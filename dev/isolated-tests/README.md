@@ -1,3 +1,9 @@
+## PTY dependency baseline (2026-09-24)
+
+For source requiring Pty4J 0.13.4, use the fixed image `ea6f75eeda4495d588db7f6d6fffec683c630acc` as `YXI_TEST_BASE_IMAGE_REVISION`. It was built once from the prior 27a1a26 baseline with explicit `YXI_TEST_REFRESH_DEPENDENCIES=1`; subsequent builds should omit that flag and remain offline. Do not chain each new application image as another dependency base.
+
+Evidence: build `run.wBuI0e`; real PTY/UTF-8/exit-code test `run.cDZlJN`; ACP transport `run.0r0S3o`; native Grok `run.WsQPDQ`, all passing with no skips. This is a dependency cache baseline, not release or Windows packaging acceptance. Runtime network isolation is unchanged. Keep the older baseline for historical snapshots and the Hermes variant built from it.
+
 # Dedicated integration-test container
 
 ## Current dependency baseline (2026-09-22)

@@ -1,3 +1,9 @@
+## 2026-09-24 本地交互 PTY 连接器
+
+- 引入固定 Pty4J 0.13.4，LocalAuthenticationTerminal 复用 JediTerm TtyConnector，直接 argv/env 启动、UTF-8 输入输出、窗口尺寸、真实退出码与所属进程清理。初次测试编译发现 TtyConnector 非 AutoCloseable，`ea6f75eeda4495d588db7f6d6fffec683c630acc` 补齐生命周期接口。
+- 构建 `run.wBuI0e`；LocalAuthenticationTerminalTest `run.cDZlJN` 1 项验证真实 isatty、中文确认往返、退出码7；LocalAcpTransportTest `run.0r0S3o` 1 项和原生 Grok `run.WsQPDQ` 1 项全部通过，无失败/跳过。
+- 依赖下载仅显式构建开关允许，测试始终断网。新固定依赖基线记录在 isolated-tests README；终端 UI、认证退出后重连、Windows ConPTY/安装包和 macOS 尚待验证。未发布。
+
 ## 2026-09-24 ACP 终端认证路由与启动计划
 
 - `dafd371ce70024d03def32c6d77ef723efc31c54` 依据 https://agentclientprotocol.com/protocol/v1/authentication 区分 agent/terminal 类型，terminal 不再误发 authenticate RPC。抽出 AcpLaunch.environment，构造同一运行器+原 ACP 参数+认证参数的 TerminalAuthPlan，应用原生 env 覆盖，拒绝描述替换 command，并限制参数/环境大小。
