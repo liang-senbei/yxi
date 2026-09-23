@@ -8,14 +8,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 /** 运行器的 [1m] 上下文后缀（只改写请求标签，不是对供应商能力的断言）。 */
-internal val OneMSuffix = Regex("\\[1m]$", RegexOption.IGNORE_CASE)
+internal val OneMSuffix = Regex("(?:\\[1m])+$", RegexOption.IGNORE_CASE)
 
 /** 去掉尾部 [1m] 并整值 trim，得到纯模型 ID（映射「显示名称」跟随的是这个纯 ID）。 */
-internal fun oneMBase(value: String) = value.trim().replace(OneMSuffix, "")
+internal fun oneMBase(value: String) = value.trim().replace(OneMSuffix, "").trim()
 
-internal fun hasOneM(value: String) = OneMSuffix.containsMatchIn(value)
+internal fun hasOneM(value: String) = OneMSuffix.containsMatchIn(value.trim())
 
-internal fun setOneM(base: String, enabled: Boolean) = if (enabled) "$base[1m]" else base
+internal fun setOneM(base: String, enabled: Boolean): String {
+    val id = oneMBase(base)
+    return if (enabled && id.isNotEmpty()) "$id[1m]" else id
+}
 
 /**
  * 单个模型 ID 输入框。

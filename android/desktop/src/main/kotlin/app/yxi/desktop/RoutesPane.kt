@@ -374,6 +374,7 @@ private fun RouteForm(original: Lines.Line, conn: Conn, onClose: () -> Unit, onS
         }
     }
     fun roleModelChange(alias: String?, supportsOneM: Boolean, raw: String) {
+        quickUndo = null
         val normalized = if (supportsOneM) raw else oneMBase(raw)
         if (alias == null) { subagentModel = normalized; return }
         // 实际模型变更：显示名称为空或还跟着旧模型 ID 时跟随更新，用户自定义过的显示名称不动
@@ -386,11 +387,12 @@ private fun RouteForm(original: Lines.Line, conn: Conn, onClose: () -> Unit, onS
         if (modelsNote.isNotBlank() && !modelsNoteIsError) { kotlinx.coroutines.delay(5000); modelsNote = "" }
     }
     fun quickSetRoles(source: String) {
-        quickUndo = Triple(mappings.toMap(), displayNames.toMap(), subagentModel)
+        val before = Triple(mappings.toMap(), displayNames.toMap(), subagentModel)
         RoleRows.forEach { row ->
             val old = if (row.alias == null) subagentModel else mappings[row.alias].orEmpty()
             roleModelChange(row.alias, row.supportsOneM, setOneM(oneMBase(source), row.supportsOneM && hasOneM(old)))
         }
+        quickUndo = before
     }
     ProviderEditorPage(onDismissRequest = { if (!busy) onClose() }, title = { Text("${if (original.name.isBlank()) "添加" else "编辑"}供应商 · ${if (original.isCodex) "Codex" else "Claude Code"}", style = MaterialTheme.typography.titleLarge) },
         text = { Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -405,7 +407,7 @@ private fun RouteForm(original: Lines.Line, conn: Conn, onClose: () -> Unit, onS
                     presetExtra = org.json.JSONObject(); advanced = "{}"
                     mappings.keys.toList().forEach { mappings[it] = "" }
                     displayNames.keys.toList().forEach { displayNames[it] = "" }
-                    subagentModel = ""
+                    subagentModel = ""; quickUndo = null
                 }, label = { Text("自定义供应商") }, enabled = !busy)
                 (if (presetsExpanded || presetSearch.isNotBlank()) matchingPresets else matchingPresets.take(12)).forEach { preset ->
                     SuggestionChip(onClick = {
@@ -419,7 +421,7 @@ private fun RouteForm(original: Lines.Line, conn: Conn, onClose: () -> Unit, onS
                             displayNames.keys.toList().forEach { alias -> displayNames[alias] = preset.env["ANTHROPIC_DEFAULT_${alias}_MODEL_NAME"].orEmpty() }
                             subagentModel = preset.env["CLAUDE_CODE_SUBAGENT_MODEL"].orEmpty()
                         } else model = preset.model
-                        advanced = presetExtra.toString(2)
+                        advanced = presetExtra.toString(2); quickUndo = null
                     }, label = { Text(preset.name) }, enabled = !busy)
                 }
             }
@@ -440,15 +442,11 @@ private fun RouteForm(original: Lines.Line, conn: Conn, onClose: () -> Unit, onS
                 Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp), color = Tokens.current.surface2,
                     border = androidx.compose.foundation.BorderStroke(1.dp, Tokens.current.border)) {
                 Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton({ mappingsOpen = !mappingsOpen }) { Text(if (mappingsOpen) "收起模型映射" else "模型映射 · 主模型与子 Agent") }
-                    OutlinedButton({ quickModel = oneMBase(model).ifBlank { oneMBase(mappings["SONNET"].orEmpty()) }; quickSetOpen = true },
-                        contentPadding = PaddingValues(10.dp, 4.dp), modifier = Modifier.height(32.dp)) { Text("一键设置", fontSize = 12.sp) }
-                    OutlinedButton({ fetchModels() }, enabled = !modelsLoading, contentPadding = PaddingValues(10.dp, 4.dp), modifier = Modifier.height(32.dp)) { Text(if (modelsLoading) "获取中…" else "获取模型列表", fontSize = 12.sp) }
+                CompactMappingToolbar(mappingsOpen, { mappingsOpen = !mappingsOpen },
+                    { quickModel = oneMBase(model).ifBlank { oneMBase(mappings["SONNET"].orEmpty()) }; quickSetOpen = true }, { fetchModels() }, modelsLoading)
                     if (quickUndo != null) TextButton({ quickUndo?.let { (oldModels, oldNames, oldSub) ->
                         mappings.clear(); mappings.putAll(oldModels); displayNames.clear(); displayNames.putAll(oldNames); subagentModel = oldSub
                     }; quickUndo = null }) { Text("撤销一键设置") }
-                }
                 if (modelsNote.isNotBlank()) Text(modelsNote, style = MaterialTheme.typography.bodySmall,
                     color = if (modelsNoteIsError) Tokens.current.danger else Tokens.current.textMuted)
                 if (mappingsOpen) {
@@ -457,7 +455,7 @@ private fun RouteForm(original: Lines.Line, conn: Conn, onClose: () -> Unit, onS
                         if (row.alias == null) subagentModel else mappings[row.alias].orEmpty(),
                         row.alias?.let { displayNames[it].orEmpty() }, row.supportsOneM) }, models,
                         changeModel = { id, value -> val row = RoleRows.single { (it.alias ?: "SUBAGENT") == id }; roleModelChange(row.alias, row.supportsOneM, value) },
-                        changeName = { id, value -> displayNames[id] = value }, fallback = model, changeFallback = { model = it })
+                        changeName = { id, value -> quickUndo = null; displayNames[id] = value }, fallback = model, changeFallback = { model = it })
                 }
                 TextButton({ requestOptionsOpen = !requestOptionsOpen }) { Text(if (requestOptionsOpen) "收起请求选项" else "更多请求选项") }
                 if (requestOptionsOpen) Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -529,7 +527,7 @@ private fun RouteForm(original: Lines.Line, conn: Conn, onClose: () -> Unit, onS
             Text("应用到所有角色，保留自定义显示名称和各角色当前的 1M 声明。")
             CompactModelInput(quickModel, models, { quickModel = it }, "一键设置模型", Modifier.fillMaxWidth())
         }
-    }, confirmButton = { TextButton({ quickSetRoles(quickModel); quickSetOpen = false }, enabled = quickModel.isNotBlank()) { Text("应用") } },
+    }, confirmButton = { TextButton({ quickSetRoles(quickModel); quickSetOpen = false }, enabled = oneMBase(quickModel).isNotBlank()) { Text("应用") } },
         dismissButton = { TextButton({ quickSetOpen = false }) { Text("取消") } })
 }
 

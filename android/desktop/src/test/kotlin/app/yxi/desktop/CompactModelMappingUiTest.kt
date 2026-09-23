@@ -31,20 +31,21 @@ class CompactModelMappingUiTest {
         val modelValues = mutableStateMapOf("SONNET" to "glm-5.3-flash[1m]", "OPUS" to "glm-5.3[1m]", "FABLE" to "", "HAIKU" to "glm-5.3-flash", "SUBAGENT" to "")
         val names = mutableStateMapOf("SONNET" to "glm-5.3-flash", "OPUS" to "glm-5.3", "FABLE" to "", "HAIKU" to "glm-5.3-flash")
         var interaction by mutableStateOf(false)
+        var theme by mutableStateOf("light")
         var selected by mutableStateOf("glm-5.3-flash")
         var bounds: Rect? = null
         var failure: Throwable? = null
         application(exitProcessOnExit = false) {
             val windowState = rememberWindowState(width = 1180.dp, height = 760.dp)
             Window(onCloseRequest = ::exitApplication, state = windowState, title = "Yxi model mapping preview") {
-                YxiTheme {
+                key(theme) { YxiTheme {
                     Column(Modifier.fillMaxSize().background(Tokens.current.surface2).verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         Text("编辑供应商 · Claude Code", style = MaterialTheme.typography.titleLarge)
                         if (interaction) CompactModelInput(selected, models, { selected = it }, "测试模型",
                             Modifier.width(460.dp).onGloballyPositioned { bounds = it.boundsInWindow() })
                         else Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Tokens.current.border), color = Tokens.current.surface2) {
                             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Row { Text("模型映射", Modifier.weight(1f)); Text("一键设置    获取模型列表", color = Tokens.current.textMuted) }
+                                CompactMappingToolbar(true, {}, {}, {}, false)
                                 Text("显示名称只影响菜单；1M 是上下文声明，需要运行器和供应商支持。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                                 CompactModelMappings(listOf("SONNET" to "Sonnet", "OPUS" to "Opus", "FABLE" to "Fable", "HAIKU" to "Haiku", "SUBAGENT" to "Subagent").map { (id, label) ->
                                     ModelMappingRow(id, label, modelValues.getValue(id), names[id], id != "HAIKU")
@@ -52,7 +53,7 @@ class CompactModelMappingUiTest {
                             }
                         }
                     }
-                }
+                } }
                 LaunchedEffect(Unit) {
                     suspend fun screenshot(name: String) = withContext(Dispatchers.IO) {
                         check(ImageIO.write(Robot().createScreenCapture(java.awt.Rectangle(window.locationOnScreen, window.size)), "png", File("/results/$name.png")))
@@ -68,6 +69,8 @@ class CompactModelMappingUiTest {
                     }
                     try {
                         delay(1000); screenshot("model-mapping-wide")
+                        Store.setPref("theme", "dark"); theme = "dark"; delay(500); screenshot("model-mapping-dark")
+                        Store.setPref("theme", "light"); theme = "light"; delay(300)
                         windowState.size = androidx.compose.ui.unit.DpSize(680.dp, 960.dp); delay(600); screenshot("model-mapping-narrow")
                         windowState.size = androidx.compose.ui.unit.DpSize(1180.dp, 760.dp); interaction = true; delay(500)
                         assertEquals(36f, requireNotNull(bounds).height, 1f)

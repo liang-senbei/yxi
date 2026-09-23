@@ -5,6 +5,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoFixHigh
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -15,6 +20,31 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 
 internal data class ModelMappingRow(val id: String, val label: String, val value: String, val displayName: String?, val supportsOneM: Boolean)
+
+@Composable internal fun CompactMappingToolbar(expanded: Boolean, toggle: () -> Unit, quickSet: () -> Unit,
+    fetch: () -> Unit, loading: Boolean) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        @Composable fun title() {
+            Row(Modifier.heightIn(min = 32.dp).clickable(onClick = toggle), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, null, Modifier.size(16.dp))
+                Text("模型映射", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+        @Composable fun actions() {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(quickSet, contentPadding = PaddingValues(10.dp, 4.dp), modifier = Modifier.height(32.dp)) {
+                    Icon(Icons.Outlined.AutoFixHigh, null, Modifier.size(14.dp)); Spacer(Modifier.width(5.dp)); Text("一键设置", fontSize = 12.sp)
+                }
+                OutlinedButton(fetch, enabled = !loading, contentPadding = PaddingValues(10.dp, 4.dp), modifier = Modifier.height(32.dp)) {
+                    Icon(Icons.Outlined.Download, null, Modifier.size(14.dp)); Spacer(Modifier.width(5.dp)); Text(if (loading) "获取中…" else "获取模型列表", fontSize = 12.sp)
+                }
+            }
+        }
+        if (maxWidth >= 540.dp) Row(verticalAlignment = Alignment.CenterVertically) { title(); Spacer(Modifier.weight(1f)); actions() }
+        else Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { title(); actions() }
+    }
+}
 
 @Composable internal fun CompactOneM(value: String, supported: Boolean, change: (String) -> Unit,
     modifier: Modifier = Modifier, height: Dp = compactControlHeight) {
