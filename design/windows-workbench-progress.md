@@ -1,3 +1,9 @@
+## 2026-09-23 OpenCode 私有启动配置 HTTP 引用
+
+- `898bd623e5f9c23053e248521f869cca835d0cf7` 增加 OpenCodeStartupMcp 与本机服务启动参数，通过 OPENCODE_CONFIG_CONTENT 传引用文本，由原生加载器展开。缺变量或已有非空 inline 配置时明确拒绝，避免丢失用户配置；无全局文件写入。
+- 构建 `run.IK6s3o`；OpenCodeMcpHttpHeadersNativeTest `run.cnSCuQ` 1 项通过，无失败/跳过。真实 1.18.32 启动、HTTP MCP 握手收到完整假 Bearer 头，状态 connected，文件字节不变。
+- 此为启动层支持，尚未接 LocalOpenCodeTasks/RemoteOpenCodeTasks，也未开放 UI；接入前必须保留原生同名冲突预检、配置变化处理和创建日志。SSH supervisor 尚无该参数。不得据此宣称用户已可从界面创建 HTTP 共享 MCP 会话。未发布。
+
 ## 2026-09-23 变量输入界面与 Codex HTTP 认证头验证
 
 - UI `a39a6d3`：添加可折叠的变量输入，按 stdio/HTTP 区分变量名和请求头映射；说明目标机器与完整头值语义，拒绝大小写重复头名；含 HTTP 头引用时禁用尚未接通的 OpenCode 选择。构建 `run.DQVENR`、现有机器隔离 UI 回归 `run.4XjPH0` 1 项通过；新增表单交互与 Windows 目视验收仍待完成。
