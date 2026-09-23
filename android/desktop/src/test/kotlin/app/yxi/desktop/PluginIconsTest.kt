@@ -57,7 +57,10 @@ class PluginIconsTest {
             "supabase" to "https://supabase.com", "google-calendar" to "https://calendar.google.com",
             "outlook-email" to "https://outlook.com", "outlook-calendar" to "https://www.microsoft.com/microsoft-365/outlook")) {
             val bytes = assertNotNull(loader.load(plugin(name, website, "https://files.openai.com/unavailable"), false))
-            assertTrue(bytes.size > 500)
+            val pixels = javax.imageio.ImageIO.read(java.io.ByteArrayInputStream(bytes))
+            val visible = (0 until pixels.height).flatMap { y -> (0 until pixels.width).map { x -> pixels.getRGB(x, y) } }.filter { it ushr 24 > 0 }
+            assertTrue(visible.size > 64, "$name must contain visible artwork")
+            assertTrue(visible.distinct().size > 1, "$name must not render as a solid empty tile")
             File("/results/plugin-$name.png").writeBytes(bytes)
             org.jetbrains.skia.Image.makeFromEncoded(bytes).use { assertEquals(64, it.width); assertEquals(64, it.height) }
         }
