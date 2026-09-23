@@ -1,3 +1,9 @@
+## 2026-09-24 ACP Markdown 与滚动跟随
+
+- `211f43d9325de4a90eb1854837584b55e6325f39` 助手消息复用 AssistantBody（GFM/CJK/工作台字号），工具与用户正文保持文本。使用会话持久视图状态、底部锚点与仅用户滚动触发的跟随开关，提供回到最新消息；消息/审批项使用分开的 UI key 命名空间。
+- 构建 `run.Z71Hnj`，AcpConversationUiTest `run.y8GuuM` 1 项通过，无失败/跳过，含模型、审批、键盘和带 Markdown 的完整回复。截图 `.artifacts/acp-ui/acp-markdown.png` 已目视核对标题、列表、代码块无裁切。
+- 用户上滚后流式更新不抢滚动、超长消息底部等专项交互尚待测试；Windows 与真实三家模型请求仍未完成。未发布。
+
 ## 2026-09-24 ACP 草稿与键盘发送
 
 - `7f0a50610c37ef95685003b59be3bedf781337c8` 输入框改用共享 chatDrafts/TextFieldValue，保留页面切换草稿；Enter/NumPadEnter 发送、Shift+Enter 换行、composition 非空时不截获确认键。发送先同步入持久队列，成功后清空草稿并交由控制器作用域执行。
