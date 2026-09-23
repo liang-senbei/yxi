@@ -15,18 +15,32 @@ class GeminiAcpConversationNativeTest {
         check(!System.getenv("YXI_ISOLATED_TEST_RUN").isNullOrBlank())
         check(System.getProperty("user.home") == "/sandbox/home")
         val paths = CopyOnWriteArrayList<String>()
+        val issuedTool = java.util.concurrent.atomic.AtomicBoolean()
+        val sawToolResult = java.util.concurrent.atomic.AtomicBoolean()
+        val marker = File("/sandbox/home/gemini-approved.txt")
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/") { exchange ->
             try {
                 val path = exchange.requestURI.path
                 check(exchange.requestHeaders.getFirst("x-goog-api-key") == "fixture-gemini-key")
                 check(paths.size < 20); paths.add(path)
-                exchange.requestBody.readAllBytes()
+                val raw = exchange.requestBody.readAllBytes().toString(Charsets.UTF_8)
+                val input = if (raw.isBlank()) JSONObject() else JSONObject(raw)
+                val tools = input.optJSONArray("tools") ?: JSONArray()
+                val declared = (0 until tools.length()).flatMap { i ->
+                    val functions = tools.getJSONObject(i).optJSONArray("functionDeclarations") ?: JSONArray()
+                    (0 until functions.length()).map { functions.getJSONObject(it).getString("name") }
+                }
+                if (input.optJSONArray("contents")?.toString()?.contains("\"functionResponse\"") == true) sawToolResult.set(true)
+                val invoke = "run_shell_command" in declared && issuedTool.compareAndSet(false, true)
+                val part = if (invoke) JSONObject().put("functionCall", JSONObject().put("name", "run_shell_command")
+                    .put("args", JSONObject().put("command", "printf approved > ${marker.path}").put("description", "Write isolated verification marker")))
+                else JSONObject().put("text", if (sawToolResult.get()) "GEMINI_NATIVE_TURN_CONFIRMED" else "Fixture response")
                 val response = when {
                     path.endsWith(":countTokens") -> JSONObject().put("totalTokens", 50)
                     path.endsWith(":generateContent") || path.endsWith(":streamGenerateContent") -> JSONObject()
                         .put("candidates", JSONArray().put(JSONObject().put("index", 0).put("finishReason", "STOP")
-                            .put("content", JSONObject().put("role", "model").put("parts", JSONArray().put(JSONObject().put("text", "GEMINI_NATIVE_TURN_CONFIRMED"))))))
+                            .put("content", JSONObject().put("role", "model").put("parts", JSONArray().put(part)))))
                         .put("usageMetadata", JSONObject().put("promptTokenCount", 50).put("candidatesTokenCount", 5).put("totalTokenCount", 55))
                         .put("modelVersion", path.substringAfter("models/").substringBefore(':'))
                     else -> JSONObject().put("models", JSONArray().put(JSONObject().put("name", "models/gemini-2.5-flash")))
@@ -55,15 +69,27 @@ class GeminiAcpConversationNativeTest {
                 val controller = tasks.controllers.getValue(record.key)
                 try {
                     controller.enqueue("Reply with the verification phrase.")
-                    withTimeout(60000) { controller.dispatchNext().join() }
+                    val delivery = controller.dispatchNext()
+                    withTimeout(30000) { while (controller.pendingApprovals.isEmpty()) delay(20) }
+                    assertFalse(marker.exists(), "Native tool must not execute before approval")
+                    val approval = controller.pendingApprovals.values.single()
+                    File("/results/gemini-native-approval.json").writeText(approval.toString(2))
+                    assertTrue(approval.toString().contains("gemini-approved.txt"))
+                    val options = approval.getJSONObject("params").getJSONArray("options")
+                    val once = (0 until options.length()).map { options.getJSONObject(it) }.single { it.getString("kind") == "allow_once" }
+                    controller.answerPermission(approval.get("id"), once.getString("optionId"))
+                    withTimeout(60000) { delivery.join() }
                     assertEquals(RuntimeTurnState.Completed, queue.entries.single().runtimeTurnState)
                     assertTrue(controller.messages.any { it.author == "Assistant" && it.text.contains("GEMINI_NATIVE_TURN_CONFIRMED") })
                     assertTrue(paths.any { it.contains("/models/gemini-2.5-flash:") })
                     assertEquals(record.key, LocalCodexTaskRegistry(index).records.single().key)
                     assertFalse(File("/sandbox/home/.gemini/oauth_creds.json").exists())
+                    assertEquals("approved", marker.readText())
+                    assertTrue(sawToolResult.get())
                 } finally {
                     File("/results/gemini-native-turn.json").writeText(JSONObject().put("paths", JSONArray(paths)).put("note", controller.note)
-                        .put("stopReason", controller.lastStopReason).put("model", tasks.registry.records.single().model).toString(2))
+                        .put("stopReason", controller.lastStopReason).put("model", tasks.registry.records.single().model)
+                        .put("issuedTool", issuedTool.get()).put("sawToolResult", sawToolResult.get()).toString(2))
                 }
             }
         } finally { server.stop(0) }
