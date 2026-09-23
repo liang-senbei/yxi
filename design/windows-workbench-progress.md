@@ -1,3 +1,8 @@
+## 2026-09-24 分组加载期间保留原生会话
+
+- `c142867fd9c19996cfa324626314e7580b371a4f` 修正已登记 ACP 会话仍显示服务器无会话的错误提示；分组尚未加载时，Codex/OpenCode/ACP 登记会话保持可见，不再等待分组读取完成。
+- 构建 `run.BGFtmZ`；RemoteAcpCreationUiTest `run.8uAZf0` 1 项通过，0 失败/错误/跳过。新增分组未加载状态下项目树搜索 Gemini 并点击的真实窗口回归，返回相同控制器且没有额外 session/new。
+- `.artifacts/server-acp-ui/project-loading.png` 已目视：加载提示和可点击的原会话同时显示。测试为隔离 Linux SSH/协议 fixture，完整分组菜单与 Windows 实机仍待验收，未发布。
 ## 2026-09-24 远端 ACP 会话侧栏入口
 
 - `e4374d71e40472b344f8255730d2858e9349bb1b` 将 Gemini/Grok/Hermes 已登记远端会话接入项目树、主机搜索、置顶与收藏；复用原生会话行，支持显示名称、归档、移组与灰色8dp选中态。按控制器审批/运行状态及队列未知状态显示待处理，断开的会话不冒充空闲。
