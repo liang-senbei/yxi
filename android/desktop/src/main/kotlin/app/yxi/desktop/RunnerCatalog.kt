@@ -8,7 +8,7 @@ internal object RunnerCatalog {
         RunnerEntry("codex", "Codex", "codex", true),
         RunnerEntry("opencode", "OpenCode", "opencode", false),
         RunnerEntry("gemini", "Gemini", "gemini", false),
-        RunnerEntry("grok", "Grok Build", null, false),
+        RunnerEntry("grok", "Grok Build", "grok", false),
         RunnerEntry("hermes", "Hermes", "hermes", false),
     )
     fun find(id: String) = entries.singleOrNull { it.id == id }

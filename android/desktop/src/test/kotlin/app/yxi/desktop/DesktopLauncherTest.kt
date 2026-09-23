@@ -25,7 +25,7 @@ class DesktopLauncherTest {
     }
     @Test fun `discovery does not accept arbitrary executable strings`() {
         assertFailsWith<IllegalArgumentException> { RunnerCatalog.probeCommand("claude; touch bad") }
-        assertFailsWith<IllegalArgumentException> { RunnerCatalog.probeCommand("grok") }
+        assertTrue(RunnerCatalog.probeCommand("grok").contains("command -v"))
         assertTrue(RunnerCatalog.probeCommand("opencode").contains("command -v"))
     }
 }
