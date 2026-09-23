@@ -1,3 +1,11 @@
+## OpenCode 本地任务登记与界面接线
+
+`34633de`接入 LocalOpenCodeTasks、原生模型读取/新建弹窗、OpenCodeConversationPane。任务记录加入 engine/provider，旧 Codex 默认值和 key 保持兼容；OpenCode 使用独立索引文件及 key。创建写前日志、保存原生 ID/工作目录后才开放控制器；未知创建与索引恢复需要人工核对。AppState 管理服务关闭，检测到本机 OpenCode 的安装行提供新建按钮。
+
+基础聊天界面连接持久队列、定时读回状态、三种审批、多问题/多选/自定义回答、拒绝及停止；Enter/Shift+Enter/IME保护沿用本地输入逻辑。重启后记录保留，但尚不自动接管原生会话。服务器创建仍未开放。
+
+构建 run.9zkZHy 通过；索引回归 run.3z70Z8 6 项、真实 Compose 窗口点击 run.VJKtOU 1 项通过，无跳过。窗口fixture验证连点仅一次投递、草稿清空及回复显示；截图已查看，.artifacts/opencode-ui/opencode-conversation.png。此轮没有验证整个新建弹窗与真实运行器组合、真实模型推理、审批全流程、Windows GUI，不能宣称 OpenCode 完整交付。附件/Markdown/后端消息形态/跨重启续聊等继续按PRD，未发布。
+
 ## OpenCode 持久化发送与原生记录核对
 
 `a9508cd`新增 OpenCodeTaskController：复用 InstructionQueue，生成并保存原生格式消息 ID，携带明确供应商/模型发送；204仅记录提交结果待核对。读回同一会话、相同ID/文本/模型的原生用户消息后确认接收。助手完成记录须关联 parentID、具有完成时间和结束原因；工具调用步骤结束不等于轮次完成。未知投递和未完成轮次阻止后续发送，不自动重试。审批/提问/停止入口串行化并刷新原生记录。
