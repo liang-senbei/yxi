@@ -42,5 +42,17 @@ requires_openai_auth = false
         assertTrue(denied.message.orEmpty().contains("ChatGPT"))
         assertContentEquals(beforeConfig, config.readBytes())
         assertContentEquals(beforeAuth, auth.readBytes(), "Selecting official mode must not log out an existing API account")
+        // Synthetic offline identity validates the positive protocol path, not a real subscription request.
+        fun encoded(value: String) = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(value.toByteArray())
+        val idToken = encoded("""{"alg":"none"}""") + "." + encoded("""{"sub":"fixture-user","exp":4102444800,"https://api.openai.com/auth":{"chatgpt_account_id":"fixture-account","chatgpt_plan_type":"pro"}}""") + ".fixture"
+        auth.writeText(JSONObject().put("auth_mode", "chatgpt").put("tokens", JSONObject().put("id_token", idToken)
+            .put("access_token", "fixture-access").put("refresh_token", "fixture-refresh").put("account_id", "fixture-account"))
+            .put("last_refresh", java.time.Instant.now().toString()).toString())
+        val chatgptBefore = auth.readBytes()
+        LocalCodexProfiles.connectOfficial(runtime).use { client ->
+            assertTrue(client.authenticationSummary().contains("ChatGPT"))
+        }
+        assertContentEquals(beforeConfig, config.readBytes())
+        assertContentEquals(chatgptBefore, auth.readBytes())
     }
 }
