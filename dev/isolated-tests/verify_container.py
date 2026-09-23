@@ -9,7 +9,7 @@ def check(condition, message="Unsafe container configuration"):
         raise ValueError(message)
 
 
-def verify(container, run_id, results, image_id, native=None):
+def verify(container, run_id, results, image_id, native=None, ssh_pty=False):
     config = container["HostConfig"]
     check(container["Image"] == image_id, "Unexpected image")
     check(container["State"]["Status"] == "created" and not container["State"]["Running"], "Container already started")
@@ -23,7 +23,11 @@ def verify(container, run_id, results, image_id, native=None):
     check(not config.get("Devices") and not config.get("DeviceRequests") and not config.get("VolumesFrom"))
     check(set(config.get("CapDrop") or []) == {"ALL"})
     capabilities = {value.removeprefix("CAP_") for value in (config.get("CapAdd") or [])}
-    check(capabilities <= {"SETUID", "SETGID", "SYS_CHROOT"})
+    allowed_capabilities = {"SETUID", "SETGID", "SYS_CHROOT"}
+    if ssh_pty:
+        check(container["Config"].get("Labels", {}).get("org.yxi.ssh-pty") == "true")
+        allowed_capabilities.add("AUDIT_WRITE")
+    check(capabilities <= allowed_capabilities)
     check("no-new-privileges" in (config.get("SecurityOpt") or []))
     check(0 < config["Memory"] <= 4 * 1024**3)
     check(config["MemorySwap"] == config["Memory"])
@@ -42,7 +46,10 @@ def verify(container, run_id, results, image_id, native=None):
 
 if __name__ == "__main__":
     inspect, run_id, results, image_id, *native = sys.argv[1:]
+    ssh_pty = "--ssh-pty" in native
+    native = [arg for arg in native if arg != "--ssh-pty"]
+    check(len(native) <= 1)
     items = json.loads(pathlib.Path(inspect).read_text())
     check(len(items) == 1)
-    verify(items[0], run_id, results, image_id, native[0] if native else None)
+    verify(items[0], run_id, results, image_id, native[0] if native else None, ssh_pty)
     print("Container isolation configuration verified; no test has started yet")

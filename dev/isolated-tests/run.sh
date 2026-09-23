@@ -83,6 +83,11 @@ image_id=$(docker_local image inspect --format '{{.Id}}' "$image")
 mkdir "$run_root/results"
 printf 'runner=%s\nimage-source=%s\ntest=%s\n' "$revision" "$image_revision" "$test_class" > "$run_root/source.txt"
 run_id=$(python3 -c 'import uuid;print(uuid.uuid4())')
+pty_options=()
+if test "${YXI_TEST_SSH_PTY:-0}" = 1; then
+    # OpenSSH root PTY login accounting requires audit_log_acct_message, not host access.
+    pty_options=(--cap-add AUDIT_WRITE --label org.yxi.ssh-pty=true)
+fi
 container_id=
 cleanup() {
     if [[ "$container_id" =~ ^[a-f0-9]{64}$ ]] && \
@@ -93,6 +98,7 @@ cleanup() {
 trap cleanup EXIT
 container_id=$(docker_local create --platform linux/amd64 --network none --ipc private \
     --cap-drop ALL --cap-add SETUID --cap-add SETGID --cap-add SYS_CHROOT \
+    "${pty_options[@]}" \
     --security-opt no-new-privileges --memory 4g --memory-swap 4g --cpus 2 --pids-limit 512 \
     --label "org.yxi.isolated-test=$run_id" \
     --env "YXI_ISOLATED_TEST_RUN=$run_id" --env HOME=/sandbox/home \
@@ -103,6 +109,7 @@ container_id=$(docker_local create --platform linux/amd64 --network none --ipc p
 docker_local inspect "$container_id" > "$run_root/container.json"
 verify_args=("$run_root/container.json" "$run_id" "$run_root/results" "$image_id")
 if test -n "$native"; then verify_args+=("$native"); fi
+if test "${YXI_TEST_SSH_PTY:-0}" = 1; then verify_args+=(--ssh-pty); fi
 python3 "$repo/dev/isolated-tests/verify_container.py" "${verify_args[@]}"
 # A timeout must also remove the labelled container, not just disconnect its client.
 set +e
