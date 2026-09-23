@@ -13,9 +13,11 @@ class PluginIconsTest {
     @TempDir lateinit var root: File
     private fun plugin(name: String, website: String, logo: String? = null) = NativePlugin(name, name, name, "", "", "fixture", null,
         "", false, false, true, logo, "fixture", "", "fixture", websiteUrl = website)
-    @Test fun `Canva and Gmail use real bundled publisher icons without blocked CDN requests`() = runBlocking {
+    @Test fun `bundled publisher icons render without blocked CDN requests`() = runBlocking {
         val loader = PluginIconLoader(root) { error("Bundled official icon should not need network") }
-        for ((name, website) in listOf("canva" to "https://www.canva.com", "gmail" to "https://workspace.google.com/products/gmail/")) {
+        for ((name, website) in listOf("canva" to "https://www.canva.com", "gmail" to "https://workspace.google.com/products/gmail/",
+            "github" to "https://github.com", "slack" to "https://slack.com", "dropbox" to "https://www.dropbox.com",
+            "google-drive" to "https://drive.google.com", "notion" to "https://notion.so", "linear" to "https://linear.app")) {
             val bytes = assertNotNull(loader.load(plugin(name, website, "https://files.openai.com/unavailable"), false))
             assertTrue(bytes.size > 500)
             File("/results/plugin-$name.png").writeBytes(bytes)

@@ -37,6 +37,12 @@ internal class PluginIconLoader(private val cache: File, private val fetch: (Str
         val bundled = when {
             plugin.name == "canva" && hostMatches(plugin.websiteUrl, "canva.com") -> "canva.ico"
             plugin.name == "gmail" && hostMatches(plugin.websiteUrl, "google.com") -> "gmail.ico"
+            plugin.name == "github" && hostMatches(plugin.websiteUrl, "github.com") -> "github-fluidicon.png"
+            plugin.name == "slack" && hostMatches(plugin.websiteUrl, "slack.com") -> "slack-nav-logo.svg"
+            plugin.name == "dropbox" && hostMatches(plugin.websiteUrl, "dropbox.com") -> "dropbox-logo-nav.svg"
+            plugin.name in setOf("google-drive", "google_drive", "googledrive") && hostMatches(plugin.websiteUrl, "google.com") -> "drive-productlogos-192.svg"
+            plugin.name == "notion" && (hostMatches(plugin.websiteUrl, "notion.so") || hostMatches(plugin.websiteUrl, "notion.com")) -> "notion-logo-ios.png"
+            plugin.name == "linear" && hostMatches(plugin.websiteUrl, "linear.app") -> "linear-apple-touch-icon.png"
             else -> null
         }
         if (bundled != null) javaClass.getResourceAsStream("/app/yxi/desktop/plugin-icons/$bundled")?.use { source ->
