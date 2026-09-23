@@ -170,10 +170,10 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
         if (conn.groupsError.isNotBlank()) {
             Text("暂列出全部 Agent，分组恢复后自动整理", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
             visible.forEach { task(it) }
-            codexTasks.forEach { codexTask(it) }
-            openCodeTasks.forEach { OpenCodeTaskRow(state, conn, it) }
-            acpTasks.forEach { AcpTaskRow(state, conn, it) }
         }
+        codexTasks.forEach { codexTask(it) }
+        openCodeTasks.forEach { OpenCodeTaskRow(state, conn, it) }
+        acpTasks.forEach { AcpTaskRow(state, conn, it) }
         return
     }
     val groupedNames = conn.projectGroups.groups.values.flatten().toSet()

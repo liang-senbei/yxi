@@ -43,11 +43,13 @@ for line in sys.stdin:
                     Window(onCloseRequest = ::exitApplication, state = rememberWindowState(width = 1180.dp, height = 960.dp)) {
                         var creating by remember { mutableStateOf(true) }
                         var sidebar by remember { mutableStateOf(false) }
+                        var projectTree by remember { mutableStateOf(false) }
                         YxiTheme { Surface {
                             if (creating) NewSessionDialog(bridge.conn, { creating = false }, initialDirectory = directory.path,
                                 initialAgent = "gemini", groupContext = "Do not send this draft automatically", onAcpConversation = { engine, path, prompt ->
                                     state.prepareAcpTask(bridge.conn, engine, path, prompt); routed = true; creating = false
                                 }) { failure = AssertionError("ACP must not use the tmux creation path") }
+                            else if (projectTree) androidx.compose.foundation.layout.Column { ProjectTree(state, bridge.conn, emptyList(), searching = true, query = "Gemini") }
                             else if (sidebar) AcpTaskRow(state, bridge.conn, state.remoteAcpTasks.tasks(bridge.conn).single())
                             else RemoteAcpPane(state)
                         } }
@@ -113,6 +115,16 @@ for line in sys.stdin:
                                 assertEquals(1, marker.readLines().count { it == "session/new" })
                                 assertFalse(marker.readText().contains("session/prompt"))
                                 ImageIO.write(Robot().createScreenCapture(java.awt.Rectangle(window.locationOnScreen, window.size)), "png", File("/results/server-acp-sidebar.png"))
+                                assertFalse(bridge.conn.groupsLoaded)
+                                state.page = Page.Workspace; state.remoteAcpSelectedKey = null
+                                projectTree = true; delay(500)
+                                click(140, 72)
+                                withTimeout(2000) { while (state.remoteAcpSelectedKey != record.key) delay(20) }
+                                assertEquals(Page.Acp, state.page)
+                                assertSame(controller, state.remoteAcpTasks.controllers[record.key])
+                                assertEquals(1, marker.readLines().count { it == "session/new" })
+                                delay(500)
+                                ImageIO.write(Robot().createScreenCapture(java.awt.Rectangle(window.locationOnScreen, window.size)), "png", File("/results/server-acp-project-loading.png"))
                             } catch (e: Throwable) { failure = e }
                             finally { exitApplication() }
                         }
