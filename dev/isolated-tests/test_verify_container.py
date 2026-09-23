@@ -23,6 +23,19 @@ class ContainerBoundaryTest(unittest.TestCase):
     def test_expected_boundary(self):
         verify(self.safe, "run-1", self.results, self.image)
 
+    def test_ssh_pty_audit_capability_requires_explicit_scope_and_label(self):
+        candidate = copy.deepcopy(self.safe)
+        candidate["HostConfig"]["CapAdd"].append("AUDIT_WRITE")
+        with self.assertRaises(ValueError):
+            verify(candidate, "run-1", self.results, self.image)
+        with self.assertRaises(ValueError):
+            verify(candidate, "run-1", self.results, self.image, ssh_pty=True)
+        candidate["Config"]["Labels"]["org.yxi.ssh-pty"] = "true"
+        verify(candidate, "run-1", self.results, self.image, ssh_pty=True)
+        candidate["HostConfig"]["CapAdd"].append("SYS_ADMIN")
+        with self.assertRaises(ValueError):
+            verify(candidate, "run-1", self.results, self.image, ssh_pty=True)
+
     def test_docker_cap_prefix_preserves_the_same_allowlist(self):
         candidate = copy.deepcopy(self.safe)
         candidate["HostConfig"]["CapAdd"] = ["CAP_SETUID", "CAP_SETGID", "CAP_SYS_CHROOT"]
