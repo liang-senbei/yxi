@@ -14,13 +14,17 @@ import java.net.URI
 import java.security.MessageDigest
 
 /** Only catalog publisher assets and icons declared by the publisher website are used. */
-internal class PluginIconLoader(private val cache: File, private val fetch: (String) -> ByteArray = ::download) {
+internal class PluginIconLoader(private val cache: File, private val now: () -> Long = System::currentTimeMillis,
+    private val fetch: (String) -> ByteArray = ::download) {
     private val slots = Semaphore(4)
+    private val failedUntil = java.util.concurrent.ConcurrentHashMap<String, Long>()
     suspend fun load(plugin: NativePlugin, dark: Boolean): ByteArray? = slots.withPermit { withContext(Dispatchers.IO) {
         val urls = listOfNotNull(if (dark) plugin.iconUrlDark else null, plugin.iconUrl, plugin.composerIconUrl).distinct()
         val key = MessageDigest.getInstance("SHA-256").digest(("viewport-v2:" + urls.joinToString() + plugin.name + plugin.websiteUrl + dark).toByteArray())
             .joinToString("") { "%02x".format(it) }
         val saved = File(cache, "$key.png")
+        if ((failedUntil[key] ?: 0L) > now()) return@withContext null
+        fun <T> attempt(block: () -> T): T? = try { block() } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
         if (saved.isFile && saved.length() <= 512 * 1024 && System.currentTimeMillis() - saved.lastModified() < 7L * 86400000) {
             runCatching { render(saved.readBytes()) }.getOrNull()?.let { return@withContext it }
         }
@@ -50,14 +54,17 @@ internal class PluginIconLoader(private val cache: File, private val fetch: (Str
         }
         for (url in urls) {
             currentCoroutineContext().ensureActive()
-            runCatching { render(fetch(checkedUrl(url).toString())) }.getOrNull()?.let { return@withContext store(it) }
+            attempt { render(fetch(checkedUrl(url).toString())) }?.let { return@withContext store(it) }
         }
         val website = runCatching { checkedUrl(plugin.websiteUrl ?: return@withContext null) }.getOrNull() ?: return@withContext null
-        val declared = runCatching { websiteIcons(website, fetch(website.toString()).toString(Charsets.UTF_8)) }.getOrDefault(emptyList())
+        val declared = attempt { websiteIcons(website, fetch(website.toString()).toString(Charsets.UTF_8)) }.orEmpty()
         for (url in (declared + website.resolve("/favicon.ico").toString()).distinct().take(5)) {
             currentCoroutineContext().ensureActive()
-            runCatching { render(fetch(checkedUrl(url).toString())) }.getOrNull()?.let { return@withContext store(it) }
+            attempt { render(fetch(checkedUrl(url).toString())) }?.let { return@withContext store(it) }
         }
+        currentCoroutineContext().ensureActive()
+        if (failedUntil.size >= 4096) failedUntil.keys.firstOrNull()?.let { failedUntil.remove(it) }
+        failedUntil[key] = now() + 60_000L
         null
     } }
     companion object {

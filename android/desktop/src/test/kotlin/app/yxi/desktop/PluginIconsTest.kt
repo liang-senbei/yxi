@@ -10,6 +10,31 @@ import kotlin.test.*
 @EnabledOnOs(OS.LINUX)
 @EnabledIfEnvironmentVariable(named = "YXI_ISOLATED_TEST_RUN", matches = "[0-9a-f-]{36}")
 class PluginIconsTest {
+    @Test fun `unavailable publisher icons back off briefly and recover without restarting`(): Unit = runBlocking {
+        var clock = 1000L; var requests = 0; var available = false
+        val loader = PluginIconLoader(root, now = { clock }) {
+            requests++
+            if (!available) error("offline")
+            "<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64'><rect width='64' height='64' fill='#0055ff'/></svg>".toByteArray()
+        }
+        val entry = plugin("fixture", "https://publisher.example", "https://publisher.example/icon.svg")
+        assertNull(loader.load(entry, false))
+        val initial = requests
+        assertTrue(initial > 0)
+        repeat(10) { assertNull(loader.load(entry, false)) }
+        assertEquals(initial, requests)
+        available = true; clock += 60_001
+        assertNotNull(loader.load(entry, false))
+        assertEquals(initial + 1, requests)
+    }
+    @Test fun `cancelled icon requests do not retry publisher fallbacks`(): Unit = runBlocking {
+        var requests = 0
+        val loader = PluginIconLoader(root) { requests++; throw kotlinx.coroutines.CancellationException("cancelled") }
+        assertFailsWith<kotlinx.coroutines.CancellationException> {
+            loader.load(plugin("fixture", "https://publisher.example", "https://publisher.example/icon.svg"), false)
+        }
+        assertEquals(1, requests)
+    }
     @Test fun `SVG intrinsic dimensions are scaled into the icon viewport without clipping`() {
         fun pixels(svg: String) = javax.imageio.ImageIO.read(java.io.ByteArrayInputStream(PluginIconLoader.render(svg.toByteArray())))
         for (size in listOf(34, 192)) {
