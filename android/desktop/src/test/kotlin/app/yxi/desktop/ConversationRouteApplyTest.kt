@@ -22,6 +22,10 @@ class ConversationRouteApplyTest {
         val home = root.resolve("home").apply { mkdir() }
         val config = home.resolve(".claude").apply { mkdir() }
         val project = root.resolve("project").apply { mkdir() }
+        val mcpScript = root.resolve("shared_mcp_fixture.py").apply { writeBytes(requireNotNull(ConversationRouteApplyTest::class.java.getResourceAsStream("/shared_mcp_fixture.py")).use { it.readBytes() }) }
+        val mcpConfig = home.resolve(".yxi/shared-mcp/${"a".repeat(32)}.json")
+        DurableFile.replace(mcpConfig, SharedMcpSettings.forRunner(SharedMcpDefinition("fixture", "echo", "test", "1", "route_echo", listOf("/usr/bin/python3", mcpScript.path)), "claude").toString())
+        val mcpBefore = mcpConfig.readBytes()
         val socket = root.resolve("tmux.sock")
         val endpoints = listOf("a", "b").map { root.resolve(it).apply { mkdir() } }
         val originalStub = javaClass.getResource("/rewind/anthropic_stub.py")!!.readText()
@@ -86,7 +90,7 @@ class ConversationRouteApplyTest {
             }
             for ((label, sid) in ids) {
                 tm("-f", "/dev/null", "new-session", "-d", "-s", "cc-route-$label", "-x", "180", "-y", "50", "-c", project.path,
-                    "exec ${Shell.q(native.path)} --resume ${Shell.q(sid)} --permission-mode manual")
+                    "exec ${Shell.q(native.path)} --resume ${Shell.q(sid)} --permission-mode manual --mcp-config ${Shell.q(mcpConfig.path)}")
                 ready("cc-route-$label")
             }
             val bPid = tm("display-message", "-p", "-t", "=cc-route-b:", "#{pane_pid}").trim()
@@ -112,6 +116,9 @@ class ConversationRouteApplyTest {
                     assertEquals(setOf(java.nio.file.attribute.PosixFilePermission.OWNER_READ, java.nio.file.attribute.PosixFilePermission.OWNER_WRITE),
                         Files.getPosixFilePermissions(Path.of(receipt.settingsPath)))
                     assertTrue(receipt.processIdentity.matches(Regex("[0-9a-f-]+:[0-9]+:[0-9]+")))
+                    val resumedArgs = File("/proc/${receipt.processIdentity.split(':')[1]}/cmdline").readText().split('\u0000')
+                    assertEquals(mcpConfig.path, resumedArgs[resumedArgs.indexOf("--mcp-config") + 1])
+                    assertContentEquals(mcpBefore, mcpConfig.readBytes())
                     val privateSettings = JSONObject(File(receipt.settingsPath).readText())
                     assertEquals("", privateSettings.getJSONObject("env").getString("ANTHROPIC_DEFAULT_OPUS_MODEL"))
                     assertContentEquals(beforeGlobal, global.readBytes())

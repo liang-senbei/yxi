@@ -44,7 +44,7 @@ import java.util.UUID
                     OutlinedTextField(program, { program = it }, label = { Text("目标机器上的程序路径或命令名") }, singleLine = true)
                     OutlinedTextField(arguments, { arguments = it }, label = { Text("参数，每行一个，空格按原样保留") }, minLines = 2, maxLines = 5)
                 }
-                Text("可用于 OpenCode、Codex 新会话及本地 Claude 任务。服务器 Claude 仍在接入。", style = MaterialTheme.typography.bodySmall)
+                Text("可用于 OpenCode、Codex 新会话，以及本地和服务器 Claude 任务。", style = MaterialTheme.typography.bodySmall)
                 if (message.isNotBlank()) Text(message, color = t.danger)
             }
         }, confirmButton = { TextButton({
@@ -81,7 +81,7 @@ import java.util.UUID
                         QuietChoice("claude" in record.desiredRunners, { change {
                             val runners = if ("claude" in record.desiredRunners) record.desiredRunners - "claude" else record.desiredRunners + "claude"
                             registry.save(record.definition, runners, record.revision)
-                        } }, enabled = hostKey == "@local" && registry.problem.isBlank(), label = { Text(if (hostKey == "@local") "Claude 本地任务" else "Claude · 接入中") })
+                        } }, enabled = registry.problem.isBlank(), label = { Text(if (hostKey == "@local") "Claude 本地任务" else "Claude 新会话") })
                         QuietChoice("codex" in record.desiredRunners, { change {
                             val runners = if ("codex" in record.desiredRunners) record.desiredRunners - "codex" else record.desiredRunners + "codex"
                             registry.save(record.definition, runners, record.revision)

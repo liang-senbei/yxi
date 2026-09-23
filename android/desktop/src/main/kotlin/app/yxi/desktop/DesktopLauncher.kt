@@ -6,12 +6,14 @@ import app.yxi.ssh.Shell
 import java.util.UUID
 
 data class DesktopLaunchPlan(val directory: String, val agent: String, val requestId: String, val initialPrompt: String = "", val collaborationGroup: String = "", val isolatedWorktree: Boolean = false,
-    val permissionMode: PermissionMode? = null) {
+    val permissionMode: PermissionMode? = null, val mcpConfigPath: String? = null, val mcpConfigHash: String? = null) {
     init {
         require(RunnerCatalog.find(agent)?.serverCreation == true) { "此运行器的会话创建适配尚未完成" }
         require(directory.startsWith('/') && directory.none { it < ' ' || it == '\u007f' }) { "请输入服务器上的绝对路径，不含控制字符" }
         require(Regex("[a-f0-9]{32}").matches(requestId)) { "启动请求标识无效" }
         require(initialPrompt.length <= 16000 && '\u0000' !in initialPrompt) { "启动提示词最多 16000 字符，不能包含空字符" }
+        require((mcpConfigPath == null) == (mcpConfigHash == null))
+        if (mcpConfigPath != null) require(agent == "claude" && mcpConfigPath.startsWith('/') && mcpConfigPath.none { it < ' ' } && Regex("[a-f0-9]{64}").matches(mcpConfigHash.orEmpty()))
     }
     val sessionName: String get() {
         val slug = directory.trimEnd('/').substringAfterLast('/').map { if (it.isLetterOrDigit() || it in "_-") it else '_' }.joinToString("").take(40).ifBlank { "workspace" }
@@ -23,6 +25,13 @@ data class DesktopLaunchPlan(val directory: String, val agent: String, val reque
         val modeArgs = permissionMode?.let { " --permission-mode ${it.nativeId}" }.orEmpty()
         // Native root bypass requires this compatibility flag; it does not create a sandbox.
         val execPrefix = if (permissionMode == PermissionMode.Bypass) "exec env IS_SANDBOX=1" else "exec"
+        val mcpWithPrompt = if (mcpConfigPath == null) "" else " --mcp-config \"${'$'}3\""
+        val mcpWithoutPrompt = if (mcpConfigPath == null) "" else " --mcp-config \"${'$'}2\""
+        val mcpPathArg = mcpConfigPath?.let { Shell.q(it) }.orEmpty()
+        val checkMcp = if (mcpConfigPath == null) "" else """
+mcp_status=${'$'}(python3 -c ${Shell.q(RemoteClaudeSharedMcp.preflightScript)} ${Shell.q(mcpConfigPath)} ${Shell.q(mcpConfigHash!!)} "${'$'}bin" "${'$'}want")
+case "${'$'}mcp_status" in ready) ;; mcp-conflict|mcp-config-invalid|mcp-config-changed|mcp-check-failed) echo "$tag:${'$'}mcp_status"; exit 0;; *) echo '$tag:mcp-check-failed'; exit 0;; esac
+""".trimIndent()
         val prepareDirectory = if (!isolatedWorktree) "mkdir -p -- \"${'$'}d\" 2>/dev/null || { echo '$tag:nodir'; exit 0; }" else {
             val script = """
 import pathlib, subprocess, sys
@@ -78,11 +87,12 @@ if tmux has-session -t "=${'$'}n" 2>/dev/null; then
   [ "${'$'}got" = "${'$'}want" ] || { echo '$tag:conflict'; exit 0; }
   echo '$tag:exists'; exit 0
 fi
+$checkMcp
 $joinGroup
 if [ -n "${'$'}prompt" ]; then
-  tmux new-session -d -s "${'$'}n" -c "${'$'}want" /bin/sh -c '$execPrefix "${'$'}1"$modeArgs -- "${'$'}2"' yxi-launch "${'$'}bin" "${'$'}prompt" 2>/dev/null || { echo '$tag:failed'; exit 0; }
+  tmux new-session -d -s "${'$'}n" -c "${'$'}want" /bin/sh -c '$execPrefix "${'$'}1"$modeArgs$mcpWithPrompt -- "${'$'}2"' yxi-launch "${'$'}bin" "${'$'}prompt" $mcpPathArg 2>/dev/null || { echo '$tag:failed'; exit 0; }
 else
-  tmux new-session -d -s "${'$'}n" -c "${'$'}want" /bin/sh -c '$execPrefix "${'$'}1"$modeArgs' yxi-launch "${'$'}bin" 2>/dev/null || { echo '$tag:failed'; exit 0; }
+  tmux new-session -d -s "${'$'}n" -c "${'$'}want" /bin/sh -c '$execPrefix "${'$'}1"$modeArgs$mcpWithoutPrompt' yxi-launch "${'$'}bin" $mcpPathArg 2>/dev/null || { echo '$tag:failed'; exit 0; }
 fi
 sleep 0.2
 tmux has-session -t "=${'$'}n" 2>/dev/null || { echo '$tag:exited'; exit 0; }

@@ -44,7 +44,7 @@ fun CollaborationDialog(state: AppState, conn: Conn, initialGroup: String = "", 
     if (creatingMember && table != null) {
         val context = "你将加入协作组「$selected」。\n队友：${table!!.groups[selected].orEmpty().joinToString()}\n组规：\n${table!!.rules[selected].orEmpty()}\n\n" +
             "负责人：${table!!.owners[selected].orEmpty().ifBlank { "未指定" }}。使用 yxi-hub who 查询当前身份与队友，yxi-hub say <成员> <内容> 联系同组成员，reply <消息ID> <内容> 回复。先读取当前组规，遵守文件归属；不要修改其他成员负责的文件。这里的名单是创建时快照，以服务器实时分组为准。"
-        NewSessionDialog(conn, { creatingMember = false }, collaborationGroup = selected, groupContext = context) { session ->
+        NewSessionDialog(conn, { creatingMember = false }, collaborationGroup = selected, groupContext = context, sharedMcpRegistry = state.sharedMcp) { session ->
             state.select(conn, session); creatingMember = false; close()
         }
         return

@@ -96,7 +96,7 @@ fun SessionRow(s: Session, selected: Boolean, displayName: String? = null, onCli
  * 出错留在弹窗里显示，成了才关；成了把新会话交给 [onCreated]。
  */
 @Composable
-fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: String = "", groupContext: String = "", onCodexConversation: ((String, String) -> Unit)? = null, initialDirectory: String? = null, initialAgent: String? = null, onOpenCodeConversation: ((String, String) -> Unit)? = null, onCreated: (Session) -> Unit) {
+internal fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: String = "", groupContext: String = "", onCodexConversation: ((String, String) -> Unit)? = null, initialDirectory: String? = null, initialAgent: String? = null, onOpenCodeConversation: ((String, String) -> Unit)? = null, sharedMcpRegistry: SharedMcpRegistry? = null, onCreated: (Session) -> Unit) {
     val scope = rememberCoroutineScope()
     // 预填现有会话的父目录（工作区），只用补项目名；不写死路径，换台机器就不一样
     var path by remember { mutableStateOf(initialDirectory ?: Dirs.parentsOf(conn.sessions.map { it.cwd }).firstOrNull()?.let { "$it/" }.orEmpty()) }
@@ -117,7 +117,8 @@ fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: Stri
     var isolatedWorktree by remember { mutableStateOf(false) }
     var permissionMode by remember { mutableStateOf(app.yxi.agent.PermissionMode.Manual) }
     var permissionsOpen by remember { mutableStateOf(false) }
-    val requestId = remember(path, agent, initialPrompt, collaborationGroup, isolatedWorktree, permissionMode) { DesktopLaunchPlan.newRequestId() }
+    val sharedResources = if (agent == "claude") sharedMcpRegistry?.forHost(projectKey(conn.host, "/"))?.filter { "claude" in it.desiredRunners }.orEmpty() else emptyList()
+    val requestId = remember(path, agent, initialPrompt, collaborationGroup, isolatedWorktree, permissionMode, sharedResources) { DesktopLaunchPlan.newRequestId() }
     WorkbenchDialog(
         onDismissRequest = { if (!busy) onDismiss() },
         title = { Text("在 ${conn.host.label} 上新建会话") },
@@ -179,8 +180,11 @@ fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: Stri
                 if (structuredOpenCode) { onOpenCodeConversation?.invoke(path, initialPrompt); return@TextButton }
                 busy = true
                 scope.launch {
-                    try { createSession(conn, DesktopLaunchPlan(path.trim(), agent, requestId, initialPrompt, collaborationGroup, isolatedWorktree,
-                        permissionMode.takeIf { agent == "claude" })).fold(onCreated) { err = it.message.orEmpty() } }
+                    try {
+                        check(sharedMcpRegistry?.problem.isNullOrBlank()) { sharedMcpRegistry?.problem.orEmpty() }
+                        createSession(conn, DesktopLaunchPlan(path.trim(), agent, requestId, initialPrompt, collaborationGroup, isolatedWorktree,
+                            permissionMode.takeIf { agent == "claude" }), sharedResources).fold(onCreated) { err = it.message.orEmpty() }
+                    }
                     catch (e: kotlinx.coroutines.CancellationException) { throw e }
                     catch (e: Exception) { err = e.message.orEmpty() }
                     finally { busy = false }
@@ -192,12 +196,18 @@ fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: Stri
 }
 
 /** 只有刷新取得真实会话后才进入任务，启动回执不能替代运行状态。 */
-private suspend fun createSession(conn: Conn, plan: DesktopLaunchPlan): Result<Session> {
+private suspend fun createSession(conn: Conn, original: DesktopLaunchPlan, sharedResources: List<SharedMcpRecord> = emptyList()): Result<Session> {
+    val plan = if (sharedResources.isEmpty()) original else RemoteClaudeSharedMcp.stage(conn, sharedResources, original.requestId).let {
+        original.copy(mcpConfigPath = it.path, mcpConfigHash = it.hash)
+    }
     val name = plan.sessionName
     val raw = conn.ssh.exec(plan.command())
     val failure = raw.lineSequence().lastOrNull { it.startsWith(Dirs.TAG + ":") }?.substringAfter(':')
     if (failure !in listOf("ok", "exists")) return Result.failure(IllegalStateException(when (failure) {
         "missing-tmux" -> "这台服务器未安装 tmux"
+        "mcp-conflict" -> "Claude 原生配置已有同名 MCP，未覆盖；请核对服务器共享插件名称"
+        "mcp-config-invalid", "mcp-config-changed" -> "共享 MCP 配置权限或内容发生变化，未启动任务"
+        "mcp-check-failed" -> "无法确认 Claude 的 MCP 配置，请检查运行器、工作目录和 Python 环境"
         "group-failed" -> "加入协作组失败，请刷新分组后重试；尚未启动新任务"
         "worktree-failed" -> "无法准备独立工作树，请确认路径是 Git 仓库、有已提交的 HEAD、父目录可写且 Git/Python3 可用。已有目录不会删除。"
         "missing-runtime" -> "未找到可执行的 ${plan.agent}，请先在该服务器安装并完成登录"

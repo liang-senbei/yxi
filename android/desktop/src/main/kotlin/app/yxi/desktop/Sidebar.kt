@@ -378,7 +378,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
             dismissButton = { TextButton({ deleting = null }) { Text("取消") } },
         )
     }
-    creatingOn?.let { c -> NewSessionDialog(c, onDismiss = { creatingOn = null; creatingFavorite = null }, onCodexConversation = { directory, prompt ->
+    creatingOn?.let { c -> NewSessionDialog(c, onDismiss = { creatingOn = null; creatingFavorite = null }, sharedMcpRegistry = state.sharedMcp, onCodexConversation = { directory, prompt ->
         creatingOn = null
         creatingFavorite = null
         state.prepareCodexTask(c, directory, prompt)

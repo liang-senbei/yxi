@@ -103,7 +103,7 @@ def apply(args):
     i = 1
     while i < len(argv):
         arg = argv[i]
-        if arg in ('--resume', '-r', '--permission-mode', '--model', '--effort', '--name', '-n', '--settings'):
+        if arg in ('--resume', '-r', '--permission-mode', '--model', '--effort', '--name', '-n', '--settings', '--mcp-config'):
             if i + 1 >= len(argv):
                 raise ValueError('incomplete launch option')
             value = argv[i + 1]
@@ -114,6 +114,15 @@ def apply(args):
             if arg == '--settings':
                 check_path(value, environment['HOME'])
                 previous_settings.append(json.loads(secure_read(value)))
+            if arg == '--mcp-config':
+                mcp_path = pathlib.Path(value)
+                mcp_root = pathlib.Path(environment['HOME']) / '.yxi' / 'shared-mcp'
+                if mcp_path.parent != mcp_root or mcp_path.resolve() != mcp_path or not re.fullmatch(r'[a-f0-9]{32}\.json', mcp_path.name):
+                    raise ValueError('unmanaged MCP configuration path')
+                mcp_config = json.loads(secure_read(value))
+                if not isinstance(mcp_config.get('mcpServers'), dict):
+                    raise ValueError('invalid MCP configuration')
+                retained.extend([arg, value])
             i += 2
         elif arg in ('--dangerously-skip-permissions', '--allow-dangerously-skip-permissions'):
             # Keep the capability flag, but the actual mode is the captured current mode.

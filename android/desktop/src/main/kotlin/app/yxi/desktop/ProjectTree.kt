@@ -96,7 +96,7 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
     var creatingDirectory by remember(conn) { mutableStateOf<String?>(null) }
     if (projectGroups) CollaborationDialog(state, conn, initialGroup = selectedGroup) { projectGroups = false }
     creatingDirectory?.let { directory ->
-        NewSessionDialog(conn, onDismiss = { creatingDirectory = null; creatingGroup = "" }, initialDirectory = directory.takeIf { it.isNotBlank() }, collaborationGroup = creatingGroup,
+        NewSessionDialog(conn, onDismiss = { creatingDirectory = null; creatingGroup = "" }, initialDirectory = directory.takeIf { it.isNotBlank() }, collaborationGroup = creatingGroup, sharedMcpRegistry = state.sharedMcp,
             onOpenCodeConversation = { path, prompt ->
                 creatingDirectory = null; creatingGroup = ""; state.prepareOpenCodeTask(conn, path, prompt)
             }, onCodexConversation = { path, prompt ->
