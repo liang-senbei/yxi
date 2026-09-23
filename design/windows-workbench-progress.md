@@ -1,3 +1,9 @@
+## 2026-09-24 远端认证窗口实际键盘验收
+
+- `5ddb2581174342b213d183a8c417bcba9b9daf06` 为缺失 TERM 的远端环境提供 xterm-256color 缺省值；新增真实 SSH PTY + JediTerm 窗口测试，核对原始 argv、环境值、TTY 状态，实际点击输入 ok/Enter，返回退出码0且原 SSH 连接仍可执行。
+- 构建 `run.Dx1WN3`，显式 SSH PTY 测试模式下 RemoteAuthenticationDialogTest `run.7liBWJ` 1 项通过，无失败/跳过。`.artifacts/acp-auth/remote-terminal.png` 已目视，中文提示正常、无启动标记和配置值回显。
+- 使用隔离 SSH 与测试认证程序，不代表远端 Hermes 真实配置或 Windows/macOS 已完成。未发布。
+
 ## 2026-09-24 远端认证配置接收确认
 
 - `458fd7786f81ce620540bf082583e0b3580099bd` 增加服务器配置已接收的第二阶段标记；客户端在该确认前不暴露终端输入，避免 stdin 缓冲读取启动 JSON 时吞入过早按键。两类内部标记均在桥接层消费，不进入终端界面。
