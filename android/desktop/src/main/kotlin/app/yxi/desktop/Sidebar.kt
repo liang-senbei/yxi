@@ -128,6 +128,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
         val c = connOf(h) ?: return
         state.codexWorkspace.disconnect(c)
         state.remoteOpenCodeTasks.disconnect(c)
+        state.remoteAcpTasks.disconnect(c)
         c.close(); state.conns.remove(c)
         if (state.conn === c) { state.rememberTaskView(); state.conn = null; state.session = null }
     }
@@ -384,6 +385,8 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
         state.prepareCodexTask(c, directory, prompt)
     }, onOpenCodeConversation = { directory, prompt ->
         creatingOn = null; creatingFavorite = null; state.prepareOpenCodeTask(c, directory, prompt)
+    }, onAcpConversation = { engine, directory, prompt ->
+        creatingOn = null; creatingFavorite = null; state.prepareAcpTask(c, engine, directory, prompt)
     }, initialDirectory = creatingFavorite?.directory, initialAgent = creatingFavorite?.agent) { s ->
         val key = taskNavigationKey(c.host, s)
         if (state.navigation.title(key) == null) state.navigation.rename(key, creatingFavorite?.title ?: ("新对话 · " + if (s.isCodex) "Codex" else "Claude Code"))

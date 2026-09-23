@@ -19,7 +19,7 @@ import app.yxi.agent.SessionState
  * 主机分组 → 会话行都在侧栏里），所以这里只剩另外两个整页入口。
  * 它跟 [AppState.tab] 是两层：`page` 决定右边整块是什么，`tab` 只在工作区里选 对话/终端/文件。
  */
-enum class Page { Workspace, Config, Me, Routes, Codex, OpenCode, Plugins, ConfigFiles, Connections, LocalAgents, LocalWorkspace, ScheduledTasks }
+enum class Page { Workspace, Config, Me, Routes, Codex, OpenCode, Acp, Plugins, ConfigFiles, Connections, LocalAgents, LocalWorkspace, ScheduledTasks }
 
 internal class CodexConversationView {
     val scroll = androidx.compose.foundation.lazy.LazyListState()
@@ -30,6 +30,14 @@ class AppState {
     internal val sharedMcp by lazy { SharedMcpRegistry(java.io.File(Store.dir, "shared-mcp.json")) }
     internal var sharedMcpPage by mutableStateOf(false)
     internal val remoteOpenCodeTasks by lazy { RemoteOpenCodeTasks(instructions, java.io.File(Store.dir, "remote-opencode-tasks.json"), sharedMcp) }
+    internal val remoteAcpTasks by lazy { RemoteAcpTasks(instructions, java.io.File(Store.dir, "remote-acp-tasks.json")) }
+    internal var remoteAcpSelectedKey by mutableStateOf<String?>(null)
+    internal var remoteAcpEngine by mutableStateOf("gemini")
+    internal var remoteAcpDirectory by mutableStateOf("")
+    internal var remoteAcpPrompt by mutableStateOf("")
+    internal fun prepareAcpTask(c: Conn, engine: String, directory: String, prompt: String) {
+        select(c, null); remoteAcpSelectedKey = null; remoteAcpEngine = engine; remoteAcpDirectory = directory; remoteAcpPrompt = prompt; page = Page.Acp
+    }
     internal var remoteOpenCodeSelectedKey by mutableStateOf<String?>(null)
     internal var remoteOpenCodeDirectory by mutableStateOf("")
     internal var remoteOpenCodePrompt by mutableStateOf("")
@@ -114,7 +122,8 @@ class AppState {
         page = Page.Codex
     }
     internal fun codexRouteBusy(c: Conn): Boolean {
-        val keys = (codexWorkspace.tasks(c.host).map { it.key } + remoteOpenCodeTasks.tasks(c.host).map { it.key }).toSet()
+        val keys = (codexWorkspace.tasks(c.host).map { it.key } + remoteOpenCodeTasks.tasks(c.host).map { it.key } + remoteAcpTasks.tasks(c).map { it.key }).toSet()
+        if (remoteAcpTasks.busy || remoteAcpTasks.controllers.any { (key, controller) -> key in keys && (controller.busy || controller.changingMode || controller.pendingApprovals.isNotEmpty()) }) return true
         if (remoteOpenCodeTasks.busy || remoteOpenCodeTasks.controllers.any { (key, controller) -> key in keys &&
                 (controller.busy || controller.nativeBusy || controller.permissions.isNotEmpty() || controller.questions.isNotEmpty()) }) return true
         return codexWorkspace.controllers.any { (key, controller) -> key in keys &&

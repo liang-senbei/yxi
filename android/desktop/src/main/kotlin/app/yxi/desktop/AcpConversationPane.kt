@@ -85,8 +85,9 @@ private class AcpPendingAuthentication(val plan: AcpTerminalAuthPlan, val comple
 }
 
 @OptIn(ExperimentalComposeUiApi::class)
-@Composable internal fun AcpConversationPane(state: AppState, record: LocalCodexTaskRecord) {
-    val controller = state.localAcpTasks.controllers[record.key]
+@Composable internal fun AcpConversationPane(state: AppState, record: LocalCodexTaskRecord,
+    controller: AcpTaskController? = state.localAcpTasks.controllers[record.key], backLabel: String = "返回本地",
+    back: () -> Unit = { state.localSelectedTaskKey = null }) {
     val scope = rememberCoroutineScope()
     val draft = remember(record.key) { state.chatDrafts.getOrPut(record.key) { mutableStateOf(TextFieldValue()) } }
     var error by remember(record.key) { mutableStateOf("") }
@@ -131,7 +132,7 @@ private class AcpPendingAuthentication(val plan: AcpTerminalAuthPlan, val comple
     }
     Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row {
-            TextButton({ state.localSelectedTaskKey = null }) { Text("返回本地") }
+            TextButton(back) { Text(backLabel) }
             Text("${record.title} · ${LocalRuntimeDiscovery.title(record.engine)}", style = MaterialTheme.typography.titleLarge)
         }
         Text(record.directory, style = MaterialTheme.typography.bodySmall)

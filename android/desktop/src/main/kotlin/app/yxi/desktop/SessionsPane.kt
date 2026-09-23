@@ -96,7 +96,7 @@ fun SessionRow(s: Session, selected: Boolean, displayName: String? = null, onCli
  * 出错留在弹窗里显示，成了才关；成了把新会话交给 [onCreated]。
  */
 @Composable
-internal fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: String = "", groupContext: String = "", onCodexConversation: ((String, String) -> Unit)? = null, initialDirectory: String? = null, initialAgent: String? = null, onOpenCodeConversation: ((String, String) -> Unit)? = null, sharedMcpRegistry: SharedMcpRegistry? = null, onCreated: (Session) -> Unit) {
+internal fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGroup: String = "", groupContext: String = "", onCodexConversation: ((String, String) -> Unit)? = null, initialDirectory: String? = null, initialAgent: String? = null, onOpenCodeConversation: ((String, String) -> Unit)? = null, sharedMcpRegistry: SharedMcpRegistry? = null, onAcpConversation: ((String, String, String) -> Unit)? = null, onCreated: (Session) -> Unit) {
     val scope = rememberCoroutineScope()
     // 预填现有会话的父目录（工作区），只用补项目名；不写死路径，换台机器就不一样
     var path by remember { mutableStateOf(initialDirectory ?: Dirs.parentsOf(conn.sessions.map { it.cwd }).firstOrNull()?.let { "$it/" }.orEmpty()) }
@@ -105,6 +105,7 @@ internal fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGr
     var agent by remember { mutableStateOf(initialAgent?.takeIf { RunnerCatalog.find(it) != null } ?: "claude") }
     val selectedRunner = RunnerCatalog.find(agent)!!
     val structuredOpenCode = agent == "opencode" && onOpenCodeConversation != null && collaborationGroup.isBlank()
+    val structuredAcp = agent in setOf("gemini", "grok", "hermes") && onAcpConversation != null && collaborationGroup.isBlank()
     var installation by remember(conn, agent) { mutableStateOf("checking") }
     LaunchedEffect(conn, agent) {
         installation = if (selectedRunner.command == null) "unknown" else try {
@@ -127,21 +128,21 @@ internal fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGr
                 RunnerCatalog.entries.chunked(2).forEach { row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         row.forEach { runner ->
-                            QuietChoice(selected = agent == runner.id, onClick = { agent = runner.id; err = ""; if (agent == "opencode") isolatedWorktree = false }, enabled = !busy,
+                            QuietChoice(selected = agent == runner.id, onClick = { agent = runner.id; err = ""; if (agent in setOf("opencode", "gemini", "grok", "hermes")) isolatedWorktree = false }, enabled = !busy,
                                 modifier = Modifier.weight(1f).heightIn(min = 44.dp),
                                 leadingIcon = { RunnerBrandIcon(runner.id, Modifier.size(20.dp)) },
-                                label = { Column { Text(runner.title); if (!runner.serverCreation && !(runner.id == "opencode" && onOpenCodeConversation != null && collaborationGroup.isBlank())) Text("创建接入中", style = MaterialTheme.typography.labelSmall) } })
+                                label = { Column { Text(runner.title); if (!runner.serverCreation && !(runner.id == "opencode" && onOpenCodeConversation != null && collaborationGroup.isBlank()) && !(runner.id in setOf("gemini", "grok", "hermes") && onAcpConversation != null && collaborationGroup.isBlank())) Text("创建接入中", style = MaterialTheme.typography.labelSmall) } })
                         }
                     }
                 }
                 Text(when (installation) {
                     "checking" -> "正在检查 ${conn.host.label} 上的 ${selectedRunner.title}…"
-                    "available" -> "${selectedRunner.title} 已安装" + if (selectedRunner.serverCreation || structuredOpenCode) "，可创建会话" else "；启动和会话状态适配尚未完成"
+                    "available" -> "${selectedRunner.title} 已安装" + if (selectedRunner.serverCreation || structuredOpenCode || structuredAcp) "，可创建会话" else "；启动和会话状态适配尚未完成"
                     "missing" -> "服务器未找到 ${selectedRunner.title}" + if (selectedRunner.serverCreation) "，请先安装并登录" else "；创建适配也尚未完成"
                     else -> if (selectedRunner.serverCreation) "无法确认服务器安装状态，请检查连接后重新选择运行器" else "该运行器的创建接入尚未完成，暂不能启动"
                 }, style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 if (initialDirectory != null) Text("已填入所选目录，可在创建前调整。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
-                Text("先检查运行器，再创建独立会话。目录不存在会创建；已有任务继续运行。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                Text(if (structuredAcp || structuredOpenCode) "使用已存在的服务器目录，连接原生运行器后创建对话。" else "先检查运行器，再创建独立会话。目录不存在会创建；已有任务继续运行。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 OutlinedTextField(path, { path = it }, enabled = !busy, singleLine = true, label = { Text("服务器工作目录") }, placeholder = { Text("/opt/workspace/…") }, modifier = Modifier.fillMaxWidth())
                 if (agent == "claude") Box {
                     TextButton({ permissionsOpen = true }, enabled = !busy) { Text("权限：${permissionMode.title} ⌄") }
@@ -154,13 +155,13 @@ internal fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGr
                     }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    androidx.compose.material3.Checkbox(isolatedWorktree, { isolatedWorktree = it }, enabled = !busy)
+                    androidx.compose.material3.Checkbox(isolatedWorktree, { isolatedWorktree = it }, enabled = !busy && !structuredAcp && !structuredOpenCode)
                     Text("使用独立 Git worktree", style = MaterialTheme.typography.bodySmall)
                 }
                 if (isolatedWorktree) Text("上方路径作为源仓库，在仓库旁创建独立目录并从当前 HEAD 开始；不带入未提交改动，不自动合并或清理。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 OutlinedTextField(initialPrompt, { initialPrompt = it }, enabled = !busy, minLines = 2, maxLines = 5,
                     label = { Text("启动提示词（可留空）") }, placeholder = { Text("描述目标、分工及需要遵守的项目约定") }, modifier = Modifier.fillMaxWidth())
-                if (initialPrompt.isNotBlank()) Text("创建后会把这段内容直接交给运行器，可能立即开始工作。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                if (initialPrompt.isNotBlank()) Text(if (structuredAcp || structuredOpenCode) "提示词先保存为草稿，确认发送后才开始工作。" else "创建后会把这段内容直接交给运行器，可能立即开始工作。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 Text("运行器沿用服务器的登录与权限设置。创建会话不代表模型请求已经成功。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 if (agent == "codex" && onCodexConversation != null && collaborationGroup.isBlank()) {
                     TextButton({ onCodexConversation(path, initialPrompt) }, enabled = !busy && !isolatedWorktree) { Text("在对话工作台继续") }
@@ -176,7 +177,8 @@ internal fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGr
             }
         },
         confirmButton = {
-            TextButton(enabled = path.isNotBlank() && !busy && (selectedRunner.serverCreation || (structuredOpenCode && !isolatedWorktree)) && installation == "available", onClick = {
+            TextButton(enabled = path.isNotBlank() && !busy && (selectedRunner.serverCreation || ((structuredOpenCode || structuredAcp) && !isolatedWorktree)) && installation == "available", onClick = {
+                if (structuredAcp) { onAcpConversation?.invoke(agent, path, initialPrompt); return@TextButton }
                 if (structuredOpenCode) { onOpenCodeConversation?.invoke(path, initialPrompt); return@TextButton }
                 busy = true
                 scope.launch {
@@ -189,7 +191,7 @@ internal fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGr
                     catch (e: Exception) { err = e.message.orEmpty() }
                     finally { busy = false }
                 }
-            }) { Text(if (busy) "正在开…" else if (structuredOpenCode) "选择模型并继续" else "开起来") }
+            }) { Text(if (busy) "正在开…" else if (structuredAcp) "连接 ACP（预览）" else if (structuredOpenCode) "选择模型并继续" else "开起来") }
         },
         dismissButton = { TextButton(onDismiss, enabled = !busy) { Text("取消") } },
     )
