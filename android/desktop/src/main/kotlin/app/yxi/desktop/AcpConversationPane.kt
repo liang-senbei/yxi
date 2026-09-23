@@ -82,9 +82,9 @@ import java.io.File
         Text(controller.note, style = MaterialTheme.typography.bodySmall)
         if (controller.configOptions.length() > 0) Column(Modifier.heightIn(max = 180.dp).verticalScroll(rememberScrollState())) {
             acpConfigSelectors(controller.configOptions).forEach { selector -> Box {
-                TextButton({ configMenu = selector.id }, enabled = controller.ready && !controller.busy && !controller.changingMode && controller.pendingApprovals.isEmpty()) {
+                QuietChoice(configMenu == selector.id, { configMenu = selector.id }, enabled = controller.ready && !controller.busy && !controller.changingMode && controller.pendingApprovals.isEmpty(), label = {
                     Text(selector.name + " · " + (selector.values.firstOrNull { it.id == selector.current }?.name ?: selector.current))
-                }
+                })
                 DropdownMenu(configMenu == selector.id, { configMenu = null }) {
                     selector.values.forEach { option -> DropdownMenuItem(text = { Text(option.name) },
                         modifier = if (option.id == selector.current) Modifier.background(Tokens.current.surface2, RoundedCornerShape(8.dp)) else Modifier, onClick = {
@@ -99,9 +99,9 @@ import java.io.File
             val current = modes.optString("currentModeId")
             val options = (0 until (available?.length() ?: 0)).map { available!!.getJSONObject(it) }
             Box {
-                TextButton({ modeMenu = true }, enabled = controller.ready && !controller.busy && !controller.changingMode && controller.pendingApprovals.isEmpty()) {
+                QuietChoice(modeMenu, { modeMenu = true }, enabled = controller.ready && !controller.busy && !controller.changingMode && controller.pendingApprovals.isEmpty(), label = {
                     Text("模式 · " + (options.firstOrNull { it.optString("id") == current }?.optString("name")?.takeIf { it.isNotBlank() } ?: current))
-                }
+                })
                 DropdownMenu(modeMenu, { modeMenu = false }) {
                     options.forEach { option -> DropdownMenuItem(text = { Text(option.optString("name").ifBlank { option.getString("id") }) },
                         modifier = if (option.optString("id") == current) Modifier.background(Tokens.current.surface2, RoundedCornerShape(8.dp)) else Modifier, onClick = {

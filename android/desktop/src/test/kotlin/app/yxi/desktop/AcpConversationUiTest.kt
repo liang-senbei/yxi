@@ -63,8 +63,8 @@ class AcpConversationUiTest {
                                 mouseMove(window.locationOnScreen.x + x, window.locationOnScreen.y + y)
                                 mousePress(InputEvent.BUTTON1_DOWN_MASK); mouseRelease(InputEvent.BUTTON1_DOWN_MASK)
                             }; Unit }
-                            click(100, 155); delay(200)
-                            ImageIO.write(Robot().createScreenCapture(java.awt.Rectangle(window.locationOnScreen, window.size)), "png", File("/results/acp-model-menu.png"))
+                            click(100, 155); delay(800)
+                            ImageIO.write(Robot().createScreenCapture(java.awt.Rectangle(java.awt.Toolkit.getDefaultToolkit().screenSize)), "png", File("/results/acp-model-menu.png"))
                             click(100, 250)
                             withTimeout(3000) { while (acpConfigSelectors(controller.configOptions).single().current != "provider/model-b") delay(20) }
                             val selection = fixture.writes.single { it.optString("method") == "session/set_config_option" }.getJSONObject("params")
