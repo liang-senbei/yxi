@@ -1,3 +1,11 @@
+## OpenCode 审批、提问与原生模型目录
+
+`f999049`：按照官方 v1.18.32 SDK 的 /permission 和 /question 接入列表/回复/拒绝；回复前核对 sessionID，明确区分 once/always/reject，多问题答案按原生数组顺序发送。模型按 connected 供应商筛选，保留供应商身份与真实 model.id，不把连接状态冒充订阅权益。
+
+构建 run.dptNeJ 通过；OpenCodeClientTest 在 run.Rweb9h 4 项通过，覆盖跨会话审批阻止、三种回复、多问题及多选答案、拒绝问题、已连接模型与既有生命周期/失败不重试。真实 OpenCode 1.18.32 回归 run.acRXor 1 项通过，增加空审批/提问列表、供应商模型读取。两组均无跳过。原生测试未触发真实模型审批或推理，因此不能宣称审批端到端完成；队列、界面与事件仍待接入，未发布。
+
+协议来源：https://raw.githubusercontent.com/anomalyco/opencode/v1.18.32/packages/sdk/js/src/v2/gen/sdk.gen.ts 。
+
 ## OpenCode 1.18.32 原生建会话验证
 
 `023678a`：使用官方发布包 opencode-linux-x64-baseline.tar.gz（SHA256 763af386ef88a8cab18df00fcf055690e5a55e31a7088beabe02307142a6adce），仅缓存到服务器 /root/.cache/yxi-native-tests/opencode-1.18.32，再只读挂入无网络隔离测试容器；没有在宿主启动或安装到用户 PATH。
