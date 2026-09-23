@@ -1,3 +1,11 @@
+## 共享配置页与 OpenCode 新会话自动加载
+
+`25a9c45`将共享登记接入产品：Plugins增加共享配置页，按本地@local或当前服务器hostKey分别添加URL/stdio定义、选择OpenCode新会话、退役/恢复并查看历史。初次保存不启用任何运行器；Claude/Codex正式应用入口仍标接入中。LocalOpenCodeTasks和RemoteOpenCodeTasks在创建时读取当前机器的活动意向、通过独立服务加载MCP并保存回执；非connected阻止创建；创建前后核对配置快照，变化时保留原生创建记录供核对。已运行会话不随意向编辑自动变更。
+
+构建run.VzYBCE通过；本地真实创建/审批回归run.i25x0e和SSH真实创建/生命周期run.IQWL6z各1项通过，增加从共享登记自动加载并写connected回执断言。`7a97a3c`窗口点击run.EW7e7X通过。`39fe858`补恢复核对对话框、目标机器文字和打开服务器原生插件时重置共享页；最终构建run.AUa0OL，SharedMcpUiTest run.ylZOpj及NativePluginIsolationTest run.GSNYxl各1项通过，无跳过。原生插件回归首次run.nSpMpl因调用命令缺少native binary挂载在启动检查失败，补参数后通过，未为此改产品代码。共享页截图已查看，.artifacts/shared-mcp-ui/shared-mcp-config.png。
+
+当前仍只是通用MCP手动登记与OpenCode新会话接线；插件市场资源自动导入、Claude/Codex正式应用、需要OAuth的共享服务授权流程、在运行会话更新/停用/卸载、完整Windows验收均未完成。不把三个独立原生调用测试等同于完整共享产品交付，未发布。
+
 ## Codex 原生共享 MCP 调用与审批补齐
 
 `7ca899b`新增SharedMcpSettings.codexArguments，生成进程级-c MCP覆盖，argv仍独立，不写原生全局配置。首次exec测试run.VqagDd失败：原生已发现/尝试工具，但approval_policy=never拒绝需要批准的MCP；模型fixture错误重复相同调用直至超时。未将失败当成通过。
