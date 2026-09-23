@@ -6,7 +6,7 @@ import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import java.io.File
 
-internal class LocalOpenCodeTasks(private val queue: InstructionQueue, private val file: File, private val sharedMcp: SharedMcpRegistry? = null) : AutoCloseable {
+internal class LocalOpenCodeTasks(private val queue: InstructionQueue, private val file: File, private val sharedMcp: SharedMcpRegistry? = null, private val environment: Map<String, String> = System.getenv()) : AutoCloseable {
     val registry = LocalCodexTaskRegistry(file)
     val controllers = mutableStateMapOf<String, OpenCodeTaskController>()
     private val servers = mutableMapOf<String, LocalOpenCodeServer>()
@@ -27,7 +27,7 @@ internal class LocalOpenCodeTasks(private val queue: InstructionQueue, private v
     suspend fun models(runtime: LocalRuntimeInstallation, directory: String): List<OpenCodeModel> = operation.withLock {
         check(!disposed); busy = true
         try {
-            LocalOpenCodeServer.start(runtime, File(directory)).use {
+            LocalOpenCodeServer.start(runtime, File(directory), environment).use {
                 starting.set(it); check(!disposed)
                 it.client.availableModels()
             }
@@ -43,14 +43,25 @@ internal class LocalOpenCodeTasks(private val queue: InstructionQueue, private v
         busy = true
         var server: LocalOpenCodeServer? = null
         try {
-            val connection = LocalOpenCodeServer.start(runtime, File(cwd)); server = connection; starting.set(connection)
+            var connection = LocalOpenCodeServer.start(runtime, File(cwd), environment); server = connection; starting.set(connection)
             check(!disposed)
             check(connection.client.availableModels().any { it.providerId == model.providerId && it.modelId == model.modelId }) { "所选模型当前不可用" }
             val scopeId = java.util.UUID.randomUUID().toString()
             val resources = sharedMcp?.forHost("@local")?.filter { "opencode" in it.desiredRunners }.orEmpty()
+            val startupResources = resources.filter { it.definition.headerVariables.isNotEmpty() }
+            if (startupResources.isNotEmpty()) {
+                val existing = connection.client.mcpStatus()
+                check(resources.none { existing.has(it.definition.name) }) { "原生运行器已有同名 MCP，未覆盖" }
+                connection.close(); starting.compareAndSet(connection, null)
+                check(!disposed)
+                connection = LocalOpenCodeServer.start(runtime, File(cwd), environment, sharedMcp = startupResources.map { it.definition })
+                server = connection; starting.set(connection); check(!disposed)
+                check(connection.client.availableModels().any { it.providerId == model.providerId && it.modelId == model.modelId }) { "所选模型当前不可用" }
+            }
             resources.forEach { resource ->
-                val binding = OpenCodeMcpBindings("@local", scopeId, connection.client, File(file.parentFile, "mcp-bindings/$scopeId/${resource.definition.key}.json"))
-                check(binding.apply(resource) == "connected") { "共享插件 ${resource.definition.name} 尚未连接，请先核对插件授权或服务" }
+                val status = if (resource in startupResources) connection.client.mcpStatus().optJSONObject(resource.definition.name)?.optString("status")
+                else OpenCodeMcpBindings("@local", scopeId, connection.client, File(file.parentFile, "mcp-bindings/$scopeId/${resource.definition.key}.json")).apply(resource)
+                check(status == "connected") { "共享插件 ${resource.definition.name} 尚未连接，请先核对插件授权或服务" }
                 check(sharedMcp?.records?.any { it == resource } == true) { "共享插件配置在创建期间发生变化，请重新核对" }
             }
             val pending = JSONObject().put("pending", true).put("directory", cwd).put("runtimeHome", runtime.home)

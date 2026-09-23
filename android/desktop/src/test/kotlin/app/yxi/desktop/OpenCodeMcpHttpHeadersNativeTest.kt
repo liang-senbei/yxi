@@ -42,7 +42,7 @@ class OpenCodeMcpHttpHeadersNativeTest {
         server.start()
         try {
             val root = File("/sandbox/home/opencode-http").apply { mkdirs() }
-            val config = File(root, "opencode.json").apply { writeText("""{"${'$'}schema":"https://opencode.ai/config.json"}""") }
+            val config = File(root, "opencode.json").apply { writeText("""{"${'$'}schema":"https://opencode.ai/config.json","provider":{"fixture":{"npm":"@ai-sdk/openai-compatible","options":{"baseURL":"http://127.0.0.1:9/v1","apiKey":"fixture"},"models":{"fixture-model":{"name":"Fixture"}}}}}""") }
             val original = config.readBytes()
             val definition = SharedMcpDefinition("@local", "http", "fixture", "1", "http_fixture",
                 url = "http://127.0.0.1:${server.address.port}/mcp", headerVariables = mapOf("Authorization" to "YXI_TEST_MCP_AUTH"))
@@ -59,6 +59,18 @@ class OpenCodeMcpHttpHeadersNativeTest {
             }
             assertContentEquals(original, config.readBytes())
             assertFalse(definition.json().toString().contains("fixture-http-token"))
+            val shared = SharedMcpRegistry(File(root, "shared.json"))
+            shared.save(definition, setOf("opencode"), null)
+            val queue = InstructionQueue(File(root, "queue.json"))
+            val index = File(root, "tasks.json")
+            LocalOpenCodeTasks(queue, index, shared, inherited).use { tasks ->
+                val model = tasks.models(runtime, root.path).single { it.providerId == "fixture" && it.modelId == "fixture-model" }
+                val record = tasks.create(runtime, root.path, "HTTP shared task", model)
+                assertEquals(record, tasks.registry.records.single())
+                assertTrue(tasks.controllers.containsKey(record.key))
+                assertEquals("", tasks.recoverySessionId)
+            }
+            assertContentEquals(original, config.readBytes())
         } finally { server.stop(0) }
     }
 }
