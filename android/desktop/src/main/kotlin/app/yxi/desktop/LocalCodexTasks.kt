@@ -51,7 +51,7 @@ internal class LocalCodexTaskRegistry(file: File) {
             LocalCodexTaskRecord(r.getString("threadId"), r.getString("user"), r.getString("platform"), r.getString("runtimeHome"),
                 r.getString("directory"), r.getString("title"), r.getString("model"), r.getLong("createdAt"),
                 r.optString("engine", "codex"), r.optString("provider", "openai"), r.optString("hostKey")).also { record ->
-                require(record.engine in setOf("codex", "opencode") && record.provider.isNotBlank())
+                require(record.engine in setOf("codex", "opencode", "gemini", "grok", "hermes") && record.provider.isNotBlank())
                 require(record.threadId.isNotBlank() && record.user.isNotBlank() && record.platform.isNotBlank())
                 require(record.runtimeHome.isNotBlank() && record.directory.isNotBlank() && record.model.isNotBlank() && record.createdAt > 0)
                 require(listOf(record.threadId, record.runtimeHome, record.directory, record.model).all { value -> value.none { it < ' ' } })
