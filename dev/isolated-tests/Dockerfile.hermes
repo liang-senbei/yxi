@@ -9,6 +9,6 @@ RUN git init /opt/hermes-src \
     && git -C /opt/hermes-src checkout --detach FETCH_HEAD \
     && test "$(git -C /opt/hermes-src rev-parse HEAD)" = 5a3e03ef37462000b5b13d03915eb3e7b1633b6f \
     && python3 -m venv /opt/hermes \
-    && /opt/hermes/bin/pip install --no-cache-dir '/opt/hermes-src[acp]' \
+    && /opt/hermes/bin/pip install --no-cache-dir -e '/opt/hermes-src[acp]' \
     && /opt/hermes/bin/pip freeze > /opt/hermes-packages.txt
 LABEL org.yxi.native-runtime="hermes" org.yxi.native-source="5a3e03ef37462000b5b13d03915eb3e7b1633b6f"
