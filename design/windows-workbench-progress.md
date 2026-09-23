@@ -1,3 +1,9 @@
+## 2026-09-24 ACP 模型菜单点击与选中态
+
+- `482e0db` 扩展 GUI fixture：实际点开模型菜单并选择 Model B，断言请求 configId=model/value=provider/model-b，随后继续审批 once 点击。首次截图未覆盖弹出层且触发器仍有蓝色点击背景。
+- `43d91d4c53cdbd3a8fd68ec456a70d3ffb30a547` 触发器改用 QuietChoice，完整屏幕截图覆盖 Popup；构建 `run.yHcrz8`，AcpConversationUiTest `run.zp2vco` 1 项通过，无失败/跳过。截图 `.artifacts/acp-ui/acp-model-menu-neutral.png` 已目视：触发器为灰色小圆角，菜单无裁切。
+- 目视发现选中行用了 surface2（白色），随后改为与 QuietChoice 相同的 Tokens.selected 灰色；此末次颜色修改尚未重新截图。真实运行器模型切换及 Windows 验收仍待完成，未发布。
+
 ## 2026-09-24 ACP 原生配置选项与模型选择
 
 - `2e13ed650f5e14022a8603e75d6fa3beeac374be` 依据 https://agentclientprotocol.com/protocol/v1/session-config-options 接入 configOptions、session/set_config_option 与 config_option_update。支持原生顺序、分组 select 值、完整依赖配置替换，忽略未支持类型；不宣称 boolean 能力。有 configOptions 时优先显示该菜单而非重复 modes。
