@@ -1,3 +1,10 @@
+## 2026-09-23 OpenCode 动态变量引用修正
+
+- 实现 `8e215a99e5def96f92b93f1db78929248fc234e9`：OpenCode 1.18.32 动态 POST /mcp 不做文件配置插值。程序型共享 MCP 改为继承目标服务器进程环境，不再注入字面占位符；HTTP 头变量在动态写入前明确拒绝，待启动配置路径接入。生成器仍保留原生文件配置格式。
+- 隔离构建 `run.Ux7YbN` 成功；OpenCodeMcpBindingsTest 2 项（`run.o29MlW`）、OpenCodeSharedMcpNativeTest 2 项（`run.6qhIcM`）均通过，无失败/跳过。真实 OpenCode 子进程必须读到测试环境值才能启动 MCP，并完成原生工具调用与结果返回；模型端点为本地 fixture。
+- yxi_pilot 源码报告保存在 `.artifacts/shared-mcp-references/opencode-dynamic-env.md`。其建议只有 opencode.json 可用过于绝对：启动期 OPENCODE_CONFIG_CONTENT 同样存在插值路径，后续应采用进程私有配置并先核对原生同名冲突，不能覆盖用户全局文件。
+- 仍未完成 HTTP 认证引用、缺失变量提示、输入界面与 Windows 实机验收；本轮未发布。
+
 ## 2026-09-23 Codex 原生变量引用读回验证
 
 - 提交 `4167bf25ef976b3631db9e327345dffda33e2fcb`：在现有隔离原生测试中为共享 stdio MCP 声明 PATH 引用，实际启动 Codex 0.153.4 app-server，校验 config/read 并通过本地任务创建路径；继续验证项目同名冲突与配置/登录文件未被改写。
