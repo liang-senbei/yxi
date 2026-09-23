@@ -1,3 +1,9 @@
+## OpenCode 远端 SSH 服务与转发
+
+`fecb50b`新增 RemoteOpenCodeServer，独立 SSH exec 启动监督进程、通过stdin传递随机服务密码、只监听远端回环地址，再租用独立本地转发。检查启动身份/工作目录及认证health。关闭只释放此次服务/转发，stdin断开或SSH关闭触发监督进程清理自有进程组。尚未挂到服务器新建入口。
+
+构建 run.nNje2C 通过；RemoteOpenCodeServerTest 在 run.b9b4YW 1 项通过、无跳过。隔离容器中真实私有SSH与原生OpenCode1.18.32：两个服务并存，创建并读回会话；关闭第一个后其PID退出、第二个仍健康、SSH主连接仍可执行命令；断开SSH后第二个PID也退出。未在hk13生产环境拉起服务，未公开端口或修改其登录。远端任务登记、界面及原生状态适配仍待接入，未发布。
+
 ## OpenCode 原生任务管理、审批与完成链路
 
 `d474de3`新增 OpenCodeNativeConversationTest。无网络容器中使用真实 OpenCode 1.18.32，通过本机 OpenAI-compatible fixture 返回 bash 工具调用及最终文本，运行 LocalOpenCodeTasks.models/create 和 OpenCodeTaskController.enqueue/sendNext/replyPermission/refresh 完整链路。配置和标记文件仅位于 /sandbox/home/native-conversation。
