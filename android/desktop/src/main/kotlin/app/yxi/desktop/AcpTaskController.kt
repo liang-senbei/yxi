@@ -142,15 +142,19 @@ internal class AcpTaskController(
     suspend fun changeModel(modelId: String) = mutation.withLock {
         check(ready && !disposed && !busy && pendingApprovals.isEmpty()) { "当前会话暂不能切换模型" }
         changingMode = true
+        var acknowledged = false
         try {
             client.setModel(sessionId, modelId)
+            acknowledged = true
             client.synchronizeEvents()
             models = client.models(sessionId)
             onModelChanged(checkNotNull(models).getString("currentModelId"))
             note = "模型已由运行器确认"
         } catch (e: Exception) {
-            if (e is IllegalArgumentException || e is AcpRpcException && e.code in setOf(-32601, -32602)) {
+            if (!acknowledged && (e is IllegalArgumentException || e is AcpRpcException && e.code in setOf(-32601, -32602))) {
                 note = "所选模型未被接受，仍可使用当前模型"
+            } else if (acknowledged) {
+                ready = false; note = "运行器已确认切换，但本地状态同步失败，请核对后再发送"
             } else { ready = false; note = "模型切换未确认，请核对原生会话后再发送" }
             throw e
         } finally { changingMode = false }
