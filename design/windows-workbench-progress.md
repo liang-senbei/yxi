@@ -1,3 +1,9 @@
+## 2026-09-24 服务器表单连接、认证、创建点击验收
+
+- `defb3aaee810d917c138266352ce3680c7cbbc8e` 扩展 RemoteAcpCreationUiTest，使用真实隔离 SSH 与协议 fixture，实际点击连接、认证、创建，断言只调用一次 session/new，进入对应远端会话，草稿保留、发送队列为空、没有 session/prompt。
+- 构建 `run.T4Mayr`，窗口测试 `run.ejt8a9` 1 项通过，无失败/跳过。`.artifacts/server-acp-ui/connected.png` 已目视，服务器/运行器/目录及认证入口显示正常；此前文案调整也已随本轮编译渲染。
+- 这是 Linux 窗口与认证 fixture 验证，不代表真实账号登录或 Windows 实机验收。远端交互终端认证仍待接入，未发布。
+
 ## 2026-09-24 服务器新建预览路由点击验收
 
 - `0524ca1` 新增真实 SSH+Compose 点击测试；首次 `run.Fhbbv1` 因测试把 Compose 内绘弹窗当作 AWT Dialog 而失败。`4eee8b8386250161bc6351c516f32b6d565ac7ed` 调整定位后，构建 `run.ytIQVy`，RemoteAcpCreationUiTest `run.1pU0Ir` 1 项通过，无失败/跳过。
