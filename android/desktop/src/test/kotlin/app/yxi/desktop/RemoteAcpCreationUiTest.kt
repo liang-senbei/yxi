@@ -21,7 +21,18 @@ class RemoteAcpCreationUiTest {
         val directory = File(home, "project").apply { mkdirs() }
         val marker = File(root, "must-not-start")
         File(home, ".local/bin").mkdirs()
-        File(home, ".local/bin/gemini").apply { writeText("#!/bin/sh\ntouch '${marker.path}'\n"); setExecutable(true) }
+        File(home, ".local/bin/gemini").apply {
+            writeText("""#!/usr/bin/python3
+import json,sys
+for line in sys.stdin:
+    request=json.loads(line)
+    method=request.get('method','')
+    with open('${marker.path}','a') as log: log.write(method+'\n')
+    result={'protocolVersion':1,'agentCapabilities':{},'authMethods':[{'id':'fixture-login','name':'Fixture Login'}]} if method=='initialize' else {'sessionId':'fixture-server-session'} if method=='session/new' else {}
+    print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':result}),flush=True)
+""")
+            setExecutable(true)
+        }
         IsolatedSshBridge(File(root, "ssh"), mapOf("HOME" to home.path), File(root, "unused.sock")).use { bridge ->
             runBlocking { bridge.conn.ssh.connect() }
             val state = AppState()
@@ -62,6 +73,25 @@ class RemoteAcpCreationUiTest {
                                 assertTrue(state.remoteAcpTasks.registry.records.isEmpty())
                                 assertFalse(marker.exists())
                                 ImageIO.write(Robot().createScreenCapture(java.awt.Rectangle(window.locationOnScreen, window.size)), "png", File("/results/server-acp-preview.png"))
+                                suspend fun click(x: Int, y: Int) = withContext(Dispatchers.IO) { Robot().apply {
+                                    mouseMove(window.locationOnScreen.x + x, window.locationOnScreen.y + y)
+                                    mousePress(InputEvent.BUTTON1_DOWN_MASK); mouseRelease(InputEvent.BUTTON1_DOWN_MASK)
+                                }; Unit }
+                                click(120, 290)
+                                withTimeout(5000) { while (state.remoteAcpTasks.initialization == null) delay(20) }
+                                delay(300)
+                                ImageIO.write(Robot().createScreenCapture(java.awt.Rectangle(window.locationOnScreen, window.size)), "png", File("/results/server-acp-connected.png"))
+                                click(120, 342)
+                                withTimeout(3000) { while (!marker.readText().contains("authenticate")) delay(20) }
+                                delay(150)
+                                click(100, 402)
+                                withTimeout(5000) { while (state.remoteAcpSelectedKey == null) delay(20) }
+                                val record = state.remoteAcpTasks.tasks(bridge.conn).single()
+                                assertEquals(record.key, state.remoteAcpSelectedKey)
+                                assertEquals("Do not send this draft automatically", state.chatDrafts.getValue(record.key).value.text)
+                                assertTrue(state.instructions.entries.none { it.taskKey == record.key })
+                                assertFalse(marker.readText().contains("session/prompt"))
+                                assertEquals(1, marker.readLines().count { it == "session/new" })
                             } catch (e: Throwable) { failure = e }
                             finally { exitApplication() }
                         }
