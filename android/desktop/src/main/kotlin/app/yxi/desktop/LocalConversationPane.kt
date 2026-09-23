@@ -7,6 +7,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.*
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
@@ -135,7 +136,13 @@ import org.json.JSONObject
             else -> "投递结果未确认，请先核对原生会话"
         }, style = MaterialTheme.typography.bodySmall) }
         if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
-        OutlinedTextField(draft.value, { draft.value = it }, Modifier.fillMaxWidth(), minLines = 2, maxLines = 5, label = { Text("给本地 Agent 的任务") })
+        OutlinedTextField(draft.value, { draft.value = it }, Modifier.fillMaxWidth().onPreviewKeyEvent { event ->
+            if (event.type == KeyEventType.KeyDown && draft.value.composition == null &&
+                (event.key == Key.Enter || event.key == Key.NumPadEnter) && !event.isShiftPressed) {
+                submitDraft(); true
+            } else false
+        }, minLines = 2, maxLines = 5, label = { Text("给本地 Agent 的任务") },
+            placeholder = { Text("Enter 发送，Shift+Enter 换行") })
         Row {
             Button(::submitDraft, enabled = draft.value.text.isNotBlank() && controller.ready && !controller.sending) { Text(if (controller.activeTurnId == null) "发送" else "加入队列") }
             if (pending.any { it.status == InstructionStatus.Local }) TextButton({ act { controller.sendNext() } }, enabled = controller.ready && !controller.sending && controller.activeTurnId == null && controller.pendingRequests.isEmpty()) { Text("发送下一条") }

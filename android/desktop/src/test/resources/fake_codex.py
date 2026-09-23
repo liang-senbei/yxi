@@ -241,13 +241,14 @@ for raw in sys.stdin:
             reply(msg, {"turn": {"id": "turn-1", "status": "inProgress"}})
             continue
         if mode == "delta-full":
-            reply(msg, {"turn": {"id": "turn-1", "status": "inProgress"}})
+            turn_id = next_turn()
+            reply(msg, {"turn": {"id": turn_id, "status": "inProgress"}})
             notify("item/completed", {"threadId": thread_id, "item": user_item("msg-0", "帮我看下")})
             notify("item/agentMessage/delta", {"threadId": thread_id, "itemId": "msg-1", "delta": "你"})
             notify("item/agentMessage/delta", {"threadId": thread_id, "itemId": "msg-1", "delta": "好"})
             notify("item/completed", {"threadId": thread_id, "item": agent_item("msg-1", "你好，世界")})
             notify("turn/completed", {"threadId": thread_id,
-                                      "turn": {"id": "turn-1", "status": "completed"}})
+                                      "turn": {"id": turn_id, "status": "completed"}})
             continue
         if mode == "read-interleave":
             reply(msg, {"turn": {"id": "turn-1", "status": "inProgress"}})

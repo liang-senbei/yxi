@@ -9,6 +9,7 @@ import kotlinx.coroutines.*
 import org.junit.jupiter.api.condition.*
 import java.awt.Robot
 import java.awt.event.InputEvent
+import java.awt.event.KeyEvent
 import java.io.File
 import javax.imageio.ImageIO
 import kotlin.test.*
@@ -50,6 +51,20 @@ class LocalConversationUiTest {
                                 assertTrue(controller.messages.any { it.text == "你好，世界" })
                                 delay(300)
                                 ImageIO.write(Robot().createScreenCapture(java.awt.Rectangle(window.locationOnScreen, window.size)), "png", File("/results/local-conversation.png"))
+                                state.chatDrafts.getValue(record.key).value = TextFieldValue("KEYBOARD-FIXTURE")
+                                delay(200)
+                                withContext(Dispatchers.IO) { Robot().apply {
+                                    mouseMove(window.locationOnScreen.x + 180, window.locationOnScreen.y + window.height - 120)
+                                    mousePress(InputEvent.BUTTON1_DOWN_MASK); mouseRelease(InputEvent.BUTTON1_DOWN_MASK)
+                                    keyPress(KeyEvent.VK_SHIFT); keyPress(KeyEvent.VK_ENTER); keyRelease(KeyEvent.VK_ENTER); keyRelease(KeyEvent.VK_SHIFT)
+                                } }
+                                delay(200)
+                                assertTrue(state.chatDrafts.getValue(record.key).value.text.contains('\n'))
+                                assertEquals(1, runner.inboundJson().count { it.optString("method") == "turn/start" })
+                                withContext(Dispatchers.IO) { Robot().apply { keyPress(KeyEvent.VK_ENTER); keyRelease(KeyEvent.VK_ENTER) } }
+                                withTimeout(8000) { while (state.instructions.entries.count { it.runtimeTurnState == RuntimeTurnState.Completed } != 2) delay(50) }
+                                assertEquals("", state.chatDrafts.getValue(record.key).value.text)
+                                assertEquals(2, runner.inboundJson().count { it.optString("method") == "turn/start" })
                             } catch (e: Throwable) { failure = e }
                             finally { exitApplication() }
                         }
