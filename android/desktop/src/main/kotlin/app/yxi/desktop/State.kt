@@ -30,6 +30,8 @@ class AppState {
     private val localWorkspaceDelegate = lazy { LocalWorkspace() }
     private val localCodexTasksDelegate = lazy { LocalCodexTasks(instructions, java.io.File(Store.dir, "local-codex-tasks.json")) }
     internal val localCodexTasks get() = localCodexTasksDelegate.value
+    private val localOpenCodeTasksDelegate = lazy { LocalOpenCodeTasks(instructions, java.io.File(Store.dir, "local-opencode-tasks.json")) }
+    internal val localOpenCodeTasks get() = localOpenCodeTasksDelegate.value
     internal var localSelectedTaskKey by mutableStateOf<String?>(null)
     internal val localWorkspace get() = localWorkspaceDelegate.value
     internal val isLocal get() = hostScope == LOCAL_HOST_SCOPE
@@ -46,9 +48,12 @@ class AppState {
     internal val localOperations get() = (if (linksDelegate.isInitialized()) deviceLinks.busy.size else 0) +
         (if (localAgentsDelegate.isInitialized()) localAgents.jobs.count { it.running } else 0) +
         (if (localCodexTasksDelegate.isInitialized()) (if (localCodexTasks.busy) 1 else 0) +
-            localCodexTasks.controllers.values.count { it.sending || it.activeTurnId != null || it.pendingRequests.isNotEmpty() } else 0)
+            localCodexTasks.controllers.values.count { it.sending || it.activeTurnId != null || it.pendingRequests.isNotEmpty() } else 0) +
+        (if (localOpenCodeTasksDelegate.isInitialized()) (if (localOpenCodeTasks.busy) 1 else 0) +
+            localOpenCodeTasks.controllers.values.count { it.busy || it.nativeBusy || it.permissions.isNotEmpty() || it.questions.isNotEmpty() } else 0)
     internal fun closeLocalFeatures() {
         if (localCodexTasksDelegate.isInitialized()) localCodexTasks.close()
+        if (localOpenCodeTasksDelegate.isInitialized()) localOpenCodeTasks.close()
         if (localWorkspaceDelegate.isInitialized()) localWorkspace.close()
         if (linksDelegate.isInitialized()) deviceLinks.close()
         if (localAgentsDelegate.isInitialized()) localAgents.close()

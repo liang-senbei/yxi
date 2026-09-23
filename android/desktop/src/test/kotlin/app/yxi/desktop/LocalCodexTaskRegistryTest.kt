@@ -5,6 +5,15 @@ import java.io.File
 import kotlin.test.*
 
 class LocalCodexTaskRegistryTest {
+    @Test fun `OpenCode records preserve provider and stay separate from Codex identities`() {
+        val file = File(directory, "mixed.json")
+        val codex = record()
+        val openCode = codex.copy(engine = "opencode", provider = "custom")
+        val registry = LocalCodexTaskRegistry(file)
+        registry.save(codex); registry.save(openCode)
+        assertEquals(listOf(codex, openCode), LocalCodexTaskRegistry(file).records.toList())
+        assertNotEquals(codex.key, openCode.key)
+    }
     @TempDir lateinit var directory: File
     private fun record() = LocalCodexTaskRecord("native-thread", "fixture-user", "fixture-os", "/native/home", "/project", "Task", "native-model", 1)
     @Test fun `native identity survives reload and separates different data homes and users`() {

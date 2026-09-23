@@ -9,11 +9,12 @@ import java.io.File
 import java.security.MessageDigest
 
 internal data class LocalCodexTaskRecord(val threadId: String, val user: String, val platform: String,
-    val runtimeHome: String, val directory: String, val title: String, val model: String, val createdAt: Long) {
-    val key get() = "local-codex:" + MessageDigest.getInstance("SHA-256").digest(JSONArray(listOf(user, platform, runtimeHome, threadId))
+    val runtimeHome: String, val directory: String, val title: String, val model: String, val createdAt: Long,
+    val engine: String = "codex", val provider: String = "openai") {
+    val key get() = "local-$engine:" + MessageDigest.getInstance("SHA-256").digest(JSONArray(listOf(user, platform, runtimeHome, threadId))
         .toString().toByteArray()).joinToString("") { "%02x".format(it) }
     fun json() = JSONObject().put("threadId", threadId).put("user", user).put("platform", platform).put("runtimeHome", runtimeHome)
-        .put("directory", directory).put("title", title).put("model", model).put("createdAt", createdAt)
+        .put("directory", directory).put("title", title).put("model", model).put("createdAt", createdAt).put("engine", engine).put("provider", provider)
 }
 
 internal class LocalCodexTaskRegistry(file: File) {
@@ -48,7 +49,9 @@ internal class LocalCodexTaskRegistry(file: File) {
         val rows = JSONArray(raw)
         return (0 until rows.length()).map { i -> rows.getJSONObject(i).let { r ->
             LocalCodexTaskRecord(r.getString("threadId"), r.getString("user"), r.getString("platform"), r.getString("runtimeHome"),
-                r.getString("directory"), r.getString("title"), r.getString("model"), r.getLong("createdAt")).also { record ->
+                r.getString("directory"), r.getString("title"), r.getString("model"), r.getLong("createdAt"),
+                r.optString("engine", "codex"), r.optString("provider", "openai")).also { record ->
+                require(record.engine in setOf("codex", "opencode") && record.provider.isNotBlank())
                 require(record.threadId.isNotBlank() && record.user.isNotBlank() && record.platform.isNotBlank())
                 require(record.runtimeHome.isNotBlank() && record.directory.isNotBlank() && record.model.isNotBlank() && record.createdAt > 0)
                 require(listOf(record.threadId, record.runtimeHome, record.directory, record.model).all { value -> value.none { it < ' ' } })
