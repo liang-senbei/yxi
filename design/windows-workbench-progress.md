@@ -1,3 +1,8 @@
+## 2026-09-24 Gemini 原生认证拒绝与创建恢复
+
+- `c3f6d8e1da5c49f567020a7b9496a8dad2f7d2be` 扩展真实 Gemini 0.34.0 测试：未登录 session/new 返回标准 -32000；通过实际 LocalAcpTasks 创建得到先登录提示，保留初始化/认证选项，任务索引为空，未知创建标记为空，未写 oauth_creds.json。
+- 产品构建 `run.DXkmzY`，Gemini 变体构建成功，GeminiAcpNativeTest `run.CLVZyU` 1 项通过，无失败/跳过。证实认证拒绝可恢复，不代表 Google 登录、订阅或模型请求可用。未发布。
+
 ## 2026-09-24 Gemini 官方原生 ACP 握手
 
 - `87171ee142a532405e0c5f468b061c14123af41c` 增加 Gemini 原生测试镜像：固定 Node 22.14.0 与官方 npm @google/gemini-cli 0.34.0，包锁保存在镜像 /opt/gemini/runtime/package-lock.json；runner 校验专属 runtime/source 标签。用户已安装版本的官方 config.ts 确认 --acp 为当前入口。
