@@ -50,7 +50,7 @@ object AgentBindingStore {
     private const val VERSION = 1
 
     /**
-     * 用户的选择。[profileId] 为空串 = 该运行器的默认/官方登录，不指向任何已存配置。
+     * 用户的选择。[profileId] 为空串 = 沿用运行器现有配置，不保证使用官方订阅；不指向已存线路。
      * 两个值都只是**引用**，这里没有密钥的位置。
      */
     data class Desired(val engine: String, val profileId: String)
