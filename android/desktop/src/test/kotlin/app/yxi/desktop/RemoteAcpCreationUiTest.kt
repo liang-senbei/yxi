@@ -41,12 +41,17 @@ class RemoteAcpCreationUiTest {
                         LaunchedEffect(Unit) {
                             try {
                                 delay(1400)
-                                val dialog = java.awt.Window.getWindows().filterIsInstance<java.awt.Dialog>().single { it.isShowing }
                                 ImageIO.write(Robot().createScreenCapture(java.awt.Rectangle(java.awt.Toolkit.getDefaultToolkit().screenSize)), "png", File("/results/server-acp-create.png"))
-                                withContext(Dispatchers.IO) { Robot().apply {
-                                    mouseMove(dialog.locationOnScreen.x + dialog.width - 100, dialog.locationOnScreen.y + dialog.height - 44)
-                                    mousePress(InputEvent.BUTTON1_DOWN_MASK); mouseRelease(InputEvent.BUTTON1_DOWN_MASK)
-                                } }
+                                val dialog = java.awt.Window.getWindows().filterIsInstance<java.awt.Dialog>().firstOrNull { it.isShowing }
+                                val locations = if (dialog != null) listOf((dialog.locationOnScreen.x + dialog.width - 100) to (dialog.locationOnScreen.y + dialog.height - 44))
+                                    else (200..440 step 16).map { (window.locationOnScreen.x + window.width / 2 + 170) to (window.locationOnScreen.y + window.height / 2 + it) }
+                                for ((x, y) in locations) {
+                                    if (routed) break
+                                    withContext(Dispatchers.IO) { Robot().apply {
+                                        mouseMove(x, y); mousePress(InputEvent.BUTTON1_DOWN_MASK); mouseRelease(InputEvent.BUTTON1_DOWN_MASK)
+                                    } }
+                                    delay(120)
+                                }
                                 withTimeout(3000) { while (!routed) delay(20) }
                                 delay(400)
                                 assertEquals(Page.Acp, state.page)
