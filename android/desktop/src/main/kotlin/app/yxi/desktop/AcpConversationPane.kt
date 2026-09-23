@@ -2,6 +2,7 @@ package app.yxi.desktop
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -75,6 +76,17 @@ import java.io.File
     var configMenu by remember(record.key) { mutableStateOf<String?>(null) }
     val view = remember(record.key) { state.codexConversationViews.getOrPut(record.key) { CodexConversationView() } }
     var followLatest by view.followLatest
+    val dragging by view.scroll.interactionSource.collectIsDraggedAsState()
+    var observedPosition by remember(record.key) { mutableStateOf(0 to 0) }
+    LaunchedEffect(view, record.key) {
+        snapshotFlow { Triple(view.scroll.firstVisibleItemIndex to view.scroll.firstVisibleItemScrollOffset,
+            view.scroll.isScrollInProgress, view.scroll.canScrollForward) }.collect { (position, scrolling, forward) ->
+            if (scrolling && (position.first < observedPosition.first || position.first == observedPosition.first && position.second < observedPosition.second)) followLatest = false
+            if (!forward && !dragging && view.scroll.layoutInfo.totalItemsCount > 0) followLatest = true
+            observedPosition = position
+        }
+    }
+    LaunchedEffect(dragging) { if (dragging) followLatest = false }
     val messages = controller?.messages?.toList().orEmpty()
     val approvals = controller?.pendingApprovals?.values?.toList().orEmpty()
     val scrollWatch = remember(record.key) { object : NestedScrollConnection {
@@ -88,7 +100,7 @@ import java.io.File
         }
     } }
     LaunchedEffect(messages, approvals.size, followLatest) {
-        if (followLatest) view.scroll.scrollToItem(messages.size + approvals.size, view.scroll.layoutInfo.viewportSize.height.coerceAtLeast(1))
+        if (followLatest && !dragging) view.scroll.scrollToItem(messages.size + approvals.size, view.scroll.layoutInfo.viewportSize.height.coerceAtLeast(1))
     }
     fun send() {
         if (controller == null || !controller.ready || sending || controller.busy || controller.changingMode || controller.pendingApprovals.isNotEmpty() || draft.value.text.isBlank()) return
