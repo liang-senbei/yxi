@@ -15,9 +15,12 @@ class HermesAcpConversationNativeTest {
         check(!System.getenv("YXI_ISOLATED_TEST_RUN").isNullOrBlank())
         check(System.getProperty("user.home") == "/sandbox/home")
         val calls = AtomicInteger()
+        val observedModels = java.util.concurrent.CopyOnWriteArrayList<String>()
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/v1/models") { exchange ->
-            val data = JSONObject().put("object", "list").put("data", JSONArray().put(JSONObject().put("id", "fixture-hermes").put("object", "model").put("owned_by", "fixture"))).toString().toByteArray()
+            val data = JSONObject().put("object", "list").put("data", JSONArray(listOf("fixture-hermes", "fixture-hermes-alt").map {
+                JSONObject().put("id", it).put("object", "model").put("owned_by", "fixture")
+            })).toString().toByteArray()
             exchange.responseHeaders.set("Content-Type", "application/json"); exchange.sendResponseHeaders(200, data.size.toLong())
             exchange.responseBody.use { it.write(data) }; exchange.close()
         }
@@ -25,7 +28,8 @@ class HermesAcpConversationNativeTest {
             try {
                 check(exchange.requestHeaders.getFirst("Authorization") == "Bearer fixture-hermes-key")
                 val input = JSONObject(exchange.requestBody.readAllBytes().toString(Charsets.UTF_8))
-                check(input.getString("model") == "fixture-hermes")
+                check(input.getString("model") in setOf("fixture-hermes", "fixture-hermes-alt"))
+                observedModels.add(input.getString("model"))
                 check(calls.incrementAndGet() <= 10)
                 val answer = "HERMES_NATIVE_TURN_CONFIRMED"
                 fun chunk(delta: JSONObject, reason: Any = JSONObject.NULL) = JSONObject().put("id", "fixture-chat").put("object", "chat.completion.chunk")
@@ -68,9 +72,20 @@ class HermesAcpConversationNativeTest {
                     assertTrue(controller.messages.any { it.author == "Assistant" && it.text.contains("HERMES_NATIVE_TURN_CONFIRMED") })
                     assertTrue(calls.get() > 0)
                     assertEquals(record.key, LocalCodexTaskRegistry(index).records.single().key)
+                    val models = checkNotNull(controller.models)
+                    File("/results/hermes-models.json").writeText(models.toString(2))
+                    val options = models.getJSONArray("availableModels")
+                    val alternative = (0 until options.length()).map { options.getJSONObject(it).getString("modelId") }.single { it.endsWith("fixture-hermes-alt") }
+                    withTimeout(60000) { controller.changeModel(alternative) }
+                    assertEquals(alternative, LocalCodexTaskRegistry(index).records.single().model)
+                    controller.enqueue("Confirm the second model.")
+                    withTimeout(60000) { controller.dispatchNext().join() }
+                    assertEquals(RuntimeTurnState.Completed, queue.entries.last().runtimeTurnState)
+                    assertEquals("fixture-hermes-alt", observedModels.last())
                 } finally {
                     File("/results/hermes-native-turn.json").writeText(JSONObject().put("calls", calls.get()).put("note", controller.note)
-                        .put("stopReason", controller.lastStopReason).put("model", record.model).put("queueStatus", queue.entries.firstOrNull()?.status?.name).toString(2))
+                        .put("stopReason", controller.lastStopReason).put("model", tasks.registry.records.single().model)
+                        .put("observedModels", JSONArray(observedModels)).put("queueStatus", queue.entries.firstOrNull()?.status?.name).toString(2))
                 }
             }
         } finally { server.stop(0) }

@@ -26,6 +26,7 @@ internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
     private val approvals = ConcurrentHashMap<String, JSONObject>()
     private val sessions = ConcurrentHashMap.newKeySet<String>()
     private val sessionModes = ConcurrentHashMap<String, JSONObject>()
+    private val sessionModels = ConcurrentHashMap<String, JSONObject>()
     private val notifiedModes = ConcurrentHashMap<String, String>()
     private val sessionConfigurations = ConcurrentHashMap<String, JSONArray>()
     private val activePrompts = ConcurrentHashMap.newKeySet<String>()
@@ -132,6 +133,7 @@ internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
         require(directory.isNotBlank() && directory.none { it < ' ' })
         return request("session/new", JSONObject().put("cwd", directory).put("mcpServers", JSONArray())).also {
             val id = it.getString("sessionId"); check(id.isNotBlank()); sessions.add(id)
+            it.optJSONObject("models")?.let { models -> sessionModels[id] = JSONObject(models.toString()) }
             it.optJSONArray("configOptions")?.let { options ->
                 acpConfigSelectors(options); sessionConfigurations.putIfAbsent(id, JSONArray(options.toString()))
             }
@@ -141,6 +143,17 @@ internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
         }
     }
     fun modes(sessionId: String): JSONObject? = sessionModes[sessionId]?.let { JSONObject(it.toString()) }
+    fun models(sessionId: String): JSONObject? = sessionModels[sessionId]?.let { JSONObject(it.toString()) }
+    suspend fun setModel(sessionId: String, modelId: String, timeoutMillis: Long = 30_000) {
+        check(sessionId in sessions)
+        val previous = sessionModels[sessionId] ?: error("运行器没有提供模型列表")
+        val available = previous.getJSONArray("availableModels")
+        require((0 until available.length()).any { available.getJSONObject(it).getString("modelId") == modelId }) { "请选择原生模型列表中的模型" }
+        check(activePrompts.add(sessionId)) { "会话仍有未确认操作" }
+        request("session/set_model", JSONObject().put("sessionId", sessionId).put("modelId", modelId), timeoutMillis)
+        sessionModels[sessionId] = JSONObject(previous.toString()).put("currentModelId", modelId)
+        activePrompts.remove(sessionId)
+    }
     fun configOptions(sessionId: String): JSONArray = sessionConfigurations[sessionId]?.let { JSONArray(it.toString()) } ?: JSONArray()
     suspend fun setConfigOption(sessionId: String, configId: String, value: String, timeoutMillis: Long = 30_000) {
         check(sessionId in sessions)

@@ -24,6 +24,7 @@ internal class AcpTaskController(
     private val promptTimeoutMillis: Long = 600_000,
     private val onRawEvent: (JSONObject) -> Unit = {},
     private val onConfigurationChanged: (JSONArray) -> Unit = {},
+    private val onModelChanged: (String) -> Unit = {},
 ) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
     private val mutation = Mutex()
@@ -36,6 +37,7 @@ internal class AcpTaskController(
     var cancelling by mutableStateOf(false); private set
     var changingMode by mutableStateOf(false); private set
     var modes by mutableStateOf(client.modes(sessionId)); private set
+    var models by mutableStateOf(client.models(sessionId)); private set
     var configOptions by mutableStateOf(client.configOptions(sessionId)); private set
     var lastStopReason by mutableStateOf(""); private set
     var note by mutableStateOf("已连接 ACP 会话"); private set
@@ -135,6 +137,19 @@ internal class AcpTaskController(
         } catch (e: Exception) {
             ready = false; note = "模式切换未确认，请核对原生会话后再发送"
             throw e
+        } finally { changingMode = false }
+    }
+    suspend fun changeModel(modelId: String) = mutation.withLock {
+        check(ready && !disposed && !busy && pendingApprovals.isEmpty()) { "当前会话暂不能切换模型" }
+        changingMode = true
+        try {
+            client.setModel(sessionId, modelId)
+            client.synchronizeEvents()
+            models = client.models(sessionId)
+            onModelChanged(checkNotNull(models).getString("currentModelId"))
+            note = "模型已由运行器确认"
+        } catch (e: Exception) {
+            ready = false; note = "模型切换未确认，请核对原生会话后再发送"; throw e
         } finally { changingMode = false }
     }
     suspend fun changeConfig(configId: String, value: String) = mutation.withLock {

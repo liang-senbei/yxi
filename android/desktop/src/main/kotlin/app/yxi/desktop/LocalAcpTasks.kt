@@ -108,6 +108,9 @@ internal class LocalAcpTasks(private val queue: InstructionQueue, file: File,
                 val currentModel = acpConfigSelectors(options).firstOrNull { it.category == "model" }?.current?.takeIf { it.isNotBlank() }
                 val current = registry.records.singleOrNull { it.key == record.key }
                 if (current != null && currentModel != null && current.model != currentModel) registry.save(current.copy(model = currentModel))
+            }, onModelChanged = { model ->
+                val current = registry.records.singleOrNull { it.key == record.key }
+                if (current != null && current.model != model) registry.save(current.copy(model = model))
             })
             try {
                 check(!disposed)

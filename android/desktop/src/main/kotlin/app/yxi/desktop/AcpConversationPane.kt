@@ -92,6 +92,7 @@ private class AcpPendingAuthentication(val plan: AcpTerminalAuthPlan, val comple
     var error by remember(record.key) { mutableStateOf("") }
     var sending by remember(record.key) { mutableStateOf(false) }
     var modeMenu by remember(record.key) { mutableStateOf(false) }
+    var modelMenu by remember(record.key) { mutableStateOf(false) }
     var configMenu by remember(record.key) { mutableStateOf<String?>(null) }
     val view = remember(record.key) { state.codexConversationViews.getOrPut(record.key) { CodexConversationView() } }
     var followLatest by view.followLatest
@@ -152,6 +153,23 @@ private class AcpPendingAuthentication(val plan: AcpTerminalAuthPlan, val comple
                     }) }
                 }
             } }
+        }
+        if (controller.configOptions.length() == 0) controller.models?.let { models ->
+            val available = models.optJSONArray("availableModels")
+            val options = (0 until (available?.length() ?: 0)).map { available!!.getJSONObject(it) }
+            val current = models.optString("currentModelId")
+            Box {
+                QuietChoice(modelMenu, { modelMenu = true }, enabled = options.isNotEmpty() && controller.ready && !controller.busy && !controller.changingMode && controller.pendingApprovals.isEmpty(), label = {
+                    Text("模型 · " + (options.firstOrNull { it.optString("modelId") == current }?.optString("name")?.takeIf { it.isNotBlank() } ?: current))
+                })
+                DropdownMenu(modelMenu, { modelMenu = false }) {
+                    options.forEach { option -> DropdownMenuItem(text = { Text(option.optString("name").ifBlank { option.getString("modelId") }) },
+                        modifier = if (option.optString("modelId") == current) Modifier.background(Tokens.current.selected, RoundedCornerShape(8.dp)) else Modifier, onClick = {
+                            modelMenu = false
+                            scope.launch { runCatching { controller.changeModel(option.getString("modelId")) }.onFailure { error = it.message.orEmpty() } }
+                        }) }
+                }
+            }
         }
         if (controller.configOptions.length() == 0) controller.modes?.let { modes ->
             val available = modes.optJSONArray("availableModes")
