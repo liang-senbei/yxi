@@ -1,3 +1,8 @@
+## 2026-09-24 ACP 明确模型拒绝后的继续发送
+
+- `8dfa00fb55fee03b686c2dd89a42c353140acaca` 对 session/set_model 的 -32601/-32602 明确拒绝释放设置操作占用，保留原模型；控制器提示选择未被接受而非停用会话。超时、内部错误继续按未知处理，不自动重发。
+- 构建 `run.Djfz3i`，AcpClientTest `run.steoXx` 8 项、AcpTaskControllerTest `run.CERNSz` 3 项全部通过，无失败/跳过。新增拒绝 provider/b 后仍保持 provider/a，并可正常提交下一轮的 fixture 断言。未发布。
+
 ## 2026-09-24 Hermes 原生模型切换
 
 - `7e39714` 为无 configOptions 的运行器补 models/session/set_model 客户端、控制器、灰色菜单和任务记录同步；新配置接口仍优先。原生 Hermes 0.21.4 的 config handler 不是模型切换接口，不能替代其 set_session_model。
