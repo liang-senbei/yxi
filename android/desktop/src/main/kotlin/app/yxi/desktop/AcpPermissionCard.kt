@@ -1,6 +1,7 @@
 package app.yxi.desktop
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -30,6 +31,7 @@ internal fun acpPermissionChoices(params: JSONObject): List<AcpPermissionChoice>
 }
 
 /** Selection IDs are native; the caller owns submission, busy state, and cancellation acknowledgement. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable internal fun AcpPermissionCard(params: JSONObject, enabled: Boolean, answer: (String?) -> Unit) {
     val choices = runCatching { acpPermissionChoices(params) }
     OutlinedCard(Modifier.fillMaxWidth()) {
@@ -37,11 +39,13 @@ internal fun acpPermissionChoices(params: JSONObject): List<AcpPermissionChoice>
             Text(params.optJSONObject("toolCall")?.optString("title")?.takeIf { it.isNotBlank() } ?: "运行器请求操作权限",
                 style = MaterialTheme.typography.titleSmall)
             choices.fold(onSuccess = { options ->
-                options.forEach { option ->
-                    OutlinedButton({ answer(option.id) }, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.fillMaxWidth()) {
-                            Text(option.name)
-                            if (option.name != option.scope) Text(option.scope, style = MaterialTheme.typography.bodySmall)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    options.forEach { option ->
+                        OutlinedButton({ answer(option.id) }, enabled = enabled, shape = RoundedCornerShape(8.dp), modifier = Modifier.widthIn(min = 160.dp, max = 300.dp)) {
+                            Column {
+                                Text(option.name)
+                                if (option.name != option.scope) Text(option.scope, style = MaterialTheme.typography.bodySmall)
+                            }
                         }
                     }
                 }
