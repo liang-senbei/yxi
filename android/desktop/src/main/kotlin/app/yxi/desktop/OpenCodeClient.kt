@@ -14,6 +14,7 @@ import java.util.Base64
  * No auth/config write endpoints are exposed; credentials are supplied by the server owner.
  */
 internal class OpenCodeClient(port: Int, password: String, private val directory: String) {
+    internal val mcpMutation = kotlinx.coroutines.sync.Mutex()
     private val base = URI("http://127.0.0.1:$port")
     private val authorization: String
     init {
@@ -25,6 +26,8 @@ internal class OpenCodeClient(port: Int, password: String, private val directory
     suspend fun health(): JSONObject = JSONObject(request("GET", "/global/health"))
     suspend fun providers(): JSONObject = JSONObject(request("GET", "/provider"))
     suspend fun availableModels(): List<OpenCodeModel> = OpenCodeModel.fromProviders(providers())
+    suspend fun mcpStatus(): JSONObject = JSONObject(request("GET", "/mcp"))
+    internal suspend fun addMcp(name: String, config: JSONObject): JSONObject = JSONObject(request("POST", "/mcp", JSONObject().put("name", name).put("config", config)))
     suspend fun permissions(sessionId: String): List<JSONObject> = pending("/permission", sessionId)
     suspend fun questions(sessionId: String): List<JSONObject> = pending("/question", sessionId)
     suspend fun replyPermission(sessionId: String, requestId: String, reply: OpenCodePermissionReply) {
