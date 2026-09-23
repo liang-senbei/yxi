@@ -1,3 +1,9 @@
+## 2026-09-23 本地 OpenCode HTTP 共享任务创建
+
+- `14b1cbcb11d3e40af565cca0e3c30c330696c615` 接入 LocalOpenCodeTasks：基线进程检查原生同名 MCP；有 HTTP 头引用时关闭基线、以私有配置启动专属进程，重新核对模型与连接，再创建和持久化会话。其他 MCP 仍用动态登记。界面开放本地 OpenCode 头引用，服务器保持明确限制。
+- 构建 `run.Rt5U8b`；HTTP 原生测试 `run.9puehx` 1 项通过（现在包括真实 models/create/任务索引/控制器路径及配置文件不变）；对话审批原生回归 `run.wDQRTr` 1 项通过，均无失败/跳过。测试使用真实 OpenCode 与本地模型 fixture，不是公网模型验收。
+- 尚需服务器 SSH 接入、预检与重启间配置变化处理、HTTP 启动绑定持久审计、Windows 新表单交互验收。当前启动层拒绝已有 inline 配置，尚未实现用户原配置合并。未发布。
+
 ## 2026-09-23 OpenCode 私有启动配置 HTTP 引用
 
 - `898bd623e5f9c23053e248521f869cca835d0cf7` 增加 OpenCodeStartupMcp 与本机服务启动参数，通过 OPENCODE_CONFIG_CONTENT 传引用文本，由原生加载器展开。缺变量或已有非空 inline 配置时明确拒绝，避免丢失用户配置；无全局文件写入。
