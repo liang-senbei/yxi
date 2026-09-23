@@ -1,3 +1,9 @@
+## 2026-09-24 ACP 取消与已排队审批竞态
+
+- `315672d37c7af6dd640a833fc4b2eb0c3f9e75ed` 展示审批前核对 cancelling 与客户端待审批表；已进入事件队列、但后来被取消的审批不会重新显示。
+- 测试刻意阻塞 UI 消费，等待 reader 登记审批后取消，再排空事件；要求界面无审批且原生收到 cancelled。构建 `run.XglxL2`，控制器 `run.kRZMC2` 2 项与正常审批 GUI `run.Gi74rw` 1 项通过，无失败/跳过。
+- 属于 fixture/隔离 GUI 验证；三家原生 ACP 与 Windows 验收仍待进行。未发布。
+
 ## 2026-09-24 ACP 审批页渲染与点击验收
 
 - `85cebe7` 新增真实 Compose 窗口+Robot 点击：同名允许选项展示不同权限范围，点击本次允许后必须返回原生 optionId=once。初版 `run.AGoKiW` 通过，但目视发现胶囊按钮过宽。
