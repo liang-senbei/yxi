@@ -2,6 +2,8 @@
 
 ## 托盘菜单中文方框修复（尚未发布）
 
+1.4.14 补丁冻结提交 `cc422150d795fc58448adca6bd0a85a183b7a1cd`，Windows CI `35816868110` 已启动。当前已核对原生托盘中文字体检查和 Windows 公钥检查通过，打包仍在运行，未据此宣称安装验收或上线成功。构建链接：https://github.com/liang-senbei/yxi/actions/runs/35816868110 。
+
 用户截图中的托盘右键菜单中文为缺字方框。AWT PopupMenu/MenuItem 未设置字体，未继承 Compose 字体。现显式按系统菜单字号选择已安装且覆盖菜单字符的物理 CJK 字体，并应用到菜单及每个菜单项。本机 Windows JDK 21 检查选中 Microsoft YaHei UI，四个菜单项字符覆盖和原生菜单 peer 创建通过；检查已加入 Windows CI。尚未完成修复包安装后的屏幕目视验收，线上 1.4.13 尚不含该修复。
 
 范围：完整落实 `windows-workbench-prd.md` v0.3。开发分支 `codex/windows-workbench`，与 hk13 主工作树隔离。以下勾选仅代表具体实现状态，不代表整体已完成。
