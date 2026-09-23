@@ -149,7 +149,10 @@ internal class AcpTaskController(
             onModelChanged(checkNotNull(models).getString("currentModelId"))
             note = "模型已由运行器确认"
         } catch (e: Exception) {
-            ready = false; note = "模型切换未确认，请核对原生会话后再发送"; throw e
+            if (e is IllegalArgumentException || e is AcpRpcException && e.code in setOf(-32601, -32602)) {
+                note = "所选模型未被接受，仍可使用当前模型"
+            } else { ready = false; note = "模型切换未确认，请核对原生会话后再发送" }
+            throw e
         } finally { changingMode = false }
     }
     suspend fun changeConfig(configId: String, value: String) = mutation.withLock {

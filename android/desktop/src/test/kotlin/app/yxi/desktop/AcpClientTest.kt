@@ -9,6 +9,23 @@ import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.*
 
 class AcpClientTest {
+    @Test fun `explicit model rejection preserves current model and permits the next prompt`(): Unit = runBlocking {
+        val fixture = Fixture()
+        fixture.handler = { request -> when (request.optString("method")) {
+            "initialize" -> fixture.result(request, JSONObject().put("protocolVersion", 1))
+            "session/new" -> fixture.result(request, JSONObject().put("sessionId", "fixture-session").put("models", JSONObject()
+                .put("currentModelId", "provider/a").put("availableModels", JSONArray().put(JSONObject().put("modelId", "provider/a").put("name", "A"))
+                    .put(JSONObject().put("modelId", "provider/b").put("name", "B")))))
+            "session/set_model" -> fixture.emit(JSONObject().put("id", request.get("id")).put("error", JSONObject().put("code", -32602).put("message", "Model rejected")))
+            "session/prompt" -> fixture.result(request, JSONObject().put("stopReason", "end_turn"))
+        } }
+        AcpClient(fixture).use { client ->
+            client.initialize(); client.newSession("/fixture")
+            assertFailsWith<AcpRpcException> { client.setModel("fixture-session", "provider/b") }
+            assertEquals("provider/a", client.models("fixture-session")?.getString("currentModelId"))
+            assertEquals("end_turn", client.prompt("fixture-session", "continue").getString("stopReason"))
+        }
+    }
     @Test fun `configuration selection uses grouped native values and replaces dependent options`(): Unit = runBlocking {
         fun config(model: String, effort: String) = JSONArray().put(JSONObject().put("id", "model").put("name", "模型").put("type", "select").put("category", "model")
             .put("currentValue", model).put("options", JSONArray().put(JSONObject().put("group", "provider").put("name", "Provider")

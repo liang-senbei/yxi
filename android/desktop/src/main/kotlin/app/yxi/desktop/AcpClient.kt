@@ -150,7 +150,11 @@ internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
         val available = previous.getJSONArray("availableModels")
         require((0 until available.length()).any { available.getJSONObject(it).getString("modelId") == modelId }) { "请选择原生模型列表中的模型" }
         check(activePrompts.add(sessionId)) { "会话仍有未确认操作" }
-        request("session/set_model", JSONObject().put("sessionId", sessionId).put("modelId", modelId), timeoutMillis)
+        try { request("session/set_model", JSONObject().put("sessionId", sessionId).put("modelId", modelId), timeoutMillis) }
+        catch (e: AcpRpcException) {
+            if (e.code in setOf(-32601, -32602)) activePrompts.remove(sessionId)
+            throw e
+        }
         sessionModels[sessionId] = JSONObject(previous.toString()).put("currentModelId", modelId)
         activePrompts.remove(sessionId)
     }
