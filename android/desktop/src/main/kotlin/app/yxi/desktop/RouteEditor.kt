@@ -25,5 +25,5 @@ internal fun routeModel(line: Lines.Line) = line.extra.optString("model").ifBlan
 internal fun routeCatalogEqual(a: List<Lines.Line>, b: List<Lines.Line>): Boolean =
     a.size == b.size && a.zip(b).all { (x, y) ->
         x.id == y.id && x.name == y.name && x.baseUrl == y.baseUrl && x.apiKey == y.apiKey && x.token == y.token &&
-            x.agent == y.agent && x.note == y.note && x.website == y.website && x.extra.similar(y.extra)
+            x.agent == y.agent && x.note == y.note && x.website == y.website && x.modelsUrl == y.modelsUrl && x.extra.similar(y.extra)
     }

@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.yxi.agent.Lines
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -303,7 +304,11 @@ private fun RouteForm(original: Lines.Line, conn: Conn, onClose: () -> Unit, onS
     var authToken by remember { mutableStateOf(original.token) }
     var showSecret by remember { mutableStateOf(false) }
     var model by remember { mutableStateOf(routeModel(original)) }
-    var mappingsOpen by remember { mutableStateOf(false) }
+    var mappingsOpen by remember { mutableStateOf(true) }
+    var requestOptionsOpen by remember { mutableStateOf(false) }
+    var quickSetOpen by remember { mutableStateOf(false) }
+    var quickModel by remember { mutableStateOf("") }
+    var quickUndo by remember { mutableStateOf<Triple<Map<String, String>, Map<String, String>, String>?>(null) }
     val mappings = remember { mutableStateMapOf<String, String>().apply {
         RoleAliases.forEach { alias -> put(alias, original.extraEnv().optString("ANTHROPIC_DEFAULT_${alias}_MODEL")) }
     } }
@@ -329,7 +334,7 @@ private fun RouteForm(original: Lines.Line, conn: Conn, onClose: () -> Unit, onS
     var modelsNoteIsError by remember { mutableStateOf(false) }
     var modelsGen by remember { mutableStateOf(0) }
     var fetchJob by remember { mutableStateOf<Job?>(null) }
-    var modelsUrl by remember { mutableStateOf("") }
+    var modelsUrl by remember { mutableStateOf(original.modelsUrl) }
     // 端点、密钥或列表 URL 一旦变化：取消在途请求并作废旧结果，不许残留旧线路的模型供误选
     LaunchedEffect(url, secret, authToken, modelsUrl) {
         modelsGen += 1
@@ -357,12 +362,11 @@ private fun RouteForm(original: Lines.Line, conn: Conn, onClose: () -> Unit, onS
                 if (gen == modelsGen && url.trim() == requestUrl && modelsUrl.trim() == requestModelsUrl &&
                     authToken.trim().ifBlank { secret.trim() } == key) {
                     models = fetched
-                    modelsNote = if (fetched.isEmpty()) "接口未返回任何模型。" else "已获取 ${fetched.size} 个模型；在各字段下方「从列表选择」回填。"
+                    modelsNote = if (fetched.isEmpty()) "接口未返回任何模型。" else "已获取 ${fetched.size} 个模型"
                 }
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) {
                 if (gen == modelsGen) {
-                    models = emptyList()
                     modelsNote = e.message?.takeIf { it.isNotBlank() } ?: "获取模型列表失败。"
                     modelsNoteIsError = true
                 }
@@ -378,18 +382,14 @@ private fun RouteForm(original: Lines.Line, conn: Conn, onClose: () -> Unit, onS
         val shown = displayNames[alias].orEmpty().trim()
         if (shown.isEmpty() || shown == oldBase) displayNames[alias] = oneMBase(normalized)
     }
-    fun quickSetRoles() {
-        // 按面板行序取第一个非空角色模型，兜底用默认模型；全部为空时按钮本就禁用
-        val source = RoleRows.firstNotNullOfOrNull { row ->
-            (if (row.alias == null) subagentModel else mappings[row.alias].orEmpty()).takeIf { it.isNotBlank() }
-        } ?: model.takeIf { it.isNotBlank() } ?: return
+    LaunchedEffect(modelsNote) {
+        if (modelsNote.isNotBlank() && !modelsNoteIsError) { kotlinx.coroutines.delay(5000); modelsNote = "" }
+    }
+    fun quickSetRoles(source: String) {
+        quickUndo = Triple(mappings.toMap(), displayNames.toMap(), subagentModel)
         RoleRows.forEach { row ->
-            val value = if (row.supportsOneM) source else oneMBase(source)
-            if (row.alias == null) subagentModel = value
-            else {
-                mappings[row.alias] = value
-                displayNames[row.alias] = oneMBase(value)
-            }
+            val old = if (row.alias == null) subagentModel else mappings[row.alias].orEmpty()
+            roleModelChange(row.alias, row.supportsOneM, setOneM(oneMBase(source), row.supportsOneM && hasOneM(old)))
         }
     }
     ProviderEditorPage(onDismissRequest = { if (!busy) onClose() }, title = { Text("${if (original.name.isBlank()) "添加" else "编辑"}供应商 · ${if (original.isCodex) "Codex" else "Claude Code"}", style = MaterialTheme.typography.titleLarge) },
@@ -401,7 +401,7 @@ private fun RouteForm(original: Lines.Line, conn: Conn, onClose: () -> Unit, onS
             val matchingPresets = app.yxi.agent.LinePresets.forAgent(original.agent).filter { it.name.contains(presetSearch, true) }
             androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 SuggestionChip(onClick = {
-                    name = ""; url = ""; website = ""; model = ""; secret = ""; authToken = ""
+                    name = ""; url = ""; website = ""; model = ""; secret = ""; authToken = ""; modelsUrl = ""
                     presetExtra = org.json.JSONObject(); advanced = "{}"
                     mappings.keys.toList().forEach { mappings[it] = "" }
                     displayNames.keys.toList().forEach { displayNames[it] = "" }
@@ -410,7 +410,7 @@ private fun RouteForm(original: Lines.Line, conn: Conn, onClose: () -> Unit, onS
                 (if (presetsExpanded || presetSearch.isNotBlank()) matchingPresets else matchingPresets.take(12)).forEach { preset ->
                     SuggestionChip(onClick = {
                         name = preset.name; url = preset.baseUrl
-                        website = ""; secret = ""; authToken = ""
+                        website = ""; secret = ""; authToken = ""; modelsUrl = ""
                         presetExtra = org.json.JSONObject(original.extra.toString())
                         if (!original.isCodex) {
                             presetExtra.put("env", preset.envJson())
@@ -436,56 +436,35 @@ private fun RouteForm(original: Lines.Line, conn: Conn, onClose: () -> Unit, onS
             OutlinedTextField(secret, { secret = it }, label = { Text("API Key") }, singleLine = true, modifier = Modifier.fillMaxWidth(), visualTransformation = if (showSecret) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(), trailingIcon = { TextButton({ showSecret = !showSecret }) { Text(if (showSecret) "隐藏" else "显示") } })
             if (!original.isCodex) OutlinedTextField(authToken, { authToken = it }, label = { Text("Auth token（按提供方要求填写）") }, singleLine = true, modifier = Modifier.fillMaxWidth(), visualTransformation = if (showSecret) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation())
             if (original.isCodex) OutlinedTextField(model, { model = it }, label = { Text("模型 ID（可留空）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            else ProviderModelField("默认 / 兜底模型（可留空）", model, models = models) { model = it }
             if (!original.isCodex) {
-                val quickSetSource = RoleRows.firstNotNullOfOrNull { row ->
-                    (if (row.alias == null) subagentModel else mappings[row.alias].orEmpty()).takeIf { it.isNotBlank() }
-                } ?: model.takeIf { it.isNotBlank() }
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp), color = Tokens.current.surface2,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Tokens.current.border)) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton({ mappingsOpen = !mappingsOpen }) { Text(if (mappingsOpen) "收起模型映射" else "模型映射 · 主模型与子 Agent") }
-                    Spacer(Modifier.weight(1f))
-                    TextButton({ quickSetRoles() }, enabled = quickSetSource != null) { Text("一键设置") }
-                    TextButton({ fetchModels() }, enabled = !modelsLoading) { Text(if (modelsLoading) "获取中…" else "获取模型列表") }
+                    OutlinedButton({ quickModel = oneMBase(model).ifBlank { oneMBase(mappings["SONNET"].orEmpty()) }; quickSetOpen = true },
+                        contentPadding = PaddingValues(10.dp, 4.dp), modifier = Modifier.height(32.dp)) { Text("一键设置", fontSize = 12.sp) }
+                    OutlinedButton({ fetchModels() }, enabled = !modelsLoading, contentPadding = PaddingValues(10.dp, 4.dp), modifier = Modifier.height(32.dp)) { Text(if (modelsLoading) "获取中…" else "获取模型列表", fontSize = 12.sp) }
+                    if (quickUndo != null) TextButton({ quickUndo?.let { (oldModels, oldNames, oldSub) ->
+                        mappings.clear(); mappings.putAll(oldModels); displayNames.clear(); displayNames.putAll(oldNames); subagentModel = oldSub
+                    }; quickUndo = null }) { Text("撤销一键设置") }
                 }
-                OutlinedTextField(modelsUrl, { modelsUrl = it }, label = { Text("模型列表 URL（可选；留空按 Base URL 常规约定尝试）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 if (modelsNote.isNotBlank()) Text(modelsNote, style = MaterialTheme.typography.bodySmall,
                     color = if (modelsNoteIsError) Tokens.current.danger else Tokens.current.textMuted)
                 if (mappingsOpen) {
-                    Text("把 Claude 的模型档位映射到此线路的模型 ID，例如 glm-5.3-flash。留空使用运行器默认；显示名称是菜单里展示用的别名。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
-                    Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("角色", Modifier.weight(0.6f), style = MaterialTheme.typography.labelMedium, color = Tokens.current.textMuted)
-                        Text("显示名称", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = Tokens.current.textMuted)
-                        Text("实际模型", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = Tokens.current.textMuted)
-                        Text("1M", Modifier.width(56.dp), style = MaterialTheme.typography.labelMedium, color = Tokens.current.textMuted)
-                    }
-                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        RoleRows.forEach { row ->
-                            val alias = row.alias
-                            val modelValue = if (alias == null) subagentModel else mappings[alias].orEmpty()
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(row.label, Modifier.weight(0.6f), style = MaterialTheme.typography.bodyMedium, color = Tokens.current.textSecondary)
-                                if (alias == null) Text("不显示在 /model 菜单", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
-                                else OutlinedTextField(displayNames[alias].orEmpty(), { displayNames[alias] = it }, Modifier.weight(1f), singleLine = true,
-                                    placeholder = { Text(oneMBase(modelValue).ifBlank { "选填" }) })
-                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    OutlinedTextField(modelValue, { roleModelChange(alias, row.supportsOneM, it) }, Modifier.fillMaxWidth(), singleLine = true,
-                                        placeholder = { Text("留空使用运行器默认") })
-                                    if (models.isNotEmpty()) ProviderModelPicker(models) { picked ->
-                                        // 换模型时保留该档位已声明的 1M 状态
-                                        val keep = row.supportsOneM && hasOneM(modelValue)
-                                        roleModelChange(alias, row.supportsOneM, if (keep) setOneM(picked, true) else picked)
-                                    }
-                                }
-                                Box(Modifier.width(56.dp)) {
-                                    if (row.supportsOneM) Checkbox(hasOneM(modelValue),
-                                        { enabled -> roleModelChange(alias, row.supportsOneM, setOneM(oneMBase(modelValue), enabled)) },
-                                        enabled = modelValue.isNotBlank())
-                                }
-                            }
-                        }
-                    }
-                    Text("1M 会添加运行器的 [1m] 标记；需要供应商支持，不会自动扩展模型能力或转换第三方协议。Haiku 档位不提供 1M。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                    Text("显示名称只影响菜单；1M 是上下文声明，需要运行器和供应商支持。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                    CompactModelMappings(RoleRows.map { row -> ModelMappingRow(row.alias ?: "SUBAGENT", row.label,
+                        if (row.alias == null) subagentModel else mappings[row.alias].orEmpty(),
+                        row.alias?.let { displayNames[it].orEmpty() }, row.supportsOneM) }, models,
+                        changeModel = { id, value -> val row = RoleRows.single { (it.alias ?: "SUBAGENT") == id }; roleModelChange(row.alias, row.supportsOneM, value) },
+                        changeName = { id, value -> displayNames[id] = value }, fallback = model, changeFallback = { model = it })
                 }
+                TextButton({ requestOptionsOpen = !requestOptionsOpen }) { Text(if (requestOptionsOpen) "收起请求选项" else "更多请求选项") }
+                if (requestOptionsOpen) Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("模型列表 URL（可选）", fontSize = 12.sp, color = Tokens.current.textMuted)
+                    CompactTextInput(modelsUrl, { modelsUrl = it }, "模型列表 URL", Modifier.fillMaxWidth(), placeholder = "留空按 Base URL 尝试")
+                }
+                } }
             }
             run {
                 OutlinedTextField(effort, { effort = it }, label = { Text("推理强度（可留空）") }, singleLine = true)
@@ -516,7 +495,11 @@ private fun RouteForm(original: Lines.Line, conn: Conn, onClose: () -> Unit, onS
                     val uri = java.net.URI(website.trim())
                     require(uri.scheme in listOf("https", "http") && !uri.host.isNullOrBlank() && uri.userInfo == null) { "官网链接需要完整的HTTP或HTTPS地址，不能含账号密码" }
                 }
-                val edited = editedRoute(original.copy(extra = extra), name, url, secret, model, authToken).copy(note = memo.trim(), website = website.trim())
+                if (modelsUrl.isNotBlank()) {
+                    val uri = java.net.URI(modelsUrl.trim())
+                    require(uri.scheme in listOf("https", "http") && !uri.host.isNullOrBlank() && uri.userInfo == null && uri.fragment == null && uri.query == null) { "模型列表 URL 需要 HTTP/HTTPS 地址，不能含凭据、查询参数或片段" }
+                }
+                val edited = editedRoute(original.copy(extra = extra), name, url, secret, model, authToken).copy(note = memo.trim(), website = website.trim(), modelsUrl = modelsUrl.trim())
                 if (!original.isCodex) {
                     val env = edited.extra.optJSONObject("env") ?: org.json.JSONObject()
                     mappings.forEach { (alias, value) ->
@@ -541,6 +524,13 @@ private fun RouteForm(original: Lines.Line, conn: Conn, onClose: () -> Unit, onS
             finally { busy = false }
         } }, enabled = !busy) { Text(if (busy) "保存中…" else "保存线路") } },
         dismissButton = { TextButton(onClose, enabled = !busy) { Text("取消") } })
+    if (quickSetOpen) AlertDialog(onDismissRequest = { quickSetOpen = false }, title = { Text("一键设置模型") }, text = {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("应用到所有角色，保留自定义显示名称和各角色当前的 1M 声明。")
+            CompactModelInput(quickModel, models, { quickModel = it }, "一键设置模型", Modifier.fillMaxWidth())
+        }
+    }, confirmButton = { TextButton({ quickSetRoles(quickModel); quickSetOpen = false }, enabled = quickModel.isNotBlank()) { Text("应用") } },
+        dismissButton = { TextButton({ quickSetOpen = false }) { Text("取消") } })
 }
 
 

@@ -202,7 +202,7 @@ exec "${'$'}bin" app-server
                 throw e
             }
             val client = CodexAppServer(shell, prepared?.overrides,
-                profile?.let { line -> suspend { ProviderModels.fetch(ssh, line.baseUrl, line.apiKey) } }, profile?.name)
+                profile?.let { line -> suspend { ProviderModels.fetch(ssh, line.baseUrl, line.apiKey, line.modelsUrl) } }, profile?.name)
             try {
                 client.request("initialize", JSONObject().put("clientInfo", JSONObject()
                     .put("name", "yxi_desktop").put("title", "Yxi").put("version", System.getProperty("jpackage.app-version", "dev"))))
