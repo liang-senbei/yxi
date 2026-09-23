@@ -50,6 +50,8 @@ internal class LocalCodexTasks(private val queue: InstructionQueue, file: File) 
     val registry = LocalCodexTaskRegistry(file)
     val controllers = mutableStateMapOf<String, CodexTaskController>()
     private val operation = Mutex()
+    @Volatile private var disposed = false
+    private val startingClient = java.util.concurrent.atomic.AtomicReference<CodexAppServer?>()
     var busy by mutableStateOf(false); private set
     var recoveryThreadId by mutableStateOf(""); private set
     private val creationJournal = DurableFile(File(file.parentFile, file.name + ".creation.json")) { raw ->
@@ -68,6 +70,7 @@ internal class LocalCodexTasks(private val queue: InstructionQueue, file: File) 
     }
     internal var connect: suspend (LocalRuntimeInstallation) -> CodexAppServer = LocalCodexProfiles::connectOfficial
     suspend fun create(runtime: LocalRuntimeInstallation, directory: String, title: String, model: String): LocalCodexTaskRecord = operation.withLock {
+        check(!disposed) { "本地会话管理器已关闭" }
         registry.requireWritable()
         check(recoveryThreadId.isBlank()) { "上次创建结果待核对，原生会话：$recoveryThreadId" }
         require(File(directory).isAbsolute && File(directory).isDirectory) { "请选择存在的本机绝对目录" }
@@ -77,6 +80,8 @@ internal class LocalCodexTasks(private val queue: InstructionQueue, file: File) 
         var client: CodexAppServer? = null
         try {
             val connection = connect(runtime); client = connection
+            startingClient.set(connection)
+            check(!disposed) { "应用已关闭，未继续创建" }
             val available = LocalOfficialModels.load { connection.listModels(it) }
             require(available.any { it.id == model }) { "所选模型不在当前官方模型列表中，请刷新后重新选择" }
             val pending = JSONObject().put("pending", true).put("runtimeHome", runtime.home).put("directory", cwd).put("model", model)
@@ -94,6 +99,7 @@ internal class LocalCodexTasks(private val queue: InstructionQueue, file: File) 
             val controller = CodexTaskController(record.key, id, connection, queue, initialModel = model)
             try {
                 controller.reconcile(thread); controller.recordSessionConfiguration(result)
+                check(!disposed) { "应用已关闭，请核对已创建的原生会话" }
                 creationJournal.write(JSONObject().put("pending", false).toString())
             }
             catch (e: Exception) { controller.close(); throw e }
@@ -101,7 +107,7 @@ internal class LocalCodexTasks(private val queue: InstructionQueue, file: File) 
             recoveryThreadId = ""
             record
         } catch (e: Exception) { client?.close(); throw e }
-        finally { busy = false }
+        finally { startingClient.compareAndSet(client, null); busy = false }
     }
-    override fun close() { controllers.values.forEach { it.close() }; controllers.clear() }
+    override fun close() { disposed = true; startingClient.getAndSet(null)?.close(); controllers.values.toList().forEach { it.close() }; controllers.clear() }
 }

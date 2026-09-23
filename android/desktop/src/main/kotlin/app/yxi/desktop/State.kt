@@ -43,7 +43,9 @@ class AppState {
     internal val localAgents get() = localAgentsDelegate.value
     var localAgentPrompt by mutableStateOf("")
     internal val localOperations get() = (if (linksDelegate.isInitialized()) deviceLinks.busy.size else 0) +
-        (if (localAgentsDelegate.isInitialized()) localAgents.jobs.count { it.running } else 0)
+        (if (localAgentsDelegate.isInitialized()) localAgents.jobs.count { it.running } else 0) +
+        (if (localCodexTasksDelegate.isInitialized()) (if (localCodexTasks.busy) 1 else 0) +
+            localCodexTasks.controllers.values.count { it.sending || it.activeTurnId != null || it.pendingRequests.isNotEmpty() } else 0)
     internal fun closeLocalFeatures() {
         if (localCodexTasksDelegate.isInitialized()) localCodexTasks.close()
         if (localWorkspaceDelegate.isInitialized()) localWorkspace.close()

@@ -32,4 +32,13 @@ class LocalCodexTaskRegistryTest {
         }
         LocalCodexTasks(InstructionQueue(File(directory, "queue.json")), file).use { tasks -> assertEquals("", tasks.recoveryThreadId) }
     }
+    @Test fun `closed local workspace does not create another native process`() = kotlinx.coroutines.runBlocking {
+        val tasks = LocalCodexTasks(InstructionQueue(File(directory, "queue.json")), File(directory, "tasks.json"))
+        tasks.connect = { error("Must not start a process after close") }
+        tasks.close()
+        val failure = assertFailsWith<IllegalStateException> {
+            tasks.create(LocalRuntimeInstallation("codex", "fixture", listOf("unused"), directory.path, "1.0.0"), directory.path, "Task", "model")
+        }
+        assertTrue(failure.message.orEmpty().contains("已关闭"))
+    }
 }
