@@ -1,3 +1,9 @@
+## 2026-09-24 本地 ACP 会话管理
+
+- `498a444` 增加 LocalAcpTasks：连接与认证分离、原生认证方法显式调用、创建前持久日志、创建确认后的任务索引与控制器、失败关闭所属进程、重启未知创建保护；索引支持 gemini/grok/hermes。未返回模型时记录 native-default，provider 为 native，不冒充官方订阅。
+- 首次 `run.D4sM4m` 只发现 1 项测试；`1e8fe61c4d06090b8ef28cf1a16ff0da3f9975b9` 修正 Kotlin 测试返回 Unit 后，构建 `run.G9vJUh`，LocalAcpTasksTest `run.T6PNKx` 2 项通过，无失败/跳过。
+- 覆盖三引擎 fixture 创建/索引持久化、不自动登录/发送、未知创建跨重启禁止隐式重试。尚未接入 AppState/实际新建界面，未做三家真实运行器登录或模型调用。未发布。
+
 ## 2026-09-24 ACP 流式事件完成顺序
 
 - `51babcdef832953a582a10a1cbdb72e74f115676` 增加内部类型化事件 fence：prompt 回执后等待此前收到的流式事件被控制器消费，再完成队列并释放下一轮。一个客户端仅允许一个事件消费者；关闭连接会失败所有待确认 fence。
