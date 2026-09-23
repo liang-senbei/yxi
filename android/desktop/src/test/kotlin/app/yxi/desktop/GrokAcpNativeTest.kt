@@ -20,6 +20,9 @@ class GrokAcpNativeTest {
             assertNotNull(hello.optJSONArray("authMethods"))
             File("/results/grok-acp-initialize.json").writeText(hello.toString(2))
             assertFalse(File(home, "auth.json").exists(), "Protocol initialization must not synthesize a login")
+            val session = withTimeout(30000) { client.newSession("/sandbox/home") }
+            assertTrue(session.getString("sessionId").isNotBlank())
+            File("/results/grok-acp-session.json").writeText(session.toString(2))
         }
         withTimeout(5000) { while (ProcessHandle.of(processId).map { it.isAlive }.orElse(false)) delay(20) }
         assertFalse(File(home, "auth.json").exists())
