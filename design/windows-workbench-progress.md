@@ -1,3 +1,9 @@
+## 2026-09-24 ACP 终端认证路由与启动计划
+
+- `dafd371ce70024d03def32c6d77ef723efc31c54` 依据 https://agentclientprotocol.com/protocol/v1/authentication 区分 agent/terminal 类型，terminal 不再误发 authenticate RPC。抽出 AcpLaunch.environment，构造同一运行器+原 ACP 参数+认证参数的 TerminalAuthPlan，应用原生 env 覆盖，拒绝描述替换 command，并限制参数/环境大小。
+- 构建 `run.CFJFEo`；计划测试 `run.AScHlm` 1 项、启动传输 `run.fvSpo1` 1 项（覆盖三引擎）、客户端 `run.F0SqXr` 7 项通过，无失败/跳过。路径含空格和 Hermes home 保持已验证。
+- 尚未实现交互终端宿主、退出码核对和重新初始化，仍不宣称 terminal auth 能力；Hermes 登录未完成。未发布。
+
 ## 2026-09-24 Hermes 官方原生 ACP 握手
 
 - `e7e0f8a` 增加专用 Dockerfile.hermes、受标签/源码 pin 校验的 Hermes run variant、HermesAcpNativeTest；固定官方源码 5a3e03ef37462000b5b13d03915eb3e7b1633b6f（0.21.4），仅在构建镜像安装 core+acp 依赖。首次普通 wheel 安装失败，官方 setup.py 明确禁止普通 wheel；`38b7abb` 改为其支持的 editable 安装并保留完整日志。
