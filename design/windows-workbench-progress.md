@@ -1,3 +1,8 @@
+## 2026-09-24 Claude 订阅启动云提供方残留处理
+
+- `f31616068db74d88d24d2af8645efcd32c873791` 在进程环境移除CLAUDE_CODE_USE_BEDROCK/VERTEX/FOUNDRY，并在临时settings env中置空，处理普通用户/项目配置中的残留，不写原文件。
+- 构建run.95uYqd；ClaudeAuthenticationRequestTest run.F0ZVh5 1项通过，0失败/错误/跳过，覆盖11组合。三云开关分别同时存在于进程环境、用户配置和两份项目配置，实际请求均回到回环端点，api=false/oauth=true，原设置字节保全。
+- 证据 `.artifacts/claude-auth-requests/claude-request-cloud-*.jsonl`。前有的凭据/禁读/磁盘登录回归同轮通过；企业托管策略、网关和profile/federation仍需单独检测。未接入正式订阅入口、未发布。
 ## 2026-09-24 Claude 磁盘凭据回落验证
 
 - `af1bb654d67d04cfa4ba2b67e3fab238087bfd63` 增加隔离CLAUDE_CONFIG_DIR下合成.credentials.json，移除OAuth环境变量后运行临时订阅覆盖；不使用真实账号。
