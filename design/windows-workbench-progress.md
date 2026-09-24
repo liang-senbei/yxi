@@ -1,3 +1,10 @@
+## 2026-09-24 本地 Claude 会话登记与明确身份
+
+- `bfd02a3383736473dc66ad423dea7fea5a53e328` 原生传输分配UUID并传--session-id；控制客户端可绑定requestedSessionId，发送和原生回执均核对身份。LocalClaudeSubscription默认保留该绑定。
+- 新增LocalClaudeTasks：准备连接核对通过后保存claude/official:claude索引与实际模型，交给持久控制器；关闭时取消正在准备的子作用域并关闭所属连接，重读索引不启动或重放。现有通用任务索引允许claude引擎。
+- Windows LocalClaudeTasksTest 3项及ClaudeControlClientTest 6项通过，无失败/错误/跳过；覆盖同名不同ID、索引重读无启动、认证失败无任务、关闭期间取消。
+- 构建run.5MoWtK；ClaudeControlClientNativeTest run.NJDsdh 1项通过，0失败/错误/跳过，指定UUID与真实首轮/续轮回执一致，已有上下文/审批/队列回归通过。
+- 管理器尚未接入AppState和正式新建/对话界面，真实官方订阅权益未验证；未发布。
 ## 2026-09-24 Claude 持久指令与消息控制器
 
 - 新增ClaudeTaskController：发送前配置核对、先持久化Delivering再写原生输入、消费文本/工具/审批事件、等待结果消息已处理后保存Accepted及Completed/Failed。发送前失败保留Local；发送后未确认记Unknown并关闭连接，不重发。审批由显式动作回传。
