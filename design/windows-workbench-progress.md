@@ -1,3 +1,8 @@
+## 2026-09-24 Claude 原生认证身份冲突校验
+
+- `06c5ea9ebf065c5308cb777b5458c44fb10126a1` 增加 requireOAuthIdentity：严格要求原生布尔loggedIn、firstParty、无apiKeySource和已知oauth_token认证方式；对已实测的混合OAuth/API状态明确报错，不误判为订阅启用。错误文案不输出原生凭据内容。
+- Windows 本机 ClaudeSubscriptionSettingsTest 3项通过，0失败/错误/跳过，覆盖混合凭据、未知/缺失/错误类型字段、非官方提供方，以及覆盖层不改原映射、不改权限顶层键。XML保存在 `.artifacts/windows-claude-subscription-guard/`。
+- 此校验尚未连到实际启动入口，亦不证明端点、权益或全部托管来源。官方managed-settings文档本轮核对显示还需考虑注册表/MDM/远端策略来源，不能只查一个文件。https://code.claude.com/docs/en/managed-settings 。未发布。
 ## 2026-09-24 Claude 托管认证策略优先级
 
 - `f989306c4efac3be42639999300c49d42e7271b0` 在隔离Docker内临时创建/etc/claude-code/managed-settings.json（先断言不存在，finally只删除本测试创建的文件），注入假API凭据与回环端点，和订阅覆盖层一起启动原生Claude2.1.280。
