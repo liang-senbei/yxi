@@ -4,6 +4,31 @@ import org.json.JSONObject
 import kotlin.test.*
 
 class ClaudeSubscriptionSettingsTest {
+    private fun route() = JSONObject().put("effective", ClaudeSubscriptionSettings.overlay())
+    @Test fun `effective route rejects alternate authorities paths and credentials without disclosing them`() {
+        for (url in listOf("http://api.anthropic.com", "https://api.anthropic.com.attacker.invalid", "https://api.anthropic.com@attacker.invalid",
+            "https://private-value@api.anthropic.com", "https://api.anthropic.com:8443", "https://api.anthropic.com/proxy", "https://api.anthropic.com/?key=private-value")) {
+            val snapshot = route().apply { getJSONObject("effective").getJSONObject("env").put("ANTHROPIC_BASE_URL", url) }
+            val failure = assertFailsWith<IllegalStateException> { ClaudeSubscriptionSettings.requireOfficialRoute(snapshot) }
+            assertFalse(failure.message.orEmpty().contains("private-value"))
+        }
+        for (url in listOf("https://api.anthropic.com", "https://api.anthropic.com/", "https://api.anthropic.com:443")) {
+            ClaudeSubscriptionSettings.requireOfficialRoute(route().apply { getJSONObject("effective").getJSONObject("env").put("ANTHROPIC_BASE_URL", url) })
+        }
+    }
+    @Test fun `effective managed authentication overrides and missing data are rejected`() {
+        for (key in listOf("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE", "ANTHROPIC_CUSTOM_HEADERS", "CLAUDE_CODE_USE_VERTEX")) {
+            assertFailsWith<IllegalStateException> { ClaudeSubscriptionSettings.requireOfficialRoute(route().apply {
+                getJSONObject("effective").getJSONObject("env").put(key, "private-value")
+            }) }
+        }
+        for (key in listOf("apiKeyHelper", "forceLoginGatewayUrl", "forceLoginMethod")) {
+            assertFailsWith<IllegalStateException> { ClaudeSubscriptionSettings.requireOfficialRoute(route().apply { getJSONObject("effective").put(key, "private-value") }) }
+        }
+        assertFailsWith<IllegalStateException> { ClaudeSubscriptionSettings.requireOfficialRoute(JSONObject()) }
+        assertFailsWith<IllegalStateException> { ClaudeSubscriptionSettings.requireOfficialRoute(route().apply { getJSONObject("effective").getJSONObject("env").put("ANTHROPIC_API_KEY", false) }) }
+        ClaudeSubscriptionSettings.requireOfficialRoute(route().apply { getJSONObject("effective").put("forceLoginMethod", "claudeai") })
+    }
     private fun oauth() = JSONObject().put("loggedIn", true).put("apiProvider", "firstParty").put("authMethod", "oauth_token")
     @Test fun `mixed native status never counts as subscription identity`() {
         val mixed = oauth().put("apiKeySource", "ANTHROPIC_API_KEY")

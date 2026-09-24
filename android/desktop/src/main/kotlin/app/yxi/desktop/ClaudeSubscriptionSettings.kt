@@ -1,10 +1,29 @@
 package app.yxi.desktop
 
 import org.json.JSONObject
+import java.net.URI
 
 /** Process-only credential overlay. Not sufficient by itself to verify subscription entitlement
  * or override managed/cloud policy; callers must verify the native provider before enabling send. */
 internal object ClaudeSubscriptionSettings {
+    /** Consumes get_settings.response, never raw settings files or a claimed provider label. */
+    fun requireOfficialRoute(snapshot: JSONObject) {
+        val effective = snapshot.optJSONObject("effective") ?: error("Claude 未返回有效配置，无法确认官方线路")
+        val env = effective.optJSONObject("env") ?: error("Claude 未返回有效线路字段，无法确认官方线路")
+        val endpoint = env.opt("ANTHROPIC_BASE_URL") as? String ?: error("Claude 请求地址尚未确认")
+        val uri = runCatching { URI(endpoint) }.getOrNull()
+        check(uri != null && uri.scheme == "https" && uri.host.equals("api.anthropic.com", true) &&
+            uri.port in setOf(-1, 443) && uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null &&
+            uri.rawPath in setOf("", "/")) { "Claude 有效请求地址不是官方端点，请核对托管或线路配置" }
+        fun absentOrBlank(value: Any?) = value == null || value is String && value.isBlank()
+        val conflicts = setOf("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_CUSTOM_HEADERS", "ANTHROPIC_PROFILE",
+            "ANTHROPIC_FEDERATION_RULE_ID", "ANTHROPIC_IDENTITY_TOKEN_FILE", "ANTHROPIC_ORGANIZATION_ID") + cloudFlags
+        check(conflicts.all { absentOrBlank(env.opt(it)) }) { "Claude 有效配置仍包含其他认证或云平台字段，官方订阅未启用" }
+        check(absentOrBlank(effective.opt("apiKeyHelper"))) { "Claude 有效配置仍启用密钥助手，官方订阅未启用" }
+        check(absentOrBlank(effective.opt("forceLoginGatewayUrl"))) { "Claude 受网关登录策略约束，无法应用直连订阅配置" }
+        val method = effective.opt("forceLoginMethod")
+        check(absentOrBlank(method) || method == "claudeai") { "Claude 登录策略与订阅配置不一致" }
+    }
     /** Credential identity only: entitlement and endpoint policy need separate verification. */
     fun requireOAuthIdentity(status: JSONObject) {
         check(status.opt("loggedIn") == true) { "Claude 尚未确认原生登录，请先完成官方登录" }
