@@ -1,3 +1,9 @@
+## 2026-09-24 本地 Claude 新建到审批界面验收
+
+- `f26da74e7335217fc77edd322cab14e0f164e4bd` 为AppState提供本地Claude管理器工厂注入（正式默认不变），新建弹窗可接受布局modifier；新增完整组件流程测试。
+- 构建run.VjKdBU；ClaudeConversationUiTest run.aZWo6c 1项通过，0失败/错误/跳过：实际点击新建、原生协议fixture核对后创建索引但无user消息；Enter仅发送一次并清草稿；待审批localOperations=1；键盘选择允许本次正确回传allow；轮次Completed后计数归零。
+- `.artifacts/claude-conversation-ui/claude-conversation-approval.png`和completed.png已目视：审批只有允许本次/拒绝，完成回复Markdown正常。此项为Linux窗口+协议替身，真实CLI另有回归；不是Windows真实账号端到端验收。
+- 停止、模型切换、历史恢复及其余PRD项仍待继续，未发布。
 ## 2026-09-24 本地 Claude 新建与对话预览接线
 
 - `e5014ef9` 将LocalClaudeTasks接入AppState惰性管理、运行任务计数、退出清理和本地任务定位；本地Claude安装项新增官方对话预览入口，新建弹窗核对后登记但不自动发送。
