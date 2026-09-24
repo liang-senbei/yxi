@@ -1,3 +1,9 @@
+## 2026-09-24 停止按钮实际点击与继续对话
+
+- `b1332dc007d6906ceecc9995671630b6acb4af98` 扩展ClaudeConversationUiTest协议替身为逐轮唯一回执/审批ID，interrupt返回原生格式中断结果。
+- 隔离构建run.m8kOyF；测试run.xo9GIL，1项通过，0失败/错误/跳过，7.215秒。实际点击停止按钮只发一次interrupt、不额外答应工具；审批清空、localOperations归零，队列最终Completed/Interrupted/Completed。第三轮通过Enter继续并在UI拒绝工具，正确回传deny。
+- 已查看 `.artifacts/claude-conversation-ui/claude-conversation-stopped.png` 和 continued.png：停止提示及继续回复可见，审批卡片清除。本项为Linux窗口+协议替身；原生CLI停止链另有此前证据，Windows交互和真实账号仍未完成。未发布。
+
 ## 2026-09-24 长输入审批卡片
 
 - `6c0459e4e94ad350d338e46aac1ca62757a1c760` 提取 ClaudePermissionCard；完整可选输入在最高220dp区域内滚动，批准和拒绝按钮放在区域外，响应/停止期间禁用。服务器Agent因429额度限制停止且无草稿交付，此项由主任务完成。
