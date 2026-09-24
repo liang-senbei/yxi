@@ -47,6 +47,13 @@ class ClaudeControlClientNativeTest {
                 "CLAUDE_CODE_OAUTH_TOKEN" to "synthetic-control-token", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" to "1"),
                 ClaudeSubscriptionSettings.overlay().apply { getJSONObject("env").put("ANTHROPIC_BASE_URL", endpoint) })
             val conversationPid = conversation.processId
+            val occupied = assertFailsWith<IllegalStateException> {
+                ClaudeProcessOccupancy.requireNoKnownOwner(runtime, conversation.requestedSessionId)
+            }
+            assertTrue(occupied.message.orEmpty().contains(conversationPid.toString()))
+            ClaudeProcessOccupancy.requireNoKnownOwner(runtime, java.util.UUID.randomUUID().toString())
+            File("/results/claude-process-occupancy.json").writeText(JSONObject()
+                .put("nativeOwnerDetected", true).put("otherSessionAllowed", true).toString(2))
             assertFailsWith<IllegalStateException> {
                 LocalClaudeControlTransport.start(runtime, home, resumeSessionId = conversation.requestedSessionId)
             }
