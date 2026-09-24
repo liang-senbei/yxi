@@ -29,6 +29,7 @@ internal object ClaudeSubscriptionProbe {
             while (!process.waitFor(100, TimeUnit.MILLISECONDS)) {
                 currentCoroutineContext().ensureActive()
                 if (cancelled()) throw CancellationException("订阅检查已取消")
+                if (reading.isDone) check(reading.get().size <= 65_536) { "Claude 认证检查响应过大，未发送任务" }
                 check(System.nanoTime() < deadline) { "Claude 认证检查超时，未发送任务" }
             }
             val bytes = reading.get(2, TimeUnit.SECONDS)
