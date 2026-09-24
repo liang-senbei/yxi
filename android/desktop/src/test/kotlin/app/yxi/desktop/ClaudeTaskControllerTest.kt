@@ -39,6 +39,32 @@ class ClaudeTaskControllerTest {
         fun emit(value: JSONObject) { producer.write((value.toString() + "\n").toByteArray()); producer.flush() }
         override fun close() { producer.close(); output.close() }
     }
+    @Test fun `stored images load before delivery and missing snapshot stays local`(): Unit = runBlocking(Dispatchers.Swing) {
+        val source = File(root, "source.png").apply { writeBytes(java.util.Base64.getDecoder().decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5XcAAAAASUVORK5CYII=")) }
+        val store = LocalClaudeImages(File(root, "images")); val attachment = store.capture(source)
+        assertTrue(source.delete())
+        for (missing in listOf(false, true)) {
+            val disk = File(root, "image-queue-$missing.json"); val queue = InstructionQueue(disk); val fixture = Fixture(disk)
+            ClaudeControlClient(fixture).use { client ->
+                client.initialize()
+                ClaudeTaskController("task", client, queue, imageStore = store).use { controller ->
+                    controller.enqueue("", listOf(if (missing) attachment.copy(remotePath = "/yxi-local-image/" + "0".repeat(64)) else attachment))
+                    if (missing) {
+                        assertFailsWith<IllegalStateException> { controller.sendNext() }
+                        assertEquals(InstructionStatus.Local, queue.entries.single().status)
+                        assertTrue(fixture.writes.none { it.optString("type") == "user" })
+                    } else {
+                        val send = async { controller.sendNext() }
+                        withTimeout(2000) { while (fixture.writes.none { it.optString("type") == "user" }) delay(10) }
+                        val content = fixture.writes.last().getJSONObject("message").getJSONArray("content")
+                        assertEquals("image", content.getJSONObject(0).getString("type"))
+                        fixture.emit(JSONObject().put("type", "result").put("uuid", "image-turn").put("session_id", "session").put("is_error", false).put("subtype", "success"))
+                        send.await(); assertEquals(RuntimeTurnState.Completed, queue.entries.single().runtimeTurnState)
+                    }
+                }
+            }
+        }
+    }
     @Test fun `scheduled dispatch never sends a different queued instruction`(): Unit = runBlocking(Dispatchers.Swing) {
         val disk = File(root, "schedule-identity.json")
         val queue = InstructionQueue(disk)

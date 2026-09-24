@@ -20,7 +20,8 @@ internal class ClaudeTaskController(val taskKey: String, private val client: Cla
     val history: List<app.yxi.agent.ChatItem> = emptyList(),
     val historyPage: LocalClaudeHistory.Page? = null,
     private val modelEfforts: Map<String, List<String>> = emptyMap(), initialEffort: String? = null,
-    private val onSettingsChanged: (String, String?) -> Unit = { _, _ -> }) : AutoCloseable {
+    private val onSettingsChanged: (String, String?) -> Unit = { _, _ -> },
+    private val imageStore: LocalClaudeImages? = null) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
     private val mutation = Mutex()
     private val rendered = mutableMapOf<String, CompletableDeferred<Unit>>()
@@ -87,9 +88,10 @@ internal class ClaudeTaskController(val taskKey: String, private val client: Cla
             throw e
         } finally { changingModel = false }
     }
-    fun enqueue(text: String): QueuedInstruction {
-        require(text.isNotBlank() && text.length <= 100_000)
-        return queue.enqueue(taskKey, text)
+    fun enqueue(text: String, attachments: List<InstructionAttachment> = emptyList()): QueuedInstruction {
+        require((text.isNotBlank() || attachments.isNotEmpty()) && text.length <= 100_000 && attachments.size <= 4)
+        require(attachments.isEmpty() || imageStore != null) { "当前连接未配置本地图片存储" }
+        return queue.enqueue(taskKey, text, attachments)
     }
     private fun receive(event: JSONObject) {
         when (event.optString("type")) {
@@ -148,17 +150,22 @@ internal class ClaudeTaskController(val taskKey: String, private val client: Cla
             ?: return@withLock
         check(expectedId == null || item.id == expectedId) { "定时指令不在队首，本次未投递" }
         check(item.status == InstructionStatus.Local) { "前一条指令尚未确认，请先核对" }
-        check(item.attachments.isEmpty()) { "Claude 附件输入尚未接入" }
         busy = true; preparing = true
         var started: QueuedInstruction? = null
         var receipt: JSONObject? = null
         try {
+            val images = withContext(Dispatchers.IO) {
+                require(item.attachments.size <= 4) { "每次最多4张图片" }
+                item.attachments.map { checkNotNull(imageStore) { "本地图片存储不可用" }.load(it) }.also { loaded ->
+                    require(loaded.sumOf { it.size.toLong() } <= 12 * 1024 * 1024) { "图片总大小超过12MiB" }
+                }
+            }
             beforeSend()
             check(!cancelling) { "发送前已停止" }; preparing = false
             started = queue.beginDelivery(item.id, item.revision)
             messages.add(ClaudeMessage("user-${item.id}", "User", item.text))
             note = "正在等待 Claude 回复"
-            val result = client.prompt(item.text, promptTimeoutMillis); receipt = result
+            val result = client.prompt(item.text, promptTimeoutMillis, images); receipt = result
             val turn = result.getString("uuid")
             withTimeout(5000) { rendered.getOrPut(turn) { CompletableDeferred() }.await() }; rendered.remove(turn)
             val outcome = when {

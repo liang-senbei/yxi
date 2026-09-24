@@ -1,3 +1,10 @@
+## 2026-09-24 Claude 图片快照到持久发送队列
+
+- LocalClaudeTasks持有本机claude-images快照存储，注入控制器。enqueue接受图片引用且可仅图片；sendNext先在IO调度验证所有快照和数量/总大小，之后才核对线路、持久beginDelivery、发送原生图片块。
+- 快照缺失/损坏不进入投递，仍保留Local指令；不会发部分图片或自动重发。原模型/强度/审批流程继续沿用。
+- Windows编译及ClaudeTaskControllerTest 9项、LocalClaudeTasksTest 9项通过，0失败/错误/跳过，1m7s。新增覆盖源文件删除后纯图片发送与完成回执、无效快照无user写入且指令保持本地。
+- 选择/预览UI、实际CLI图片请求、发送后的图片显示和快照回收仍待继续；未更新已发布1.4.15。
+
 ## 2026-09-24 图片附件本地快照存储
 
 - 新增LocalClaudeImages，将用户选择文件的内容复制为摘要命名的持久base64快照；队列只保存/yxi-local-image/<sha256>引用，恢复不依赖源路径。读取核对大小/摘要/格式签名并拒绝符号链接，重复选择复用已验证内容。

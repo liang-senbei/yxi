@@ -13,6 +13,7 @@ internal class LocalClaudeTasks(private val queue: InstructionQueue, file: File,
     private val resumeConnection: suspend (LocalRuntimeInstallation, LocalCodexTaskRecord) -> LocalClaudeSubscription.Prepared = { runtime, record -> subscription.resume(runtime, record) },
     private val readHistory: ((LocalCodexTaskRecord) -> List<app.yxi.agent.ChatItem>)? = null) : AutoCloseable {
     var onNotification: (LocalCodexTaskRecord, String) -> Unit = { _, _ -> }
+    val images = LocalClaudeImages(File(file.parentFile, "claude-images"))
     val registry = LocalCodexTaskRegistry(file)
     val controllers = mutableStateMapOf<String, ClaudeTaskController>()
     private val operation = Mutex()
@@ -115,7 +116,7 @@ internal class LocalClaudeTasks(private val queue: InstructionQueue, file: File,
             onSettingsChanged = { actual, effort ->
                 val latest = registry.records.single { it.key == record.key }
                 registry.save(latest.copy(model = actual, effort = effort))
-            }, history = history.toList(), historyPage = historyPage, modelEfforts = efforts,
+            }, history = history.toList(), historyPage = historyPage, modelEfforts = efforts, imageStore = images,
             initialEffort = prepared.settings.optJSONObject("applied")?.optString("effort")?.takeIf { it in efforts[record.model].orEmpty() }).also { controllers[record.key] = it }
     }
     override fun close() {
