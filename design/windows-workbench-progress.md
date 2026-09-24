@@ -1,3 +1,9 @@
+## 2026-09-24 长输入审批卡片
+
+- `6c0459e4e94ad350d338e46aac1ca62757a1c760` 提取 ClaudePermissionCard；完整可选输入在最高220dp区域内滚动，批准和拒绝按钮放在区域外，响应/停止期间禁用。服务器Agent因429额度限制停止且无草稿交付，此项由主任务完成。
+- Windows compileKotlin通过（21秒）；隔离构建run.SIzfDY，ClaudeConversationUiTest run.fn82f4 1项通过，0失败/错误/跳过。60行命令覆盖新建、Enter发送、允许本次以及updatedInput完整性。
+- 已查看 `.artifacts/claude-conversation-ui/claude-conversation-approval-long.png`，长内容有滚动条且审批按钮可见。测试为Linux窗口+协议替身，不是Windows实际账号验收；未发布。停止按钮点击回归仍待补齐。
+
 ## 2026-09-24 停止功能真实控制器回归
 
 - `25e5ce94c0351c4c27301d3bfd42b46ba1fa3865` 为控制器增加独立延迟响应场景，真实调用cancelTurn后核对持久Interrupted、停止状态清理，再继续发送新轮次并核对回复文本。回环fixture按合并消息的最后一个显式标记回复，避免重放旧停止标记造成伪延迟。
