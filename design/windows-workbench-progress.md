@@ -1,3 +1,10 @@
+## 2026-09-24 图片添加与纯图片发送界面验收
+
+- 439551453f0888b182ec41f306a979b367548451，隔离build run.eAsto0，ClaudeImageUiTest run.WtvP0S 1项通过，0失败/错误/跳过，4.087秒。
+- Robot点击添加和发送按钮（picker返回合成文件），截图确认草稿缩略图带移除、发送后消息缩略图无移除。验证预览期间无user、纯图片退出提醒、删除源文件后发送快照字节不变、仅一次user、入队后草稿清空、完成后操作数归零及已发引用保留。
+- 已查看 `.artifacts/claude-conversation-ui/claude-image-preview.png` 与sent.png。本机LocalClaudeImagesTest 2项/ExitProtectionTest 9项此前通过；预览流可独立重复读取且源改写不影响快照。
+- 此为Linux组件窗口与协议替身，Windows原生文件选择框、点开放大预览/移除、历史图片和快照回收仍待完整验收。生命周期审查 `.artifacts/claude-image-lifecycle-review.md` 指出只扫描队列会误删实时已发消息图片，故暂不自动清理，保留引用安全。新增未发布。
+
 ## 2026-09-24 纯图片草稿退出保护
 
 - 修复本地Claude纯图片草稿未计入pendingWork的问题，按非空图片对话数提醒；图片快照捕获期间计入不可丢弃操作，协程结束或取消时释放计数。切换任务仍由AppState保留草稿引用。
