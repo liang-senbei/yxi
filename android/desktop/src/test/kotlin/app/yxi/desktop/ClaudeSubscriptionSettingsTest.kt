@@ -16,6 +16,7 @@ class ClaudeSubscriptionSettingsTest {
             assertFailsWith<IllegalStateException> { ClaudeSubscriptionSettings.requireOAuthIdentity(status) }
         }
         ClaudeSubscriptionSettings.requireOAuthIdentity(oauth())
+        ClaudeSubscriptionSettings.requireOAuthIdentity(oauth().put("authMethod", "claude.ai"))
     }
     @Test fun `subscription overlay preserves unrelated settings and inherited environment`() {
         val inherited = mapOf("PATH" to "kept", "CLAUDE_CONFIG_DIR" to "native-home", "CLAUDE_CODE_OAUTH_TOKEN" to "fixture",
