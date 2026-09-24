@@ -28,22 +28,32 @@ class ClaudeConversationUiTest {
         override val output = PipedInputStream(65536)
         private val producer = PipedOutputStream(output)
         val writes = CopyOnWriteArrayList<JSONObject>()
+        private var turn = 0
         val command = (1..60).joinToString("\n") { "printf 'fixture line $it\\n'" }
         fun emit(value: JSONObject) { producer.write((value.toString() + "\n").toByteArray()); producer.flush() }
         override suspend fun write(text: String): Boolean {
             val request = JSONObject(text); writes.add(request)
             when (request.getString("type")) {
                 "control_request" -> {
-                    val value = if (request.getJSONObject("request").getString("subtype") == "initialize") JSONObject().put("account", JSONObject().put("tokenSource", "claude.ai").put("apiProvider", "firstParty"))
+                    val subtype = request.getJSONObject("request").getString("subtype")
+                    val value = if (subtype == "initialize") JSONObject().put("account", JSONObject().put("tokenSource", "claude.ai").put("apiProvider", "firstParty"))
                         else JSONObject().put("effective", ClaudeSubscriptionSettings.overlay()).put("applied", JSONObject().put("model", "claude-fixture"))
                     emit(JSONObject().put("type", "control_response").put("response", JSONObject().put("subtype", "success").put("request_id", request.getString("request_id")).put("response", value)))
+                    if (subtype == "interrupt") {
+                        emit(JSONObject().put("type", "control_cancel_request").put("request_id", "permission-$turn"))
+                        emit(JSONObject().put("type", "result").put("uuid", "result-$turn").put("session_id", session)
+                            .put("subtype", "error_during_execution").put("is_error", true).put("terminal_reason", "aborted_streaming"))
+                    }
                 }
-                "user" -> emit(JSONObject().put("type", "control_request").put("request_id", "permission").put("request", JSONObject()
-                    .put("subtype", "can_use_tool").put("tool_name", "Bash").put("input", JSONObject().put("command", command))))
+                "user" -> {
+                    turn++
+                    emit(JSONObject().put("type", "control_request").put("request_id", "permission-$turn").put("request", JSONObject()
+                        .put("subtype", "can_use_tool").put("tool_name", "Bash").put("input", JSONObject().put("command", command))))
+                }
                 "control_response" -> {
-                    emit(JSONObject().put("type", "assistant").put("uuid", "answer").put("message", JSONObject().put("content", JSONArray()
+                    emit(JSONObject().put("type", "assistant").put("uuid", "answer-$turn").put("message", JSONObject().put("content", JSONArray()
                         .put(JSONObject().put("type", "text").put("text", "## 检查完成\n\n这是一条 **Markdown** 回复。")))))
-                    emit(JSONObject().put("type", "result").put("uuid", "result").put("session_id", session).put("subtype", "success").put("is_error", false))
+                    emit(JSONObject().put("type", "result").put("uuid", "result-$turn").put("session_id", session).put("subtype", "success").put("is_error", false))
                 }
             }
             return true
@@ -99,6 +109,35 @@ class ClaudeConversationUiTest {
                             assertEquals(RuntimeTurnState.Completed, state.instructions.entries.single().runtimeTurnState)
                             assertEquals(0, state.localOperations)
                             delay(400); screenshot("claude-conversation-completed")
+                            suspend fun sendNext(text: String) {
+                                state.chatDrafts.getValue(record.key).value = TextFieldValue(text)
+                                delay(300); click(150, window.height - 115)
+                                withContext(Dispatchers.IO) { Robot().apply { keyPress(KeyEvent.VK_ENTER); keyRelease(KeyEvent.VK_ENTER) } }
+                                withTimeout(3000) { while (controller.pendingApprovals.isEmpty()) delay(20) }
+                                delay(300)
+                            }
+                            sendNext("检查停止按钮")
+                            click(110, window.height - 45)
+                            withTimeout(3000) { while (controller.busy || controller.cancelling) delay(20) }
+                            assertTrue(controller.pendingApprovals.isEmpty())
+                            assertEquals(1, fixture.writes.count { it.optString("type") == "control_request" && it.getJSONObject("request").optString("subtype") == "interrupt" })
+                            assertEquals(1, fixture.writes.count { it.optString("type") == "control_response" })
+                            assertEquals(RuntimeTurnState.Interrupted, state.instructions.entries.last().runtimeTurnState)
+                            assertEquals(0, state.localOperations)
+                            delay(300); screenshot("claude-conversation-stopped")
+                            sendNext("停止后继续，并拒绝工具")
+                            withContext(Dispatchers.IO) { Robot().apply {
+                                keyPress(KeyEvent.VK_SHIFT); keyPress(KeyEvent.VK_TAB); keyRelease(KeyEvent.VK_TAB)
+                                keyRelease(KeyEvent.VK_SHIFT); keyPress(KeyEvent.VK_SPACE); keyRelease(KeyEvent.VK_SPACE)
+                            } }
+                            withTimeout(3000) { while (controller.busy) delay(20) }
+                            assertEquals("deny", fixture.writes.last { it.optString("type") == "control_response" }
+                                .getJSONObject("response").getJSONObject("response").getString("behavior"))
+                            assertEquals(listOf(RuntimeTurnState.Completed, RuntimeTurnState.Interrupted, RuntimeTurnState.Completed),
+                                state.instructions.entries.map { it.runtimeTurnState })
+                            assertEquals(3, fixture.writes.count { it.optString("type") == "user" })
+                            assertEquals(0, state.localOperations)
+                            delay(300); screenshot("claude-conversation-continued")
                         } catch (e: Throwable) { screenshot("claude-conversation-failure"); failure = e }
                         finally { exitApplication() }
                     }
