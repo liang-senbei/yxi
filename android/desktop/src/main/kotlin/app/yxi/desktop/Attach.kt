@@ -64,8 +64,20 @@ object Attach {
         val cb = java.awt.Toolkit.getDefaultToolkit().systemClipboard
         val contents = cb.getContents(null) ?: return null
         if (!cb.isDataFlavorAvailable(java.awt.datatransfer.DataFlavor.imageFlavor)) return null
-        contents.getTransferData(java.awt.datatransfer.DataFlavor.imageFlavor) as java.awt.image.BufferedImage
+        bufferClipboardImage(contents.getTransferData(java.awt.datatransfer.DataFlavor.imageFlavor) as? java.awt.Image ?: return null)
     }.getOrNull()
+
+    internal fun bufferClipboardImage(image: java.awt.Image): java.awt.image.BufferedImage {
+        val loaded = javax.swing.ImageIcon(image).image
+        val width = loaded.getWidth(null); val height = loaded.getHeight(null)
+        require(width > 0 && height > 0 && width.toLong() * height <= 48_000_000L) { "剪贴板图片尺寸无效或超过4800万像素" }
+        // Always detach from clipboard ownership: another app can replace its mutable image immediately.
+        val copy = java.awt.image.BufferedImage(width, height, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+        val graphics = copy.createGraphics()
+        try { check(graphics.drawImage(loaded, 0, 0, null)) { "剪贴板图片尚未完整加载" } }
+        finally { graphics.dispose() }
+        return copy
+    }
 
     /** 便宜的预检：剪贴板里**有没有**图（不解码——完整解码很贵，别放在按键线程上做）。 */
     fun hasClipboardImage(): Boolean = runCatching {

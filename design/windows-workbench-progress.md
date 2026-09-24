@@ -1,3 +1,8 @@
+## 2026-09-24 剪贴板图片类型兼容
+
+- Attach.clipboardImage不再强转BufferedImage，支持AWT Image并转换为独立ARGB像素副本；尺寸检查限制4800万像素，避免其他应用修改原图影响捕获结果。此共享入口同时惠及已有附件粘贴使用方。
+- Windows编译与ClipboardImageTest 1项、LocalClaudeImagesTest 2项通过，0失败/错误/跳过，31秒。覆盖非BufferedImage的Toolkit缩放图、源像素改写不影响副本；尚未代替实际系统剪贴板按键验收。未发布。
+
 ## 2026-09-24 Claude 剪贴板图片入口
 
 - 本地Claude输入框接入Ctrl/Command+V图片检测；无图片时保留文本粘贴。截图在IO调度编码为PNG后进入同一快照存储，重复内容去重，限制像素/数量/总大小，捕获期间纳入退出保护。
