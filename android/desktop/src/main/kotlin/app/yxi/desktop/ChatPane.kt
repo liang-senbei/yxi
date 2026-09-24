@@ -817,6 +817,20 @@ private fun ItemView(conn: Conn, item: ChatItem, onEdit: (MessageEditTarget) -> 
     is ChatItem.Unknown -> Unit
 }
 
+/** Read-only local history uses the same assistant, tool, and folded-event renderers. */
+@Composable internal fun LocalClaudeHistoryItem(item: ChatItem) {
+    when (item) {
+        is ChatItem.UserText -> Column { Text("你", style = MaterialTheme.typography.labelLarge); SelectionContainer { Text(item.text) } }
+        is ChatItem.Queued -> Column { Text("原生队列 · 待处理", style = MaterialTheme.typography.labelLarge); SelectionContainer { Text(item.text) } }
+        is ChatItem.AssistantText -> MessageRow(item.markdown, user = false) { AssistantBody(item.markdown) }
+        is ChatItem.Thinking -> Fold("思考过程", item.text)
+        is ChatItem.ToolCall -> ToolCard(item)
+        is ChatItem.Injected -> Fold(listOfNotNull(item.kind, item.from).joinToString(" · "), Transcript.clean(item.text))
+        is ChatItem.ApiError -> Note(item.text, Tokens.current.danger)
+        is ChatItem.Unknown -> Fold("未识别的历史内容", item.raw)
+    }
+}
+
 /** 一条消息 + 悬停才浮现的「复制」（Claude 的 MessageActions）。按钮常驻只改透明度，免得布局跳。 */
 @Composable
 private fun MessageRow(copyText: String, user: Boolean, onEdit: (() -> Unit)? = null, content: @Composable () -> Unit) {

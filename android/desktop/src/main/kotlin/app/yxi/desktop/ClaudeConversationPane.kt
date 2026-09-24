@@ -19,6 +19,9 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import app.yxi.agent.ChatItem
 import java.io.File
 
 @Composable internal fun NewClaudeConversationDialog(state: AppState, runtime: LocalRuntimeInstallation, dismiss: () -> Unit,
@@ -65,6 +68,18 @@ import java.io.File
     var previousPosition by remember(record.key) { mutableStateOf(0 to 0) }
     val messages = controller?.messages?.toList().orEmpty()
     val approvals = controller?.pendingApprovals?.values?.toList().orEmpty()
+    var history by remember(record.key) { mutableStateOf<List<ChatItem>>(emptyList()) }
+    var historyLoading by remember(record.key) { mutableStateOf(false) }
+    var historyError by remember(record.key) { mutableStateOf("") }
+    LaunchedEffect(record.key, controller) {
+        if (controller == null) {
+            historyLoading = true; historyError = ""
+            try { history = withContext(Dispatchers.IO) { LocalClaudeHistory.read(record) } }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { historyError = e.message ?: "历史读取失败" }
+            finally { historyLoading = false }
+        } else history = emptyList()
+    }
     LaunchedEffect(view, record.key) {
         snapshotFlow { Triple(view.scroll.firstVisibleItemIndex to view.scroll.firstVisibleItemScrollOffset,
             view.scroll.isScrollInProgress, view.scroll.canScrollForward) }.collect { (position, scrolling, forward) ->
@@ -74,8 +89,8 @@ import java.io.File
         }
     }
     LaunchedEffect(dragging) { if (dragging) followLatest = false }
-    LaunchedEffect(messages.size, approvals.size, followLatest) {
-        if (followLatest && !dragging) view.scroll.scrollToItem(messages.size + approvals.size, view.scroll.layoutInfo.viewportSize.height.coerceAtLeast(1))
+    LaunchedEffect(history.size, messages.size, approvals.size, followLatest) {
+        if (followLatest && !dragging) view.scroll.scrollToItem(history.size + messages.size + approvals.size, view.scroll.layoutInfo.viewportSize.height.coerceAtLeast(1))
     }
     fun send() {
         if (controller == null || !controller.ready || controller.busy || controller.cancelling || controller.changingModel || sending || controller.pendingApprovals.isNotEmpty() || draft.value.text.isBlank()) return
@@ -110,10 +125,13 @@ import java.io.File
             }
         }
         Text(controller?.note ?: "连接未恢复；此记录不会自动重发指令。")
+        if (historyLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (historyError.isNotBlank()) Text(historyError, color = Tokens.current.danger)
         InstructionStrip(state.instructions, record.key, controller?.ready == true && !controller.busy && !controller.cancelling && !controller.changingModel && controller.pendingApprovals.isEmpty(), { controller?.dispatchNext() })
         LazyColumn(Modifier.weight(1f).fillMaxWidth().onPointerEvent(PointerEventType.Scroll, PointerEventPass.Initial) { event ->
             if (event.changes.any { it.scrollDelta.y < 0f }) followLatest = false
         }, state = view.scroll, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(history, key = { "history:" + it.key }) { LocalClaudeHistoryItem(it) }
             items(messages, key = { it.id }) { message ->
                 Column {
                     Text(when (message.role) { "User" -> "你"; "Assistant" -> "Claude"; else -> "工具" }, style = MaterialTheme.typography.labelLarge)

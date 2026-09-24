@@ -1,3 +1,9 @@
+## 2026-09-24 断开 Claude 对话的只读历史页面
+
+- ClaudeConversationPane在无控制器时通过IO调度读取原生历史，展示加载进度和明确错误；不会启动运行器。历史项进入同一LazyColumn及滚动跟随逻辑。
+- LocalClaudeHistoryItem复用原有Markdown回复、ToolCard、折叠思考/注入事件和错误组件；用户正文可选复制，原生队列明确标记待处理，未知历史折叠展示。
+- Windows compileKotlin通过（23秒），git diff --check通过。本轮未做新截图测试，不据编译宣称视觉验收；新连接仍用实时消息，恢复连接历史合并/恢复按钮还待接入。未发布。
+
 ## 2026-09-24 真实 Claude 历史与锁恢复整链
 
 - cbff66d2de37fbc84b00adae93bde27a460b4d92，构建run.Mnvr7s，ClaudeControlClientNativeTest run.7uK2Lz 1项通过，0失败/错误/跳过，4.229秒。
