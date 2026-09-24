@@ -202,6 +202,7 @@ class AppState internal constructor(private val localClaudeFactory: (Instruction
     internal val shopPurchases = ShopPurchaseStore(java.io.File(Store.dir, "shop-purchases.json"))
     val documents = mutableStateListOf<FileDocument>()
     val documentSelection = androidx.compose.runtime.mutableStateMapOf<String, String>()
+    internal val claudeImageDrafts = mutableMapOf<String, androidx.compose.runtime.snapshots.SnapshotStateList<InstructionAttachment>>()
     val chatDrafts = mutableMapOf<String, androidx.compose.runtime.MutableState<androidx.compose.ui.text.input.TextFieldValue>>()
     fun appendDocumentQuote(host: Host, task: Session, quote: String) {
         val holder = chatDrafts.getOrPut(taskNavigationKey(host, task)) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue()) }

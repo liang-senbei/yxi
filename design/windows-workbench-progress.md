@@ -1,3 +1,9 @@
+## 2026-09-24 Claude 图片选择与预览接线
+
+- 会话加入添加图片、共享DraftAttachmentTray缩略图/预览/移除；选择后IO保存快照，核对数量和总大小，按摘要引用去重；纯图片可发送，入队成功后才清空图片草稿。
+- AppState按taskKey保留内存图片草稿，切换页面不丢；LocalClaudeImages提供快照预览流并限制文件读取字节，预览不依赖原文件。尚未实现未发送草稿跨应用重启保存。
+- Windows编译与LocalClaudeImagesTest 1项通过，无失败/错误/跳过；最后UI去重及IO快照列表修正后compileKotlin再次通过（38秒）。本轮尚无实际文件选择点击/截图及真实CLI图片请求验收，已发送图片气泡和快照回收仍待补齐。未发布。
+
 ## 2026-09-24 Claude 图片快照到持久发送队列
 
 - LocalClaudeTasks持有本机claude-images快照存储，注入控制器。enqueue接受图片引用且可仅图片；sendNext先在IO调度验证所有快照和数量/总大小，之后才核对线路、持久beginDelivery、发送原生图片块。

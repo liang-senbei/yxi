@@ -24,7 +24,12 @@ internal class LocalClaudeImages(private val directory: File) {
         val target = File(directory, "$digest.json")
         check(target.isFile && target.length() <= 7 * 1024 * 1024) { "图片快照不存在或过大" }
         check(!java.nio.file.Files.isSymbolicLink(target.toPath())) { "图片快照不能是符号链接" }
-        return ClaudeImageInput.fromBytes(decode(target.readText(), digest))
+        return ClaudeImageInput.fromBytes(decode(target.inputStream().use { it.readNBytes(7 * 1024 * 1024 + 1) }.toString(Charsets.UTF_8), digest))
+    }
+    fun preview(attachment: InstructionAttachment): DraftAttach {
+        val image = load(attachment)
+        val bytes = Base64.getDecoder().decode(image.block().getJSONObject("source").getString("data"))
+        return DraftAttach(attachment.name, true, bytes.size.toLong(), attachment.remotePath) { bytes.inputStream() }
     }
     private fun decode(raw: String, digest: String): ByteArray {
         require(raw.length <= 7 * 1024 * 1024)

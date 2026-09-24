@@ -62,6 +62,15 @@ import java.io.File
     val draft = remember(record.key) { state.chatDrafts.getOrPut(record.key) { mutableStateOf(TextFieldValue()) } }
     var error by remember(record.key) { mutableStateOf("") }
     var sending by remember(record.key) { mutableStateOf(false) }
+    val imageDrafts = remember(record.key) { state.claudeImageDrafts.getOrPut(record.key) { mutableStateListOf() } }
+    var capturingImages by remember(record.key) { mutableStateOf(false) }
+    var imagePreviews by remember(record.key) { mutableStateOf<List<DraftAttach>>(emptyList()) }
+    LaunchedEffect(imageDrafts.toList()) {
+        val references = imageDrafts.toList()
+        try { imagePreviews = withContext(Dispatchers.IO) { references.map(state.localClaudeTasks.images::preview) } }
+        catch (e: CancellationException) { throw e }
+        catch (e: Exception) { error = e.message ?: "图片预览失败" }
+    }
     var resuming by remember(record.key) { mutableStateOf(false) }
     val responding = remember(record.key) { mutableStateListOf<String>() }
     val view = remember(record.key) { state.codexConversationViews.getOrPut(record.key) { CodexConversationView() } }
@@ -129,9 +138,9 @@ import java.io.File
         if (followLatest && !dragging) view.scroll.scrollToItem(1 + history.size + messages.size + approvals.size, view.scroll.layoutInfo.viewportSize.height.coerceAtLeast(1))
     }
     fun send() {
-        if (controller == null || !controller.ready || controller.busy || controller.cancelling || controller.changingModel || sending || controller.pendingApprovals.isNotEmpty() || draft.value.text.isBlank()) return
-        try { controller.enqueue(draft.value.text) } catch (e: Exception) { error = e.message.orEmpty(); return }
-        draft.value = TextFieldValue(); error = ""; sending = true
+        if (controller == null || !controller.ready || controller.busy || controller.cancelling || controller.changingModel || sending || capturingImages || controller.pendingApprovals.isNotEmpty() || (draft.value.text.isBlank() && imageDrafts.isEmpty())) return
+        try { controller.enqueue(draft.value.text, imageDrafts.toList()) } catch (e: Exception) { error = e.message.orEmpty(); return }
+        draft.value = TextFieldValue(); imageDrafts.clear(); imagePreviews = emptyList(); error = ""; sending = true
         val job = controller.dispatchNext()
         scope.launch { try { job.join() } finally { sending = false } }
     }
@@ -228,11 +237,33 @@ import java.io.File
         }
         if (!followLatest) TextButton({ followLatest = true }) { Text("回到最新消息 ↓") }
         if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
+        DraftAttachmentTray(imagePreviews, remove = { preview -> imageDrafts.removeAll { it.remotePath == preview.stamp } }, showTransferStatus = false)
+        TextButton({
+            if (!capturingImages) {
+                val files = Attach.pickFiles()
+                if (files.isNotEmpty()) {
+                    capturingImages = true; error = ""
+                    scope.launch {
+                        try {
+                            require(files.size + imageDrafts.size <= 4) { "每次最多4张图片" }
+                            val captured = withContext(Dispatchers.IO) { files.map(state.localClaudeTasks.images::capture) }
+                            val all = imageDrafts.toList() + captured
+                            withContext(Dispatchers.IO) {
+                                require(all.sumOf { state.localClaudeTasks.images.load(it).size.toLong() } <= 12 * 1024 * 1024) { "图片总大小超过12MiB" }
+                            }
+                            captured.forEach { if (imageDrafts.none { existing -> existing.remotePath == it.remotePath }) imageDrafts.add(it) }
+                        } catch (e: CancellationException) { throw e }
+                        catch (e: Exception) { error = e.message ?: "图片读取失败" }
+                        finally { capturingImages = false }
+                    }
+                }
+            }
+        }, enabled = !capturingImages && imageDrafts.size < 4) { Text(if (capturingImages) "正在读取图片…" else "添加图片") }
         OutlinedTextField(draft.value, { draft.value = it }, Modifier.fillMaxWidth().onPreviewKeyEvent { event ->
             if (event.type == KeyEventType.KeyDown && draft.value.composition == null && (event.key == Key.Enter || event.key == Key.NumPadEnter) && !event.isShiftPressed) { send(); true } else false
         }, label = { Text("消息 · Enter 发送，Shift+Enter 换行") }, minLines = 2, maxLines = 6)
         Row {
-            TextButton(::send, enabled = controller?.ready == true && !controller.busy && !controller.cancelling && !controller.changingModel && !sending && controller.pendingApprovals.isEmpty() && draft.value.text.isNotBlank()) { Text("发送") }
+            TextButton(::send, enabled = controller?.ready == true && !controller.busy && !controller.cancelling && !controller.changingModel && !sending && !capturingImages && controller.pendingApprovals.isEmpty() && (draft.value.text.isNotBlank() || imageDrafts.isNotEmpty())) { Text("发送") }
             TextButton({ scope.launch { try { controller?.cancelTurn() }
                 catch (e: CancellationException) { throw e }
                 catch (e: Exception) { error = e.message ?: "停止结果未确认" } } },
