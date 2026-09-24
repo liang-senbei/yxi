@@ -56,7 +56,8 @@ import java.io.File
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable internal fun ClaudeConversationPane(state: AppState, record: LocalCodexTaskRecord,
-    installations: List<LocalRuntimeInstallation> = state.localWorkspace.installations, historyPagingModifier: Modifier = Modifier) {
+    installations: List<LocalRuntimeInstallation> = state.localWorkspace.installations, historyPagingModifier: Modifier = Modifier,
+    pickImages: () -> List<java.io.File> = Attach::pickFiles, imageButtonModifier: Modifier = Modifier, sendButtonModifier: Modifier = Modifier) {
     val controller = state.localClaudeTasks.controllers[record.key]
     val scope = rememberCoroutineScope()
     val draft = remember(record.key) { state.chatDrafts.getOrPut(record.key) { mutableStateOf(TextFieldValue()) } }
@@ -241,7 +242,7 @@ import java.io.File
         DraftAttachmentTray(imagePreviews, remove = { preview -> imageDrafts.removeAll { it.remotePath == preview.stamp } }, showTransferStatus = false)
         TextButton({
             if (!capturingImages) {
-                val files = Attach.pickFiles()
+                val files = pickImages()
                 if (files.isNotEmpty()) {
                     capturingImages = true; state.claudeImageCaptures.add(record.key); error = ""
                     scope.launch {
@@ -259,12 +260,12 @@ import java.io.File
                     }
                 }
             }
-        }, enabled = !capturingImages && imageDrafts.size < 4) { Text(if (capturingImages) "正在读取图片…" else "添加图片") }
+        }, modifier = imageButtonModifier, enabled = !capturingImages && imageDrafts.size < 4) { Text(if (capturingImages) "正在读取图片…" else "添加图片") }
         OutlinedTextField(draft.value, { draft.value = it }, Modifier.fillMaxWidth().onPreviewKeyEvent { event ->
             if (event.type == KeyEventType.KeyDown && draft.value.composition == null && (event.key == Key.Enter || event.key == Key.NumPadEnter) && !event.isShiftPressed) { send(); true } else false
         }, label = { Text("消息 · Enter 发送，Shift+Enter 换行") }, minLines = 2, maxLines = 6)
         Row {
-            TextButton(::send, enabled = controller?.ready == true && !controller.busy && !controller.cancelling && !controller.changingModel && !sending && !capturingImages && controller.pendingApprovals.isEmpty() && (draft.value.text.isNotBlank() || imageDrafts.isNotEmpty())) { Text("发送") }
+            TextButton(::send, modifier = sendButtonModifier, enabled = controller?.ready == true && !controller.busy && !controller.cancelling && !controller.changingModel && !sending && !capturingImages && controller.pendingApprovals.isEmpty() && (draft.value.text.isNotBlank() || imageDrafts.isNotEmpty())) { Text("发送") }
             TextButton({ scope.launch { try { controller?.cancelTurn() }
                 catch (e: CancellationException) { throw e }
                 catch (e: Exception) { error = e.message ?: "停止结果未确认" } } },

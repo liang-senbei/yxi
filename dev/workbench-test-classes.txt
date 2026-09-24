@@ -16,3 +16,4 @@ app.yxi.agent.TranscriptBranchEdgeTest
 app.yxi.agent.TranscriptIncrementalUpdateTest
 app.yxi.desktop.ClaudeImageInputTest
 app.yxi.desktop.LocalClaudeImagesTest
+app.yxi.desktop.ExitProtectionTest
