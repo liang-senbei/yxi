@@ -17,6 +17,20 @@ internal class ClaudeImageInput private constructor(private val encoded: String,
                 bytes.size >= 12 && String(bytes, 0, 4, Charsets.US_ASCII) == "RIFF" && String(bytes, 8, 4, Charsets.US_ASCII) == "WEBP" -> "image/webp"
                 else -> error("仅支持PNG、JPEG、GIF或WebP图片内容")
             }
+            val dimensions = if (mime == "image/webp") {
+                org.jetbrains.skia.Image.makeFromEncoded(bytes).use { it.width to it.height }
+            } else {
+                javax.imageio.ImageIO.createImageInputStream(bytes.inputStream()).use { input ->
+                    val readers = javax.imageio.ImageIO.getImageReaders(input)
+                    require(readers.hasNext()) { "无法读取图片尺寸，请重新选择完整图片" }
+                    val reader = readers.next()
+                    try { reader.input = input; reader.getWidth(0) to reader.getHeight(0) }
+                    finally { reader.dispose() }
+                }
+            }
+            require(dimensions.first > 0 && dimensions.second > 0 && dimensions.first.toLong() * dimensions.second <= 48_000_000L) {
+                "图片像素超过4800万或尺寸无效，请先缩小图片"
+            }
             return ClaudeImageInput(Base64.getEncoder().encodeToString(bytes), mime, bytes.size)
         }
     }

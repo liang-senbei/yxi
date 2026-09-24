@@ -1,3 +1,9 @@
+## 2026-09-24 图片尺寸与不完整头校验
+
+- ClaudeImageInput在签名识别后读取实际宽高，拒绝无效尺寸及超过4800万像素内容；PNG/JPEG/GIF用ImageIO元数据读取，WebP用现有Skia入口。仍保留5MiB字节上限，不更改发送字节。
+- Windows编译及ClaudeImageInputTest 1项、ClaudeControlClientTest 10项、LocalClaudeImagesTest 1项通过，0失败/错误/跳过，29秒。覆盖普通PNG字节不变、仅签名截断图片拒绝、过大文件和伪造巨大IHDR尺寸拒绝。元数据检查不等同完整图片解码质量检查。
+- 两图片测试类加入后续workbench发布门禁。本轮未发布；图片实际UI与清理继续待完成。
+
 ## 2026-09-24 真实 CLI 图片发送整链验证
 
 - 源码1525bc8b330bc79a1aa824a8d2cfb2a011c41e3c，隔离构建run.uGQRDg；ClaudeControlClientNativeTest run.YqOewA 1项通过，0失败/错误/跳过，4.806秒。
