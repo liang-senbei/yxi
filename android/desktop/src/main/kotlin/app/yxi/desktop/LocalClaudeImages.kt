@@ -30,6 +30,12 @@ internal class LocalClaudeImages(private val directory: File) {
         check(!java.nio.file.Files.isSymbolicLink(target.toPath())) { "图片快照不能是符号链接" }
         return ClaudeImageInput.fromBytes(decode(target.inputStream().use { it.readNBytes(7 * 1024 * 1024 + 1) }.toString(Charsets.UTF_8), digest))
     }
+    fun mergeDraft(existing: List<InstructionAttachment>, additions: List<InstructionAttachment>): List<InstructionAttachment> {
+        val merged = (existing + additions).distinctBy { it.remotePath }
+        require(merged.size <= 4) { "每次最多4张图片" }
+        require(merged.sumOf { load(it).size.toLong() } <= 12 * 1024 * 1024) { "图片总大小超过12MiB" }
+        return merged
+    }
     fun preview(attachment: InstructionAttachment): DraftAttach {
         val image = load(attachment)
         val bytes = Base64.getDecoder().decode(image.block().getJSONObject("source").getString("data"))

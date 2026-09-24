@@ -12,6 +12,12 @@ import kotlinx.coroutines.*
 import org.json.JSONObject
 import java.awt.Color
 import java.awt.Robot
+import java.awt.Toolkit
+import java.awt.datatransfer.DataFlavor
+import java.awt.datatransfer.StringSelection
+import java.awt.datatransfer.Transferable
+import java.awt.datatransfer.UnsupportedFlavorException
+import java.awt.event.KeyEvent
 import java.awt.event.InputEvent
 import java.awt.image.BufferedImage
 import java.io.File
@@ -67,6 +73,7 @@ class ClaudeImageUiTest {
         var imageBounds: Rect? = null
         var sendBounds: Rect? = null
         var pickerCalls = 0
+        val clipboard = Toolkit.getDefaultToolkit().systemClipboard
         try {
             application(exitProcessOnExit = false) {
                 Window(onCloseRequest = ::exitApplication, state = rememberWindowState(width = 960.dp, height = 820.dp)) {
@@ -122,6 +129,47 @@ class ClaudeImageUiTest {
                             assertEquals(0, state.pendingWork().operations)
                             assertEquals(1, fixture.writes.count { it.optString("type") == "user" })
                             delay(500); screenshot("claude-image-sent")
+                            // Clipboard belongs to this isolated Xvfb display; no host clipboard is accessed.
+                            val transfer = object : Transferable {
+                                override fun getTransferDataFlavors() = arrayOf(DataFlavor.imageFlavor)
+                                override fun isDataFlavorSupported(flavor: DataFlavor) = flavor == DataFlavor.imageFlavor
+                                override fun getTransferData(flavor: DataFlavor): Any {
+                                    if (!isDataFlavorSupported(flavor)) throw UnsupportedFlavorException(flavor)
+                                    return pixels
+                                }
+                            }
+                            withContext(Dispatchers.IO) { clipboard.setContents(transfer, null) }
+                            // The multiline composer is immediately above the Send row.
+                            val send = checkNotNull(sendBounds)
+                            click(Rect(160f, send.top - 50f, 180f, send.top - 30f))
+                            suspend fun paste() = withContext(Dispatchers.IO) {
+                                Robot().apply { keyPress(KeyEvent.VK_CONTROL); keyPress(KeyEvent.VK_V)
+                                    keyRelease(KeyEvent.VK_V); keyRelease(KeyEvent.VK_CONTROL); waitForIdle() }
+                            }
+                            paste()
+                            withTimeout(5000) { while (state.claudeImageDrafts.getValue(saved.key).isEmpty() || state.claudeImageCaptures.isNotEmpty()) delay(20) }
+                            val pasted = state.claudeImageDrafts.getValue(saved.key).single()
+                            assertTrue(state.chatDrafts.getValue(saved.key).value.text.isEmpty())
+                            assertEquals(1, state.pendingWork().drafts)
+                            delay(300)
+                            paste()
+                            delay(300)
+                            withTimeout(5000) { while (state.claudeImageCaptures.isNotEmpty()) delay(20) }
+                            assertEquals(listOf(pasted), state.claudeImageDrafts.getValue(saved.key).toList())
+                            assertEquals(1, fixture.writes.count { it.optString("type") == "user" })
+                            val pastedPayload = state.localClaudeTasks.images.load(pasted).block().getJSONObject("source")
+                            val pastedPixels = ImageIO.read(Base64.getDecoder().decode(pastedPayload.getString("data")).inputStream())
+                            assertEquals(pixels.width, pastedPixels.width)
+                            assertEquals(pixels.height, pastedPixels.height)
+                            assertEquals(pixels.getRGB(0, 0), pastedPixels.getRGB(0, 0))
+                            withContext(Dispatchers.IO) { clipboard.setContents(StringSelection("clipboard text stays a draft"), null) }
+                            paste()
+                            withTimeout(5000) { while (state.chatDrafts.getValue(saved.key).value.text != "clipboard text stays a draft") delay(20) }
+                            assertEquals(listOf(pasted), state.claudeImageDrafts.getValue(saved.key).toList())
+                            assertEquals(1, pickerCalls)
+                            assertEquals(1, fixture.writes.count { it.optString("type") == "user" })
+                            assertEquals(2, state.pendingWork().drafts)
+                            delay(300); screenshot("claude-image-clipboard-draft")
                         } catch (e: Throwable) {
                             failure = e
                             runCatching { screenshot("claude-image-failure") }
@@ -129,7 +177,9 @@ class ClaudeImageUiTest {
                     }
                 }
             }
-        } finally { state.closeLocalFeatures() }
+        } finally {
+            try { clipboard.setContents(StringSelection(""), null) } finally { state.closeLocalFeatures() }
+        }
         assertTrue(fixture.closed)
         failure?.let { throw it }
     }

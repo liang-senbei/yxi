@@ -144,17 +144,14 @@ import java.io.File
         capturingImages = true; state.claudeImageCaptures.add(record.key); error = ""
         scope.launch {
             try {
-                require(imageDrafts.size < 4) { "每次最多4张图片" }
                 val reference = withContext(Dispatchers.IO) {
                     val bitmap = checkNotNull(Attach.clipboardImage()) { "无法读取剪贴板图片" }
                     require(bitmap.width.toLong() * bitmap.height <= 48_000_000L) { "图片超过4800万像素，请先缩小" }
                     state.localClaudeTasks.images.capture("粘贴图片.png", Attach.pngBytes(bitmap))
                 }
-                val references = (imageDrafts.toList() + reference).distinctBy { it.remotePath }
-                withContext(Dispatchers.IO) {
-                    require(references.sumOf { state.localClaudeTasks.images.load(it).size.toLong() } <= 12 * 1024 * 1024) { "图片总大小超过12MiB" }
-                }
-                if (imageDrafts.none { it.remotePath == reference.remotePath }) imageDrafts.add(reference)
+                val existing = imageDrafts.toList()
+                val merged = withContext(Dispatchers.IO) { state.localClaudeTasks.images.mergeDraft(existing, listOf(reference)) }
+                merged.forEach { item -> if (imageDrafts.none { it.remotePath == item.remotePath }) imageDrafts.add(item) }
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { error = e.message ?: "图片粘贴失败" }
             finally { capturingImages = false; state.claudeImageCaptures.remove(record.key) }
@@ -270,13 +267,11 @@ import java.io.File
                     capturingImages = true; state.claudeImageCaptures.add(record.key); error = ""
                     scope.launch {
                         try {
-                            require(files.size + imageDrafts.size <= 4) { "每次最多4张图片" }
+                            require(files.size <= 4) { "每次最多4张图片" }
                             val captured = withContext(Dispatchers.IO) { files.map(state.localClaudeTasks.images::capture) }
-                            val all = imageDrafts.toList() + captured
-                            withContext(Dispatchers.IO) {
-                                require(all.sumOf { state.localClaudeTasks.images.load(it).size.toLong() } <= 12 * 1024 * 1024) { "图片总大小超过12MiB" }
-                            }
-                            captured.forEach { if (imageDrafts.none { existing -> existing.remotePath == it.remotePath }) imageDrafts.add(it) }
+                            val existing = imageDrafts.toList()
+                            val merged = withContext(Dispatchers.IO) { state.localClaudeTasks.images.mergeDraft(existing, captured) }
+                            merged.forEach { item -> if (imageDrafts.none { it.remotePath == item.remotePath }) imageDrafts.add(item) }
                         } catch (e: CancellationException) { throw e }
                         catch (e: Exception) { error = e.message ?: "图片读取失败" }
                         finally { capturingImages = false; state.claudeImageCaptures.remove(record.key) }

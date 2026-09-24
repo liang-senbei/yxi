@@ -7,6 +7,19 @@ import kotlin.test.*
 
 class LocalClaudeImagesTest {
     @TempDir lateinit var root: File
+    @Test fun `repeated image at capacity deduplicates while fifth distinct snapshot is rejected`() {
+        val store = LocalClaudeImages(File(root, "deduplicated"))
+        val images = (1..5).map { index ->
+            val bitmap = java.awt.image.BufferedImage(2, 2, java.awt.image.BufferedImage.TYPE_INT_RGB)
+            bitmap.setRGB(0, 0, index)
+            val out = java.io.ByteArrayOutputStream(); javax.imageio.ImageIO.write(bitmap, "png", out)
+            store.capture("$index.png", out.toByteArray())
+        }
+        val draft = images.take(4)
+        assertEquals(draft, store.mergeDraft(draft, listOf(draft.first().copy(name = "renamed.png"))))
+        assertFailsWith<IllegalArgumentException> { store.mergeDraft(draft, listOf(images.last())) }
+        assertEquals(4, draft.size)
+    }
     @Test fun `preview streams reopen independently and use the immutable stored image`() {
         val out = java.io.ByteArrayOutputStream()
         javax.imageio.ImageIO.write(java.awt.image.BufferedImage(18, 11, java.awt.image.BufferedImage.TYPE_INT_RGB), "png", out)
