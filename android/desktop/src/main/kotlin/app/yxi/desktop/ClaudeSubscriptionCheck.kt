@@ -23,7 +23,7 @@ import java.io.File
                 Text(runtime.command.joinToString(" "), style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(directory, { directory = it; result = ""; error = "" }, Modifier.fillMaxWidth(),
                     enabled = !busy, singleLine = true, label = { Text("需要检查的本机工作目录") })
-                Text("按此目录的原生配置核对认证来源，不发送任务，也不改写已有配置。", style = MaterialTheme.typography.bodySmall)
+                Text("按此目录的原生配置核对认证来源，不发送任务，也不保存新的线路配置。", style = MaterialTheme.typography.bodySmall)
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 if (result.isNotBlank()) Text(result)
                 if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
