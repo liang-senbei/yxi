@@ -1,3 +1,9 @@
+## 2026-09-24 服务器认证检查取消与错误隔离
+
+- `f749a8a8` 新增真实SSH下取消、超大输出、无效JSON、非零退出测试。首跑run.HFjmLB中原生身份检查通过，取消场景失败：JSch读取被中断时抛InterruptedIOException，未转换为协程取消。
+- `96a95d7bb7ee0e9a3460fb67bf8d880f57f80308` 在有界读取作用域内先检查协程状态，仅已取消时按取消传播；非取消IO错误仍失败，finally继续关闭所属通道。
+- 构建run.WJaR89；RemoteClaudeSubscriptionProbeTest run.je49Qp 2项通过，0失败/错误/跳过。覆盖四种异常及原生Claude身份检查；远端PID消失、原SSH仍可执行、无关sleep存活，合成私密响应不进入错误提示。
+- Windows真实桌面交互和正式订阅任务应用仍未完成，未发布。
 ## 2026-09-24 服务器 Claude 认证检查界面接线
 
 - 服务器OfficialProviderCards接入RemoteClaudeSubscriptionCheck，显示主机身份、服务器绝对工作目录，连接不可用时禁用入口；本地与远端复用有取消/防重复提交的弹窗，分别验证本机路径和服务器路径。
