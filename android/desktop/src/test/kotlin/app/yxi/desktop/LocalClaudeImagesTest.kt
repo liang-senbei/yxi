@@ -14,6 +14,9 @@ class LocalClaudeImagesTest {
         val source = File(root, "preview.png").apply { writeBytes(original) }
         val store = LocalClaudeImages(File(root, "snapshots"))
         val saved = store.capture(source)
+        val pasted = store.capture("粘贴图片.png", original)
+        assertEquals(saved.remotePath, pasted.remotePath)
+        assertEquals("粘贴图片.png", pasted.name)
         source.writeText("source changed")
         val preview = store.preview(saved)
         assertTrue(preview.isImage)

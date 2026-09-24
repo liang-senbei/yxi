@@ -138,6 +138,29 @@ import java.io.File
     LaunchedEffect(history.size, messages.size, approvals.size, followLatest) {
         if (followLatest && !dragging) view.scroll.scrollToItem(1 + history.size + messages.size + approvals.size, view.scroll.layoutInfo.viewportSize.height.coerceAtLeast(1))
     }
+    fun pasteImage(): Boolean {
+        if (!Attach.hasClipboardImage()) return false
+        if (capturingImages) return true
+        capturingImages = true; state.claudeImageCaptures.add(record.key); error = ""
+        scope.launch {
+            try {
+                require(imageDrafts.size < 4) { "每次最多4张图片" }
+                val reference = withContext(Dispatchers.IO) {
+                    val bitmap = checkNotNull(Attach.clipboardImage()) { "无法读取剪贴板图片" }
+                    require(bitmap.width.toLong() * bitmap.height <= 48_000_000L) { "图片超过4800万像素，请先缩小" }
+                    state.localClaudeTasks.images.capture("粘贴图片.png", Attach.pngBytes(bitmap))
+                }
+                val references = (imageDrafts.toList() + reference).distinctBy { it.remotePath }
+                withContext(Dispatchers.IO) {
+                    require(references.sumOf { state.localClaudeTasks.images.load(it).size.toLong() } <= 12 * 1024 * 1024) { "图片总大小超过12MiB" }
+                }
+                if (imageDrafts.none { it.remotePath == reference.remotePath }) imageDrafts.add(reference)
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { error = e.message ?: "图片粘贴失败" }
+            finally { capturingImages = false; state.claudeImageCaptures.remove(record.key) }
+        }
+        return true
+    }
     fun send() {
         if (controller == null || !controller.ready || controller.busy || controller.cancelling || controller.changingModel || sending || capturingImages || controller.pendingApprovals.isNotEmpty() || (draft.value.text.isBlank() && imageDrafts.isEmpty())) return
         try { controller.enqueue(draft.value.text, imageDrafts.toList()) } catch (e: Exception) { error = e.message.orEmpty(); return }
@@ -262,7 +285,8 @@ import java.io.File
             }
         }, modifier = imageButtonModifier, enabled = !capturingImages && imageDrafts.size < 4) { Text(if (capturingImages) "正在读取图片…" else "添加图片") }
         OutlinedTextField(draft.value, { draft.value = it }, Modifier.fillMaxWidth().onPreviewKeyEvent { event ->
-            if (event.type == KeyEventType.KeyDown && draft.value.composition == null && (event.key == Key.Enter || event.key == Key.NumPadEnter) && !event.isShiftPressed) { send(); true } else false
+            if (event.type == KeyEventType.KeyDown && event.key == Key.V && (event.isCtrlPressed || event.isMetaPressed) && pasteImage()) true
+            else if (event.type == KeyEventType.KeyDown && draft.value.composition == null && (event.key == Key.Enter || event.key == Key.NumPadEnter) && !event.isShiftPressed) { send(); true } else false
         }, label = { Text("消息 · Enter 发送，Shift+Enter 换行") }, minLines = 2, maxLines = 6)
         Row {
             TextButton(::send, modifier = sendButtonModifier, enabled = controller?.ready == true && !controller.busy && !controller.cancelling && !controller.changingModel && !sending && !capturingImages && controller.pendingApprovals.isEmpty() && (draft.value.text.isNotBlank() || imageDrafts.isNotEmpty())) { Text("发送") }

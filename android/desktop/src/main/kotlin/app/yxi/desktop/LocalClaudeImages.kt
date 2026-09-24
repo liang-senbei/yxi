@@ -9,10 +9,14 @@ internal class LocalClaudeImages(private val directory: File) {
     fun capture(source: File): InstructionAttachment {
         require(source.isFile) { "图片文件不存在" }
         val bytes = source.inputStream().use { it.readNBytes(MAX_BYTES + 1) }
+        return capture(source.name, bytes)
+    }
+    fun capture(name: String, bytes: ByteArray): InstructionAttachment {
+        require(name.isNotBlank() && name.length <= 500 && name.none { it < ' ' })
         ClaudeImageInput.fromBytes(bytes)
         val digest = contentHash(bytes)
         val target = File(directory, "$digest.json")
-        val reference = InstructionAttachment(source.name, PREFIX + digest)
+        val reference = InstructionAttachment(name, PREFIX + digest)
         val storage = DurableFile(target) { decode(it, digest) }
         if (target.exists()) load(reference) else storage.write(JSONObject().put("data", Base64.getEncoder().encodeToString(bytes)).toString())
         return reference
