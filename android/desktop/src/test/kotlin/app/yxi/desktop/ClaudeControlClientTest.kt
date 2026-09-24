@@ -14,6 +14,7 @@ class ClaudeControlClientTest {
         val writes = CopyOnWriteArrayList<JSONObject>()
         override suspend fun write(text: String): Boolean {
             val request = JSONObject(text); writes.add(request)
+            if (request.optString("type") == "user") return true
             if (request.getJSONObject("request").getString("subtype") == "initialize") respond(request, JSONObject())
             return true
         }
@@ -21,6 +22,31 @@ class ClaudeControlClientTest {
         fun respond(request: JSONObject, value: JSONObject) = emit(JSONObject().put("type", "control_response").put("response", JSONObject()
             .put("request_id", request.getString("request_id")).put("subtype", "success").put("response", value)))
         override fun close() { producer.close(); output.close() }
+    }
+    @Test fun `only one prompt is active and native results retain the session identity`(): Unit = runBlocking {
+        val fixture = Fixture()
+        ClaudeControlClient(fixture).use { client ->
+            client.initialize()
+            for (index in 1..2) {
+                val turn = async { client.prompt("turn-$index") }
+                withTimeout(2000) { while (fixture.writes.count { it.optString("type") == "user" } < index) delay(10) }
+                assertFailsWith<IllegalStateException> { client.prompt("duplicate") }
+                fixture.emit(JSONObject().put("type", "result").put("uuid", "result-$index").put("session_id", "session")
+                    .put("subtype", "success").put("is_error", false).put("result", "answer-$index"))
+                assertEquals("answer-$index", turn.await().getString("result"))
+            }
+            assertEquals("session", client.sessionId)
+            assertEquals("session", fixture.writes.last().getString("session_id"))
+        }
+    }
+    @Test fun `uncertain prompt closes the connection and cannot be replayed`(): Unit = runBlocking {
+        val fixture = Fixture()
+        ClaudeControlClient(fixture).use { client ->
+            client.initialize()
+            assertFailsWith<TimeoutCancellationException> { client.prompt("one", 100) }
+            assertFailsWith<IllegalStateException> { client.prompt("two") }
+            assertEquals(1, fixture.writes.count { it.optString("type") == "user" })
+        }
     }
     @Test fun `control replies correlate by request identity without submitting prompts`(): Unit = runBlocking {
         val fixture = Fixture()

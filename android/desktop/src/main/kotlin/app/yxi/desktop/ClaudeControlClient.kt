@@ -10,13 +10,14 @@ import java.io.InputStream
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 internal interface ClaudeControlTransport : AutoCloseable {
     val output: InputStream
     suspend fun write(text: String): Boolean
 }
 
-/** Claude stream-json control protocol, not ACP. No user prompt or approval is sent by this client. */
+/** Claude stream-json protocol, not ACP. Prompts require an explicit call; approvals are never automatic. */
 internal class ClaudeControlClient(private val transport: ClaudeControlTransport) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val pending = ConcurrentHashMap<String, CompletableDeferred<JSONObject>>()
@@ -24,6 +25,9 @@ internal class ClaudeControlClient(private val transport: ClaudeControlTransport
     private val writing = Mutex()
     private val initialization = Mutex()
     private var initialized = false
+    private val activeTurn = AtomicReference<CompletableDeferred<JSONObject>?>()
+    private val completedResults = ConcurrentHashMap.newKeySet<String>()
+    @Volatile var sessionId: String? = null; private set
     val events = Channel<JSONObject>(64)
     init {
         scope.launch {
@@ -43,7 +47,18 @@ internal class ClaudeControlClient(private val transport: ClaudeControlTransport
                                 if (response.optString("subtype") == "success") waiter.complete(response.optJSONObject("response") ?: JSONObject())
                                 else waiter.completeExceptionally(IllegalStateException("Claude 未完成控制请求；请核对运行器版本及原生配置"))
                             }
-                            "control_request" -> error("Claude 需要原生交互，尚未发送任务")
+                            "control_request" -> error("Claude 需要尚未支持的原生交互")
+                            "result" -> {
+                                val parent = value.opt("parent_tool_use_id")
+                                if (parent != null && parent != JSONObject.NULL) { events.send(value); continue }
+                                val uuid = value.getString("uuid"); check(uuid.isNotBlank())
+                                if (!completedResults.add(uuid)) continue
+                                val turn = checkNotNull(activeTurn.get())
+                                val nativeId = value.getString("session_id"); check(nativeId.isNotBlank())
+                                check(sessionId == null || sessionId == nativeId) { "Claude 会话身份发生变化" }
+                                sessionId = nativeId
+                                events.send(value); turn.complete(value)
+                            }
                             else -> events.send(value)
                         }
                     }
@@ -59,6 +74,24 @@ internal class ClaudeControlClient(private val transport: ClaudeControlTransport
     suspend fun settings(): JSONObject {
         check(initialized) { "请先初始化 Claude 控制连接" }
         return request("get_settings")
+    }
+    suspend fun prompt(text: String, timeoutMillis: Long = 600_000): JSONObject {
+        check(initialized && !closed.get()) { "Claude 控制连接尚未就绪" }
+        require(text.isNotBlank() && text.toByteArray(Charsets.UTF_8).size <= 1024 * 1024)
+        val result = CompletableDeferred<JSONObject>()
+        check(activeTurn.compareAndSet(null, result)) { "Claude 上一轮尚未结束" }
+        try {
+            return withTimeout(timeoutMillis) {
+                writing.withLock {
+                    check(!closed.get())
+                    check(transport.write(JSONObject().put("type", "user").put("session_id", sessionId.orEmpty())
+                        .put("parent_tool_use_id", JSONObject.NULL).put("uuid", UUID.randomUUID().toString())
+                        .put("message", JSONObject().put("role", "user").put("content", text)).toString() + "\n")) { "Claude 提示词未写入" }
+                }
+                result.await()
+            }
+        } catch (e: Exception) { close(); throw e }
+        finally { activeTurn.compareAndSet(result, null) }
     }
     private suspend fun request(subtype: String): JSONObject {
         check(!closed.get()) { "Claude 控制连接已关闭" }
@@ -82,6 +115,7 @@ internal class ClaudeControlClient(private val transport: ClaudeControlTransport
             runCatching { transport.close() }
             pending.values.forEach { it.completeExceptionally(IllegalStateException("Claude 控制连接已关闭，未确认结果")) }
             pending.clear(); events.close(); scope.cancel()
+            activeTurn.getAndSet(null)?.completeExceptionally(IllegalStateException("Claude 轮次结果未确认，连接已关闭"))
         }
     }
 }
