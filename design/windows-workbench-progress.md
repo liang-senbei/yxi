@@ -1,3 +1,10 @@
+## 2026-09-24 Claude 临时订阅凭据覆盖层
+
+- `31a0f49c766760d0bbe9566c3e3ee4695ddaa25b` 新增 ClaudeSubscriptionSettings：进程环境移除API Key/Bearer/旧Base URL，临时 --settings 清空API凭据和apiKeyHelper并指定官方端点；不写入用户配置文件。该层尚未接入产品入口，不能独立证明订阅或企业策略兼容性。
+- 原生Claude2.1.280测试新增旧settings.json内API Key、无效旧端点和密钥助手冲突场景，测试仅将覆盖层端点替换为回环协议服务。构建run.3ZrUKh；run.tSVVxf 1项通过，0失败/错误/跳过，覆盖4种请求组合。
+- 覆盖场景实际请求api=false/oauth=true，用户settings字节未改变，助手标记未出现。证据 `.artifacts/claude-auth-requests/claude-request-overlay.jsonl`。先前混合凭据场景的API优先断言也通过。
+- 构建最初因不足4GiB被拒；删除61份已完成、带org.yxi.test-isolation标签且无容器引用的context副本后空闲5.6GiB，报告/镜像/生产资源均保留。审计 `/root/.cache/yxi-isolated-tests/removed-contexts-subscription-overlay.json`。
+- 磁盘订阅登录、项目/企业配置和真实官方端点仍待验证；未修改真实账号、未发布。
 ## 2026-09-24 Claude 原生请求凭据实证
 
 - `d2c61bad` 新增真实Claude2.1.280到隔离容器回环Anthropic协议服务的三组合请求验证；首跑run.5ha2DM在测试脚本类加载器处NPE，未发请求。`52098d2f217ccb7b50ff9733101e6bc119c8ade2` 修正类加载器并保留测试输出。
