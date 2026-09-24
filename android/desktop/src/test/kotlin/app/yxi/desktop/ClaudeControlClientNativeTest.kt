@@ -42,6 +42,24 @@ class ClaudeControlClientNativeTest {
             withTimeout(5000) { while (ProcessHandle.of(rejectedPid).map { it.isAlive }.orElse(false)) delay(20) }
             val requests = File(root, "requests.jsonl")
             if (requests.exists()) assertTrue(requests.readLines().map(::JSONObject).all { it.getJSONArray("messages").length() == 0 })
+            val conversation = LocalClaudeControlTransport.start(runtime, home, mapOf("HOME" to home.path, "PATH" to "/usr/bin:/bin",
+                "CLAUDE_CODE_OAUTH_TOKEN" to "synthetic-control-token", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" to "1"),
+                ClaudeSubscriptionSettings.overlay().apply { getJSONObject("env").put("ANTHROPIC_BASE_URL", endpoint) })
+            val conversationPid = conversation.processId
+            ClaudeControlClient(conversation).use { client ->
+                client.initialize()
+                val first = client.prompt("KEEP-control-first", 30000)
+                assertFalse(first.getBoolean("is_error")); assertTrue(first.getString("result").contains("answer:KEEP-control-first"))
+                val second = client.prompt("FOLLOWUP-control-second", 30000)
+                assertFalse(second.getBoolean("is_error")); assertTrue(second.getString("result").contains("answer:FOLLOWUP-control-second"))
+                assertEquals(first.getString("session_id"), second.getString("session_id"))
+                assertEquals(second.getString("session_id"), client.sessionId)
+                File("/results/claude-control-second-turn.json").writeText(second.toString(2))
+            }
+            withTimeout(5000) { while (ProcessHandle.of(conversationPid).map { it.isAlive }.orElse(false)) delay(20) }
+            val turns = requests.readLines().map(::JSONObject)
+            val secondRequest = turns.last { it.getJSONArray("messages").toString().contains("FOLLOWUP-control-second") }
+            assertTrue(secondRequest.getJSONArray("messages").toString().contains("KEEP-control-first"))
         } finally { server.destroyForcibly(); server.waitFor() }
     }
 }
