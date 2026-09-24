@@ -1,3 +1,9 @@
+## 2026-09-24 官方订阅适配核对与 Claude 原生认证探测
+
+- 核对当前 OfficialProviderCards/Profiles：除Codex本地专门进程校验外，内置卡片仍主要为说明，不能作为全部运行器已默认应用官方订阅的证明。已委派cc-yxi进行Grok官方认证来源/线路验证能力审计，尚在执行。
+- `4fa64bd3c7b66365d8655dfff7621042424ce64a` 增加 ClaudeAuthenticationNativeTest，固定Claude2.1.280、隔离Docker网络和HOME，执行auth status --json。构建run.kabH2t；run.y2ioVk 1项通过，0失败/错误/跳过。
+- 空配置返回 loggedIn=false/authMethod=none；合成API Key返回 loggedIn=true/authMethod=api_key/apiKeySource=ANTHROPIC_API_KEY，两者apiProvider均为firstParty。没有密钥回显。因此loggedIn或firstParty不能判定订阅有效，也不证明真实账号可请求。证据 `.artifacts/claude-auth-native/`。
+- 官方认证优先级资料：https://code.claude.com/docs/en/authentication#authentication-precedence 。后续适配必须分别核对原生认证来源与请求路由，不能仅清一个环境变量。当前未应用真实账号配置，未发布。
 ## 2026-09-24 本地 ACP 通知接线
 
 - `dfb5cc6c18a0f617cc82dbf23fbd3b0d0606c603` 本地ACP管理器将控制器通知连到Notify现有偏好过滤，使用完整taskKey和用户显示名称。Main新增本地登记优先的通知定位，支持本地Codex/OpenCode/ACP记录，否则查找远端，不新建或恢复原生会话。
