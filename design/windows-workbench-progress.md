@@ -1,3 +1,9 @@
+## 2026-09-24 Claude 持久指令与消息控制器
+
+- 新增ClaudeTaskController：发送前配置核对、先持久化Delivering再写原生输入、消费文本/工具/审批事件、等待结果消息已处理后保存Accepted及Completed/Failed。发送前失败保留Local；发送后未确认记Unknown并关闭连接，不重发。审批由显式动作回传。
+- Windows ClaudeTaskControllerTest 3项及ClaudeControlClientTest 6项通过，无失败/错误/跳过，覆盖落盘先于IO、消息先于完成记录、成功/失败回执、前置检查失败、断连后Unknown与防重放。
+- `22b89a6720e26af422e059caf5e2b6e688e00517` 构建run.kSXadZ；ClaudeControlClientNativeTest run.NKsGVw 1项通过，0失败/错误/跳过。真实CLI通过控制器完成两轮（含拒绝Bash），重新加载队列得到两条Accepted/Completed且原生turn UUID不同，消息已消费、审批清空、拒绝文件未生成，PID回收。
+- 证据 `.artifacts/claude-control/claude-controller-queue.json`及Windows XML。原生测试使用回环端点校验替身，不代表真实官方订阅权益；会话索引和正式对话UI尚未接线，未发布。
 ## 2026-09-24 Claude 原生工具审批回传
 
 - 控制客户端接入can_use_tool和control_cancel_request：只在活跃轮次登记请求，原始input私有快照，显式允许本次或拒绝，不发送updatedPermissions；重复/已取消请求不能再次审批，结果到达后清理残余请求。原生传输启用permission-prompt-tool stdio。
