@@ -1,3 +1,9 @@
+## 2026-09-24 Claude 原生请求凭据实证
+
+- `d2c61bad` 新增真实Claude2.1.280到隔离容器回环Anthropic协议服务的三组合请求验证；首跑run.5ha2DM在测试脚本类加载器处NPE，未发请求。`52098d2f217ccb7b50ff9733101e6bc119c8ade2` 修正类加载器并保留测试输出。
+- 构建run.gGCNOQ；ClaudeAuthenticationRequestTest run.6IWZL6 1项通过，0失败/错误/跳过；三组合都完成原生文本轮次。服务端仅保存测试凭据匹配布尔值，不存请求头值。
+- 逐份JSONL核对：API单独存在为api=true/oauth=false；OAuth单独存在为api=false/oauth=true；两者并存为api=true/oauth=false。结合先前混合auth status的oauth_token，可确认该状态字段不能代表实际请求凭据优先级。
+- 证据 `.artifacts/claude-auth-requests/`；仅针对该固定版本、进程环境、回环自定义端点。磁盘登录/项目及企业设置、真实订阅有效性尚未验证；真实官方订阅启动适配未完成，未发布。
 ## 2026-09-24 Claude 混合凭据状态与 Grok 审计
 
 - `cc46f378` 扩展原生Claude2.1.280测试到空配置/API/OAuth/两者并存，首跑 run.5B77q2 失败，推翻了将auth status等同请求优先级的假设：两者并存时authMethod仍为oauth_token，同时apiKeySource=ANTHROPIC_API_KEY。
