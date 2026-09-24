@@ -1,3 +1,8 @@
+## 2026-09-24 Claude 有效官方线路校验
+
+- 新增requireOfficialRoute，消费原生get_settings的effective数据：只接受HTTPS api.anthropic.com根端点（默认或443端口），拒绝userinfo/query/fragment/其他路径与伪装域名；检查API/Bearer/custom headers/profile/federation/云开关、helper、网关和登录方式冲突。错误不回显地址中的凭据值。
+- `dd972d2e7cbb8e927dbf4a4d7e349e7eaa70539a` 进一步将空白字符凭据视为未解决覆盖，不能当作已清空。Windows ClaudeSubscriptionSettingsTest 5项通过，0失败/错误/跳过，21秒构建；XML保存在 `.artifacts/windows-claude-subscription-guard/`。
+- 此校验函数尚未和原生控制连接/实际任务发送连成完整流程，不能据单元测试宣称官方订阅应用已完成；真实权益也未验证。未发布。
 ## 2026-09-24 Claude 有效配置控制接口实证
 
 - 固定官方2.1.280二进制静态检查发现get_settings控制请求及连接类型限制，不能仅凭字符串认为可用。`7bf9fa3a`首跑run.Y4X9Dw初始化超时，未得到接口结论。
