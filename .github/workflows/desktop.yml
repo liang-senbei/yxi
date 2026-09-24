@@ -48,6 +48,11 @@ jobs:
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File dev/test-link-windows-keys.ps1 2>&1 | Tee-Object smoke-link-keys.txt
           if ($LASTEXITCODE -ne 0) { throw 'Windows SSH key update contract failed' }
 
+      - name: Workbench core regression
+        shell: pwsh
+        timeout-minutes: 20
+        run: ./dev/test-workbench.ps1
+
       - name: 打包（jpackage app-image + uber jar）
         working-directory: android
         shell: bash
@@ -137,6 +142,8 @@ jobs:
           path: |
             smoke-*.txt
             smoke-browser.png
+            android/desktop/build/test-results/test/*.xml
+            android/desktop/build/reports/tests/test/
           if-no-files-found: ignore
 
   transfer:

@@ -1,0 +1,16 @@
+app.yxi.desktop.AcpClientTest
+app.yxi.desktop.AcpTaskControllerTest
+app.yxi.desktop.ClaudeControlClientTest
+app.yxi.desktop.ClaudeTaskControllerTest
+app.yxi.desktop.ClaudeSessionLeaseTest
+app.yxi.desktop.ClaudeProcessOccupancyTest
+app.yxi.desktop.LocalClaudeTasksTest
+app.yxi.desktop.LocalClaudeHistoryTest
+app.yxi.desktop.LocalCodexTaskRegistryTest
+app.yxi.desktop.PluginMcpImportTest
+app.yxi.desktop.SharedMcpRegistryTest
+app.yxi.desktop.ScheduleTargetAdapterTest
+app.yxi.desktop.ScheduledTasksTest
+app.yxi.agent.TranscriptBranchTest
+app.yxi.agent.TranscriptBranchEdgeTest
+app.yxi.agent.TranscriptIncrementalUpdateTest
