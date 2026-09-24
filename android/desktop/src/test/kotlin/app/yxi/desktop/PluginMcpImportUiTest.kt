@@ -51,11 +51,10 @@ class PluginMcpImportUiTest {
                         click(origin.x + 125, origin.y + 48)
                         withTimeout(4000) { while (dialogBounds == null) delay(20) }
                         delay(250)
-                        val dialog = java.awt.Window.getWindows().single { it.isVisible && it !== window && it is java.awt.Dialog }
                         assertTrue(registry.records.isEmpty()); assertFalse(registryFile.exists())
-                        screenshot("plugin-mcp-preview", dialog)
+                        screenshot("plugin-mcp-preview")
                         val box = checkNotNull(dialogBounds)
-                        val dialogOrigin = (dialog as javax.swing.JDialog).contentPane.locationOnScreen
+                        val dialogOrigin = window.contentPane.locationOnScreen
                         click(dialogOrigin.x + box.right.toInt() - 75, dialogOrigin.y + box.bottom.toInt() - 35)
                         withTimeout(4000) { while (registry.records.isEmpty()) delay(20) }
                         val record = registry.records.single()
