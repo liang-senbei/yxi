@@ -55,6 +55,8 @@ class ClaudeSubscriptionCheckUiTest {
                             Robot().apply { mouseMove(origin.x + x, origin.y + y); mousePress(InputEvent.BUTTON1_DOWN_MASK); mouseRelease(InputEvent.BUTTON1_DOWN_MASK) }
                         }
                         try {
+                            window.toFront(); window.requestFocus()
+                            delay(300)
                             withTimeout(5000) {
                                 while (bounds == null) {
                                     if (window.isShowing) click(65, 20)
@@ -71,7 +73,10 @@ class ClaudeSubscriptionCheckUiTest {
                             withContext(Dispatchers.IO) { Robot().apply { keyPress(KeyEvent.VK_ESCAPE); keyRelease(KeyEvent.VK_ESCAPE) } }
                             if (mode == "cancel") withTimeout(3000) { while (!cancelled) delay(20) }
                             assertEquals(1, calls)
-                        } catch (e: Throwable) { failure = e }
+                        } catch (e: Throwable) {
+                            ImageIO.write(Robot().createScreenCapture(java.awt.Rectangle(window.locationOnScreen, window.size)), "png", File(results, "claude-subscription-$mode-failure.png"))
+                            failure = e
+                        }
                         finally { exitApplication() }
                     }
                 }
