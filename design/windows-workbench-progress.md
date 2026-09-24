@@ -1,3 +1,10 @@
+## 2026-09-24 同连接核对本地 Claude 身份与有效端点
+
+- `9d0d07e7d87f9062672de317d405fad1234109f4` 新增LocalClaudeSubscription.prepare：在同一原生控制连接上initialize读取account来源，再get_settings核对effective端点/认证覆盖；失败关闭，成功返回仍存活的Prepared连接供后续任务使用。无用户prompt写入。
+- 本地检查弹窗默认接入该准备流程，并在结束时关闭连接；成功文案明确认证与有效端点已核对但订阅额度未验证。服务器检查仍保留其身份检查范围。
+- Windows LocalClaudeSubscriptionTest 2项 + ClaudeSubscriptionSettingsTest 5项通过，无失败/错误/跳过；覆盖成功连接保留、身份/端点冲突关闭及请求序列。
+- 构建run.8kOC87；ClaudeControlClientNativeTest run.do0YV4 1项通过，0失败/错误/跳过。真实Claude在OAuth身份正确但effective为回环端点时被准备流程按官方端点错误拒绝，进程回收、无模型messages。
+- 正式任务发送/权限交互与真实官方订阅权益尚未完成；未发布。
 ## 2026-09-24 原生 Claude 控制客户端
 
 - `817bec61d1c4868a00a380bde6505015e531bc8c` 新增ClaudeControlClient与LocalClaudeControlTransport，使用Claude stream-json控制协议（非ACP），独立argv/环境/进程所有权，UUID响应关联、2MiB单行限制、30秒请求限制、断连失败及清理。当前只开放initialize/get_settings，不发送用户prompt；未知交互请求关闭连接，不自动批准。
