@@ -1,3 +1,9 @@
+## 2026-09-24 Claude 有效配置控制接口实证
+
+- 固定官方2.1.280二进制静态检查发现get_settings控制请求及连接类型限制，不能仅凭字符串认为可用。`7bf9fa3a`首跑run.Y4X9Dw初始化超时，未得到接口结论。
+- `0555d2c844b587d201e8d3204a45c54908a04dcd` 将原生启动端点指向隔离回环服务、保留诊断控制帧；构建run.YFuYjD，ClaudeSettingsControlNativeTest run.qy3aKc 1项通过，0失败/错误/跳过。
+- 手动核对原生响应：initialize成功，get_settings success返回effective（含真实合并后的ANTHROPIC_BASE_URL及认证env）、sources（本例flagSettings）和applied模型/effort。测试只发initialize/get_settings，回环服务未收到模型messages。
+- 证据 `.artifacts/claude-control/`。这证明当前版本可在发送前读取有效配置；尚未集成到生产会话和验证托管端点冲突。原生账号权益/正式订阅应用仍未完成，未发布。
 ## 2026-09-24 服务器认证检查取消与错误隔离
 
 - `f749a8a8` 新增真实SSH下取消、超大输出、无效JSON、非零退出测试。首跑run.HFjmLB中原生身份检查通过，取消场景失败：JSch读取被中断时抛InterruptedIOException，未转换为协程取消。
