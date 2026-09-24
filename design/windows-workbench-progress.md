@@ -1,3 +1,9 @@
+## 2026-09-24 真实 Claude 历史与锁恢复整链
+
+- cbff66d2de37fbc84b00adae93bde27a460b4d92，构建run.Mnvr7s，ClaudeControlClientNativeTest run.7uK2Lz 1项通过，0失败/错误/跳过，4.229秒。
+- 产品历史读取器解析CLI 2.1.280生成的19项，核对首轮用户消息、停止后助手回复及Bash工具结果。实际连接存活时第二次恢复同ID被占用锁拒绝，原进程仍活；关闭后恢复原ID及历史继续通过。
+- 证据 `.artifacts/claude-control/claude-native-history.json`。这仍是容器内原生CLI+合成凭据+回环模型；恢复UI、外部Claude占用检测及Windows完整交互尚未完成，未发布。
+
 ## 2026-09-24 本地 Claude 历史只读读取层
 
 - LocalClaudeHistory在原配置目录projects下按完整UUID精确定位单个JSONL，不使用标题或mtime猜测，不跟随子目录/文件符号链接；核对sessionId/cwd，使用已有Transcript解析器保留分支及工具语义。
