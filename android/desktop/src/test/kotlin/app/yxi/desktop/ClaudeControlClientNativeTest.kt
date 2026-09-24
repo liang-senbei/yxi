@@ -29,6 +29,17 @@ class ClaudeControlClientNativeTest {
                 assertFailsWith<IllegalStateException> { ClaudeSubscriptionSettings.requireOfficialRoute(settings) }
             }
             withTimeout(5000) { while (ProcessHandle.of(pid).map { it.isAlive }.orElse(false)) delay(20) }
+            var rejectedPid = 0L
+            val preparation = LocalClaudeSubscription { selected, directory ->
+                val rejected = LocalClaudeControlTransport.start(selected, directory, mapOf("HOME" to home.path, "PATH" to "/usr/bin:/bin",
+                    "CLAUDE_CODE_OAUTH_TOKEN" to "synthetic-control-token", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" to "1"),
+                    ClaudeSubscriptionSettings.overlay().apply { getJSONObject("env").put("ANTHROPIC_BASE_URL", endpoint) })
+                rejectedPid = rejected.processId
+                ClaudeControlClient(rejected)
+            }
+            val failure = assertFailsWith<IllegalStateException> { preparation.prepare(runtime, home) }
+            assertTrue(failure.message.orEmpty().contains("官方端点"))
+            withTimeout(5000) { while (ProcessHandle.of(rejectedPid).map { it.isAlive }.orElse(false)) delay(20) }
             val requests = File(root, "requests.jsonl")
             if (requests.exists()) assertTrue(requests.readLines().map(::JSONObject).all { it.getJSONArray("messages").length() == 0 })
         } finally { server.destroyForcibly(); server.waitFor() }

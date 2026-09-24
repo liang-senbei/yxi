@@ -6,6 +6,12 @@ import java.net.URI
 /** Process-only credential overlay. Not sufficient by itself to verify subscription entitlement
  * or override managed/cloud policy; callers must verify the native provider before enabling send. */
 internal object ClaudeSubscriptionSettings {
+    fun requireControlIdentity(initialization: JSONObject) {
+        val account = initialization.optJSONObject("account") ?: error("Claude 未返回账号来源，官方订阅未启用")
+        check(account.optString("apiProvider") == "firstParty") { "Claude 当前仍使用其他提供方" }
+        check(account.optString("apiKeySource").isEmpty()) { "Claude 控制连接仍使用 API 凭据，官方订阅未启用" }
+        check(account.optString("tokenSource") in setOf("CLAUDE_CODE_OAUTH_TOKEN", "claude.ai")) { "Claude 控制连接尚未确认原生 OAuth 来源" }
+    }
     /** Consumes get_settings.response, never raw settings files or a claimed provider label. */
     fun requireOfficialRoute(snapshot: JSONObject) {
         val effective = snapshot.optJSONObject("effective") ?: error("Claude 未返回有效配置，无法确认官方线路")

@@ -11,10 +11,11 @@ import java.io.File
 
 @Composable internal fun ClaudeSubscriptionCheck(runtime: LocalRuntimeInstallation, dialogModifier: Modifier = Modifier,
     verify: suspend (LocalRuntimeInstallation, File) -> Unit = { selected, cwd ->
-        ClaudeSubscriptionProbe.verify(selected.command, cwd, System.getenv() + ("CLAUDE_CONFIG_DIR" to selected.home))
+        LocalClaudeSubscription().prepare(selected, cwd).use { }
     }) {
     ClaudeSubscriptionCheckAction(runtime.id, runtime.command.joinToString(" "), "需要检查的本机工作目录",
-        System.getProperty("user.home"), runtime.ready, dialogModifier) { directory ->
+        System.getProperty("user.home"), runtime.ready, dialogModifier,
+        "认证来源及有效官方端点核对通过。订阅额度尚未验证，此检查不会应用配置到任务。") { directory ->
         val cwd = File(directory)
         require(cwd.isAbsolute && cwd.isDirectory) { "请选择已存在的本机工作目录" }
         verify(runtime, cwd)
@@ -32,7 +33,9 @@ import java.io.File
 }
 
 @Composable private fun ClaudeSubscriptionCheckAction(identity: Any, description: String, directoryLabel: String,
-    initialDirectory: String, ready: Boolean, dialogModifier: Modifier, verify: suspend (String) -> Unit) {
+    initialDirectory: String, ready: Boolean, dialogModifier: Modifier,
+    successMessage: String = "认证来源核对通过。订阅额度与实际任务线路尚未验证，此检查不会应用配置到任务。",
+    verify: suspend (String) -> Unit) {
     var open by remember(identity) { mutableStateOf(false) }
     TextButton({ open = true }, enabled = ready) { Text("检查官方认证") }
     if (open) {
@@ -58,7 +61,7 @@ import java.io.File
                 scope.launch {
                 try {
                     verify(requestedDirectory)
-                    result = "认证来源核对通过。订阅额度与实际任务线路尚未验证，此检查不会应用配置到任务。"
+                    result = successMessage
                 } catch (e: CancellationException) { throw e }
                 catch (e: Exception) { error = e.message ?: "认证检查未完成" }
                 finally { busy = false }
