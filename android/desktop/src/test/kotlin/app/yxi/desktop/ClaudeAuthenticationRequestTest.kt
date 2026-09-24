@@ -9,10 +9,14 @@ class ClaudeAuthenticationRequestTest {
     @Test fun `native Claude request headers identify isolated credential combinations`() {
         check(!System.getenv("YXI_ISOLATED_TEST_RUN").isNullOrBlank())
         check(File("/.dockerenv").exists() && File("/sys/class/net").list()?.toSet() == setOf("lo"))
-        for ((name, api, oauth) in listOf(Triple("api", true, false), Triple("oauth", false, true), Triple("mixed", true, true), Triple("overlay", true, true), Triple("project-overlay", true, true))) {
+        for ((name, api, oauth) in listOf(Triple("api", true, false), Triple("oauth", false, true), Triple("mixed", true, true), Triple("overlay", true, true), Triple("project-overlay", true, true),
+            Triple("permission-baseline", false, true), Triple("permission-overlay", true, true))) {
             val root = File("/sandbox/tmp/claude-request-$name").apply { mkdirs() }
             val overlay = name.endsWith("overlay")
-            val directory = if (name == "project-overlay") File(root, "workspace").apply { mkdirs() } else root
+            val permission = name.startsWith("permission-")
+            val directory = if (permission) File(root, "project").apply { mkdirs() } else if (name == "project-overlay") File(root, "workspace").apply { mkdirs() } else root
+            if (permission) File(directory, "retained-tool.txt").writeText("YXI_PERMISSION_CONTENT")
+            val prompt = if (permission) "KEEP-container-first" else "KEEP-auth-request"
             val script = File(root, "server.py").apply { writeText(ClaudeAuthenticationRequestTest::class.java.getResource("/rewind/anthropic_stub.py")!!.readText()) }
             val server = ProcessBuilder("python3", script.path, root.path).redirectErrorStream(true).redirectOutput(File(root, "server.log")).start()
             var process: Process? = null
@@ -33,18 +37,18 @@ class ClaudeAuthenticationRequestTest {
                         .put("effortLevel", "low").toString())
                     settings.readBytes()
                 } else null
-                val projectFiles = if (name == "project-overlay") listOf("settings.json", "settings.local.json").associate { filename ->
+                val projectFiles = if (name == "project-overlay" || name == "permission-overlay") listOf("settings.json", "settings.local.json").associate { filename ->
                     val file = File(directory, ".claude/$filename").apply { parentFile.mkdirs() }
                     file.writeText(JSONObject().put("env", JSONObject().put("ANTHROPIC_API_KEY", "sk-ant-yxi-container-test-only")
                         .put("ANTHROPIC_AUTH_TOKEN", "project-conflicting-token").put("ANTHROPIC_BASE_URL", "http://127.0.0.1:1"))
-                        .put("permissions", JSONObject().put("deny", org.json.JSONArray().put("Bash"))).toString())
+                        .put("permissions", JSONObject().put("deny", org.json.JSONArray().put(if (permission) "Read" else "Bash"))).toString())
                     file to file.readBytes()
                 } else emptyMap()
                 val overlayArgs = if (overlay) listOf("--settings", ClaudeSubscriptionSettings.overlay().apply {
                     // The test substitutes only the endpoint; production defaults remain official.
                     getJSONObject("env").put("ANTHROPIC_BASE_URL", endpoint)
                 }.toString()) else emptyList()
-                process = ProcessBuilder(listOf("/opt/native/claude", "-p", "KEEP-auth-request", "--output-format", "json", "--max-turns", "1") + overlayArgs)
+                process = ProcessBuilder(listOf("/opt/native/claude", "-p", prompt, "--output-format", "json", "--max-turns", if (permission) "3" else "1") + overlayArgs)
                     .directory(directory).redirectOutput(stdout).redirectError(File(root, "stderr.txt")).apply {
                         environment().clear()
                         environment().putAll(mapOf("HOME" to root.path, "PATH" to "/usr/bin:/bin", "CLAUDE_CONFIG_DIR" to File(root, ".claude").path,
@@ -63,9 +67,18 @@ class ClaudeAuthenticationRequestTest {
                 stdout.copyTo(File("/results/claude-request-$name-output.json"), overwrite = true)
                 File(root, "stderr.txt").copyTo(File("/results/claude-request-$name-error.txt"), overwrite = true)
                 check(process.exitValue() == 0) { "$name native CLI failed" }
-                assertTrue(stdout.readText().contains("answer:KEEP-auth-request"))
+                assertTrue(stdout.readText().contains("answer:$prompt"))
                 val messages = requests.readLines().map(::JSONObject).filter { it.getJSONArray("messages").length() > 0 }
                 assertTrue(messages.isNotEmpty())
+                if (permission) {
+                    val content = messages.last().getJSONArray("messages").toString()
+                    if (!overlay) assertTrue(content.contains("YXI_PERMISSION_CONTENT"), "Control must actually read the file")
+                    else {
+                        assertFalse(content.contains("YXI_PERMISSION_CONTENT"))
+                        val denials = JSONObject(stdout.readText()).getJSONArray("permission_denials")
+                        assertTrue((0 until denials.length()).any { denials.getJSONObject(it).optString("tool_name") == "Read" }, "Native CLI must report a Read permission denial")
+                    }
+                }
                 if (name == "api") assertTrue(messages.all { it.getBoolean("fixture_api_header") })
                 if (name == "oauth") assertTrue(messages.all { it.getBoolean("fixture_oauth_header") })
                 if (name == "mixed") assertTrue(messages.all { it.getBoolean("fixture_api_header") && !it.getBoolean("fixture_oauth_header") })
