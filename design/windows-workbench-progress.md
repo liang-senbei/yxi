@@ -1,3 +1,9 @@
+## 2026-09-24 真实 CLI 进程占用扫描验证
+
+- 49de341eef933465a50abbba7fcbdfb9034e626b，构建run.MAsZwZ；ClaudeControlClientNativeTest run.v2rD6Q 1项通过，0失败/错误/跳过，4.238秒。
+- ProcessHandle扫描识别实际CLI 2.1.280的目标session-id，错误指向真实PID；随机其他sessionId未被拦截。后续重复连接拒绝、历史读取、关闭恢复、模型切换及审批停止整链继续通过。
+- 证据 `.artifacts/claude-control/claude-process-occupancy.json`。检测读取启动参数但不输出或持久化完整命令行；本次容器使用合成凭据。--continue及不可读参数仍无法确认外部空闲，Windows实际CLI扫描未验收，未发布。
+
 ## 2026-09-24 外部 Claude 显式会话占用识别
 
 - ClaudeProcessOccupancy读取ProcessHandle参数，识别Claude可执行文件/当前选定原生程序/官方npm CLI脚本中的--resume、-r、--session-id及等号形式；精确匹配目标UUID，恢复启动前发现owner则拒绝并仅提示PID。
