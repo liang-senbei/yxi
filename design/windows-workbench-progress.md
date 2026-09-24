@@ -1,3 +1,9 @@
+## 2026-09-24 真实 CLI 图片发送整链验证
+
+- 源码1525bc8b330bc79a1aa824a8d2cfb2a011c41e3c，隔离构建run.uGQRDg；ClaudeControlClientNativeTest run.YqOewA 1项通过，0失败/错误/跳过，4.806秒。
+- 真实Claude CLI 2.1.280通过持久控制器发送本地图片快照；原PNG在发送前删除，回环HTTP请求media_type=image/png且解码字节与原图逐字节一致。收到完成回执后继续下一轮文本成功，已有设置/审批/停止/恢复/定时回归仍通过。
+- 证据 `.artifacts/claude-control/claude-native-image.json`。测试只用容器生成的12x12图片及合成凭据，不证明真实模型识图质量。图片选择/预览实际UI、历史图片富展示及快照清理仍待完成；线上1.4.15不包含这些发布后新增代码。
+
 ## 2026-09-24 已发送图片消息显示
 
 - ClaudeMessage携带已入队的附件引用，发送后消息保留对应快照；纯图片不再渲染空白文本。ClaudeSentImages读取快照后提供只读缩略图/放大预览，不显示移除按钮，失败显示文件名和原因。
