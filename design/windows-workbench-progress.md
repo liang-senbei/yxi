@@ -1,3 +1,10 @@
+## 2026-09-24 Claude 原生思考强度控制验证
+
+- 3283495599648711d51b6105c8de15fe287ca5b9增加setEffort，经apply_flag_settings.settings.effortLevel发送；与模型切换/发送共用互斥，get_settings确认applied.effort后才解除操作占用，不确认则关闭连接。
+- 构建run.vPqdLy。测试入口不接受通配类名，未启动测试；改为显式类名后NativeTest run.X05hwa 1项、ControlClientTest run.JLWgis 9项通过，均0失败/错误/跳过。真实CLI 2.1.280应用low后，applied.effort和下一轮HTTP output_config.effort均为low。
+- 证据 `.artifacts/claude-control/claude-effort-settings.json`。接口线索：https://github.com/anthropics/claude-agent-sdk-python/issues/981；实际支持由本次隔离回环测试确认，不据旧issue猜测版本能力。
+- 滑块/模型支持档位/恢复后的强度设置接线仍待完成，未发布。
+
 ## 2026-09-24 真实 CLI 进程占用扫描验证
 
 - 49de341eef933465a50abbba7fcbdfb9034e626b，构建run.MAsZwZ；ClaudeControlClientNativeTest run.v2rD6Q 1项通过，0失败/错误/跳过，4.238秒。
