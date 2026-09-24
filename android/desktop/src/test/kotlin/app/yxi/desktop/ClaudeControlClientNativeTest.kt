@@ -47,6 +47,10 @@ class ClaudeControlClientNativeTest {
                 "CLAUDE_CODE_OAUTH_TOKEN" to "synthetic-control-token", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" to "1"),
                 ClaudeSubscriptionSettings.overlay().apply { getJSONObject("env").put("ANTHROPIC_BASE_URL", endpoint) })
             val conversationPid = conversation.processId
+            assertFailsWith<IllegalStateException> {
+                LocalClaudeControlTransport.start(runtime, home, resumeSessionId = conversation.requestedSessionId)
+            }
+            assertTrue(ProcessHandle.of(conversationPid).map { it.isAlive }.orElse(false))
             ClaudeControlClient(conversation, conversation.requestedSessionId).use { client ->
                 client.initialize()
                 val first = client.prompt("KEEP-control-first", 30000)
@@ -99,6 +103,14 @@ class ClaudeControlClientNativeTest {
                 assertEquals(first.getString("session_id"), continued.getString("session_id"))
             }
             withTimeout(5000) { while (ProcessHandle.of(conversationPid).map { it.isAlive }.orElse(false)) delay(20) }
+            val historyRecord = LocalCodexTaskRecord(conversation.requestedSessionId, "fixture", "fixture", runtime.home,
+                home.canonicalPath, "History", "fixture", 1L, "claude", "official:claude")
+            val history = LocalClaudeHistory.read(historyRecord)
+            assertTrue(history.any { it is app.yxi.agent.ChatItem.UserText && it.text.contains("KEEP-control-first") })
+            assertTrue(history.any { it is app.yxi.agent.ChatItem.AssistantText && it.markdown.contains("answer:FOLLOWUP-after-stop") })
+            assertTrue(history.any { it is app.yxi.agent.ChatItem.ToolCall && it.name == "Bash" && it.result != null })
+            File("/results/claude-native-history.json").writeText(JSONObject().put("items", history.size)
+                .put("userAndAssistantVerified", true).put("toolResultVerified", true).put("duplicateConnectionRejected", true).toString(2))
             val requestsBeforeResume = requests.readLines().size
             val resumedTransport = LocalClaudeControlTransport.start(runtime, home,
                 mapOf("HOME" to home.path, "PATH" to "/usr/bin:/bin", "CLAUDE_CODE_OAUTH_TOKEN" to "synthetic-control-token",
