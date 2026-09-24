@@ -1,3 +1,9 @@
+## 2026-09-24 跨运行器交接基础层
+
+- RunnerHandoffSummary提供用户要求/已完成/未完成/文件/假设/风险六段编辑值，标注历史范围与未自动转移附件，缺失内容不编造。
+- 子代理实现RunnerHandoffStore持久阶段、版本校验、唯一deliveryId与固定targetKey；创建/投递未确认重启转Unknown，拒绝自动重放，备份恢复关闭写入。
+- Windows编译与RunnerHandoffSummaryTest 1项、RunnerHandoffStoreTest 4项通过，0失败/错误/跳过。仅为基础层，UI/真实创建投递、人工核对恢复、跨进程互斥及完整六运行器接线仍待完成，尚未发布。
+
 ## 2026-09-24 图片异步合并不恢复已移除草稿
 
 - 修复选择/粘贴图片异步校验期间移除已有图片，完成时又从旧snapshot加入的竞态。commitDraft只追加本次相对原草稿新增身份，不复活已移除引用，重复commit不重复添加。
