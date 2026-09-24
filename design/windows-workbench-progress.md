@@ -1,3 +1,8 @@
+## 2026-09-24 Windows 认证弹窗点击验收未通过
+
+- 新增YXI_SUBSCRIPTION_UI_FIXTURE显式测试入口，Test进程的user.home/HOME/USERPROFILE/APPDATA/LOCALAPPDATA均指向专用profile，界面检查函数为替身，不启动原生AI、不读取真实登录。修正Gradle java扩展遮蔽java.io.File的编译问题后，Windows测试可编译执行。
+- 两次窗口回归均在等待打开弹窗处超时，检查函数尚未调用；加入窗口toFront/requestFocus后仍失败。截图 `.artifacts/windows-subscription-ui/results/claude-subscription-success-failure.png` 全黑，XML `.artifacts/windows-subscription-ui/failed-test.xml` 为1失败，不能宣称Windows点击验收通过。
+- 当前交互桌面是否可用尚未确认，已异步询问用户是否锁屏/远程桌面断开；不推断全黑必定由锁屏导致。保留已通过的Linux窗口验收与Windows构建/存储/Chromium表面渲染证据，各自范围不扩张。未发布。
 ## 2026-09-24 认证检查重复点击与回归约束
 
 - `71da9f89` 将busy置位和目标目录捕获移到点击同步路径，避免协程调度前重复启动检查；窗口测试连续点击两次，检查回调延迟期间必须只执行一次。进程异常测试明确排除TimeoutCancellationException，不能把测试超时算作有效拒绝。
