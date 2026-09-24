@@ -1,3 +1,12 @@
+## 2026-09-24 长历史分页与候选发布门禁
+
+- eaf59dab加入按offset索引的只读分页，默认近100项，正文每页上限8MiB、单行2MiB；保留分支、工具结果/元数据、队列与模式上下文。旧cursor固定文件前缀/原生文件ID，允许追加，拒绝替换或改写；完整无换行尾JSON正常读取，未完成尾行标记。Windows首次测试发现creation-time tunneling导致同内容替换漏检，改FILE_ID_INFO后通过。
+- 控制器携带首屏与更早游标，恢复不再因为整份历史超过8MiB而失败；UI“加载更早消息”追加旧内容并保留滚动位置，半行历史只读展示，恢复前要求末尾完整。5000条连续消息加入快速主线路径，避免每轮遍历全部祖先。
+- 新增dev/test-workbench.ps1及明确的16类测试列表，强制--rerun-tasks；报告检查验证计数、实际testcase、无失败/跳过节点。13项报告验证反例通过；本机完整门禁95项通过，0失败/错误/跳过（1m48s）。证据 `.artifacts/long-history-eaf59dab/unit/`。
+- 50f040f1把Workbench core regression加入Windows CI打包前必需步骤并上传JUnit；publish.sh只接受同一成功Windows job的回归及安装启动检查，工作流名与冻结提交SHA都必须匹配。本机门禁已验证，云端新门禁尚待候选CI验证。
+- 隔离build run.9DZJ2C，ClaudeConversationUiTest run.k46NSn 2项通过（11.263s），105条历史首屏/加载更早/恢复续聊点击通过并查看claude-history-earlier.png；NativeTest run.gUHayw 1项通过（4.484s），真实CLI设置/审批/停止/历史/恢复/定时派发回归继续通过。未使用真实账号。
+- ACP官方调研位于 `.artifacts/acp-official-profile-plan.md`：当前Hermes握手provider不足以证明端点，配置优先级和fallback需同进程扩展约束，暂不宣称官方配置闭环。发布流水线可经本机gh访问，hk13非交互PATH无gh；正式feed本轮仍1.4.14。下一步创建1.4.15独立候选，保留全PRD继续开发。
+
 ## 2026-09-24 并行交付：设置恢复、共享插件登记、工作台定时目标
 
 - 用户授权两个子代理后，分别完成持久化/调度测试与插件市场接线，主任务复核并统一构建。PRD只读审计留在 `.artifacts/prd-delivery-audit.md`，指出官方ACP身份、共享市场、统一定时目标与长历史分页仍需闭环；本批处理其中两个入口，未缩小总范围。
