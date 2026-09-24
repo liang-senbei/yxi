@@ -1,3 +1,15 @@
+## 2026-09-24 并行交付：设置恢复、共享插件登记、工作台定时目标
+
+- 用户授权两个子代理后，分别完成持久化/调度测试与插件市场接线，主任务复核并统一构建。PRD只读审计留在 `.artifacts/prd-delivery-audit.md`，指出官方ACP身份、共享市场、统一定时目标与长历史分页仍需闭环；本批处理其中两个入口，未缩小总范围。
+- `91824cb6` 保存LocalCodexTaskRecord.effort（可空，旧索引兼容，错误类型拒绝），Claude模型/强度确认后一起持久化；恢复先核对原模型，再应用已保存且仍受支持的强度。24项相关JVM测试通过；原先nullable Pair断言编译错误已修正。原生回归源码51cae7e1、build run.P4cze3、test run.wQkqT2 1项通过：重读索引并重新启动CLI后，HTTP请求model/effort与保存值一致，恢复阶段无prompt。证据 `.artifacts/claude-control/claude-restored-preferences.json`。
+- `8153961d` 接通本地原生市场条目的通用MCP登记预览：只读绝对本地来源的.mcp.json，展示来源/版本/命令或URL/变量名引用，选择Claude/Codex/OpenCode绑定，确认时重读摘要防过期。支持插件根模板的目录内资源及npx scoped package；拒绝字面量认证、无法确认的相对资源、未知字段/类型，不执行命令、不复制令牌。远端市场、云连接器、插件专属技能/钩子尚未统一共享，登记不等于加载/授权。
+- `4d16d61f` 为已连接的本地Claude/ACP会话增加local-session定时目标，run.id写入统一指令队列并只派发同一ID；忙/有队列则跳过，审批保持执行中，未知回执暂停，不自动批准/重发。ScheduleRun保存当次目标key，修改计划后旧记录仍打开原目标；旧记录无key不猜测。旧本地新任务与远端分支仍保留，客户端关闭后运行/其余引擎统一调度待完成。
+- 统一构建发现并修正ScheduledTasksPane漏括号及ACP消费者注册竞态。最终Windows应用目录构建成功，60项JVM测试均0失败/错误/跳过（AcpClient 8、AcpTaskController 6、ClaudeTaskController 8、LocalClaudeTasks 8、LocalCodexTaskRegistry 9、PluginMcpImport 6、ScheduledTasks 6、ScheduleTargetAdapter 5、SharedMcpRegistry 4）。ACP控制操作和发送在副作用前等待事件消费者注册，关闭解除等待，新增无delay确定性回归。
+- Windows source4d16d61f应用目录在独立HOME/APPDATA/LOCALAPPDATA下--smoke成功、exit0；证据 `.artifacts/windows-native-4d16d61f/`，包含应用jar摘要，不仅是相同启动器exe摘要。应用目录仍使用1.4.14版本元数据，不是新正式包，未安装替换用户应用。
+- 最终隔离source7c55031eea7910314c3a0120d67a2f8493f4e010 build run.jW5rwZ。PluginMcpImportUiTest run.oUvX4A 1项通过（3.335s）；此前两次测试因错误假设独立Dialog及硬编码入口坐标失败，已改为实际渲染布局定位。已查看preview/registered截图，确认前无写入，确认后@local三绑定，原manifest不变，仅保存变量名。
+- ClaudeControlClientNativeTest run.y1L5Ru 1项通过（4.686s），包含实际调度adapter→ClaudeTaskController→CLI 2.1.280→回环模型→持久完成回执，目标key保留，一次计划不重复claim。证据 `.artifacts/parallel-delivery-4d16d61f/claude-scheduled-native.json`。这不代证真实账号、等待实际时钟的整页操作、Windows完整交互或后台常驻。
+- 正式更新源仍是1.4.14，本批未发布。下一批继续官方配置身份闭环、长历史分页和完整Windows验收；原PRD其他条目仍保留。
+
 ## 2026-09-24 思考强度实际拖动与配色验收
 
 - 097a7bad1f46ffcb58f61fe8124f7ad4a21a13a9提取ClaudeEffortSettings，保留滑块预览与单独应用；构建run.8Dqx6U，ClaudeEffortUiTest run.SmODt7 1项通过，0失败/错误/跳过，3.165秒。
