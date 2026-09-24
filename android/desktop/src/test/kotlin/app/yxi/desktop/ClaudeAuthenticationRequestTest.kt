@@ -10,11 +10,13 @@ class ClaudeAuthenticationRequestTest {
         check(!System.getenv("YXI_ISOLATED_TEST_RUN").isNullOrBlank())
         check(File("/.dockerenv").exists() && File("/sys/class/net").list()?.toSet() == setOf("lo"))
         for ((name, api, oauth) in listOf(Triple("api", true, false), Triple("oauth", false, true), Triple("mixed", true, true), Triple("overlay", true, true), Triple("project-overlay", true, true),
-            Triple("permission-baseline", false, true), Triple("permission-overlay", true, true), Triple("stored-overlay", true, false))) {
+            Triple("permission-baseline", false, true), Triple("permission-overlay", true, true), Triple("stored-overlay", true, false),
+            Triple("cloud-BEDROCK-overlay", true, true), Triple("cloud-VERTEX-overlay", true, true), Triple("cloud-FOUNDRY-overlay", true, true))) {
             val root = File("/sandbox/tmp/claude-request-$name").apply { mkdirs() }
             val overlay = name.endsWith("overlay")
+            val cloudFlag = name.takeIf { it.startsWith("cloud-") }?.split('-')?.get(1)?.let { "CLAUDE_CODE_USE_$it" }
             val permission = name.startsWith("permission-")
-            val directory = if (permission) File(root, "project").apply { mkdirs() } else if (name == "project-overlay") File(root, "workspace").apply { mkdirs() } else root
+            val directory = if (permission) File(root, "project").apply { mkdirs() } else if (name == "project-overlay" || cloudFlag != null) File(root, "workspace").apply { mkdirs() } else root
             if (permission) File(directory, "retained-tool.txt").writeText("YXI_PERMISSION_CONTENT")
             val prompt = if (permission) "KEEP-container-first" else "KEEP-auth-request"
             val script = File(root, "server.py").apply { writeText(ClaudeAuthenticationRequestTest::class.java.getResource("/rewind/anthropic_stub.py")!!.readText()) }
@@ -43,15 +45,15 @@ class ClaudeAuthenticationRequestTest {
                 val before = if (overlay) {
                     settings.parentFile.mkdirs()
                     settings.writeText(JSONObject().put("env", JSONObject().put("ANTHROPIC_API_KEY", "sk-ant-yxi-container-test-only")
-                        .put("ANTHROPIC_BASE_URL", "http://127.0.0.1:1"))
+                        .put("ANTHROPIC_BASE_URL", "http://127.0.0.1:1").apply { cloudFlag?.let { put(it, "1") } })
                         .put("apiKeyHelper", "touch ${helperMarker.path}; printf sk-ant-yxi-container-test-only")
                         .put("effortLevel", "low").toString())
                     settings.readBytes()
                 } else null
-                val projectFiles = if (name == "project-overlay" || name == "permission-overlay") listOf("settings.json", "settings.local.json").associate { filename ->
+                val projectFiles = if (name == "project-overlay" || name == "permission-overlay" || cloudFlag != null) listOf("settings.json", "settings.local.json").associate { filename ->
                     val file = File(directory, ".claude/$filename").apply { parentFile.mkdirs() }
                     file.writeText(JSONObject().put("env", JSONObject().put("ANTHROPIC_API_KEY", "sk-ant-yxi-container-test-only")
-                        .put("ANTHROPIC_AUTH_TOKEN", "project-conflicting-token").put("ANTHROPIC_BASE_URL", "http://127.0.0.1:1"))
+                        .put("ANTHROPIC_AUTH_TOKEN", "project-conflicting-token").put("ANTHROPIC_BASE_URL", "http://127.0.0.1:1").apply { cloudFlag?.let { put(it, "1") } })
                         .put("permissions", JSONObject().put("deny", org.json.JSONArray().put(if (permission) "Read" else "Bash"))).toString())
                     file to file.readBytes()
                 } else emptyMap()
@@ -67,6 +69,7 @@ class ClaudeAuthenticationRequestTest {
                             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" to "1", "DISABLE_TELEMETRY" to "1"))
                         if (api) environment()["ANTHROPIC_API_KEY"] = "sk-ant-yxi-container-test-only"
                         if (oauth) environment()["CLAUDE_CODE_OAUTH_TOKEN"] = "synthetic-oauth-request-token"
+                        cloudFlag?.let { environment()[it] = "1" }
                         if (overlay) {
                             val filtered = ClaudeSubscriptionSettings.environment(environment())
                             environment().clear(); environment().putAll(filtered)
