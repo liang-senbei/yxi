@@ -1,3 +1,8 @@
+## 2026-09-24 服务器 Claude 认证探测
+
+- `35de0b4571f43207fb54f7f49d4f1a44a1a2f843` 新增verifyRemote：按服务器目录解析原生Claude，通过独立SSH exec和Python监督进程执行临时订阅配置下的auth status；仅过滤远端子进程环境、不传本机凭据，15秒服务端/17秒客户端限制、64KiB上限、退出回执及通道清理。
+- 构建run.3Tw4my；RemoteClaudeSubscriptionProbeTest run.YDkJrN 1项通过，0失败/错误/跳过。真实隔离SSH+Claude2.1.280中，无OAuth明确拒绝、有合成OAuth通过；原SSH环境API变量仍完整、连接可执行，未生成.credentials.json。
+- 服务器UI入口尚未接入，远端取消/异常输出和真实账号权限仍待进一步验收。只核对身份，不证明端点/订阅权益，未发布。
 ## 2026-09-24 Windows 认证弹窗点击验收未通过
 
 - 新增YXI_SUBSCRIPTION_UI_FIXTURE显式测试入口，Test进程的user.home/HOME/USERPROFILE/APPDATA/LOCALAPPDATA均指向专用profile，界面检查函数为替身，不启动原生AI、不读取真实登录。修正Gradle java扩展遮蔽java.io.File的编译问题后，Windows测试可编译执行。
