@@ -1,3 +1,9 @@
+## 2026-09-24 剪贴板实际按键与去重验收
+
+- cc3e4fa7ead427cdfb409f64568711cea6af4626统一mergeDraft先按快照引用去重再检查4张/12MiB限制；满4张重复加入原内容不误拒绝，第5张不同图片仍失败。LocalClaudeImagesTest 3项通过。
+- 隔离build run.Delvkg，ClaudeImageUiTest run.oUhVts 1项通过，0失败/错误/跳过，6.22秒。Linux系统剪贴板实际Ctrl+V图片、重复粘贴去重、普通文字粘贴与已有图片共存、不自动发送及退出草稿计数均通过；原添加按钮/纯图片发送流程也通过。
+- 已查看 `.artifacts/claude-conversation-ui/claude-image-clipboard-draft.png`。Windows系统文件选择与剪贴板尚需本机交互验证，图片历史富展示和回收仍待完成，新增功能未发布。
+
 ## 2026-09-24 剪贴板图片类型兼容
 
 - Attach.clipboardImage不再强转BufferedImage，支持AWT Image并转换为独立ARGB像素副本；尺寸检查限制4800万像素，避免其他应用修改原图影响捕获结果。此共享入口同时惠及已有附件粘贴使用方。
