@@ -11,7 +11,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-@Composable internal fun PluginMcpImportPreview(plugin: NativePlugin, registry: SharedMcpRegistry, dialogModifier: Modifier = Modifier) {
+@Composable internal fun PluginMcpImportPreview(plugin: NativePlugin, registry: SharedMcpRegistry, dialogModifier: Modifier = Modifier, entryModifier: Modifier = Modifier) {
     var previews by remember(plugin) { mutableStateOf<List<PluginMcpImport.Preview>>(emptyList()) }
     var error by remember(plugin) { mutableStateOf("") }
     var loading by remember(plugin) { mutableStateOf(true) }
@@ -29,7 +29,7 @@ import kotlinx.coroutines.withContext
     if (saved.isNotBlank()) Text(saved, style = MaterialTheme.typography.bodySmall)
     previews.forEach { preview ->
         val registered = registry.records.any { it.definition.key == preview.definition.key && !it.retired }
-        TextButton({ selected = preview }, enabled = !registered) { Text(if (registered) "${preview.definition.name} · 已登记共享配置" else "登记共享配置 · ${preview.definition.name}") }
+        TextButton({ selected = preview }, modifier = entryModifier, enabled = !registered) { Text(if (registered) "${preview.definition.name} · 已登记共享配置" else "登记共享配置 · ${preview.definition.name}") }
     }
     selected?.let { preview ->
         AlertDialog(modifier = dialogModifier, onDismissRequest = { selected = null }, title = { Text("登记本地共享 MCP") }, text = {

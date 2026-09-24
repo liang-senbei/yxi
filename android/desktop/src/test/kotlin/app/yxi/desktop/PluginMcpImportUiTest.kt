@@ -34,8 +34,10 @@ class PluginMcpImportUiTest {
         application(exitProcessOnExit = false) {
             Window(onCloseRequest = ::exitApplication, state = rememberWindowState(width = 620.dp, height = 740.dp)) {
                 var dialogBounds by remember { mutableStateOf<Rect?>(null) }
+                var entryBounds by remember { mutableStateOf<Rect?>(null) }
                 YxiTheme { Surface(Modifier.fillMaxSize()) { Column(Modifier.padding(24.dp)) {
-                    PluginMcpImportPreview(plugin, registry, Modifier.onGloballyPositioned { dialogBounds = it.boundsInWindow() })
+                    PluginMcpImportPreview(plugin, registry, Modifier.onGloballyPositioned { dialogBounds = it.boundsInWindow() },
+                        Modifier.onGloballyPositioned { entryBounds = it.boundsInWindow() })
                 } } }
                 LaunchedEffect(Unit) {
                     fun screenshot(name: String, target: java.awt.Window = window) {
@@ -45,10 +47,13 @@ class PluginMcpImportUiTest {
                         mouseMove(x, y); mousePress(InputEvent.BUTTON1_DOWN_MASK); mouseRelease(InputEvent.BUTTON1_DOWN_MASK)
                     } }
                     try {
-                        delay(700)
+                        withTimeout(5000) { while (entryBounds == null) delay(20) }; delay(400)
                         assertTrue(registry.records.isEmpty()); assertFalse(registryFile.exists())
                         val origin = window.contentPane.locationOnScreen
-                        click(origin.x + 125, origin.y + 48)
+                        val entry = checkNotNull(entryBounds)
+                        File("/results/plugin-mcp-layout.json").writeText(JSONObject().put("entry", entry.toString()).put("origin", origin.toString())
+                            .put("window", window.bounds.toString()).toString())
+                        click(origin.x + entry.center.x.toInt(), origin.y + entry.center.y.toInt())
                         withTimeout(4000) { while (dialogBounds == null) delay(20) }
                         delay(250)
                         assertTrue(registry.records.isEmpty()); assertFalse(registryFile.exists())
