@@ -1,3 +1,9 @@
+## 2026-09-24 本地 Claude 恢复前身份检查
+
+- LocalClaudeSubscription.resume验证本地official:claude记录、用户/平台、运行器配置目录、原工作目录和规范UUID，再创建恢复连接；回传requestedSessionId必须与记录匹配。仍走同一连接的登录身份及有效官方端点检查，无prompt或队列重放。
+- Windows构建29秒通过，LocalClaudeTasksTest 4项、LocalClaudeSubscriptionTest 2项，均0失败/错误/跳过。覆盖六类启动前不匹配拒绝、匹配连接核对与关闭、错误会话身份立即关闭且不发送控制请求。
+- 此项是恢复服务接线前置；管理器并发所有权、历史正文和恢复按钮仍待实现。未发布。
+
 ## 2026-09-24 Claude 关闭后原生恢复验证
 
 - de214938f14c300a9ab5f50e58ae4ae3df03b4ed为LocalClaudeControlTransport增加显式resumeSessionId；只接受完整规范UUID，使用--resume而非创建新的--session-id。默认创建行为保持原有逻辑。

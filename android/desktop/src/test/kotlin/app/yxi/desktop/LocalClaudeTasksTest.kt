@@ -32,6 +32,27 @@ class LocalClaudeTasksTest {
         override fun close() { closed = true; producer.close(); output.close() }
     }
     private fun runtime() = LocalRuntimeInstallation("claude", "fixture", listOf("fixture"), root.resolve("native-home").path, "fixture")
+    @Test fun `resume verifies native identity and rejects foreign targets before launch`(): Unit = runBlocking(Dispatchers.Swing) {
+        val selected = runtime()
+        val record = LocalCodexTaskRecord(UUID.randomUUID().toString(), System.getProperty("user.name"), System.getProperty("os.name"),
+            File(selected.home).canonicalPath, root.canonicalPath, "Resume", "claude-fixture", 1L, "claude", "official:claude")
+        val subscription = LocalClaudeSubscription { _, _ -> error("must not create a new session") }
+        for (invalid in listOf(record.copy(user = "another-user"), record.copy(hostKey = "remote"),
+            record.copy(provider = "third-party"), record.copy(runtimeHome = root.resolve("other").path),
+            record.copy(directory = root.resolve("missing").path), record.copy(threadId = "invalid"))) {
+            assertFailsWith<IllegalArgumentException> { subscription.resume(selected, invalid) { _, _, _ -> error("must not launch") } }
+        }
+        val fixture = Fixture()
+        subscription.resume(selected, record) { _, directory, id ->
+            assertEquals(root.canonicalFile, directory); assertEquals(record.threadId, id)
+            ClaudeControlClient(fixture, id)
+        }.use { assertEquals(record.threadId, it.client.requestedSessionId) }
+        assertTrue(fixture.closed)
+        assertTrue(fixture.writes.all { it.getString("type") == "control_request" })
+        val wrong = Fixture()
+        assertFailsWith<IllegalStateException> { subscription.resume(selected, record) { _, _, _ -> ClaudeControlClient(wrong, UUID.randomUUID().toString()) } }
+        assertTrue(wrong.closed); assertTrue(wrong.writes.isEmpty())
+    }
     @Test fun `new checked sessions persist distinct identities and reopening never launches them`(): Unit = runBlocking(Dispatchers.Swing) {
         val index = File(root, "tasks.json"); val queue = InstructionQueue(File(root, "queue.json")); val fixtures = mutableListOf<Fixture>()
         LocalClaudeTasks(queue, index, LocalClaudeSubscription { _, _ ->
