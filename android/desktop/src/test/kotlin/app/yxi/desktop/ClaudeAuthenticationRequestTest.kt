@@ -9,7 +9,7 @@ class ClaudeAuthenticationRequestTest {
     @Test fun `native Claude request headers identify isolated credential combinations`() {
         check(!System.getenv("YXI_ISOLATED_TEST_RUN").isNullOrBlank())
         check(File("/.dockerenv").exists() && File("/sys/class/net").list()?.toSet() == setOf("lo"))
-        for ((name, api, oauth) in listOf(Triple("api", true, false), Triple("oauth", false, true), Triple("mixed", true, true))) {
+        for ((name, api, oauth) in listOf(Triple("api", true, false), Triple("oauth", false, true), Triple("mixed", true, true), Triple("overlay", true, true))) {
             val root = File("/sandbox/tmp/claude-request-$name").apply { mkdirs() }
             val script = File(root, "server.py").apply { writeText(ClaudeAuthenticationRequestTest::class.java.getResource("/rewind/anthropic_stub.py")!!.readText()) }
             val server = ProcessBuilder("python3", script.path, root.path).redirectErrorStream(true).redirectOutput(File(root, "server.log")).start()
@@ -20,7 +20,22 @@ class ClaudeAuthenticationRequestTest {
                 while (!port.exists() && System.nanoTime() < deadline) Thread.sleep(20)
                 check(port.exists())
                 val stdout = File(root, "stdout.json")
-                process = ProcessBuilder("/opt/native/claude", "-p", "KEEP-auth-request", "--output-format", "json", "--max-turns", "1")
+                val endpoint = "http://127.0.0.1:${port.readText().trim()}"
+                val settings = File(root, ".claude/settings.json")
+                val helperMarker = File(root, "helper-ran")
+                val before = if (name == "overlay") {
+                    settings.parentFile.mkdirs()
+                    settings.writeText(JSONObject().put("env", JSONObject().put("ANTHROPIC_API_KEY", "sk-ant-yxi-container-test-only")
+                        .put("ANTHROPIC_BASE_URL", "http://127.0.0.1:1"))
+                        .put("apiKeyHelper", "touch ${helperMarker.path}; printf sk-ant-yxi-container-test-only")
+                        .put("effortLevel", "low").toString())
+                    settings.readBytes()
+                } else null
+                val overlayArgs = if (name == "overlay") listOf("--settings", ClaudeSubscriptionSettings.overlay().apply {
+                    // The test substitutes only the endpoint; production defaults remain official.
+                    getJSONObject("env").put("ANTHROPIC_BASE_URL", endpoint)
+                }.toString()) else emptyList()
+                process = ProcessBuilder(listOf("/opt/native/claude", "-p", "KEEP-auth-request", "--output-format", "json", "--max-turns", "1") + overlayArgs)
                     .directory(root).redirectOutput(stdout).redirectError(File(root, "stderr.txt")).apply {
                         environment().clear()
                         environment().putAll(mapOf("HOME" to root.path, "PATH" to "/usr/bin:/bin", "CLAUDE_CONFIG_DIR" to File(root, ".claude").path,
@@ -28,6 +43,10 @@ class ClaudeAuthenticationRequestTest {
                             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" to "1", "DISABLE_TELEMETRY" to "1"))
                         if (api) environment()["ANTHROPIC_API_KEY"] = "sk-ant-yxi-container-test-only"
                         if (oauth) environment()["CLAUDE_CODE_OAUTH_TOKEN"] = "synthetic-oauth-request-token"
+                        if (name == "overlay") {
+                            val filtered = ClaudeSubscriptionSettings.environment(environment())
+                            environment().clear(); environment().putAll(filtered)
+                        }
                     }.start()
                 check(process.waitFor(40, TimeUnit.SECONDS)) { "$name request timed out" }
                 val requests = File(root, "requests.jsonl")
@@ -40,6 +59,12 @@ class ClaudeAuthenticationRequestTest {
                 assertTrue(messages.isNotEmpty())
                 if (name == "api") assertTrue(messages.all { it.getBoolean("fixture_api_header") })
                 if (name == "oauth") assertTrue(messages.all { it.getBoolean("fixture_oauth_header") })
+                if (name == "mixed") assertTrue(messages.all { it.getBoolean("fixture_api_header") && !it.getBoolean("fixture_oauth_header") })
+                if (name == "overlay") {
+                    assertTrue(messages.all { !it.getBoolean("fixture_api_header") && it.getBoolean("fixture_oauth_header") })
+                    assertContentEquals(before, settings.readBytes())
+                    assertFalse(helperMarker.exists())
+                }
             } finally {
                 process?.takeIf { it.isAlive }?.let { it.destroyForcibly(); it.waitFor(5, TimeUnit.SECONDS) }
                 server.destroyForcibly(); server.waitFor(5, TimeUnit.SECONDS)
