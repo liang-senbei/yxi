@@ -35,7 +35,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         body = json.loads(self.rfile.read(length) or b"{}")
         with lock, (root / "requests.jsonl").open("a") as log:
-            log.write(json.dumps({"path": self.path, "model": body.get("model"), "messages": body.get("messages", []),
+            log.write(json.dumps({"path": self.path, "model": body.get("model"), "output_config": body.get("output_config"), "messages": body.get("messages", []),
                                   "fixture_api_header": self.headers.get("x-api-key") == key,
                                   "fixture_oauth_header": self.headers.get("Authorization") == "Bearer synthetic-oauth-request-token",
                                   "fake_auth": self.headers.get("x-api-key") == key or

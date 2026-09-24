@@ -98,14 +98,22 @@ internal class ClaudeControlClient(private val transport: ClaudeControlTransport
     }
     suspend fun setModel(model: String): JSONObject {
         require(model.isNotBlank() && model.length <= 500 && model.none { it < ' ' })
+        return changeSettings("set_model", JSONObject().put("model", model))
+    }
+    suspend fun setEffort(effort: String): JSONObject {
+        require(effort in setOf("low", "medium", "high", "xhigh", "max"))
+        return changeSettings("apply_flag_settings", JSONObject().put("settings", JSONObject().put("effortLevel", effort)), effort)
+    }
+    private suspend fun changeSettings(subtype: String, fields: JSONObject, expectedEffort: String? = null): JSONObject {
         synchronized(turnGate) {
             check(initialized && !closed.get() && !changingModel && activeTurn.get() == null && !interrupting.get()) { "请等待当前操作结束后再切换模型" }
             changingModel = true
         }
         try {
-            request("set_model", JSONObject().put("model", model))
+            request(subtype, fields)
             return settings().also {
                 check(it.optJSONObject("applied")?.optString("model")?.isNotBlank() == true) { "Claude 未确认实际模型" }
+                if (expectedEffort != null) check(it.getJSONObject("applied").optString("effort") == expectedEffort) { "Claude 未确认所选思考强度" }
             }
         } catch (e: Exception) { close(); throw e }
         finally { synchronized(turnGate) { changingModel = false } }

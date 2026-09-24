@@ -23,6 +23,23 @@ class ClaudeControlClientTest {
             .put("request_id", request.getString("request_id")).put("subtype", "success").put("response", value)))
         override fun close() { producer.close(); output.close() }
     }
+    @Test fun `effort uses flag settings and confirms effective applied value`(): Unit = runBlocking {
+        val fixture = Fixture()
+        ClaudeControlClient(fixture).use { client ->
+            client.initialize()
+            assertFailsWith<IllegalArgumentException> { client.setEffort("unsupported") }
+            val change = async { client.setEffort("high") }
+            withTimeout(2000) { while (fixture.writes.size < 2) delay(10) }
+            val request = fixture.writes.last().getJSONObject("request")
+            assertEquals("apply_flag_settings", request.getString("subtype"))
+            assertEquals("high", request.getJSONObject("settings").getString("effortLevel"))
+            fixture.respond(fixture.writes.last(), JSONObject())
+            withTimeout(2000) { while (fixture.writes.size < 3) delay(10) }
+            assertFalse(change.isCompleted)
+            fixture.respond(fixture.writes.last(), JSONObject().put("applied", JSONObject().put("model", "fixture").put("effort", "high")))
+            assertEquals("high", change.await().getJSONObject("applied").getString("effort"))
+        }
+    }
     @Test fun `model selection awaits effective settings and excludes concurrent prompts`(): Unit = runBlocking {
         val fixture = Fixture()
         ClaudeControlClient(fixture).use { client ->

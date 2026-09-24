@@ -60,7 +60,13 @@ class ClaudeControlClientNativeTest {
             assertTrue(ProcessHandle.of(conversationPid).map { it.isAlive }.orElse(false))
             ClaudeControlClient(conversation, conversation.requestedSessionId).use { client ->
                 client.initialize()
+                val effortSettings = client.setEffort("low")
+                assertEquals("low", effortSettings.getJSONObject("applied").getString("effort"))
                 val first = client.prompt("KEEP-control-first", 30000)
+                val effortRequest = requests.readLines().map(::JSONObject).last { it.getJSONArray("messages").toString().contains("KEEP-control-first") }
+                assertEquals("low", effortRequest.getJSONObject("output_config").getString("effort"))
+                File("/results/claude-effort-settings.json").writeText(JSONObject().put("applied", effortSettings.getJSONObject("applied"))
+                    .put("requestEffort", effortRequest.getJSONObject("output_config").getString("effort")).toString(2))
                 assertEquals(conversation.requestedSessionId, first.getString("session_id"))
                 assertFalse(first.getBoolean("is_error")); assertTrue(first.getString("result").contains("answer:KEEP-control-first"))
                 val second = client.prompt("FOLLOWUP-control-second", 30000)
