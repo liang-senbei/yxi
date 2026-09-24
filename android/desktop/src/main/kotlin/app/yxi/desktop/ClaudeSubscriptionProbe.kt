@@ -18,7 +18,10 @@ internal object ClaudeSubscriptionProbe {
             Shell.q(ClaudeSubscriptionSettings.overlay().toString()) + " " + Shell.q(JSONArray(ClaudeSubscriptionSettings.removedEnvironmentKeys()).toString())
         val channel = ssh.openExecStream(command)
         try {
-            val bytes = withTimeout(17000) { runInterruptible(Dispatchers.IO) { channel.output.readNBytes(65_537) } }
+            val bytes = withTimeout(17000) {
+                try { runInterruptible(Dispatchers.IO) { channel.output.readNBytes(65_537) } }
+                catch (e: java.io.InterruptedIOException) { currentCoroutineContext().ensureActive(); throw e }
+            }
             check(bytes.size in 1..65_536) { "服务器 Claude 认证检查未返回有效响应，请检查运行器和工作目录" }
             val status = try { JSONObject(bytes.toString(Charsets.UTF_8)) }
                 catch (_: Exception) { error("服务器 Claude 未返回可识别的认证状态") }
