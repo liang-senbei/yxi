@@ -11,8 +11,9 @@ class ClaudeAuthenticationNativeTest {
         check(File("/.dockerenv").exists())
         check(File("/sys/class/net").list()?.toSet() == setOf("lo"))
         check(File("/opt/native/claude").canExecute())
-        for (api in listOf(false, true)) {
-            val home = File("/sandbox/tmp/claude-auth-${if (api) "api" else "empty"}").apply { mkdirs() }
+        for ((name, api, oauth) in listOf(Triple("empty", false, false), Triple("api", true, false),
+            Triple("oauth", false, true), Triple("oauth-and-api", true, true))) {
+            val home = File("/sandbox/tmp/claude-auth-$name").apply { mkdirs() }
             val output = File(home, "stdout.json")
             val error = File(home, "stderr.txt")
             val process = ProcessBuilder("/opt/native/claude", "auth", "status", "--json").directory(home)
@@ -21,15 +22,18 @@ class ClaudeAuthenticationNativeTest {
                     environment().putAll(mapOf("HOME" to home.path, "PATH" to "/usr/bin:/bin", "CLAUDE_CONFIG_DIR" to File(home, ".claude").path,
                         "DISABLE_AUTOUPDATER" to "1"))
                     if (api) environment()["ANTHROPIC_API_KEY"] = "synthetic-auth-status-key"
+                    if (oauth) environment()["CLAUDE_CODE_OAUTH_TOKEN"] = "synthetic-oauth-status-token"
                 }.start()
             try {
                 check(process.waitFor(30, TimeUnit.SECONDS)) { "Claude auth status timed out" }
                 check(output.length() in 1..65536)
                 val status = JSONObject(output.readText())
                 assertFalse(output.readText().contains("synthetic-auth-status-key"))
-                assertEquals(api, status.getBoolean("loggedIn"))
+                assertFalse(output.readText().contains("synthetic-oauth-status-token"))
+                File("/results/claude-auth-$name.json").writeText(status.toString(2))
+                assertEquals(api || oauth, status.getBoolean("loggedIn"))
                 if (api) assertEquals("api_key", status.getString("authMethod"))
-                File("/results/claude-auth-${if (api) "api" else "empty"}.json").writeText(status.toString(2))
+                else if (oauth) assertEquals("oauth_token", status.getString("authMethod"))
             } finally { if (process.isAlive) { process.destroyForcibly(); process.waitFor(5, TimeUnit.SECONDS) } }
         }
     }
