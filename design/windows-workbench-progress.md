@@ -1,3 +1,8 @@
+## 2026-09-24 Claude 托管认证策略优先级
+
+- `f989306c4efac3be42639999300c49d42e7271b0` 在隔离Docker内临时创建/etc/claude-code/managed-settings.json（先断言不存在，finally只删除本测试创建的文件），注入假API凭据与回环端点，和订阅覆盖层一起启动原生Claude2.1.280。
+- 构建run.JoOklL；ClaudeAuthenticationRequestTest run.qhYX9V 1项通过，0失败/错误/跳过，覆盖12组合。托管场景实际api=true/oauth=false，证实托管认证优先于临时覆盖；其余普通配置场景OAuth与权限回归通过。
+- 证据 `.artifacts/claude-auth-requests/claude-request-managed-overlay.jsonl`。该结果要求产品接线时检测并报告有效凭据冲突，不能因已选择订阅就显示启用；尚未实现完整托管/网关/profile检测，未修改真实策略、未发布。
 ## 2026-09-24 Claude 订阅启动云提供方残留处理
 
 - `f31616068db74d88d24d2af8645efcd32c873791` 在进程环境移除CLAUDE_CODE_USE_BEDROCK/VERTEX/FOUNDRY，并在临时settings env中置空，处理普通用户/项目配置中的残留，不写原文件。
