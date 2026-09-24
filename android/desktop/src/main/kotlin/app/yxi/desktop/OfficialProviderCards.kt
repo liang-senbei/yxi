@@ -8,7 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 
-@Composable internal fun OfficialProviderCards(engine: String) {
+@Composable internal fun OfficialProviderCards(engine: String, conn: Conn? = null) {
     val uris = LocalUriHandler.current
     OfficialProviderProfiles.forEngine(engine).forEachIndexed { index, profile ->
         OutlinedCard(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
                 Text(profile.description, style = MaterialTheme.typography.bodySmall)
                 Text("账号与实际线路尚未核对；此卡片不会自动覆盖已有配置。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 TextButton({ uris.openUri(profile.documentation) }) { Text("官方登录与使用说明") }
+                if (engine == "claude" && conn != null) RemoteClaudeSubscriptionCheck(conn)
             }
         }
     }

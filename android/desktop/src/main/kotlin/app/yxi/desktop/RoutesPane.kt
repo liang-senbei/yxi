@@ -121,7 +121,7 @@ private fun BoundRoutesPane(state: AppState, conn: Conn) {
             if (engine == "opencode") openCodeAdd = true else editor = Lines.Line(Lines.newId(), "", agent = engine)
         }
         Spacer(Modifier.height(22.dp))
-        OfficialProviderCards(engine)
+        OfficialProviderCards(engine, conn)
         if (engine == "gemini") {
             GeminiConfigurationCard(conn)
             return@Column
