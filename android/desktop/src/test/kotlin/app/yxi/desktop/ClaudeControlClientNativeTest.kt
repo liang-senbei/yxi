@@ -7,7 +7,7 @@ import org.json.JSONObject
 import kotlin.test.*
 
 class ClaudeControlClientNativeTest {
-    @Test fun `production control client reads native effective settings without model messages`(): Unit = runBlocking {
+    @Test fun `native Claude settings turns approval recovery and scheduled delivery remain isolated`(): Unit = runBlocking {
         check(!System.getenv("YXI_ISOLATED_TEST_RUN").isNullOrBlank() && File("/.dockerenv").exists())
         val root = File("/sandbox/tmp/claude-control-client").apply { mkdirs() }
         val home = File(root, "home").apply { mkdirs() }
@@ -172,9 +172,10 @@ class ClaudeControlClientNativeTest {
                 ClaudeSubscriptionSettings.overlay().apply { getJSONObject("env").put("ANTHROPIC_BASE_URL", endpoint) })
             val controlledPid = controlled.processId
             val disk = File(root, "controller-queue.json")
+            val controllerQueue = InstructionQueue(disk)
             withContext(Dispatchers.Swing) {
                 val client = ClaudeControlClient(controlled); client.initialize()
-                ClaudeTaskController("native-controller", client, InstructionQueue(disk), beforeSend = {
+                ClaudeTaskController("native-controller", client, controllerQueue, beforeSend = {
                     assertEquals(endpoint, client.settings().getJSONObject("effective").getJSONObject("env").getString("ANTHROPIC_BASE_URL"))
                 }).use { controller ->
                     controller.enqueue("KEEP-controller-durable"); controller.sendNext()
@@ -201,6 +202,24 @@ class ClaudeControlClientNativeTest {
                     controller.enqueue("FOLLOWUP-controller-after-stop"); controller.sendNext()
                     assertTrue(controller.messages.any { it.text.contains("answer:FOLLOWUP-controller-after-stop") })
                     assertEquals(RuntimeTurnState.Completed, InstructionQueue(disk).entries.last().runtimeTurnState)
+                    val schedules = ScheduledTasks(File(root, "native-schedules.json"))
+                    val schedule = ScheduledTask("native-schedule", "Native schedule", "FOLLOWUP-controller-scheduled",
+                        ScheduleTarget("local-session", "Native Claude", engine = "claude", task = controller.taskKey), 1L, "一次", "UTC")
+                    schedules.put(schedule)
+                    val claimed = assertNotNull(schedules.claim(2L))
+                    val adapter = ScheduleTargetAdapter(controllerQueue, { target ->
+                        if (target.task != controller.taskKey) null else ScheduleTargetAdapter.Connection(
+                            { controller.ready && !controller.busy && !controller.changingModel && controller.pendingApprovals.isEmpty() },
+                            { controller.pendingApprovals.isNotEmpty() }, controller::dispatchScheduled)
+                    }, pollMillis = 10)
+                    val dispatched = adapter.execute(claimed.first, claimed.second) { schedules.progress(claimed.second.id, it) }
+                    schedules.finish(claimed.second.id, dispatched.status, dispatched.detail)
+                    assertEquals("已完成", dispatched.status)
+                    assertEquals(controller.taskKey, schedules.runs.single().targetTaskKey)
+                    assertTrue(controller.messages.any { it.text.contains("answer:FOLLOWUP-controller-scheduled") })
+                    assertNull(schedules.claim(3L))
+                    File("/results/claude-scheduled-native.json").writeText(JSONObject().put("status", dispatched.status)
+                        .put("targetTaskKey", schedules.runs.single().targetTaskKey).put("duplicateClaim", false).toString(2))
                     disk.copyTo(File("/results/claude-controller-queue.json"), overwrite = true)
                 }
             }
