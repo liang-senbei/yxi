@@ -20,13 +20,14 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 @Composable internal fun NewClaudeConversationDialog(state: AppState, runtime: LocalRuntimeInstallation, dismiss: () -> Unit,
+    modifier: Modifier = Modifier,
     created: (LocalCodexTaskRecord) -> Unit) {
     val scope = rememberCoroutineScope()
     var directory by remember(runtime.id) { mutableStateOf(System.getProperty("user.home")) }
     var title by remember(runtime.id) { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
-    WorkbenchDialog(onDismissRequest = dismiss, title = { Text("新建本地 Claude 对话") }, text = {
+    WorkbenchDialog(onDismissRequest = dismiss, modifier = modifier, title = { Text("新建本地 Claude 对话") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("官方订阅 · 使用此运行器的原生登录和项目权限")
             Text(runtime.command.joinToString(" "), style = MaterialTheme.typography.bodySmall)

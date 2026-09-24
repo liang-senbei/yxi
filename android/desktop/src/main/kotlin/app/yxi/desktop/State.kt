@@ -26,7 +26,7 @@ internal class CodexConversationView {
     val followLatest = mutableStateOf(true)
 }
 
-class AppState {
+class AppState internal constructor(private val localClaudeFactory: (InstructionQueue, java.io.File) -> LocalClaudeTasks = { queue, file -> LocalClaudeTasks(queue, file) }) {
     internal val sharedMcp by lazy { SharedMcpRegistry(java.io.File(Store.dir, "shared-mcp.json")) }
     internal var sharedMcpPage by mutableStateOf(false)
     internal val remoteOpenCodeTasks by lazy { RemoteOpenCodeTasks(instructions, java.io.File(Store.dir, "remote-opencode-tasks.json"), sharedMcp) }
@@ -75,7 +75,7 @@ class AppState {
         Notify.notify(title, "任务：" + (navigation.title(task.key) ?: task.title), taskKey = task.key)
     }) }
     internal val localAcpTasks get() = localAcpTasksDelegate.value
-    private val localClaudeTasksDelegate = lazy { LocalClaudeTasks(instructions, java.io.File(Store.dir, "local-claude-tasks.json")) }
+    private val localClaudeTasksDelegate = lazy { localClaudeFactory(instructions, java.io.File(Store.dir, "local-claude-tasks.json")) }
     internal val localClaudeTasks get() = localClaudeTasksDelegate.value
     internal var localSelectedTaskKey by mutableStateOf<String?>(null)
     internal val localWorkspace get() = localWorkspaceDelegate.value
