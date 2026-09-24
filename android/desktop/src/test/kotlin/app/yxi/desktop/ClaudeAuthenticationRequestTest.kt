@@ -70,7 +70,7 @@ class ClaudeAuthenticationRequestTest {
                     // The test substitutes only the endpoint; production defaults remain official.
                     getJSONObject("env").put("ANTHROPIC_BASE_URL", endpoint)
                 }.toString()) else emptyList()
-                process = ProcessBuilder(listOf("/opt/native/claude", "-p", prompt, "--output-format", "json", "--max-turns", if (permission) "3" else "1") + overlayArgs)
+                val builder = ProcessBuilder(listOf("/opt/native/claude", "-p", prompt, "--output-format", "json", "--max-turns", if (permission) "3" else "1") + overlayArgs)
                     .directory(directory).redirectOutput(stdout).redirectError(File(root, "stderr.txt")).apply {
                         environment().clear()
                         environment().putAll(mapOf("HOME" to root.path, "PATH" to "/usr/bin:/bin", "CLAUDE_CONFIG_DIR" to File(root, ".claude").path,
@@ -83,7 +83,15 @@ class ClaudeAuthenticationRequestTest {
                             val filtered = ClaudeSubscriptionSettings.environment(environment())
                             environment().clear(); environment().putAll(filtered)
                         }
-                    }.start()
+                    }
+                if (overlay) kotlinx.coroutines.runBlocking {
+                    val configuration = JSONObject(overlayArgs.last())
+                    if (name == "managed-overlay") assertFailsWith<IllegalStateException> {
+                        ClaudeSubscriptionProbe.verify(File("/opt/native/claude"), directory, builder.environment(), configuration)
+                    } else ClaudeSubscriptionProbe.verify(File("/opt/native/claude"), directory, builder.environment(), configuration)
+                    assertFalse(File(root, "requests.jsonl").exists(), "Credential checks must not submit a model request")
+                }
+                process = builder.start()
                 check(process.waitFor(40, TimeUnit.SECONDS)) { "$name request timed out" }
                 val requests = File(root, "requests.jsonl")
                 if (requests.exists()) requests.copyTo(File("/results/claude-request-$name.jsonl"), overwrite = true)
