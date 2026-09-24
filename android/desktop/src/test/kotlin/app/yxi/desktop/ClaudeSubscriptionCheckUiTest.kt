@@ -42,8 +42,12 @@ class ClaudeSubscriptionCheckUiTest {
                             Robot().apply { mouseMove(origin.x + x, origin.y + y); mousePress(InputEvent.BUTTON1_DOWN_MASK); mouseRelease(InputEvent.BUTTON1_DOWN_MASK) }
                         }
                         try {
-                            delay(700); click(65, 20)
-                            withTimeout(3000) { while (bounds == null) delay(20) }
+                            withTimeout(5000) {
+                                while (bounds == null) {
+                                    if (window.isShowing) click(65, 20)
+                                    delay(200)
+                                }
+                            }
                             delay(300)
                             val box = checkNotNull(bounds)
                             click(box.right.toInt() - 65, box.bottom.toInt() - 45)
