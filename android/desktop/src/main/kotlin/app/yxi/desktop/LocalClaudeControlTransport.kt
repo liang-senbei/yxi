@@ -20,14 +20,17 @@ internal class LocalClaudeControlTransport private constructor(private val proce
     override fun close() { if (closed.compareAndSet(false, true)) LocalRuntimeDiscovery.stopOwnedProcess(process) }
     companion object {
         suspend fun start(runtime: LocalRuntimeInstallation, directory: File, inherited: Map<String, String> = System.getenv(),
-            settings: JSONObject = ClaudeSubscriptionSettings.overlay()): LocalClaudeControlTransport {
+            settings: JSONObject = ClaudeSubscriptionSettings.overlay(), resumeSessionId: String? = null): LocalClaudeControlTransport {
             require(runtime.engine == "claude" && runtime.ready && runtime.command.isNotEmpty())
             require(directory.isAbsolute && directory.isDirectory)
-            val sessionId = java.util.UUID.randomUUID().toString()
+            val sessionId = resumeSessionId?.also {
+                require(java.util.UUID.fromString(it).toString() == it) { "Claude 恢复需要完整原生会话 ID" }
+            } ?: java.util.UUID.randomUUID().toString()
+            val sessionOption = if (resumeSessionId == null) "--session-id" else "--resume"
             var owned: Process? = null
             try {
                 return withContext(Dispatchers.IO) {
-                    val process = ProcessBuilder(runtime.command + listOf("--settings", settings.toString(), "--session-id", sessionId, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--permission-prompt-tool", "stdio"))
+                    val process = ProcessBuilder(runtime.command + listOf("--settings", settings.toString(), sessionOption, sessionId, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--permission-prompt-tool", "stdio"))
                         .directory(directory.canonicalFile).redirectError(ProcessBuilder.Redirect.DISCARD).apply {
                             environment().clear(); environment().putAll(ClaudeSubscriptionSettings.environment(inherited))
                             environment()["CLAUDE_CONFIG_DIR"] = runtime.home

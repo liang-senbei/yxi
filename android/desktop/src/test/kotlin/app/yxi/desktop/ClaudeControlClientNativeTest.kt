@@ -99,6 +99,28 @@ class ClaudeControlClientNativeTest {
                 assertEquals(first.getString("session_id"), continued.getString("session_id"))
             }
             withTimeout(5000) { while (ProcessHandle.of(conversationPid).map { it.isAlive }.orElse(false)) delay(20) }
+            val requestsBeforeResume = requests.readLines().size
+            val resumedTransport = LocalClaudeControlTransport.start(runtime, home,
+                mapOf("HOME" to home.path, "PATH" to "/usr/bin:/bin", "CLAUDE_CODE_OAUTH_TOKEN" to "synthetic-control-token",
+                    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" to "1"),
+                ClaudeSubscriptionSettings.overlay().apply { getJSONObject("env").put("ANTHROPIC_BASE_URL", endpoint) },
+                resumeSessionId = conversation.requestedSessionId)
+            val resumedPid = resumedTransport.processId
+            ClaudeControlClient(resumedTransport, resumedTransport.requestedSessionId).use { client ->
+                client.initialize(); client.settings()
+                assertEquals(requestsBeforeResume, requests.readLines().size, "Resume initialization must not send a model request")
+                val result = client.prompt("FOLLOWUP-restored-session", 30000)
+                assertFalse(result.getBoolean("is_error"))
+                assertEquals(conversation.requestedSessionId, result.getString("session_id"))
+                val request = requests.readLines().map(::JSONObject).last {
+                    it.getJSONArray("messages").toString().contains("FOLLOWUP-restored-session")
+                }
+                assertTrue(request.getJSONArray("messages").toString().contains("KEEP-control-first"))
+                assertTrue(request.getJSONArray("messages").toString().contains("FOLLOWUP-after-stop"))
+                File("/results/claude-resumed-session.json").writeText(JSONObject().put("sessionId", result.getString("session_id"))
+                    .put("historyPreserved", true).put("initializationDidNotPrompt", true).put("isError", result.getBoolean("is_error")).toString(2))
+            }
+            withTimeout(5000) { while (ProcessHandle.of(resumedPid).map { it.isAlive }.orElse(false)) delay(20) }
             val turns = requests.readLines().map(::JSONObject)
             val secondRequest = turns.last { it.getJSONArray("messages").toString().contains("FOLLOWUP-control-second") }
             assertTrue(secondRequest.getJSONArray("messages").toString().contains("KEEP-control-first"))
