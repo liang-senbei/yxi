@@ -23,6 +23,27 @@ class ClaudeControlClientTest {
             .put("request_id", request.getString("request_id")).put("subtype", "success").put("response", value)))
         override fun close() { producer.close(); output.close() }
     }
+    @Test fun `image snapshot sends native content blocks without changing source after capture`(): Unit = runBlocking {
+        val bytes = java.util.Base64.getDecoder().decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5XcAAAAASUVORK5CYII=")
+        val expected = bytes.copyOf()
+        val image = ClaudeImageInput.fromBytes(bytes)
+        bytes.fill(0)
+        val fixture = Fixture()
+        ClaudeControlClient(fixture).use { client ->
+            client.initialize()
+            val turn = async { client.prompt("Describe", images = listOf(image)) }
+            withTimeout(2000) { while (fixture.writes.size < 2) delay(10) }
+            val content = fixture.writes.last().getJSONObject("message").getJSONArray("content")
+            assertEquals("Describe", content.getJSONObject(0).getString("text"))
+            val source = content.getJSONObject(1).getJSONObject("source")
+            assertEquals("image/png", source.getString("media_type"))
+            assertContentEquals(expected, java.util.Base64.getDecoder().decode(source.getString("data")))
+            fixture.emit(JSONObject().put("type", "result").put("uuid", "image-result").put("session_id", "image-session").put("is_error", false))
+            turn.await()
+            assertFailsWith<IllegalArgumentException> { client.prompt("too many", images = List(5) { image }) }
+            assertEquals(2, fixture.writes.size)
+        }
+    }
     @Test fun `effort uses flag settings and confirms effective applied value`(): Unit = runBlocking {
         val fixture = Fixture()
         ClaudeControlClient(fixture).use { client ->

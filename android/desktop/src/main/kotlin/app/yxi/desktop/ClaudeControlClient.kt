@@ -140,9 +140,15 @@ internal class ClaudeControlClient(private val transport: ClaudeControlTransport
                 .put("request_id", id).put("response", answer)).toString() + "\n")) { "Claude 审批答复未写入" }
         } catch (e: Exception) { close(); throw e }
     }
-    suspend fun prompt(text: String, timeoutMillis: Long = 600_000): JSONObject {
+    suspend fun prompt(text: String, timeoutMillis: Long = 600_000, images: List<ClaudeImageInput> = emptyList()): JSONObject {
         check(initialized && !closed.get() && !interrupting.get()) { "Claude 控制连接尚未就绪" }
-        require(text.isNotBlank() && text.toByteArray(Charsets.UTF_8).size <= 1024 * 1024)
+        val imageSnapshot = images.toList()
+        require((text.isNotBlank() || imageSnapshot.isNotEmpty()) && text.toByteArray(Charsets.UTF_8).size <= 1024 * 1024)
+        require(imageSnapshot.size <= 4 && imageSnapshot.sumOf { it.size.toLong() } <= 12 * 1024 * 1024) { "每次最多4张图片，总计不超过12MiB" }
+        val content: Any = if (imageSnapshot.isEmpty()) text else org.json.JSONArray().apply {
+            if (text.isNotBlank()) put(JSONObject().put("type", "text").put("text", text))
+            imageSnapshot.forEach { put(it.block()) }
+        }
         val result = CompletableDeferred<JSONObject>()
         synchronized(turnGate) {
             check(!changingModel && activeTurn.compareAndSet(null, result)) { "Claude 上一轮或模型切换尚未结束" }
@@ -154,7 +160,7 @@ internal class ClaudeControlClient(private val transport: ClaudeControlTransport
                     check(!interrupting.get() && stopRequested.get() !== result) { "Claude 本轮在写入前已请求停止" }
                     check(transport.write(JSONObject().put("type", "user").put("session_id", sessionId ?: requestedSessionId.orEmpty())
                         .put("parent_tool_use_id", JSONObject.NULL).put("uuid", UUID.randomUUID().toString())
-                        .put("message", JSONObject().put("role", "user").put("content", text)).toString() + "\n")) { "Claude 提示词未写入" }
+                        .put("message", JSONObject().put("role", "user").put("content", content)).toString() + "\n")) { "Claude 提示词未写入" }
                 }
                 result.await()
             }

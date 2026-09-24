@@ -1,3 +1,10 @@
+## 2026-09-24 发布后继续：Claude 图片协议
+
+- ClaudeImageInput保存不可变base64字节快照，按签名识别PNG/JPEG/GIF/WebP（尚不等于完整图片解码校验）；单张5MiB、最多4张、总计12MiB。ClaudeControlClient.prompt支持原生text/image内容块，旧纯文本格式保持兼容。
+- Windows编译及ClaudeControlClientTest 10项通过，0失败/错误/跳过，47秒。新增验证来源数组改动不影响已捕获图片、原生media_type/data正确、超数量在写入前拒绝。
+- 此为协议层，图片选择/预览/持久队列与真实CLI图片请求尚需接入验收，未进入已发布1.4.15。
+- 两子代理继续分别检查跨运行器交接与Gemini官方配置；交接报告.artifacts/cross-runner-handoff-next.md确认需稳定Agent身份、可编辑摘要、交接事务与双向关联，现有创建/指定指令投递可复用。原PRD全范围继续保留。
+
 ## 2026-09-24 Windows 1.4.15 已正式上线
 
 - 发布冻结源码e744ba255fb0bbfadd38cb973efd91f0fdfbcf27，GitHub Desktop run35974085873成功。95项工作台回归与安装启动/浏览器/凭据检查全部通过；阶段功能及限制详见design/windows-1.4.15-release.md。
