@@ -1,3 +1,9 @@
+## 2026-09-24 原生 Claude 控制客户端
+
+- `817bec61d1c4868a00a380bde6505015e531bc8c` 新增ClaudeControlClient与LocalClaudeControlTransport，使用Claude stream-json控制协议（非ACP），独立argv/环境/进程所有权，UUID响应关联、2MiB单行限制、30秒请求限制、断连失败及清理。当前只开放initialize/get_settings，不发送用户prompt；未知交互请求关闭连接，不自动批准。
+- Windows ClaudeControlClientTest 3项通过，0失败/错误/跳过：乱序回复正确关联、原生错误不泄露payload、断连或未支持交互让待处理检查失败且无批准回传。
+- 构建run.uR1Xll；ClaudeControlClientNativeTest run.Qdk0Ql 1项通过，0失败/错误/跳过。正式客户端连接原生Claude2.1.280，读取effective实际回环端点，该端点被官方线路校验正确拒绝；没有模型messages，关闭后原生PID消失。
+- 证据 `.artifacts/claude-control/claude-client-effective-settings.json`及Windows XML。尚未接入完整任务发送/审批/历史流程，未发布。
 ## 2026-09-24 Claude 有效官方线路校验
 
 - 新增requireOfficialRoute，消费原生get_settings的effective数据：只接受HTTPS api.anthropic.com根端点（默认或443端口），拒绝userinfo/query/fragment/其他路径与伪装域名；检查API/Bearer/custom headers/profile/federation/云开关、helper、网关和登录方式冲突。错误不回显地址中的凭据值。
