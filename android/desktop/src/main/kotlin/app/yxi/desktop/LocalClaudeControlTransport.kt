@@ -8,7 +8,8 @@ import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
-internal class LocalClaudeControlTransport private constructor(private val process: Process, val requestedSessionId: String) : ClaudeControlTransport {
+internal class LocalClaudeControlTransport private constructor(private val process: Process, val requestedSessionId: String, private val lease: ClaudeSessionLease) : ClaudeControlTransport {
+    init { process.onExit().thenRun { lease.close() } }
     override val output get() = process.inputStream
     private val writing = Mutex()
     private val closed = AtomicBoolean()
@@ -28,17 +29,26 @@ internal class LocalClaudeControlTransport private constructor(private val proce
             } ?: java.util.UUID.randomUUID().toString()
             val sessionOption = if (resumeSessionId == null) "--session-id" else "--resume"
             var owned: Process? = null
+            var lease: ClaudeSessionLease? = null
             try {
                 return withContext(Dispatchers.IO) {
+                    val acquired = ClaudeSessionLease.acquire(File(Store.dir, "claude-session-locks"), File(runtime.home), sessionId).also { lease = it }
                     val process = ProcessBuilder(runtime.command + listOf("--settings", settings.toString(), sessionOption, sessionId, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--permission-prompt-tool", "stdio"))
                         .directory(directory.canonicalFile).redirectError(ProcessBuilder.Redirect.DISCARD).apply {
                             environment().clear(); environment().putAll(ClaudeSubscriptionSettings.environment(inherited))
                             environment()["CLAUDE_CONFIG_DIR"] = runtime.home
                             environment()["DISABLE_AUTOUPDATER"] = "1"
                         }.start().also { owned = it }
-                    LocalClaudeControlTransport(process, sessionId)
+                    LocalClaudeControlTransport(process, sessionId, acquired)
                 }
-            } catch (e: Exception) { owned?.let(LocalRuntimeDiscovery::stopOwnedProcess); throw e }
+            } catch (e: Exception) {
+                val process = owned
+                if (process == null) lease?.close() else {
+                    process.onExit().thenRun { lease?.close() }
+                    LocalRuntimeDiscovery.stopOwnedProcess(process)
+                }
+                throw e
+            }
         }
     }
 }

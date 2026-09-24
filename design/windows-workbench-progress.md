@@ -1,3 +1,9 @@
+## 2026-09-24 Claude 原生连接占用锁
+
+- ClaudeSessionLease用OS文件锁协调相同规范runtimeHome+sessionId，锁文件在Yxi数据目录，只存哈希文件名；不删除锁文件以避免inode分裂。启动CLI前取得锁，失败启动关闭锁，进程退出后释放；close请求本身不提前释放仍在退出中的进程所有权。
+- Windows编译及ClaudeSessionLeaseTest 1项、LocalClaudeTasksTest 5项通过，0失败/错误/跳过，22秒。验证同身份拒绝重复占用、不同home/session独立、释放后重取及重复close。
+- 当前基础测试在同一JVM，跨独立进程竞争/退出释放及原生连接集成仍需验证；此锁只协调Yxi，不证明外部Claude客户端空闲。恢复UI与外部占用检测尚未完成，未发布。
+
 ## 2026-09-24 Claude 任务管理器显式恢复
 
 - LocalClaudeTasks.resume接入已核对的恢复服务，串行化创建/恢复；复用已有ready控制器，拒绝原连接仍在处理或队列存在Delivering/Unknown/InProgress。成功后保存有效模型并建立控制器，不发送本地队列项。
