@@ -55,7 +55,8 @@ import java.io.File
 }
 
 @OptIn(ExperimentalComposeUiApi::class)
-@Composable internal fun ClaudeConversationPane(state: AppState, record: LocalCodexTaskRecord) {
+@Composable internal fun ClaudeConversationPane(state: AppState, record: LocalCodexTaskRecord,
+    installations: List<LocalRuntimeInstallation> = state.localWorkspace.installations) {
     val controller = state.localClaudeTasks.controllers[record.key]
     val scope = rememberCoroutineScope()
     val draft = remember(record.key) { state.chatDrafts.getOrPut(record.key) { mutableStateOf(TextFieldValue()) } }
@@ -127,7 +128,7 @@ import java.io.File
         }
         Text(controller?.note ?: "连接未恢复；此记录不会自动重发指令。")
         if (controller?.ready != true && controller?.busy != true && controller?.cancelling != true && controller?.changingModel != true) {
-            ClaudeResumeActions(record, state.localWorkspace.installations,
+            ClaudeResumeActions(record, installations,
                 busy = resuming || state.localClaudeTasks.busy,
                 detecting = state.localWorkspace.detecting,
                 refresh = { state.localWorkspace.refresh() }) { runtime ->

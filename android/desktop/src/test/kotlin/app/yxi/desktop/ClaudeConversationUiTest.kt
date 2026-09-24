@@ -64,6 +64,71 @@ class ClaudeConversationUiTest {
         }
         override fun close() { producer.close(); output.close() }
     }
+    @Test fun `resume button preserves native history and sends only after explicit Enter`() {
+        check(!System.getenv("YXI_ISOLATED_TEST_RUN").isNullOrBlank() && File("/.dockerenv").exists())
+        check(System.getProperty("user.home") == "/sandbox/home")
+        System.setProperty("skiko.renderApi", "SOFTWARE")
+        val id = UUID.randomUUID().toString()
+        val nativeHome = File("/sandbox/tmp/resume-ui-$id").apply { mkdirs() }
+        val runtime = LocalRuntimeInstallation("claude", "fixture", listOf("/fixture/claude"), nativeHome.path, "fixture")
+        val record = LocalCodexTaskRecord(id, System.getProperty("user.name"), System.getProperty("os.name"), nativeHome.path,
+            nativeHome.path, "恢复历史测试", "claude-fixture", 1L, "claude", "official:claude")
+        File(nativeHome, "projects/project/$id.jsonl").apply {
+            parentFile.mkdirs()
+            writeText(JSONObject().put("type", "user").put("uuid", "old-user").put("parentUuid", JSONObject.NULL)
+                .put("sessionId", id).put("cwd", nativeHome.path)
+                .put("message", JSONObject().put("role", "user").put("content", "恢复前的历史消息")).toString() + "\n")
+        }
+        val fixture = Fixture(id); var launches = 0
+        val subscription = LocalClaudeSubscription { _, _ -> error("must not create") }
+        val state = AppState { queue, file -> LocalClaudeTasks(queue, file, subscription,
+            resumeConnection = { selected, saved ->
+                launches++; subscription.resume(selected, saved) { _, _, sid -> ClaudeControlClient(fixture, sid) }
+            }) }
+        state.localClaudeTasks.registry.save(record)
+        var failure: Throwable? = null
+        try {
+            application(exitProcessOnExit = false) {
+                Window(onCloseRequest = ::exitApplication, state = rememberWindowState(width = 960.dp, height = 820.dp)) {
+                    YxiTheme { Surface { ClaudeConversationPane(state, record, listOf(runtime)) } }
+                    LaunchedEffect(Unit) {
+                        suspend fun click(x: Int, y: Int) = withContext(Dispatchers.IO) {
+                            val origin = window.contentPane.locationOnScreen
+                            Robot().apply { mouseMove(origin.x + x, origin.y + y); mousePress(InputEvent.BUTTON1_DOWN_MASK); mouseRelease(InputEvent.BUTTON1_DOWN_MASK) }
+                        }
+                        fun screenshot(name: String) { ImageIO.write(Robot().createScreenCapture(java.awt.Rectangle(window.locationOnScreen, window.size)), "png", File("/results/$name.png")) }
+                        try {
+                            delay(700); screenshot("claude-before-resume")
+                            assertEquals(0, launches)
+                            click(85, 225)
+                            withTimeout(4000) { while (state.localClaudeTasks.controllers[record.key]?.ready != true) delay(20) }
+                            val controller = state.localClaudeTasks.controllers.getValue(record.key)
+                            assertEquals(1, launches)
+                            assertTrue(controller.history.any { it is app.yxi.agent.ChatItem.UserText && it.text == "恢复前的历史消息" })
+                            assertTrue(fixture.writes.none { it.optString("type") == "user" })
+                            delay(400); screenshot("claude-after-resume")
+                            state.chatDrafts.getValue(record.key).value = TextFieldValue("恢复后继续")
+                            delay(200); click(150, window.height - 115)
+                            withContext(Dispatchers.IO) { Robot().apply { keyPress(KeyEvent.VK_ENTER); keyRelease(KeyEvent.VK_ENTER) } }
+                            withTimeout(3000) { while (controller.pendingApprovals.isEmpty()) delay(20) }
+                            delay(300)
+                            withContext(Dispatchers.IO) { Robot().apply {
+                                keyPress(KeyEvent.VK_SHIFT); repeat(2) { keyPress(KeyEvent.VK_TAB); keyRelease(KeyEvent.VK_TAB); delay(80) }
+                                keyRelease(KeyEvent.VK_SHIFT); keyPress(KeyEvent.VK_SPACE); keyRelease(KeyEvent.VK_SPACE)
+                            } }
+                            withTimeout(3000) { while (controller.busy) delay(20) }
+                            assertEquals(1, fixture.writes.count { it.optString("type") == "user" })
+                            assertEquals(RuntimeTurnState.Completed, state.instructions.entries.single { it.taskKey == record.key }.runtimeTurnState)
+                            assertEquals(1, controller.history.size)
+                            delay(300); screenshot("claude-resume-continued")
+                        } catch (e: Throwable) { screenshot("claude-resume-failure"); failure = e }
+                        finally { exitApplication() }
+                    }
+                }
+            }
+        } finally { state.closeLocalFeatures() }
+        failure?.let { throw it }
+    }
     @Test fun `new Claude dialog sends once with Enter and routes the allow-once UI choice`() {
         check(!System.getenv("YXI_ISOLATED_TEST_RUN").isNullOrBlank() && File("/.dockerenv").exists())
         check(System.getProperty("user.home") == "/sandbox/home")
