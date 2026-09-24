@@ -55,6 +55,22 @@ class ClaudeControlClientNativeTest {
                 assertEquals(first.getString("session_id"), second.getString("session_id"))
                 assertEquals(second.getString("session_id"), client.sessionId)
                 File("/results/claude-control-second-turn.json").writeText(second.toString(2))
+                for (allow in listOf(true, false)) {
+                    val marker = if (allow) "KEEP-control-permission" else "FOLLOWUP-control-permission"
+                    val file = File(root, if (allow) "approved-control.txt" else "denied-control.txt")
+                    val turn = async { client.prompt(marker, 30000) }
+                    withTimeout(10000) { while (client.pendingPermissions().isEmpty() && !turn.isCompleted) delay(20) }
+                    assertFalse(file.exists(), "Bash must not execute before approval")
+                    val permission = client.pendingPermissions().single()
+                    assertEquals("Bash", permission.getJSONObject("request").getString("tool_name"))
+                    client.answerPermission(permission.getString("request_id"), allow)
+                    val result = turn.await()
+                    assertFalse(result.getBoolean("is_error"))
+                    assertEquals(allow, file.exists())
+                    if (allow) assertEquals("allowed", file.readText())
+                    assertTrue(client.pendingPermissions().isEmpty())
+                    File("/results/claude-control-permission-$allow.json").writeText(result.toString(2))
+                }
             }
             withTimeout(5000) { while (ProcessHandle.of(conversationPid).map { it.isAlive }.orElse(false)) delay(20) }
             val turns = requests.readLines().map(::JSONObject)

@@ -3,6 +3,7 @@ import http.server
 import json
 import pathlib
 import re
+import shlex
 import sys
 import threading
 import time
@@ -49,14 +50,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             (root / "native-stop-request-started").write_text("ready")
             time.sleep(15)  # Give the real interactive CLI a deterministic cancellation window.
         tool = None
-        if marker and marker.group(0) in ("KEEP-container-first", "DROP-container-third"):
+        if marker and marker.group(0) in ("KEEP-container-first", "DROP-container-third", "KEEP-control-permission", "FOLLOWUP-control-permission"):
             tool_id = "tool_fixture_" + marker.group(0).replace("-", "_")
             completed = any(block.get("type") == "tool_result" and block.get("tool_use_id") == tool_id
                             for m in body.get("messages", []) if isinstance(m.get("content"), list)
                             for block in m["content"] if isinstance(block, dict))
             if not completed:
-                name = "retained-tool.txt" if marker.group(0).startswith("KEEP") else "discarded-tool.txt"
-                tool = {"type": "tool_use", "id": tool_id, "name": "Read", "input": {"file_path": str(root / "project" / name)}}
+                if marker.group(0).endswith("control-permission"):
+                    target = root / ("approved-control.txt" if marker.group(0).startswith("KEEP") else "denied-control.txt")
+                    tool = {"type": "tool_use", "id": tool_id, "name": "Bash", "input": {"command": "printf allowed > " + shlex.quote(str(target)), "description": "Fixture permission write"}}
+                else:
+                    name = "retained-tool.txt" if marker.group(0).startswith("KEEP") else "discarded-tool.txt"
+                    tool = {"type": "tool_use", "id": tool_id, "name": "Read", "input": {"file_path": str(root / "project" / name)}}
         message = {"id": "msg_fixture_" + str(time.time_ns()), "type": "message", "role": "assistant",
                    "model": body.get("model", "fixture"), "content": [tool] if tool else [{"type": "text", "text": answer}],
                    "stop_reason": "tool_use" if tool else "end_turn", "stop_sequence": None,
