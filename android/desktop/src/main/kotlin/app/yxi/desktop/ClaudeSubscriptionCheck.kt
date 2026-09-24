@@ -9,7 +9,10 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.io.File
 
-@Composable internal fun ClaudeSubscriptionCheck(runtime: LocalRuntimeInstallation) {
+@Composable internal fun ClaudeSubscriptionCheck(runtime: LocalRuntimeInstallation, dialogModifier: Modifier = Modifier,
+    verify: suspend (LocalRuntimeInstallation, File) -> Unit = { selected, cwd ->
+        ClaudeSubscriptionProbe.verify(selected.command, cwd, System.getenv() + ("CLAUDE_CONFIG_DIR" to selected.home))
+    }) {
     var open by remember(runtime.id) { mutableStateOf(false) }
     TextButton({ open = true }, enabled = runtime.ready) { Text("检查官方认证") }
     if (open) {
@@ -18,7 +21,7 @@ import java.io.File
         var busy by remember { mutableStateOf(false) }
         var result by remember { mutableStateOf("") }
         var error by remember { mutableStateOf("") }
-        WorkbenchDialog(onDismissRequest = { open = false }, title = { Text("检查 Claude 官方认证") }, text = {
+        WorkbenchDialog(onDismissRequest = { open = false }, modifier = dialogModifier, title = { Text("检查 Claude 官方认证") }, text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(runtime.command.joinToString(" "), style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(directory, { directory = it; result = ""; error = "" }, Modifier.fillMaxWidth(),
@@ -34,7 +37,7 @@ import java.io.File
                 try {
                     val cwd = File(directory)
                     require(cwd.isAbsolute && cwd.isDirectory) { "请选择已存在的本机工作目录" }
-                    ClaudeSubscriptionProbe.verify(runtime.command, cwd, System.getenv() + ("CLAUDE_CONFIG_DIR" to runtime.home))
+                    verify(runtime, cwd)
                     result = "认证来源核对通过。订阅额度与实际任务线路尚未验证，此检查不会应用配置到任务。"
                 } catch (e: CancellationException) { throw e }
                 catch (e: Exception) { error = e.message ?: "认证检查未完成" }
