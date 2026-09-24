@@ -75,11 +75,13 @@ class AppState {
         Notify.notify(title, "任务：" + (navigation.title(task.key) ?: task.title), taskKey = task.key)
     }) }
     internal val localAcpTasks get() = localAcpTasksDelegate.value
+    private val localClaudeTasksDelegate = lazy { LocalClaudeTasks(instructions, java.io.File(Store.dir, "local-claude-tasks.json")) }
+    internal val localClaudeTasks get() = localClaudeTasksDelegate.value
     internal var localSelectedTaskKey by mutableStateOf<String?>(null)
     internal val localWorkspace get() = localWorkspaceDelegate.value
     internal val isLocal get() = hostScope == LOCAL_HOST_SCOPE
     internal fun openNotifiedTask(key: String): Boolean {
-        if (listOf(localAcpTasks.registry, localOpenCodeTasks.registry, localCodexTasks.registry).any { registry -> registry.records.any { it.key == key } }) {
+        if (listOf(localClaudeTasks.registry, localAcpTasks.registry, localOpenCodeTasks.registry, localCodexTasks.registry).any { registry -> registry.records.any { it.key == key } }) {
             selectLocal(); localSelectedTaskKey = key
             if (navigation.archived(key)) navigation.setMode("归档")
             else if (navigation.mode == "归档") navigation.setMode("全部")
@@ -104,11 +106,14 @@ class AppState {
         (if (localOpenCodeTasksDelegate.isInitialized()) (if (localOpenCodeTasks.busy) 1 else 0) +
             localOpenCodeTasks.controllers.values.count { it.busy || it.nativeBusy || it.permissions.isNotEmpty() || it.questions.isNotEmpty() } else 0) +
         (if (localAcpTasksDelegate.isInitialized()) (if (localAcpTasks.busy) 1 else 0) +
-            localAcpTasks.controllers.values.count { it.busy || it.pendingApprovals.isNotEmpty() } else 0)
+            localAcpTasks.controllers.values.count { it.busy || it.pendingApprovals.isNotEmpty() } else 0) +
+        (if (localClaudeTasksDelegate.isInitialized()) (if (localClaudeTasks.busy) 1 else 0) +
+            localClaudeTasks.controllers.values.count { it.busy || it.pendingApprovals.isNotEmpty() } else 0)
     internal fun closeLocalFeatures() {
         if (localCodexTasksDelegate.isInitialized()) localCodexTasks.close()
         if (localOpenCodeTasksDelegate.isInitialized()) localOpenCodeTasks.close()
         if (localAcpTasksDelegate.isInitialized()) localAcpTasks.close()
+        if (localClaudeTasksDelegate.isInitialized()) localClaudeTasks.close()
         if (localWorkspaceDelegate.isInitialized()) localWorkspace.close()
         if (linksDelegate.isInitialized()) deviceLinks.close()
         if (localAgentsDelegate.isInitialized()) localAgents.close()

@@ -22,6 +22,12 @@ import javax.swing.JFileChooser
     var creating by remember { mutableStateOf(false) }
     var openCodeRuntime by remember { mutableStateOf<LocalRuntimeInstallation?>(null) }
     var acpRuntime by remember { mutableStateOf<LocalRuntimeInstallation?>(null) }
+    var claudeRuntime by remember { mutableStateOf<LocalRuntimeInstallation?>(null) }
+    claudeRuntime?.let { runtime -> NewClaudeConversationDialog(state, runtime, { claudeRuntime = null }) {
+        claudeRuntime = null; state.localSelectedTaskKey = it.key
+    } }
+    val claudeOwned = state.localSelectedTaskKey?.let { key -> state.localClaudeTasks.registry.records.singleOrNull { it.key == key } }
+    if (!configuration && claudeOwned != null) { ClaudeConversationPane(state, claudeOwned); return }
     acpRuntime?.let { runtime -> NewAcpConversationDialog(state, runtime, { acpRuntime = null }) {
         acpRuntime = null; state.localSelectedTaskKey = it.key
     } }
@@ -91,6 +97,7 @@ import javax.swing.JFileChooser
                                     }
                                     if (engine == "opencode" && runtime.ready && !configuration) TextButton({ openCodeRuntime = runtime }) { Text("新建对话") }
                                     if (engine == "claude") ClaudeSubscriptionCheck(runtime)
+                                    if (engine == "claude" && runtime.ready && !configuration) TextButton({ claudeRuntime = runtime }) { Text("新建官方对话（预览）") }
                                     if (engine in setOf("gemini", "grok", "hermes") && runtime.ready && !configuration)
                                         TextButton({ acpRuntime = runtime }) { Text("连接并继续（预览）") }
                                 }
@@ -143,6 +150,9 @@ import javax.swing.JFileChooser
                     }
                     items(state.localAcpTasks.registry.records.filter { it.user == System.getProperty("user.name") && it.platform == System.getProperty("os.name") }, key = { "owned:${it.key}" }) { record ->
                         TextButton({ state.localSelectedTaskKey = record.key }) { Text("${record.title} · ${LocalRuntimeDiscovery.title(record.engine)}") }
+                    }
+                    items(state.localClaudeTasks.registry.records.filter { it.user == System.getProperty("user.name") && it.platform == System.getProperty("os.name") }, key = { "owned:${it.key}" }) { record ->
+                        TextButton({ state.localSelectedTaskKey = record.key }) { Text("${record.title} · Claude · ${record.model}") }
                     }
                     if (workspace.projects.isNotEmpty()) item { Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         workspace.projects.forEach { path -> Text(path + if (File(path).isDirectory) "" else " · 目录已不可用", color = t.textMuted) }
