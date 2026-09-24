@@ -1,3 +1,9 @@
+## 2026-09-24 服务器 Claude 认证检查界面接线
+
+- 服务器OfficialProviderCards接入RemoteClaudeSubscriptionCheck，显示主机身份、服务器绝对工作目录，连接不可用时禁用入口；本地与远端复用有取消/防重复提交的弹窗，分别验证本机路径和服务器路径。
+- Windows createDistributable及ClaudeSubscriptionSettingsTest通过（42秒，3项校验0失败/错误/跳过）；仍非Windows真实鼠标验收。
+- `662e2787c068b8d2f2d94cb233aaccf4ec643a74` 新增真实窗口+隔离SSH+Claude2.1.280点击测试；构建run.U9NAud，RemoteClaudeSubscriptionUiTest run.CSKTFn 1项通过，0失败/错误/跳过，单次点击到服务器probe，原SSH保持、没有.credentials.json新增。
+- `.artifacts/claude-subscription-ui/remote-claude-subscription.png` 已目视确认服务器身份和结果说明。仍只核对认证来源，不代表订阅额度/有效端点/任务配置应用已完成；未发布。
 ## 2026-09-24 服务器 Claude 认证探测
 
 - `35de0b4571f43207fb54f7f49d4f1a44a1a2f843` 新增verifyRemote：按服务器目录解析原生Claude，通过独立SSH exec和Python监督进程执行临时订阅配置下的auth status；仅过滤远端子进程环境、不传本机凭据，15秒服务端/17秒客户端限制、64KiB上限、退出回执及通道清理。
