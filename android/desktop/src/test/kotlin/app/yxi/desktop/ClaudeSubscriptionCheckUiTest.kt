@@ -17,19 +17,32 @@ import kotlin.test.*
 
 class ClaudeSubscriptionCheckUiTest {
     @Test fun `actual subscription dialog opens runs and cancels its checker`() {
-        check(!System.getenv("YXI_ISOLATED_TEST_RUN").isNullOrBlank() && File("/.dockerenv").exists())
-        check(System.getProperty("user.home") == "/sandbox/home")
+        val windowsFixture = System.getenv("YXI_SUBSCRIPTION_UI_FIXTURE")?.let { File(it).canonicalFile }
+        val home = if (windowsFixture != null) {
+            check(System.getProperty("os.name").startsWith("Windows"))
+            windowsFixture.resolve("profile").also { profile ->
+                check(File(System.getProperty("user.home")).canonicalFile == profile)
+                check(File(System.getenv("APPDATA")).canonicalFile == profile.resolve("Roaming"))
+                check(File(System.getenv("LOCALAPPDATA")).canonicalFile == profile.resolve("Local"))
+                profile.mkdirs(); profile.resolve("Roaming").mkdirs(); profile.resolve("Local").mkdirs()
+            }
+        } else {
+            check(!System.getenv("YXI_ISOLATED_TEST_RUN").isNullOrBlank() && File("/.dockerenv").exists())
+            check(System.getProperty("user.home") == "/sandbox/home")
+            File("/sandbox/home")
+        }
+        val results = windowsFixture?.resolve("results")?.apply { mkdirs() } ?: File("/results")
         System.setProperty("skiko.renderApi", "SOFTWARE")
         for (mode in listOf("success", "error", "cancel")) {
             var bounds: Rect? = null
             var calls = 0
             var cancelled = false
             var failure: Throwable? = null
-            val runtime = LocalRuntimeInstallation("claude", "fixture", listOf("/fixture/claude"), "/sandbox/home/.claude", "fixture")
+            val runtime = LocalRuntimeInstallation("claude", "fixture", listOf("/fixture/claude"), home.resolve(".claude").path, "fixture")
             application(exitProcessOnExit = false) {
                 Window(onCloseRequest = ::exitApplication, state = rememberWindowState(width = 760.dp, height = 650.dp)) {
                     YxiTheme { ClaudeSubscriptionCheck(runtime, Modifier.onGloballyPositioned { bounds = it.boundsInWindow() }) { selected, directory ->
-                        assertSame(runtime, selected); assertEquals("/sandbox/home", directory.path); calls++
+                        assertSame(runtime, selected); assertEquals(home, directory.canonicalFile); calls++
                         delay(250)
                         when (mode) {
                             "error" -> error("测试：仍检测到 API 凭据来源")
@@ -54,7 +67,7 @@ class ClaudeSubscriptionCheckUiTest {
                             click(box.right.toInt() - 65, box.bottom.toInt() - 45)
                             withTimeout(3000) { while (calls == 0) delay(20) }
                             delay(500)
-                            ImageIO.write(Robot().createScreenCapture(java.awt.Rectangle(window.locationOnScreen, window.size)), "png", File("/results/claude-subscription-$mode.png"))
+                            ImageIO.write(Robot().createScreenCapture(java.awt.Rectangle(window.locationOnScreen, window.size)), "png", File(results, "claude-subscription-$mode.png"))
                             withContext(Dispatchers.IO) { Robot().apply { keyPress(KeyEvent.VK_ESCAPE); keyRelease(KeyEvent.VK_ESCAPE) } }
                             if (mode == "cancel") withTimeout(3000) { while (!cancelled) delay(20) }
                             assertEquals(1, calls)
