@@ -1,3 +1,9 @@
+## 2026-09-24 Claude 磁盘凭据回落验证
+
+- `af1bb654d67d04cfa4ba2b67e3fab238087bfd63` 增加隔离CLAUDE_CONFIG_DIR下合成.credentials.json，移除OAuth环境变量后运行临时订阅覆盖；不使用真实账号。
+- 构建run.K5hC38；ClaudeAuthenticationRequestTest run.g9l91D 1项通过，0失败/错误/跳过，覆盖8组合。新增场景实际请求api=false/oauth=true，磁盘凭据、用户设置字节保全，旧API/helper仍被覆盖。证据 `.artifacts/claude-auth-requests/claude-request-stored-overlay.jsonl`。
+- cc-yxi审查报告已收回 `.artifacts/claude-auth-requests/overlay-review.md`，基线3f238dc1，不含本次新增磁盘场景；云提供方开关、托管设置优先级等剩余项继续有效。合成凭据回落不证明真实订阅有效。
+- 下一步需处理云提供方残留并验证托管策略明确失败/不越权行为，之后才能接入选择入口。未发布。
 ## 2026-09-24 临时订阅覆盖层保留项目禁读规则
 
 - `b9e1bb2e` 增加正常读取与项目禁止Read的对照；首跑run.LLhCCw失败在permission_denials数组断言。实际原生CLI将Read工具直接禁用，返回明确的disabled工具错误，而非填充permission_denials数组。
