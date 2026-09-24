@@ -40,9 +40,11 @@ internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
     private val incoming = Channel<Event>(64)
     private val consuming = AtomicBoolean()
     private val fences = ConcurrentHashMap.newKeySet<CompletableDeferred<Unit>>()
-    suspend fun consumeEvents(handler: suspend (JSONObject) -> Unit) {
+    suspend fun consumeEvents(onReady: () -> Unit = {}, handler: suspend (JSONObject) -> Unit) {
         check(consuming.compareAndSet(false, true)) { "ACP 事件只能由一个会话控制器消费" }
         try {
+            check(!closed.get()) { "ACP 连接已关闭" }
+            onReady()
             for (event in incoming) when (event) {
                 is Event.Message -> handler(event.value)
                 is Event.Fence -> event.completion.complete(Unit)

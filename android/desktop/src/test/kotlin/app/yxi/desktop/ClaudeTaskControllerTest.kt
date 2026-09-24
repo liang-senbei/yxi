@@ -39,6 +39,21 @@ class ClaudeTaskControllerTest {
         fun emit(value: JSONObject) { producer.write((value.toString() + "\n").toByteArray()); producer.flush() }
         override fun close() { producer.close(); output.close() }
     }
+    @Test fun `scheduled dispatch never sends a different queued instruction`(): Unit = runBlocking(Dispatchers.Swing) {
+        val disk = File(root, "schedule-identity.json")
+        val queue = InstructionQueue(disk)
+        val fixture = Fixture(disk)
+        ClaudeControlClient(fixture).use { client ->
+            client.initialize()
+            ClaudeTaskController("task", client, queue).use { controller ->
+                queue.enqueue("task", "user first", id = "first")
+                queue.enqueue("task", "scheduled second", id = "scheduled")
+                withTimeout(2000) { controller.dispatchScheduled("scheduled").join() }
+                assertTrue(fixture.writes.none { it.optString("type") == "user" })
+                assertTrue(queue.entries.all { it.status == InstructionStatus.Local })
+            }
+        }
+    }
     @Test fun `effort changes only to supported levels and never sends a user message`(): Unit = runBlocking(Dispatchers.Swing) {
         val disk = File(root, "effort.json"); val fixture = Fixture(disk)
         ClaudeControlClient(fixture).use { client ->

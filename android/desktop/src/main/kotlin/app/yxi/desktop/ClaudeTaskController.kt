@@ -140,10 +140,12 @@ internal class ClaudeTaskController(val taskKey: String, private val client: Cla
         finally { stopInFlight = false; if (!busy) cancelling = false }
     }
     fun dispatchNext(): Job = scope.launch { try { sendNext() } catch (e: CancellationException) { throw e } catch (_: Exception) { } }
-    suspend fun sendNext(): Unit = withContext(Dispatchers.Swing) { mutation.withLock {
+    fun dispatchScheduled(id: String): Job = scope.launch { try { sendNext(id) } catch (e: CancellationException) { throw e } catch (_: Exception) { } }
+    suspend fun sendNext(expectedId: String? = null): Unit = withContext(Dispatchers.Swing) { mutation.withLock {
         check(ready && !disposed && !busy && !cancelling && !changingModel && pendingApprovals.isEmpty()) { "Claude 当前不能接收新指令" }
         val item = queue.entries.firstOrNull { it.taskKey == taskKey && it.status !in setOf(InstructionStatus.Cancelled, InstructionStatus.Sent, InstructionStatus.Accepted, InstructionStatus.Resolved) }
             ?: return@withLock
+        check(expectedId == null || item.id == expectedId) { "定时指令不在队首，本次未投递" }
         check(item.status == InstructionStatus.Local) { "前一条指令尚未确认，请先核对" }
         check(item.attachments.isEmpty()) { "Claude 附件输入尚未接入" }
         busy = true; preparing = true

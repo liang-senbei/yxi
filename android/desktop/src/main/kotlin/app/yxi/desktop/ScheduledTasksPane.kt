@@ -35,12 +35,14 @@ import java.util.UUID
             OutlinedCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row { Text(task.name, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium); Text(if (active) "执行中" else if (task.enabled) "已启用" else if (task.repeat == "一次" && last != null) last.status else "已暂停", color = Tokens.current.textMuted) }
                 Text(task.target.label)
+                if (active && last?.detail?.isNotBlank() == true) Text(last.detail, color = Tokens.current.textMuted, style = MaterialTheme.typography.bodySmall)
                 Text("${task.repeat} · ${scheduleTime(task.next, task.zone)} · ${task.zone}", style = MaterialTheme.typography.bodySmall)
                 Text(task.prompt, maxLines = 3)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (task.repeat != "一次" || last == null) TextButton({ action { if (task.enabled) store.pause(task.id) else store.resume(task.id, System.currentTimeMillis()) } }, enabled = !active) { Text(if (task.enabled) "暂停" else "恢复") }
                     TextButton({ editor = task }, enabled = !active) { Text("编辑") }
                     TextButton({ history = task.id }) { Text("执行记录") }
+                    if (task.target.kind == "local-session") TextButton({ action { check(state.openNotifiedTask(task.target.task)) { "目标会话不存在" } } }) { Text("打开目标会话") }
                     TextButton({ action { store.remove(task.id) } }, enabled = !active) { Text("删除") }
                 }
             } }
@@ -54,6 +56,9 @@ import java.util.UUID
             items(records, key = { it.id }) { run -> Column {
                 Text("${scheduleTime(run.due, ZoneId.systemDefault().id)} · ${run.status}")
                 Text(run.detail, style = MaterialTheme.typography.bodySmall)
+                run.targetTaskKey?.let { targetKey ->
+                    TextButton({ action { check(state.openNotifiedTask(targetKey)) { "目标会话不存在" }; history = null } }) { Text("打开目标会话") }
+                }
                 if (run.status == "结果未确认") TextButton({ confirmRun = run }) { Text("已核对目标会话") }
             } }
         }
@@ -77,7 +82,7 @@ private fun scheduleTime(time: Long, zone: String) = Instant.ofEpochMilli(time).
     var targetsOpen by remember { mutableStateOf(false) }
     var repeatOpen by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
-    val targets = listOf(ScheduleTarget("local", "本地 · Codex", "codex"), ScheduleTarget("local", "本地 · Claude Code", "claude")) +
+    val targets = listOf(ScheduleTarget("local", "本地 · Codex", "codex"), ScheduleTarget("local", "本地 · Claude Code", "claude")) + ScheduleTargetAdapter.connectedTargets(state) +
         state.conns.filter { it.status == Conn.Status.Connected }.flatMap { conn ->
             conn.sessions.map { ScheduleTarget("terminal", "${conn.host.label} · ${it.short}", host = projectKey(conn.host, "/"), task = taskNavigationKey(conn.host, it), runtime = it.runtimeId) } +
                 state.codexWorkspace.tasks(conn.host).map { ScheduleTarget("codex", "${conn.host.label} · ${it.title}", host = projectKey(conn.host, "/"), task = it.key) }
@@ -96,14 +101,14 @@ private fun scheduleTime(time: Long, zone: String) = Instant.ofEpochMilli(time).
                 } }
                 OutlinedTextField(time, { time = it }, Modifier.weight(1f), label = { Text("首次执行 yyyy-MM-dd HH:mm") }, singleLine = true)
             }
-            Text("时区：$zone。服务器会话继续现有上下文；本地每次创建新任务，沿用运行器的权限设置。", style = MaterialTheme.typography.bodySmall)
+            Text("时区：$zone。现有会话继续原上下文，须保持连接；“本地 · 运行器”每次创建新任务。沿用原权限设置，审批需手动处理。", style = MaterialTheme.typography.bodySmall)
             if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
         }
     }, confirmButton = { Button({ runCatching {
         val next = LocalDateTime.parse(time.trim(), DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")).atZone(ZoneId.of(zone)).toInstant().toEpochMilli()
         require(next > System.currentTimeMillis()) { "首次执行时间必须晚于现在" }
         if (target.kind == "local") require(java.io.File(directory).isDirectory) { "本地工作目录不存在" }
-        state.scheduledTasks.put(ScheduledTask(original?.id ?: UUID.randomUUID().toString(), name.trim(), prompt.trim(), target.copy(directory = directory), next, repeat, zone, original?.enabled ?: true))
+        state.scheduledTasks.put(ScheduledTask(original?.id ?: UUID.randomUUID().toString(), name.trim(), prompt.trim(), if (target.kind == "local") target.copy(directory = directory) else target, next, repeat, zone, original?.enabled ?: true))
     }.onSuccess { close() }.onFailure { error = it.message ?: "请检查任务信息" } }, enabled = name.isNotBlank() && prompt.isNotBlank()) { Text("保存") } },
         dismissButton = { TextButton(close) { Text("取消") } })
 }

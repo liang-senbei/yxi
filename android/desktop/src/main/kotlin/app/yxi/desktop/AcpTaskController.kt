@@ -29,6 +29,7 @@ internal class AcpTaskController(
 ) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
     private val mutation = Mutex()
+    private val eventsReady = CompletableDeferred<Unit>()
     private val agentText = StringBuilder()
     private var activeMessageId = ""
     val messages = mutableStateListOf<AcpMessage>()
@@ -48,11 +49,12 @@ internal class AcpTaskController(
         require(taskKey.isNotBlank() && sessionId.isNotBlank())
         scope.launch {
             try {
-                client.consumeEvents { event -> onRawEvent(event); receive(event) }
+                client.consumeEvents(onReady = { eventsReady.complete(Unit) }) { event -> onRawEvent(event); receive(event) }
                 ready = false
                 if (!disposed) note = "运行器连接已结束，未确认指令不会自动重发"
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { ready = false; client.close(); note = "运行器状态未确认：${e.message}" }
+            finally { eventsReady.completeExceptionally(IllegalStateException("ACP 事件处理器已退出")) }
         }
     }
 
@@ -129,6 +131,7 @@ internal class AcpTaskController(
         it.status !in setOf(InstructionStatus.Sent, InstructionStatus.Accepted, InstructionStatus.Cancelled, InstructionStatus.Resolved) }
 
     suspend fun changeMode(modeId: String) = mutation.withLock {
+        eventsReady.await()
         check(ready && !disposed && !busy && pendingApprovals.isEmpty()) { "当前会话暂不能切换模式" }
         changingMode = true
         try {
@@ -142,6 +145,7 @@ internal class AcpTaskController(
         } finally { changingMode = false }
     }
     suspend fun changeModel(modelId: String) = mutation.withLock {
+        eventsReady.await()
         check(ready && !disposed && !busy && pendingApprovals.isEmpty()) { "当前会话暂不能切换模型" }
         changingMode = true
         var acknowledged = false
@@ -162,6 +166,7 @@ internal class AcpTaskController(
         } finally { changingMode = false }
     }
     suspend fun changeConfig(configId: String, value: String) = mutation.withLock {
+        eventsReady.await()
         check(ready && !disposed && !busy && pendingApprovals.isEmpty()) { "当前会话暂不能修改配置" }
         changingMode = true
         try {
@@ -177,11 +182,17 @@ internal class AcpTaskController(
 
     /** 提交下一条本地指令并等待原生轮次结束。prompt 响应携带 stopReason，是唯一可接受的
      * 轮次回执；超时/断连一律记 Unknown，不重发。 */
-    suspend fun sendNext() = mutation.withLock {
+    fun dispatchScheduled(id: String): Job = scope.launch {
+        try { sendNext(id) } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { note = e.message ?: "定时指令未确认" }
+    }
+    suspend fun sendNext(expectedId: String? = null) = mutation.withLock {
+        eventsReady.await()
         check(ready && !disposed) { "请先连接并核对运行器状态" }
         check(!busy) { "当前轮次尚未结束" }
         check(pendingApprovals.isEmpty()) { "运行器正在等待审批" }
         val item = firstPending() ?: return@withLock
+        check(expectedId == null || item.id == expectedId) { "定时指令不在队首，本次未投递" }
         check(item.status == InstructionStatus.Local) { "前一条指令尚未确认，不能重发或跳过" }
         check(item.attachments.isEmpty()) { "ACP 附件输入尚未接入" }
         val started = queue.beginDelivery(item.id, item.revision)
@@ -280,6 +291,7 @@ internal class AcpTaskController(
 
     override fun close() {
         disposed = true; ready = false
+        eventsReady.completeExceptionally(IllegalStateException("ACP 控制器已关闭"))
         client.close(); scope.cancel(); pendingApprovals.clear()
     }
 

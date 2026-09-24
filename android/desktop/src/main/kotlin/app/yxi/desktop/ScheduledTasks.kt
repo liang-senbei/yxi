@@ -13,7 +13,7 @@ internal data class ScheduleTarget(val kind: String, val label: String, val engi
     val host: String = "", val task: String = "", val runtime: String = "")
 internal data class ScheduledTask(val id: String, val name: String, val prompt: String, val target: ScheduleTarget,
     val next: Long, val repeat: String, val zone: String, val enabled: Boolean = true)
-internal data class ScheduleRun(val id: String, val schedule: String, val due: Long, val status: String, val detail: String = "")
+internal data class ScheduleRun(val id: String, val schedule: String, val due: Long, val status: String, val detail: String = "", val targetTaskKey: String? = null)
 
 internal class ScheduledTasks(file: File) {
     var tasks by mutableStateOf<List<ScheduledTask>>(emptyList()); private set
@@ -40,7 +40,8 @@ internal class ScheduledTasks(file: File) {
     fun put(task: ScheduledTask) {
         require(task.name.isNotBlank() && task.prompt.isNotBlank())
         require(task.repeat in setOf("一次", "每小时", "每天", "每周")); ZoneId.of(task.zone)
-        require(task.target.kind in setOf("local", "terminal", "codex"))
+        require(task.target.kind in setOf("local", "terminal", "codex", "local-session"))
+        if (task.target.kind == "local-session") require(task.target.task.isNotBlank() && task.target.engine in setOf("claude", "gemini", "grok", "hermes"))
         check(runs.none { it.schedule == task.id && it.status == "执行中" }) { "请等待本次执行结束" }
         check(!task.enabled || runs.none { it.schedule == task.id && it.status == "结果未确认" }) { "请先核对未确认执行，再启用计划" }
         save(tasks.filterNot { it.id == task.id } + task)
@@ -58,11 +59,15 @@ internal class ScheduledTasks(file: File) {
     fun claim(now: Long): Pair<ScheduledTask, ScheduleRun>? {
         if (!writable) return null
         val task = tasks.filter { it.enabled && it.next <= now && runs.none { r -> r.schedule == it.id && r.status == "执行中" } }.minByOrNull { it.next } ?: return null
-        val run = ScheduleRun(UUID.randomUUID().toString(), task.id, task.next, "执行中")
+        val run = ScheduleRun(UUID.randomUUID().toString(), task.id, task.next, "执行中", targetTaskKey = task.target.task.takeIf { task.target.kind == "local-session" })
         val next = if (task.repeat == "一次") task.copy(enabled = false) else task.copy(next = nextTime(task, now))
         // Commit receipt and advance before any side effect. Crash means unknown, never automatic replay.
         save(tasks.map { if (it.id == task.id) next else it }, runs + run)
         return task to run
+    }
+    fun progress(id: String, detail: String) {
+        check(runs.single { it.id == id }.status == "执行中")
+        save(tasks, runs.map { if (it.id == id) it.copy(detail = detail.take(4000)) else it })
     }
     fun finish(id: String, status: String, detail: String) {
         val run = runs.single { it.id == id }; check(run.status == "执行中")
@@ -84,7 +89,7 @@ internal class ScheduledTasks(file: File) {
             .put("tasks", JSONArray(tasks.map { t -> JSONObject().put("id", t.id).put("name", t.name).put("prompt", t.prompt).put("next", t.next)
                 .put("repeat", t.repeat).put("zone", t.zone).put("enabled", t.enabled).put("target", JSONObject().put("kind", t.target.kind)
                     .put("label", t.target.label).put("engine", t.target.engine).put("directory", t.target.directory).put("host", t.target.host).put("task", t.target.task).put("runtime", t.target.runtime)) }))
-            .put("runs", JSONArray(runs.map { JSONObject().put("id", it.id).put("schedule", it.schedule).put("due", it.due).put("status", it.status).put("detail", it.detail) })).toString()
+            .put("runs", JSONArray(runs.map { JSONObject().put("id", it.id).put("schedule", it.schedule).put("due", it.due).put("status", it.status).put("detail", it.detail).put("targetTaskKey", it.targetTaskKey ?: JSONObject.NULL) })).toString()
         private fun decode(raw: String): Pair<List<ScheduledTask>, List<ScheduleRun>> {
             val json = JSONObject(raw); require(json.getInt("version") == 1)
             val ts = json.getJSONArray("tasks"); val rs = json.getJSONArray("runs")
@@ -93,7 +98,7 @@ internal class ScheduledTasks(file: File) {
                     t.getLong("next"), t.getString("repeat"), t.getString("zone"), t.getBoolean("enabled")).also { require(it.repeat in setOf("一次", "每小时", "每天", "每周")); ZoneId.of(it.zone) }
             }
             require(tasks.map { it.id }.distinct().size == tasks.size)
-            return tasks to (0 until rs.length()).map { val r = rs.getJSONObject(it); ScheduleRun(r.getString("id"), r.getString("schedule"), r.getLong("due"), r.getString("status"), r.getString("detail")) }
+            return tasks to (0 until rs.length()).map { val r = rs.getJSONObject(it); ScheduleRun(r.getString("id"), r.getString("schedule"), r.getLong("due"), r.getString("status"), r.getString("detail"), if (r.isNull("targetTaskKey")) null else r.getString("targetTaskKey").also { require(it.isNotBlank()) }) }
         }
     }
 }
@@ -115,6 +120,11 @@ internal class ScheduleDispatcher(private val state: AppState) : AutoCloseable {
     } } }
     private suspend fun execute(task: ScheduledTask, run: ScheduleRun) {
         val target = task.target
+        if (target.kind == "local-session") {
+            val result = ScheduleTargetAdapter.forState(state).execute(task, run) { state.scheduledTasks.progress(run.id, it) }
+            state.scheduledTasks.finish(run.id, result.status, result.detail)
+            return
+        }
         if (target.kind == "local") {
             val job = state.localAgents.start(target.engine, target.directory, task.prompt)
             while (job.running) delay(500)

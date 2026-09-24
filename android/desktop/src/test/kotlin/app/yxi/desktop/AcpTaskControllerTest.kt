@@ -37,6 +37,34 @@ class AcpTaskControllerTest {
             .put("update", JSONObject().put("sessionUpdate", "agent_message_chunk").put("content", JSONObject().put("type", "text").put("text", text)))))
         override fun close() { pipe.close(); output.close() }
     }
+    @Test fun `immediate settings wait for event consumer registration before native control writes`(): Unit = runBlocking(Dispatchers.Swing) {
+        val fixture = Fixture()
+        AcpClient(fixture).use { client ->
+            client.initialize(); client.newSession(root.path)
+            AcpTaskController("task", "session", client, InstructionQueue(File(root, "consumer-ready.json"))).use { controller ->
+                // This starts on the current Swing turn before the queued consumer coroutine can run.
+                val changing = async(start = CoroutineStart.UNDISPATCHED) { controller.changeMode("plan") }
+                assertTrue(fixture.writes.none { it.optString("method") == "session/set_mode" })
+                withTimeout(2000) { changing.await() }
+                assertTrue(controller.ready)
+                assertEquals("plan", controller.modes?.getString("currentModeId"))
+            }
+        }
+    }
+    @Test fun `scheduled dispatch never sends a different queued instruction`(): Unit = runBlocking(Dispatchers.Swing) {
+        val queue = InstructionQueue(File(root, "schedule-identity.json"))
+        val fixture = Fixture()
+        AcpClient(fixture).use { client ->
+            client.initialize(); client.newSession(root.path)
+            AcpTaskController("task", "session", client, queue).use { controller ->
+                queue.enqueue("task", "user first", id = "first")
+                queue.enqueue("task", "scheduled second", id = "scheduled")
+                withTimeout(2000) { controller.dispatchScheduled("scheduled").join() }
+                assertTrue(fixture.writes.none { it.optString("method") == "session/prompt" })
+                assertTrue(queue.entries.all { it.status == InstructionStatus.Local })
+            }
+        }
+    }
     @Test fun `local persistence failure after model acknowledgement does not claim rejection`(): Unit = runBlocking(Dispatchers.Swing) {
         val fixture = Fixture()
         AcpClient(fixture).use { client ->
