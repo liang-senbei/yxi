@@ -1,3 +1,9 @@
+## 2026-09-24 Claude 真实 CLI 模型切换请求验证
+
+- 源码220f43a44a8a13a93cdd653dfbc1c7484d52c5b9，隔离构建run.VsQGgY，ClaudeControlClientNativeTest run.iKrarU：1项通过，0失败/错误/跳过，3.397秒。
+- CLI 2.1.280调用set_model后，get_settings.applied.model与下一轮回环HTTP请求model均为claude-haiku-4-5-20251001；原生session_id一致，请求仍含切换前历史。后续批准/拒绝、interrupt及控制器持久化回归继续通过。
+- 证据 `.artifacts/claude-control/claude-model-switch.json`；测试使用独立容器、合成凭据及回环服务，不证明真实订阅额度。实际菜单点击/选中样式和Windows交互仍待验收，未发布。
+
 ## 2026-09-24 本地 Claude 模型菜单与索引接线
 
 - LocalClaudeTasks从原生初始化models的resolvedModel取真实ID并去重；缺少解析结果时不猜测别名对应模型、不展示不可确认选项。创建控制器携带当前模型，确认后同步持久任务索引。
