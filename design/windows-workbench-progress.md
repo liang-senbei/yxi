@@ -1,3 +1,8 @@
+## 2026-09-24 Claude 项目级线路冲突验证
+
+- `3af6934f6af4129213cae77f4d4a9c5dd2efb54d` 在独立工作目录增加项目settings.json及settings.local.json，含冲突API/Bearer/无效端点和permissions字段，与用户级旧配置并存；运行临时订阅覆盖层。
+- 构建run.iJoSu6，ClaudeAuthenticationRequestTest run.4UbJww 1项通过，0失败/错误/跳过，覆盖5组合。项目冲突场景实际请求api=false/oauth=true，用户和两个项目文件字节不变，旧密钥助手不执行。
+- 证据 `.artifacts/claude-auth-requests/claude-request-project-overlay.jsonl`。仅证明此版本回环场景的请求与文件保留；permissions字段实际执行、企业托管策略、云提供方和磁盘订阅登录仍需验证。cc-yxi 正在独立复核遗漏，未发布。
 ## 2026-09-24 Claude 临时订阅凭据覆盖层
 
 - `31a0f49c766760d0bbe9566c3e3ee4695ddaa25b` 新增 ClaudeSubscriptionSettings：进程环境移除API Key/Bearer/旧Base URL，临时 --settings 清空API凭据和apiKeyHelper并指定官方端点；不写入用户配置文件。该层尚未接入产品入口，不能独立证明订阅或企业策略兼容性。
