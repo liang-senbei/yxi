@@ -11,7 +11,7 @@ class ClaudeAuthenticationRequestTest {
         check(File("/.dockerenv").exists() && File("/sys/class/net").list()?.toSet() == setOf("lo"))
         for ((name, api, oauth) in listOf(Triple("api", true, false), Triple("oauth", false, true), Triple("mixed", true, true))) {
             val root = File("/sandbox/tmp/claude-request-$name").apply { mkdirs() }
-            val script = File(root, "server.py").apply { writeText(javaClass.getResource("/rewind/anthropic_stub.py")!!.readText()) }
+            val script = File(root, "server.py").apply { writeText(ClaudeAuthenticationRequestTest::class.java.getResource("/rewind/anthropic_stub.py")!!.readText()) }
             val server = ProcessBuilder("python3", script.path, root.path).redirectErrorStream(true).redirectOutput(File(root, "server.log")).start()
             var process: Process? = null
             try {
@@ -32,6 +32,8 @@ class ClaudeAuthenticationRequestTest {
                 check(process.waitFor(40, TimeUnit.SECONDS)) { "$name request timed out" }
                 val requests = File(root, "requests.jsonl")
                 if (requests.exists()) requests.copyTo(File("/results/claude-request-$name.jsonl"), overwrite = true)
+                stdout.copyTo(File("/results/claude-request-$name-output.json"), overwrite = true)
+                File(root, "stderr.txt").copyTo(File("/results/claude-request-$name-error.txt"), overwrite = true)
                 check(process.exitValue() == 0) { "$name native CLI failed" }
                 assertTrue(stdout.readText().contains("answer:KEEP-auth-request"))
                 val messages = requests.readLines().map(::JSONObject).filter { it.getJSONArray("messages").length() > 0 }
