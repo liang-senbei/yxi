@@ -1,3 +1,9 @@
+## 2026-09-24 模型菜单交互与选中样式
+
+- 893aa4a277a81275c7e5d884eff99fbcef3054ab为Claude模型菜单加入8dp圆角灰色加深选中背景，展示resolvedModel而非角色别名。
+- 构建run.XO4mC6，ClaudeConversationUiTest run.PL6i7d 1项通过，0失败/错误/跳过，7.971秒。点击打开菜单、键盘选择第二项后，控制器和任务记录均更新实际模型；set_model仅一次，没有新增user请求，既有三轮审批/停止流程继续通过。
+- 已查看 `.artifacts/claude-conversation-ui/claude-conversation-model-menu.png` 和 model-selected.png，选中背景及新模型显示正常。该项为Linux窗口+协议替身；真实CLI模型请求另有证据，Windows交互和真实账号验收仍未完成。未发布。
+
 ## 2026-09-24 Claude 真实 CLI 模型切换请求验证
 
 - 源码220f43a44a8a13a93cdd653dfbc1c7484d52c5b9，隔离构建run.VsQGgY，ClaudeControlClientNativeTest run.iKrarU：1项通过，0失败/错误/跳过，3.397秒。
