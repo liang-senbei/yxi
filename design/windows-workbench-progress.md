@@ -1,3 +1,9 @@
+## 2026-09-24 本地 Claude 官方认证检查入口
+
+- `f49ad53f` 在本地工作台/配置的Claude安装项加入检查官方认证弹窗：明确目标运行器和工作目录、忙碌禁用/取消、成功与冲突提示；使用已验证临时配置和原生probe，不发送任务、不保存线路选择。指定发现的CLAUDE_CONFIG_DIR，支持原生exe或已发现的node+CLI argv组合。
+- Windows createDistributable与ClaudeSubscriptionSettingsTest通过（36秒；3项测试0失败/错误/跳过）。该版本只完成界面编译与身份校验回归，未执行Windows真实账号检查或弹窗点击验收。
+- 随后`fe98dfc8`仅将说明改为“不保存新的线路配置”，避免承诺原生CLI不会写入自身元数据；该文案未重新截图/打包。
+- 正式任务的官方订阅选择/应用仍未接通，检查通过不代表额度或端点验证完成；服务器入口亦待接入。未发布。
 ## 2026-09-24 Claude 原生发送前认证探测
 
 - `24b58e77` 新增ClaudeSubscriptionProbe：目标cwd/临时settings/过滤后env下执行auth status，不发送prompt；15秒限时、64KiB输出限制、取消检查、所属进程清理，原生状态不直接输出到用户日志。
