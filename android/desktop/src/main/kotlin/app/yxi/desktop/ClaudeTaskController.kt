@@ -12,7 +12,8 @@ internal data class ClaudeMessage(val id: String, val role: String, val text: St
 /** Owns the event consumer and durable outbox for a previously prepared native connection. */
 internal class ClaudeTaskController(val taskKey: String, private val client: ClaudeControlClient, private val queue: InstructionQueue,
     private val beforeSend: suspend () -> Unit = { ClaudeSubscriptionSettings.requireOfficialRoute(client.settings()) },
-    private val promptTimeoutMillis: Long = 600_000) : AutoCloseable {
+    private val promptTimeoutMillis: Long = 600_000,
+    private val onNotification: (String) -> Unit = {}) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
     private val mutation = Mutex()
     private val rendered = mutableMapOf<String, CompletableDeferred<Unit>>()
@@ -48,8 +49,10 @@ internal class ClaudeTaskController(val taskKey: String, private val client: Cla
             "control_request" -> {
                 if (cancelling) return
                 val id = event.getString("request_id")
-                if (client.pendingPermissions().any { it.getString("request_id") == id }) pendingApprovals[id] = event
+                if (client.pendingPermissions().none { it.getString("request_id") == id }) return
+                val previous = pendingApprovals.put(id, event)
                 note = "Claude 正在等待审批"
+                if (previous == null) notify("等待批准")
             }
             "control_cancel_request" -> pendingApprovals.remove(event.getString("request_id"))
             "assistant", "user" -> {
@@ -116,6 +119,7 @@ internal class ClaudeTaskController(val taskKey: String, private val client: Cla
             }
             queue.confirmRuntimeAccepted(item.id, started.revision, turn, result.toString())
             check(queue.completeRuntimeTurn(taskKey, turn, outcome, result.toString(), if (outcome == RuntimeTurnState.Failed) "Claude 返回未成功结束的轮次" else ""))
+            notify(when (outcome) { RuntimeTurnState.Completed -> "任务完成"; RuntimeTurnState.Interrupted -> "任务已停止"; else -> "任务未成功" })
             note = when (outcome) { RuntimeTurnState.Completed -> "本轮处理结束"; RuntimeTurnState.Interrupted -> "本轮已停止"; else -> "本轮未成功，请核对结果" }
         } catch (e: Exception) {
             ready = false; client.close()
@@ -126,8 +130,10 @@ internal class ClaudeTaskController(val taskKey: String, private val client: Cla
                 val current = queue.entries.singleOrNull { it.id == item.id }
                 if (current?.status == InstructionStatus.Delivering) runCatching { queue.markUnknown(current.id, current.revision, note) }
             }
+            notify(if (started == null) "发送未完成" else if (receipt != null) "结果记录未完成" else "投递结果未确认")
             throw e
         } finally { busy = false; preparing = false; if (!stopInFlight) cancelling = false }
     } }
+    private fun notify(title: String) { if (!disposed) runCatching { onNotification(title) } }
     override fun close() { disposed = true; ready = false; client.close(); scope.cancel(); pendingApprovals.clear() }
 }

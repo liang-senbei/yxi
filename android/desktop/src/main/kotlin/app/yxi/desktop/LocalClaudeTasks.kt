@@ -10,6 +10,7 @@ import java.util.concurrent.atomic.AtomicReference
 /** Registers only new, checked connections. Loading an index never resumes or replays a native task. */
 internal class LocalClaudeTasks(private val queue: InstructionQueue, file: File,
     private val subscription: LocalClaudeSubscription = LocalClaudeSubscription()) : AutoCloseable {
+    var onNotification: (LocalCodexTaskRecord, String) -> Unit = { _, _ -> }
     val registry = LocalCodexTaskRegistry(file)
     val controllers = mutableStateMapOf<String, ClaudeTaskController>()
     private val operation = Mutex()
@@ -36,7 +37,7 @@ internal class LocalClaudeTasks(private val queue: InstructionQueue, file: File,
                 val record = LocalCodexTaskRecord(sessionId, System.getProperty("user.name"), System.getProperty("os.name"),
                     File(runtime.home).canonicalPath, cwd.path, label, model, System.currentTimeMillis(), "claude", "official:claude")
                 registry.save(record)
-                controllers[record.key] = ClaudeTaskController(record.key, prepared.client, queue)
+                controllers[record.key] = ClaudeTaskController(record.key, prepared.client, queue, onNotification = { title -> onNotification(record, title) })
                 record
             } catch (e: Exception) { prepared?.close(); throw e }
             finally { starting.compareAndSet(job, null); busy = false }

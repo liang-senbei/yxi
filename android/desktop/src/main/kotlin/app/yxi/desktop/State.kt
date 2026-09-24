@@ -75,7 +75,11 @@ class AppState internal constructor(private val localClaudeFactory: (Instruction
         Notify.notify(title, "任务：" + (navigation.title(task.key) ?: task.title), taskKey = task.key)
     }) }
     internal val localAcpTasks get() = localAcpTasksDelegate.value
-    private val localClaudeTasksDelegate = lazy { localClaudeFactory(instructions, java.io.File(Store.dir, "local-claude-tasks.json")) }
+    private val localClaudeTasksDelegate = lazy { localClaudeFactory(instructions, java.io.File(Store.dir, "local-claude-tasks.json")).also { manager ->
+        manager.onNotification = { task, title ->
+            Notify.notify(title, "任务：" + (navigation.title(task.key) ?: task.title), taskKey = task.key)
+        }
+    } }
     internal val localClaudeTasks get() = localClaudeTasksDelegate.value
     internal var localSelectedTaskKey by mutableStateOf<String?>(null)
     internal val localWorkspace get() = localWorkspaceDelegate.value

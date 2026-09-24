@@ -37,7 +37,8 @@ class ClaudeTaskControllerTest {
         val disk = File(root, "queue.json"); val queue = InstructionQueue(disk); val fixture = Fixture(disk)
         ClaudeControlClient(fixture).use { client ->
             client.initialize()
-            ClaudeTaskController("task", client, queue).use { controller ->
+            val notices = mutableListOf<String>()
+            ClaudeTaskController("task", client, queue, onNotification = { notices.add(it); error("notification unavailable") }).use { controller ->
                 for (index in 1..2) {
                     controller.enqueue("question-$index")
                     val send = async { controller.sendNext() }
@@ -49,6 +50,7 @@ class ClaudeTaskControllerTest {
                     send.await()
                     assertTrue(controller.messages.any { it.text == "answer-$index" })
                 }
+                assertEquals(listOf("任务完成", "任务未成功"), notices)
                 val saved = InstructionQueue(disk).entries
                 assertTrue(saved.all { it.status == InstructionStatus.Accepted })
                 assertEquals(listOf(RuntimeTurnState.Completed, RuntimeTurnState.Failed), saved.map { it.runtimeTurnState })

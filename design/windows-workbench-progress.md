@@ -1,3 +1,9 @@
+## 2026-09-24 本地 Claude 任务通知接线
+
+- ClaudeTaskController增加通知回调；新有效审批、持久化完成/失败/中断和投递未确认触发通知，重复审批ID不重复提示，无效审批不再误显示等待审批。关闭后不通知，通知异常不影响队列处理。
+- LocalClaudeTasks把记录身份传至AppState统一Notify入口，使用taskKey定位并沿用通知过滤。通知正文只带任务显示名，不带命令或模型回复。
+- Windows编译及ClaudeTaskControllerTest 5项通过，0失败/错误/跳过（构建33秒）。成功/失败通知和回调抛错不破坏结果记录已验证；系统通知弹出/点击及审批通知重复场景仍需界面验收。未发布。
+
 ## 2026-09-24 停止按钮实际点击与继续对话
 
 - `b1332dc007d6906ceecc9995671630b6acb4af98` 扩展ClaudeConversationUiTest协议替身为逐轮唯一回执/审批ID，interrupt返回原生格式中断结果。
