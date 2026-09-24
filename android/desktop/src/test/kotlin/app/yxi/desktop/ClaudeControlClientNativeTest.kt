@@ -46,6 +46,7 @@ class ClaudeControlClientNativeTest {
             val conversation = LocalClaudeControlTransport.start(runtime, home, mapOf("HOME" to home.path, "PATH" to "/usr/bin:/bin",
                 "CLAUDE_CODE_OAUTH_TOKEN" to "synthetic-control-token", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" to "1"),
                 ClaudeSubscriptionSettings.overlay().apply { getJSONObject("env").put("ANTHROPIC_BASE_URL", endpoint) })
+            val preferenceFile = File(root, "saved-preferences.json")
             val conversationPid = conversation.processId
             val occupied = assertFailsWith<IllegalStateException> {
                 ClaudeProcessOccupancy.requireNoKnownOwner(runtime, conversation.requestedSessionId)
@@ -114,6 +115,12 @@ class ClaudeControlClientNativeTest {
                 val continued = client.prompt("FOLLOWUP-after-stop", 30000)
                 assertFalse(continued.getBoolean("is_error"))
                 assertEquals(first.getString("session_id"), continued.getString("session_id"))
+                val preferredModel = effortSettings.getJSONObject("applied").getString("model")
+                client.setModel(preferredModel)
+                val preferredSettings = client.setEffort("high")
+                LocalCodexTaskRegistry(preferenceFile).save(LocalCodexTaskRecord(conversation.requestedSessionId,
+                    "fixture", "fixture", runtime.home, home.canonicalPath, "Saved settings", preferredModel, 1L,
+                    "claude", "official:claude", effort = preferredSettings.getJSONObject("applied").getString("effort")))
             }
             withTimeout(5000) { while (ProcessHandle.of(conversationPid).map { it.isAlive }.orElse(false)) delay(20) }
             val historyRecord = LocalCodexTaskRecord(conversation.requestedSessionId, "fixture", "fixture", runtime.home,
@@ -133,6 +140,11 @@ class ClaudeControlClientNativeTest {
             val resumedPid = resumedTransport.processId
             ClaudeControlClient(resumedTransport, resumedTransport.requestedSessionId).use { client ->
                 client.initialize(); client.settings()
+                val savedPreferences = LocalCodexTaskRegistry(preferenceFile).records.single()
+                client.setModel(savedPreferences.model)
+                val reapplied = client.setEffort(checkNotNull(savedPreferences.effort))
+                assertEquals(savedPreferences.model, reapplied.getJSONObject("applied").getString("model"))
+                assertEquals("high", reapplied.getJSONObject("applied").getString("effort"))
                 assertEquals(requestsBeforeResume, requests.readLines().size, "Resume initialization must not send a model request")
                 val result = client.prompt("FOLLOWUP-restored-session", 30000)
                 assertFalse(result.getBoolean("is_error"))
@@ -142,6 +154,12 @@ class ClaudeControlClientNativeTest {
                 }
                 assertTrue(request.getJSONArray("messages").toString().contains("KEEP-control-first"))
                 assertTrue(request.getJSONArray("messages").toString().contains("FOLLOWUP-after-stop"))
+                assertEquals(savedPreferences.model, request.getString("model"))
+                assertEquals(savedPreferences.effort, request.getJSONObject("output_config").getString("effort"))
+                File("/results/claude-restored-preferences.json").writeText(JSONObject()
+                    .put("storedModel", savedPreferences.model).put("storedEffort", savedPreferences.effort)
+                    .put("requestModel", request.getString("model")).put("requestEffort", request.getJSONObject("output_config").getString("effort"))
+                    .put("noPromptDuringRestore", true).toString(2))
                 File("/results/claude-resumed-session.json").writeText(JSONObject().put("sessionId", result.getString("session_id"))
                     .put("historyPreserved", true).put("initializationDidNotPrompt", true).put("isError", result.getBoolean("is_error")).toString(2))
             }
