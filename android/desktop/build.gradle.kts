@@ -1,3 +1,5 @@
+import java.io.File
+
 // Yxi 桌面版（Windows；老板 2026-09-08：「像 Claude Desktop / ChatGPT Windows 版那样」）。
 // Compose Multiplatform（JVM），SSH 还是 jsch；跟手机端共用 :core。
 // 发布包走 Velopack（createDistributable 的 app-image → `vpk pack` → 一键 Setup.exe + 自动更新，见 README / desktop.yml）；
@@ -53,8 +55,7 @@ tasks.test {
         inputs.property("fixture.$key", System.getenv(key).orEmpty())
     }
     System.getenv("YXI_SUBSCRIPTION_UI_FIXTURE")?.let {
-        val fixture = java.io.File(it).canonicalFile
-        require(fixture.isAbsolute)
+        val fixture = File(it).also { requested -> require(requested.isAbsolute) }.canonicalFile
         val profile = fixture.resolve("profile")
         systemProperty("user.home", profile.path)
         environment("HOME", profile.path); environment("USERPROFILE", profile.path)
