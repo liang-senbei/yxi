@@ -13,7 +13,10 @@ internal data class ClaudeMessage(val id: String, val role: String, val text: St
 internal class ClaudeTaskController(val taskKey: String, private val client: ClaudeControlClient, private val queue: InstructionQueue,
     private val beforeSend: suspend () -> Unit = { ClaudeSubscriptionSettings.requireOfficialRoute(client.settings()) },
     private val promptTimeoutMillis: Long = 600_000,
-    private val onNotification: (String) -> Unit = {}) : AutoCloseable {
+    private val onNotification: (String) -> Unit = {},
+    initialModel: String = "",
+    val availableModels: List<String> = emptyList(),
+    private val onModelChanged: (String) -> Unit = {}) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
     private val mutation = Mutex()
     private val rendered = mutableMapOf<String, CompletableDeferred<Unit>>()
@@ -22,6 +25,8 @@ internal class ClaudeTaskController(val taskKey: String, private val client: Cla
     var ready by mutableStateOf(true); private set
     var busy by mutableStateOf(false); private set
     var cancelling by mutableStateOf(false); private set
+    var model by mutableStateOf(initialModel); private set
+    var changingModel by mutableStateOf(false); private set
     private var preparing = false
     private var stopInFlight = false
     var note by mutableStateOf("已连接 Claude 会话"); private set
@@ -39,6 +44,23 @@ internal class ClaudeTaskController(val taskKey: String, private val client: Cla
                 if (!disposed && wasReady) note = "Claude 连接已结束，未确认指令不会自动重发"
             }
         }
+    }
+    suspend fun selectModel(value: String): Unit = withContext(Dispatchers.Swing) {
+        check(ready && !disposed && !busy && !cancelling && !changingModel && pendingApprovals.isEmpty()) { "请等待当前操作结束后再切换模型" }
+        require(value in availableModels) { "模型不在当前运行器返回的列表中" }
+        if (value == model) return@withContext
+        changingModel = true
+        try {
+            val settings = client.setModel(value)
+            ClaudeSubscriptionSettings.requireOfficialRoute(settings)
+            val actual = settings.getJSONObject("applied").getString("model")
+            onModelChanged(actual)
+            model = actual
+            note = "当前模型：$actual"
+        } catch (e: Exception) {
+            ready = false; client.close(); note = "模型切换未确认，请核对原生配置"
+            throw e
+        } finally { changingModel = false }
     }
     fun enqueue(text: String): QueuedInstruction {
         require(text.isNotBlank() && text.length <= 100_000)
@@ -95,7 +117,7 @@ internal class ClaudeTaskController(val taskKey: String, private val client: Cla
     }
     fun dispatchNext(): Job = scope.launch { try { sendNext() } catch (e: CancellationException) { throw e } catch (_: Exception) { } }
     suspend fun sendNext(): Unit = withContext(Dispatchers.Swing) { mutation.withLock {
-        check(ready && !disposed && !busy && !cancelling && pendingApprovals.isEmpty()) { "Claude 当前不能接收新指令" }
+        check(ready && !disposed && !busy && !cancelling && !changingModel && pendingApprovals.isEmpty()) { "Claude 当前不能接收新指令" }
         val item = queue.entries.firstOrNull { it.taskKey == taskKey && it.status !in setOf(InstructionStatus.Cancelled, InstructionStatus.Sent, InstructionStatus.Accepted, InstructionStatus.Resolved) }
             ?: return@withLock
         check(item.status == InstructionStatus.Local) { "前一条指令尚未确认，请先核对" }

@@ -17,6 +17,7 @@ class ClaudeTaskControllerTest {
         override val output = PipedInputStream(65536)
         private val producer = PipedOutputStream(output)
         val writes = CopyOnWriteArrayList<JSONObject>()
+        private var model = "initial"
         override suspend fun write(text: String): Boolean {
             val request = JSONObject(text); writes.add(request)
             if (request.optString("type") == "user") {
@@ -24,7 +25,10 @@ class ClaudeTaskControllerTest {
                     (0 until rows.length()).any { rows.getJSONObject(it).getString("status") == "Delivering" }
                 }, "Delivery must be durable before native IO")
             } else if (request.optString("type") == "control_request") {
-                val result = if (request.getJSONObject("request").getString("subtype") == "get_settings") JSONObject().put("effective", ClaudeSubscriptionSettings.overlay()) else JSONObject()
+                val command = request.getJSONObject("request")
+                if (command.getString("subtype") == "set_model") model = command.getString("model")
+                val result = if (command.getString("subtype") == "get_settings") JSONObject().put("effective", ClaudeSubscriptionSettings.overlay())
+                    .put("applied", JSONObject().put("model", model)) else JSONObject()
                 emit(JSONObject().put("type", "control_response").put("response", JSONObject().put("subtype", "success")
                     .put("request_id", request.getString("request_id")).put("response", result)))
             }
@@ -32,6 +36,29 @@ class ClaudeTaskControllerTest {
         }
         fun emit(value: JSONObject) { producer.write((value.toString() + "\n").toByteArray()); producer.flush() }
         override fun close() { producer.close(); output.close() }
+    }
+    @Test fun `model selection updates only confirmed choices and persistence failure disables sending`(): Unit = runBlocking(Dispatchers.Swing) {
+        for (failSave in listOf(false, true)) {
+            val disk = File(root, "model-$failSave.json"); val fixture = Fixture(disk)
+            ClaudeControlClient(fixture).use { client ->
+                client.initialize()
+                val saved = mutableListOf<String>()
+                ClaudeTaskController("task", client, InstructionQueue(disk), initialModel = "initial", availableModels = listOf("resolved-model"),
+                    onModelChanged = { if (failSave) error("disk unavailable"); saved.add(it) }).use { controller ->
+                    assertFailsWith<IllegalArgumentException> { controller.selectModel("unlisted") }
+                    assertTrue(controller.ready)
+                    if (failSave) {
+                        assertFailsWith<IllegalStateException> { controller.selectModel("resolved-model") }
+                        assertFalse(controller.ready); assertEquals("initial", controller.model); assertTrue(saved.isEmpty())
+                    } else {
+                        controller.selectModel("resolved-model")
+                        assertEquals("resolved-model", controller.model); assertEquals(listOf("resolved-model"), saved)
+                    }
+                    assertFalse(controller.changingModel)
+                    assertTrue(fixture.writes.none { it.optString("type") == "user" })
+                }
+            }
+        }
     }
     @Test fun `native receipts persist completed or failed turns after messages are processed`(): Unit = runBlocking(Dispatchers.Swing) {
         val disk = File(root, "queue.json"); val queue = InstructionQueue(disk); val fixture = Fixture(disk)

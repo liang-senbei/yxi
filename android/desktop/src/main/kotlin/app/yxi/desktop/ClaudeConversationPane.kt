@@ -76,7 +76,7 @@ import java.io.File
         if (followLatest && !dragging) view.scroll.scrollToItem(messages.size + approvals.size, view.scroll.layoutInfo.viewportSize.height.coerceAtLeast(1))
     }
     fun send() {
-        if (controller == null || !controller.ready || controller.busy || controller.cancelling || sending || controller.pendingApprovals.isNotEmpty() || draft.value.text.isBlank()) return
+        if (controller == null || !controller.ready || controller.busy || controller.cancelling || controller.changingModel || sending || controller.pendingApprovals.isNotEmpty() || draft.value.text.isBlank()) return
         try { controller.enqueue(draft.value.text) } catch (e: Exception) { error = e.message.orEmpty(); return }
         draft.value = TextFieldValue(); error = ""; sending = true
         val job = controller.dispatchNext()
@@ -85,9 +85,27 @@ import java.io.File
     Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         TextButton({ state.localSelectedTaskKey = null }) { Text("返回本地") }
         Text(state.navigation.title(record.key) ?: record.title, style = MaterialTheme.typography.headlineSmall)
-        Text("Claude · ${record.model} · ${record.directory}", style = MaterialTheme.typography.bodySmall)
+        Text("Claude · ${controller?.model?.ifBlank { record.model } ?: record.model} · ${record.directory}", style = MaterialTheme.typography.bodySmall)
+        if (controller != null && controller.availableModels.isNotEmpty()) {
+            var modelMenu by remember(record.key) { mutableStateOf(false) }
+            Box {
+                TextButton({ modelMenu = true }, enabled = controller.ready && !controller.busy && !controller.cancelling && !controller.changingModel && controller.pendingApprovals.isEmpty()) {
+                    Text(if (controller.changingModel) "正在切换模型…" else "选择模型")
+                }
+                DropdownMenu(modelMenu, { modelMenu = false }) {
+                    controller.availableModels.forEach { model ->
+                        DropdownMenuItem(text = { Text(model) }, onClick = {
+                            modelMenu = false
+                            scope.launch { try { controller.selectModel(model) }
+                                catch (e: CancellationException) { throw e }
+                                catch (e: Exception) { error = e.message ?: "模型切换未确认" } }
+                        }, trailingIcon = { if (model == controller.model) Text("✓") })
+                    }
+                }
+            }
+        }
         Text(controller?.note ?: "连接未恢复；此记录不会自动重发指令。")
-        InstructionStrip(state.instructions, record.key, controller?.ready == true && !controller.busy && !controller.cancelling && controller.pendingApprovals.isEmpty(), { controller?.dispatchNext() })
+        InstructionStrip(state.instructions, record.key, controller?.ready == true && !controller.busy && !controller.cancelling && !controller.changingModel && controller.pendingApprovals.isEmpty(), { controller?.dispatchNext() })
         LazyColumn(Modifier.weight(1f).fillMaxWidth().onPointerEvent(PointerEventType.Scroll, PointerEventPass.Initial) { event ->
             if (event.changes.any { it.scrollDelta.y < 0f }) followLatest = false
         }, state = view.scroll, verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -121,7 +139,7 @@ import java.io.File
             if (event.type == KeyEventType.KeyDown && draft.value.composition == null && (event.key == Key.Enter || event.key == Key.NumPadEnter) && !event.isShiftPressed) { send(); true } else false
         }, label = { Text("消息 · Enter 发送，Shift+Enter 换行") }, minLines = 2, maxLines = 6)
         Row {
-            TextButton(::send, enabled = controller?.ready == true && !controller.busy && !controller.cancelling && !sending && controller.pendingApprovals.isEmpty() && draft.value.text.isNotBlank()) { Text("发送") }
+            TextButton(::send, enabled = controller?.ready == true && !controller.busy && !controller.cancelling && !controller.changingModel && !sending && controller.pendingApprovals.isEmpty() && draft.value.text.isNotBlank()) { Text("发送") }
             TextButton({ scope.launch { try { controller?.cancelTurn() }
                 catch (e: CancellationException) { throw e }
                 catch (e: Exception) { error = e.message ?: "停止结果未确认" } } },

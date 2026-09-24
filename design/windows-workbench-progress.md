@@ -1,3 +1,10 @@
+## 2026-09-24 本地 Claude 模型菜单与索引接线
+
+- LocalClaudeTasks从原生初始化models的resolvedModel取真实ID并去重；缺少解析结果时不猜测别名对应模型、不展示不可确认选项。创建控制器携带当前模型，确认后同步持久任务索引。
+- ClaudeConversationPane加入模型菜单并显示当前实际模型。ClaudeTaskController在空闲、无审批时才允许切换，校验选择在运行器列表内，重新确认官方端点及有效模型；保存失败停用连接，不把选择伪装为成功。模型切换计入退出操作，发送与指令队列按钮在切换期间禁用。
+- Windows编译及ClaudeTaskControllerTest 6项、LocalClaudeTasksTest 3项通过，0失败/错误/跳过。新增覆盖未列出模型拒绝、确认后更新、索引保存回调失败不更新显示且禁止继续发送。
+- 尚需真实CLI切换与模型请求核对、实际菜单点击与选中样式验收。未发布，不能据此宣称模型切换整体完成。
+
 ## 2026-09-24 Claude 模型切换控制接口
 
 - 已核对官方Python SDK的_internal/query.py：set_model控制请求携带model字段。既有CLI 2.1.280初始化证据包含models.value及resolvedModel；后续菜单应呈现实际模型，不能把别名当成实际第三方模型。

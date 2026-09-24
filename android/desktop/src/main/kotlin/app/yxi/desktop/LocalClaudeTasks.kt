@@ -37,7 +37,14 @@ internal class LocalClaudeTasks(private val queue: InstructionQueue, file: File,
                 val record = LocalCodexTaskRecord(sessionId, System.getProperty("user.name"), System.getProperty("os.name"),
                     File(runtime.home).canonicalPath, cwd.path, label, model, System.currentTimeMillis(), "claude", "official:claude")
                 registry.save(record)
-                controllers[record.key] = ClaudeTaskController(record.key, prepared.client, queue, onNotification = { title -> onNotification(record, title) })
+                val nativeModels = prepared.initialization.optJSONArray("models")
+                val models = (0 until (nativeModels?.length() ?: 0)).mapNotNull { index ->
+                    val entry = nativeModels?.optJSONObject(index) ?: return@mapNotNull null
+                    entry.optString("resolvedModel").takeIf { it.isNotBlank() && it.length <= 500 && it.none { c -> c < ' ' } }
+                }.distinct()
+                controllers[record.key] = ClaudeTaskController(record.key, prepared.client, queue,
+                    onNotification = { title -> onNotification(record, title) }, initialModel = model, availableModels = models,
+                    onModelChanged = { actual -> registry.save(record.copy(model = actual)) })
                 record
             } catch (e: Exception) { prepared?.close(); throw e }
             finally { starting.compareAndSet(job, null); busy = false }
