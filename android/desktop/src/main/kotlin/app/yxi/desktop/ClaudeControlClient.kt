@@ -27,6 +27,8 @@ internal class ClaudeControlClient(private val transport: ClaudeControlTransport
     private var initialized = false
     private val activeTurn = AtomicReference<CompletableDeferred<JSONObject>?>()
     private val completedResults = ConcurrentHashMap.newKeySet<String>()
+    private val permissions = ConcurrentHashMap<String, JSONObject>()
+    private val resolvedPermissions = ConcurrentHashMap.newKeySet<String>()
     @Volatile var sessionId: String? = null; private set
     val events = Channel<JSONObject>(64)
     init {
@@ -47,7 +49,19 @@ internal class ClaudeControlClient(private val transport: ClaudeControlTransport
                                 if (response.optString("subtype") == "success") waiter.complete(response.optJSONObject("response") ?: JSONObject())
                                 else waiter.completeExceptionally(IllegalStateException("Claude 未完成控制请求；请核对运行器版本及原生配置"))
                             }
-                            "control_request" -> error("Claude 需要尚未支持的原生交互")
+                            "control_request" -> {
+                                val id = value.getString("request_id"); check(id.isNotBlank())
+                                if (id in resolvedPermissions) continue
+                                val request = value.getJSONObject("request")
+                                check(request.optString("subtype") == "can_use_tool" && activeTurn.get() != null)
+                                check(request.getString("tool_name").isNotBlank()); request.getJSONObject("input")
+                                val previous = permissions.putIfAbsent(id, JSONObject(value.toString()))
+                                if (previous == null) events.send(value) else check(previous.similar(value))
+                            }
+                            "control_cancel_request" -> {
+                                val id = value.getString("request_id")
+                                resolvedPermissions.add(id); permissions.remove(id); events.send(value)
+                            }
                             "result" -> {
                                 val parent = value.opt("parent_tool_use_id")
                                 if (parent != null && parent != JSONObject.NULL) { events.send(value); continue }
@@ -57,6 +71,7 @@ internal class ClaudeControlClient(private val transport: ClaudeControlTransport
                                 val nativeId = value.getString("session_id"); check(nativeId.isNotBlank())
                                 check(sessionId == null || sessionId == nativeId) { "Claude 会话身份发生变化" }
                                 sessionId = nativeId
+                                resolvedPermissions.addAll(permissions.keys); permissions.clear()
                                 events.send(value); turn.complete(value)
                             }
                             else -> events.send(value)
@@ -74,6 +89,18 @@ internal class ClaudeControlClient(private val transport: ClaudeControlTransport
     suspend fun settings(): JSONObject {
         check(initialized) { "请先初始化 Claude 控制连接" }
         return request("get_settings")
+    }
+    fun pendingPermissions(): List<JSONObject> = permissions.values.map { JSONObject(it.toString()) }
+    suspend fun answerPermission(id: String, allow: Boolean) = writing.withLock {
+        check(!closed.get() && activeTurn.get() != null) { "Claude 审批所属轮次已结束" }
+        val original = permissions.remove(id) ?: error("Claude 审批已处理或已失效")
+        resolvedPermissions.add(id)
+        val answer = if (allow) JSONObject().put("behavior", "allow").put("updatedInput", original.getJSONObject("request").getJSONObject("input"))
+            else JSONObject().put("behavior", "deny").put("message", "用户拒绝此操作")
+        try {
+            check(transport.write(JSONObject().put("type", "control_response").put("response", JSONObject().put("subtype", "success")
+                .put("request_id", id).put("response", answer)).toString() + "\n")) { "Claude 审批答复未写入" }
+        } catch (e: Exception) { close(); throw e }
     }
     suspend fun prompt(text: String, timeoutMillis: Long = 600_000): JSONObject {
         check(initialized && !closed.get()) { "Claude 控制连接尚未就绪" }
@@ -114,7 +141,7 @@ internal class ClaudeControlClient(private val transport: ClaudeControlTransport
         if (closed.compareAndSet(false, true)) {
             runCatching { transport.close() }
             pending.values.forEach { it.completeExceptionally(IllegalStateException("Claude 控制连接已关闭，未确认结果")) }
-            pending.clear(); events.close(); scope.cancel()
+            pending.clear(); permissions.clear(); events.close(); scope.cancel()
             activeTurn.getAndSet(null)?.completeExceptionally(IllegalStateException("Claude 轮次结果未确认，连接已关闭"))
         }
     }

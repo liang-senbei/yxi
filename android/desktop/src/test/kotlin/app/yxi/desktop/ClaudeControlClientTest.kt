@@ -14,7 +14,7 @@ class ClaudeControlClientTest {
         val writes = CopyOnWriteArrayList<JSONObject>()
         override suspend fun write(text: String): Boolean {
             val request = JSONObject(text); writes.add(request)
-            if (request.optString("type") == "user") return true
+            if (request.optString("type") != "control_request") return true
             if (request.getJSONObject("request").getString("subtype") == "initialize") respond(request, JSONObject())
             return true
         }
@@ -22,6 +22,32 @@ class ClaudeControlClientTest {
         fun respond(request: JSONObject, value: JSONObject) = emit(JSONObject().put("type", "control_response").put("response", JSONObject()
             .put("request_id", request.getString("request_id")).put("subtype", "success").put("response", value)))
         override fun close() { producer.close(); output.close() }
+    }
+    @Test fun `permissions require explicit one-time answers and cancelled requests cannot be approved`(): Unit = runBlocking {
+        val fixture = Fixture()
+        ClaudeControlClient(fixture).use { client ->
+            client.initialize()
+            val turn = async { client.prompt("question") }
+            withTimeout(2000) { while (fixture.writes.size < 2) delay(10) }
+            fun permission(id: String) = JSONObject().put("type", "control_request").put("request_id", id)
+                .put("request", JSONObject().put("subtype", "can_use_tool").put("tool_name", "Bash").put("input", JSONObject().put("command", "fixture")))
+            fixture.emit(permission("allow"))
+            withTimeout(2000) { while (client.pendingPermissions().isEmpty()) delay(10) }
+            assertEquals(2, fixture.writes.size)
+            client.pendingPermissions().single().getJSONObject("request").getJSONObject("input").put("command", "must-not-change-native-input")
+            client.answerPermission("allow", true)
+            val reply = fixture.writes.last().getJSONObject("response").getJSONObject("response")
+            assertEquals("allow", reply.getString("behavior")); assertEquals("fixture", reply.getJSONObject("updatedInput").getString("command"))
+            assertFalse(reply.has("updatedPermissions"))
+            assertFailsWith<IllegalStateException> { client.answerPermission("allow", true) }
+            fixture.emit(permission("cancel"))
+            withTimeout(2000) { while (client.pendingPermissions().isEmpty()) delay(10) }
+            fixture.emit(JSONObject().put("type", "control_cancel_request").put("request_id", "cancel"))
+            withTimeout(2000) { while (client.pendingPermissions().isNotEmpty()) delay(10) }
+            assertFailsWith<IllegalStateException> { client.answerPermission("cancel", true) }
+            fixture.emit(JSONObject().put("type", "result").put("uuid", "done").put("session_id", "session").put("is_error", false))
+            turn.await()
+        }
     }
     @Test fun `only one prompt is active and native results retain the session identity`(): Unit = runBlocking {
         val fixture = Fixture()

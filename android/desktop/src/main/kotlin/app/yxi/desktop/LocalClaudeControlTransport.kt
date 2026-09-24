@@ -26,7 +26,7 @@ internal class LocalClaudeControlTransport private constructor(private val proce
             var owned: Process? = null
             try {
                 return withContext(Dispatchers.IO) {
-                    val process = ProcessBuilder(runtime.command + listOf("--settings", settings.toString(), "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"))
+                    val process = ProcessBuilder(runtime.command + listOf("--settings", settings.toString(), "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--permission-prompt-tool", "stdio"))
                         .directory(directory.canonicalFile).redirectError(ProcessBuilder.Redirect.DISCARD).apply {
                             environment().clear(); environment().putAll(ClaudeSubscriptionSettings.environment(inherited))
                             environment()["CLAUDE_CONFIG_DIR"] = runtime.home
