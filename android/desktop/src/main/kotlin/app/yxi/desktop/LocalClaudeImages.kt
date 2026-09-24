@@ -36,6 +36,13 @@ internal class LocalClaudeImages(private val directory: File) {
         require(merged.sumOf { load(it).size.toLong() } <= 12 * 1024 * 1024) { "图片总大小超过12MiB" }
         return merged
     }
+    /** Apply only new identities from the validated snapshot; never resurrect a concurrently removed draft. */
+    fun commitDraft(current: MutableList<InstructionAttachment>, before: List<InstructionAttachment>, validated: List<InstructionAttachment>) {
+        val previous = before.map { it.remotePath }.toSet()
+        validated.filter { it.remotePath !in previous }.forEach { addition ->
+            if (current.none { it.remotePath == addition.remotePath }) current.add(addition)
+        }
+    }
     fun preview(attachment: InstructionAttachment): DraftAttach {
         val image = load(attachment)
         val bytes = Base64.getDecoder().decode(image.block().getJSONObject("source").getString("data"))

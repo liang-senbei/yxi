@@ -7,6 +7,18 @@ import kotlin.test.*
 
 class LocalClaudeImagesTest {
     @TempDir lateinit var root: File
+    @Test fun `completed capture does not restore an attachment removed while validation was pending`() {
+        val store = LocalClaudeImages(File(root, "commit"))
+        val removed = InstructionAttachment("removed", "/yxi-local-image/first")
+        val retained = InstructionAttachment("retained", "/yxi-local-image/second")
+        val added = InstructionAttachment("added", "/yxi-local-image/third")
+        val before = listOf(removed, retained)
+        val current = mutableListOf(retained)
+        store.commitDraft(current, before, before + added)
+        assertEquals(listOf(retained, added), current)
+        store.commitDraft(current, before, before + added)
+        assertEquals(listOf(retained, added), current)
+    }
     @Test fun `repeated image at capacity deduplicates while fifth distinct snapshot is rejected`() {
         val store = LocalClaudeImages(File(root, "deduplicated"))
         val images = (1..5).map { index ->

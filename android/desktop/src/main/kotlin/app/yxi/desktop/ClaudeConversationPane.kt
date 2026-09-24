@@ -151,7 +151,7 @@ import java.io.File
                 }
                 val existing = imageDrafts.toList()
                 val merged = withContext(Dispatchers.IO) { state.localClaudeTasks.images.mergeDraft(existing, listOf(reference)) }
-                merged.forEach { item -> if (imageDrafts.none { it.remotePath == item.remotePath }) imageDrafts.add(item) }
+                state.localClaudeTasks.images.commitDraft(imageDrafts, existing, merged)
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { error = e.message ?: "图片粘贴失败" }
             finally { capturingImages = false; state.claudeImageCaptures.remove(record.key) }
@@ -271,7 +271,7 @@ import java.io.File
                             val captured = withContext(Dispatchers.IO) { files.map(state.localClaudeTasks.images::capture) }
                             val existing = imageDrafts.toList()
                             val merged = withContext(Dispatchers.IO) { state.localClaudeTasks.images.mergeDraft(existing, captured) }
-                            merged.forEach { item -> if (imageDrafts.none { it.remotePath == item.remotePath }) imageDrafts.add(item) }
+                            state.localClaudeTasks.images.commitDraft(imageDrafts, existing, merged)
                         } catch (e: CancellationException) { throw e }
                         catch (e: Exception) { error = e.message ?: "图片读取失败" }
                         finally { capturingImages = false; state.claudeImageCaptures.remove(record.key) }
