@@ -64,6 +64,25 @@ internal class LocalClaudeTasks(private val queue: InstructionQueue, file: File,
                 prepared = resumeConnection(runtime, record)
                 check(!disposed); currentCoroutineContext().ensureActive()
                 check(prepared.client.requestedSessionId == record.threadId) { "恢复会话身份不一致" }
+                val client = prepared.client
+                var restored = prepared.settings
+                if (restored.optJSONObject("applied")?.optString("model") != record.model) restored = client.setModel(record.model)
+                ClaudeSubscriptionSettings.requireOfficialRoute(restored)
+                check(restored.getJSONObject("applied").getString("model") == record.model) { "保存的模型未恢复，请核对原生配置" }
+                if (record.effort != null) {
+                    val declarations = prepared.initialization.optJSONArray("models")
+                    val supported = (0 until (declarations?.length() ?: 0)).mapNotNull { declarations?.optJSONObject(it) }
+                        .filter { it.optString("resolvedModel") == record.model }
+                    check(supported.isNotEmpty() && supported.all { row ->
+                        val levels = row.optJSONArray("supportedEffortLevels")
+                        row.opt("supportsEffort") == true && levels != null && (0 until levels.length()).any { levels.optString(it) == record.effort }
+                    }) { "当前运行器不再声明支持保存的思考强度" }
+                    restored = client.setEffort(record.effort)
+                    ClaudeSubscriptionSettings.requireOfficialRoute(restored)
+                    check(restored.getJSONObject("applied").getString("model") == record.model) { "恢复思考强度时模型发生变化" }
+                }
+                prepared = LocalClaudeSubscription.Prepared(client, prepared.initialization, restored)
+                check(!disposed); currentCoroutineContext().ensureActive()
                 val model = prepared.settings.optJSONObject("applied")?.optString("model").orEmpty()
                 check(model.isNotBlank()) { "Claude 未返回恢复后的模型" }
                 controllers.remove(key)?.close()
@@ -90,7 +109,10 @@ internal class LocalClaudeTasks(private val queue: InstructionQueue, file: File,
         registry.save(record)
         return ClaudeTaskController(record.key, prepared.client, queue,
             onNotification = { title -> onNotification(record, title) }, initialModel = record.model, availableModels = models,
-            onModelChanged = { actual -> registry.save(record.copy(model = actual)) }, history = history.toList(), modelEfforts = efforts,
+            onSettingsChanged = { actual, effort ->
+                val latest = registry.records.single { it.key == record.key }
+                registry.save(latest.copy(model = actual, effort = effort))
+            }, history = history.toList(), modelEfforts = efforts,
             initialEffort = prepared.settings.optJSONObject("applied")?.optString("effort")?.takeIf { it in efforts[record.model].orEmpty() }).also { controllers[record.key] = it }
     }
     override fun close() {

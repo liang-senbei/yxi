@@ -13,18 +13,29 @@ import kotlin.test.*
 
 class LocalClaudeTasksTest {
     @TempDir lateinit var root: File
-    private class Fixture(val reject: Boolean = false, val hold: Boolean = false) : ClaudeControlTransport {
+    private class Fixture(val reject: Boolean = false, val hold: Boolean = false, val declaredLevels: List<String> = listOf("low", "high")) : ClaudeControlTransport {
         override val output = PipedInputStream(65536)
         private val producer = PipedOutputStream(output)
         val writes = CopyOnWriteArrayList<JSONObject>()
         var closed = false
+        var model = "claude-fixture"
+        var effort = "high"
         override suspend fun write(text: String): Boolean {
             val request = JSONObject(text); writes.add(request)
             assertEquals("control_request", request.getString("type"))
             if (hold) return true
-            val value = if (request.getJSONObject("request").getString("subtype") == "initialize") JSONObject().put("account", JSONObject()
+            val control = request.getJSONObject("request")
+            val subtype = control.getString("subtype")
+            if (subtype == "set_model") model = control.getString("model")
+            if (subtype == "apply_flag_settings") effort = control.getJSONObject("settings").getString("effortLevel")
+            val value = if (subtype == "initialize") JSONObject().put("account", JSONObject()
                 .put("tokenSource", "claude.ai").put("apiProvider", if (reject) "bedrock" else "firstParty"))
-            else JSONObject().put("effective", ClaudeSubscriptionSettings.overlay()).put("applied", JSONObject().put("model", "claude-fixture"))
+                .put("models", org.json.JSONArray(listOf("claude-fixture", "claude-saved").map { name ->
+                    JSONObject().put("resolvedModel", name).put("supportsEffort", true)
+                        .put("supportedEffortLevels", org.json.JSONArray(declaredLevels))
+                }))
+            else JSONObject().put("effective", ClaudeSubscriptionSettings.overlay())
+                .put("applied", JSONObject().put("model", model).put("effort", effort))
             producer.write((JSONObject().put("type", "control_response").put("response", JSONObject().put("subtype", "success")
                 .put("request_id", request.getString("request_id")).put("response", value)).toString() + "\n").toByteArray()); producer.flush()
             return true
@@ -35,7 +46,7 @@ class LocalClaudeTasksTest {
     @Test fun `explicit resume reuses one controller and does not replay local instructions`(): Unit = runBlocking(Dispatchers.Swing) {
         val index = File(root, "resume-tasks.json"); val queue = InstructionQueue(File(root, "resume-queue.json"))
         val record = LocalCodexTaskRecord(UUID.randomUUID().toString(), System.getProperty("user.name"), System.getProperty("os.name"),
-            File(runtime().home).canonicalPath, root.canonicalPath, "Resume", "old-model", 1L, "claude", "official:claude")
+            File(runtime().home).canonicalPath, root.canonicalPath, "Resume", "claude-fixture", 1L, "claude", "official:claude")
         LocalCodexTaskRegistry(index).save(record)
         val pending = queue.enqueue(record.key, "must stay local")
         var launches = 0
@@ -71,6 +82,74 @@ class LocalClaudeTasksTest {
             assertFailsWith<IllegalStateException> { tasks.resume(runtime(), record.key) }
             assertTrue(tasks.controllers.isEmpty()); assertFalse(tasks.busy)
             assertEquals(InstructionStatus.Local, emptyQueue.entries.single().status)
+        }
+    }
+    @Test fun `selected effort persists and is restored without sending a user message`(): Unit = runBlocking(Dispatchers.Swing) {
+        val index = File(root, "effort-tasks.json")
+        val queue = InstructionQueue(File(root, "effort-queue.json"))
+        val created = Fixture()
+        val subscription = LocalClaudeSubscription { _, _ -> ClaudeControlClient(created, UUID.randomUUID().toString()) }
+        lateinit var saved: LocalCodexTaskRecord
+        LocalClaudeTasks(queue, index, subscription).use { tasks ->
+            val record = tasks.create(runtime(), root.path, "Saved effort")
+            tasks.controllers.getValue(record.key).selectEffort("low")
+            saved = LocalCodexTaskRegistry(index).records.single()
+            assertEquals("low", saved.effort)
+        }
+        val fixture = Fixture()
+        LocalClaudeTasks(queue, index, subscription, readHistory = { emptyList() }, resumeConnection = { selected, record ->
+            subscription.resume(selected, record) { _, _, id -> ClaudeControlClient(fixture, id) }
+        }).use { tasks ->
+            val controller = tasks.resume(runtime(), saved.key)
+            assertEquals("low", controller.effort)
+            assertEquals(saved, LocalCodexTaskRegistry(index).records.single())
+            assertEquals(listOf("initialize", "get_settings", "apply_flag_settings", "get_settings"),
+                fixture.writes.map { it.getJSONObject("request").getString("subtype") })
+            assertTrue(fixture.writes.all { it.getString("type") == "control_request" })
+            assertTrue(queue.entries.isEmpty())
+        }
+        assertTrue(fixture.closed)
+    }
+    @Test fun `resume restores saved model before optional effort`(): Unit = runBlocking(Dispatchers.Swing) {
+        for (savedEffort in listOf(null, "low")) {
+            val index = File(root, "model-$savedEffort-tasks.json")
+            val saved = LocalCodexTaskRecord(UUID.randomUUID().toString(), System.getProperty("user.name"), System.getProperty("os.name"),
+                File(runtime().home).canonicalPath, root.canonicalPath, "Saved model", "claude-saved", 1L, "claude", "official:claude", effort = savedEffort)
+            LocalCodexTaskRegistry(index).save(saved)
+            val fixture = Fixture()
+            val subscription = LocalClaudeSubscription { _, _ -> error("must not create") }
+            LocalClaudeTasks(InstructionQueue(File(root, "model-$savedEffort-queue.json")), index, subscription, readHistory = { emptyList() },
+                resumeConnection = { selected, record -> subscription.resume(selected, record) { _, _, id -> ClaudeControlClient(fixture, id) } }).use { tasks ->
+                val controller = tasks.resume(runtime(), saved.key)
+                assertEquals(saved.model, controller.model)
+                if (savedEffort != null) assertEquals(savedEffort, controller.effort)
+                val expected = listOf("initialize", "get_settings", "set_model", "get_settings") +
+                    if (savedEffort == null) emptyList() else listOf("apply_flag_settings", "get_settings")
+                assertEquals(expected, fixture.writes.map { it.getJSONObject("request").getString("subtype") })
+                assertTrue(fixture.writes.all { it.getString("type") == "control_request" })
+                assertEquals(saved, LocalCodexTaskRegistry(index).records.single())
+            }
+            assertTrue(fixture.closed)
+        }
+    }
+    @Test fun `unsupported saved effort closes recovery without altering index or queued instructions`(): Unit = runBlocking(Dispatchers.Swing) {
+        val index = File(root, "unsupported-tasks.json")
+        val saved = LocalCodexTaskRecord(UUID.randomUUID().toString(), System.getProperty("user.name"), System.getProperty("os.name"),
+            File(runtime().home).canonicalPath, root.canonicalPath, "Unsupported", "claude-fixture", 1L, "claude", "official:claude", effort = "low")
+        LocalCodexTaskRegistry(index).save(saved)
+        val original = index.readBytes()
+        val queue = InstructionQueue(File(root, "unsupported-queue.json"))
+        queue.enqueue(saved.key, "not sent")
+        val fixture = Fixture(declaredLevels = listOf("high"))
+        val subscription = LocalClaudeSubscription { _, _ -> error("must not create") }
+        LocalClaudeTasks(queue, index, subscription, readHistory = { emptyList() }, resumeConnection = { selected, record ->
+            subscription.resume(selected, record) { _, _, id -> ClaudeControlClient(fixture, id) }
+        }).use { tasks ->
+            assertFailsWith<IllegalStateException> { tasks.resume(runtime(), saved.key) }
+            assertTrue(fixture.closed); assertTrue(tasks.controllers.isEmpty()); assertFalse(tasks.busy)
+            assertContentEquals(original, index.readBytes())
+            assertEquals(InstructionStatus.Local, queue.entries.single().status)
+            assertEquals(listOf("initialize", "get_settings"), fixture.writes.map { it.getJSONObject("request").getString("subtype") })
         }
     }
     @Test fun `resume verifies native identity and rejects foreign targets before launch`(): Unit = runBlocking(Dispatchers.Swing) {

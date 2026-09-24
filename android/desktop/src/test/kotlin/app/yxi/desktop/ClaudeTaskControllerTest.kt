@@ -43,12 +43,14 @@ class ClaudeTaskControllerTest {
         val disk = File(root, "effort.json"); val fixture = Fixture(disk)
         ClaudeControlClient(fixture).use { client ->
             client.initialize()
+            val stored = mutableListOf<Pair<String, String?>>()
             ClaudeTaskController("task", client, InstructionQueue(disk), initialModel = "initial",
-                modelEfforts = mapOf("initial" to listOf("low", "high")), initialEffort = "low").use { controller ->
+                onSettingsChanged = { model, effort -> stored.add(model to effort) }, modelEfforts = mapOf("initial" to listOf("low", "high")), initialEffort = "low").use { controller ->
                 assertFailsWith<IllegalArgumentException> { controller.selectEffort("max") }
                 assertTrue(controller.ready)
                 controller.selectEffort("high")
                 assertEquals("high", controller.effort); assertFalse(controller.changingModel)
+                assertEquals(listOf<Pair<String, String?>>("initial" to "high"), stored)
                 assertEquals("initial", controller.model)
                 assertTrue(fixture.writes.none { it.optString("type") == "user" })
             }

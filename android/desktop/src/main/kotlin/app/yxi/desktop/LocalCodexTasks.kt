@@ -10,11 +10,11 @@ import java.security.MessageDigest
 
 internal data class LocalCodexTaskRecord(val threadId: String, val user: String, val platform: String,
     val runtimeHome: String, val directory: String, val title: String, val model: String, val createdAt: Long,
-    val engine: String = "codex", val provider: String = "openai", val hostKey: String = "") {
+    val engine: String = "codex", val provider: String = "openai", val hostKey: String = "", val effort: String? = null) {
     val key get() = (if (hostKey.isBlank()) "local-$engine:" else "remote-$engine:$hostKey:") + MessageDigest.getInstance("SHA-256").digest(JSONArray(listOf(user, platform, runtimeHome, threadId))
         .toString().toByteArray()).joinToString("") { "%02x".format(it) }
     fun json() = JSONObject().put("threadId", threadId).put("user", user).put("platform", platform).put("runtimeHome", runtimeHome)
-        .put("directory", directory).put("title", title).put("model", model).put("createdAt", createdAt).put("engine", engine).put("provider", provider).put("hostKey", hostKey)
+        .put("directory", directory).put("title", title).put("model", model).put("createdAt", createdAt).put("engine", engine).put("provider", provider).put("hostKey", hostKey).put("effort", effort ?: JSONObject.NULL)
 }
 
 internal class LocalCodexTaskRegistry(file: File) {
@@ -48,9 +48,11 @@ internal class LocalCodexTaskRegistry(file: File) {
         require(raw.length <= 4 * 1024 * 1024)
         val rows = JSONArray(raw)
         return (0 until rows.length()).map { i -> rows.getJSONObject(i).let { r ->
+            require(!r.has("effort") || r.isNull("effort") || r.opt("effort") is String)
             LocalCodexTaskRecord(r.getString("threadId"), r.getString("user"), r.getString("platform"), r.getString("runtimeHome"),
                 r.getString("directory"), r.getString("title"), r.getString("model"), r.getLong("createdAt"),
-                r.optString("engine", "codex"), r.optString("provider", "openai"), r.optString("hostKey")).also { record ->
+                r.optString("engine", "codex"), r.optString("provider", "openai"), r.optString("hostKey"), (r.opt("effort") as? String)).also { record ->
+                require(record.effort == null || record.effort in setOf("none", "minimal", "low", "medium", "high", "xhigh", "max"))
                 require(record.engine in setOf("codex", "claude", "opencode", "gemini", "grok", "hermes") && record.provider.isNotBlank())
                 require(record.threadId.isNotBlank() && record.user.isNotBlank() && record.platform.isNotBlank())
                 require(record.runtimeHome.isNotBlank() && record.directory.isNotBlank() && record.model.isNotBlank() && record.createdAt > 0)

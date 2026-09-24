@@ -30,6 +30,35 @@ class LocalCodexTaskRegistryTest {
         assertNotEquals(original.key, original.copy(user = "another-user").key)
         assertNotEquals(original.key, original.copy(platform = "another-os").key)
     }
+    @Test fun `effort survives disk reload without changing task identity`() {
+        val file = File(directory, "effort.json")
+        val saved = record().copy(engine = "claude", provider = "official:claude", effort = "low")
+        LocalCodexTaskRegistry(file).save(saved)
+        assertEquals(saved, LocalCodexTaskRegistry(file).records.single())
+        assertEquals(saved.key, saved.copy(effort = "high").key)
+    }
+    @Test fun `legacy missing effort and explicit null preserve default behavior`() {
+        for (missing in listOf(true, false)) {
+            val row = record().json()
+            if (missing) row.remove("effort")
+            val file = File(directory, "legacy-$missing.json").apply { writeText(org.json.JSONArray().put(row).toString()) }
+            val registry = LocalCodexTaskRegistry(file)
+            assertEquals("", registry.problem)
+            assertNull(registry.records.single().effort)
+            assertEquals(record(), registry.records.single())
+        }
+    }
+    @Test fun `malformed effort is retained and cannot silently fall back to default`() {
+        for ((index, value) in listOf<Any>("unsupported", "", 3, true, org.json.JSONObject()).withIndex()) {
+            val raw = org.json.JSONArray().put(record().json().put("effort", value)).toString()
+            val file = File(directory, "invalid-effort-$index.json").apply { writeText(raw) }
+            val registry = LocalCodexTaskRegistry(file)
+            assertTrue(registry.problem.isNotBlank(), "Must reject effort $value")
+            assertTrue(registry.records.isEmpty())
+            assertFailsWith<IllegalStateException> { registry.save(record()) }
+            assertEquals(raw, file.readText())
+        }
+    }
     @Test fun `damaged native task index cannot be silently replaced by an empty list`() {
         val file = File(directory, "tasks.json").apply { writeText("not json") }
         val registry = LocalCodexTaskRegistry(file)

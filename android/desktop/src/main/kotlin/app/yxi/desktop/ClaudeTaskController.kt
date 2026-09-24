@@ -18,7 +18,8 @@ internal class ClaudeTaskController(val taskKey: String, private val client: Cla
     val availableModels: List<String> = emptyList(),
     private val onModelChanged: (String) -> Unit = {},
     val history: List<app.yxi.agent.ChatItem> = emptyList(),
-    private val modelEfforts: Map<String, List<String>> = emptyMap(), initialEffort: String? = null) : AutoCloseable {
+    private val modelEfforts: Map<String, List<String>> = emptyMap(), initialEffort: String? = null,
+    private val onSettingsChanged: (String, String?) -> Unit = { _, _ -> }) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
     private val mutation = Mutex()
     private val rendered = mutableMapOf<String, CompletableDeferred<Unit>>()
@@ -58,9 +59,11 @@ internal class ClaudeTaskController(val taskKey: String, private val client: Cla
             val settings = client.setModel(value)
             ClaudeSubscriptionSettings.requireOfficialRoute(settings)
             val actual = settings.getJSONObject("applied").getString("model")
+            val actualEffort = settings.getJSONObject("applied").optString("effort").takeIf { it in modelEfforts[actual].orEmpty() }
             onModelChanged(actual)
+            onSettingsChanged(actual, actualEffort)
             model = actual
-            effort = settings.getJSONObject("applied").optString("effort").takeIf { it in effortLevels }
+            effort = actualEffort
             note = "当前模型：$actual"
         } catch (e: Exception) {
             ready = false; client.close(); note = "模型切换未确认，请核对原生配置"
@@ -76,6 +79,7 @@ internal class ClaudeTaskController(val taskKey: String, private val client: Cla
             val settings = client.setEffort(value)
             ClaudeSubscriptionSettings.requireOfficialRoute(settings)
             check(settings.getJSONObject("applied").getString("model") == model) { "修改思考强度时模型发生变化" }
+            onSettingsChanged(model, value)
             effort = value; note = "思考强度：${effortName(value)}"
         } catch (e: Exception) {
             ready = false; client.close(); note = "思考强度未确认，请核对原生配置"
