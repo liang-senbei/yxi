@@ -23,6 +23,24 @@ class ClaudeControlClientTest {
             .put("request_id", request.getString("request_id")).put("subtype", "success").put("response", value)))
         override fun close() { producer.close(); output.close() }
     }
+    @Test fun `model selection awaits effective settings and excludes concurrent prompts`(): Unit = runBlocking {
+        val fixture = Fixture()
+        ClaudeControlClient(fixture).use { client ->
+            client.initialize()
+            val change = async { client.setModel("third-party-model") }
+            withTimeout(2000) { while (fixture.writes.size < 2) delay(10) }
+            assertEquals("third-party-model", fixture.writes.last().getJSONObject("request").getString("model"))
+            assertFailsWith<IllegalStateException> { client.prompt("must not send") }
+            assertFailsWith<IllegalStateException> { client.setModel("second") }
+            fixture.respond(fixture.writes.last(), JSONObject())
+            withTimeout(2000) { while (fixture.writes.size < 3) delay(10) }
+            assertFalse(change.isCompleted)
+            assertEquals("get_settings", fixture.writes.last().getJSONObject("request").getString("subtype"))
+            fixture.respond(fixture.writes.last(), JSONObject().put("applied", JSONObject().put("model", "resolved-model")))
+            assertEquals("resolved-model", change.await().getJSONObject("applied").getString("model"))
+            assertTrue(fixture.writes.none { it.optString("type") == "user" })
+        }
+    }
     @Test fun `permissions require explicit one-time answers and cancelled requests cannot be approved`(): Unit = runBlocking {
         val fixture = Fixture()
         ClaudeControlClient(fixture).use { client ->

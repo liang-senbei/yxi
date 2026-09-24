@@ -1,3 +1,11 @@
+## 2026-09-24 Claude 模型切换控制接口
+
+- 已核对官方Python SDK的_internal/query.py：set_model控制请求携带model字段。既有CLI 2.1.280初始化证据包含models.value及resolvedModel；后续菜单应呈现实际模型，不能把别名当成实际第三方模型。
+- ClaudeControlClient增加setModel，等待控制响应后再次get_settings返回实际applied.model；切换期间与prompt互斥，禁止并发第二次切换。未确认设置时关闭连接，避免继续在未知模型状态发送。
+- Windows编译及ClaudeControlClientTest 8项、ClaudeTaskControllerTest 5项通过，0失败/错误/跳过（31秒）。新增测试核对model载荷、ACK不等于有效设置确认、切换期间不发送prompt。
+- 此项仅为协议层；真实CLI切换、会话控制器/菜单/索引同步尚待接入，不算完整模型切换验收。未发布。
+- 接口来源：https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/_internal/query.py
+
 ## 2026-09-24 本地 Claude 任务通知接线
 
 - ClaudeTaskController增加通知回调；新有效审批、持久化完成/失败/中断和投递未确认触发通知，重复审批ID不重复提示，无效审批不再误显示等待审批。关闭后不通知，通知异常不影响队列处理。

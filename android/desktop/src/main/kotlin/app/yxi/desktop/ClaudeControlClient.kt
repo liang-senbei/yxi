@@ -25,6 +25,8 @@ internal class ClaudeControlClient(private val transport: ClaudeControlTransport
     private val writing = Mutex()
     private val initialization = Mutex()
     private var initialized = false
+    private val turnGate = Any()
+    private var changingModel = false
     private val activeTurn = AtomicReference<CompletableDeferred<JSONObject>?>()
     private val stopRequested = AtomicReference<CompletableDeferred<JSONObject>?>()
     private val interrupting = AtomicBoolean()
@@ -94,6 +96,20 @@ internal class ClaudeControlClient(private val transport: ClaudeControlTransport
         check(initialized) { "请先初始化 Claude 控制连接" }
         return request("get_settings")
     }
+    suspend fun setModel(model: String): JSONObject {
+        require(model.isNotBlank() && model.length <= 500 && model.none { it < ' ' })
+        synchronized(turnGate) {
+            check(initialized && !closed.get() && !changingModel && activeTurn.get() == null && !interrupting.get()) { "请等待当前操作结束后再切换模型" }
+            changingModel = true
+        }
+        try {
+            request("set_model", JSONObject().put("model", model))
+            return settings().also {
+                check(it.optJSONObject("applied")?.optString("model")?.isNotBlank() == true) { "Claude 未确认实际模型" }
+            }
+        } catch (e: Exception) { close(); throw e }
+        finally { synchronized(turnGate) { changingModel = false } }
+    }
     fun pendingPermissions(): List<JSONObject> = permissions.values.map { JSONObject(it.toString()) }
     suspend fun interrupt(): Boolean {
         val turn = activeTurn.get() ?: return false
@@ -120,7 +136,9 @@ internal class ClaudeControlClient(private val transport: ClaudeControlTransport
         check(initialized && !closed.get() && !interrupting.get()) { "Claude 控制连接尚未就绪" }
         require(text.isNotBlank() && text.toByteArray(Charsets.UTF_8).size <= 1024 * 1024)
         val result = CompletableDeferred<JSONObject>()
-        check(activeTurn.compareAndSet(null, result)) { "Claude 上一轮尚未结束" }
+        synchronized(turnGate) {
+            check(!changingModel && activeTurn.compareAndSet(null, result)) { "Claude 上一轮或模型切换尚未结束" }
+        }
         try {
             return withTimeout(timeoutMillis) {
                 writing.withLock {
@@ -135,7 +153,7 @@ internal class ClaudeControlClient(private val transport: ClaudeControlTransport
         } catch (e: Exception) { close(); throw e }
         finally { activeTurn.compareAndSet(result, null); stopRequested.compareAndSet(result, null) }
     }
-    private suspend fun request(subtype: String): JSONObject {
+    private suspend fun request(subtype: String, fields: JSONObject = JSONObject()): JSONObject {
         check(!closed.get()) { "Claude 控制连接已关闭" }
         val id = UUID.randomUUID().toString()
         val response = CompletableDeferred<JSONObject>()
@@ -145,7 +163,7 @@ internal class ClaudeControlClient(private val transport: ClaudeControlTransport
                 writing.withLock {
                     check(!closed.get())
                     check(transport.write(JSONObject().put("type", "control_request").put("request_id", id)
-                        .put("request", JSONObject().put("subtype", subtype)).toString() + "\n")) { "Claude 控制请求未写入" }
+                        .put("request", JSONObject(fields.toString()).put("subtype", subtype)).toString() + "\n")) { "Claude 控制请求未写入" }
                 }
                 response.await()
             }
