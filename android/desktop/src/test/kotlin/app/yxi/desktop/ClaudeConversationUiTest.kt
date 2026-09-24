@@ -28,6 +28,7 @@ class ClaudeConversationUiTest {
         override val output = PipedInputStream(65536)
         private val producer = PipedOutputStream(output)
         val writes = CopyOnWriteArrayList<JSONObject>()
+        val command = (1..60).joinToString("\n") { "printf 'fixture line $it\\n'" }
         fun emit(value: JSONObject) { producer.write((value.toString() + "\n").toByteArray()); producer.flush() }
         override suspend fun write(text: String): Boolean {
             val request = JSONObject(text); writes.add(request)
@@ -38,7 +39,7 @@ class ClaudeConversationUiTest {
                     emit(JSONObject().put("type", "control_response").put("response", JSONObject().put("subtype", "success").put("request_id", request.getString("request_id")).put("response", value)))
                 }
                 "user" -> emit(JSONObject().put("type", "control_request").put("request_id", "permission").put("request", JSONObject()
-                    .put("subtype", "can_use_tool").put("tool_name", "Bash").put("input", JSONObject().put("command", "printf fixture"))))
+                    .put("subtype", "can_use_tool").put("tool_name", "Bash").put("input", JSONObject().put("command", command))))
                 "control_response" -> {
                     emit(JSONObject().put("type", "assistant").put("uuid", "answer").put("message", JSONObject().put("content", JSONArray()
                         .put(JSONObject().put("type", "text").put("text", "## 检查完成\n\n这是一条 **Markdown** 回复。")))))
@@ -93,6 +94,8 @@ class ClaudeConversationUiTest {
                             } }
                             withTimeout(3000) { while (controller.busy) delay(20) }
                             assertEquals("allow", fixture.writes.single { it.optString("type") == "control_response" }.getJSONObject("response").getJSONObject("response").getString("behavior"))
+                            assertEquals(fixture.command, fixture.writes.single { it.optString("type") == "control_response" }
+                                .getJSONObject("response").getJSONObject("response").getJSONObject("updatedInput").getString("command"))
                             assertEquals(RuntimeTurnState.Completed, state.instructions.entries.single().runtimeTurnState)
                             assertEquals(0, state.localOperations)
                             delay(400); screenshot("claude-conversation-completed")

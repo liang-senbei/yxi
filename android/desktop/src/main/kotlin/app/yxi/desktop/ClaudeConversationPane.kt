@@ -100,24 +100,18 @@ import java.io.File
             }
             items(approvals, key = { "permission:" + it.getString("request_id") }) { approval ->
                 val id = approval.getString("request_id"); val request = approval.getJSONObject("request")
-                OutlinedCard(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("允许 Claude 使用 ${request.getString("tool_name")}？")
-                        SelectionContainer { Text(request.getJSONObject("input").toString(2), style = MaterialTheme.typography.bodySmall) }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            fun answer(allow: Boolean) {
-                                if (id in responding || controller == null) return
-                                responding.add(id)
-                                scope.launch { try { controller.answerPermission(id, allow) }
-                                    catch (e: CancellationException) { throw e }
-                                    catch (e: Exception) { error = e.message.orEmpty() }
-                                    finally { responding.remove(id) } }
-                            }
-                            OutlinedButton({ answer(true) }, enabled = controller?.ready == true && !controller.cancelling && id !in responding) { Text("允许本次") }
-                            TextButton({ answer(false) }, enabled = controller?.ready == true && !controller.cancelling && id !in responding) { Text("拒绝") }
-                        }
-                    }
+                fun answer(allow: Boolean) {
+                    if (id in responding || controller == null || !controller.ready || controller.cancelling) return
+                    responding.add(id)
+                    scope.launch { try { controller.answerPermission(id, allow) }
+                        catch (e: CancellationException) { throw e }
+                        catch (e: Exception) { error = e.message.orEmpty() }
+                        finally { responding.remove(id) } }
                 }
+                ClaudePermissionCard(request,
+                    enabled = controller?.ready == true && !controller.cancelling,
+                    responding = id in responding,
+                    onAllowOnce = { answer(true) }, onDeny = { answer(false) })
             }
             item { Spacer(Modifier.height(1.dp)) }
         }
