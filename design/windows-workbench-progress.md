@@ -1,3 +1,8 @@
+## 2026-09-24 官方认证检查弹窗交互验收
+
+- `1a55df34dab4660ccdba901660057de0c3fe8323` 为检查弹窗提供可注入检查函数与布局modifier；正式入口默认仍调用同一原生probe，测试不启动真实账号。
+- 构建run.bJLeeq；ClaudeSubscriptionCheckUiTest run.novlvX 1项通过，0失败/错误/跳过，覆盖真实点击打开/开始、成功、错误、Escape取消挂起协程，每种模式仅调用一次检查，传入正确运行器与目录。
+- `.artifacts/claude-subscription-ui/` 三张截图已目视，文案、错误、禁用输入/按钮和取消入口正常。这是Linux隔离窗口+检查替身，不代表Windows高DPI或真实账号端到端验收；任务订阅应用仍待接线，未发布。
 ## 2026-09-24 Claude 认证检查异常与取消清理
 
 - `d3cfda5ba0bb3cfab0231075dcc0998016b11327` 在读取超过64KiB时即时停止探测，不再等15秒总时限；新增隔离Python进程fixture覆盖正确argv、API环境剥离、正常JSON、无效JSON、超大输出、非零退出与取消。
