@@ -27,6 +27,7 @@ class ClaudeSubscriptionSettingsTest {
         }
         assertFailsWith<IllegalStateException> { ClaudeSubscriptionSettings.requireOfficialRoute(JSONObject()) }
         assertFailsWith<IllegalStateException> { ClaudeSubscriptionSettings.requireOfficialRoute(route().apply { getJSONObject("effective").getJSONObject("env").put("ANTHROPIC_API_KEY", false) }) }
+        assertFailsWith<IllegalStateException> { ClaudeSubscriptionSettings.requireOfficialRoute(route().apply { getJSONObject("effective").getJSONObject("env").put("ANTHROPIC_API_KEY", " ") }) }
         ClaudeSubscriptionSettings.requireOfficialRoute(route().apply { getJSONObject("effective").put("forceLoginMethod", "claudeai") })
     }
     private fun oauth() = JSONObject().put("loggedIn", true).put("apiProvider", "firstParty").put("authMethod", "oauth_token")

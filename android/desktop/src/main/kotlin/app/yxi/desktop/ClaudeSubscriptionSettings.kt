@@ -15,14 +15,14 @@ internal object ClaudeSubscriptionSettings {
         check(uri != null && uri.scheme == "https" && uri.host.equals("api.anthropic.com", true) &&
             uri.port in setOf(-1, 443) && uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null &&
             uri.rawPath in setOf("", "/")) { "Claude 有效请求地址不是官方端点，请核对托管或线路配置" }
-        fun absentOrBlank(value: Any?) = value == null || value is String && value.isBlank()
+        fun absentOrEmpty(value: Any?) = value == null || value is String && value.isEmpty()
         val conflicts = setOf("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_CUSTOM_HEADERS", "ANTHROPIC_PROFILE",
             "ANTHROPIC_FEDERATION_RULE_ID", "ANTHROPIC_IDENTITY_TOKEN_FILE", "ANTHROPIC_ORGANIZATION_ID") + cloudFlags
-        check(conflicts.all { absentOrBlank(env.opt(it)) }) { "Claude 有效配置仍包含其他认证或云平台字段，官方订阅未启用" }
-        check(absentOrBlank(effective.opt("apiKeyHelper"))) { "Claude 有效配置仍启用密钥助手，官方订阅未启用" }
-        check(absentOrBlank(effective.opt("forceLoginGatewayUrl"))) { "Claude 受网关登录策略约束，无法应用直连订阅配置" }
+        check(conflicts.all { absentOrEmpty(env.opt(it)) }) { "Claude 有效配置仍包含其他认证或云平台字段，官方订阅未启用" }
+        check(absentOrEmpty(effective.opt("apiKeyHelper"))) { "Claude 有效配置仍启用密钥助手，官方订阅未启用" }
+        check(absentOrEmpty(effective.opt("forceLoginGatewayUrl"))) { "Claude 受网关登录策略约束，无法应用直连订阅配置" }
         val method = effective.opt("forceLoginMethod")
-        check(absentOrBlank(method) || method == "claudeai") { "Claude 登录策略与订阅配置不一致" }
+        check(absentOrEmpty(method) || method == "claudeai") { "Claude 登录策略与订阅配置不一致" }
     }
     /** Credential identity only: entitlement and endpoint policy need separate verification. */
     fun requireOAuthIdentity(status: JSONObject) {
