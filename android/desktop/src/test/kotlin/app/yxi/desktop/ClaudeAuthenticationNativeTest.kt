@@ -6,7 +6,7 @@ import org.json.JSONObject
 import kotlin.test.*
 
 class ClaudeAuthenticationNativeTest {
-    @Test fun `native Claude distinguishes missing login from an explicit API credential`() {
+    @Test fun `native Claude reports mixed credential sources without proving request authentication`() {
         check(!System.getenv("YXI_ISOLATED_TEST_RUN").isNullOrBlank())
         check(File("/.dockerenv").exists())
         check(File("/sys/class/net").list()?.toSet() == setOf("lo"))
@@ -32,8 +32,9 @@ class ClaudeAuthenticationNativeTest {
                 assertFalse(output.readText().contains("synthetic-oauth-status-token"))
                 File("/results/claude-auth-$name.json").writeText(status.toString(2))
                 assertEquals(api || oauth, status.getBoolean("loggedIn"))
-                if (api) assertEquals("api_key", status.getString("authMethod"))
-                else if (oauth) assertEquals("oauth_token", status.getString("authMethod"))
+                assertEquals(if (oauth) "oauth_token" else if (api) "api_key" else "none", status.getString("authMethod"))
+                if (api) assertEquals("ANTHROPIC_API_KEY", status.getString("apiKeySource"))
+                else assertFalse(status.has("apiKeySource"))
             } finally { if (process.isAlive) { process.destroyForcibly(); process.waitFor(5, TimeUnit.SECONDS) } }
         }
     }
