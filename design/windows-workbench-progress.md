@@ -1,3 +1,11 @@
+## 2026-09-24 Windows 1.4.15 已正式上线
+
+- 发布冻结源码e744ba255fb0bbfadd38cb973efd91f0fdfbcf27，GitHub Desktop run35974085873成功。95项工作台回归与安装启动/浏览器/凭据检查全部通过；阶段功能及限制详见design/windows-1.4.15-release.md。
+- 925552780字节产物ID10797747549已在服务器下载并校验GitHub SHA256、ZIP CRC、包内版本、nupkg及旧格式RELEASES引用。本地重复慢下载主动停止，部分文件保留，无重复部署。
+- /var/www/yxi/desktop新包和Setup完整公网GET摘要核对后，依次原子更新RELEASES与JSON。服务器保留1.4.14备份及历史包，部署记录位于/root/src/workspace/yunxi/windows-release/1.4.15-run35974085873/deployment-result.json。
+- 本机再次公网GET确认Version=1.4.15，nupkg SHA256=6093997DA90F4FE096E3C64D9BE140C7ADEFDC33F68F7095754997F09162EF18。应用未自动安装或重启。开发分支快进同步版本与发布记录。
+- 整体目标仍未完成：ACP官方身份/端点闭环、全部插件类型共享、后台常驻调度、所有运行器历史/附件/跨运行器交接、Windows完整交互及原PRD其他项继续推进。此次已发布不等同完整PRD完成。
+
 ## 2026-09-24 长历史分页与候选发布门禁
 
 - eaf59dab加入按offset索引的只读分页，默认近100项，正文每页上限8MiB、单行2MiB；保留分支、工具结果/元数据、队列与模式上下文。旧cursor固定文件前缀/原生文件ID，允许追加，拒绝替换或改写；完整无换行尾JSON正常读取，未完成尾行标记。Windows首次测试发现creation-time tunneling导致同内容替换漏检，改FILE_ID_INFO后通过。
