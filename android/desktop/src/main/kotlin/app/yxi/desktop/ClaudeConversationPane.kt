@@ -1,6 +1,8 @@
 package app.yxi.desktop
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -94,7 +96,10 @@ import java.io.File
                 }
                 DropdownMenu(modelMenu, { modelMenu = false }) {
                     controller.availableModels.forEach { model ->
-                        DropdownMenuItem(text = { Text(model) }, onClick = {
+                        DropdownMenuItem(text = { Text(model) },
+                            modifier = Modifier.padding(horizontal = 6.dp).then(if (model == controller.model)
+                                Modifier.background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp)) else Modifier),
+                            onClick = {
                             modelMenu = false
                             scope.launch { try { controller.selectModel(model) }
                                 catch (e: CancellationException) { throw e }

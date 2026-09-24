@@ -29,6 +29,7 @@ class ClaudeConversationUiTest {
         private val producer = PipedOutputStream(output)
         val writes = CopyOnWriteArrayList<JSONObject>()
         private var turn = 0
+        private var model = "claude-fixture"
         val command = (1..60).joinToString("\n") { "printf 'fixture line $it\\n'" }
         fun emit(value: JSONObject) { producer.write((value.toString() + "\n").toByteArray()); producer.flush() }
         override suspend fun write(text: String): Boolean {
@@ -36,8 +37,11 @@ class ClaudeConversationUiTest {
             when (request.getString("type")) {
                 "control_request" -> {
                     val subtype = request.getJSONObject("request").getString("subtype")
+                    if (subtype == "set_model") model = request.getJSONObject("request").getString("model")
                     val value = if (subtype == "initialize") JSONObject().put("account", JSONObject().put("tokenSource", "claude.ai").put("apiProvider", "firstParty"))
-                        else JSONObject().put("effective", ClaudeSubscriptionSettings.overlay()).put("applied", JSONObject().put("model", "claude-fixture"))
+                        .put("models", JSONArray().put(JSONObject().put("value", "sonnet").put("resolvedModel", "claude-fixture"))
+                            .put(JSONObject().put("value", "opus").put("resolvedModel", "third-party-fixture")))
+                        else JSONObject().put("effective", ClaudeSubscriptionSettings.overlay()).put("applied", JSONObject().put("model", model))
                     emit(JSONObject().put("type", "control_response").put("response", JSONObject().put("subtype", "success").put("request_id", request.getString("request_id")).put("response", value)))
                     if (subtype == "interrupt") {
                         emit(JSONObject().put("type", "control_cancel_request").put("request_id", "permission-$turn"))
@@ -138,6 +142,17 @@ class ClaudeConversationUiTest {
                             assertEquals(3, fixture.writes.count { it.optString("type") == "user" })
                             assertEquals(0, state.localOperations)
                             delay(300); screenshot("claude-conversation-continued")
+                            click(80, 165); delay(400); screenshot("claude-conversation-model-menu")
+                            withContext(Dispatchers.IO) { Robot().apply {
+                                keyPress(KeyEvent.VK_DOWN); keyRelease(KeyEvent.VK_DOWN)
+                                keyPress(KeyEvent.VK_DOWN); keyRelease(KeyEvent.VK_DOWN)
+                                keyPress(KeyEvent.VK_ENTER); keyRelease(KeyEvent.VK_ENTER)
+                            } }
+                            withTimeout(3000) { while (controller.model != "third-party-fixture" || controller.changingModel) delay(20) }
+                            assertEquals("third-party-fixture", state.localClaudeTasks.registry.records.single().model)
+                            assertEquals(1, fixture.writes.count { it.optString("type") == "control_request" && it.getJSONObject("request").optString("subtype") == "set_model" })
+                            assertEquals(3, fixture.writes.count { it.optString("type") == "user" })
+                            delay(300); screenshot("claude-conversation-model-selected")
                         } catch (e: Throwable) { screenshot("claude-conversation-failure"); failure = e }
                         finally { exitApplication() }
                     }
