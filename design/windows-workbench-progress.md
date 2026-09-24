@@ -1,3 +1,9 @@
+## 2026-09-24 思考强度实际拖动与配色验收
+
+- 097a7bad1f46ffcb58f61fe8124f7ad4a21a13a9提取ClaudeEffortSettings，保留滑块预览与单独应用；构建run.8Dqx6U，ClaudeEffortUiTest run.SmODt7 1项通过，0失败/错误/跳过，3.165秒。
+- Robot真实拖动至最高档，拖动期间submitted为空且当前值仍low；点击应用后仅一次max提交。已查看 `.artifacts/claude-conversation-ui/claude-effort-low.png` 和 max-applied.png：蓝色轻度、紫色渐变最高及白色圆形滑块正常。
+- 此为Linux组件截图及交互，尚非所有档位逐像素比较，也非Windows完整对话页/真实账号验收。原生low请求此前已通过；强度跨重启保存仍待实现。未发布。
+
 ## 2026-09-24 本地 Claude 思考强度滑块接线
 
 - LocalClaudeTasks从原生models.supportsEffort和supportedEffortLevels取当前实际模型支持档位，同一resolvedModel多个声明取交集；初始化强度来自get_settings.applied。
