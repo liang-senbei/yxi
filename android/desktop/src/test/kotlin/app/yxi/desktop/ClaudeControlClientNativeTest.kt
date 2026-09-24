@@ -173,9 +173,10 @@ class ClaudeControlClientNativeTest {
             val controlledPid = controlled.processId
             val disk = File(root, "controller-queue.json")
             val controllerQueue = InstructionQueue(disk)
+            val imageStore = LocalClaudeImages(File(root, "images"))
             withContext(Dispatchers.Swing) {
                 val client = ClaudeControlClient(controlled); client.initialize()
-                ClaudeTaskController("native-controller", client, controllerQueue, beforeSend = {
+                ClaudeTaskController("native-controller", client, controllerQueue, imageStore = imageStore, beforeSend = {
                     assertEquals(endpoint, client.settings().getJSONObject("effective").getJSONObject("env").getString("ANTHROPIC_BASE_URL"))
                 }).use { controller ->
                     controller.enqueue("KEEP-controller-durable"); controller.sendNext()
@@ -220,6 +221,30 @@ class ClaudeControlClientNativeTest {
                     assertNull(schedules.claim(3L))
                     File("/results/claude-scheduled-native.json").writeText(JSONObject().put("status", dispatched.status)
                         .put("targetTaskKey", schedules.runs.single().targetTaskKey).put("duplicateClaim", false).toString(2))
+                    val imageFile = File(root, "selected-image.png")
+                    val pixels = java.awt.image.BufferedImage(12, 12, java.awt.image.BufferedImage.TYPE_INT_RGB)
+                    val graphics = pixels.createGraphics()
+                    try { graphics.color = java.awt.Color.BLUE; graphics.fillRect(0, 0, 12, 12) } finally { graphics.dispose() }
+                    javax.imageio.ImageIO.write(pixels, "png", imageFile)
+                    val expectedImage = imageFile.readBytes()
+                    val snapshot = imageStore.capture(imageFile)
+                    assertTrue(imageFile.delete())
+                    controller.enqueue("FOLLOWUP-controller-image", listOf(snapshot)); controller.sendNext()
+                    assertEquals(RuntimeTurnState.Completed, controllerQueue.entries.last().runtimeTurnState)
+                    val imageRequest = requests.readLines().map(::JSONObject).last { request ->
+                        request.getJSONArray("messages").toString().contains("FOLLOWUP-controller-image")
+                    }
+                    val nativeMessages = imageRequest.getJSONArray("messages")
+                    val imageBlocks = (0 until nativeMessages.length()).mapNotNull { nativeMessages.getJSONObject(it).optJSONArray("content") }
+                        .flatMap { content -> (0 until content.length()).mapNotNull { content.optJSONObject(it) } }
+                        .filter { it.optString("type") == "image" }
+                    val imageSource = imageBlocks.single().getJSONObject("source")
+                    assertEquals("image/png", imageSource.getString("media_type"))
+                    assertContentEquals(expectedImage, java.util.Base64.getDecoder().decode(imageSource.getString("data")))
+                    controller.enqueue("FOLLOWUP-after-image"); controller.sendNext()
+                    assertEquals(RuntimeTurnState.Completed, controllerQueue.entries.last().runtimeTurnState)
+                    File("/results/claude-native-image.json").writeText(JSONObject().put("mediaType", imageSource.getString("media_type"))
+                        .put("sourceDeletedBeforeSend", true).put("bytesPreserved", true).put("continued", true).toString(2))
                     disk.copyTo(File("/results/claude-controller-queue.json"), overwrite = true)
                 }
             }
