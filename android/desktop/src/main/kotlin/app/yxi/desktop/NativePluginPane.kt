@@ -1,6 +1,7 @@
 package app.yxi.desktop
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
@@ -95,13 +96,14 @@ internal fun NativePluginPane(state: AppState, conn: Conn?, installedOnly: Boole
     }
     selected?.let { p ->
         AlertDialog(onDismissRequest = { selected = null }, title = { Text(p.title) }, text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(p.description.ifBlank { p.name })
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     CatalogLogo(p); Text(p.title)
                 }
                 Text("安装位置：$target\n分类：${categoryLabel(p.category)}\n来源：${p.marketplace}\n版本：${p.version.ifBlank { "未提供" }}")
-                Text("运行器接入：Codex 已接入；Claude Code、OpenCode 等共享接入尚未完成。", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+                Text(if (p.installed) "原生安装记录：Codex；安装记录不代表已加载或完成服务授权。" else "此条目来自原生目录，尚未安装。", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
+                if (conn == null) PluginMcpImportPreview(p, state.sharedMcp)
                 Text(if (conn == null) "本地插件供这台电脑共用，不随服务器切换。" else "安装到当前服务器的 Codex。其他服务器需分别安装。")
                 Text("服务插件可能还需账号授权。同一账号的云端连接可能共享；已安装不代表服务已连接。", color = t.textMuted)
                 if (!p.installable && !p.installed) Text("此插件需在原生 Codex 中处理权限或安装说明。", color = t.warning)
