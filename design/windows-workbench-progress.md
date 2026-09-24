@@ -1,3 +1,10 @@
+## 2026-09-24 Claude 任务管理器显式恢复
+
+- LocalClaudeTasks.resume接入已核对的恢复服务，串行化创建/恢复；复用已有ready控制器，拒绝原连接仍在处理或队列存在Delivering/Unknown/InProgress。成功后保存有效模型并建立控制器，不发送本地队列项。
+- 创建与恢复共用attach，确保模型列表/通知/模型持久化接线一致；关闭管理器取消恢复准备并释放所属控制器。
+- Windows编译及LocalClaudeTasksTest 5项通过，0失败/错误/跳过（30秒）。新增验证Unknown时零启动、重复恢复只建立一个连接、本地指令不重放、模型更新及关闭释放。
+- 该互斥限同一管理器；跨进程占用、原生历史正文及恢复UI仍待接入和验收。未发布。
+
 ## 2026-09-24 本地 Claude 恢复前身份检查
 
 - LocalClaudeSubscription.resume验证本地official:claude记录、用户/平台、运行器配置目录、原工作目录和规范UUID，再创建恢复连接；回传requestedSessionId必须与记录匹配。仍走同一连接的登录身份及有效官方端点检查，无prompt或队列重放。

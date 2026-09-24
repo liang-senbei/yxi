@@ -32,6 +32,40 @@ class LocalClaudeTasksTest {
         override fun close() { closed = true; producer.close(); output.close() }
     }
     private fun runtime() = LocalRuntimeInstallation("claude", "fixture", listOf("fixture"), root.resolve("native-home").path, "fixture")
+    @Test fun `explicit resume reuses one controller and does not replay local instructions`(): Unit = runBlocking(Dispatchers.Swing) {
+        val index = File(root, "resume-tasks.json"); val queue = InstructionQueue(File(root, "resume-queue.json"))
+        val record = LocalCodexTaskRecord(UUID.randomUUID().toString(), System.getProperty("user.name"), System.getProperty("os.name"),
+            File(runtime().home).canonicalPath, root.canonicalPath, "Resume", "old-model", 1L, "claude", "official:claude")
+        LocalCodexTaskRegistry(index).save(record)
+        val pending = queue.enqueue(record.key, "must stay local")
+        var launches = 0
+        val fixtures = mutableListOf<Fixture>()
+        val subscription = LocalClaudeSubscription { _, _ -> error("must not create") }
+        LocalClaudeTasks(queue, index, subscription, resumeConnection = { selected, saved ->
+            launches++
+            subscription.resume(selected, saved) { _, _, id ->
+                ClaudeControlClient(Fixture().also { fixtures.add(it) }, id)
+            }
+        }).use { tasks ->
+            val delivering = queue.beginDelivery(pending.id, pending.revision)
+            queue.markUnknown(delivering.id, delivering.revision, "test interruption")
+            assertFailsWith<IllegalStateException> { tasks.resume(runtime(), record.key) }
+            assertEquals(0, launches)
+        }
+        val emptyQueue = InstructionQueue(File(root, "safe-queue.json"))
+        emptyQueue.enqueue(record.key, "local only")
+        LocalClaudeTasks(emptyQueue, index, subscription, resumeConnection = { selected, saved ->
+            launches++
+            subscription.resume(selected, saved) { _, _, id -> ClaudeControlClient(Fixture().also { fixtures.add(it) }, id) }
+        }).use { tasks ->
+            val first = tasks.resume(runtime(), record.key)
+            assertSame(first, tasks.resume(runtime(), record.key))
+            assertEquals(1, launches); assertEquals("claude-fixture", tasks.registry.records.single().model)
+            assertEquals(InstructionStatus.Local, emptyQueue.entries.single().status)
+            assertTrue(fixtures.single().writes.all { it.getString("type") == "control_request" })
+        }
+        assertTrue(fixtures.all { it.closed })
+    }
     @Test fun `resume verifies native identity and rejects foreign targets before launch`(): Unit = runBlocking(Dispatchers.Swing) {
         val selected = runtime()
         val record = LocalCodexTaskRecord(UUID.randomUUID().toString(), System.getProperty("user.name"), System.getProperty("os.name"),
