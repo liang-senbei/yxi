@@ -1,3 +1,9 @@
+## 2026-09-24 停止按钮与发布状态核对
+
+- 本轮实时读取 https://yxi.keuury.com/desktop/releases.win.json，最新Full仍为1.4.14（SHA256 9D0C66602C664A9344C7A7B5FD81D39A82D61949563F78A256CDE5248795394C），近期开发改动未发布到更新源。
+- 停止按钮接入controller.cancelTurn，停止期间禁发/禁审批；仅本地发起停止且原生terminal_reason=aborted_streaming时持久化Interrupted，否则按原生成功/失败处理。发送前停止保留Local；等待interrupt应答期间继续计入退出检查。
+- Windows构建与ClaudeTaskControllerTest 5项/ClaudeControlClientTest 7项全部通过，0失败/错误/跳过，45秒。覆盖停止ACK不结束轮次、原生中断回执、非用户中断不误标取消、前置检查中停止不发prompt。界面停止点击与真实控制器停止整链仍待验收。
+- 未发布新版本，当前Windows开发包仍沿用1.4.14元数据，不代表线上更新已完成。
 ## 2026-09-24 Claude 原生 interrupt 回执
 
 - `24f2818a1f6af1334b33ecddfd21a16f80fff16e` 加入显式interrupt控制请求，重复停止去重，停止期间禁止继续答应工具审批；仅收到interrupt应答不会完成prompt，仍等待原生result。
