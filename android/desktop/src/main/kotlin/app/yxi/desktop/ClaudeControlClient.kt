@@ -18,7 +18,7 @@ internal interface ClaudeControlTransport : AutoCloseable {
 }
 
 /** Claude stream-json protocol, not ACP. Prompts require an explicit call; approvals are never automatic. */
-internal class ClaudeControlClient(private val transport: ClaudeControlTransport) : AutoCloseable {
+internal class ClaudeControlClient(private val transport: ClaudeControlTransport, val requestedSessionId: String? = null) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val pending = ConcurrentHashMap<String, CompletableDeferred<JSONObject>>()
     private val closed = AtomicBoolean()
@@ -69,6 +69,7 @@ internal class ClaudeControlClient(private val transport: ClaudeControlTransport
                                 if (!completedResults.add(uuid)) continue
                                 val turn = checkNotNull(activeTurn.get())
                                 val nativeId = value.getString("session_id"); check(nativeId.isNotBlank())
+                                check(requestedSessionId == null || requestedSessionId == nativeId) { "Claude 返回了其他会话身份" }
                                 check(sessionId == null || sessionId == nativeId) { "Claude 会话身份发生变化" }
                                 sessionId = nativeId
                                 resolvedPermissions.addAll(permissions.keys); permissions.clear()
@@ -111,7 +112,7 @@ internal class ClaudeControlClient(private val transport: ClaudeControlTransport
             return withTimeout(timeoutMillis) {
                 writing.withLock {
                     check(!closed.get())
-                    check(transport.write(JSONObject().put("type", "user").put("session_id", sessionId.orEmpty())
+                    check(transport.write(JSONObject().put("type", "user").put("session_id", sessionId ?: requestedSessionId.orEmpty())
                         .put("parent_tool_use_id", JSONObject.NULL).put("uuid", UUID.randomUUID().toString())
                         .put("message", JSONObject().put("role", "user").put("content", text)).toString() + "\n")) { "Claude 提示词未写入" }
                 }

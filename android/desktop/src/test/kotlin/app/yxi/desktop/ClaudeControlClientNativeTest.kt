@@ -47,9 +47,10 @@ class ClaudeControlClientNativeTest {
                 "CLAUDE_CODE_OAUTH_TOKEN" to "synthetic-control-token", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" to "1"),
                 ClaudeSubscriptionSettings.overlay().apply { getJSONObject("env").put("ANTHROPIC_BASE_URL", endpoint) })
             val conversationPid = conversation.processId
-            ClaudeControlClient(conversation).use { client ->
+            ClaudeControlClient(conversation, conversation.requestedSessionId).use { client ->
                 client.initialize()
                 val first = client.prompt("KEEP-control-first", 30000)
+                assertEquals(conversation.requestedSessionId, first.getString("session_id"))
                 assertFalse(first.getBoolean("is_error")); assertTrue(first.getString("result").contains("answer:KEEP-control-first"))
                 val second = client.prompt("FOLLOWUP-control-second", 30000)
                 assertFalse(second.getBoolean("is_error")); assertTrue(second.getString("result").contains("answer:FOLLOWUP-control-second"))

@@ -5,7 +5,7 @@ import java.io.File
 
 /** Keeps the checked native process alive; a future task must use this same connection. */
 internal class LocalClaudeSubscription(private val connect: suspend (LocalRuntimeInstallation, File) -> ClaudeControlClient = { runtime, directory ->
-    ClaudeControlClient(LocalClaudeControlTransport.start(runtime, directory))
+    LocalClaudeControlTransport.start(runtime, directory).let { ClaudeControlClient(it, it.requestedSessionId) }
 }) {
     class Prepared(val client: ClaudeControlClient, val initialization: JSONObject, val settings: JSONObject) : AutoCloseable {
         override fun close() = client.close()

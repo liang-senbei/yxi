@@ -8,7 +8,7 @@ import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
-internal class LocalClaudeControlTransport private constructor(private val process: Process) : ClaudeControlTransport {
+internal class LocalClaudeControlTransport private constructor(private val process: Process, val requestedSessionId: String) : ClaudeControlTransport {
     override val output get() = process.inputStream
     private val writing = Mutex()
     private val closed = AtomicBoolean()
@@ -23,16 +23,17 @@ internal class LocalClaudeControlTransport private constructor(private val proce
             settings: JSONObject = ClaudeSubscriptionSettings.overlay()): LocalClaudeControlTransport {
             require(runtime.engine == "claude" && runtime.ready && runtime.command.isNotEmpty())
             require(directory.isAbsolute && directory.isDirectory)
+            val sessionId = java.util.UUID.randomUUID().toString()
             var owned: Process? = null
             try {
                 return withContext(Dispatchers.IO) {
-                    val process = ProcessBuilder(runtime.command + listOf("--settings", settings.toString(), "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--permission-prompt-tool", "stdio"))
+                    val process = ProcessBuilder(runtime.command + listOf("--settings", settings.toString(), "--session-id", sessionId, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--permission-prompt-tool", "stdio"))
                         .directory(directory.canonicalFile).redirectError(ProcessBuilder.Redirect.DISCARD).apply {
                             environment().clear(); environment().putAll(ClaudeSubscriptionSettings.environment(inherited))
                             environment()["CLAUDE_CONFIG_DIR"] = runtime.home
                             environment()["DISABLE_AUTOUPDATER"] = "1"
                         }.start().also { owned = it }
-                    LocalClaudeControlTransport(process)
+                    LocalClaudeControlTransport(process, sessionId)
                 }
             } catch (e: Exception) { owned?.let(LocalRuntimeDiscovery::stopOwnedProcess); throw e }
         }
