@@ -1,3 +1,9 @@
+## 2026-09-24 Claude 原生工具审批回传
+
+- 控制客户端接入can_use_tool和control_cancel_request：只在活跃轮次登记请求，原始input私有快照，显式允许本次或拒绝，不发送updatedPermissions；重复/已取消请求不能再次审批，结果到达后清理残余请求。原生传输启用permission-prompt-tool stdio。
+- Windows ClaudeControlClientTest 6项通过，无失败/错误/跳过，覆盖无自动答复、输入快照不可被UI副本改写、一次性回传和取消失效。
+- `65c8c168cbe642b1edef0847b741e86bd397ec97` 构建run.1FIPT7；ClaudeControlClientNativeTest run.gUQK7T 1项通过，0失败/错误/跳过。真实Claude在测试Bash写文件前等待原生审批；允许一次后文件为allowed，拒绝后另一文件不存在，两轮均有结束回执，既有上下文/配置/进程回收断言通过。
+- `.artifacts/claude-control/claude-control-permission-*.json`保留回执。模型为回环fixture，审批UI与持久任务控制器尚未接线；未发布。
 ## 2026-09-24 Claude 控制连接原生文本轮次
 
 - 新增显式prompt调用：仅初始化后的连接可发送，单轮CAS锁、1MiB文本限制、原生result完成回执、结果UUID去重及session_id一致性；超时/取消/断连关闭连接，不自动重发。审批仍不自动允许。
