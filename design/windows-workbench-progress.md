@@ -1,3 +1,9 @@
+## 2026-09-24 Claude 控制连接原生文本轮次
+
+- 新增显式prompt调用：仅初始化后的连接可发送，单轮CAS锁、1MiB文本限制、原生result完成回执、结果UUID去重及session_id一致性；超时/取消/断连关闭连接，不自动重发。审批仍不自动允许。
+- Windows ClaudeControlClientTest 5项通过，无失败/错误/跳过，新增并发发送拒绝、两轮身份保留及超时后禁止重放。
+- `df0475c1e122109df92ae129a39d997624497649` 构建run.yulFTG；ClaudeControlClientNativeTest run.JVQXd3 1项通过，0失败/错误/跳过。先读取配置且无模型messages，再新建原生控制会话显式发送两轮，session_id相同、第二轮HTTP消息包含第一轮上下文、原生result success，关闭PID消失。
+- `.artifacts/claude-control/claude-control-second-turn.json`保存回执。模型端点为隔离回环fixture；任务持久化、审批及正式界面发送仍未接通，真实订阅权益未验证，未发布。
 ## 2026-09-24 同连接核对本地 Claude 身份与有效端点
 
 - `9d0d07e7d87f9062672de317d405fad1234109f4` 新增LocalClaudeSubscription.prepare：在同一原生控制连接上initialize读取account来源，再get_settings核对effective端点/认证覆盖；失败关闭，成功返回仍存活的Prepared连接供后续任务使用。无用户prompt写入。
