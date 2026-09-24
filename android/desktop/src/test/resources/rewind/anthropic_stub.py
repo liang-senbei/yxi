@@ -44,11 +44,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.reply_json({"input_tokens": 1})
             return
         marker = next((found for m in reversed(body.get("messages", [])) if m.get("role") == "user"
-                       for found in [re.search(r"(?:KEEP|FOLLOWUP|DROP|EDIT|VERIFY|SINGLE|INTERACTIVE|APP|SECOND|RECOVERY|ROOT)-[A-Za-z-]+", json.dumps(m.get("content", "")))] if found), None)
+                       for matches in [list(re.finditer(r"(?:KEEP|FOLLOWUP|DROP|EDIT|VERIFY|SINGLE|INTERACTIVE|APP|SECOND|RECOVERY|ROOT)-[A-Za-z-]+", json.dumps(m.get("content", ""))))]
+                       for found in [matches[-1] if matches else None] if found), None)
         answer = "answer:" + marker.group(0) if marker else "ok"
         if marker and marker.group(0) == "ROOT-container-native-stop":
             (root / "native-stop-request-started").write_text("ready")
             time.sleep(15)  # Give the real interactive CLI a deterministic cancellation window.
+        if marker and marker.group(0) == "ROOT-controller-native-stop":
+            (root / "controller-stop-request-started").write_text("ready")
+            time.sleep(15)
         tool = None
         if marker and marker.group(0) in ("KEEP-container-first", "DROP-container-third", "KEEP-control-permission", "FOLLOWUP-control-permission"):
             tool_id = "tool_fixture_" + marker.group(0).replace("-", "_")

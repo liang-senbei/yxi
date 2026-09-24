@@ -110,6 +110,17 @@ class ClaudeControlClientNativeTest {
                     assertEquals(2, saved.size)
                     assertTrue(saved.all { it.status == InstructionStatus.Accepted && it.runtimeTurnState == RuntimeTurnState.Completed })
                     assertEquals(2, saved.map { it.runtimeTurnId }.distinct().size)
+                    controller.enqueue("ROOT-controller-native-stop")
+                    val stopping = async { controller.sendNext() }
+                    withTimeout(10000) { while (!File(root, "controller-stop-request-started").exists()) delay(20) }
+                    controller.cancelTurn()
+                    withTimeout(10000) { stopping.await() }
+                    assertEquals(RuntimeTurnState.Interrupted, InstructionQueue(disk).entries.last().runtimeTurnState)
+                    assertEquals("本轮已停止", controller.note)
+                    assertFalse(controller.busy); assertFalse(controller.cancelling)
+                    controller.enqueue("FOLLOWUP-controller-after-stop"); controller.sendNext()
+                    assertTrue(controller.messages.any { it.text.contains("answer:FOLLOWUP-controller-after-stop") })
+                    assertEquals(RuntimeTurnState.Completed, InstructionQueue(disk).entries.last().runtimeTurnState)
                     disk.copyTo(File("/results/claude-controller-queue.json"), overwrite = true)
                 }
             }
