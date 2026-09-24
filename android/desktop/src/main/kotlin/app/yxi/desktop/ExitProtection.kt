@@ -20,9 +20,11 @@ internal fun pendingWorkOf(documents: List<FileDocument>, drafts: List<String>, 
     browsers.count { it.hasUnsubmittedFeedback },
     documents.count { it.busy } + browsers.count { it.preparing || it.stylePending != null || it.capturing },
 )
+internal fun claudeImageDraftCount(drafts: Map<String, List<InstructionAttachment>>) = drafts.values.count { it.isNotEmpty() }
+
 fun AppState.pendingWork() = pendingWorkOf(documents, chatDrafts.values.map { it.value.text }, browsers.values).let {
-    it.copy(operations = it.operations + instructions.entries.count { item -> item.status == InstructionStatus.Delivering } + support.running.size + shopPurchases.running.size + pluginOperations.running.size + nativePluginBusy + localOperations + serviceControllers.values.count { service -> service.mutating } + (if (VoiceActivity.busy) 1 else 0) + (if (deferredRoute?.applying == true) 1 else 0) + (if (codexWorkspace.busy) 1 else 0),
-        drafts = it.drafts + support.editors.values.count { edit -> edit.dirty } + serviceEditors.values.count { edit -> edit.dirty } + (if (VoiceActivity.hasDraft) 1 else 0) + codexWorkspace.attachments.values.count { images -> images.isNotEmpty() } + codexWorkspace.controllers.values.sumOf { controller -> controller.answerDraftCount },
+    it.copy(operations = it.operations + claudeImageCaptures.size + instructions.entries.count { item -> item.status == InstructionStatus.Delivering } + support.running.size + shopPurchases.running.size + pluginOperations.running.size + nativePluginBusy + localOperations + serviceControllers.values.count { service -> service.mutating } + (if (VoiceActivity.busy) 1 else 0) + (if (deferredRoute?.applying == true) 1 else 0) + (if (codexWorkspace.busy) 1 else 0),
+        drafts = it.drafts + claudeImageDraftCount(claudeImageDrafts) + support.editors.values.count { edit -> edit.dirty } + serviceEditors.values.count { edit -> edit.dirty } + (if (VoiceActivity.hasDraft) 1 else 0) + codexWorkspace.attachments.values.count { images -> images.isNotEmpty() } + codexWorkspace.controllers.values.sumOf { controller -> controller.answerDraftCount },
         waitingRoutes = deferredRoute?.takeIf { request -> !request.applying }?.let { request -> listOf("${request.conn.host.label} · ${request.line.name}") }.orEmpty(),
         codexTurns = codexWorkspace.controllers.values.count { controller -> controller.activeTurnId != null })
 }

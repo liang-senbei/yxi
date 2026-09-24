@@ -3,6 +3,13 @@ package app.yxi.desktop
 import kotlin.test.*
 
 class ExitProtectionTest {
+    @Test fun `image only drafts count tasks rather than individual attachments`() {
+        val image = InstructionAttachment("image.png", "/yxi-local-image/fixture")
+        assertEquals(0, claudeImageDraftCount(mapOf("empty" to emptyList())))
+        val count = claudeImageDraftCount(mapOf("first" to listOf(image, image), "second" to listOf(image), "empty" to emptyList()))
+        assertEquals(2, count)
+        assertTrue(PendingWork(emptyList(), count, 0, 0).needsReview)
+    }
     @Test fun `clean workspace does not need a prompt`() {
         assertFalse(PendingWork(emptyList(), 0, 0, 0).needsReview)
     }

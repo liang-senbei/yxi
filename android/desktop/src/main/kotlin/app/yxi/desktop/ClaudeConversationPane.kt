@@ -243,7 +243,7 @@ import java.io.File
             if (!capturingImages) {
                 val files = Attach.pickFiles()
                 if (files.isNotEmpty()) {
-                    capturingImages = true; error = ""
+                    capturingImages = true; state.claudeImageCaptures.add(record.key); error = ""
                     scope.launch {
                         try {
                             require(files.size + imageDrafts.size <= 4) { "每次最多4张图片" }
@@ -255,7 +255,7 @@ import java.io.File
                             captured.forEach { if (imageDrafts.none { existing -> existing.remotePath == it.remotePath }) imageDrafts.add(it) }
                         } catch (e: CancellationException) { throw e }
                         catch (e: Exception) { error = e.message ?: "图片读取失败" }
-                        finally { capturingImages = false }
+                        finally { capturingImages = false; state.claudeImageCaptures.remove(record.key) }
                     }
                 }
             }
