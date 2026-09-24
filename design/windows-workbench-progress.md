@@ -1,3 +1,8 @@
+## 2026-09-24 临时订阅覆盖层保留项目禁读规则
+
+- `b9e1bb2e` 增加正常读取与项目禁止Read的对照；首跑run.LLhCCw失败在permission_denials数组断言。实际原生CLI将Read工具直接禁用，返回明确的disabled工具错误，而非填充permission_denials数组。
+- `3f238dc13bbf77ceb7d5ed96becb1fec9478ce68` 改为验证原生tool_result.is_error及Read is disabled for this session，仍要求测试内容未进入后续请求；无禁读规则的对照必须读到文件内容。构建run.1eMLuD，run.360w3I 1项通过，0失败/错误/跳过，覆盖7个请求/权限组合。
+- 项目禁读与临时订阅覆盖同时生效，原配置字节不变；证据 `.artifacts/claude-auth-requests/claude-request-permission-*.jsonl`。只验证固定版本的这一禁读规则，企业托管策略和磁盘登录仍待验证；未接入正式订阅选择入口，未发布。
 ## 2026-09-24 Claude 项目级线路冲突验证
 
 - `3af6934f6af4129213cae77f4d4a9c5dd2efb54d` 在独立工作目录增加项目settings.json及settings.local.json，含冲突API/Bearer/无效端点和permissions字段，与用户级旧配置并存；运行临时订阅覆盖层。
