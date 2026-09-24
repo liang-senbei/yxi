@@ -13,7 +13,7 @@ internal object ClaudeSubscriptionProbe {
         require(binary.isFile && binary.canExecute() && directory.isDirectory)
         currentCoroutineContext().ensureActive()
         if (cancelled()) throw CancellationException("订阅检查已取消")
-        val process = ProcessBuilder(binary.absolutePath, "auth", "status", "--json", "--settings", settings.toString())
+        val process = ProcessBuilder(binary.absolutePath, "--settings", settings.toString(), "auth", "status", "--json")
             .directory(directory.canonicalFile).redirectError(ProcessBuilder.Redirect.DISCARD).apply {
                 environment().clear(); environment().putAll(ClaudeSubscriptionSettings.environment(inherited))
                 environment()["DISABLE_AUTOUPDATER"] = "1"
