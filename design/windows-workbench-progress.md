@@ -1,3 +1,9 @@
+## 2026-09-24 本地 Claude 新建与对话预览接线
+
+- `e5014ef9` 将LocalClaudeTasks接入AppState惰性管理、运行任务计数、退出清理和本地任务定位；本地Claude安装项新增官方对话预览入口，新建弹窗核对后登记但不自动发送。
+- 新增ClaudeConversationPane：共享草稿、Enter发送/Shift+Enter换行、持久指令条、Markdown文本、原生工具输入及明确的允许本次/拒绝按钮；页面切换不取消控制器所属发送任务，断开记录不自动恢复或重发。
+- Windows createDistributable及LocalClaudeTasksTest 3项/ClaudeTaskControllerTest 3项通过，0失败/错误/跳过。`4b516e00`随后补新消息跟随、上滚停止跟随和回到最新，Windows应用目录重建通过（28秒）。
+- 新页面尚未做完整点击/滚动/审批UI验收；暂停原生轮次、模型选择、恢复历史、附件等仍需继续接入。真实官方订阅额度未验证，当前为未发布开发预览。
 ## 2026-09-24 本地 Claude 会话登记与明确身份
 
 - `bfd02a3383736473dc66ad423dea7fea5a53e328` 原生传输分配UUID并传--session-id；控制客户端可绑定requestedSessionId，发送和原生回执均核对身份。LocalClaudeSubscription默认保留该绑定。
