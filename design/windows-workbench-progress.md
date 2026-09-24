@@ -1,3 +1,9 @@
+## 2026-09-24 停止功能真实控制器回归
+
+- `25e5ce94c0351c4c27301d3bfd42b46ba1fa3865` 为控制器增加独立延迟响应场景，真实调用cancelTurn后核对持久Interrupted、停止状态清理，再继续发送新轮次并核对回复文本。回环fixture按合并消息的最后一个显式标记回复，避免重放旧停止标记造成伪延迟。
+- 构建run.bM7lz2；ClaudeControlClientNativeTest run.p6Y51o 1项通过，0失败/错误/跳过，3.398秒。重新读取队列得到Completed/Completed/Interrupted/Completed，均Accepted，原生会话继续可用。
+- 最新回执在 `.artifacts/claude-control/claude-controller-queue.json`。这是实际控制器+原生CLI+回环模型，不是Windows停止按钮点击或真实账号验收；未发布。
+- 已向确认属于cc-yxi的%8派发审批卡片长命令排版独立草稿任务，要求不改主仓库、不运行宿主机AI/集成测试；等待复核交付。
 ## 2026-09-24 停止按钮与发布状态核对
 
 - 本轮实时读取 https://yxi.keuury.com/desktop/releases.win.json，最新Full仍为1.4.14（SHA256 9D0C66602C664A9344C7A7B5FD81D39A82D61949563F78A256CDE5248795394C），近期开发改动未发布到更新源。
