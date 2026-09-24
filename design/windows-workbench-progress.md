@@ -1,3 +1,10 @@
+## 2026-09-24 Claude 原生发送前认证探测
+
+- `24b58e77` 新增ClaudeSubscriptionProbe：目标cwd/临时settings/过滤后env下执行auth status，不发送prompt；15秒限时、64KiB输出限制、取消检查、所属进程清理，原生状态不直接输出到用户日志。
+- 首跑run.WxJfQj发现全局--settings放在auth子命令后无JSON；`5dda94c3`调整顺序后run.SaiVvx发现磁盘登录认证方法不是oauth_token。核对固定官方二进制后，`c32061db22c90a05af626eee455f203181cff149`识别claude.ai，仍要求无API来源和firstParty。
+- 最终构建run.KO4NSl；ClaudeAuthenticationRequestTest run.hhlLrm 1项通过，0失败/错误/跳过。所有普通覆盖场景先通过原生认证检查且无模型请求，托管API场景被检查器拒绝；之后原生请求回归12组合通过。
+- 第二次构建前空间不足，按归属标签、源码tag和无容器引用核验删除35个旧测试镜像，保留最新5个及两份依赖基线；审计removed-images-auth-probe.json，空闲约11GiB，未动生产资源。
+- 此探测只核对凭据身份，不证明端点政策/订阅权益，且尚未接入正式任务入口。未发布。
 ## 2026-09-24 Claude 原生认证身份冲突校验
 
 - `06c5ea9ebf065c5308cb777b5458c44fb10126a1` 增加 requireOAuthIdentity：严格要求原生布尔loggedIn、firstParty、无apiKeySource和已知oauth_token认证方式；对已实测的混合OAuth/API状态明确报错，不误判为订阅启用。错误文案不输出原生凭据内容。
