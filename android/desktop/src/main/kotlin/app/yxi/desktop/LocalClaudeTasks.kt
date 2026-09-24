@@ -7,7 +7,7 @@ import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.util.concurrent.atomic.AtomicReference
 
-/** Registers only new, checked connections. Loading an index never resumes or replays a native task. */
+/** Owns explicitly created or resumed checked connections. Index loading never launches or replays a task. */
 internal class LocalClaudeTasks(private val queue: InstructionQueue, file: File,
     private val subscription: LocalClaudeSubscription = LocalClaudeSubscription(),
     private val resumeConnection: suspend (LocalRuntimeInstallation, LocalCodexTaskRecord) -> LocalClaudeSubscription.Prepared = { runtime, record -> subscription.resume(runtime, record) },

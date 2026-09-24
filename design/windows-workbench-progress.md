@@ -1,3 +1,9 @@
+## 2026-09-24 本地 Claude 恢复按钮接线
+
+- ClaudeConversationPane在无ready控制器且无活跃操作时显示ClaudeResumeActions；按原runtimeHome匹配ready的Claude安装，多候选必须明确选择，无候选可重新检测。
+- 点击恢复调用已验证的管理器恢复链，同步置busy防重复点击；恢复失败保留错误，页面离开取消准备；已有本地指令不自动发送。页面提示外部窗口中的同一会话需先停止，因为Yxi文件锁不能代替外部Claude占用检测。
+- Windows compileKotlin通过（19秒），git diff --check通过。本轮仅完成UI接线，实际按钮/历史连续显示/失败点击场景仍需隔离界面回归；外部占用检测尚未实现，未发布。
+
 ## 2026-09-24 恢复控制器保留历史正文
 
 - LocalClaudeTasks.resume在IO调度读取原生历史并核对后才连接，attach将历史快照交给ClaudeTaskController；页面使用控制器history而不在连接出现后清空旧正文，新消息仍按独立实时列表追加。

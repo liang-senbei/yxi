@@ -61,6 +61,7 @@ import java.io.File
     val draft = remember(record.key) { state.chatDrafts.getOrPut(record.key) { mutableStateOf(TextFieldValue()) } }
     var error by remember(record.key) { mutableStateOf("") }
     var sending by remember(record.key) { mutableStateOf(false) }
+    var resuming by remember(record.key) { mutableStateOf(false) }
     val responding = remember(record.key) { mutableStateListOf<String>() }
     val view = remember(record.key) { state.codexConversationViews.getOrPut(record.key) { CodexConversationView() } }
     var followLatest by view.followLatest
@@ -125,6 +126,22 @@ import java.io.File
             }
         }
         Text(controller?.note ?: "连接未恢复；此记录不会自动重发指令。")
+        if (controller?.ready != true && controller?.busy != true && controller?.cancelling != true && controller?.changingModel != true) {
+            ClaudeResumeActions(record, state.localWorkspace.installations,
+                busy = resuming || state.localClaudeTasks.busy,
+                detecting = state.localWorkspace.detecting,
+                refresh = { state.localWorkspace.refresh() }) { runtime ->
+                if (!resuming) {
+                    resuming = true; error = ""
+                    scope.launch {
+                        try { state.localClaudeTasks.resume(runtime, record.key) }
+                        catch (e: CancellationException) { throw e }
+                        catch (e: Exception) { error = e.message ?: "恢复未完成" }
+                        finally { resuming = false }
+                    }
+                }
+            }
+        }
         if (historyLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (historyError.isNotBlank()) Text(historyError, color = Tokens.current.danger)
         InstructionStrip(state.instructions, record.key, controller?.ready == true && !controller.busy && !controller.cancelling && !controller.changingModel && controller.pendingApprovals.isEmpty(), { controller?.dispatchNext() })
@@ -167,6 +184,32 @@ import java.io.File
                 catch (e: CancellationException) { throw e }
                 catch (e: Exception) { error = e.message ?: "停止结果未确认" } } },
                 enabled = controller?.busy == true && !controller.cancelling) { Text(if (controller?.cancelling == true) "停止中…" else "停止") }
+        }
+    }
+}
+
+@Composable internal fun ClaudeResumeActions(record: LocalCodexTaskRecord, installations: List<LocalRuntimeInstallation>,
+    busy: Boolean, detecting: Boolean, refresh: () -> Unit, resume: (LocalRuntimeInstallation) -> Unit) {
+    val candidates = remember(record.runtimeHome, installations) {
+        installations.filter { runtime -> runtime.engine == "claude" && runtime.ready &&
+            runCatching { File(runtime.home).canonicalPath == File(record.runtimeHome).canonicalPath }.getOrDefault(false) }
+    }
+    var selectedId by remember(record.key) { mutableStateOf<String?>(null) }
+    val selected = candidates.singleOrNull() ?: candidates.singleOrNull { it.id == selectedId }
+    var open by remember(record.key) { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("恢复会保留原会话；请先停止其他窗口中的同一会话。", style = MaterialTheme.typography.bodySmall)
+        if (candidates.isEmpty()) Text("尚未找到匹配原配置目录的 Claude 运行器。", style = MaterialTheme.typography.bodySmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (candidates.size > 1) Box {
+                TextButton({ open = true }, enabled = !busy && !detecting) { Text(selected?.let { "${it.source} · ${it.version}" } ?: "选择原运行器") }
+                DropdownMenu(open, { open = false }) {
+                    candidates.forEach { runtime -> DropdownMenuItem(text = { Text("${runtime.source} · ${runtime.version} · ${runtime.command.firstOrNull().orEmpty()}") },
+                        onClick = { selectedId = runtime.id; open = false }) }
+                }
+            }
+            TextButton({ selected?.let(resume) }, enabled = !busy && !detecting && selected != null) { Text(if (busy) "正在恢复…" else "恢复此会话") }
+            TextButton(refresh, enabled = !busy && !detecting) { Text(if (detecting) "正在检测…" else "重新检测运行器") }
         }
     }
 }
