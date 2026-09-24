@@ -1,3 +1,10 @@
+## 2026-09-24 恢复按钮与历史续接界面验收
+
+- 901f63cfe760b99f76e7421997b5c4c45217a85e，构建run.rBZGqo；ClaudeConversationUiTest run.gkI1ex 2项通过，0失败/错误/跳过，10.642秒。
+- 新增恢复场景使用本地合成JSONL和协议替身，实际点击恢复按钮；启动计数1、恢复阶段无user消息、旧正文进入控制器；随后Enter发送一次并在UI批准工具，队列Completed，旧历史保留。
+- 已查看 `.artifacts/claude-conversation-ui/claude-before-resume.png` 和 claude-resume-continued.png：断开时历史可读、续聊前后内容连续。原新建/审批/停止/模型选择回归也通过。
+- 此为Linux窗口组件验收，原生CLI链另有独立证据；Windows完整交互、外部客户端占用检测和长历史分页仍待完成。未发布。
+
 ## 2026-09-24 本地 Claude 恢复按钮接线
 
 - ClaudeConversationPane在无ready控制器且无活跃操作时显示ClaudeResumeActions；按原runtimeHome匹配ready的Claude安装，多候选必须明确选择，无候选可重新检测。
