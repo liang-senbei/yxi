@@ -73,6 +73,15 @@ class ClaudeControlClientNativeTest {
                     assertTrue(client.pendingPermissions().isEmpty())
                     File("/results/claude-control-permission-$allow.json").writeText(result.toString(2))
                 }
+                val interrupted = async { client.prompt("ROOT-container-native-stop", 30000) }
+                withTimeout(10000) { while (!File(root, "native-stop-request-started").exists()) delay(20) }
+                assertFalse(interrupted.isCompleted)
+                assertTrue(client.interrupt())
+                val stopped = withTimeout(10000) { interrupted.await() }
+                File("/results/claude-control-interrupted.json").writeText(stopped.toString(2))
+                val continued = client.prompt("FOLLOWUP-after-stop", 30000)
+                assertFalse(continued.getBoolean("is_error"))
+                assertEquals(first.getString("session_id"), continued.getString("session_id"))
             }
             withTimeout(5000) { while (ProcessHandle.of(conversationPid).map { it.isAlive }.orElse(false)) delay(20) }
             val turns = requests.readLines().map(::JSONObject)

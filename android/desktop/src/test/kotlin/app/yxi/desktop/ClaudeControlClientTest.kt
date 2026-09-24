@@ -74,6 +74,22 @@ class ClaudeControlClientTest {
             assertEquals(1, fixture.writes.count { it.optString("type") == "user" })
         }
     }
+    @Test fun `interrupt acknowledgement does not complete the prompt before its result`(): Unit = runBlocking {
+        val fixture = Fixture()
+        ClaudeControlClient(fixture).use { client ->
+            client.initialize(); assertFalse(client.interrupt())
+            val turn = async { client.prompt("stop fixture") }
+            withTimeout(2000) { while (fixture.writes.size < 2) delay(10) }
+            val stopping = async { client.interrupt() }
+            withTimeout(2000) { while (fixture.writes.size < 3) delay(10) }
+            assertEquals("interrupt", fixture.writes.last().getJSONObject("request").getString("subtype"))
+            fixture.respond(fixture.writes.last(), JSONObject())
+            assertTrue(stopping.await()); assertFalse(turn.isCompleted); assertFalse(client.interrupt())
+            fixture.emit(JSONObject().put("type", "result").put("uuid", "stopped").put("session_id", "session").put("is_error", true))
+            turn.await()
+            assertEquals(1, fixture.writes.count { it.optJSONObject("request")?.optString("subtype") == "interrupt" })
+        }
+    }
     @Test fun `control replies correlate by request identity without submitting prompts`(): Unit = runBlocking {
         val fixture = Fixture()
         ClaudeControlClient(fixture).use { client ->

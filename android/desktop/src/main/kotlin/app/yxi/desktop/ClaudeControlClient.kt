@@ -26,6 +26,8 @@ internal class ClaudeControlClient(private val transport: ClaudeControlTransport
     private val initialization = Mutex()
     private var initialized = false
     private val activeTurn = AtomicReference<CompletableDeferred<JSONObject>?>()
+    private val stopRequested = AtomicReference<CompletableDeferred<JSONObject>?>()
+    private val interrupting = AtomicBoolean()
     private val completedResults = ConcurrentHashMap.newKeySet<String>()
     private val permissions = ConcurrentHashMap<String, JSONObject>()
     private val resolvedPermissions = ConcurrentHashMap.newKeySet<String>()
@@ -54,6 +56,7 @@ internal class ClaudeControlClient(private val transport: ClaudeControlTransport
                                 if (id in resolvedPermissions) continue
                                 val request = value.getJSONObject("request")
                                 check(request.optString("subtype") == "can_use_tool" && activeTurn.get() != null)
+                                if (stopRequested.get() === activeTurn.get()) { resolvedPermissions.add(id); continue }
                                 check(request.getString("tool_name").isNotBlank()); request.getJSONObject("input")
                                 val previous = permissions.putIfAbsent(id, JSONObject(value.toString()))
                                 if (previous == null) events.send(value) else check(previous.similar(value))
@@ -92,8 +95,15 @@ internal class ClaudeControlClient(private val transport: ClaudeControlTransport
         return request("get_settings")
     }
     fun pendingPermissions(): List<JSONObject> = permissions.values.map { JSONObject(it.toString()) }
+    suspend fun interrupt(): Boolean {
+        val turn = activeTurn.get() ?: return false
+        if (turn.isCompleted || !stopRequested.compareAndSet(null, turn)) return false
+        interrupting.set(true)
+        return try { request("interrupt"); true } finally { interrupting.set(false) }
+    }
     suspend fun answerPermission(id: String, allow: Boolean) = writing.withLock {
         check(!closed.get() && activeTurn.get() != null) { "Claude 审批所属轮次已结束" }
+        check(stopRequested.get() !== activeTurn.get()) { "Claude 正在停止，不能继续批准" }
         val original = permissions.remove(id) ?: error("Claude 审批已处理或已失效")
         resolvedPermissions.add(id)
         val answer = if (allow) JSONObject().put("behavior", "allow").put("updatedInput", original.getJSONObject("request").getJSONObject("input"))
@@ -104,7 +114,7 @@ internal class ClaudeControlClient(private val transport: ClaudeControlTransport
         } catch (e: Exception) { close(); throw e }
     }
     suspend fun prompt(text: String, timeoutMillis: Long = 600_000): JSONObject {
-        check(initialized && !closed.get()) { "Claude 控制连接尚未就绪" }
+        check(initialized && !closed.get() && !interrupting.get()) { "Claude 控制连接尚未就绪" }
         require(text.isNotBlank() && text.toByteArray(Charsets.UTF_8).size <= 1024 * 1024)
         val result = CompletableDeferred<JSONObject>()
         check(activeTurn.compareAndSet(null, result)) { "Claude 上一轮尚未结束" }
@@ -119,7 +129,7 @@ internal class ClaudeControlClient(private val transport: ClaudeControlTransport
                 result.await()
             }
         } catch (e: Exception) { close(); throw e }
-        finally { activeTurn.compareAndSet(result, null) }
+        finally { activeTurn.compareAndSet(result, null); stopRequested.compareAndSet(result, null) }
     }
     private suspend fun request(subtype: String): JSONObject {
         check(!closed.get()) { "Claude 控制连接已关闭" }
