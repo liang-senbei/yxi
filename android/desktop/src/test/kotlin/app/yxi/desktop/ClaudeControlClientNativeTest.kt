@@ -1,6 +1,7 @@
 package app.yxi.desktop
 
 import kotlinx.coroutines.*
+import kotlinx.coroutines.swing.Swing
 import java.io.File
 import org.json.JSONObject
 import kotlin.test.*
@@ -76,6 +77,33 @@ class ClaudeControlClientNativeTest {
             val turns = requests.readLines().map(::JSONObject)
             val secondRequest = turns.last { it.getJSONArray("messages").toString().contains("FOLLOWUP-control-second") }
             assertTrue(secondRequest.getJSONArray("messages").toString().contains("KEEP-control-first"))
+            val controlled = LocalClaudeControlTransport.start(runtime, home, mapOf("HOME" to home.path, "PATH" to "/usr/bin:/bin",
+                "CLAUDE_CODE_OAUTH_TOKEN" to "synthetic-control-token", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" to "1"),
+                ClaudeSubscriptionSettings.overlay().apply { getJSONObject("env").put("ANTHROPIC_BASE_URL", endpoint) })
+            val controlledPid = controlled.processId
+            val disk = File(root, "controller-queue.json")
+            withContext(Dispatchers.Swing) {
+                val client = ClaudeControlClient(controlled); client.initialize()
+                ClaudeTaskController("native-controller", client, InstructionQueue(disk), beforeSend = {
+                    assertEquals(endpoint, client.settings().getJSONObject("effective").getJSONObject("env").getString("ANTHROPIC_BASE_URL"))
+                }).use { controller ->
+                    controller.enqueue("KEEP-controller-durable"); controller.sendNext()
+                    assertTrue(controller.messages.any { it.role == "Assistant" && it.text.contains("answer:KEEP-controller-durable") })
+                    controller.enqueue("FOLLOWUP-control-permission")
+                    val pending = async { controller.sendNext() }
+                    withTimeout(10000) { while (controller.pendingApprovals.isEmpty() && !pending.isCompleted) delay(20) }
+                    controller.answerPermission(controller.pendingApprovals.keys.single(), false)
+                    pending.await()
+                    assertTrue(controller.pendingApprovals.isEmpty())
+                    assertFalse(File(root, "denied-control.txt").exists())
+                    val saved = InstructionQueue(disk).entries
+                    assertEquals(2, saved.size)
+                    assertTrue(saved.all { it.status == InstructionStatus.Accepted && it.runtimeTurnState == RuntimeTurnState.Completed })
+                    assertEquals(2, saved.map { it.runtimeTurnId }.distinct().size)
+                    disk.copyTo(File("/results/claude-controller-queue.json"), overwrite = true)
+                }
+            }
+            withTimeout(5000) { while (ProcessHandle.of(controlledPid).map { it.isAlive }.orElse(false)) delay(20) }
         } finally { server.destroyForcibly(); server.waitFor() }
     }
 }
