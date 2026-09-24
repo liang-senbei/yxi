@@ -1,3 +1,8 @@
+## 2026-09-24 交接失败撤回未投递摘要
+
+- 交接派发前拒绝既有deliveryId，避免碰撞或旧队列被重复派发；失败时仅撤回本次source/target/id/summary完全匹配且仍Local的指令，已投递状态及其他任务不修改。
+- Windows编译与RunnerHandoffExecutorTest 4项通过，0失败/错误/跳过，31秒。新增派发失败撤回且源草稿不变、异任务ID碰撞不派发不修改测试。交接UI/运行器适配仍待接入，未发布。
+
 ## 2026-09-24 跨运行器交接执行器
 
 - RunnerHandoffExecutor串联创建意图持久化、目标记录、唯一摘要入队和指定ID投递回调。只有Accepted且Completed的目标队列回执才标Completed；异常/取消保留Unknown不自动重试，源历史不触碰。

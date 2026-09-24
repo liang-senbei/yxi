@@ -20,6 +20,7 @@ internal class RunnerHandoffExecutor(private val store: RunnerHandoffStore, priv
                 current = store.created(id, current.revision, target)
             }
             val target = checkNotNull(current.targetTaskKey)
+            check(queue.entries.none { it.id == current.deliveryId }) { "摘要投递ID已存在，请核对队列；不会重复派发" }
             current = store.beginDelivery(id, current.revision, target)
             queue.enqueue(target, current.summary, id = current.deliveryId, sourceTask = current.sourceTaskKey)
             deliver(target, current.deliveryId)
@@ -32,6 +33,8 @@ internal class RunnerHandoffExecutor(private val store: RunnerHandoffStore, priv
         } catch (error: Exception) {
             withContext(NonCancellable) {
                 val latest = store.records.single { it.id == id }
+                val queued = queue.entries.singleOrNull { it.id == latest.deliveryId && it.taskKey == latest.targetTaskKey && it.sourceTask == latest.sourceTaskKey && it.text == latest.summary }
+                if (queued?.status == InstructionStatus.Local) runCatching { queue.cancel(queued.id, queued.revision) }
                 if (latest.stage in setOf(RunnerHandoffStage.Creating, RunnerHandoffStage.Delivering))
                     runCatching { store.unknown(id, latest.revision, "交接未取得完整确认，请核对目标会话；不会自动重试") }
             }
