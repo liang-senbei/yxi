@@ -1,3 +1,10 @@
+## 2026-09-24 本地 Claude 历史只读读取层
+
+- LocalClaudeHistory在原配置目录projects下按完整UUID精确定位单个JSONL，不使用标题或mtime猜测，不跟随子目录/文件符号链接；核对sessionId/cwd，使用已有Transcript解析器保留分支及工具语义。
+- 限制2048个项目项、8MiB读取；超限/多个匹配/身份不符均明确失败，不静默截断。解析过程不改写原生历史。
+- Windows编译及LocalClaudeHistoryTest 1项通过，0失败/错误/跳过，22秒。覆盖用户正文、读取前后字节一致、错误sessionId、同ID多位置及超大文件拒绝。
+- 真实CLI历史样本验证、分页、历史渲染及恢复按钮尚需继续；目前只是读取层，未发布。
+
 ## 2026-09-24 Windows 独立进程会话锁验收
 
 - ClaudeSessionLeaseTest新增独立Java进程持锁场景，父进程使用产品acquire验证排他；分别正常退出和强制结束持锁进程，再验证重取锁，保持锁文件不删除。
