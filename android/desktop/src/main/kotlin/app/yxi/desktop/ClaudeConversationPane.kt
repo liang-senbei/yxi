@@ -78,7 +78,7 @@ import java.io.File
             catch (e: CancellationException) { throw e }
             catch (e: Exception) { historyError = e.message ?: "历史读取失败" }
             finally { historyLoading = false }
-        } else history = emptyList()
+        } else { history = controller.history; historyError = "" }
     }
     LaunchedEffect(view, record.key) {
         snapshotFlow { Triple(view.scroll.firstVisibleItemIndex to view.scroll.firstVisibleItemScrollOffset,

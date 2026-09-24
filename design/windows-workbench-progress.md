@@ -1,3 +1,9 @@
+## 2026-09-24 恢复控制器保留历史正文
+
+- LocalClaudeTasks.resume在IO调度读取原生历史并核对后才连接，attach将历史快照交给ClaudeTaskController；页面使用控制器history而不在连接出现后清空旧正文，新消息仍按独立实时列表追加。
+- Windows构建及LocalClaudeTasksTest 5项/ClaudeTaskControllerTest 6项通过，0失败/错误/跳过（33秒）。新增断言恢复控制器携带旧用户正文，读取失败时不启动连接、不建立控制器，busy归零且本地指令不重放。
+- 恢复按钮、真实页面截图、外部原生客户端占用检测及长历史分页仍待完成。当前大于8MiB的历史明确报错并阻止恢复，未宣称完整长会话支持。未发布。
+
 ## 2026-09-24 断开 Claude 对话的只读历史页面
 
 - ClaudeConversationPane在无控制器时通过IO调度读取原生历史，展示加载进度和明确错误；不会启动运行器。历史项进入同一LazyColumn及滚动跟随逻辑。

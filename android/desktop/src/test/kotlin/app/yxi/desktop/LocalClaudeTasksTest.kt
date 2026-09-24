@@ -54,17 +54,24 @@ class LocalClaudeTasksTest {
         }
         val emptyQueue = InstructionQueue(File(root, "safe-queue.json"))
         emptyQueue.enqueue(record.key, "local only")
-        LocalClaudeTasks(emptyQueue, index, subscription, resumeConnection = { selected, saved ->
+        LocalClaudeTasks(emptyQueue, index, subscription, readHistory = { listOf(app.yxi.agent.ChatItem.UserText("old", "previous question")) }, resumeConnection = { selected, saved ->
             launches++
             subscription.resume(selected, saved) { _, _, id -> ClaudeControlClient(Fixture().also { fixtures.add(it) }, id) }
         }).use { tasks ->
             val first = tasks.resume(runtime(), record.key)
+            assertEquals("previous question", (first.history.single() as app.yxi.agent.ChatItem.UserText).text)
             assertSame(first, tasks.resume(runtime(), record.key))
             assertEquals(1, launches); assertEquals("claude-fixture", tasks.registry.records.single().model)
             assertEquals(InstructionStatus.Local, emptyQueue.entries.single().status)
             assertTrue(fixtures.single().writes.all { it.getString("type") == "control_request" })
         }
         assertTrue(fixtures.all { it.closed })
+        LocalClaudeTasks(emptyQueue, index, subscription, readHistory = { error("history unavailable") },
+            resumeConnection = { _, _ -> error("must not launch when history cannot be verified") }).use { tasks ->
+            assertFailsWith<IllegalStateException> { tasks.resume(runtime(), record.key) }
+            assertTrue(tasks.controllers.isEmpty()); assertFalse(tasks.busy)
+            assertEquals(InstructionStatus.Local, emptyQueue.entries.single().status)
+        }
     }
     @Test fun `resume verifies native identity and rejects foreign targets before launch`(): Unit = runBlocking(Dispatchers.Swing) {
         val selected = runtime()

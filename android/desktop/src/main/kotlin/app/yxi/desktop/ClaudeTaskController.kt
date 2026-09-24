@@ -16,7 +16,8 @@ internal class ClaudeTaskController(val taskKey: String, private val client: Cla
     private val onNotification: (String) -> Unit = {},
     initialModel: String = "",
     val availableModels: List<String> = emptyList(),
-    private val onModelChanged: (String) -> Unit = {}) : AutoCloseable {
+    private val onModelChanged: (String) -> Unit = {},
+    val history: List<app.yxi.agent.ChatItem> = emptyList()) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
     private val mutation = Mutex()
     private val rendered = mutableMapOf<String, CompletableDeferred<Unit>>()

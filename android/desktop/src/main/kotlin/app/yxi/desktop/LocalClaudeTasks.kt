@@ -10,7 +10,8 @@ import java.util.concurrent.atomic.AtomicReference
 /** Registers only new, checked connections. Loading an index never resumes or replays a native task. */
 internal class LocalClaudeTasks(private val queue: InstructionQueue, file: File,
     private val subscription: LocalClaudeSubscription = LocalClaudeSubscription(),
-    private val resumeConnection: suspend (LocalRuntimeInstallation, LocalCodexTaskRecord) -> LocalClaudeSubscription.Prepared = { runtime, record -> subscription.resume(runtime, record) }) : AutoCloseable {
+    private val resumeConnection: suspend (LocalRuntimeInstallation, LocalCodexTaskRecord) -> LocalClaudeSubscription.Prepared = { runtime, record -> subscription.resume(runtime, record) },
+    private val readHistory: (LocalCodexTaskRecord) -> List<app.yxi.agent.ChatItem> = LocalClaudeHistory::read) : AutoCloseable {
     var onNotification: (LocalCodexTaskRecord, String) -> Unit = { _, _ -> }
     val registry = LocalCodexTaskRegistry(file)
     val controllers = mutableStateMapOf<String, ClaudeTaskController>()
@@ -58,18 +59,20 @@ internal class LocalClaudeTasks(private val queue: InstructionQueue, file: File,
             starting.set(job); busy = true
             var prepared: LocalClaudeSubscription.Prepared? = null
             try {
+                val history = withContext(Dispatchers.IO) { readHistory(record) }
+                currentCoroutineContext().ensureActive()
                 prepared = resumeConnection(runtime, record)
                 check(!disposed); currentCoroutineContext().ensureActive()
                 check(prepared.client.requestedSessionId == record.threadId) { "恢复会话身份不一致" }
                 val model = prepared.settings.optJSONObject("applied")?.optString("model").orEmpty()
                 check(model.isNotBlank()) { "Claude 未返回恢复后的模型" }
                 controllers.remove(key)?.close()
-                attach(record.copy(model = model), prepared)
+                attach(record.copy(model = model), prepared, history)
             } catch (e: Exception) { prepared?.close(); throw e }
             finally { starting.compareAndSet(job, null); busy = false }
         }
     }
-    private fun attach(record: LocalCodexTaskRecord, prepared: LocalClaudeSubscription.Prepared): ClaudeTaskController {
+    private fun attach(record: LocalCodexTaskRecord, prepared: LocalClaudeSubscription.Prepared, history: List<app.yxi.agent.ChatItem> = emptyList()): ClaudeTaskController {
         val nativeModels = prepared.initialization.optJSONArray("models")
         val models = (0 until (nativeModels?.length() ?: 0)).mapNotNull { index ->
             val entry = nativeModels?.optJSONObject(index) ?: return@mapNotNull null
@@ -78,7 +81,7 @@ internal class LocalClaudeTasks(private val queue: InstructionQueue, file: File,
         registry.save(record)
         return ClaudeTaskController(record.key, prepared.client, queue,
             onNotification = { title -> onNotification(record, title) }, initialModel = record.model, availableModels = models,
-            onModelChanged = { actual -> registry.save(record.copy(model = actual)) }).also { controllers[record.key] = it }
+            onModelChanged = { actual -> registry.save(record.copy(model = actual)) }, history = history.toList()).also { controllers[record.key] = it }
     }
     override fun close() {
         disposed = true; starting.getAndSet(null)?.cancel()
