@@ -75,8 +75,13 @@ class ClaudeAuthenticationRequestTest {
                     if (!overlay) assertTrue(content.contains("YXI_PERMISSION_CONTENT"), "Control must actually read the file")
                     else {
                         assertFalse(content.contains("YXI_PERMISSION_CONTENT"))
-                        val denials = JSONObject(stdout.readText()).getJSONArray("permission_denials")
-                        assertTrue((0 until denials.length()).any { denials.getJSONObject(it).optString("tool_name") == "Read" }, "Native CLI must report a Read permission denial")
+                        val transcript = messages.last().getJSONArray("messages")
+                        val blocks = (0 until transcript.length()).flatMap { i ->
+                            val entries = transcript.getJSONObject(i).optJSONArray("content")
+                            if (entries == null) emptyList() else (0 until entries.length()).mapNotNull { entries.optJSONObject(it) }
+                        }
+                        assertTrue(blocks.any { it.optString("type") == "tool_result" && it.optBoolean("is_error") &&
+                            it.optString("content").contains("Read is disabled for this session") }, "Native CLI must explicitly disable the forbidden Read tool")
                     }
                 }
                 if (name == "api") assertTrue(messages.all { it.getBoolean("fixture_api_header") })
