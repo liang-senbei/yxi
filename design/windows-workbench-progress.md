@@ -1,3 +1,10 @@
+## 2026-09-24 本地 Claude 思考强度滑块接线
+
+- LocalClaudeTasks从原生models.supportsEffort和supportedEffortLevels取当前实际模型支持档位，同一resolvedModel多个声明取交集；初始化强度来自get_settings.applied。
+- 控制器selectEffort校验模型能力、空闲状态，调用已验证setEffort并重新确认官方端点/模型；收到明确生效值才更新显示，失败停止连接。切换模型重新读取实际强度。
+- 会话接入已有彩色EffortControl，拖动只选择预览值，应用按钮提交一次；提交期间禁发。当前仍为进程设置，跨重启保存尚未实现。
+- Windows编译及ClaudeTaskControllerTest 7项、LocalClaudeTasksTest 5项通过，0失败/错误/跳过，59秒。新增验证不支持档位拒绝、强度更新不改变模型、不发送user消息。滑块实际交互和颜色截图仍待验收，未发布。
+
 ## 2026-09-24 Claude 原生思考强度控制验证
 
 - 3283495599648711d51b6105c8de15fe287ca5b9增加setEffort，经apply_flag_settings.settings.effortLevel发送；与模型切换/发送共用互斥，get_settings确认applied.effort后才解除操作占用，不确认则关闭连接。

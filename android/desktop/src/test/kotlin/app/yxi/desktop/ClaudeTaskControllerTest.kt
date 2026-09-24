@@ -18,6 +18,7 @@ class ClaudeTaskControllerTest {
         private val producer = PipedOutputStream(output)
         val writes = CopyOnWriteArrayList<JSONObject>()
         private var model = "initial"
+        private var effort = "low"
         override suspend fun write(text: String): Boolean {
             val request = JSONObject(text); writes.add(request)
             if (request.optString("type") == "user") {
@@ -27,8 +28,9 @@ class ClaudeTaskControllerTest {
             } else if (request.optString("type") == "control_request") {
                 val command = request.getJSONObject("request")
                 if (command.getString("subtype") == "set_model") model = command.getString("model")
+                if (command.getString("subtype") == "apply_flag_settings") effort = command.getJSONObject("settings").getString("effortLevel")
                 val result = if (command.getString("subtype") == "get_settings") JSONObject().put("effective", ClaudeSubscriptionSettings.overlay())
-                    .put("applied", JSONObject().put("model", model)) else JSONObject()
+                    .put("applied", JSONObject().put("model", model).put("effort", effort)) else JSONObject()
                 emit(JSONObject().put("type", "control_response").put("response", JSONObject().put("subtype", "success")
                     .put("request_id", request.getString("request_id")).put("response", result)))
             }
@@ -36,6 +38,21 @@ class ClaudeTaskControllerTest {
         }
         fun emit(value: JSONObject) { producer.write((value.toString() + "\n").toByteArray()); producer.flush() }
         override fun close() { producer.close(); output.close() }
+    }
+    @Test fun `effort changes only to supported levels and never sends a user message`(): Unit = runBlocking(Dispatchers.Swing) {
+        val disk = File(root, "effort.json"); val fixture = Fixture(disk)
+        ClaudeControlClient(fixture).use { client ->
+            client.initialize()
+            ClaudeTaskController("task", client, InstructionQueue(disk), initialModel = "initial",
+                modelEfforts = mapOf("initial" to listOf("low", "high")), initialEffort = "low").use { controller ->
+                assertFailsWith<IllegalArgumentException> { controller.selectEffort("max") }
+                assertTrue(controller.ready)
+                controller.selectEffort("high")
+                assertEquals("high", controller.effort); assertFalse(controller.changingModel)
+                assertEquals("initial", controller.model)
+                assertTrue(fixture.writes.none { it.optString("type") == "user" })
+            }
+        }
     }
     @Test fun `model selection updates only confirmed choices and persistence failure disables sending`(): Unit = runBlocking(Dispatchers.Swing) {
         for (failSave in listOf(false, true)) {

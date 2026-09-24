@@ -78,10 +78,20 @@ internal class LocalClaudeTasks(private val queue: InstructionQueue, file: File,
             val entry = nativeModels?.optJSONObject(index) ?: return@mapNotNull null
             entry.optString("resolvedModel").takeIf { it.isNotBlank() && it.length <= 500 && it.none { c -> c < ' ' } }
         }.distinct()
+        val efforts = models.associateWith { model ->
+            val declarations = (0 until (nativeModels?.length() ?: 0)).mapNotNull { nativeModels?.optJSONObject(it) }
+                .filter { it.optString("resolvedModel") == model }
+            val allowed = listOf("low", "medium", "high", "xhigh", "max")
+            allowed.filter { level -> declarations.isNotEmpty() && declarations.all { entry ->
+                val levels = entry.optJSONArray("supportedEffortLevels")
+                entry.opt("supportsEffort") == true && levels != null && (0 until levels.length()).any { levels.optString(it) == level }
+            } }
+        }
         registry.save(record)
         return ClaudeTaskController(record.key, prepared.client, queue,
             onNotification = { title -> onNotification(record, title) }, initialModel = record.model, availableModels = models,
-            onModelChanged = { actual -> registry.save(record.copy(model = actual)) }, history = history.toList()).also { controllers[record.key] = it }
+            onModelChanged = { actual -> registry.save(record.copy(model = actual)) }, history = history.toList(), modelEfforts = efforts,
+            initialEffort = prepared.settings.optJSONObject("applied")?.optString("effort")?.takeIf { it in efforts[record.model].orEmpty() }).also { controllers[record.key] = it }
     }
     override fun close() {
         disposed = true; starting.getAndSet(null)?.cancel()

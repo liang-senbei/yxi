@@ -17,7 +17,8 @@ internal class ClaudeTaskController(val taskKey: String, private val client: Cla
     initialModel: String = "",
     val availableModels: List<String> = emptyList(),
     private val onModelChanged: (String) -> Unit = {},
-    val history: List<app.yxi.agent.ChatItem> = emptyList()) : AutoCloseable {
+    val history: List<app.yxi.agent.ChatItem> = emptyList(),
+    private val modelEfforts: Map<String, List<String>> = emptyMap(), initialEffort: String? = null) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
     private val mutation = Mutex()
     private val rendered = mutableMapOf<String, CompletableDeferred<Unit>>()
@@ -27,6 +28,8 @@ internal class ClaudeTaskController(val taskKey: String, private val client: Cla
     var busy by mutableStateOf(false); private set
     var cancelling by mutableStateOf(false); private set
     var model by mutableStateOf(initialModel); private set
+    var effort by mutableStateOf(initialEffort); private set
+    val effortLevels get() = modelEfforts[model].orEmpty()
     var changingModel by mutableStateOf(false); private set
     private var preparing = false
     private var stopInFlight = false
@@ -57,9 +60,25 @@ internal class ClaudeTaskController(val taskKey: String, private val client: Cla
             val actual = settings.getJSONObject("applied").getString("model")
             onModelChanged(actual)
             model = actual
+            effort = settings.getJSONObject("applied").optString("effort").takeIf { it in effortLevels }
             note = "当前模型：$actual"
         } catch (e: Exception) {
             ready = false; client.close(); note = "模型切换未确认，请核对原生配置"
+            throw e
+        } finally { changingModel = false }
+    }
+    suspend fun selectEffort(value: String): Unit = withContext(Dispatchers.Swing) {
+        check(ready && !disposed && !busy && !cancelling && !changingModel && pendingApprovals.isEmpty()) { "请等待当前操作结束后再修改思考强度" }
+        require(value in effortLevels) { "当前模型未声明支持此思考强度" }
+        if (effort == value) return@withContext
+        changingModel = true
+        try {
+            val settings = client.setEffort(value)
+            ClaudeSubscriptionSettings.requireOfficialRoute(settings)
+            check(settings.getJSONObject("applied").getString("model") == model) { "修改思考强度时模型发生变化" }
+            effort = value; note = "思考强度：${effortName(value)}"
+        } catch (e: Exception) {
+            ready = false; client.close(); note = "思考强度未确认，请核对原生配置"
             throw e
         } finally { changingModel = false }
     }
