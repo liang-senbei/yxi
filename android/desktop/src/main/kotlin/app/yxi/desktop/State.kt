@@ -108,7 +108,7 @@ class AppState internal constructor(private val localClaudeFactory: (Instruction
         (if (localAcpTasksDelegate.isInitialized()) (if (localAcpTasks.busy) 1 else 0) +
             localAcpTasks.controllers.values.count { it.busy || it.pendingApprovals.isNotEmpty() } else 0) +
         (if (localClaudeTasksDelegate.isInitialized()) (if (localClaudeTasks.busy) 1 else 0) +
-            localClaudeTasks.controllers.values.count { it.busy || it.pendingApprovals.isNotEmpty() } else 0)
+            localClaudeTasks.controllers.values.count { it.busy || it.cancelling || it.pendingApprovals.isNotEmpty() } else 0)
     internal fun closeLocalFeatures() {
         if (localCodexTasksDelegate.isInitialized()) localCodexTasks.close()
         if (localOpenCodeTasksDelegate.isInitialized()) localOpenCodeTasks.close()

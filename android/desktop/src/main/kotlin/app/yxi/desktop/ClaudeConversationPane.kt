@@ -76,7 +76,7 @@ import java.io.File
         if (followLatest && !dragging) view.scroll.scrollToItem(messages.size + approvals.size, view.scroll.layoutInfo.viewportSize.height.coerceAtLeast(1))
     }
     fun send() {
-        if (controller == null || !controller.ready || controller.busy || sending || controller.pendingApprovals.isNotEmpty() || draft.value.text.isBlank()) return
+        if (controller == null || !controller.ready || controller.busy || controller.cancelling || sending || controller.pendingApprovals.isNotEmpty() || draft.value.text.isBlank()) return
         try { controller.enqueue(draft.value.text) } catch (e: Exception) { error = e.message.orEmpty(); return }
         draft.value = TextFieldValue(); error = ""; sending = true
         val job = controller.dispatchNext()
@@ -87,7 +87,7 @@ import java.io.File
         Text(state.navigation.title(record.key) ?: record.title, style = MaterialTheme.typography.headlineSmall)
         Text("Claude · ${record.model} · ${record.directory}", style = MaterialTheme.typography.bodySmall)
         Text(controller?.note ?: "连接未恢复；此记录不会自动重发指令。")
-        InstructionStrip(state.instructions, record.key, controller?.ready == true && !controller.busy && controller.pendingApprovals.isEmpty(), { controller?.dispatchNext() })
+        InstructionStrip(state.instructions, record.key, controller?.ready == true && !controller.busy && !controller.cancelling && controller.pendingApprovals.isEmpty(), { controller?.dispatchNext() })
         LazyColumn(Modifier.weight(1f).fillMaxWidth().onPointerEvent(PointerEventType.Scroll, PointerEventPass.Initial) { event ->
             if (event.changes.any { it.scrollDelta.y < 0f }) followLatest = false
         }, state = view.scroll, verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -113,8 +113,8 @@ import java.io.File
                                     catch (e: Exception) { error = e.message.orEmpty() }
                                     finally { responding.remove(id) } }
                             }
-                            OutlinedButton({ answer(true) }, enabled = controller?.ready == true && id !in responding) { Text("允许本次") }
-                            TextButton({ answer(false) }, enabled = controller?.ready == true && id !in responding) { Text("拒绝") }
+                            OutlinedButton({ answer(true) }, enabled = controller?.ready == true && !controller.cancelling && id !in responding) { Text("允许本次") }
+                            TextButton({ answer(false) }, enabled = controller?.ready == true && !controller.cancelling && id !in responding) { Text("拒绝") }
                         }
                     }
                 }
@@ -126,6 +126,12 @@ import java.io.File
         OutlinedTextField(draft.value, { draft.value = it }, Modifier.fillMaxWidth().onPreviewKeyEvent { event ->
             if (event.type == KeyEventType.KeyDown && draft.value.composition == null && (event.key == Key.Enter || event.key == Key.NumPadEnter) && !event.isShiftPressed) { send(); true } else false
         }, label = { Text("消息 · Enter 发送，Shift+Enter 换行") }, minLines = 2, maxLines = 6)
-        TextButton(::send, enabled = controller?.ready == true && !controller.busy && !sending && controller.pendingApprovals.isEmpty() && draft.value.text.isNotBlank()) { Text("发送") }
+        Row {
+            TextButton(::send, enabled = controller?.ready == true && !controller.busy && !controller.cancelling && !sending && controller.pendingApprovals.isEmpty() && draft.value.text.isNotBlank()) { Text("发送") }
+            TextButton({ scope.launch { try { controller?.cancelTurn() }
+                catch (e: CancellationException) { throw e }
+                catch (e: Exception) { error = e.message ?: "停止结果未确认" } } },
+                enabled = controller?.busy == true && !controller.cancelling) { Text(if (controller?.cancelling == true) "停止中…" else "停止") }
+        }
     }
 }

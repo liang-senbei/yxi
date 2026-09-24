@@ -99,6 +99,9 @@ internal class ClaudeControlClient(private val transport: ClaudeControlTransport
         val turn = activeTurn.get() ?: return false
         if (turn.isCompleted || !stopRequested.compareAndSet(null, turn)) return false
         interrupting.set(true)
+        if (activeTurn.get() !== turn || turn.isCompleted) {
+            stopRequested.compareAndSet(turn, null); interrupting.set(false); return false
+        }
         return try { request("interrupt"); true } finally { interrupting.set(false) }
     }
     suspend fun answerPermission(id: String, allow: Boolean) = writing.withLock {
@@ -122,6 +125,7 @@ internal class ClaudeControlClient(private val transport: ClaudeControlTransport
             return withTimeout(timeoutMillis) {
                 writing.withLock {
                     check(!closed.get())
+                    check(!interrupting.get() && stopRequested.get() !== result) { "Claude 本轮在写入前已请求停止" }
                     check(transport.write(JSONObject().put("type", "user").put("session_id", sessionId ?: requestedSessionId.orEmpty())
                         .put("parent_tool_use_id", JSONObject.NULL).put("uuid", UUID.randomUUID().toString())
                         .put("message", JSONObject().put("role", "user").put("content", text)).toString() + "\n")) { "Claude 提示词未写入" }

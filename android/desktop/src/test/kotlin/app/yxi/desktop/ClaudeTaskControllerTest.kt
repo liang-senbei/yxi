@@ -84,4 +84,44 @@ class ClaudeTaskControllerTest {
             }
         }
     }
+    @Test fun `stop acknowledgement keeps delivery pending until native aborted receipt`(): Unit = runBlocking(Dispatchers.Swing) {
+        for (requested in listOf(false, true)) {
+            val disk = File(root, "stop-$requested.json"); val queue = InstructionQueue(disk); val fixture = Fixture(disk)
+            ClaudeControlClient(fixture).use { client ->
+                client.initialize()
+                ClaudeTaskController("task", client, queue).use { controller ->
+                    controller.enqueue("question")
+                    val sending = async { controller.sendNext() }
+                    withTimeout(2000) { while (fixture.writes.none { it.optString("type") == "user" }) delay(10) }
+                    if (requested) {
+                        controller.cancelTurn()
+                        assertTrue(controller.cancelling); assertTrue(controller.busy)
+                        assertEquals(InstructionStatus.Delivering, queue.entries.single().status)
+                        assertFalse(sending.isCompleted)
+                    }
+                    fixture.emit(JSONObject().put("type", "result").put("uuid", "stopped").put("session_id", "session")
+                        .put("is_error", true).put("subtype", "error_during_execution").put("terminal_reason", "aborted_streaming"))
+                    sending.await()
+                    assertEquals(if (requested) RuntimeTurnState.Interrupted else RuntimeTurnState.Failed, InstructionQueue(disk).entries.single().runtimeTurnState)
+                    assertFalse(controller.busy); assertFalse(controller.cancelling)
+                }
+            }
+        }
+    }
+    @Test fun `stopping before delivery leaves the instruction local and never writes a prompt`(): Unit = runBlocking(Dispatchers.Swing) {
+        val disk = File(root, "stop-preflight.json"); val queue = InstructionQueue(disk); val fixture = Fixture(disk)
+        val checking = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        ClaudeControlClient(fixture).use { client ->
+            client.initialize()
+            ClaudeTaskController("task", client, queue, beforeSend = { checking.complete(Unit); release.await() }).use { controller ->
+                controller.enqueue("question")
+                val sending = async { runCatching { controller.sendNext() } }
+                checking.await(); controller.cancelTurn(); release.complete(Unit)
+                assertTrue(sending.await().isFailure)
+                assertEquals(InstructionStatus.Local, InstructionQueue(disk).entries.single().status)
+                assertTrue(fixture.writes.none { it.optString("type") == "user" })
+                assertTrue(controller.note.contains("发送前已停止"))
+            }
+        }
+    }
 }
