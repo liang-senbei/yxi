@@ -127,19 +127,15 @@ import java.io.File
             }
         }
         if (controller != null && controller.effortLevels.isNotEmpty()) {
-            var selectedEffort by remember(record.key, controller.model, controller.effort) { mutableStateOf(controller.effort) }
-            Box(Modifier.widthIn(max = 320.dp)) {
-                EffortControl(controller.model, controller.effortLevels, selectedEffort) { selectedEffort = it }
-            }
-            TextButton({
-                val choice = selectedEffort
-                if (choice != null) scope.launch {
+            ClaudeEffortSettings(controller.model, controller.effortLevels, controller.effort,
+                enabled = controller.ready && !controller.busy && !controller.cancelling && controller.pendingApprovals.isEmpty(),
+                applying = controller.changingModel) { choice ->
+                scope.launch {
                     try { controller.selectEffort(choice) }
                     catch (e: CancellationException) { throw e }
                     catch (e: Exception) { error = e.message ?: "思考强度未确认" }
                 }
-            }, enabled = controller.ready && !controller.busy && !controller.cancelling && !controller.changingModel && controller.pendingApprovals.isEmpty() &&
-                selectedEffort != null && selectedEffort != controller.effort) { Text(if (controller.changingModel) "正在应用…" else "应用思考强度") }
+            }
         }
         Text(controller?.note ?: "连接未恢复；此记录不会自动重发指令。")
         if (controller?.ready != true && controller?.busy != true && controller?.cancelling != true && controller?.changingModel != true) {
