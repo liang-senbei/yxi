@@ -1,3 +1,9 @@
+## 2026-09-24 Claude 混合凭据状态与 Grok 审计
+
+- `cc46f378` 扩展原生Claude2.1.280测试到空配置/API/OAuth/两者并存，首跑 run.5B77q2 失败，推翻了将auth status等同请求优先级的假设：两者并存时authMethod仍为oauth_token，同时apiKeySource=ANTHROPIC_API_KEY。
+- `cf82a1925994d842889efba7a8ecb01f15457dc7` 明确测试仅校验原生状态报告，不推断真实请求用哪种凭据；构建run.qpKyNr，run.WuMJL1 1项通过，0失败/错误/跳过，覆盖4种隔离环境组合。合成凭据无回显，结果在 `.artifacts/claude-auth-native/`。
+- cc-yxi Grok审计已收回 `.artifacts/grok-native/official-profile-audit.md`：官方文档、二进制字符串与既有未认证握手证据分开标注；广告模型/认证方法不是已登录证明，未有订阅完成会话的正向验证。未经执行验证的偏好字段不能直接作为产品配置实现。
+- 官方订阅真实启动适配仍未完成；下一步需要以隔离回环请求验证凭据和路由，并覆盖磁盘/项目配置优先级。未修改真实账号，未发布。
 ## 2026-09-24 官方订阅适配核对与 Claude 原生认证探测
 
 - 核对当前 OfficialProviderCards/Profiles：除Codex本地专门进程校验外，内置卡片仍主要为说明，不能作为全部运行器已默认应用官方订阅的证明。已委派cc-yxi进行Grok官方认证来源/线路验证能力审计，尚在执行。
