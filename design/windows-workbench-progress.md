@@ -1,3 +1,9 @@
+## 2026-09-24 Claude 关闭后原生恢复验证
+
+- de214938f14c300a9ab5f50e58ae4ae3df03b4ed为LocalClaudeControlTransport增加显式resumeSessionId；只接受完整规范UUID，使用--resume而非创建新的--session-id。默认创建行为保持原有逻辑。
+- 构建run.yrWGOL；ClaudeControlClientNativeTest run.JJ9n8p 1项通过，0失败/错误/跳过，4.068秒。关闭旧CLI并核对PID退出后，启动新进程恢复原ID；初始化/settings没有模型请求，显式下一轮保持session_id且包含首轮及停止后继续的历史。
+- 证据 `.artifacts/claude-control/claude-resumed-session.json`。使用CLI 2.1.280、容器合成凭据、回环模型；恢复UI、控制器所有权及历史正文接线仍待完成，不代表恢复功能整体交付。未发布。
+
 ## 2026-09-24 模型菜单交互与选中样式
 
 - 893aa4a277a81275c7e5d884eff99fbcef3054ab为Claude模型菜单加入8dp圆角灰色加深选中背景，展示resolvedModel而非角色别名。
