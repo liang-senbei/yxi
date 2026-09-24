@@ -1,13 +1,18 @@
 package app.yxi.desktop
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.input.key.*
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
@@ -43,6 +48,7 @@ import java.io.File
         dismissButton = { TextButton(dismiss) { Text(if (busy) "取消创建" else "取消") } })
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable internal fun ClaudeConversationPane(state: AppState, record: LocalCodexTaskRecord) {
     val controller = state.localClaudeTasks.controllers[record.key]
     val scope = rememberCoroutineScope()
@@ -51,8 +57,23 @@ import java.io.File
     var sending by remember(record.key) { mutableStateOf(false) }
     val responding = remember(record.key) { mutableStateListOf<String>() }
     val view = remember(record.key) { state.codexConversationViews.getOrPut(record.key) { CodexConversationView() } }
+    var followLatest by view.followLatest
+    val dragging by view.scroll.interactionSource.collectIsDraggedAsState()
+    var previousPosition by remember(record.key) { mutableStateOf(0 to 0) }
     val messages = controller?.messages?.toList().orEmpty()
     val approvals = controller?.pendingApprovals?.values?.toList().orEmpty()
+    LaunchedEffect(view, record.key) {
+        snapshotFlow { Triple(view.scroll.firstVisibleItemIndex to view.scroll.firstVisibleItemScrollOffset,
+            view.scroll.isScrollInProgress, view.scroll.canScrollForward) }.collect { (position, scrolling, forward) ->
+            if (scrolling && (position.first < previousPosition.first || position.first == previousPosition.first && position.second < previousPosition.second)) followLatest = false
+            if (!forward && !dragging && view.scroll.layoutInfo.totalItemsCount > 0) followLatest = true
+            previousPosition = position
+        }
+    }
+    LaunchedEffect(dragging) { if (dragging) followLatest = false }
+    LaunchedEffect(messages.size, approvals.size, followLatest) {
+        if (followLatest && !dragging) view.scroll.scrollToItem(messages.size + approvals.size, view.scroll.layoutInfo.viewportSize.height.coerceAtLeast(1))
+    }
     fun send() {
         if (controller == null || !controller.ready || controller.busy || sending || controller.pendingApprovals.isNotEmpty() || draft.value.text.isBlank()) return
         try { controller.enqueue(draft.value.text) } catch (e: Exception) { error = e.message.orEmpty(); return }
@@ -66,7 +87,9 @@ import java.io.File
         Text("Claude · ${record.model} · ${record.directory}", style = MaterialTheme.typography.bodySmall)
         Text(controller?.note ?: "连接未恢复；此记录不会自动重发指令。")
         InstructionStrip(state.instructions, record.key, controller?.ready == true && !controller.busy && controller.pendingApprovals.isEmpty(), { controller?.dispatchNext() })
-        LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = view.scroll, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        LazyColumn(Modifier.weight(1f).fillMaxWidth().onPointerEvent(PointerEventType.Scroll, PointerEventPass.Initial) { event ->
+            if (event.changes.any { it.scrollDelta.y < 0f }) followLatest = false
+        }, state = view.scroll, verticalArrangement = Arrangement.spacedBy(12.dp)) {
             items(messages, key = { it.id }) { message ->
                 Column {
                     Text(when (message.role) { "User" -> "你"; "Assistant" -> "Claude"; else -> "工具" }, style = MaterialTheme.typography.labelLarge)
@@ -97,7 +120,7 @@ import java.io.File
             }
             item { Spacer(Modifier.height(1.dp)) }
         }
-        TextButton({ scope.launch { view.scroll.scrollToItem(messages.size + approvals.size, view.scroll.layoutInfo.viewportSize.height.coerceAtLeast(1)) } }) { Text("回到最新消息 ↓") }
+        if (!followLatest) TextButton({ followLatest = true }) { Text("回到最新消息 ↓") }
         if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
         OutlinedTextField(draft.value, { draft.value = it }, Modifier.fillMaxWidth().onPreviewKeyEvent { event ->
             if (event.type == KeyEventType.KeyDown && draft.value.composition == null && (event.key == Key.Enter || event.key == Key.NumPadEnter) && !event.isShiftPressed) { send(); true } else false
