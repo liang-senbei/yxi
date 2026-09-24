@@ -10,7 +10,7 @@ class ClaudeAuthenticationRequestTest {
         check(!System.getenv("YXI_ISOLATED_TEST_RUN").isNullOrBlank())
         check(File("/.dockerenv").exists() && File("/sys/class/net").list()?.toSet() == setOf("lo"))
         for ((name, api, oauth) in listOf(Triple("api", true, false), Triple("oauth", false, true), Triple("mixed", true, true), Triple("overlay", true, true), Triple("project-overlay", true, true),
-            Triple("permission-baseline", false, true), Triple("permission-overlay", true, true))) {
+            Triple("permission-baseline", false, true), Triple("permission-overlay", true, true), Triple("stored-overlay", true, false))) {
             val root = File("/sandbox/tmp/claude-request-$name").apply { mkdirs() }
             val overlay = name.endsWith("overlay")
             val permission = name.startsWith("permission-")
@@ -29,6 +29,17 @@ class ClaudeAuthenticationRequestTest {
                 val endpoint = "http://127.0.0.1:${port.readText().trim()}"
                 val settings = File(root, ".claude/settings.json")
                 val helperMarker = File(root, "helper-ran")
+                val credentials = File(root, ".claude/.credentials.json")
+                val storedCredentials = if (name == "stored-overlay") {
+                    credentials.parentFile.mkdirs()
+                    credentials.writeText(JSONObject().put("claudeAiOauth", JSONObject()
+                        .put("accessToken", "synthetic-oauth-request-token").put("refreshToken", "synthetic-refresh-token")
+                        .put("expiresAt", 4102444800000L).put("scopes", org.json.JSONArray().put("user:inference").put("user:profile"))
+                        .put("subscriptionType", "max")).toString())
+                    credentials.setReadable(false, false); credentials.setReadable(true, true)
+                    credentials.setWritable(false, false); credentials.setWritable(true, true)
+                    credentials.readBytes()
+                } else null
                 val before = if (overlay) {
                     settings.parentFile.mkdirs()
                     settings.writeText(JSONObject().put("env", JSONObject().put("ANTHROPIC_API_KEY", "sk-ant-yxi-container-test-only")
@@ -92,6 +103,7 @@ class ClaudeAuthenticationRequestTest {
                     assertContentEquals(before, settings.readBytes())
                     assertFalse(helperMarker.exists())
                     projectFiles.forEach { (file, bytes) -> assertContentEquals(bytes, file.readBytes()) }
+                    if (storedCredentials != null) assertContentEquals(storedCredentials, credentials.readBytes())
                 }
             } finally {
                 process?.takeIf { it.isAlive }?.let { it.destroyForcibly(); it.waitFor(5, TimeUnit.SECONDS) }
