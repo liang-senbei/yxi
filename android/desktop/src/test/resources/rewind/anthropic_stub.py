@@ -35,6 +35,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(length) or b"{}")
         with lock, (root / "requests.jsonl").open("a") as log:
             log.write(json.dumps({"path": self.path, "messages": body.get("messages", []),
+                                  "fixture_api_header": self.headers.get("x-api-key") == key,
+                                  "fixture_oauth_header": self.headers.get("Authorization") == "Bearer synthetic-oauth-request-token",
                                   "fake_auth": self.headers.get("x-api-key") == key or
                                   self.headers.get("Authorization") == "Bearer " + key}) + "\n")
         if "count_tokens" in self.path:
