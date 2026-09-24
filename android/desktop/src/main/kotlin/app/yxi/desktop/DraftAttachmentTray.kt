@@ -27,7 +27,7 @@ internal fun attachmentLabels(items: List<DraftAttach>): List<String> {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun DraftAttachmentTray(items: List<DraftAttach>, remove: (DraftAttach) -> Unit,
-    labels: List<String> = attachmentLabels(items), showTransferStatus: Boolean = true) {
+    labels: List<String> = attachmentLabels(items), showTransferStatus: Boolean = true, removable: Boolean = true) {
     if (items.isEmpty()) return
     require(labels.size == items.size)
     var preview by remember { mutableStateOf<DraftAttach?>(null) }
@@ -51,7 +51,7 @@ internal fun DraftAttachmentTray(items: List<DraftAttach>, remove: (DraftAttach)
                         is DraftState.Failed -> Text("上传失败", Modifier.align(Alignment.BottomCenter).background(Tokens.current.surface2).padding(3.dp), color = Tokens.current.danger, style = MaterialTheme.typography.labelSmall)
                         is DraftState.Done -> Unit
                     }
-                    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+                    if (removable) CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
                         IconButton({ if (preview === attachment) preview = null; remove(attachment) }, Modifier.align(Alignment.TopEnd).padding(3.dp).size(22.dp).background(Tokens.current.textPrimary, RoundedCornerShape(50))) {
                             Icon(Icons.Outlined.Close, "移除${labels[index]}", Modifier.size(14.dp), tint = Tokens.current.surface2)
                         }

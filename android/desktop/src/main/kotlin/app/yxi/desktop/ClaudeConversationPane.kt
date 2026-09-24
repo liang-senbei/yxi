@@ -215,7 +215,8 @@ import java.io.File
                 Column {
                     Text(when (message.role) { "User" -> "你"; "Assistant" -> "Claude"; else -> "工具" }, style = MaterialTheme.typography.labelLarge)
                     if (message.role == "Assistant" && message.kind == "text") AssistantBody(message.text)
-                    else SelectionContainer { Text(message.text) }
+                    else if (message.text.isNotBlank()) SelectionContainer { Text(message.text) }
+                    if (message.attachments.isNotEmpty()) ClaudeSentImages(message.attachments, state.localClaudeTasks.images)
                 }
             }
             items(approvals, key = { "permission:" + it.getString("request_id") }) { approval ->
@@ -296,4 +297,16 @@ import java.io.File
             TextButton(refresh, enabled = !busy && !detecting) { Text(if (detecting) "正在检测…" else "重新检测运行器") }
         }
     }
+}
+
+@Composable internal fun ClaudeSentImages(attachments: List<InstructionAttachment>, store: LocalClaudeImages) {
+    var previews by remember(attachments) { mutableStateOf<List<DraftAttach>>(emptyList()) }
+    var error by remember(attachments) { mutableStateOf("") }
+    LaunchedEffect(attachments) {
+        try { previews = withContext(Dispatchers.IO) { attachments.distinctBy { it.remotePath }.map(store::preview) } }
+        catch (e: CancellationException) { throw e }
+        catch (e: Exception) { error = e.message ?: "图片快照无法预览" }
+    }
+    if (previews.isNotEmpty()) DraftAttachmentTray(previews, remove = {}, showTransferStatus = false, removable = false)
+    else Text(if (error.isBlank()) "正在读取已发送图片…" else "图片：${attachments.joinToString { it.name }} · $error", style = MaterialTheme.typography.bodySmall)
 }

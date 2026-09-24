@@ -7,7 +7,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 
-internal data class ClaudeMessage(val id: String, val role: String, val text: String, val kind: String = "message")
+internal data class ClaudeMessage(val id: String, val role: String, val text: String, val kind: String = "message", val attachments: List<InstructionAttachment> = emptyList())
 
 /** Owns the event consumer and durable outbox for a previously prepared native connection. */
 internal class ClaudeTaskController(val taskKey: String, private val client: ClaudeControlClient, private val queue: InstructionQueue,
@@ -163,7 +163,7 @@ internal class ClaudeTaskController(val taskKey: String, private val client: Cla
             beforeSend()
             check(!cancelling) { "发送前已停止" }; preparing = false
             started = queue.beginDelivery(item.id, item.revision)
-            messages.add(ClaudeMessage("user-${item.id}", "User", item.text))
+            messages.add(ClaudeMessage("user-${item.id}", "User", item.text, attachments = item.attachments.toList()))
             note = "正在等待 Claude 回复"
             val result = client.prompt(item.text, promptTimeoutMillis, images); receipt = result
             val turn = result.getString("uuid")

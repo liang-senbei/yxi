@@ -58,6 +58,7 @@ class ClaudeTaskControllerTest {
                         withTimeout(2000) { while (fixture.writes.none { it.optString("type") == "user" }) delay(10) }
                         val content = fixture.writes.last().getJSONObject("message").getJSONArray("content")
                         assertEquals("image", content.getJSONObject(0).getString("type"))
+                        assertEquals(queue.entries.single().attachments, controller.messages.single { it.role == "User" }.attachments)
                         fixture.emit(JSONObject().put("type", "result").put("uuid", "image-turn").put("session_id", "session").put("is_error", false).put("subtype", "success"))
                         send.await(); assertEquals(RuntimeTurnState.Completed, queue.entries.single().runtimeTurnState)
                     }

@@ -1,3 +1,9 @@
+## 2026-09-24 已发送图片消息显示
+
+- ClaudeMessage携带已入队的附件引用，发送后消息保留对应快照；纯图片不再渲染空白文本。ClaudeSentImages读取快照后提供只读缩略图/放大预览，不显示移除按钮，失败显示文件名和原因。
+- DraftAttachmentTray新增可选removable参数，默认true保持其他页面行为；本地已发图片设置false。
+- Windows编译及ClaudeTaskControllerTest 9项、LocalClaudeImagesTest 1项通过，0失败/错误/跳过，1m19s。核对用户消息附件与队列完全一致。实际图片UI截图、原生CLI图片请求、恢复后的图片历史富展示及清理仍待验收，未发布。
+
 ## 2026-09-24 Claude 图片选择与预览接线
 
 - 会话加入添加图片、共享DraftAttachmentTray缩略图/预览/移除；选择后IO保存快照，核对数量和总大小，按摘要引用去重；纯图片可发送，入队成功后才清空图片草稿。
