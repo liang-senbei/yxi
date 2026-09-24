@@ -32,17 +32,19 @@ import java.io.File
                 if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
             }
         }, confirmButton = {
-            TextButton({ scope.launch {
+            TextButton({ if (!busy) {
                 busy = true; result = ""; error = ""
+                val requestedDirectory = directory
+                scope.launch {
                 try {
-                    val cwd = File(directory)
+                    val cwd = File(requestedDirectory)
                     require(cwd.isAbsolute && cwd.isDirectory) { "请选择已存在的本机工作目录" }
                     verify(runtime, cwd)
                     result = "认证来源核对通过。订阅额度与实际任务线路尚未验证，此检查不会应用配置到任务。"
                 } catch (e: CancellationException) { throw e }
                 catch (e: Exception) { error = e.message ?: "认证检查未完成" }
                 finally { busy = false }
-            } }, enabled = !busy && directory.isNotBlank()) { Text(if (busy) "检查中…" else "开始检查") }
+            } } }, enabled = !busy && directory.isNotBlank()) { Text(if (busy) "检查中…" else "开始检查") }
         }, dismissButton = { TextButton({ open = false }) { Text(if (busy) "取消检查" else "关闭") } })
     }
 }

@@ -38,6 +38,7 @@ else:
                     assertTrue(work.isCancelled)
                 } else {
                     val failure = assertFailsWith<IllegalStateException> { withTimeout(5000) { ClaudeSubscriptionProbe.verify(command, root, environment) } }
+                    assertFalse(failure is CancellationException, "A test timeout must not count as a native response rejection")
                     assertFalse(failure.message.orEmpty().contains("synthetic-private"))
                 }
                 val pid = File(script.path + ".$mode.pid").readText().toLong()

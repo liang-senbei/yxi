@@ -30,6 +30,7 @@ class ClaudeSubscriptionCheckUiTest {
                 Window(onCloseRequest = ::exitApplication, state = rememberWindowState(width = 760.dp, height = 650.dp)) {
                     YxiTheme { ClaudeSubscriptionCheck(runtime, Modifier.onGloballyPositioned { bounds = it.boundsInWindow() }) { selected, directory ->
                         assertSame(runtime, selected); assertEquals("/sandbox/home", directory.path); calls++
+                        delay(250)
                         when (mode) {
                             "error" -> error("测试：仍检测到 API 凭据来源")
                             "cancel" -> try { awaitCancellation() } finally { cancelled = true }
@@ -45,6 +46,7 @@ class ClaudeSubscriptionCheckUiTest {
                             withTimeout(3000) { while (bounds == null) delay(20) }
                             delay(300)
                             val box = checkNotNull(bounds)
+                            click(box.right.toInt() - 65, box.bottom.toInt() - 45)
                             click(box.right.toInt() - 65, box.bottom.toInt() - 45)
                             withTimeout(3000) { while (calls == 0) delay(20) }
                             delay(500)
