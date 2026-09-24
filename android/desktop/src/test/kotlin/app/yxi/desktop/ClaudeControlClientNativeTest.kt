@@ -57,6 +57,21 @@ class ClaudeControlClientNativeTest {
                 assertEquals(first.getString("session_id"), second.getString("session_id"))
                 assertEquals(second.getString("session_id"), client.sessionId)
                 File("/results/claude-control-second-turn.json").writeText(second.toString(2))
+                val selectedModel = "claude-haiku-4-5-20251001"
+                val changed = client.setModel(selectedModel)
+                assertEquals(selectedModel, changed.getJSONObject("applied").getString("model"))
+                val modelTurn = client.prompt("FOLLOWUP-model-switch", 30000)
+                assertFalse(modelTurn.getBoolean("is_error"))
+                assertEquals(first.getString("session_id"), modelTurn.getString("session_id"))
+                val modelRequest = requests.readLines().map(::JSONObject).last {
+                    it.getJSONArray("messages").toString().contains("FOLLOWUP-model-switch")
+                }
+                assertEquals(selectedModel, modelRequest.getString("model"))
+                assertTrue(modelRequest.getJSONArray("messages").toString().contains("KEEP-control-first"))
+                File("/results/claude-model-switch.json").writeText(JSONObject()
+                    .put("selected", selectedModel).put("applied", changed.getJSONObject("applied"))
+                    .put("requestModel", modelRequest.getString("model"))
+                    .put("sessionPreserved", true).put("historyPreserved", true).toString(2))
                 for (allow in listOf(true, false)) {
                     val marker = if (allow) "KEEP-control-permission" else "FOLLOWUP-control-permission"
                     val file = File(root, if (allow) "approved-control.txt" else "denied-control.txt")
