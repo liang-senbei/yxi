@@ -56,7 +56,7 @@ import java.io.File
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable internal fun ClaudeConversationPane(state: AppState, record: LocalCodexTaskRecord,
-    installations: List<LocalRuntimeInstallation> = state.localWorkspace.installations) {
+    installations: List<LocalRuntimeInstallation> = state.localWorkspace.installations, historyPagingModifier: Modifier = Modifier) {
     val controller = state.localClaudeTasks.controllers[record.key]
     val scope = rememberCoroutineScope()
     val draft = remember(record.key) { state.chatDrafts.getOrPut(record.key) { mutableStateOf(TextFieldValue()) } }
@@ -70,17 +70,51 @@ import java.io.File
     var previousPosition by remember(record.key) { mutableStateOf(0 to 0) }
     val messages = controller?.messages?.toList().orEmpty()
     val approvals = controller?.pendingApprovals?.values?.toList().orEmpty()
-    var history by remember(record.key) { mutableStateOf<List<ChatItem>>(emptyList()) }
-    var historyLoading by remember(record.key) { mutableStateOf(false) }
-    var historyError by remember(record.key) { mutableStateOf("") }
-    LaunchedEffect(record.key, controller) {
+    var history by remember(record.key, controller) { mutableStateOf<List<ChatItem>>(emptyList()) }
+    var historyCursor by remember(record.key, controller) { mutableStateOf<LocalClaudeHistory.Cursor?>(null) }
+    var historyLoading by remember(record.key, controller) { mutableStateOf(false) }
+    var historyPartial by remember(record.key, controller) { mutableStateOf(false) }
+    var historyError by remember(record.key, controller) { mutableStateOf("") }
+    var historyLoadJob by remember(record.key, controller) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var historyRefresh by remember(record.key) { mutableStateOf(0) }
+    DisposableEffect(record.key, controller) { onDispose { historyLoadJob?.cancel() } }
+    LaunchedEffect(record.key, controller, historyRefresh) {
         if (controller == null) {
             historyLoading = true; historyError = ""
-            try { history = withContext(Dispatchers.IO) { LocalClaudeHistory.read(record) } }
+            try {
+                val page = withContext(Dispatchers.IO) { LocalClaudeHistory.page(record) }
+                history = page.items; historyCursor = page.earlier; historyPartial = page.partialTail
+            }
             catch (e: CancellationException) { throw e }
             catch (e: Exception) { historyError = e.message ?: "历史读取失败" }
             finally { historyLoading = false }
-        } else { history = controller.history; historyError = "" }
+        } else {
+            history = controller.historyPage?.items ?: controller.history
+            historyCursor = controller.historyPage?.earlier; historyPartial = controller.historyPage?.partialTail == true
+            historyError = ""
+        }
+    }
+    fun loadEarlier() {
+        val cursor = historyCursor ?: return
+        if (historyLoading) return
+        historyLoading = true; historyError = ""; followLatest = false
+        val capturedIndex = view.scroll.firstVisibleItemIndex
+        val anchorKey = view.scroll.layoutInfo.visibleItemsInfo.firstOrNull()?.key
+        val anchorOffset = view.scroll.firstVisibleItemScrollOffset
+        historyLoadJob = scope.launch {
+            try {
+                val page = withContext(Dispatchers.IO) { LocalClaudeHistory.page(record, cursor) }
+                check(page.items.none { earlier -> history.any { it.key == earlier.key } }) { "历史分页出现重复，请重新加载" }
+                val merged = page.items + history
+                history = merged; historyCursor = page.earlier; historyPartial = page.partialTail
+                // Item zero is the stable paging control; all message keys remain unchanged when rows prepend.
+                val anchor = merged.indexOfFirst { "history:" + it.key == anchorKey }
+                if (anchor >= 0) view.scroll.scrollToItem(anchor + 1, anchorOffset)
+                else if (capturedIndex == 0) view.scroll.scrollToItem(0)
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { historyError = e.message ?: "较早历史读取失败" }
+            finally { historyLoading = false }
+        }
     }
     LaunchedEffect(view, record.key) {
         snapshotFlow { Triple(view.scroll.firstVisibleItemIndex to view.scroll.firstVisibleItemScrollOffset,
@@ -92,7 +126,7 @@ import java.io.File
     }
     LaunchedEffect(dragging) { if (dragging) followLatest = false }
     LaunchedEffect(history.size, messages.size, approvals.size, followLatest) {
-        if (followLatest && !dragging) view.scroll.scrollToItem(history.size + messages.size + approvals.size, view.scroll.layoutInfo.viewportSize.height.coerceAtLeast(1))
+        if (followLatest && !dragging) view.scroll.scrollToItem(1 + history.size + messages.size + approvals.size, view.scroll.layoutInfo.viewportSize.height.coerceAtLeast(1))
     }
     fun send() {
         if (controller == null || !controller.ready || controller.busy || controller.cancelling || controller.changingModel || sending || controller.pendingApprovals.isNotEmpty() || draft.value.text.isBlank()) return
@@ -155,11 +189,18 @@ import java.io.File
             }
         }
         if (historyLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
-        if (historyError.isNotBlank()) Text(historyError, color = Tokens.current.danger)
+        if (historyPartial) Text("读取时历史末尾尚未写完，当前仅显示完整记录。", style = MaterialTheme.typography.bodySmall)
+        if (historyError.isNotBlank()) {
+            Text(historyError, color = Tokens.current.danger)
+            if (controller == null) TextButton({ historyRefresh++ }, enabled = !historyLoading) { Text("重新加载历史") }
+        }
         InstructionStrip(state.instructions, record.key, controller?.ready == true && !controller.busy && !controller.cancelling && !controller.changingModel && controller.pendingApprovals.isEmpty(), { controller?.dispatchNext() })
         LazyColumn(Modifier.weight(1f).fillMaxWidth().onPointerEvent(PointerEventType.Scroll, PointerEventPass.Initial) { event ->
             if (event.changes.any { it.scrollDelta.y < 0f }) followLatest = false
         }, state = view.scroll, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            item(key = "history-paging") {
+                if (historyCursor != null) TextButton(::loadEarlier, modifier = historyPagingModifier, enabled = !historyLoading) { Text(if (historyLoading) "正在加载…" else "加载更早消息") }
+            }
             items(history, key = { "history:" + it.key }) { LocalClaudeHistoryItem(it) }
             items(messages, key = { it.id }) { message ->
                 Column {

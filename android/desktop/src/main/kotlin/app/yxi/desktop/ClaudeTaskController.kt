@@ -18,6 +18,7 @@ internal class ClaudeTaskController(val taskKey: String, private val client: Cla
     val availableModels: List<String> = emptyList(),
     private val onModelChanged: (String) -> Unit = {},
     val history: List<app.yxi.agent.ChatItem> = emptyList(),
+    val historyPage: LocalClaudeHistory.Page? = null,
     private val modelEfforts: Map<String, List<String>> = emptyMap(), initialEffort: String? = null,
     private val onSettingsChanged: (String, String?) -> Unit = { _, _ -> }) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)

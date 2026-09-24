@@ -43,6 +43,32 @@ class LocalClaudeTasksTest {
         override fun close() { closed = true; producer.close(); output.close() }
     }
     private fun runtime() = LocalRuntimeInstallation("claude", "fixture", listOf("fixture"), root.resolve("native-home").path, "fixture")
+    @Test fun `large native history restores with a first page and retains the earlier cursor`(): Unit = runBlocking(Dispatchers.Swing) {
+        val runtime = runtime()
+        val record = LocalCodexTaskRecord(UUID.randomUUID().toString(), System.getProperty("user.name"), System.getProperty("os.name"),
+            File(runtime.home).canonicalPath, root.canonicalPath, "Long history", "claude-fixture", 1L, "claude", "official:claude")
+        val history = File(runtime.home, "projects/project/${record.threadId}.jsonl").apply { parentFile.mkdirs() }
+        history.bufferedWriter().use { out ->
+            repeat(200) { index ->
+                out.append(JSONObject().put("type", "user").put("uuid", "row-$index").put("parentUuid", if (index == 0) JSONObject.NULL else "row-${index - 1}")
+                    .put("sessionId", record.threadId).put("cwd", root.canonicalPath)
+                    .put("message", JSONObject().put("role", "user").put("content", "history-$index " + "x".repeat(45_000))).toString()).append('\n')
+            }
+        }
+        assertTrue(history.length() > 8 * 1024 * 1024)
+        val index = File(root, "long-history-tasks.json"); LocalCodexTaskRegistry(index).save(record)
+        val fixture = Fixture(); val subscription = LocalClaudeSubscription { _, _ -> error("must not create") }
+        LocalClaudeTasks(InstructionQueue(File(root, "long-history-queue.json")), index, subscription,
+            resumeConnection = { selected, saved -> subscription.resume(selected, saved) { _, _, id -> ClaudeControlClient(fixture, id) } }).use { tasks ->
+            val restored = tasks.resume(runtime, record.key)
+            assertEquals(100, restored.history.size)
+            assertEquals("row-100", restored.history.first().key)
+            val page = assertNotNull(restored.historyPage)
+            val earlier = LocalClaudeHistory.page(record, assertNotNull(page.earlier))
+            assertEquals("row-0", earlier.items.first().key); assertNull(earlier.earlier)
+            assertTrue(fixture.writes.none { it.optString("type") == "user" })
+        }
+    }
     @Test fun `explicit resume reuses one controller and does not replay local instructions`(): Unit = runBlocking(Dispatchers.Swing) {
         val index = File(root, "resume-tasks.json"); val queue = InstructionQueue(File(root, "resume-queue.json"))
         val record = LocalCodexTaskRecord(UUID.randomUUID().toString(), System.getProperty("user.name"), System.getProperty("os.name"),

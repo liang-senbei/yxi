@@ -97,6 +97,19 @@ object Transcript {
     fun parse(lines: Sequence<String>): List<ChatItem> =
         Incremental().apply { add(lines) }.snapshot()
 
+    /** Normalizes already branch-selected lines without retaining their full bodies.
+     * History readers own cross-line tool/queue indexes; native mode/context carry stays here. */
+    class LineReader {
+        private val carry = Carry()
+        var ctx: Ctx? = null
+            private set
+        fun parse(line: String): List<ChatItem> {
+            val out = ArrayList<ChatItem>()
+            parseInto(sequenceOf(line), out, HashMap(), ArrayList(), HashSet(), ctx, carry) { ctx = it }
+            return out
+        }
+    }
+
     /**
      * **可续解析器：只吃新来的行。**
      *
@@ -580,8 +593,10 @@ object Transcript {
                 "thinking" -> b.optString("thinking").takeIf { it.isNotBlank() }
                     ?.let { out += ChatItem.Thinking(key, it) }
                 "tool_use" -> {
+                    val previous = calls[b.optString("id")]?.let { out.getOrNull(it) as? ChatItem.ToolCall }?.takeIf { it.key == key }
                     val call = ChatItem.ToolCall(
-                        key, b.optString("name"), b.optJSONObject("input") ?: JSONObject()
+                        key, b.optString("name"), b.optJSONObject("input") ?: JSONObject(),
+                        result = previous?.result, isError = previous?.isError ?: false, meta = previous?.meta
                     )
                     // ⚠️ 记的是它**将要占**的下标 —— 写在 out += 之前，所以是 size 不是 size-1。
                     // 写成 size-1 会指到前一条：回填时改错卡片，而且那张真正的卡永远停在「进行中」

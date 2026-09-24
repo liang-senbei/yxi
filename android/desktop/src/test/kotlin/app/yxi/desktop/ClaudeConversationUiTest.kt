@@ -75,9 +75,11 @@ class ClaudeConversationUiTest {
             nativeHome.path, "恢复历史测试", "claude-fixture", 1L, "claude", "official:claude")
         File(nativeHome, "projects/project/$id.jsonl").apply {
             parentFile.mkdirs()
-            writeText(JSONObject().put("type", "user").put("uuid", "old-user").put("parentUuid", JSONObject.NULL)
-                .put("sessionId", id).put("cwd", nativeHome.path)
-                .put("message", JSONObject().put("role", "user").put("content", "恢复前的历史消息")).toString() + "\n")
+            bufferedWriter().use { out -> repeat(105) { index ->
+                out.append(JSONObject().put("type", "user").put("uuid", "old-user-$index").put("parentUuid", if (index == 0) JSONObject.NULL else "old-user-${index - 1}")
+                    .put("sessionId", id).put("cwd", nativeHome.path)
+                    .put("message", JSONObject().put("role", "user").put("content", "恢复前的历史消息 $index")).toString()).append('\n')
+            } }
         }
         val fixture = Fixture(id); var launches = 0
         val subscription = LocalClaudeSubscription { _, _ -> error("must not create") }
@@ -87,10 +89,11 @@ class ClaudeConversationUiTest {
             }) }
         state.localClaudeTasks.registry.save(record)
         var failure: Throwable? = null
+        var pagingBounds: Rect? = null
         try {
             application(exitProcessOnExit = false) {
                 Window(onCloseRequest = ::exitApplication, state = rememberWindowState(width = 960.dp, height = 820.dp)) {
-                    YxiTheme { Surface { ClaudeConversationPane(state, record, listOf(runtime)) } }
+                    YxiTheme { Surface { ClaudeConversationPane(state, record, listOf(runtime), Modifier.onGloballyPositioned { pagingBounds = it.boundsInWindow() }) } }
                     LaunchedEffect(Unit) {
                         suspend fun click(x: Int, y: Int) = withContext(Dispatchers.IO) {
                             val origin = window.contentPane.locationOnScreen
@@ -100,11 +103,20 @@ class ClaudeConversationUiTest {
                         try {
                             delay(700); screenshot("claude-before-resume")
                             assertEquals(0, launches)
+                            val view = state.codexConversationViews.getValue(record.key)
+                            view.followLatest.value = false
+                            view.scroll.scrollToItem(0)
+                            withTimeout(3000) { while (pagingBounds == null) delay(20) }; delay(300)
+                            val paging = checkNotNull(pagingBounds)
+                            click(paging.center.x.toInt(), paging.center.y.toInt())
+                            withTimeout(4000) { while (view.scroll.layoutInfo.totalItemsCount != 107) delay(20) }
+                            assertTrue(view.scroll.layoutInfo.visibleItemsInfo.any { it.key == "history:old-user-0" })
+                            screenshot("claude-history-earlier")
                             click(85, 225)
                             withTimeout(4000) { while (state.localClaudeTasks.controllers[record.key]?.ready != true) delay(20) }
                             val controller = state.localClaudeTasks.controllers.getValue(record.key)
                             assertEquals(1, launches)
-                            assertTrue(controller.history.any { it is app.yxi.agent.ChatItem.UserText && it.text == "恢复前的历史消息" })
+                            assertTrue(controller.history.any { it is app.yxi.agent.ChatItem.UserText && it.text == "恢复前的历史消息 104" })
                             assertTrue(fixture.writes.none { it.optString("type") == "user" })
                             delay(400); screenshot("claude-after-resume")
                             state.chatDrafts.getValue(record.key).value = TextFieldValue("恢复后继续")
@@ -119,7 +131,8 @@ class ClaudeConversationUiTest {
                             withTimeout(3000) { while (controller.busy) delay(20) }
                             assertEquals(1, fixture.writes.count { it.optString("type") == "user" })
                             assertEquals(RuntimeTurnState.Completed, state.instructions.entries.single { it.taskKey == record.key }.runtimeTurnState)
-                            assertEquals(1, controller.history.size)
+                            assertEquals(100, controller.history.size)
+                            assertNotNull(controller.historyPage?.earlier)
                             delay(300); screenshot("claude-resume-continued")
                         } catch (e: Throwable) { screenshot("claude-resume-failure"); failure = e }
                         finally { exitApplication() }

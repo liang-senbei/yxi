@@ -27,7 +27,7 @@ internal class TranscriptBranch {
                 } == true } &&
                 (0 until content.length()).none { content.optJSONObject(it)?.optString("type") == "tool_result" }))
         val chain = when {
-            !linked || known || !human -> null
+            !linked || known || !human || parent == leaf -> null
             parent == null -> emptySet()
             parents.containsKey(parent) -> ancestors(parent)
             else -> null
