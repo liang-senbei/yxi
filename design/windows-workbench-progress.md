@@ -1,3 +1,9 @@
+## 2026-09-24 Claude 原生 interrupt 回执
+
+- `24f2818a1f6af1334b33ecddfd21a16f80fff16e` 加入显式interrupt控制请求，重复停止去重，停止期间禁止继续答应工具审批；仅收到interrupt应答不会完成prompt，仍等待原生result。
+- Windows ClaudeControlClientTest 7项通过，无失败/错误/跳过。构建run.1aQ0tK；ClaudeControlClientNativeTest run.hLDQKD 1项通过，0失败/错误/跳过。
+- 真实CLI在回环服务延迟响应期间被中断，result为subtype=error_during_execution、is_error=true、terminal_reason=aborted_streaming，随后同一session_id继续下一轮成功。证据 `.artifacts/claude-control/claude-control-interrupted.json`。
+- 该结果用于后续控制器和UI停止状态接线，不能把interrupt ACK当作停止完成；当前停止按钮尚未接入，未发布。
 ## 2026-09-24 本地 Claude 新建到审批界面验收
 
 - `f26da74e7335217fc77edd322cab14e0f164e4bd` 为AppState提供本地Claude管理器工厂注入（正式默认不变），新建弹窗可接受布局modifier；新增完整组件流程测试。
