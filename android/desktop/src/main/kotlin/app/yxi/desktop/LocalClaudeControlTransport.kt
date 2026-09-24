@@ -32,6 +32,7 @@ internal class LocalClaudeControlTransport private constructor(private val proce
             var lease: ClaudeSessionLease? = null
             try {
                 return withContext(Dispatchers.IO) {
+                    if (resumeSessionId != null) ClaudeProcessOccupancy.requireNoKnownOwner(runtime, sessionId)
                     val acquired = ClaudeSessionLease.acquire(File(Store.dir, "claude-session-locks"), File(runtime.home), sessionId).also { lease = it }
                     val process = ProcessBuilder(runtime.command + listOf("--settings", settings.toString(), sessionOption, sessionId, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--permission-prompt-tool", "stdio"))
                         .directory(directory.canonicalFile).redirectError(ProcessBuilder.Redirect.DISCARD).apply {

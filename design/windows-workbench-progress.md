@@ -1,3 +1,9 @@
+## 2026-09-24 外部 Claude 显式会话占用识别
+
+- ClaudeProcessOccupancy读取ProcessHandle参数，识别Claude可执行文件/当前选定原生程序/官方npm CLI脚本中的--resume、-r、--session-id及等号形式；精确匹配目标UUID，恢复启动前发现owner则拒绝并仅提示PID。
+- 不解析shell命令字符串，不把无关Node脚本当作Claude，不跨过--参数终止符；仅有--continue或参数不可见时不能确认外部空闲，仍保留界面提示及Yxi文件锁。
+- Windows编译、ClaudeProcessOccupancyTest 1项与ClaudeSessionLeaseTest 2项通过，0失败/错误/跳过（最终构建31秒）。参数识别与Node误判场景已验证；真实外部CLI占用的进程扫描整链仍待隔离验证。未发布。
+
 ## 2026-09-24 恢复按钮与历史续接界面验收
 
 - 901f63cfe760b99f76e7421997b5c4c45217a85e，构建run.rBZGqo；ClaudeConversationUiTest run.gkI1ex 2项通过，0失败/错误/跳过，10.642秒。
