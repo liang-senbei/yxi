@@ -9,11 +9,16 @@ import java.util.concurrent.TimeUnit
 /** Reads native credential identity without sending a prompt. This does not certify endpoint policy or entitlement. */
 internal object ClaudeSubscriptionProbe {
     suspend fun verify(binary: File, directory: File, inherited: Map<String, String>,
+        settings: JSONObject = ClaudeSubscriptionSettings.overlay(), cancelled: () -> Boolean = { false }): Unit =
+        verify(listOf(binary.absolutePath), directory, inherited, settings, cancelled)
+
+    suspend fun verify(command: List<String>, directory: File, inherited: Map<String, String>,
         settings: JSONObject = ClaudeSubscriptionSettings.overlay(), cancelled: () -> Boolean = { false }): Unit = withContext(Dispatchers.IO) {
-        require(binary.isFile && binary.canExecute() && directory.isDirectory)
+        require(command.isNotEmpty() && command.none { '\u0000' in it })
+        require(File(command.first()).let { it.isFile && it.canExecute() } && directory.isDirectory)
         currentCoroutineContext().ensureActive()
         if (cancelled()) throw CancellationException("订阅检查已取消")
-        val process = ProcessBuilder(binary.absolutePath, "--settings", settings.toString(), "auth", "status", "--json")
+        val process = ProcessBuilder(command + listOf("--settings", settings.toString(), "auth", "status", "--json"))
             .directory(directory.canonicalFile).redirectError(ProcessBuilder.Redirect.DISCARD).apply {
                 environment().clear(); environment().putAll(ClaudeSubscriptionSettings.environment(inherited))
                 environment()["DISABLE_AUTOUPDATER"] = "1"

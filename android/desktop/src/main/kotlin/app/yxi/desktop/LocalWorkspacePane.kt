@@ -90,6 +90,7 @@ import javax.swing.JFileChooser
                                         Text(if (workspace.selectedRuntime?.id == runtime.id) "已选择" else "读取历史")
                                     }
                                     if (engine == "opencode" && runtime.ready && !configuration) TextButton({ openCodeRuntime = runtime }) { Text("新建对话") }
+                                    if (engine == "claude") ClaudeSubscriptionCheck(runtime)
                                     if (engine in setOf("gemini", "grok", "hermes") && runtime.ready && !configuration)
                                         TextButton({ acpRuntime = runtime }) { Text("连接并继续（预览）") }
                                 }
