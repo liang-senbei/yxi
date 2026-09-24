@@ -11,7 +11,7 @@ class ClaudeAuthenticationRequestTest {
         check(File("/.dockerenv").exists() && File("/sys/class/net").list()?.toSet() == setOf("lo"))
         for ((name, api, oauth) in listOf(Triple("api", true, false), Triple("oauth", false, true), Triple("mixed", true, true), Triple("overlay", true, true), Triple("project-overlay", true, true),
             Triple("permission-baseline", false, true), Triple("permission-overlay", true, true), Triple("stored-overlay", true, false),
-            Triple("cloud-BEDROCK-overlay", true, true), Triple("cloud-VERTEX-overlay", true, true), Triple("cloud-FOUNDRY-overlay", true, true))) {
+            Triple("cloud-BEDROCK-overlay", true, true), Triple("cloud-VERTEX-overlay", true, true), Triple("cloud-FOUNDRY-overlay", true, true), Triple("managed-overlay", true, true))) {
             val root = File("/sandbox/tmp/claude-request-$name").apply { mkdirs() }
             val overlay = name.endsWith("overlay")
             val cloudFlag = name.takeIf { it.startsWith("cloud-") }?.split('-')?.get(1)?.let { "CLAUDE_CODE_USE_$it" }
@@ -22,6 +22,7 @@ class ClaudeAuthenticationRequestTest {
             val script = File(root, "server.py").apply { writeText(ClaudeAuthenticationRequestTest::class.java.getResource("/rewind/anthropic_stub.py")!!.readText()) }
             val server = ProcessBuilder("python3", script.path, root.path).redirectErrorStream(true).redirectOutput(File(root, "server.log")).start()
             var process: Process? = null
+            var managedFile: File? = null
             try {
                 val port = File(root, "port")
                 val deadline = System.nanoTime() + 5_000_000_000L
@@ -29,6 +30,14 @@ class ClaudeAuthenticationRequestTest {
                 check(port.exists())
                 val stdout = File(root, "stdout.json")
                 val endpoint = "http://127.0.0.1:${port.readText().trim()}"
+                if (name == "managed-overlay") {
+                    val managed = File("/etc/claude-code/managed-settings.json")
+                    check(!managed.exists()) { "The isolated image must not contain a managed policy" }
+                    managed.parentFile.mkdirs()
+                    managed.writeText(JSONObject().put("env", JSONObject().put("ANTHROPIC_API_KEY", "sk-ant-yxi-container-test-only")
+                        .put("ANTHROPIC_BASE_URL", endpoint)).toString())
+                    managedFile = managed
+                }
                 val settings = File(root, ".claude/settings.json")
                 val helperMarker = File(root, "helper-ran")
                 val credentials = File(root, ".claude/.credentials.json")
@@ -102,7 +111,9 @@ class ClaudeAuthenticationRequestTest {
                 if (name == "oauth") assertTrue(messages.all { it.getBoolean("fixture_oauth_header") })
                 if (name == "mixed") assertTrue(messages.all { it.getBoolean("fixture_api_header") && !it.getBoolean("fixture_oauth_header") })
                 if (overlay) {
-                    assertTrue(messages.all { !it.getBoolean("fixture_api_header") && it.getBoolean("fixture_oauth_header") })
+                    if (name == "managed-overlay") {
+                        assertTrue(messages.all { it.getBoolean("fixture_api_header") && !it.getBoolean("fixture_oauth_header") }, "Managed credential policy must outrank the subscription overlay")
+                    } else assertTrue(messages.all { !it.getBoolean("fixture_api_header") && it.getBoolean("fixture_oauth_header") })
                     assertContentEquals(before, settings.readBytes())
                     assertFalse(helperMarker.exists())
                     projectFiles.forEach { (file, bytes) -> assertContentEquals(bytes, file.readBytes()) }
@@ -111,6 +122,7 @@ class ClaudeAuthenticationRequestTest {
             } finally {
                 process?.takeIf { it.isAlive }?.let { it.destroyForcibly(); it.waitFor(5, TimeUnit.SECONDS) }
                 server.destroyForcibly(); server.waitFor(5, TimeUnit.SECONDS)
+                managedFile?.let { check(it.delete()) }
             }
         }
     }
