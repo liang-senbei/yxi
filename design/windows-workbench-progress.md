@@ -1,3 +1,9 @@
+## 2026-09-24 图片附件本地快照存储
+
+- 新增LocalClaudeImages，将用户选择文件的内容复制为摘要命名的持久base64快照；队列只保存/yxi-local-image/<sha256>引用，恢复不依赖源路径。读取核对大小/摘要/格式签名并拒绝符号链接，重复选择复用已验证内容。
+- Windows编译与LocalClaudeImagesTest 1项通过，0失败/错误/跳过（最终41秒）；覆盖源图片删除后队列重读得到相同字节、损坏内容拒绝、路径穿越引用拒绝、本地指令状态未变。
+- 仍是附件存储层：选择/预览UI、控制器发送接线、快照回收和真实CLI图片回归待完成。本轮未改已发布1.4.15产物。
+
 ## 2026-09-24 发布后继续：Claude 图片协议
 
 - ClaudeImageInput保存不可变base64字节快照，按签名识别PNG/JPEG/GIF/WebP（尚不等于完整图片解码校验）；单张5MiB、最多4张、总计12MiB。ClaudeControlClient.prompt支持原生text/image内容块，旧纯文本格式保持兼容。
