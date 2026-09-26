@@ -1,0 +1,71 @@
+diff --git a/android/desktop/src/main/kotlin/app/yxi/desktop/RunnerHandoffStore.kt b/android/desktop/src/main/kotlin/app/yxi/desktop/RunnerHandoffStore.kt
+index 08549a22..d1589ef0 100644
+--- a/android/desktop/src/main/kotlin/app/yxi/desktop/RunnerHandoffStore.kt
++++ b/android/desktop/src/main/kotlin/app/yxi/desktop/RunnerHandoffStore.kt
+@@ -5,7 +5,7 @@ import org.json.JSONObject
+ import java.io.File
+ import java.util.UUID
+ 
+-internal enum class RunnerHandoffStage { Draft, Creating, Created, Delivering, Completed, Unknown }
++internal enum class RunnerHandoffStage { Draft, Creating, Created, Delivering, Completed, Unknown, Cancelled }
+ internal data class RunnerHandoffRecord(val id: String, val sourceTaskKey: String, val targetHost: String,
+     val targetEngine: String, val targetProvider: String, val summary: String, val deliveryId: String,
+     val stage: RunnerHandoffStage = RunnerHandoffStage.Draft, val targetTaskKey: String? = null,
+@@ -28,12 +28,15 @@ internal class RunnerHandoffStore(file: File) {
+         } catch (e: Exception) { problem = e.message ?: "交接记录无法读取" }
+     }
+     @Synchronized fun draft(sourceTaskKey: String, targetHost: String, targetEngine: String, targetProvider: String, summary: String): RunnerHandoffRecord {
+-        check(records.none { it.sourceTaskKey == sourceTaskKey && it.stage != RunnerHandoffStage.Completed }) { "原会话已有未结束交接，请先核对" }
++        check(records.none { it.sourceTaskKey == sourceTaskKey && it.stage !in setOf(RunnerHandoffStage.Completed, RunnerHandoffStage.Cancelled) }) { "原会话已有未结束交接，请先核对" }
+         val record = RunnerHandoffRecord(UUID.randomUUID().toString(), sourceTaskKey, targetHost, targetEngine, targetProvider,
+             summary, UUID.randomUUID().toString())
+         save(records + record); return record
+     }
+     fun edit(id: String, revision: Long, summary: String) = change(id, revision, setOf(RunnerHandoffStage.Draft)) { it.copy(summary = summary) }
++    fun cancelDraft(id: String, revision: Long) = change(id, revision, setOf(RunnerHandoffStage.Draft)) {
++        it.copy(stage = RunnerHandoffStage.Cancelled, detail = "创建前取消，未创建或发送新会话")
++    }
+     fun beginCreation(id: String, revision: Long) = change(id, revision, setOf(RunnerHandoffStage.Draft)) { it.copy(stage = RunnerHandoffStage.Creating) }
+     fun created(id: String, revision: Long, targetTaskKey: String) = change(id, revision, setOf(RunnerHandoffStage.Creating)) {
+         it.copy(stage = RunnerHandoffStage.Created, targetTaskKey = targetTaskKey)
+@@ -86,12 +89,12 @@ internal class RunnerHandoffStore(file: File) {
+                     require(listOf(it.sourceTaskKey, it.targetHost, it.targetProvider).all { value -> value.isNotBlank() && value.length <= 2000 && value.none { c -> c < ' ' } })
+                     require(it.summary.isNotBlank() && it.summary.length <= 100_000 && it.revision >= 0 && it.detail.length <= 4000)
+                     require(it.targetTaskKey == null || it.targetTaskKey.isNotBlank() && it.targetTaskKey.length <= 2000 && it.targetTaskKey != it.sourceTaskKey && it.targetTaskKey.none { c -> c < ' ' })
+-                    require(it.stage !in setOf(RunnerHandoffStage.Draft, RunnerHandoffStage.Creating) || it.targetTaskKey == null)
++                    require(it.stage !in setOf(RunnerHandoffStage.Draft, RunnerHandoffStage.Creating, RunnerHandoffStage.Cancelled) || it.targetTaskKey == null)
+                     require(it.stage !in setOf(RunnerHandoffStage.Created, RunnerHandoffStage.Delivering, RunnerHandoffStage.Completed) || it.targetTaskKey != null)
+                 }
+             }.also { records ->
+                 require(records.map { it.id }.distinct().size == records.size && records.map { it.deliveryId }.distinct().size == records.size)
+-                val active = records.filter { it.stage != RunnerHandoffStage.Completed }
++                val active = records.filter { it.stage !in setOf(RunnerHandoffStage.Completed, RunnerHandoffStage.Cancelled) }
+                 require(active.map { it.sourceTaskKey }.distinct().size == active.size)
+             }
+         }
+diff --git a/android/desktop/src/test/kotlin/app/yxi/desktop/RunnerHandoffStoreTest.kt b/android/desktop/src/test/kotlin/app/yxi/desktop/RunnerHandoffStoreTest.kt
+index ba348bb4..e7e4abef 100644
+--- a/android/desktop/src/test/kotlin/app/yxi/desktop/RunnerHandoffStoreTest.kt
++++ b/android/desktop/src/test/kotlin/app/yxi/desktop/RunnerHandoffStoreTest.kt
+@@ -7,6 +7,21 @@ import kotlin.test.*
+ class RunnerHandoffStoreTest {
+     @TempDir lateinit var root: File
+     private fun draft(store: RunnerHandoffStore) = store.draft("source-key", "local", "codex", "official:codex", "Reviewed context")
++    @Test fun `cancelled draft remains auditable and allows a fresh choice but cannot cancel started creation`() {
++        val file = File(root, "cancel.json"); val store = RunnerHandoffStore(file)
++        val initial = draft(store)
++        val cancelled = store.cancelDraft(initial.id, initial.revision)
++        assertEquals(RunnerHandoffStage.Cancelled, cancelled.stage)
++        assertNull(cancelled.targetTaskKey)
++        val reopened = RunnerHandoffStore(file)
++        assertEquals(cancelled, reopened.records.single())
++        assertFailsWith<IllegalStateException> { reopened.beginCreation(cancelled.id, cancelled.revision) }
++        val replacement = draft(reopened)
++        assertNotEquals(initial.deliveryId, replacement.deliveryId)
++        val creating = reopened.beginCreation(replacement.id, replacement.revision)
++        assertFailsWith<IllegalStateException> { reopened.cancelDraft(creating.id, creating.revision) }
++        assertEquals(2, reopened.records.size)
++    }
+     @Test fun `reviewed context has one target and one delivery identity across restart`() {
+         val file = File(root, "handoff.json")
+         val source = File(root, "source-history.jsonl").apply { writeText("original history") }

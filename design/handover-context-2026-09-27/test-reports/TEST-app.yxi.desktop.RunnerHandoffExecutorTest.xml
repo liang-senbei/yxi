@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="app.yxi.desktop.RunnerHandoffExecutorTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-09-24T10:23:58.439Z" hostname="LAPTOP-3P8NH0IQ" time="0.314">
+  <properties/>
+  <testcase name="lost creation receipt becomes unknown and never invokes creation twice()" classname="app.yxi.desktop.RunnerHandoffExecutorTest" time="0.189"/>
+  <testcase name="existing delivery identity is never dispatched or altered on another task()" classname="app.yxi.desktop.RunnerHandoffExecutorTest" time="0.022"/>
+  <testcase name="creation and delivery intents are durable before side effects and duplicate execution is rejected()" classname="app.yxi.desktop.RunnerHandoffExecutorTest" time="0.045"/>
+  <testcase name="failed dispatch retracts only its unsent summary and keeps source draft intact()" classname="app.yxi.desktop.RunnerHandoffExecutorTest" time="0.037"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

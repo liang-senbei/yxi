@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="app.yxi.desktop.RunnerHandoffStoreTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-09-24T10:23:58.755Z" hostname="LAPTOP-3P8NH0IQ" time="0.119">
+  <properties/>
+  <testcase name="reviewed context has one target and one delivery identity across restart()" classname="app.yxi.desktop.RunnerHandoffStoreTest" time="0.033"/>
+  <testcase name="cancelled draft remains auditable and allows a fresh choice but cannot cancel started creation()" classname="app.yxi.desktop.RunnerHandoffStoreTest" time="0.021"/>
+  <testcase name="creation and delivery interrupted by restart become unknown and cannot retry()" classname="app.yxi.desktop.RunnerHandoffStoreTest" time="0.04"/>
+  <testcase name="unsupported journal version is retained and writes refused()" classname="app.yxi.desktop.RunnerHandoffStoreTest" time="0.004"/>
+  <testcase name="backup recovery never permits replay from an older draft()" classname="app.yxi.desktop.RunnerHandoffStoreTest" time="0.018"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

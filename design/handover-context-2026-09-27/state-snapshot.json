@@ -1,0 +1,43 @@
+{
+  "capturedAt": "2026-09-27T02:52:33+08:00",
+  "developmentBranch": "codex/windows-workbench",
+  "sourceHead": "6b74a2dcd51bcece315fc4501594337326e30ccc",
+  "dirtyCodeFiles": [
+    "android/desktop/src/main/kotlin/app/yxi/desktop/RunnerHandoffStore.kt",
+    "android/desktop/src/test/kotlin/app/yxi/desktop/RunnerHandoffStoreTest.kt"
+  ],
+  "publishedVersion": "1.4.15",
+  "publishedSource": "e744ba255fb0bbfadd38cb973efd91f0fdfbcf27",
+  "releaseBranchHead": "30c06312bd0691cc721c6711cb1e74552a5213b0",
+  "remoteVerificationHead": "cc3e4fa7ead427cdfb409f64568711cea6af4626",
+  "ciRun": 35974085873,
+  "artifactId": 10797747549,
+  "nupkgSha256": "6093997da90f4fe096e3c64d9be140c7adefdc33f68f7095754997f09162ef18",
+  "dockerIsolatedImagesPresent": false,
+  "pendingToolHandle70429": "missing at handoff; inspected existing XML instead",
+  "latestLocalTestReports": {
+    "RunnerHandoffStoreTest": {
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "timestamp": "2026-09-24T10:23:58.755Z"
+    },
+    "RunnerHandoffExecutorTest": {
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "timestamp": "2026-09-24T10:23:58.439Z"
+    }
+  },
+  "activeSubagentsAtHandoff": [],
+  "reportsCopied": [
+    "prd-delivery-audit.md",
+    "cross-runner-handoff-next.md",
+    "claude-image-lifecycle-review.md",
+    "acp-official-profile-plan.md",
+    "gemini-official-profile-plan.md",
+    "release-1.4.15-promotion-review.md"
+  ]
+}
