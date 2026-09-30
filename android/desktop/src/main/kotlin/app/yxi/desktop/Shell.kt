@@ -8,6 +8,7 @@ import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,7 +27,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.awt.ComposeWindow
@@ -112,32 +115,73 @@ object Shell {
     }
 }
 
-/** 标题栏 40dp（Codex 顶栏 36、Claude 58）：整条可拖、双击最大化；左侧栏钮 + 「主机 · 会话」，右三键自绘（悬停 Tokens.hover，关闭悬停红）。 */
+/**
+ * 窗口外壳的句柄：Code 风格不要经典标题栏，顶部条画在 CodeShell 里，拖窗口 / 最小化 / 最大化 / 关闭靠它。
+ * [onClose] 是关窗（可能只是收进托盘），[onQuit] 是真退出（有未完成的活会先弹确认）。
+ */
+internal class WindowChrome(val scope: FrameWindowScope, val win: WindowState, val onClose: () -> Unit, val onQuit: () -> Unit) {
+    fun toggleMaximized() { win.placement = if (win.placement == WindowPlacement.Maximized) WindowPlacement.Floating else WindowPlacement.Maximized }
+}
+internal val LocalWindowChrome = staticCompositionLocalOf<WindowChrome?> { null }
+
+/**
+ * Main.kt 和截图夹具（ShotFrame）共用的窗口内容：背景 Column → 经典标题栏（只在经典下）→ 正文。
+ * Code 风格没有横贯的标题栏，侧栏从窗口顶开始，主区顶部 36 的顶部条画在 CodeShell 里（规格表 §2）。
+ * [body] 的调用位置固定：切风格时标题栏这个条件兄弟出现 / 消失，正文不重建（PRD §4 切换不丢状态）。
+ */
 @Composable
-fun FrameWindowScope.TitleBar(state: AppState, win: WindowState, onClose: () -> Unit) {
-    val t = Tokens.current
-    val maximized = win.placement == WindowPlacement.Maximized
-    val toggleMax = { win.placement = if (win.placement == WindowPlacement.Maximized) WindowPlacement.Floating else WindowPlacement.Maximized }
-    val title = state.conn?.let { c -> c.host.alias.ifBlank { c.host.hostname } + (state.session?.let { " · " + (state.navigation.title(taskNavigationKey(c.host, it)) ?: it.short) } ?: "") } ?: "Yxi"
-    WindowDraggableArea(Modifier.fillMaxWidth().height(40.dp).background(t.surface1).pointerInput(Unit) { detectTapGestures(onDoubleTap = { toggleMax() }) }) {
-        Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
-            CaptionButton({ state.sidebarOpen = !state.sidebarOpen }) { sidebarGlyph(it) }
-            Text(title, Modifier.weight(1f).padding(horizontal = 4.dp), color = t.textSecondary, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            CaptionButton({ win.isMinimized = true }) { minimizeGlyph(it) }
-            CaptionButton(toggleMax) { if (maximized) restoreGlyph(it) else maximizeGlyph(it) }
-            CaptionButton(onClose, danger = true) { closeGlyph(it) }
+internal fun FrameWindowScope.WindowFrame(state: AppState, win: WindowState, onClose: () -> Unit, onQuit: () -> Unit = onClose, body: @Composable () -> Unit) {
+    val close by rememberUpdatedState(onClose)
+    val quit by rememberUpdatedState(onQuit)
+    val chrome = remember(this, win) { WindowChrome(this, win, { close() }, { quit() }) }
+    CompositionLocalProvider(LocalWindowChrome provides chrome) {
+        Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+            if (LocalThemeSpec.current.style == UiStyle.Classic) TitleBar(state, win, onClose)
+            body()
         }
     }
 }
 
-/** 标题栏按钮：46×40（Windows 系统三键的尺寸），无水波纹，悬停换底色；[danger] = 关闭键，悬停红底、图形用页面底色反白。 */
+/** 经典标题栏（40dp，取 ThemeSpec.metrics；Code 风格不画它，顶部条在 CodeShell 里）：整条可拖、双击最大化；底色跟侧栏走；左侧栏钮 + 「主机 · 会话」，右三键自绘（悬停 Tokens.hover，关闭悬停红）。 */
 @Composable
-private fun CaptionButton(onClick: () -> Unit, danger: Boolean = false, glyph: DrawScope.(Color) -> Unit) {
+fun FrameWindowScope.TitleBar(state: AppState, win: WindowState, onClose: () -> Unit) {
+    val t = Tokens.current
+    val height = LocalThemeSpec.current.metrics.titleBarHeight
+    val toggleMax = { win.placement = if (win.placement == WindowPlacement.Maximized) WindowPlacement.Floating else WindowPlacement.Maximized }
+    val title = state.conn?.let { c -> c.host.alias.ifBlank { c.host.hostname } + (state.session?.let { " · " + (state.navigation.title(taskNavigationKey(c.host, it)) ?: it.short) } ?: "") } ?: "Yxi"
+    WindowDraggableArea(Modifier.fillMaxWidth().height(height).background(t.sidebar).pointerInput(Unit) { detectTapGestures(onDoubleTap = { toggleMax() }) }) {
+        Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+            CaptionButton({ state.sidebarOpen = !state.sidebarOpen }) { sidebarGlyph(it) }
+            Text(title, Modifier.weight(1f).padding(horizontal = 4.dp), color = t.textSecondary, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            WindowButtons(win, onClose)
+        }
+    }
+}
+
+/** 右上角三键：最小化 / 最大化（还原）/ 关闭。经典标题栏和 Code 风格的顶部条共用，Code 传自己的字形色和关闭红。 */
+@Composable
+internal fun WindowButtons(win: WindowState, onClose: () -> Unit, glyphColor: Color = Tokens.current.textSecondary, closeFill: Color = Tokens.current.danger, closeGlyphColor: Color = Tokens.current.surface0) {
+    val maximized = win.placement == WindowPlacement.Maximized
+    CaptionButton({ win.isMinimized = true }, glyphColor = glyphColor) { minimizeGlyph(it) }
+    CaptionButton({ win.placement = if (win.placement == WindowPlacement.Maximized) WindowPlacement.Floating else WindowPlacement.Maximized }, glyphColor = glyphColor) { if (maximized) restoreGlyph(it) else maximizeGlyph(it) }
+    CaptionButton(onClose, danger = true, glyphColor = glyphColor, closeFill = closeFill, closeGlyphColor = closeGlyphColor) { closeGlyph(it) }
+}
+
+/** 标题栏按钮：46 宽（Windows 系统三键的尺寸）、高随标题栏，无水波纹，悬停换底色；[danger] = 关闭键，悬停 [closeFill] 底、图形反白。 */
+@Composable
+private fun CaptionButton(
+    onClick: () -> Unit,
+    danger: Boolean = false,
+    glyphColor: Color = Tokens.current.textSecondary,
+    closeFill: Color = Tokens.current.danger,
+    closeGlyphColor: Color = Tokens.current.surface0,
+    glyph: DrawScope.(Color) -> Unit,
+) {
     val t = Tokens.current
     val src = remember { MutableInteractionSource() }
     val hover by src.collectIsHoveredAsState()
-    val bg = if (!hover) Color.Transparent else if (danger) t.danger else t.hover
-    val fg = if (hover && danger) t.surface0 else t.textSecondary
+    val bg = if (!hover) Color.Transparent else if (danger) closeFill else t.hover
+    val fg = if (hover && danger) closeGlyphColor else glyphColor
     Box(Modifier.width(46.dp).fillMaxHeight().background(bg).hoverable(src).clickable(src, indication = null, onClick = onClick), contentAlignment = Alignment.Center) {
         Canvas(Modifier.size(10.dp)) { glyph(fg) }
     }

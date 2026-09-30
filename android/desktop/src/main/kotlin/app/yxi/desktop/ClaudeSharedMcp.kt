@@ -25,7 +25,7 @@ internal object ClaudeSharedMcp {
             currentCoroutineContext().ensureActive()
             if (cancelled()) throw CancellationException("任务已取消")
             val process = ProcessBuilder(binary.path, "mcp", "get", definition.name).directory(directory)
-                .redirectErrorStream(true).apply { environment()["NO_COLOR"] = "1"; environment()["DISABLE_AUTOUPDATER"] = "1" }.start()
+                .redirectErrorStream(true).apply { environment()["NO_COLOR"] = "1"; environment()["DISABLE_AUTOUPDATER"] = "1"; LoginShellPath.applyTo(environment()) }.start()
             val reading = CompletableFuture.supplyAsync { process.inputStream.use { it.readNBytes(16_385) } }
             try {
                 val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)

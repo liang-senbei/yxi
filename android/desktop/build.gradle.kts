@@ -1,9 +1,9 @@
 import java.io.File
 
-// Yxi 桌面版（Windows；老板 2026-09-08：「像 Claude Desktop / ChatGPT Windows 版那样」）。
+// Yxi 桌面版（Windows + macOS Apple Silicon；老板 2026-09-08：「像 Claude Desktop / ChatGPT Windows 版那样」）。
 // Compose Multiplatform（JVM），SSH 还是 jsch；跟手机端共用 :core。
-// 发布包走 Velopack（createDistributable 的 app-image → `vpk pack` → 一键 Setup.exe + 自动更新，见 README / desktop.yml）；
-// jpackage 的 Msi/Exe 目标留着只是给老地址应急用。
+// Windows 发布包走 Velopack（createDistributable 的 app-image → `vpk pack` → 一键 Setup.exe + 自动更新，见 README / desktop.yml）；
+// jpackage 的 Msi/Exe 目标留着只是给老地址应急用。macOS 只出 arm64：createDistributable 的 Yxi.app → dmg（见下面 macOS {} 和 desktop.yml 的 macos job）。
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.compose)
@@ -14,7 +14,7 @@ java { toolchain { languageVersion.set(JavaLanguageVersion.of(21)) } }
 kotlin { jvmToolchain(21) }
 
 // 在 Linux 服务器上给别的平台打 uber jar（差别只是 Skia 的原生库）：-Pyxi.os=mac / win，不传 = 本机。
-// jpackage（Msi/Exe）跨不了平台，那个只能在 Windows 上打（.github/workflows/desktop.yml）。
+// jpackage 跨不了平台：Msi/Exe 只能在 Windows 上打，Dmg / Yxi.app 只能在 Mac 上打（.github/workflows/desktop.yml）。
 val yxiOs = project.findProperty("yxi.os") as String?
 dependencies {
     implementation(project(":core"))
@@ -51,7 +51,7 @@ tasks.test {
     // Fresh isolated fixtures must execute, even when compiled tests are unchanged.
     listOf("YXI_ROUTE_FIXTURE", "YXI_BROWSER_FIXTURE", "YXI_SERVICE_UI_FIXTURE",
         "YXI_MAIL_UI_FIXTURE", "YXI_SUPPORT_UI_FIXTURE", "YXI_PLUGIN_UI_OUT",
-        "YXI_PLUGIN_TOGGLE_FIXTURE", "YXI_PLUGIN_INSTALL_FIXTURE", "YXI_HOST_RECOVERY_UI_OUT", "YXI_SUBSCRIPTION_UI_FIXTURE", "SKIKO_RENDER_API").forEach { key ->
+        "YXI_PLUGIN_TOGGLE_FIXTURE", "YXI_PLUGIN_INSTALL_FIXTURE", "YXI_HOST_RECOVERY_UI_OUT", "YXI_SUBSCRIPTION_UI_FIXTURE", "YXI_THEME_SHOT_FIXTURE", "YXI_THEME_SHOT_BASELINE", "YXI_THEME_SHOT_MODE", "SKIKO_RENDER_API", "YXI_KEYCHAIN_TEST").forEach { key ->
         inputs.property("fixture.$key", System.getenv(key).orEmpty())
     }
     System.getenv("YXI_SUBSCRIPTION_UI_FIXTURE")?.let {
@@ -60,6 +60,16 @@ tasks.test {
         systemProperty("user.home", profile.path)
         environment("HOME", profile.path); environment("USERPROFILE", profile.path)
         environment("APPDATA", profile.resolve("Roaming").path); environment("LOCALAPPDATA", profile.resolve("Local").path)
+    }
+    System.getenv("YXI_THEME_SHOT_FIXTURE")?.let {
+        val fixture = File(it).also { requested -> require(requested.isAbsolute) }.canonicalFile
+        val profile = fixture.resolve("profile")
+        systemProperty("user.home", profile.path)
+        environment("HOME", profile.path); environment("USERPROFILE", profile.path)
+        environment("APPDATA", profile.resolve("Roaming").path); environment("LOCALAPPDATA", profile.resolve("Local").path)
+        systemProperty("java.security.manager", "allow")   // 夹具装一个只拦 exec / 外连的 SecurityManager，JDK 18+ 要显式允许
+        // 同一夹具目录连跑几次比对时输入完全相同，别让 Gradle 判 UP-TO-DATE / FROM-CACHE 跳过
+        doNotTrackState("主题截图夹具每次都要真跑比对")
     }
     System.getenv("YXI_MAIL_UI_FIXTURE")?.let { systemProperty("user.home", "$it/profile") }
     System.getenv("YXI_SUPPORT_UI_FIXTURE")?.let { systemProperty("user.home", "$it/profile") }
@@ -83,20 +93,29 @@ tasks.named<org.gradle.language.jvm.tasks.ProcessResources>("processResources") 
     from(rootProject.projectDir.parentFile.resolve("server/yxi-hub")) { into("app/yxi/desktop/hub") }
     from(rootProject.projectDir.parentFile.resolve("server/configure-hub.py")) { into("app/yxi/desktop/hub") }
 }
+// ⚠️ jcefmaven 在 macOS 上要反射 AWT 内部类拿窗口句柄（CefBrowserWindowMac → sun.awt.AWTAccessor），
+//    不开放就是 IllegalAccessError、网页预览一片空白（Mac mini 上 --browser-smoke 实测）；Windows 不走这条，不加。
+val macOpens = listOf("java.desktop/sun.awt", "java.desktop/sun.lwawt", "java.desktop/sun.lwawt.macosx")
+val hostIsMac = System.getProperty("os.name").startsWith("Mac")
 // 插件按本机 OS 起名（跨平台打出来也叫 linux-x64），文件名改成跟着目标平台走。
 // ⚠️ 要设 archiveFileName 不能设 archiveAppendix：插件在 afterEvaluate 里才设 appendix，会盖掉这儿的；显式 fileName 不受约定影响。
 tasks.withType<org.gradle.jvm.tasks.Jar>().matching { it.name == "packageUberJarForCurrentOS" }.configureEach {
     // ⚠️ BouncyCastle 的 jar 是签过名的，它的 META-INF/*.SF|RSA 摊进 uber jar 后 java -jar 直接死：
     //    `Invalid signature file digest for Manifest main attributes`（xvfb 冒烟撞见的）。OpenJDK 不要求 JCE provider 签名，丢掉即可。
     exclude("META-INF/*.SF", "META-INF/*.RSA", "META-INF/*.DSA", "META-INF/*.EC")
+    // java -jar 只认主 jar 清单里的 Add-Opens（等价于命令行 --add-opens …=ALL-UNNAMED）
+    if (yxiOs == "mac" || (yxiOs == null && hostIsMac)) manifest.attributes("Add-Opens" to macOpens.joinToString(" "))
     val tag = when (yxiOs) { "mac" -> "macos-arm64"; "win" -> "windows-x64"; else -> return@configureEach }
     archiveFileName.set("Yxi-$tag-${compose.desktop.application.nativeDistributions.packageVersion}.jar")
 }
 compose.desktop {
     application {
         mainClass = "app.yxi.desktop.MainKt"
+        // Yxi.app 只能在 Mac 上打，按本机判断即可（进 Yxi.cfg 的 java-options，也作用于 :desktop:run）
+        if (hostIsMac) jvmArgs(*macOpens.map { "--add-opens=$it=ALL-UNNAMED" }.toTypedArray())
         nativeDistributions {
-            targetFormats(org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi, org.jetbrains.compose.desktop.application.dsl.TargetFormat.Exe)
+            targetFormats(org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi, org.jetbrains.compose.desktop.application.dsl.TargetFormat.Exe,
+                org.jetbrains.compose.desktop.application.dsl.TargetFormat.Dmg)
             // ⚠️ 必须带全模块：1.1.0 的精简 runtime 缺 java.net.http（Updater 的 HttpClient 在用），
             //    真机一启动就是「Failed to launch JVM」（NoClassDefFoundError）——CI 和开发机的 smoke 都用
             //    完整 JDK 跑 uber jar，永远验不出来，只有精简后的 jpackage runtime 会炸（老板真机抓的）。
@@ -105,6 +124,31 @@ compose.desktop {
             packageVersion = "1.4.15"   // 也是 Velopack 的 packVersion（CI 从 app-image 的 Yxi.cfg 读）和运行时的 jpackage.app-version
             vendor = "Yxi"
             windows { menu = true; shortcut = true; iconFile.set(project.file("icon.ico")); upgradeUuid = "3f6a9d2c-7b1e-4c0a-9a3d-8e2f5b1c4d7a" }
+            macOS {
+                bundleID = "app.yxi.desktop"   // 也是钥匙串主密钥条目的 service（MacKeychainCredentialProtector）
+                packageName = "Yxi"
+                dockName = "Yxi"
+                iconFile.set(project.file("icon.icns"))   // 由 src/main/resources/icon.png 经 sips + iconutil 生成（源图只有 512，最大到 512×512）
+                // 取 JDK 21 和 JCEF 146 要求里较高的：Temurin 21 的 libjvm / java 启动器 Mach-O minos 是 11.0（Mac mini 上实测）；
+                // JCEF 146 = Chromium 146，Chrome 139 起不再支持 macOS 11（138 是最后一版，150 是支持 macOS 12 的最后一版）→ 12.0。
+                minimumSystemVersion = "12.0"
+                appCategory = "public.app-category.developer-tools"
+                // hardened runtime 的权限：JIT、未签名可执行内存、关库校验（JCEF 解压在数据目录、在签名之外）、麦克风（语音输入）
+                entitlementsFile.set(project.file("entitlements.plist"))
+                runtimeEntitlementsFile.set(project.file("entitlements.plist"))
+                infoPlist { extraKeysRawXml = "<key>NSMicrophoneUsageDescription</key><string>Yxi 的语音输入需要使用麦克风。</string>" }
+                // 正式签名 / 公证默认关（Developer ID 账号待定）。打开：-Pyxi.mac.sign=true -Pyxi.mac.signIdentity="Developer ID Application: …"；
+                // 公证另给环境变量 YXI_MAC_NOTARY_APPLE_ID / YXI_MAC_NOTARY_PASSWORD（App 专用密码）/ YXI_MAC_NOTARY_TEAM_ID，再跑 notarizeDmg。
+                signing {
+                    sign.set(providers.gradleProperty("yxi.mac.sign").map(String::toBoolean).orElse(false))
+                    identity.set(providers.gradleProperty("yxi.mac.signIdentity"))
+                }
+                notarization {
+                    appleID.set(providers.environmentVariable("YXI_MAC_NOTARY_APPLE_ID"))
+                    password.set(providers.environmentVariable("YXI_MAC_NOTARY_PASSWORD"))
+                    teamID.set(providers.environmentVariable("YXI_MAC_NOTARY_TEAM_ID"))
+                }
+            }
         }
     }
 }

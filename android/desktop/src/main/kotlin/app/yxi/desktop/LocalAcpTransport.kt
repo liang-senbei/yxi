@@ -38,7 +38,7 @@ internal class LocalAcpTransport private constructor(private val process: Proces
     }
     override fun close() { if (closed.compareAndSet(false, true)) LocalRuntimeDiscovery.stopOwnedProcess(process) }
     companion object {
-        suspend fun start(runtime: LocalRuntimeInstallation, directory: File, environment: Map<String, String> = System.getenv()): LocalAcpTransport {
+        suspend fun start(runtime: LocalRuntimeInstallation, directory: File, environment: Map<String, String> = LoginShellPath.environment()): LocalAcpTransport {
             require(runtime.ready) { "请先确认运行器安装及版本" }
             require(directory.isAbsolute && directory.isDirectory) { "本机工作目录不存在" }
             val arguments = AcpLaunch.arguments(runtime.engine)

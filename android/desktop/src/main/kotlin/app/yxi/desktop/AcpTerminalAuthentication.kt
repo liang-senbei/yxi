@@ -7,7 +7,7 @@ internal class AcpTerminalAuthPlan(val command: List<String>, val directory: Str
 
 /** Descriptors may append arguments and override environment, never substitute another executable. */
 internal fun acpTerminalAuthPlan(runtime: LocalRuntimeInstallation, directory: File, method: JSONObject,
-    inherited: Map<String, String> = System.getenv()): AcpTerminalAuthPlan {
+    inherited: Map<String, String> = LoginShellPath.environment()): AcpTerminalAuthPlan {
     require(runtime.ready && directory.isAbsolute && directory.isDirectory)
     require(method.getString("type") == "terminal" && !method.has("command"))
     val args = method.optJSONArray("args") ?: org.json.JSONArray()

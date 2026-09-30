@@ -18,29 +18,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.yxi.agent.Session
-import app.yxi.agent.SessionState
 import kotlinx.coroutines.launch
 
+/**
+ * 一台主机的项目树：分组标题 + 各类任务行。行为和对话框（改名 / 配置 / 组内新建 / 分组编辑）只写在这里，两种风格共用；
+ * [look] 为 null 画经典样式，Code 侧栏传自己的外观（[TreeLook]），只换画法（PRD §4.2）。
+ */
 @Composable
-fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching: Boolean, query: String = "") {
+internal fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching: Boolean, query: String = "", look: TreeLook? = null) {
     val nav = state.navigation
     val t = Tokens.current
     val scope = rememberCoroutineScope()
     var openError by remember(conn) { mutableStateOf("") }
-    val acpTasks = state.remoteAcpTasks.tasks(conn).filter { record ->
-        nav.visible(record.key, acpTaskState(state, record)) &&
-            listOf(nav.title(record.key).orEmpty(), record.title, record.directory, conn.host.label, conn.host.region, nav.group(record.key), LocalRuntimeDiscovery.title(record.engine)).any { it.contains(query, true) }
-    }
-    val openCodeTasks = state.remoteOpenCodeTasks.tasks(conn.host).filter { record ->
-        nav.visible(record.key, openCodeTaskState(state, record)) &&
-            listOf(nav.title(record.key).orEmpty(), record.title, record.directory, conn.host.label, nav.group(record.key)).any { it.contains(query, true) }
-    }
-    val codexTasks = state.codexWorkspace.tasks(conn.host).filter { record ->
-        val controller = state.codexWorkspace.controllers[record.key]
-        nav.visible(record.key, if (controller?.pendingRequests?.isNotEmpty() == true) SessionState.NeedsYou
-            else if (controller?.activeTurnId != null) SessionState.Working else SessionState.Idle) &&
-            listOf(nav.title(record.key).orEmpty(), record.title, record.directory, conn.host.label, conn.host.region, nav.group(record.key)).any { it.contains(query, true) }
-    }
+    val tree = hostTree(state, conn, sessions, searching, query)
     @Composable fun codexTask(record: CodexTaskRecord) {
         var menu by remember(record.key) { mutableStateOf(false) }
         var rename by remember(record.key) { mutableStateOf(false) }
@@ -49,15 +39,18 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
         NativeOverlay(menu)
         val selected = state.page == Page.Codex && state.codexSelectedTaskKey == record.key && state.conn === conn
         val controller = state.codexWorkspace.controllers[record.key]
-        Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 4.dp).background(if (selected) t.surface3 else androidx.compose.ui.graphics.Color.Transparent), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f).clickable {
-                state.select(conn, null); state.codexSelectedTaskKey = record.key; state.page = Page.Codex
-                if (controller == null && conn.ssh.isConnected) scope.launch {
-                    try { state.codexWorkspace.open(conn, record); openError = "" }
-                    catch (e: kotlinx.coroutines.CancellationException) { throw e }
-                    catch (e: Exception) { openError = e.message.orEmpty() }
-                }
-            }.padding(vertical = 8.dp)) {
+        val open: () -> Unit = {
+            state.select(conn, null); state.codexSelectedTaskKey = record.key; state.page = Page.Codex
+            if (controller == null && conn.ssh.isConnected) scope.launch {
+                try { state.codexWorkspace.open(conn, record); openError = "" }
+                catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (e: Exception) { openError = e.message.orEmpty() }
+            }
+        }
+        val entries = { codexMenu(state, conn, record, onConfigure = { configuring = true }, onRename = { rename = true }) }
+        if (look != null) look.row(TreeRow(record.key, nav.title(record.key) ?: record.title, "Codex", codexTaskState(state, record), selected, entries, open))
+        else Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 4.dp).background(if (selected) t.surface3 else androidx.compose.ui.graphics.Color.Transparent), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f).clickable(onClick = open).padding(vertical = 8.dp)) {
                 Text(nav.title(record.key) ?: record.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
                 Text("Codex · " + when {
                     controller?.pendingRequests?.isNotEmpty() == true -> "需要你处理"
@@ -69,19 +62,7 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
             Box {
                 IconButton({ menu = true }, Modifier.size(26.dp)) { Icon(Icons.Default.MoreHoriz, "会话操作", Modifier.size(16.dp)) }
                 DropdownMenu(menu, { menu = false }) {
-                    DropdownMenuItem(text = { Text("配置") }, onClick = { configuring = true; menu = false })
-                    DropdownMenuItem(text = { Text(if (nav.pinned(record.key)) "取消置顶" else "置顶") }, onClick = { nav.togglePin(record.key); menu = false })
-                    DropdownMenuItem(text = { Text(if (nav.favorite(record.key)) "取消收藏" else "收藏") }, onClick = { nav.setCodexFavorite(record, !nav.favorite(record.key)); menu = false })
-                    DropdownMenuItem(text = { Text("修改显示名称") }, onClick = { rename = true; menu = false })
-                    DropdownMenuItem(text = { Text(if (nav.muted(record.key)) "恢复通知" else "静音") }, onClick = { nav.setMuted(record.key, !nav.muted(record.key)); menu = false })
-                    DropdownMenuItem(text = { Text(if (nav.archived(record.key)) "恢复到项目列表" else "归档") },
-                        enabled = controller?.activeTurnId == null && controller?.pendingRequests.isNullOrEmpty(),
-                        onClick = { nav.setArchived(record.key, !nav.archived(record.key)); menu = false })
-                    HorizontalDivider()
-                    Text("移到项目分组", Modifier.padding(12.dp), style = MaterialTheme.typography.labelMedium)
-                    (conn.projectGroups.groups.keys.toList() + "").forEach { group ->
-                        DropdownMenuItem(text = { Text(group.ifBlank { "未分组" }) }, onClick = { nav.setGroup(record.key, group); menu = false })
-                    }
+                    ClassicMenuEntries(entries()) { menu = false }
                 }
             }
         }
@@ -114,9 +95,6 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
             state.select(conn, session)
         }
     }
-    val visible = sessions.filter { nav.visible(taskNavigationKey(conn.host, it), it.state) }
-    val pinned = if (nav.mode == "归档") emptyList() else visible.filter { nav.pinned(taskNavigationKey(conn.host, it)) }.sortedBy { nav.pinOrder(taskNavigationKey(conn.host, it)) }
-    val pinKeys = pinned.map { taskNavigationKey(conn.host, it) }
     @Composable fun task(s: Session) {
         val key = taskNavigationKey(conn.host, s)
         var menu by remember(key) { mutableStateOf(false) }
@@ -128,30 +106,16 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
         val selected = state.conn === conn && (if (stable) state.session?.runtimeId == s.runtimeId else state.session?.name == s.name)
         val reveal = remember(key) { BringIntoViewRequester() }
         LaunchedEffect(selected) { if (selected) { withFrameNanos { }; reveal.bringIntoView() } }
-        Row(Modifier.fillMaxWidth().padding(start = 6.dp).bringIntoViewRequester(reveal), verticalAlignment = Alignment.CenterVertically) {
+        val entries = { sessionMenu(nav, conn, s, key, stable, tree.pinKeys, onConfigure = { configuring = true }, onRename = { renaming = true }) }
+        if (look != null) Box(Modifier.fillMaxWidth().bringIntoViewRequester(reveal)) {
+            look.row(TreeRow(key, nav.title(key) ?: s.short, LocalRuntimeDiscovery.title(s.agent), s.state, selected, entries) { state.select(conn, s) })
+        } else Row(Modifier.fillMaxWidth().padding(start = 6.dp).bringIntoViewRequester(reveal), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.weight(1f)) { SessionRow(s, selected = selected,
                 displayName = nav.title(key)) { state.select(conn, s) } }
             Box {
                 IconButton({ menu = true }, Modifier.size(26.dp)) { Icon(Icons.Default.MoreHoriz, "任务操作", Modifier.size(16.dp), tint = t.textMuted) }
                 DropdownMenu(menu, { menu = false }) {
-                    @Composable fun item(label: String, enabled: Boolean = stable, action: () -> Unit) {
-                        DropdownMenuItem(text = { Text(label) }, enabled = enabled, onClick = { menu = false; action() })
-                    }
-                    if (!stable) DropdownMenuItem(text = { Text("会话标识不可用，请刷新后整理") }, enabled = false, onClick = {})
-                    item("配置") { configuring = true }
-                    item(if (nav.pinned(key)) "取消置顶" else "置顶") { nav.togglePin(key) }
-                    item(if (nav.muted(key)) "恢复任务通知" else "静音此任务") { nav.setMuted(key, !nav.muted(key)) }
-                    item(if (nav.favorite(key)) "取消收藏启动入口" else "收藏为启动入口", stable && s.cwd.startsWith('/')) { nav.setFavorite(key, conn.host, s, !nav.favorite(key)) }
-                    if (nav.pinned(key)) {
-                        item("置顶上移", pinKeys.indexOf(key) > 0) { nav.movePin(key, -1, pinKeys) }
-                        item("置顶下移", pinKeys.indexOf(key) in 0 until pinKeys.lastIndex) { nav.movePin(key, 1, pinKeys) }
-                    }
-                    item("修改显示名称") { renaming = true }
-                    val canArchive = s.state != SessionState.Working && s.state != SessionState.NeedsYou
-                    item(if (nav.archived(key)) "恢复到项目列表" else if (canArchive) "归档" else "运行中或待处理任务不能归档", stable && (nav.archived(key) || canArchive)) {
-                        nav.setArchived(key, !nav.archived(key))
-                    }
-                    item("复制项目路径", true) { runCatching { java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(java.awt.datatransfer.StringSelection(s.cwd), null) } }
+                    ClassicMenuEntries(entries()) { menu = false }
                 }
             }
         }
@@ -166,57 +130,58 @@ fun ProjectTree(state: AppState, conn: Conn, sessions: List<Session>, searching:
             dismissButton = { TextButton({ renaming = false }) { Text("取消") } })
     }
     if (!conn.groupsLoaded) {
-        Text(conn.groupsError.ifBlank { "正在读取服务器分组…" }, Modifier.padding(16.dp), color = t.textMuted)
+        if (look != null) look.note(conn.groupsError.ifBlank { "正在读取服务器分组…" }, false)
+        else Text(conn.groupsError.ifBlank { "正在读取服务器分组…" }, Modifier.padding(16.dp), color = t.textMuted)
         if (conn.groupsError.isNotBlank()) {
-            Text("暂列出全部 Agent，分组恢复后自动整理", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
-            visible.forEach { task(it) }
+            if (look != null) look.note("暂列出全部 Agent，分组恢复后自动整理", false)
+            else Text("暂列出全部 Agent，分组恢复后自动整理", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+            tree.sessions.forEach { task(it) }
         }
-        codexTasks.forEach { codexTask(it) }
-        openCodeTasks.forEach { OpenCodeTaskRow(state, conn, it) }
-        acpTasks.forEach { AcpTaskRow(state, conn, it) }
+        tree.codex.forEach { codexTask(it) }
+        tree.openCode.forEach { OpenCodeTaskRow(state, conn, it, look) }
+        tree.acp.forEach { AcpTaskRow(state, conn, it, look) }
         return
     }
-    val groupedNames = conn.projectGroups.groups.values.flatten().toSet()
-    val groupRows = conn.projectGroups.groups.entries.map { it.key to visible.filter { s -> s.name in it.value } } +
-        listOf("" to visible.filter { it.name !in groupedNames })
-    Text("项目分组", Modifier.padding(16.dp, 8.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
-    groupRows.forEach { (name, members) ->
-        val managedMembers = codexTasks.filter { record ->
-            val group = nav.group(record.key).takeIf { it in conn.projectGroups.groups.keys }.orEmpty()
-            group == name
+    if (look == null) Text("项目分组", Modifier.padding(16.dp, 8.dp), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+    tree.groups.forEach { group ->
+        val name = group.name
+        val closed = group.closed
+        val toggle: () -> Unit = { nav.setCollapsed(group.key, !closed) }
+        val create: () -> Unit = { creatingGroup = name; creatingDirectory = group.directories.firstOrNull().orEmpty() }
+        val entries = { projectGroupMenu(conn, name, group.directories, onEdit = { selectedGroup = name; projectGroups = true }) }
+        // 分组标题里有按位置记的状态（⋮ 开关、hover），按分组键定位，搜索滤掉前面的分组时不串
+        if (look != null) key(group.key) { look.group(name, closed, toggle, create, entries) }
+        else ClassicGroupHeader(name, closed, group.count, toggle, create, entries)
+        if (!closed) {
+            group.sessions.forEach { task(it) }
+            group.codex.forEach { codexTask(it) }
+            group.openCode.forEach { OpenCodeTaskRow(state, conn, it, look) }
+            group.acp.forEach { AcpTaskRow(state, conn, it, look) }
         }
-        val openCodeMembers = openCodeTasks.filter { nav.group(it.key).takeIf { group -> group in conn.projectGroups.groups.keys }.orEmpty() == name }
-        val acpMembers = acpTasks.filter { nav.group(it.key).takeIf { group -> group in conn.projectGroups.groups.keys }.orEmpty() == name }
-        val directories = (members.map { it.cwd } + managedMembers.map { it.directory } + openCodeMembers.map { it.directory } + acpMembers.map { it.directory }).filter { it.isNotBlank() }.distinct()
-        if ((searching || name.isEmpty()) && members.isEmpty() && managedMembers.isEmpty() && openCodeMembers.isEmpty() && acpMembers.isEmpty()) return@forEach
-        val groupKey = "server-group:" + projectKey(conn.host, "/") + ":" + name
-        val closed = !searching && nav.collapsed(groupKey, false)
-        var menu by remember(groupKey) { mutableStateOf(false) }
-        NativeOverlay(menu)
-        Row(Modifier.fillMaxWidth().clickable { nav.setCollapsed(groupKey, !closed) }.padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(if (closed) Icons.Default.ChevronRight else Icons.Default.ExpandMore, "展开分组", Modifier.size(16.dp), tint = t.textMuted)
-            Icon(Icons.Outlined.Folder, null, Modifier.padding(horizontal = 6.dp).size(16.dp), tint = t.textSecondary)
-            Text(name.ifEmpty { "未分组" }, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text((members.size + managedMembers.size + openCodeMembers.size + acpMembers.size).toString(), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
-            IconButton({ creatingGroup = name; creatingDirectory = directories.firstOrNull().orEmpty() }, Modifier.size(28.dp)) { Icon(Icons.Outlined.Add, "在组内新建 Agent", Modifier.size(16.dp)) }
-            Box {
-                IconButton({ menu = true }, Modifier.size(28.dp)) { Icon(Icons.Default.MoreHoriz, "分组操作", Modifier.size(16.dp)) }
-                DropdownMenu(menu, { menu = false }) {
-                    Text(conn.host.label + " · " + name.ifEmpty { "未分组" }, Modifier.padding(16.dp, 8.dp), style = MaterialTheme.typography.titleSmall)
-                    directories.forEach { path ->
-                        DropdownMenuItem(text = { Text(path) }, onClick = { runCatching { java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(java.awt.datatransfer.StringSelection(path), null) }; menu = false })
-                    }
-                    DropdownMenuItem(text = { Text("编辑分组与组规") }, onClick = { selectedGroup = name; projectGroups = true; menu = false })
-                }
+    }
+    if (conn.groupsError.isNotBlank()) { if (look != null) look.note(conn.groupsError, true) else Text(conn.groupsError, color = t.warning, style = MaterialTheme.typography.bodySmall) }
+    if (openError.isNotBlank()) { if (look != null) look.note(openError, true) else Text(openError, color = t.warning, style = MaterialTheme.typography.bodySmall) }
+    return
+}
+
+/** 经典的分组标题：折叠箭头、文件夹、名称、成员数、组内新建、⋯ 分组菜单；整行点一下折叠 / 展开。 */
+@Composable
+private fun ClassicGroupHeader(name: String, closed: Boolean, count: Int, onToggle: () -> Unit, onCreate: () -> Unit, entries: () -> List<MenuEntry>) {
+    val t = Tokens.current
+    var menu by remember(name) { mutableStateOf(false) }
+    NativeOverlay(menu)
+    Row(Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(if (closed) Icons.Default.ChevronRight else Icons.Default.ExpandMore, "展开分组", Modifier.size(16.dp), tint = t.textMuted)
+        Icon(Icons.Outlined.Folder, null, Modifier.padding(horizontal = 6.dp).size(16.dp), tint = t.textSecondary)
+        Text(name.ifEmpty { "未分组" }, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(count.toString(), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+        IconButton(onCreate, Modifier.size(28.dp)) { Icon(Icons.Outlined.Add, "在组内新建 Agent", Modifier.size(16.dp)) }
+        Box {
+            IconButton({ menu = true }, Modifier.size(28.dp)) { Icon(Icons.Default.MoreHoriz, "分组操作", Modifier.size(16.dp)) }
+            DropdownMenu(menu, { menu = false }) {
+                ClassicMenuEntries(entries()) { menu = false }
             }
         }
-        if (!closed) members.sortedBy { s -> val k = taskNavigationKey(conn.host, s); if (nav.pinned(k)) nav.pinOrder(k) else Int.MAX_VALUE }.forEach { task(it) }
-        if (!closed) managedMembers.sortedBy { nav.pinOrder(it.key) }.forEach { codexTask(it) }
-        if (!closed) openCodeMembers.sortedBy { nav.pinOrder(it.key) }.forEach { OpenCodeTaskRow(state, conn, it) }
-        if (!closed) acpMembers.sortedBy { nav.pinOrder(it.key) }.forEach { AcpTaskRow(state, conn, it) }
     }
-    if (conn.groupsError.isNotBlank()) Text(conn.groupsError, color = t.warning, style = MaterialTheme.typography.bodySmall)
-    if (openError.isNotBlank()) Text(openError, color = t.warning, style = MaterialTheme.typography.bodySmall)
-    return
 }
 

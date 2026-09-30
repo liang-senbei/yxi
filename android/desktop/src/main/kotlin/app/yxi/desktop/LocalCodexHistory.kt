@@ -129,7 +129,7 @@ internal class LocalCodexHistory private constructor(private val process: Proces
             var owned: Process? = null
             val process = try { withContext(Dispatchers.IO) {
                 ProcessBuilder(installation.command + "app-server").directory(File(System.getProperty("user.home")))
-                    .redirectError(ProcessBuilder.Redirect.DISCARD).apply { environment()["CODEX_HOME"] = installation.home }.start().also { owned = it }
+                    .redirectError(ProcessBuilder.Redirect.DISCARD).apply { environment()["CODEX_HOME"] = installation.home; LoginShellPath.applyTo(environment()) }.start().also { owned = it }
             } } catch (e: Exception) { owned?.let(LocalRuntimeDiscovery::stopOwnedProcess); throw e }
             val client = LocalCodexHistory(process)
             try {

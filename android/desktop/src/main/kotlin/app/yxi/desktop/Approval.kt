@@ -104,7 +104,8 @@ fun ApprovalCard(p: Pending, a: Approval, busy: Boolean, onKey: (String) -> Unit
     val simple = perm && !p.multiSelect && p.tabs.size <= 1 && !p.review   // 一排按钮；多选 / 多题还是列表 + 提交
     val shape = RoundedCornerShape(Radius)
     Column(
-        Modifier.fillMaxWidth().padding(12.dp, 4.dp).background(t.surface2, shape).border(1.dp, t.border, shape).padding(14.dp, 12.dp),
+        Modifier.fillMaxWidth().then(if (LocalThemeSpec.current.style == UiStyle.Code) Modifier.padding(top = 4.dp, bottom = 6.4.dp) else Modifier.padding(12.dp, 4.dp))   // Code：宽随停靠区 768、下缘到输入卡 6.4（规格 §3.3），样式 M3 再换
+            .background(t.surface2, shape).border(1.dp, t.border, shape).padding(14.dp, 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(

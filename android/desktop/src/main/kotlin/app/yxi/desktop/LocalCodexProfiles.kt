@@ -76,7 +76,7 @@ internal object LocalCodexProfiles {
     }
     private suspend fun connect(runtime: LocalRuntimeInstallation, records: List<SharedMcpRecord>, directory: String? = null): CodexAppServer {
         val arguments = officialArguments().dropLast(1) + SharedMcpSettings.codexArguments(records, "@local") + "app-server"
-        val transport = LocalCodexTransport.start(runtime, arguments, officialEnvironment(System.getenv()))
+        val transport = LocalCodexTransport.start(runtime, arguments, officialEnvironment(LoginShellPath.environment()))
         val client = CodexAppServer(transport, profileLabel = "官方订阅 · ChatGPT")
         try {
             client.initializeLocal()

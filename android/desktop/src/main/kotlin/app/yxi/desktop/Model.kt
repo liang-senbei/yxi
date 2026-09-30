@@ -143,17 +143,16 @@ object Store {
         runCatching { hostsFile.setReadable(false, false); hostsFile.setReadable(true, true) }
     }
 
-    /** 简单偏好（主题 / 通知档 / 关窗行为…），prefs.json；Compose 里读要能重组，所以放在 state 里。 */
-    private val prefsFile = File(dir, "prefs.json")
-    private val prefData = DurableFile(prefsFile) { JSONObject(it) }
-    private val prefs = androidx.compose.runtime.mutableStateMapOf<String, String>().apply {
-        runCatching { JSONObject(prefData.read() ?: "{}").let { j -> j.keys().forEach { put(it, j.getString(it)) } } }
-            .onFailure { warning = "无法读取桌面偏好：${it.message}" }
-    }
-    fun pref(key: String, default: String): String = prefs[key] ?: default
-    fun setPref(key: String, value: String) {
-        runCatching { prefData.write(JSONObject(prefs.toMap() + (key to value)).toString()); prefs[key] = value }
-            .onFailure { warning = "偏好未保存：${it.message}" }
+    /** 简单偏好，见 [PrefStore]：写不进去就不改内存值（界面不切换），原因进 [warning]。 */
+    private val prefs = PrefStore(File(dir, "prefs.json")) { warning = it }
+    private var prefWarning = ""
+    fun pref(key: String, default: String): String = prefs.get(key, default)
+    /** 存上返回 null，否则返回给人看的原因（同时进 [warning]）；之后再存上只清掉自己留下的那条。 */
+    fun setPref(key: String, value: String, failure: String = "偏好未保存"): String? {
+        val error = prefs.set(key, value, failure)
+        if (error != null) { warning = error; prefWarning = error }
+        else if (prefWarning.isNotEmpty()) { if (warning == prefWarning) warning = ""; prefWarning = "" }
+        return error
     }
 
     /** 窗口大小 / 位置：关窗时存，下次开窗恢复（Claude Desktop 那样记住上次的样子）。 */

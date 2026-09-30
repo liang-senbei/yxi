@@ -1,15 +1,10 @@
 package app.yxi.desktop
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.ExperimentalComposeUiApi
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Notification
@@ -53,7 +48,7 @@ fun main(args: Array<String>) {
             if ("--smoke" !in args) schedules.start()
             onDispose { schedules.close() }
         }
-        DisposableEffect(state) { onDispose { state.codexWorkspace.close(); state.remoteOpenCodeTasks.close(); state.remoteAcpTasks.close(); state.closeLocalFeatures() } }
+        DisposableEffect(state) { onDispose { state.codexWorkspace.close(); state.chatAttachments.close(); state.remoteOpenCodeTasks.close(); state.remoteAcpTasks.close(); state.closeLocalFeatures() } }
         val tray = remember { TrayState().also { Notify.tray = it } }
         val scope = rememberCoroutineScope()
         // 点通知跳会话（ZCode 同款）：按 hostId + 会话名选中，select 会把页面拉回工作区；叫回窗口归 Notify.clicked
@@ -139,8 +134,7 @@ fun main(args: Array<String>) {
             }
             Zoomed {
                 YxiTheme {
-                    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-                        TitleBar(state, win, ::close)
+                    WindowFrame(state, win, ::close, ::quit) {
                         if ("--smoke" in args) AssistantBody("# Document renderer\n\n| Runtime | Status |\n| --- | --- |\n| Markdown | loaded |")
                         App(state)
                     }

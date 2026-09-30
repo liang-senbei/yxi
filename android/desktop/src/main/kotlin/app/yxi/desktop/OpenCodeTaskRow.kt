@@ -25,8 +25,8 @@ internal fun openCodeTaskState(state: AppState, task: LocalCodexTaskRecord): Ses
     }
 }
 
-@Composable internal fun OpenCodeTaskRow(state: AppState, conn: Conn, task: LocalCodexTaskRecord) {
-    RemoteNativeTaskRow(state, conn, task, false)
+@Composable internal fun OpenCodeTaskRow(state: AppState, conn: Conn, task: LocalCodexTaskRecord, look: TreeLook? = null) {
+    RemoteNativeTaskRow(state, conn, task, false, look)
 }
 
 internal fun acpTaskState(state: AppState, task: LocalCodexTaskRecord): SessionState {
@@ -39,11 +39,12 @@ internal fun acpTaskState(state: AppState, task: LocalCodexTaskRecord): SessionS
     }
 }
 
-@Composable internal fun AcpTaskRow(state: AppState, conn: Conn, task: LocalCodexTaskRecord) {
-    RemoteNativeTaskRow(state, conn, task, true)
+@Composable internal fun AcpTaskRow(state: AppState, conn: Conn, task: LocalCodexTaskRecord, look: TreeLook? = null) {
+    RemoteNativeTaskRow(state, conn, task, true, look)
 }
 
-@Composable private fun RemoteNativeTaskRow(state: AppState, conn: Conn, task: LocalCodexTaskRecord, acp: Boolean) {
+/** 远程 OpenCode / ACP 任务行；[look] 为 null 画经典样式（同 [ProjectTree]）。 */
+@Composable private fun RemoteNativeTaskRow(state: AppState, conn: Conn, task: LocalCodexTaskRecord, acp: Boolean, look: TreeLook?) {
     val nav = state.navigation; val t = Tokens.current
     var menu by remember(task.key) { mutableStateOf(false) }
     var rename by remember(task.key) { mutableStateOf(false) }
@@ -53,13 +54,16 @@ internal fun acpTaskState(state: AppState, task: LocalCodexTaskRecord): SessionS
         else state.page == Page.OpenCode && state.remoteOpenCodeSelectedKey == task.key
     val ready = if (acp) state.remoteAcpTasks.controllers[task.key]?.ready == true else state.remoteOpenCodeTasks.controllers[task.key]?.ready == true
     NativeOverlay(menu)
-    Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 4.dp).clip(RoundedCornerShape(8.dp))
+    val open: () -> Unit = {
+        state.select(conn, null)
+        if (acp) { state.remoteAcpEngine = task.engine; state.remoteAcpSelectedKey = task.key; state.page = Page.Acp }
+        else { state.remoteOpenCodeSelectedKey = task.key; state.page = Page.OpenCode }
+    }
+    val entries = { nativeTaskMenu(nav, conn, task, status, onRename = { rename = true }) }
+    if (look != null) look.row(TreeRow(task.key, nav.title(task.key) ?: task.title, LocalRuntimeDiscovery.title(task.engine), status, selected, entries, open))
+    else Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 4.dp).clip(RoundedCornerShape(8.dp))
         .background(if (selected) t.selected else Color.Transparent), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f).clickable {
-            state.select(conn, null)
-            if (acp) { state.remoteAcpEngine = task.engine; state.remoteAcpSelectedKey = task.key; state.page = Page.Acp }
-            else { state.remoteOpenCodeSelectedKey = task.key; state.page = Page.OpenCode }
-        }.padding(vertical = 8.dp, horizontal = 8.dp)) {
+        Column(Modifier.weight(1f).clickable(onClick = open).padding(vertical = 8.dp, horizontal = 8.dp)) {
             Text(nav.title(task.key) ?: task.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(LocalRuntimeDiscovery.title(task.engine) + " · " + when {
                 status == SessionState.NeedsYou -> "需要你处理"
@@ -71,18 +75,7 @@ internal fun acpTaskState(state: AppState, task: LocalCodexTaskRecord): SessionS
         Box {
             IconButton({ menu = true }, Modifier.size(26.dp)) { Icon(Icons.Default.MoreHoriz, "会话操作", Modifier.size(16.dp)) }
             DropdownMenu(menu, { menu = false }) {
-                DropdownMenuItem(text = { Text(if (nav.pinned(task.key)) "取消置顶" else "置顶") }, onClick = { nav.togglePin(task.key); menu = false })
-                DropdownMenuItem(text = { Text(if (nav.favorite(task.key)) "取消收藏" else "收藏") }, onClick = { nav.setNativeFavorite(task.key, !nav.favorite(task.key)); menu = false })
-                DropdownMenuItem(text = { Text("修改显示名称") }, onClick = { rename = true; menu = false })
-                DropdownMenuItem(text = { Text(if (nav.muted(task.key)) "恢复任务通知" else "静音此任务") },
-                    onClick = { nav.setMuted(task.key, !nav.muted(task.key)); menu = false })
-                DropdownMenuItem(text = { Text(if (nav.archived(task.key)) "恢复到项目列表" else "归档") }, enabled = status == SessionState.Idle,
-                    onClick = { nav.setArchived(task.key, !nav.archived(task.key)); menu = false })
-                HorizontalDivider()
-                Text("移到项目分组", Modifier.padding(12.dp), style = MaterialTheme.typography.labelMedium)
-                (conn.projectGroups.groups.keys.toList() + "").forEach { group ->
-                    DropdownMenuItem(text = { Text(group.ifBlank { "未分组" }) }, onClick = { nav.setGroup(task.key, group); menu = false })
-                }
+                ClassicMenuEntries(entries()) { menu = false }
             }
         }
     }

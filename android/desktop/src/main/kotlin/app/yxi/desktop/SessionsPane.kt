@@ -198,7 +198,7 @@ internal fun NewSessionDialog(conn: Conn, onDismiss: () -> Unit, collaborationGr
 }
 
 /** 只有刷新取得真实会话后才进入任务，启动回执不能替代运行状态。 */
-private suspend fun createSession(conn: Conn, original: DesktopLaunchPlan, sharedResources: List<SharedMcpRecord> = emptyList()): Result<Session> {
+internal suspend fun createSession(conn: Conn, original: DesktopLaunchPlan, sharedResources: List<SharedMcpRecord> = emptyList()): Result<Session> {
     val plan = if (sharedResources.isEmpty()) original else if (original.agent == "claude") RemoteClaudeSharedMcp.stage(conn, sharedResources, original.requestId).let {
         original.copy(mcpConfigPath = it.path, mcpConfigHash = it.hash)
     } else {

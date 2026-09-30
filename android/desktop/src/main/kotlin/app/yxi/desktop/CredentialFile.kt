@@ -7,6 +7,8 @@ import org.json.JSONObject
 internal interface CredentialProtector {
     fun protect(plain: ByteArray): ByteArray
     fun unprotect(cipher: ByteArray): ByteArray
+    /** 写进信封 format 的方案名：Windows 的记录拿到 Mac 上会被格式检查挡住，不会拿错密钥去解。 */
+    val scheme: String get() = "dpapi"
 }
 
 /** No LOCAL_MACHINE flag: DPAPI uses the signed-in Windows user's protection. */
@@ -22,7 +24,14 @@ internal class WindowsCredentialProtector(purpose: String = "Yxi/account-credent
         catch (e: Exception) { throw IllegalStateException("Windows凭据保护失败，请使用原Windows账号或重新登录", e) }
         catch (e: LinkageError) { throw IllegalStateException("Windows凭据保护组件无法加载，未回退到明文保存", e) }
     companion object {
-        fun forPlatform(purpose: String = "Yxi/account-credentials/v1"): CredentialProtector? = if (System.getProperty("os.name").startsWith("Windows")) WindowsCredentialProtector(purpose) else null
+        /** Windows：DPAPI；macOS：钥匙串里的主密钥 + AES-GCM（MacKeychainCredentialProtector）；其他平台没有系统保护。 */
+        fun forPlatform(purpose: String = "Yxi/account-credentials/v1"): CredentialProtector? = System.getProperty("os.name").let { os ->
+            when {
+                os.startsWith("Windows") -> WindowsCredentialProtector(purpose)
+                os.startsWith("Mac") -> MacKeychainCredentialProtector(purpose)
+                else -> null
+            }
+        }
     }
 }
 
@@ -34,14 +43,14 @@ internal class CredentialFile(private val legacy: File, private val protector: C
     private fun decode(raw: String): JSONObject {
         val envelope = JSONObject(raw)
         if (envelope.length() == 0) return envelope
-        require(envelope.getString("format") == "yxi-dpapi-v1") { "不支持的登录凭据格式" }
-        val plain = protector!!.unprotect(Base64.getDecoder().decode(envelope.getString("data")))
+        require(envelope.getString("format") == "yxi-${protector!!.scheme}-v1") { "不支持的登录凭据格式" }
+        val plain = protector.unprotect(Base64.getDecoder().decode(envelope.getString("data")))
         return try { JSONObject(plain.toString(Charsets.UTF_8)) } finally { plain.fill(0) }
     }
     private fun encode(value: JSONObject): String {
         val plain = value.toString().toByteArray(Charsets.UTF_8)
         val cipher = try { protector!!.protect(plain) } finally { plain.fill(0) }
-        val envelope = JSONObject().put("format", "yxi-dpapi-v1").put("data", Base64.getEncoder().encodeToString(cipher)).toString()
+        val envelope = JSONObject().put("format", "yxi-${protector.scheme}-v1").put("data", Base64.getEncoder().encodeToString(cipher)).toString()
         check(decode(envelope).similar(value)) { "凭据保护验证失败，原记录已保留" }
         return envelope
     }

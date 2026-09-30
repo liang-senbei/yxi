@@ -20,7 +20,7 @@ internal class LocalOpenCodeServer private constructor(private val process: Proc
 
     companion object {
         suspend fun start(runtime: LocalRuntimeInstallation, directory: File,
-            environment: Map<String, String> = System.getenv(), startupTimeoutMillis: Long = 30_000,
+            environment: Map<String, String> = LoginShellPath.environment(), startupTimeoutMillis: Long = 30_000,
             sharedMcp: List<SharedMcpDefinition> = emptyList()): LocalOpenCodeServer {
             require(runtime.engine == "opencode" && runtime.ready) { "请选择可用的 OpenCode 安装" }
             require(directory.isAbsolute && directory.isDirectory) { "本机工作目录不存在" }

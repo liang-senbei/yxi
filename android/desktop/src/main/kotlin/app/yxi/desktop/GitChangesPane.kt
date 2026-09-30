@@ -121,8 +121,8 @@ print('__YXI_GIT__:' + json.dumps({'root': root, 'files': files, 'diff': text, '
                             val color = when {
                                 line.startsWith("@@") -> colors.accent
                                 line.startsWith("+++") || line.startsWith("---") || line.startsWith("diff --git") || line.startsWith("index ") -> colors.textMuted
-                                line.startsWith("+") -> colors.success
-                                line.startsWith("-") -> colors.danger
+                                line.startsWith("+") -> colors.diffAdd
+                                line.startsWith("-") -> colors.diffDel
                                 else -> colors.textPrimary
                             }
                             withStyle(SpanStyle(color = color)) { append(line); append('\n') }

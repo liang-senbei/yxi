@@ -75,6 +75,8 @@ object BrowserRuntime {
         // Runtime natives are bundled by Gradle; do not silently download executables on the user's first preview.
         builder.setMirrors(emptyList())
         if (fixtureMode) builder.addJcefArgs("--disable-background-networking", "--disable-component-update")
+        // macOS 上 Chromium 用钥匙串（Chromium Safe Storage）加密 cookie：测试模式换 mock，免得测试机（隔离 HOME、没有默认钥匙串）弹系统框
+        if (fixtureMode && System.getProperty("os.name").startsWith("Mac")) builder.addJcefArgs("--use-mock-keychain")
         if (linuxRoot && fixtureMode) builder.addJcefArgs("--no-sandbox")
         return builder.build().also { app = it }
     }

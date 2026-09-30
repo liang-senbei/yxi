@@ -44,6 +44,8 @@ fun SettingsDialog(state: AppState) {
         androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.TopCenter) {
             Column(Modifier.widthIn(max = 820.dp).fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(20.dp)) {
                 Text(state.settingsSection, style = MaterialTheme.typography.headlineSmall)
+                // 设置页盖住了侧栏底部，偏好没存上等提示在这里也要说出来；常规页由 UserDataSettings 显示
+                if (state.settingsSection != "常规" && Store.warning.isNotBlank()) Text(Store.warning, color = Tokens.current.danger, style = MaterialTheme.typography.bodySmall)
                 androidx.compose.material3.OutlinedCard(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         when (state.settingsSection) {
@@ -54,7 +56,11 @@ fun SettingsDialog(state: AppState) {
                                 SwitchRow("启动时重连上次主机", Store.pref("reconnectOnStart", "1") == "1") { Store.setPref("reconnectOnStart", if (it) "1" else "0") }
                             }
                             "外观" -> {
-                                Choice("主题", listOf("system" to "跟随系统", "light" to "浅色", "dark" to "深色"), Store.pref("theme", "system")) { Store.setPref("theme", it) }
+                                val style = UiStyle.from(Store.pref(UiStyle.PREF, UiStyle.Classic.key))
+                                Choice("界面风格", listOf(UiStyle.Classic.key to UiStyle.Classic.label, UiStyle.Code.key to "${UiStyle.Code.label}（预览）"), style.key) {
+                                    Store.setPref(UiStyle.PREF, it, "界面风格没存上")
+                                }
+                                Choice("明暗", listOf("system" to "跟随系统", "light" to "浅色", "dark" to "深色"), Store.pref("theme", "system")) { Store.setPref("theme", it, "明暗没存上") }
                                 Text("聊天背景使用固定状态色，无循环波纹或闪烁。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                             }
                             "通知" -> {
@@ -63,7 +69,8 @@ fun SettingsDialog(state: AppState) {
                             }
                             "输入历史" -> {
                                 Choice("已结束输入正文保留", listOf("0" to "一直保留", "3" to "3天", "7" to "7天", "30" to "30天"), Store.pref("inputRetentionDays", "0")) { value ->
-                                    runCatching { Store.setPref("inputRetentionDays", value); state.instructions.pruneCompleted(value.toInt()); retentionError = "" }.onFailure { retentionError = it.message.orEmpty() }
+                                    // 没存上就别按新档清理：单选还停在旧值，原因走 Store.warning
+                                    runCatching { if (Store.setPref("inputRetentionDays", value) == null) state.instructions.pruneCompleted(value.toInt()); retentionError = "" }.onFailure { retentionError = it.message.orEmpty() }
                                 }
                                 Text("仅清理已结束的本机输入正文，保留去重记录；服务器对话不受影响。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                                 if (retentionError.isNotBlank()) Text(retentionError, color = Tokens.current.danger)

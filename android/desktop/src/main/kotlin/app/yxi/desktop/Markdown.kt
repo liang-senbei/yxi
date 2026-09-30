@@ -10,20 +10,22 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-// 手机端的呼吸感（手机 Theme.kt AiryType 的注释）：字号大一点、行距松一点——光换色不改行距，看着还是「另一个 app」
-val BodyStyle = TextStyle(fontSize = 15.sp, lineHeight = 24.sp)
-val CodeStyle = TextStyle(fontFamily = Mono, fontSize = 13.sp, lineHeight = 19.sp)
+// 正文 / 代码字号跟界面风格走（取值见 Theme.kt 的 ThemeSpec；经典保持 15 / 24、13 / 19）
+val BodyStyle: TextStyle @Composable @ReadOnlyComposable get() = LocalThemeSpec.current.body
+val CodeStyle: TextStyle @Composable @ReadOnlyComposable get() = LocalThemeSpec.current.code
 
 @Composable
 internal fun workbenchMarkdownTypography() = com.mikepenz.markdown.m3.markdownTypography(
@@ -43,13 +45,13 @@ fun AssistantBody(md: String) {
     }
 }
 
-/** 代码块：surface1 底 + 细描边（surface1 和面板底色只差一档，光靠底色看不出边界）。 */
+/** 代码块：codeBg 底 + 细描边（经典的 codeBg = surface1，和面板底色只差一档，光靠底色看不出边界）。 */
 @Composable
 fun CodeBlock(text: String, modifier: Modifier = Modifier) {
     val t = Tokens.current
     val shape = RoundedCornerShape(Radius)
     SelectionContainer {
-        Text(text, Modifier.fillMaxWidth().background(t.surface1, shape).border(1.dp, t.border, shape).then(modifier).padding(10.dp, 8.dp), style = CodeStyle, color = t.textPrimary)
+        Text(text, Modifier.fillMaxWidth().background(t.codeBg, shape).border(1.dp, t.border, shape).then(modifier).padding(10.dp, 8.dp), style = CodeStyle, color = t.textPrimary)
     }
 }
 
@@ -82,7 +84,7 @@ fun inlineMd(text: String): AnnotatedString = buildAnnotatedString {
             append(line.substring(at, m.range.first))
             val bold = m.groupValues[1]
             if (bold.isNotEmpty()) withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(bold) }
-            else withStyle(SpanStyle(fontFamily = Mono, fontSize = 13.sp)) { append(m.groupValues[2]) }
+            else withStyle(SpanStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp)) { append(m.groupValues[2]) }
             at = m.range.last + 1
         }
         append(line.substring(at))

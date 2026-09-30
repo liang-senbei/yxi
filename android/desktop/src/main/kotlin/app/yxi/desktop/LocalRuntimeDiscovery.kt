@@ -16,7 +16,7 @@ internal object LocalRuntimeDiscovery {
     val engines = listOf("codex", "claude", "opencode", "gemini", "grok", "hermes")
     fun title(engine: String) = when (engine) { "codex" -> "Codex"; "claude" -> "Claude Code"; "opencode" -> "OpenCode"; "gemini" -> "Gemini"; "grok" -> "Grok Build"; "hermes" -> "Hermes"; else -> engine }
 
-    internal fun candidates(userHome: File = File(System.getProperty("user.home")), env: Map<String, String> = System.getenv(),
+    internal fun candidates(userHome: File = File(System.getProperty("user.home")), env: Map<String, String> = LoginShellPath.environment(),
         windows: Boolean = System.getProperty("os.name").startsWith("Windows")): List<LocalRuntimeInstallation> {
         val paths = env.entries.firstOrNull { it.key.equals("PATH", true) }?.value.orEmpty()
             .split(if (windows) ';' else ':').filter { it.isNotBlank() }.map { File(it.trim('"')) }.filter { it.isAbsolute }
@@ -77,6 +77,7 @@ internal object LocalRuntimeDiscovery {
     }
 
     suspend fun discover(): List<LocalRuntimeInstallation> = withContext(Dispatchers.IO) {
+        LoginShellPath.await() // macOS：等登录 shell 的 PATH 读完再找，否则从 Dock 启动时找不到 Homebrew / nvm 装的运行器
         val overrides = runCatching { JSONObject(Store.pref("localRuntimePaths", "{}")) }.getOrDefault(JSONObject())
         val manual = engines.mapNotNull { engine -> overrides.optString(engine).takeIf { it.isNotBlank() }?.let { path ->
             runCatching { manualCandidate(engine, File(path)) }.getOrNull() } }
@@ -107,7 +108,7 @@ internal object LocalRuntimeDiscovery {
         val output = kotlin.io.path.createTempFile("yxi-version-", ".txt").toFile()
         try {
             process = ProcessBuilder(candidate.command + if (candidate.engine == "grok") listOf("--no-auto-update", "version") else listOf("--version")).directory(File(System.getProperty("user.home")))
-                .redirectError(ProcessBuilder.Redirect.DISCARD).redirectOutput(output).start()
+                .redirectError(ProcessBuilder.Redirect.DISCARD).redirectOutput(output).apply { LoginShellPath.applyTo(environment()) }.start()
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
             while (!process.waitFor(100, TimeUnit.MILLISECONDS)) {
                 currentCoroutineContext().ensureActive()

@@ -54,14 +54,14 @@ internal class HostConfigFile(private val file: File, private val protector: Cre
     }
     private fun decode(raw: String): String {
         val value = JSONObject(raw)
-        require(value.getString("format") == "yxi-hosts-dpapi-v1") { "服务器保护格式无法识别" }
-        val plain = protector!!.unprotect(Base64.getDecoder().decode(value.getString("data")))
+        require(value.getString("format") == "yxi-hosts-${protector!!.scheme}-v1") { "服务器保护格式无法识别" }
+        val plain = protector.unprotect(Base64.getDecoder().decode(value.getString("data")))
         return try { plain.toString(Charsets.UTF_8) } finally { plain.fill(0) }
     }
     private fun encode(raw: String): String {
         val plain = raw.toByteArray(Charsets.UTF_8)
         val cipher = try { protector!!.protect(plain) } finally { plain.fill(0) }
-        val result = JSONObject().put("format", "yxi-hosts-dpapi-v1").put("data", Base64.getEncoder().encodeToString(cipher)).toString()
+        val result = JSONObject().put("format", "yxi-hosts-${protector.scheme}-v1").put("data", Base64.getEncoder().encodeToString(cipher)).toString()
         check(decode(result) == raw) { "服务器凭据保护验证失败" }
         return result
     }

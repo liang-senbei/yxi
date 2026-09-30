@@ -1,14 +1,20 @@
 package app.yxi.desktop
 
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import app.yxi.agent.Attachments
 import app.yxi.agent.Uploader
 import app.yxi.ssh.SshSession
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.swing.Swing
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.FileInputStream
@@ -151,6 +157,23 @@ object Attach {
     /** 暂存区 3 天自动清理（core 的 sweep，命令写死不接外部输入）。接上会话就跑一次。 */
     suspend fun sweep(c: Conn) {
         if (c.ssh.isConnected) runCatching { Attachments.sweep(c.ssh) }
+    }
+}
+
+/**
+ * 对话输入框的暂存附件，按任务 key 存在 [AppState] 上：切任务、切界面风格（外壳整组重建）都不丢。
+ * 上传跑在自己的 scope 里，不随 ChatPane 离开组合被取消（那样条目会一直停在「上传中」）。
+ */
+internal class ChatAttachments : AutoCloseable {
+    private val uploadScope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
+    private val lists = mutableMapOf<String, SnapshotStateList<DraftAttach>>()
+    fun of(key: String): SnapshotStateList<DraftAttach> = lists.getOrPut(key) { mutableStateListOf() }
+    fun upload(c: Conn, sessionName: String, a: DraftAttach) = Attach.launchUpload(c, sessionName, a, uploadScope)
+    /** 还带着附件的输入框个数（退出前核对用，同 Codex 工作台）。 */
+    fun draftCount() = lists.values.count { it.isNotEmpty() }
+    override fun close() {
+        lists.values.flatten().forEach { it.cancelled.set(true) }
+        uploadScope.cancel()
     }
 }
 

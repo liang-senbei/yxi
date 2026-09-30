@@ -24,10 +24,10 @@ import java.io.File
 
 private class AcpPendingAuthentication(val plan: AcpTerminalAuthPlan, val completion: kotlinx.coroutines.CompletableDeferred<Int>)
 
-@Composable internal fun NewAcpConversationDialog(state: AppState, runtime: LocalRuntimeInstallation, dismiss: () -> Unit, created: (LocalCodexTaskRecord) -> Unit) {
+@Composable internal fun NewAcpConversationDialog(state: AppState, runtime: LocalRuntimeInstallation, dismiss: () -> Unit, initialDirectory: String? = null, created: (LocalCodexTaskRecord) -> Unit) {
     val tasks = state.localAcpTasks
     val scope = rememberCoroutineScope()
-    var directory by remember { mutableStateOf(System.getProperty("user.home")) }
+    var directory by remember { mutableStateOf(initialDirectory ?: System.getProperty("user.home")) }
     var title by remember { mutableStateOf("") }
     var connectedDirectory by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }

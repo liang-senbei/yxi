@@ -16,7 +16,7 @@ import org.json.JSONObject
 import java.io.File
 import javax.swing.JFileChooser
 
-@Composable internal fun LocalWorkspacePane(state: AppState, configuration: Boolean = false) {
+@Composable internal fun LocalWorkspacePane(state: AppState, configuration: Boolean = false, home: (@Composable () -> Unit)? = null) {
     val workspace = state.localWorkspace
     val t = Tokens.current
     var creating by remember { mutableStateOf(false) }
@@ -51,6 +51,8 @@ import javax.swing.JFileChooser
         return
     }
     LaunchedEffect(workspace) { if (!workspace.scanned) workspace.refresh() }
+    // Code 风格：列表页换成外壳传入的本机首页；配置页、选中的原生历史、上面的对话和对话框照旧（检测两种风格共用）。
+    if (home != null && !configuration && workspace.selectedThread == null) { home(); return }
     var search by remember { mutableStateOf(workspace.query) }
     var projectError by remember { mutableStateOf("") }
     val selected = workspace.selectedThread.takeUnless { configuration }
@@ -226,6 +228,14 @@ import javax.swing.JFileChooser
     }
 }
 
+/** 侧栏点原生历史：先退出正在看的本地任务再读历史 —— 否则 [LocalWorkspacePane] 开头按
+ *  localSelectedTaskKey 提前返回，页面一直停在旧任务上（§12-1）。任务本身不停，回任务列表还在。 */
+internal fun openNativeHistory(state: AppState, thread: NativeHistoryThread, open: (NativeHistoryThread) -> Unit = { state.localWorkspace.openThread(it) }) {
+    state.localSelectedTaskKey = null
+    state.page = Page.LocalWorkspace
+    open(thread)
+}
+
 @Composable internal fun LocalWorkspaceSidebar(state: AppState, query: String) {
     val workspace = state.localWorkspace
     LaunchedEffect(workspace) { if (!workspace.scanned) workspace.refresh() }
@@ -235,7 +245,7 @@ import javax.swing.JFileChooser
         (workspace.projects + groups.keys).distinct().forEach { directory ->
             Text(File(directory).name.ifBlank { "未分组" }, Modifier.padding(top = 10.dp), style = MaterialTheme.typography.titleSmall, color = Tokens.current.textPrimary)
             groups[directory].orEmpty().forEach { thread ->
-                Text(thread.title, Modifier.fillMaxWidth().clickable { state.page = Page.LocalWorkspace; workspace.openThread(thread) }.padding(vertical = 6.dp),
+                Text(thread.title, Modifier.fillMaxWidth().clickable { openNativeHistory(state, thread) }.padding(vertical = 6.dp),
                     maxLines = 1, overflow = TextOverflow.Ellipsis, color = Tokens.current.textSecondary)
             }
         }

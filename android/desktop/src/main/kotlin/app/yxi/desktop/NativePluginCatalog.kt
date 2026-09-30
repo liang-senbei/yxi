@@ -64,10 +64,10 @@ internal class PluginRpc private constructor(output: InputStream,
                 val codexHome = System.getenv("CODEX_HOME")?.let(::File) ?: File(home, ".codex")
                 val names = if (System.getProperty("os.name").startsWith("Windows")) listOf("codex.exe") else listOf("codex")
                 val candidates = listOf(File(codexHome, "plugins/.plugin-appserver/codex.exe"), File(home, ".local/bin/codex")) +
-                    System.getenv("PATH").orEmpty().split(File.pathSeparator).flatMap { dir -> names.map { File(dir, it) } }
+                    LoginShellPath.await().split(File.pathSeparator).flatMap { dir -> names.map { File(dir, it) } }
                 val binary = candidates.firstOrNull { it.isFile && it.canExecute() } ?: error("此电脑未找到 Codex，请先安装 Codex 并登录后刷新")
                 val process = ProcessBuilder(binary.absolutePath, "app-server").directory(home)
-                    .redirectError(ProcessBuilder.Redirect.DISCARD).start()
+                    .redirectError(ProcessBuilder.Redirect.DISCARD).apply { LoginShellPath.applyTo(environment()) }.start()
                 PluginRpc(process.inputStream, { text -> withContext(Dispatchers.IO) {
                     process.outputStream.write(text.toByteArray(Charsets.UTF_8)); process.outputStream.flush(); true
                 } }, { process.destroy(); process.inputStream.close() })

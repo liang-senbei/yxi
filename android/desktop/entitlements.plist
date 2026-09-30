@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Yxi.app 的 hardened runtime 权限（build.gradle.kts 的 macOS { entitlementsFile / runtimeEntitlementsFile }）：
+     - allow-jit / allow-unsigned-executable-memory：HotSpot JIT 与 Skia 需要可写可执行内存；
+     - disable-library-validation：JNA、Skiko、pty4j 的 dylib 运行时从 jar 解到临时目录，JCEF 解到数据目录
+       （BrowserRuntime.kt），都不在 .app 签名之内，开着库校验会拒载；
+     - device.audio-input：语音输入（DesktopVoice 的 TargetDataLine），配合 Info.plist 的 NSMicrophoneUsageDescription。 -->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+</dict>
+</plist>

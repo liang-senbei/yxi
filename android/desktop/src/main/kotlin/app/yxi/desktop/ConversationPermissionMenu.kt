@@ -127,11 +127,50 @@ internal fun ConversationPermissionMenu(conn: Conn, session: Session, enabled: B
             catch (_: Exception) { actual = null }
         }
     }
+    // 切换 / 配置两种外观共用（Code 风格只换样子，行为不分叉）
+    fun choose(mode: PermissionMode) {
+        changing = true; error = ""; canConfigure = false
+        scope.launch {
+            try { actual = changeConversationPermission(conn, session, mode); open = false }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { actual = null; error = e.message ?: "切换失败"; canConfigure = e is PermissionModeUnavailable && e.desired == PermissionMode.Bypass }
+            finally { changing = false }
+        }
+    }
+    fun configure() {
+        changing = true; canConfigure = false
+        scope.launch {
+            try { configureConversationBypass(conn, session); actual = PermissionMode.Bypass; error = ""; open = false }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { actual = null; error = e.message ?: "配置未完成，请查看终端" }
+            finally { changing = false }
+        }
+    }
+    val label = if (changing) "切换中…" else actual?.title ?: "权限模式"
+    if (LocalThemeSpec.current.style == UiStyle.Code) {
+        val close: () -> Unit = { if (!changing) open = false }
+        Box {
+            CodeFooterChip(label, { open = true }, color = if (actual == PermissionMode.Manual) CodePalette.current.manual else Tokens.current.textPrimary,
+                held = open, enabled = enabled && !changing)
+            if (open) CodePopup(close, side = PopupSide.Above, gap = 2.4.dp, width = 280.dp) {
+                PermissionMode.entries.forEach { mode ->
+                    CodeMenuOption(mode.title, mode.description, { choose(mode) }, checked = actual == mode, enabled = enabled && !changing)
+                }
+                if (error.isNotBlank()) {
+                    CodeMenuDivider()
+                    CodeMenuNote(error, Tokens.current.danger)
+                    if (canConfigure) CodeMenuItem("配置并重启当前会话", { configure() }, enabled = enabled && !changing)
+                    CodeMenuItem("查看终端", { open = false; onTerminal() })
+                }
+            }
+        }
+        return
+    }
     Box {
         TextButton({ open = true }, enabled = enabled && !changing) {
             Icon(Icons.Outlined.Shield, null, Modifier.size(16.dp))
             Spacer(Modifier.width(5.dp))
-            Text(if (changing) "切换中…" else actual?.title ?: "权限模式")
+            Text(label)
         }
         DropdownMenu(open, { if (!changing) open = false }, Modifier.width(300.dp)) {
             Text("当前会话权限", Modifier.padding(16.dp, 8.dp), style = MaterialTheme.typography.labelMedium)
@@ -139,27 +178,11 @@ internal fun ConversationPermissionMenu(conn: Conn, session: Session, enabled: B
                 DropdownMenuItem(text = { Column {
                     Text(mode.title + if (actual == mode) "  ✓" else "")
                     Text(mode.description, style = MaterialTheme.typography.bodySmall)
-                } }, enabled = enabled && !changing, onClick = {
-                    changing = true; error = ""; canConfigure = false
-                    scope.launch {
-                        try { actual = changeConversationPermission(conn, session, mode); open = false }
-                        catch (e: CancellationException) { throw e }
-                        catch (e: Exception) { actual = null; error = e.message ?: "切换失败"; canConfigure = e is PermissionModeUnavailable && e.desired == PermissionMode.Bypass }
-                        finally { changing = false }
-                    }
-                })
+                } }, enabled = enabled && !changing, onClick = { choose(mode) })
             }
             if (error.isNotBlank()) {
                 Text(error, Modifier.padding(16.dp, 8.dp), color = MaterialTheme.colorScheme.error)
-                if (canConfigure) DropdownMenuItem(text = { Text("配置并重启当前会话") }, enabled = enabled && !changing, onClick = {
-                    changing = true; canConfigure = false
-                    scope.launch {
-                        try { configureConversationBypass(conn, session); actual = PermissionMode.Bypass; error = ""; open = false }
-                        catch (e: CancellationException) { throw e }
-                        catch (e: Exception) { actual = null; error = e.message ?: "配置未完成，请查看终端" }
-                        finally { changing = false }
-                    }
-                })
+                if (canConfigure) DropdownMenuItem(text = { Text("配置并重启当前会话") }, enabled = enabled && !changing, onClick = { configure() })
                 DropdownMenuItem(text = { Text("查看终端") }, onClick = { open = false; onTerminal() })
             }
         }

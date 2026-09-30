@@ -20,7 +20,7 @@ internal class LocalClaudeControlTransport private constructor(private val proce
     }
     override fun close() { if (closed.compareAndSet(false, true)) LocalRuntimeDiscovery.stopOwnedProcess(process) }
     companion object {
-        suspend fun start(runtime: LocalRuntimeInstallation, directory: File, inherited: Map<String, String> = System.getenv(),
+        suspend fun start(runtime: LocalRuntimeInstallation, directory: File, inherited: Map<String, String> = LoginShellPath.environment(),
             settings: JSONObject = ClaudeSubscriptionSettings.overlay(), resumeSessionId: String? = null): LocalClaudeControlTransport {
             require(runtime.engine == "claude" && runtime.ready && runtime.command.isNotEmpty())
             require(directory.isAbsolute && directory.isDirectory)

@@ -68,7 +68,7 @@ internal class LocalAgents(private val root: File = File(Store.dir, "local-agent
                 if (job.cancelRequested) throw CancellationException("本地任务已取消")
                 val args = command(binary, engine, resume) + mcpArguments
                 val process = withContext(Dispatchers.IO) {
-                    ProcessBuilder(args).directory(cwd).redirectErrorStream(true).redirectOutput(job.log).start().also {
+                    ProcessBuilder(args).directory(cwd).redirectErrorStream(true).redirectOutput(job.log).apply { LoginShellPath.applyTo(environment()) }.start().also {
                         // Retain ownership before crossing the cancellable dispatcher boundary.
                         job.process = it
                     }
@@ -151,7 +151,7 @@ internal class LocalAgents(private val root: File = File(Store.dir, "local-agent
             val name = engine + if (windows) ".exe" else ""
             val paths = listOf(File(home, ".local/bin/$name")) +
                 (if (engine == "codex") listOf(File(System.getenv("CODEX_HOME") ?: File(home, ".codex").path, "plugins/.plugin-appserver/codex.exe")) else emptyList()) +
-                System.getenv("PATH").orEmpty().split(File.pathSeparator).map { File(it, name) }
+                LoginShellPath.path().split(File.pathSeparator).map { File(it, name) }
             return paths.firstOrNull { it.isFile && it.canExecute() }
         }
     }

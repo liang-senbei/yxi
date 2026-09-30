@@ -27,6 +27,7 @@ internal class CodexConversationView {
 }
 
 class AppState internal constructor(private val localClaudeFactory: (InstructionQueue, java.io.File) -> LocalClaudeTasks = { queue, file -> LocalClaudeTasks(queue, file) }) {
+    init { LoginShellPath.prefetch() } // macOS：启动时后台读一次登录 shell 的 PATH，找运行器、起子进程时合进去
     internal val sharedMcp by lazy { SharedMcpRegistry(java.io.File(Store.dir, "shared-mcp.json")) }
     internal var sharedMcpPage by mutableStateOf(false)
     internal val remoteOpenCodeTasks by lazy { RemoteOpenCodeTasks(instructions, java.io.File(Store.dir, "remote-opencode-tasks.json"), sharedMcp) }
@@ -205,6 +206,12 @@ class AppState internal constructor(private val localClaudeFactory: (Instruction
     internal val claudeImageCaptures = androidx.compose.runtime.mutableStateListOf<String>()
     internal val claudeImageDrafts = mutableMapOf<String, androidx.compose.runtime.snapshots.SnapshotStateList<InstructionAttachment>>()
     val chatDrafts = mutableMapOf<String, androidx.compose.runtime.MutableState<androidx.compose.ui.text.input.TextFieldValue>>()
+    /** 对话输入框的暂存附件，和 [chatDrafts] 一样按任务存（PRD §4.1：切风格不丢附件）。 */
+    internal val chatAttachments = ChatAttachments()
+    /** Code 风格新会话页的草稿（切风格、切页面都不丢；经典风格走对话框，不用它）。 */
+    internal val newSessionDraft = NewSessionDraft()
+    /** Code 风格本机首页的草稿（同上：切风格、切页面都不丢）。 */
+    internal val localHomeDraft = LocalHomeDraft()
     fun appendDocumentQuote(host: Host, task: Session, quote: String) {
         val holder = chatDrafts.getOrPut(taskNavigationKey(host, task)) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue()) }
         val old = holder.value.text

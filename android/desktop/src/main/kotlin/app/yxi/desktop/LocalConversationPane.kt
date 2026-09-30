@@ -14,11 +14,11 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
-@Composable internal fun NewLocalConversationDialog(state: AppState, close: () -> Unit, created: (LocalCodexTaskRecord) -> Unit) {
+@Composable internal fun NewLocalConversationDialog(state: AppState, close: () -> Unit, initialDirectory: String? = null, created: (LocalCodexTaskRecord) -> Unit) {
     val workspace = state.localWorkspace
     val tasks = state.localCodexTasks
     val scope = rememberCoroutineScope()
-    var directory by remember { mutableStateOf(workspace.projects.firstOrNull() ?: System.getProperty("user.home")) }
+    var directory by remember { mutableStateOf(initialDirectory ?: workspace.projects.firstOrNull() ?: System.getProperty("user.home")) }
     var title by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
     var submitting by remember { mutableStateOf(false) }

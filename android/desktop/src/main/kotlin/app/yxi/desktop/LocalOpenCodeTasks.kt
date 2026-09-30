@@ -6,7 +6,9 @@ import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import java.io.File
 
-internal class LocalOpenCodeTasks(private val queue: InstructionQueue, private val file: File, private val sharedMcp: SharedMcpRegistry? = null, private val environment: Map<String, String> = System.getenv()) : AutoCloseable {
+internal class LocalOpenCodeTasks(private val queue: InstructionQueue, private val file: File, private val sharedMcp: SharedMcpRegistry? = null, private val inherited: Map<String, String>? = null) : AutoCloseable {
+    // 用到时再取：macOS 上登录 shell 的 PATH 是后台读的，构造时可能还没读完
+    private val environment: Map<String, String> get() = inherited ?: LoginShellPath.environment()
     val registry = LocalCodexTaskRegistry(file)
     val controllers = mutableStateMapOf<String, OpenCodeTaskController>()
     private val servers = mutableMapOf<String, LocalOpenCodeServer>()

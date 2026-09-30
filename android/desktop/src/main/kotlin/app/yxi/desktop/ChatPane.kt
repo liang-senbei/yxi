@@ -10,6 +10,7 @@ import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -67,6 +68,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isShiftPressed
@@ -113,7 +115,7 @@ import org.jetbrains.skia.Image as SkiaImage
  * · composer = 一张圆角卡片：无边框输入区 + 底部功能行（+ 附件 / 审批态 / 模型·强度·模式·上下文 chips / 圆形发送）。
  */
 @Composable
-internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQueue, savedDraft: androidx.compose.runtime.MutableState<TextFieldValue>? = null, displayName: String? = null, onRoutes: () -> Unit = {}, onTerminal: () -> Unit = {}, modelSwitches: ModelChangeStore? = null) {
+internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQueue, attachments: ChatAttachments, savedDraft: androidx.compose.runtime.MutableState<TextFieldValue>? = null, displayName: String? = null, onRoutes: () -> Unit = {}, onTerminal: () -> Unit = {}, modelSwitches: ModelChangeStore? = null) {
     val taskKey = taskNavigationKey(conn.host, session)
     val ssh = conn.ssh
     val t = Tokens.current
@@ -244,7 +246,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                 }
             })
     }
-    val staged = remember(taskKey) { mutableStateListOf<DraftAttach>() }
+    val staged = remember(taskKey) { attachments.of(taskKey) }
 
     // Durable queued attachments may outlive the old three-day staging sweep.
     // Do not run that destructive sweep from desktop until queue-aware leases exist.
@@ -254,7 +256,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
         if (staged.size >= 10) { sendErr = "一次最多带 10 个附件"; return }
         val a = Attach.fromFile(f)
         staged.add(a)
-        Attach.launchUpload(conn, session.name, a, scope)
+        attachments.upload(conn, session.name, a)
     }
 
     /** 剪贴板里的图 → PNG → 暂存（Codex / Claude Desktop 的 Ctrl+V 贴图）。编码几十毫秒，挪出输入线程。 */
@@ -267,7 +269,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                 if (staged.size >= 10) { sendErr = "一次最多带 10 个附件"; return@launch }
                 val a = Attach.fromPastedImage(bytes)
                 staged.add(a)
-                Attach.launchUpload(conn, session.name, a, scope)
+                attachments.upload(conn, session.name, a)
             } finally {
                 Attach.pasteBusy.set(false)
             }
@@ -494,9 +496,10 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
         }
     }
 
-    Column(Modifier.fillMaxSize().background(t.surface2)) {
+    val codeStyle = LocalThemeSpec.current.style == UiStyle.Code
+    Column(Modifier.fillMaxSize().background(if (codeStyle) t.surface0 else t.surface2)) {
         // 会话头（ZCode 顶栏的形态）：任务名 + 主机 pill + 连接状态。重连按钮只在断开时出现
-        SessionHeader(conn, session, displayName) { conn.start() }   // 重连循环在 Conn 自己的 scope 里跑，切走面板不会断
+        if (!codeStyle) SessionHeader(conn, session, displayName) { conn.start() }   // 重连循环在 Conn 自己的 scope 里跑，切走面板不会断
         Box(Modifier.weight(1f).fillMaxWidth()) {
             // 手机端搬来的背景光：待机=底部蓝色聚光，思考=铺满顶部色相流动，等你拍板=琥珀（ThinkingGlow.kt）
             ThinkingGlow(
@@ -504,17 +507,21 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                 streaming = live.busy && items.lastOrNull() is ChatItem.AssistantText,
                 Modifier.matchParentSize(),
             )
+            // Code 风格：对话列 768 在主区居中，窄时两侧各留 40（规格 §2）；LazyColumn 本身仍铺满，两侧留白里滚轮照样滚
             LazyColumn(
                 Modifier.fillMaxSize().nestedScroll(scrollWatch), state = listState,
-                contentPadding = PaddingValues(16.dp, 12.dp),
+                contentPadding = if (codeStyle) PaddingValues(40.dp, 12.dp) else PaddingValues(16.dp, 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalAlignment = if (codeStyle) Alignment.CenterHorizontally else Alignment.Start,
             ) {
                 items(rows, key = { it.key }) { row ->
-                    when (row) {
-                        is ChatRow.Group -> GroupCard(row.calls, open = row.key in openGroups) {
-                            if (row.key in openGroups) openGroups.remove(row.key) else openGroups.add(row.key)
+                    CodeColumn(codeStyle) {
+                        when (row) {
+                            is ChatRow.Group -> GroupCard(row.calls, open = row.key in openGroups) {
+                                if (row.key in openGroups) openGroups.remove(row.key) else openGroups.add(row.key)
+                            }
+                            is ChatRow.One -> ItemView(conn, row.item) { editingMessage = it }
                         }
-                        is ChatRow.One -> ItemView(conn, row.item) { editingMessage = it }
                     }
                 }
                 item(key = "conversation-bottom-anchor") { Spacer(Modifier.height(1.dp)) }
@@ -525,107 +532,114 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                 modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp).background(t.surface3, RoundedCornerShape(Radius)).border(1.dp, t.border, RoundedCornerShape(Radius)),
             ) { Text("↓ 回到最新", color = t.textPrimary) }
         }
-        if (items.isNotEmpty()) status?.let { Note(it, t.textMuted) }
-        if (live.busy) BusyLine(live.status)
-        val p = pending
-        val a = approval?.takeIf { it.first == p?.fingerprint }?.second ?: Approval(null, "")   // 抓屏还没回来就先只有标题
-        if (p != null) ApprovalCard(p, a, busy = !canAct || rewindBlocked || rewindRunning, onKey = { sendKey(it, p.fingerprint) }, onSubmit = { submit(p) })
-        if (rewindRunning) {
-            LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp))
-            Note(rewindOperation?.message.orEmpty(), t.textSecondary)
-        } else if (rewindOperation?.failed == true) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(rewindOperation.message, Modifier.weight(1f), color = t.danger, fontSize = 12.sp)
-            if (!rewindBlocked && rewindOperation.messageUuid != null && rewindOperation.editedText != null) TextButton({
-                editingMessage = MessageEditTarget(rewindOperation.messageUuid, rewindOperation.editedText,
-                    sourceUuid = rewindOperation.messageUuid, imageSelection = rewindOperation.imageSelection)
-            }) { Text("重新编辑") }
-        } else if (rewindOperation != null && !rewindBlocked) Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Icon(Icons.Outlined.Check, null, Modifier.size(16.dp), tint = t.success)
-            Text(rewindOperation.message, Modifier.weight(1f), color = t.textSecondary, fontSize = 12.sp)
-            IconButton({ ConversationRewind.dismiss(taskKey) }, Modifier.size(28.dp)) {
-                Icon(Icons.Default.Close, "关闭回退完成提示", Modifier.size(14.dp), tint = t.textMuted)
+        CodeDock(codeStyle) {
+            // 排队：Code 下画成对话末尾的消息，排在状态行之前（规格 §3.4）；经典仍在输入框正上方
+            val queueStrip: @Composable () -> Unit = {
+                InstructionStrip(instructions, taskNavigationKey(conn.host, session), !rewindRunning && !rewindBlocked && !sending && !live.busy && pending == null && ssh.isConnected, ::deliver,
+                    onQuery = { queryInstructionDelivery(conn, session, it) }, compactUnknown = true,
+                    automatic = QueuePreferences.enabled(taskKey),
+                    onAutomaticChange = { QueuePreferences.setEnabled(taskKey, it) },
+                    canSteer = !rewindRunning && !rewindBlocked && !session.isCodex && live.busy && pending == null && !sending && !keyBusy,
+                    onSteer = { item ->
+                        keyBusy = true
+                        scope.launch {
+                            try {
+                                conn.instructionDeliveryMutex.lock()
+                                try {
+                                    check(!RewindDelivery.gate.blocked(taskKey)) { "历史回退尚未确认，暂不能调整方向" }
+                                    val q = app.yxi.ssh.Shell::q
+                                    val target = "=" + session.name + ":"
+                                    val screen = ssh.exec("tmux capture-pane -p -t ${q(target)}")
+                                    check(app.yxi.agent.Prompt.parse(screen) == null && Live.parse(screen).busy) { "当前状态已变化，请稍后再试" }
+                                    instructions.prioritize(item.id)
+                                    val result = ssh.exec("pane=\$(tmux display-message -p -t ${q(target)} '#{pane_id}') && test \"\$(tmux display-message -p -t \"\$pane\" '#{pid}:#{session_id}:#{session_created}')\" = ${q(session.runtimeId)} && test \"\$(tmux capture-pane -p -t \"\$pane\")\" = ${q(screen.trimEnd('\n'))} && tmux send-keys -t \"\$pane\" Escape && printf '__YXI_REDIRECT__'")
+                                    check(result.contains("__YXI_REDIRECT__")) { "调整方向请求未确认，请查看当前任务" }
+                                    conn.terminalAwaiting[session.runtimeId] = (conn.terminalCompletion[session.runtimeId] ?: 0L) to true
+                                } finally { conn.instructionDeliveryMutex.unlock() }
+                            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                            catch (e: Exception) { sendErr = e.message }
+                            finally { keyBusy = false }
+                        }
+                    })
             }
-        }
-        if (rewindBlocked && !rewindRunning) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("回退尚未确认，发送已暂停。输入和排队消息已保留。", Modifier.weight(1f), color = t.warning, fontSize = 12.sp)
-            if (RewindDelivery.gate.pending(taskKey)?.let { it.verification != null || it.nativeRoot != null } == true) TextButton({
-                rewindChecking = true; sendErr = null
-                scope.launch {
-                    try { recheckRewindRecovery(conn, session); ConversationRewind.dismiss(taskKey) }
-                    catch (e: kotlinx.coroutines.CancellationException) { throw e }
-                    catch (e: Exception) { sendErr = e.message ?: "恢复状态无法确认" }
-                    finally { rewindChecking = false }
+            if (codeStyle) queueStrip()
+            if (items.isNotEmpty()) status?.let { Note(it, t.textMuted) }
+            if (live.busy) BusyLine(live.status)
+            val p = pending
+            val a = approval?.takeIf { it.first == p?.fingerprint }?.second ?: Approval(null, "")   // 抓屏还没回来就先只有标题
+            if (p != null) ApprovalCard(p, a, busy = !canAct || rewindBlocked || rewindRunning, onKey = { sendKey(it, p.fingerprint) }, onSubmit = { submit(p) })
+            if (rewindRunning) {
+                LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp))
+                Note(rewindOperation?.message.orEmpty(), t.textSecondary)
+            } else if (rewindOperation?.failed == true) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(rewindOperation.message, Modifier.weight(1f), color = t.danger, fontSize = 12.sp)
+                if (!rewindBlocked && rewindOperation.messageUuid != null && rewindOperation.editedText != null) TextButton({
+                    editingMessage = MessageEditTarget(rewindOperation.messageUuid, rewindOperation.editedText,
+                        sourceUuid = rewindOperation.messageUuid, imageSelection = rewindOperation.imageSelection)
+                }) { Text("重新编辑") }
+            } else if (rewindOperation != null && !rewindBlocked) Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(Icons.Outlined.Check, null, Modifier.size(16.dp), tint = t.success)
+                Text(rewindOperation.message, Modifier.weight(1f), color = t.textSecondary, fontSize = 12.sp)
+                IconButton({ ConversationRewind.dismiss(taskKey) }, Modifier.size(28.dp)) {
+                    Icon(Icons.Default.Close, "关闭回退完成提示", Modifier.size(14.dp), tint = t.textMuted)
                 }
-            }, enabled = !rewindChecking && !rewindRunning && conn.ssh.isConnected) {
-                Text(if (rewindChecking) "正在核对…" else "重新检查")
             }
-            TextButton(onTerminal) { Text("查看终端") }
-        }
-        sendErr?.let { Note(it, t.danger) }
-        InstructionStrip(instructions, taskNavigationKey(conn.host, session), !rewindRunning && !rewindBlocked && !sending && !live.busy && pending == null && ssh.isConnected, ::deliver,
-            onQuery = { queryInstructionDelivery(conn, session, it) }, compactUnknown = true,
-            automatic = QueuePreferences.enabled(taskKey),
-            onAutomaticChange = { QueuePreferences.setEnabled(taskKey, it) },
-            canSteer = !rewindRunning && !rewindBlocked && !session.isCodex && live.busy && pending == null && !sending && !keyBusy,
-            onSteer = { item ->
-                keyBusy = true
-                scope.launch {
-                    try {
-                        conn.instructionDeliveryMutex.lock()
-                        try {
-                            check(!RewindDelivery.gate.blocked(taskKey)) { "历史回退尚未确认，暂不能调整方向" }
-                            val q = app.yxi.ssh.Shell::q
-                            val target = "=" + session.name + ":"
-                            val screen = ssh.exec("tmux capture-pane -p -t ${q(target)}")
-                            check(app.yxi.agent.Prompt.parse(screen) == null && Live.parse(screen).busy) { "当前状态已变化，请稍后再试" }
-                            instructions.prioritize(item.id)
-                            val result = ssh.exec("pane=\$(tmux display-message -p -t ${q(target)} '#{pane_id}') && test \"\$(tmux display-message -p -t \"\$pane\" '#{pid}:#{session_id}:#{session_created}')\" = ${q(session.runtimeId)} && test \"\$(tmux capture-pane -p -t \"\$pane\")\" = ${q(screen.trimEnd('\n'))} && tmux send-keys -t \"\$pane\" Escape && printf '__YXI_REDIRECT__'")
-                            check(result.contains("__YXI_REDIRECT__")) { "调整方向请求未确认，请查看当前任务" }
-                            conn.terminalAwaiting[session.runtimeId] = (conn.terminalCompletion[session.runtimeId] ?: 0L) to true
-                        } finally { conn.instructionDeliveryMutex.unlock() }
-                    } catch (e: kotlinx.coroutines.CancellationException) { throw e }
-                    catch (e: Exception) { sendErr = e.message }
-                    finally { keyBusy = false }
+            if (rewindBlocked && !rewindRunning) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("回退尚未确认，发送已暂停。输入和排队消息已保留。", Modifier.weight(1f), color = t.warning, fontSize = 12.sp)
+                if (RewindDelivery.gate.pending(taskKey)?.let { it.verification != null || it.nativeRoot != null } == true) TextButton({
+                    rewindChecking = true; sendErr = null
+                    scope.launch {
+                        try { recheckRewindRecovery(conn, session); ConversationRewind.dismiss(taskKey) }
+                        catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                        catch (e: Exception) { sendErr = e.message ?: "恢复状态无法确认" }
+                        finally { rewindChecking = false }
+                    }
+                }, enabled = !rewindChecking && !rewindRunning && conn.ssh.isConnected) {
+                    Text(if (rewindChecking) "正在核对…" else "重新检查")
                 }
-            })
-        Composer(
-            attachments = staged.toList(),
-            onRemoveAttachment = { attachment ->
-                draft = draftAfterAttachmentRemoval(draft, staged.toList(), attachment)
-                attachment.cancelled.set(true); staged.remove(attachment)
-            },
-            draft, { draft = it }, focus,
-            ctx = ctx,
-            busy = live.busy, waiting = pending != null,
-            hint = when {
-                rewindRunning -> "正在回退对话，可继续编辑下一条消息"
-                rewindBlocked -> "可继续编辑，确认回退状态后再发送"
-                pending != null || live.busy -> "输入下一条指令，当前任务结束后自动发送"
-                else -> "跟它说点什么… Enter 发送，Shift+Enter 换行；截图直接 Ctrl+V"
-            },
-            hasPending = pending != null,
-            canSend = !rewindRunning && !rewindBlocked && (draft.text.isNotBlank() || hasDone) && !sending && staged.all { it.state is DraftState.Done },
-            canAct = canAct,
-            onAttach = { Attach.pickFiles().forEach { stage(it) } },
-            onPaste = ::stagePasted,
-            onApprove = ::approve, onReject = ::reject,
-            onSend = ::send,
-            onHistory = { historyOpen = true },
-            onSearch = { searchOpen = true },
-            onVoice = { voiceOpen = true },
-            onRoutes = onRoutes,
-            permissionControl = {
-                if (!session.isCodex) ConversationPermissionMenu(conn, session,
-                    canAct && !rewindRunning && !rewindBlocked && !live.busy && pending == null && !sending, onTerminal)
-            },
-            modelControl = { if (rewindRunning || rewindBlocked) Text("回退处理中", color = t.textMuted)
-                else if (session.isCodex) TextButton(onRoutes) { Text("模型与思考 ⌄") }
-                else ConversationModelMenu(conn, session, ctx?.model.orEmpty(), ctx?.effort.orEmpty(), onRoutes, modelSwitches, onTerminal) },
-        )
+                TextButton(onTerminal) { Text("查看终端") }
+            }
+            sendErr?.let { Note(it, t.danger) }
+            if (!codeStyle) queueStrip()
+            Composer(
+                attachments = staged.toList(),
+                onRemoveAttachment = { attachment ->
+                    draft = draftAfterAttachmentRemoval(draft, staged.toList(), attachment)
+                    attachment.cancelled.set(true); staged.remove(attachment)
+                },
+                draft, { draft = it }, focus,
+                ctx = ctx,
+                busy = live.busy, waiting = pending != null,
+                hint = when {
+                    rewindRunning -> "正在回退对话，可继续编辑下一条消息"
+                    rewindBlocked -> "可继续编辑，确认回退状态后再发送"
+                    pending != null || live.busy -> "输入下一条指令，当前任务结束后自动发送"
+                    else -> "跟它说点什么… Enter 发送，Shift+Enter 换行；截图直接 Ctrl+V"
+                },
+                hasPending = pending != null,
+                canSend = !rewindRunning && !rewindBlocked && (draft.text.isNotBlank() || hasDone) && !sending && staged.all { it.state is DraftState.Done },
+                canAct = canAct,
+                onAttach = { Attach.pickFiles().forEach { stage(it) } },
+                onPaste = ::stagePasted,
+                onApprove = ::approve, onReject = ::reject,
+                onSend = ::send,
+                onHistory = { historyOpen = true },
+                onSearch = { searchOpen = true },
+                onVoice = { voiceOpen = true },
+                onRoutes = onRoutes,
+                permissionControl = {
+                    if (!session.isCodex) ConversationPermissionMenu(conn, session,
+                        canAct && !rewindRunning && !rewindBlocked && !live.busy && pending == null && !sending, onTerminal)
+                },
+                modelControl = { if (rewindRunning || rewindBlocked) { if (codeStyle) CodeFooterNote("回退处理中", t.textMuted) else Text("回退处理中", color = t.textMuted) }
+                    else if (session.isCodex) { if (codeStyle) CodeFooterChip("模型与思考", onRoutes) else TextButton(onRoutes) { Text("模型与思考 ⌄") } }
+                    else ConversationModelMenu(conn, session, ctx?.model.orEmpty(), ctx?.effort.orEmpty(), onRoutes, modelSwitches, onTerminal) },
+            )
+        }
     }
 }
 
@@ -633,6 +647,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
  * 输入区（ZCode / Codex 同款的一张卡）：无边框输入 + 底部功能行。
  * 左：+ 附件；右：模型 · 强度 · 模式 · 上下文 chips（转录顺带解析的，零开销）+ 圆形发送。
  * Enter / Esc 的审批语义照旧：空输入 + 在等审批 = Enter 批准 / Esc 拒绝（Codex）。
+ * Code 风格下外观换成 [CodeChatComposer]，按键处理是同一个。
  */
 @Composable
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
@@ -652,15 +667,38 @@ internal fun Composer(
 ) {
     val t = Tokens.current
     val mentions = rememberAttachmentMentions(attachments, draft, onDraft)
+    // 按键两种外观共用（Code 风格只换样子，行为不分叉）
+    val onKey: (KeyEvent) -> Boolean = { e ->
+        val enter = e.key == Key.Enter || e.key == Key.NumPadEnter
+        when {
+            mentions.handle(e) -> true
+            e.type != KeyEventType.KeyDown || draft.composition != null -> false   // 中文输入法正在组词时 Enter / Esc 归输入法
+            // 剪贴板里有图 = 粘贴图片（预检是便宜的 isDataFlavorAvailable，不解码）；贴着的时候按键重复不重入
+            e.isCtrlPressed && e.key == Key.V && Attach.hasClipboardImage() && !Attach.pasteBusy.get() -> { onPaste(); true }
+            // 有字就是发消息；空着时 Enter 归审批卡（Codex：Enter 批准）
+            enter && !e.isShiftPressed -> { if (canSend) onSend() else if (draft.text.isBlank() && attachments.isEmpty() && hasPending && canAct) onApprove(); true }
+            e.key == Key.Escape && hasPending && canAct -> { onReject(); true }   // 没在等审批时 Esc 留给窗口壳
+            else -> false
+        }
+    }
+    if (LocalThemeSpec.current.style == UiStyle.Code) {
+        CodeChatComposer(
+            attachments, onRemoveAttachment, mentions, draft, onDraft, focus, hint, canSend, onSend, onKey,
+            canAct = canAct, planMode = ctx?.mode == "plan", tokens = ctx?.tokens ?: 0L,
+            onAttach = onAttach, onHistory = onHistory, onSearch = onSearch, onVoice = onVoice, onRoutes = if (ctx != null) onRoutes else null,
+            permissionControl = permissionControl, modelControl = modelControl,
+        )
+        return
+    }
     var focused by remember { mutableStateOf(false) }
     // 手机端 glowBrush 同源：输入卡的底也是同一套色相在流（淡），等你拍板时定在琥珀
     val glow = glowBrush(busy, waiting)
     Column(
         Modifier.fillMaxWidth().padding(12.dp, 6.dp, 12.dp, 12.dp)
             .clip(RoundedCornerShape(RadiusComposer))
-            .background(t.surface1)
+            .background(t.composer)
             .background(glow)
-            .border(if (focused) 1.5.dp else 1.dp, if (focused) t.accent.copy(alpha = 0.6f) else t.border, RoundedCornerShape(RadiusComposer)),
+            .border(if (focused) 1.5.dp else 1.dp, if (focused) t.composerRingFocused else t.composerRing, RoundedCornerShape(RadiusComposer)),
     ) {
         DraftAttachmentTray(attachments, onRemoveAttachment)
         AttachmentMentionList(mentions)
@@ -671,19 +709,7 @@ internal fun Composer(
             modifier = Modifier.fillMaxWidth().padding(14.dp, 10.dp, 14.dp, 4.dp)
                 .focusRequester(focus)
                 .onFocusChanged { focused = it.isFocused }
-                .onPreviewKeyEvent { e ->
-                    val enter = e.key == Key.Enter || e.key == Key.NumPadEnter
-                    when {
-                        mentions.handle(e) -> true
-                        e.type != KeyEventType.KeyDown || draft.composition != null -> false   // 中文输入法正在组词时 Enter / Esc 归输入法
-                        // 剪贴板里有图 = 粘贴图片（预检是便宜的 isDataFlavorAvailable，不解码）；贴着的时候按键重复不重入
-                        e.isCtrlPressed && e.key == Key.V && Attach.hasClipboardImage() && !Attach.pasteBusy.get() -> { onPaste(); true }
-                        // 有字就是发消息；空着时 Enter 归审批卡（Codex：Enter 批准）
-                        enter && !e.isShiftPressed -> { if (canSend) onSend() else if (draft.text.isBlank() && attachments.isEmpty() && hasPending && canAct) onApprove(); true }
-                        e.key == Key.Escape && hasPending && canAct -> { onReject(); true }   // 没在等审批时 Esc 留给窗口壳
-                        else -> false
-                    }
-                },
+                .onPreviewKeyEvent(onKey),
             decorationBox = { inner ->
                 Box { if (draft.text.isEmpty()) Text(hint, style = BodyStyle, color = t.textMuted); inner() }
             },
@@ -706,13 +732,13 @@ internal fun Composer(
             if (!canAct) Text("重新连接后可操作", fontSize = 11.sp, color = t.textMuted)
             Spacer(Modifier.weight(1f))
             modelControl()
-            // 圆形发送（Codex 的 ↑）：能发时点亮（Copper 主操作，手机端同款）；附件在传时灰着不亮
+            // 圆形发送（Codex 的 ↑）：能发时点亮（品牌位：经典 = Copper 主操作，手机端同款；Code 风格 = Yxi 铜）；附件在传时灰着不亮
             Box(
                 Modifier.size(30.dp).clip(CircleShape)
-                    .background(if (canSend) t.accent else t.border)
+                    .background(if (canSend) t.brand else t.border)
                     .clickable(enabled = canSend, onClick = onSend),
                 contentAlignment = Alignment.Center,
-            ) { Icon(Icons.Default.ArrowUpward, "发送", Modifier.size(17.dp), tint = if (canSend) t.onAccent else t.textMuted) }
+            ) { Icon(Icons.Default.ArrowUpward, "发送", Modifier.size(17.dp), tint = if (canSend) t.onBrand else t.textMuted) }
         }
     }
 }
@@ -778,7 +804,7 @@ private fun effortLabel(effort: String): String? = when (effort) {
     "max" -> "最大思考"; "high" -> "高强度"; "mid" -> "中等"; else -> null
 }
 
-private fun kShort(tokens: Long): String = when {
+internal fun kShort(tokens: Long): String = when {
     tokens >= 1_000_000 -> "%.1fM".format(tokens / 1e6)
     tokens >= 1_000 -> "%.0fK".format(tokens / 1e3)
     else -> tokens.toString()
@@ -789,6 +815,19 @@ private fun Dot(color: Color) = Box(Modifier.size(8.dp).background(color, Circle
 
 @Composable
 private fun Note(text: String, color: Color) = Text(text, Modifier.padding(16.dp, 2.dp), fontSize = 12.sp, lineHeight = 16.sp, color = color)
+
+/** Code 风格的对话列：最宽 768、在父级里居中（对齐和两侧留白由父级给）；经典原样。只是布局，不加语义节点。 */
+@Composable
+private fun CodeColumn(code: Boolean, content: @Composable () -> Unit) {
+    if (code) Box(Modifier.widthIn(max = 768.dp).fillMaxWidth()) { content() } else content()
+}
+
+/** 停靠区（状态行 / 审批卡 / 排队 / 输入卡）：Code 风格和对话列同宽、居中，窄时两侧各留 40（规格 §2）；经典原样。 */
+@Composable
+private fun ColumnScope.CodeDock(code: Boolean, content: @Composable ColumnScope.() -> Unit) {
+    if (code) Column(Modifier.align(Alignment.CenterHorizontally).padding(horizontal = 40.dp).widthIn(max = 768.dp).fillMaxWidth(), content = content)
+    else content()
+}
 
 /** 等推流把屏幕换掉（指纹变了 / 面板没了），最多 [timeoutMs]；不自己抓屏，抓屏归 watchScreen 那条长连。 */
 private suspend fun waitChange(before: String, timeoutMs: Long = 4_000, get: () -> Pending?): Pending? {

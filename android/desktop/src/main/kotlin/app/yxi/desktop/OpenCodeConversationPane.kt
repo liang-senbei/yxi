@@ -15,10 +15,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
-@Composable internal fun NewOpenCodeConversationDialog(state: AppState, runtime: LocalRuntimeInstallation, close: () -> Unit, created: (LocalCodexTaskRecord) -> Unit) {
+@Composable internal fun NewOpenCodeConversationDialog(state: AppState, runtime: LocalRuntimeInstallation, close: () -> Unit, initialDirectory: String? = null, created: (LocalCodexTaskRecord) -> Unit) {
     val tasks = state.localOpenCodeTasks
     val scope = rememberCoroutineScope()
-    var directory by remember { mutableStateOf(state.localWorkspace.projects.firstOrNull() ?: System.getProperty("user.home")) }
+    var directory by remember { mutableStateOf(initialDirectory ?: state.localWorkspace.projects.firstOrNull() ?: System.getProperty("user.home")) }
     var title by remember { mutableStateOf("") }
     var models by remember { mutableStateOf<List<OpenCodeModel>>(emptyList()) }
     var selected by remember { mutableStateOf<OpenCodeModel?>(null) }
