@@ -44,7 +44,7 @@ import kotlin.test.*
  * 和 ClassicThemeShotsTest 共用夹具目录和 Store 单例，所以只在 YXI_THEME_SHOT_MODE=switch 时跑（那边此时让位）；
  * 比的是同一次运行里的帧，不需要基线。不在 dev/workbench-test-classes.txt 里（PRD §10-4）。
  */
-@EnabledOnOs(OS.WINDOWS)
+@EnabledOnOs(OS.WINDOWS, OS.MAC)
 @EnabledIfEnvironmentVariables(
     EnabledIfEnvironmentVariable(named = "YXI_THEME_SHOT_FIXTURE", matches = ".+"),
     EnabledIfEnvironmentVariable(named = "YXI_THEME_SHOT_MODE", matches = "switch"),
@@ -158,7 +158,9 @@ class StyleSwitchStateTest {
                 clock.settle()
                 // 设置对话框一进组合就同步 reg query 一次（Settings.kt 开机自启的初值，拦下按未开启）；切风格要是把对话框拆了重建就是两次
                 val settingsBlocked = guard.drain()
-                if (settingsBlocked != listOf("exec:reg")) failures += "设置页阶段被拦的应该正好是一次 reg query：$settingsBlocked"
+                // Mac 上开机自启不查注册表，这一阶段什么都不该拦（也就核不到对话框有没有重建，靠上面的逐像素比和节点核）
+                val expected = if (System.getProperty("os.name").startsWith("Windows")) listOf("exec:reg") else emptyList()
+                if (settingsBlocked != expected) failures += "设置页阶段被拦的应该正好是 $expected：$settingsBlocked"
                 state.showSettings = false
                 verify("settings-closed", UiStyle.Classic, false).keptInput("关设置后")
                 check(!NativeOverlays.active) { "关了设置 NativeOverlay 租约还在" }

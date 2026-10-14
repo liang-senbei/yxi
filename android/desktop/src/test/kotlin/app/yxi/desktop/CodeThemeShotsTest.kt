@@ -64,7 +64,7 @@ import kotlin.test.*
  * 画到稳定都和 [ClassicThemeShotsTest] 同一套，产物写到 <fixture>/out-code，不进仓库。Code 还在做，先不设基线：
  * 这里只保证画得出、画得稳、不越界。只在 YXI_THEME_SHOT_MODE=code 时跑（经典截图此时让位）；不在 dev/workbench-test-classes.txt 里。
  */
-@EnabledOnOs(OS.WINDOWS)
+@EnabledOnOs(OS.WINDOWS, OS.MAC)
 @EnabledIfEnvironmentVariables(
     EnabledIfEnvironmentVariable(named = "YXI_THEME_SHOT_FIXTURE", matches = ".+"),
     EnabledIfEnvironmentVariable(named = "YXI_THEME_SHOT_MODE", matches = "code"),
@@ -257,6 +257,22 @@ private fun codeScenes() = listOf(
     // 记录只改内存里的索引。第二张多一轮等审批的（审批卡、停止方块、侧栏的状态点）
     CodeScene("local-opencode") { localOpenCode(it, permission = false) },
     CodeScene("local-opencode-permission") { localOpenCode(it, permission = true) },
+    // 本机 OpenCode 接回（本机对齐 P4）：同一条记录没有控制器，页面自动接回一次（serve 钩子接回环上的假 OpenCode，不起进程）：
+    // 读回会话和历史、登记控制器，停靠区回到「就绪」和输入区；只起一次服务
+    CodeScene("local-opencode-restore", verify = { state, nodes ->
+        check(shotConnects.get() == 1) { "接回起了 ${shotConnects.get()} 次服务，应该只有进页面那一次" }
+        val c = checkNotNull(state.localOpenCodeTasks.controllers.values.singleOrNull()) { "接回后没登记控制器" }
+        check(c.ready && c.note == "就绪" && !state.localOpenCodeTasks.busy) { "接回后不是就绪：${c.note}" }
+        check(nodes.any { it.endsWith(" 侧栏导航太乱了，按「入门 / 指南 / 参考」三组重排一下") }) { "没读回历史" }
+        check(nodes.any { it.endsWith(" 核对状态") } && nodes.none { it.endsWith(" 重新连接") }) { "接回后停靠区不对" }
+    }) { localOpenCodeRestore(it, known = true) },
+    // 本机 OpenCode 接不回：原生端已经删了这个会话（GET 404）。进页面自动试一次，失败留原因和「重新连接」；再手动点一次，一共两次
+    CodeScene("local-opencode-gone", listOf("重新连接"), verify = { state, nodes ->
+        check(shotConnects.get() == 2) { "接回起了 ${shotConnects.get()} 次服务，应该是自动一次加手动一次" }
+        check(state.localOpenCodeTasks.controllers.isEmpty() && !state.localOpenCodeTasks.busy) { "接回失败后不该留控制器或忙状态" }
+        check(nodes.any { it.contains("OpenCode 里读不到这个会话") }) { "停靠区没有失败原因" }
+        check(nodes.any { it.endsWith(" 重新连接") } && nodes.any { it.endsWith(" 接回会话后可发送") }) { "失败后没有回到「重新连接」或输入提示不对" }
+    }) { localOpenCodeRestore(it, known = false) },
     // 服务器 OpenCode 对话：打开 ssh-list 里那条 OpenCode 托管任务（没有控制器）：会话头换主机图标，停靠区只有说明
     CodeScene("ssh-opencode") { sshOpenCode(it) },
     // 本机 Codex 对话（本机对齐 P1b）：打开 localHome 里那条 Codex 记录；控制器接假 app-server（只答 thread/read、thread/goal/get 和 model/list），
@@ -775,6 +791,52 @@ private fun localOpenCode(state: AppState, permission: Boolean) {
         OpenCodeClient(server.address.port, "fixture", record.directory), state.instructions)
     runBlocking { controller.refresh() }
     state.localOpenCodeTasks.controllers[record.key] = controller
+    state.localSelectedTaskKey = record.key
+}
+
+/**
+ * 本机 OpenCode 接回（本机对齐 P4）：[localHome] 里那条 OpenCode 记录换成用 OpenCode 运行器自己的数据目录（key 跟着变，只改内存），
+ * 加一个就绪的 OpenCode 运行器，打开记录、不建控制器，让页面自动接回。serve 钩子每次起一个回环上的假 OpenCode（计数进 [shotConnects]），
+ * 答 refresh 要的几条 GET，历史同 [localOpenCode] 的第一轮；[known] 为 false 时这个会话 404（原生端已删）。
+ */
+private fun localOpenCodeRestore(state: AppState, known: Boolean) {
+    localHome(state)
+    val opencode = LocalRuntimeInstallation("opencode", "PATH", listOf("C:\\fixture\\bin\\opencode.exe"), "C:\\fixture\\opencode-home", "1.18.32")
+    state.localWorkspace.forceState("installations", state.localWorkspace.installations + opencode)
+    val records = state.localOpenCodeTasks.registry.records
+    val index = records.indexOfFirst { it.threadId == "shot-local-3" }
+    val record = records[index].copy(runtimeHome = File(opencode.home).canonicalPath, provider = "anthropic", model = "claude-sonnet-4-5")
+        .also { records[index] = it }
+    val sid = record.threadId
+    val history = JSONArray()
+        .put(JSONObject().put("info", JSONObject().put("id", "msg_shot_1").put("sessionID", sid).put("role", "user"))
+            .put("parts", JSONArray().put(JSONObject().put("type", "text").put("text", "侧栏导航太乱了，按「入门 / 指南 / 参考」三组重排一下"))))
+        .put(JSONObject().put("info", JSONObject().put("id", "msg_shot_2").put("sessionID", sid).put("role", "assistant"))
+            .put("parts", JSONArray().put(JSONObject().put("type", "text").put("text", "## 调整方案\n\n按读者路径分成「入门 / 指南 / 参考」三组，旧链接保留跳转。"))))
+    shotConnects.set(0)
+    state.localOpenCodeTasks.serve = { _, _, _ ->
+        shotConnects.incrementAndGet()
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/") { exchange ->
+            val body = when (exchange.requestURI.path) {
+                "/session/$sid" -> if (known) JSONObject().put("id", sid).put("directory", record.directory).toString() else null
+                "/session/$sid/message" -> if (known) history.toString() else null
+                "/permission", "/question" -> "[]"
+                "/session/status" -> "{}"
+                "/mcp" -> "{}"
+                else -> null
+            }?.toByteArray()
+            exchange.sendResponseHeaders(if (body == null) 404 else 200, body?.size?.toLong() ?: -1L)
+            body?.let { exchange.responseBody.write(it) }
+            exchange.close()
+        }
+        // 不进 shotServers：接回失败时 open 自己关，接上的由 closeLocalFeatures → LocalOpenCodeTasks.close 关，免得停两次
+        server.start()
+        object : OpenCodeServing {
+            override val client = OpenCodeClient(server.address.port, "fixture", record.directory)
+            override fun close() = server.stop(0)
+        }
+    }
     state.localSelectedTaskKey = record.key
 }
 

@@ -24,8 +24,10 @@ internal class WindowsCredentialProtector(purpose: String = "Yxi/account-credent
         catch (e: Exception) { throw IllegalStateException("Windows凭据保护失败，请使用原Windows账号或重新登录", e) }
         catch (e: LinkageError) { throw IllegalStateException("Windows凭据保护组件无法加载，未回退到明文保存", e) }
     companion object {
+        /** 只给离屏测试夹具用：设了就用它，不碰系统的凭据保护（Mac 上跑截图时不能去问登录钥匙串，交接 §11）。生产里没人设，是 null。 */
+        @Volatile internal var fixtureOverride: ((String) -> CredentialProtector)? = null
         /** Windows：DPAPI；macOS：钥匙串里的主密钥 + AES-GCM（MacKeychainCredentialProtector）；其他平台没有系统保护。 */
-        fun forPlatform(purpose: String = "Yxi/account-credentials/v1"): CredentialProtector? = System.getProperty("os.name").let { os ->
+        fun forPlatform(purpose: String = "Yxi/account-credentials/v1"): CredentialProtector? = fixtureOverride?.invoke(purpose) ?: System.getProperty("os.name").let { os ->
             when {
                 os.startsWith("Windows") -> WindowsCredentialProtector(purpose)
                 os.startsWith("Mac") -> MacKeychainCredentialProtector(purpose)

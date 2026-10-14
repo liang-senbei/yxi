@@ -10,8 +10,11 @@ import java.util.Base64
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
+/** 本机 OpenCode 服务的持有者：生产是 [LocalOpenCodeServer]；单测和截图夹具换成回环上的假服务（本机对齐 P4，LocalOpenCodeTasks.serve）。 */
+internal interface OpenCodeServing : AutoCloseable { val client: OpenCodeClient }
+
 /** Owns only the process launched here; native user data and other servers are untouched. */
-internal class LocalOpenCodeServer private constructor(private val process: Process, val client: OpenCodeClient) : AutoCloseable {
+internal class LocalOpenCodeServer private constructor(private val process: Process, override val client: OpenCodeClient) : OpenCodeServing {
     private val closed = AtomicBoolean()
     val alive: Boolean get() = !closed.get() && process.isAlive
     override fun close() {

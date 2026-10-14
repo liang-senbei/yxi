@@ -24,6 +24,9 @@ internal object LoginShellPath {
             .onFailure { resolved.complete(null) }
     }
 
+    /** 只给离屏测试夹具用：不起登录 shell，当作没读到（之后只用继承的 PATH + Homebrew 目录）。夹具拦 exec，起了也会被拦下记一笔。 */
+    internal fun skipForFixture() { if (started.compareAndSet(false, true)) resolved.complete(null) }
+
     /** 不阻塞：登录 shell 还没读完就先用继承的 PATH + Homebrew 目录。EDT 上（含默认参数）只能用这个。 */
     fun path(inherited: String? = System.getenv("PATH")): String {
         if (!mac) return inherited.orEmpty()

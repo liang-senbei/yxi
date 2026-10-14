@@ -55,7 +55,7 @@ import kotlin.test.*
  * 不在 dev/workbench-test-classes.txt 里（PRD §10-4），不设 env 就跳过。
  * YXI_THEME_SHOT_MODE=switch / code 时让位给风格切换的状态用例 / Code 截图：共用 profile 和 Store 单例，不能在同一个 JVM 里跑。
  */
-@EnabledOnOs(OS.WINDOWS)
+@EnabledOnOs(OS.WINDOWS, OS.MAC)
 @EnabledIfEnvironmentVariable(named = "YXI_THEME_SHOT_FIXTURE", matches = ".+")
 @DisabledIfEnvironmentVariable(named = "YXI_THEME_SHOT_MODE", matches = "switch|code")
 class ClassicThemeShotsTest {
@@ -169,7 +169,20 @@ internal fun prepareShotProfile(fixture: File, vararg outside: File): File {
     fixture.mkdirs(); marker.writeText("主题截图夹具目录：每次运行清空 profile/ 和本次用例的 out 目录\n")
     check(profile.deleteRecursively()) { "清不掉 $profile（有文件被占用？）" }
     listOf(profile.resolve("Roaming"), profile.resolve("Local")).forEach { check(it.mkdirs()) { "建不了 $it" } }
+    // Mac 上不许去问登录钥匙串（交接 §11）：夹具 profile 里的服务器配置改用直通保护，只落在夹具目录。Windows 照旧走 DPAPI
+    // 同理不起登录 shell 去读 PATH（夹具拦 exec，起了会被记成场景外的调用）
+    if (System.getProperty("os.name").startsWith("Mac")) {
+        WindowsCredentialProtector.fixtureOverride = { ShotPassthroughProtector }
+        LoginShellPath.skipForFixture()
+    }
     return profile
+}
+
+/** 截图夹具在 Mac 上用的凭据保护：原样存取（调用方会清零传入的数组，所以都拷一份），只用在夹具 profile 里。 */
+private object ShotPassthroughProtector : CredentialProtector {
+    override val scheme = "shot-fixture"
+    override fun protect(plain: ByteArray) = plain.copyOf()
+    override fun unprotect(cipher: ByteArray) = cipher.copyOf()
 }
 
 /** 场景：[arrange] 只喂合成状态；[allowed] 是这一张允许被拦下的 exec / 外连（拦下即不执行）。 */

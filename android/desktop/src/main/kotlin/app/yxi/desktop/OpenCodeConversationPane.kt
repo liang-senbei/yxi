@@ -97,31 +97,85 @@ import org.json.JSONObject
     if (LocalThemeSpec.current.style == UiStyle.Code) {
         // Code 风格（PRD §5.1）：会话头 + 居中的对话列 + 停靠区；状态、函数（act / send / 2 秒轮询）和列表顺序同经典。服务器上的 OpenCode 对话
         // （RemoteOpenCodePane）也走这里（PRD G3），会话头换成主机图标。不放「返回」（同 ACP）；不跟随最新（同经典：每次轮询都换一份 messages，留给 M3）
+        // 本机记录进页面自动接回一次（本机对齐 P4，同本机 Codex / ACP 的 Code 对话页）：失败留原因和「重新连接」「重新检测运行器」，不反复重试
         val t = Tokens.current
         val runner = LocalRuntimeDiscovery.title(record.engine)
         val focus = remember(record.key) { FocusRequester() }
         LaunchedEffect(record.key) { runCatching { focus.requestFocus() } }   // 同 ACP：焦点先落输入框（没有输入区时吞掉异常）
+        // 服务器上的记录由 RemoteOpenCodeTasks 管连接，这里不碰本机的会话管理和运行器检测
+        val local = record.hostKey.isBlank()
+        val tasks = if (local) state.localOpenCodeTasks else null
+        val workspace = if (local) state.localWorkspace else null
+        var connecting by remember(record.key) { mutableStateOf(false) }
+        var attempted by remember(record.key) { mutableStateOf(false) }
+        // 原数据目录的 OpenCode 运行器（核对同 LocalOpenCodeTasks.open）；有多个时优先当前选中的那个
+        val installations = workspace?.installations.orEmpty()
+        val matching = remember(record.engine, record.runtimeHome, installations) {
+            installations.filter { it.engine == record.engine && runCatching { java.io.File(it.home).canonicalPath == record.runtimeHome }.getOrDefault(false) }
+        }
+        val runtime = matching.filter { it.ready }.let { found -> found.firstOrNull { it.id == workspace?.selectedRuntime?.id } ?: found.firstOrNull() }
+        val unavailable = matching.firstOrNull { !it.ready }
+        fun connect(target: LocalRuntimeInstallation) {
+            if (tasks == null || connecting || tasks.busy) return
+            connecting = true; error = ""
+            scope.launch {
+                try { tasks.open(target, record.key) }
+                catch (e: CancellationException) { throw e }
+                catch (e: Exception) { error = e.message ?: "接回未完成" }
+                finally { connecting = false }
+            }
+        }
+        // 运行器检测由侧栏发起，这里不重复扫描
+        LaunchedEffect(record.key, runtime?.id, tasks?.busy) {
+            if (tasks != null && !attempted && !tasks.busy && tasks.controllers[record.key] == null && runtime != null) { attempted = true; connect(runtime) }
+        }
+        // 「马上要接回」也算接回中：免得进页面先闪一下「还没接回」
+        val opening = local && (connecting || controller == null && !attempted && runtime != null)
         Surface(Modifier.fillMaxSize(), color = t.surface0, contentColor = t.textPrimary) {
             Column(Modifier.fillMaxSize()) {
                 CodeLocalSessionHeader(state.navigation.title(record.key) ?: record.title, record.directory, runner,
                     host = if (record.hostKey.isBlank()) null else state.conn?.host?.label ?: "服务器")
-                LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(40.dp, 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    if (controller != null) {
-                        items(controller.messages, key = { it.getJSONObject("info").getString("id") }) { CodeColumn(true) { OpenCodeMessageItem(it, runner) } }
-                        items(controller.permissions, key = { "permission:${it.getString("id")}" }) { request ->
-                            CodeColumn(true) { OpenCodePermissionCard(request, controller, ::act, Modifier.fillMaxWidth()) }
-                        }
-                        items(controller.questions, key = { "question:${it.getString("id")}" }) { request ->
-                            CodeColumn(true) { OpenCodeQuestions(request, controller, ::act, Modifier.fillMaxWidth()) }
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(40.dp, 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        if (controller != null) {
+                            items(controller.messages, key = { it.getJSONObject("info").getString("id") }) { CodeColumn(true) { OpenCodeMessageItem(it, runner) } }
+                            items(controller.permissions, key = { "permission:${it.getString("id")}" }) { request ->
+                                CodeColumn(true) { OpenCodePermissionCard(request, controller, ::act, Modifier.fillMaxWidth()) }
+                            }
+                            items(controller.questions, key = { "question:${it.getString("id")}" }) { request ->
+                                CodeColumn(true) { OpenCodeQuestions(request, controller, ::act, Modifier.fillMaxWidth()) }
+                            }
                         }
                     }
+                    // 接回时列表顶端一条 2 高的进度条（同本机 Codex / ACP）
+                    if (opening) LinearProgressIndicator(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(2.dp))
                 }
                 CodeDock(true) {
-                    // 没有控制器（不是当前进程建的）时只留说明，不画输入区（经典也不画）
-                    if (controller == null) {
+                    // 服务器上没有控制器（不是当前进程建的）时只留说明，不画输入区（经典也不画）
+                    if (controller == null && !local) {
                         Note("此会话未由当前 Yxi 进程持有。原生会话与本地登记已保留，跨重启接管仍待接入。", t.textMuted)
                         Spacer(Modifier.height(8.dp))   // 同 ACP：说明字和有输入区时页脚的字同高
+                    } else if (controller == null) {
+                        // 本机还没接回：说明 + 两个 chip，输入区照画但不能发送（同 ACP）
+                        Note(when {
+                            opening -> "正在接回会话…"
+                            runtime != null -> "会话还没接回。"
+                            workspace?.detecting == true -> "正在检测本机运行器…"
+                            unavailable != null -> "$runner 运行器不可用：" + unavailable.problem.ifBlank { "未检测到版本" }
+                            workspace?.scanned != true -> "还没检测本机运行器。"
+                            else -> "没有找到使用原数据目录（${record.runtimeHome}）的 $runner 运行器，请重新检测。"
+                        }, t.textMuted)
+                        // 9.6 = Note 的 16 − chip 的 6.4：chip 的字和上面的提示字对齐
+                        Row(Modifier.padding(horizontal = 9.6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            CodeFooterChip(if (opening) "正在连接…" else "重新连接", { runtime?.let(::connect) }, enabled = runtime != null && !opening && tasks?.busy != true)
+                            CodeFooterChip(if (workspace?.detecting == true) "正在检测…" else "重新检测运行器", { workspace?.refresh() },
+                                enabled = workspace?.detecting != true && !connecting)
+                        }
+                        if (error.isNotBlank()) Note(error, t.danger)
+                        CodeLocalComposer(draft.value, { draft.value = it }, hint = if (opening) "正在接回会话…" else "接回会话后可发送",
+                            focus = focus, canSend = false, onSend = {}, running = false, onStop = {},
+                            end = { CodeFooterNote("${record.provider} · ${record.model}") })
                     } else {
                         // 待发送 / 待核对的指令画成对话末尾的排队气泡（同 Claude）；「发送」只给排第一的待发送项
                         InstructionStrip(state.instructions, record.key, !controller.busy, { act { controller.sendNext() } })
