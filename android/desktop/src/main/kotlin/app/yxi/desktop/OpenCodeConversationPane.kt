@@ -144,7 +144,10 @@ import org.json.JSONObject
                     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(40.dp, 12.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         if (controller != null) {
-                            items(controller.messages, key = { it.getJSONObject("info").getString("id") }) { CodeColumn(true) { OpenCodeMessageItem(it, runner) } }
+                            items(controller.messages, key = { it.getJSONObject("info").getString("id") }) {
+                                // M3b：一条 OpenCode 消息拆成几项（正文、思考、工具），同一套 Code 对话项
+                                CodeColumn(true) { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { Transcripts.openCode(it).forEach { item -> key(item.key) { CodeTranscriptRow(item) } } } }
+                            }
                             items(controller.permissions, key = { "permission:${it.getString("id")}" }) { request ->
                                 CodeColumn(true) { OpenCodePermissionCard(request, controller, ::act, Modifier.fillMaxWidth()) }
                             }
@@ -275,19 +278,4 @@ import org.json.JSONObject
         SelectionContainer { Text(request.toString(2)) }
         Row { OpenCodePermissionReply.entries.forEach { reply -> TextButton({ act { controller.replyPermission(request.getString("id"), reply) } }) { Text(reply.label) } } }
     } }
-}
-
-/** Code 风格的一条 OpenCode 消息：作者（你 / 运行器名，同 ACP）+ 各段；助手的 text 段按 Markdown 画，其余段照经典（text / reasoning 给原文，别的类型给 JSON）。 */
-@Composable private fun OpenCodeMessageItem(message: JSONObject, runner: String) {
-    Column {
-        val role = message.getJSONObject("info").optString("role")
-        Text(when (role) { "user" -> "你"; "assistant" -> runner; else -> role }, style = MaterialTheme.typography.labelLarge)
-        val parts = message.getJSONArray("parts")
-        for (i in 0 until parts.length()) {
-            val part = parts.getJSONObject(i)
-            val type = part.optString("type")
-            if (role == "assistant" && type == "text") AssistantBody(part.optString("text"))
-            else SelectionContainer { Text(if (type in setOf("text", "reasoning")) part.optString("text") else part.toString(2)) }
-        }
-    }
 }

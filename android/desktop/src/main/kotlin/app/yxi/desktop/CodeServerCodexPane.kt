@@ -292,11 +292,8 @@ private fun CodeServerCodexConversation(state: AppState, conn: Conn, record: Cod
                         items(messages, key = { "message:" + it.id }) { message ->
                             CodeColumn(true) {
                                 if (message.kind != "message") CodexActivityCard(message, ::openTaskFile)
-                                else Column {
-                                    Text(message.author, style = MaterialTheme.typography.labelLarge)
-                                    if (message.author == "Codex") CompositionLocalProvider(LocalUriHandler provides taskUris) { AssistantBody(message.text) }
-                                    else SelectionContainer { Text(message.text) }
-                                }
+                                // M3b：消息走统一对话项，同本机 Codex 页
+                                else CompositionLocalProvider(LocalUriHandler provides taskUris) { CodeTranscriptRow(Transcripts.codex(message)) }
                             }
                         }
                         if (controller != null) items(requests, key = { "request:" + it.get("id").toString() }) { request ->

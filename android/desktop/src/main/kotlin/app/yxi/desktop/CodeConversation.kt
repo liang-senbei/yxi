@@ -6,6 +6,9 @@ import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
@@ -20,6 +23,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -78,3 +82,51 @@ internal fun CodeTextAction(label: String, onClick: () -> Unit, enabled: Boolean
 internal fun CodeActionNote(text: String, modifier: Modifier = Modifier, color: Color = Tokens.current.textMuted) {
     Text(text, modifier.padding(horizontal = 6.4.dp), color = color, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
 }
+
+/**
+ * Code 风格的一项对话（M3b，PRD §5.5 / 规格表 §3.4），只认 [TranscriptItem]：
+ * - 你的消息：右对齐的 [CodeUserBubble]（字可选中复制），随消息发的图片画在气泡下面（[images] 槽，各运行器自己画）；
+ * - 助手正文：没有作者名的 Markdown（参照端就是这样）；
+ * - 思考：弱色斜体 14 / 20，没有标题和框；
+ * - 工具和认不出的项交给 [other]，默认是 [CodeToolFallback]（M3c 换成摘要行和工具组卡片之前的过渡外观）。
+ */
+@Composable
+internal fun CodeTranscriptRow(item: TranscriptItem, images: @Composable (List<InstructionAttachment>) -> Unit = {},
+    other: @Composable (TranscriptItem) -> Unit = { CodeToolFallback(it) }) {
+    val t = Tokens.current
+    when (item) {
+        is TranscriptItem.User -> Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+            if (item.text.isNotBlank()) SelectionContainer { CodeUserBubble(item.text) }
+            if (item.images.isNotEmpty()) images(item.images)
+        }
+        is TranscriptItem.AssistantText -> AssistantBody(item.text)
+        is TranscriptItem.Thinking -> SelectionContainer {
+            Text(item.text, color = t.textMuted, fontSize = 14.sp, lineHeight = 20.sp, fontStyle = FontStyle.Italic)
+        }
+        else -> other(item)
+    }
+}
+
+/** 工具 / 认不出的项的过渡外观（M3c 之前）：一行弱色标题（带状态），下面是可选中的原文（等宽小字）。 */
+@Composable
+internal fun CodeToolFallback(item: TranscriptItem) {
+    val t = Tokens.current
+    Column(Modifier.fillMaxWidth()) {
+        when (item) {
+            is TranscriptItem.Tool -> {
+                Text(item.title + if (item.status.isBlank()) "" else " · " + toolStatusName(item.status), color = t.textMuted, fontSize = 14.sp, lineHeight = 20.sp,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (item.detail.isNotBlank()) SelectionContainer { Text(item.detail, style = CodeStyle, color = t.textSecondary, maxLines = 12, overflow = TextOverflow.Ellipsis) }
+            }
+            is TranscriptItem.Notice -> SelectionContainer { Text(item.text, style = CodeStyle, color = t.textSecondary, maxLines = 12, overflow = TextOverflow.Ellipsis) }
+            else -> {}
+        }
+    }
+}
+
+/** 运行器给的工具状态换成中文（ACP：pending / in_progress / completed / failed；Codex：inProgress / completed / failed / declined；OpenCode：pending / running / completed / error）；认不出的原样给。 */
+internal fun toolStatusName(status: String) = when (status) {
+    "pending" -> "等待中"; "in_progress", "inProgress", "running" -> "进行中"; "completed" -> "已完成"
+    "failed", "error" -> "失败"; "declined" -> "已拒绝"; else -> status
+}
+

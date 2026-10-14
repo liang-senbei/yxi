@@ -222,11 +222,8 @@ internal fun CodeLocalCodexPane(state: AppState, record: LocalCodexTaskRecord) {
                     items(messages, key = { "message:" + it.id }) { message ->
                         CodeColumn(true) {
                             if (message.kind != "message") CodexActivityCard(message, ::copyPath)
-                            else Column {
-                                Text(message.author, style = MaterialTheme.typography.labelLarge)
-                                if (message.author == "Codex") CompositionLocalProvider(LocalUriHandler provides links) { AssistantBody(message.text) }
-                                else SelectionContainer { Text(message.text) }
-                            }
+                            // M3b：消息走统一对话项（你 = 右对齐气泡，Codex = 没有作者名的正文）；回复里的链接照旧改成复制路径
+                            else CompositionLocalProvider(LocalUriHandler provides links) { CodeTranscriptRow(Transcripts.codex(message)) }
                         }
                     }
                     if (controller != null) items(requests, key = { "request:" + it.get("id").toString() }) { request ->

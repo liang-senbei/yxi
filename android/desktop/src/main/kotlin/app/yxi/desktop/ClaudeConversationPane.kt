@@ -269,7 +269,7 @@ import java.io.File
                             }
                         }
                         items(history, key = { "history:" + it.key }) { CodeColumn(true) { LocalClaudeHistoryItem(it) } }
-                        items(messages, key = { it.id }) { CodeColumn(true) { ClaudeMessageItem(it, state.localClaudeTasks.images) } }
+                        items(messages, key = { it.id }) { CodeColumn(true) { CodeTranscriptRow(Transcripts.claude(it), images = { ClaudeSentImages(it, state.localClaudeTasks.images) }) } }   // M3b
                         items(approvals, key = { "permission:" + it.getString("request_id") }) { approval ->
                             val id = approval.getString("request_id")
                             CodeColumn(true) {
