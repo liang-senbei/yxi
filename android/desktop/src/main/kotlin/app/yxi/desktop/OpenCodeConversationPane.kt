@@ -146,9 +146,6 @@ import org.json.JSONObject
                         if (controller != null) {
                             // M3b / M3c：每条 OpenCode 消息拆成几项（正文、思考、工具），连着的工具调用跨消息合成摘要行 + 卡片
                             items(Transcripts.rows(controller.messages.flatMap(Transcripts::openCode)), key = { "row:" + it.key }) { row -> CodeColumn(true) { CodeTranscriptLine(row) } }
-                            items(controller.permissions, key = { "permission:${it.getString("id")}" }) { request ->
-                                CodeColumn(true) { OpenCodePermissionCard(request, controller, ::act, Modifier.fillMaxWidth()) }
-                            }
                             items(controller.questions, key = { "question:${it.getString("id")}" }) { request ->
                                 CodeColumn(true) { OpenCodeQuestions(request, controller, ::act, Modifier.fillMaxWidth()) }
                             }
@@ -187,6 +184,8 @@ import org.json.JSONObject
                         InstructionStrip(state.instructions, record.key, !controller.busy, { act { controller.sendNext() } })
                         Note(controller.note, t.textMuted)
                         if (error.isNotBlank()) Note(error, t.danger)
+                        // M3d-2：审批卡停靠在输入卡上方、和输入卡同宽，不进对话滚动区（规格表 §3.3）；下缘到输入卡 6.4
+                        controller.permissions.forEach { request -> key(request.getString("id")) { CodeOpenCodeApproval(request, controller, ::act) } }
                         CodeLocalComposer(draft.value, { draft.value = it },
                             // 不看 ready：每次轮询 refresh 都会把它短暂置 false，提示会闪
                             hint = when {
@@ -277,3 +276,15 @@ import org.json.JSONObject
         Row { OpenCodePermissionReply.entries.forEach { reply -> TextButton({ act { controller.replyPermission(request.getString("id"), reply) } }) { Text(reply.label) } } }
     } }
 }
+
+/** Code 风格的 OpenCode 审批（M3d-2）：标题「需要审批：权限名」；匹配规则（patterns）放进命令块，没有就放原始请求；「拒绝」在左，「仅允许本次」是主按钮。 */
+@Composable private fun CodeOpenCodeApproval(request: JSONObject, controller: OpenCodeTaskController, act: (suspend () -> Unit) -> Unit) {
+    val id = request.getString("id")
+    fun reply(r: OpenCodePermissionReply) = CodeApprovalAction(r.label, primary = r == OpenCodePermissionReply.Once) { act { controller.replyPermission(id, r) } }
+    val patterns = request.optJSONArray("patterns")?.let { array -> (0 until array.length()).map { array.optString(it) }.filter { it.isNotBlank() } }.orEmpty()
+    CodeApprovalCard("需要审批：" + request.optString("permission").ifBlank { "操作" }, reply(OpenCodePermissionReply.Reject),
+        listOf(reply(OpenCodePermissionReply.Always), reply(OpenCodePermissionReply.Once)), Modifier.padding(bottom = 6.4.dp)) {
+        CodeCommandBlock(if (patterns.isNotEmpty()) patterns.joinToString("\n") else request.toString(2))
+    }
+}
+

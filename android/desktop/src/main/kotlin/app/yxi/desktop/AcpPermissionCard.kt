@@ -6,6 +6,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import org.json.JSONObject
 
 internal data class AcpPermissionChoice(val id: String, val name: String, val scope: String)
@@ -54,3 +55,28 @@ internal fun acpPermissionChoices(params: JSONObject): List<AcpPermissionChoice>
         }
     }
 }
+
+/** Code 风格的 ACP 审批（M3d-2）：选项照运行器给的；「仅本次拒绝」放左边的拒绝位，「仅本次允许」是主按钮，其余（持续允许 / 持续拒绝 / 取消此次审批）是次按钮。 */
+@Composable internal fun CodeAcpApproval(params: JSONObject, enabled: Boolean, answer: (String?) -> Unit) {
+    val title = params.optJSONObject("toolCall")?.optString("title")?.takeIf { it.isNotBlank() } ?: "运行器请求操作权限"
+    val choices = runCatching { acpPermissionChoices(params) }
+    val cancel = CodeApprovalAction("取消此次审批", enabled = enabled) { answer(null) }
+    choices.fold(onSuccess = { options ->
+        val deny = options.firstOrNull { it.scope == "仅本次拒绝" }
+        val allow = options.firstOrNull { it.scope == "仅本次允许" }
+        val rest = options.filter { it != deny && it != allow }.map { CodeApprovalAction(it.name, enabled = enabled) { answer(it.id) } }
+        CodeApprovalCard(title, deny?.let { d -> CodeApprovalAction(d.name, enabled = enabled) { answer(d.id) } },
+            listOf(cancel) + rest + listOfNotNull(allow?.let { a -> CodeApprovalAction(a.name, primary = true, enabled = enabled) { answer(a.id) } }),
+            Modifier.padding(bottom = 6.4.dp)) {
+            params.optJSONObject("toolCall")?.optJSONArray("content")?.let { content ->
+                (0 until content.length()).mapNotNull { content.optJSONObject(it)?.optJSONObject("content")?.optString("text")?.takeIf { t -> t.isNotBlank() } }
+                    .joinToString("\n").takeIf { it.isNotBlank() }?.let { CodeCommandBlock(it) }
+            }
+        }
+    }, onFailure = { error ->
+        CodeApprovalCard(title, null, listOf(cancel), Modifier.padding(bottom = 6.4.dp)) {
+            Text(error.message ?: "审批选项无法识别", color = Tokens.current.danger, fontSize = 14.sp, lineHeight = 20.sp)
+        }
+    })
+}
+

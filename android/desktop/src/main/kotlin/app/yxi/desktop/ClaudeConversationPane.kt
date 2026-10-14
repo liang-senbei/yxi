@@ -274,15 +274,6 @@ import java.io.File
                         items(Transcripts.rows(messages.map(Transcripts::claude)), key = { "row:" + it.key }) { row ->
                             CodeColumn(true) { CodeTranscriptLine(row, images = { ClaudeSentImages(it, state.localClaudeTasks.images) }) }
                         }
-                        items(approvals, key = { "permission:" + it.getString("request_id") }) { approval ->
-                            val id = approval.getString("request_id")
-                            CodeColumn(true) {
-                                ClaudePermissionCard(approval.getJSONObject("request"),
-                                    enabled = controller?.ready == true && !controller.cancelling,
-                                    responding = id in responding,
-                                    onAllowOnce = { answer(id, true) }, onDeny = { answer(id, false) })
-                            }
-                        }
                         item { Spacer(Modifier.height(1.dp)) }
                     }
                     // 读历史、恢复时列表顶端一条 2 高的进度条（经典读历史时在列表上方占一行）
@@ -302,6 +293,12 @@ import java.io.File
                         ClaudeResumeActions(record, installations, busy = resuming || state.localClaudeTasks.busy,
                             detecting = state.localWorkspace.detecting, refresh = { state.localWorkspace.refresh() }) { resumeSession(it) }
                     if (error.isNotBlank()) Note(error, t.danger)
+                    // M3d-2：审批卡停靠在输入卡上方、和输入卡同宽，不进对话滚动区（规格表 §3.3）；下缘到输入卡 6.4
+                    approvals.forEach { approval ->
+                        val id = approval.getString("request_id")
+                        key(id) { CodeClaudeApproval(approval.getJSONObject("request"), controller?.ready == true && !controller.cancelling && id !in responding,
+                            onAllow = { answer(id, true) }, onDeny = { answer(id, false) }) }
+                    }
                     CodeLocalComposer(draft.value, { draft.value = it },
                         hint = when {
                             controller == null || !controller.ready -> if (opening) "正在恢复会话…" else "恢复会话后可发送"

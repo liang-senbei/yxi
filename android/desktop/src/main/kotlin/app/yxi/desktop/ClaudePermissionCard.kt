@@ -39,3 +39,15 @@ import org.json.JSONObject
         }
     }
 }
+
+/** Code 风格的 Claude 审批（M3d-2，规格表 §3.3）：标题「允许 Claude 使用 X？」；有命令就把说明（如果有）和命令放进命令块，没有就放原始输入；「拒绝」在左，「允许本次」是主按钮。 */
+@Composable internal fun CodeClaudeApproval(request: JSONObject, enabled: Boolean, onAllow: () -> Unit, onDeny: () -> Unit) {
+    val input = request.optJSONObject("input") ?: JSONObject()
+    val command = input.optString("command")
+    CodeApprovalCard("允许 Claude 使用 ${request.optString("tool_name").ifBlank { "工具" }}？", CodeApprovalAction("拒绝", enabled = enabled, onClick = onDeny),
+        listOf(CodeApprovalAction("允许本次", primary = true, enabled = enabled, onClick = onAllow)), Modifier.padding(bottom = 6.4.dp)) {
+        input.optString("description").takeIf { it.isNotBlank() }?.let { CodeApprovalText(it) }
+        CodeCommandBlock(command.ifBlank { input.toString(2) })
+    }
+}
+

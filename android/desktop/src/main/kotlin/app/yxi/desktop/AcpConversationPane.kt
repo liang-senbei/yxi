@@ -223,13 +223,6 @@ private class AcpPendingAuthentication(val plan: AcpTerminalAuthPlan, val comple
                         // 顺序和 key 同经典：跟随最新滚到下标 messages + approvals（末尾的占位）
                         // M3b / M3c：统一对话项，连着的工具调用合成摘要行 + 卡片
                         items(Transcripts.rows(messages.map(Transcripts::acp)), key = { "row:" + it.key }) { row -> CodeColumn(true) { CodeTranscriptLine(row) } }
-                        items(approvals, key = { "approval:" + org.json.JSONArray().put(it.get("id")).toString() }) { request ->
-                            CodeColumn(true) {
-                                AcpPermissionCard(request.getJSONObject("params"), controller?.ready == true && !controller.cancelling) { option ->
-                                    act { answerPermission(request.get("id"), option) }
-                                }
-                            }
-                        }
                         item(key = "acp-end") { Spacer(Modifier.height(1.dp)) }
                     }
                     // 接回时列表顶端一条 2 高的进度条（同本机 Codex）
@@ -268,6 +261,12 @@ private class AcpPendingAuthentication(val plan: AcpTerminalAuthPlan, val comple
                         val options = controller?.configOptions
                         val legacy = options == null || options.length() == 0
                         val selectors = if (options == null || legacy) emptyList() else acpConfigSelectors(options)
+                        // M3d-2：审批卡停靠在输入卡上方、和输入卡同宽，不进对话滚动区（规格表 §3.3）；下缘到输入卡 6.4
+                        approvals.forEach { request ->
+                            key(org.json.JSONArray().put(request.get("id")).toString()) {
+                                CodeAcpApproval(request.getJSONObject("params"), controller?.ready == true && !controller.cancelling) { option -> act { answerPermission(request.get("id"), option) } }
+                            }
+                        }
                         CodeLocalComposer(draft.value, { draft.value = it },
                             hint = when {
                                 controller == null || !controller.ready -> if (!local) "此连接已不能再发送" else if (opening) "正在接回会话…" else "接回会话后可发送"

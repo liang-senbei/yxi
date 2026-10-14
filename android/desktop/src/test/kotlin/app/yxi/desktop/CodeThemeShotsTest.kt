@@ -224,6 +224,21 @@ private fun codeScenes() = listOf(
     CodeScene("local-acp") { localAcp(it) },
     CodeScene("local-acp-model", listOf("Gemini 2.5 Pro")) { localAcp(it) },
     CodeScene("local-acp-mode", listOf("Default")) { localAcp(it) },
+    // ACP 审批卡（M3d-2，规格表 §3.3）：控制器里塞一个等审批的请求（三个选项），停靠在输入卡上方；「仅本次拒绝」在左，「仅本次允许」是主按钮
+    CodeScene("local-acp-approval", verify = { _, nodes ->
+        for (text in listOf("运行 ./gradlew test", "./gradlew :app:test", "拒绝", "总是允许", "允许一次", "取消此次审批"))
+            check(nodes.any { it.endsWith(" $text") }) { "审批卡上没有「$text」" }
+    }) {
+        localAcp(it)
+        val c = it.localAcpTasks.controllers.values.single()
+        c.pendingApprovals["shot-approval"] = JSONObject().put("id", "shot-approval").put("method", "session/request_permission").put("params", JSONObject()
+            .put("toolCall", JSONObject().put("title", "运行 ./gradlew test").put("content", JSONArray().put(JSONObject().put("type", "content")
+                .put("content", JSONObject().put("type", "text").put("text", "./gradlew :app:test")))))
+            .put("options", JSONArray()
+                .put(JSONObject().put("optionId", "allow-once").put("name", "允许一次").put("kind", "allow_once"))
+                .put(JSONObject().put("optionId", "allow-always").put("name", "总是允许").put("kind", "allow_always"))
+                .put(JSONObject().put("optionId", "reject-once").put("name", "拒绝").put("kind", "reject_once"))))
+    },
     // 本机 ACP 接回（本机对齐 P3）：放在本机侧栏整理那几张之前，免得它们落盘的置顶、新建记录串进来。进页面自动接回一次。运行器声明了 loadSession：先回放整段对话再回包；回放里的模型是旧值，回包里是当前值
     CodeScene("local-acp-restore", verify = { state, nodes ->
         check(shotAcpRequests.toList() == listOf("initialize", "session/load")) { "接回的请求不对：$shotAcpRequests" }
