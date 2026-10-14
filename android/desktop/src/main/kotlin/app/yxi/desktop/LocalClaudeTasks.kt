@@ -7,10 +7,11 @@ import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.util.concurrent.atomic.AtomicReference
 
-/** Owns explicitly created or resumed checked connections. Index loading never launches or replays a task. */
+/** Owns explicitly created or resumed checked connections. Index loading never launches or replays a task.
+ *  [resumeConnection] 可替换：截图夹具换成假的控制传输（本机对齐 P5），生产默认值不变。 */
 internal class LocalClaudeTasks(private val queue: InstructionQueue, file: File,
     private val subscription: LocalClaudeSubscription = LocalClaudeSubscription(),
-    private val resumeConnection: suspend (LocalRuntimeInstallation, LocalCodexTaskRecord) -> LocalClaudeSubscription.Prepared = { runtime, record -> subscription.resume(runtime, record) },
+    internal var resumeConnection: suspend (LocalRuntimeInstallation, LocalCodexTaskRecord) -> LocalClaudeSubscription.Prepared = { runtime, record -> subscription.resume(runtime, record) },
     private val readHistory: ((LocalCodexTaskRecord) -> List<app.yxi.agent.ChatItem>)? = null) : AutoCloseable {
     var onNotification: (LocalCodexTaskRecord, String) -> Unit = { _, _ -> }
     val images = LocalClaudeImages(File(file.parentFile, "claude-images"))

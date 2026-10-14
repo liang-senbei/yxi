@@ -89,6 +89,7 @@ import java.io.File
     var historyError by remember(record.key, controller) { mutableStateOf("") }
     var historyLoadJob by remember(record.key, controller) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var historyRefresh by remember(record.key) { mutableStateOf(0) }
+    var historyLoaded by remember(record.key, controller) { mutableStateOf(false) }   // 没恢复时原生历史读成功过（Code 的自动恢复等它）
     DisposableEffect(record.key, controller) { onDispose { historyLoadJob?.cancel() } }
     LaunchedEffect(record.key, controller, historyRefresh) {
         if (controller == null) {
@@ -96,6 +97,7 @@ import java.io.File
             try {
                 val page = withContext(Dispatchers.IO) { LocalClaudeHistory.page(record) }
                 history = page.items; historyCursor = page.earlier; historyPartial = page.partialTail
+                historyLoaded = true
             }
             catch (e: CancellationException) { throw e }
             catch (e: Exception) { historyError = e.message ?: "历史读取失败" }
@@ -230,6 +232,20 @@ import java.io.File
         LaunchedEffect(record.key) { runCatching { focus.requestFocus() } }   // 焦点先落输入框，同 SSH 对话页
         val idle = controller != null && controller.ready && !controller.busy && !controller.cancelling && !controller.changingModel && controller.pendingApprovals.isEmpty()
         val canSend = idle && !sending && !capturingImages && (draft.value.text.isNotBlank() || imageDrafts.isNotEmpty())
+        // 本机对齐 P5：进页面自动恢复一次（同本机 Codex / ACP / OpenCode 的 Code 对话页），走的就是「恢复此会话」那条路：
+        // 占用检查（ClaudeProcessOccupancy）、会话锁、历史末尾核对、未确认指令核对都在 LocalClaudeTasks.resume 里。
+        // 只在原配置目录的运行器恰好一个、原生历史读好了（读不到或末尾没写完时恢复也会失败）时试；失败只留原因和按钮，不反复重试
+        var attempted by remember(record.key) { mutableStateOf(false) }
+        val candidates = remember(record.runtimeHome, installations) { claudeResumeCandidates(record, installations) }
+        // 第一帧时读历史的 LaunchedEffect 还没开始（historyLoading 还是 false），所以要等「读成功过」
+        val historyReady = controller == null && historyLoaded && !historyLoading && historyError.isBlank() && !historyPartial
+        LaunchedEffect(record.key, candidates.singleOrNull()?.id, historyReady, state.localClaudeTasks.busy) {
+            if (!attempted && controller == null && historyReady && !resuming && !state.localClaudeTasks.busy && candidates.size == 1) {
+                attempted = true; resumeSession(candidates.single())
+            }
+        }
+        // 「马上要恢复」也算恢复中：免得读完历史先闪一下「连接未恢复」
+        val opening = resuming || controller == null && !attempted && candidates.size == 1 && historyError.isBlank() && !historyPartial
         Surface(Modifier.fillMaxSize(), color = t.surface0, contentColor = t.textPrimary) {
             Column(Modifier.fillMaxSize()) {
                 CodeLocalSessionHeader(state.navigation.title(record.key) ?: record.title, record.directory, LocalRuntimeDiscovery.title(record.engine))
@@ -259,13 +275,13 @@ import java.io.File
                         }
                         item { Spacer(Modifier.height(1.dp)) }
                     }
-                    // 读历史时列表顶端一条 2 高的进度条（经典在列表上方占一行）
-                    if (historyLoading) LinearProgressIndicator(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(2.dp))
+                    // 读历史、恢复时列表顶端一条 2 高的进度条（经典读历史时在列表上方占一行）
+                    if (historyLoading || opening) LinearProgressIndicator(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(2.dp))
                     if (!followLatest) JumpToLatestButton { followLatest = true }
                 }
                 CodeDock(true) {
                     InstructionStrip(state.instructions, record.key, idle, { controller?.dispatchNext() })
-                    Note(controller?.note ?: "连接未恢复；此记录不会自动重发指令。", t.textMuted)
+                    Note(controller?.note ?: if (opening) "正在恢复会话…" else "连接未恢复；此记录不会自动重发指令。", t.textMuted)
                     if (historyPartial) Note("读取时历史末尾尚未写完，当前仅显示完整记录。", t.textMuted)
                     if (historyError.isNotBlank()) {
                         Note(historyError, t.danger)
@@ -278,7 +294,7 @@ import java.io.File
                     if (error.isNotBlank()) Note(error, t.danger)
                     CodeLocalComposer(draft.value, { draft.value = it },
                         hint = when {
-                            controller == null || !controller.ready -> "恢复会话后可发送"
+                            controller == null || !controller.ready -> if (opening) "正在恢复会话…" else "恢复会话后可发送"
                             controller.pendingApprovals.isNotEmpty() -> "先处理上面的审批"
                             controller.busy || controller.cancelling || controller.changingModel -> "本轮结束后可发送"
                             else -> "跟它说点什么… Enter 发送，Shift+Enter 换行；截图直接 Ctrl+V"
@@ -390,12 +406,14 @@ import java.io.File
     }
 }
 
+/** 能恢复这条记录的运行器：就绪的 Claude，配置目录和记录的相同（两种风格的恢复按钮、Code 的自动恢复共用）。 */
+internal fun claudeResumeCandidates(record: LocalCodexTaskRecord, installations: List<LocalRuntimeInstallation>) =
+    installations.filter { runtime -> runtime.engine == "claude" && runtime.ready &&
+        runCatching { File(runtime.home).canonicalPath == File(record.runtimeHome).canonicalPath }.getOrDefault(false) }
+
 @Composable internal fun ClaudeResumeActions(record: LocalCodexTaskRecord, installations: List<LocalRuntimeInstallation>,
     busy: Boolean, detecting: Boolean, refresh: () -> Unit, resume: (LocalRuntimeInstallation) -> Unit) {
-    val candidates = remember(record.runtimeHome, installations) {
-        installations.filter { runtime -> runtime.engine == "claude" && runtime.ready &&
-            runCatching { File(runtime.home).canonicalPath == File(record.runtimeHome).canonicalPath }.getOrDefault(false) }
-    }
+    val candidates = remember(record.runtimeHome, installations) { claudeResumeCandidates(record, installations) }
     var selectedId by remember(record.key) { mutableStateOf<String?>(null) }
     val selected = candidates.singleOrNull() ?: candidates.singleOrNull { it.id == selectedId }
     var open by remember(record.key) { mutableStateOf(false) }

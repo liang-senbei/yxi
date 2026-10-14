@@ -92,7 +92,9 @@ class CodeThemeShotsTest {
                 val scope = object : FrameWindowScope { override val window: ComposeWindow get() = hidden }
                 try {
                     assertEquals(emptyList(), guard.drain(), "准备阶段就有被拦的 exec / 外连")
-                    for (scene in codeScenes()) for (theme in listOf("light", "dark")) {
+                    // 调试时可以只跑几张：YXI_THEME_SHOT_SCENES=名字,名字（不设就是全部；基准只认全部跑的那一轮）
+                    val only = System.getenv("YXI_THEME_SHOT_SCENES")?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet()
+                    for (scene in codeScenes().filter { only == null || it.name in only }) for (theme in listOf("light", "dark")) {
                         val name = "$theme/${scene.name}"
                         val started = System.nanoTime()
                         val verdict = try {
@@ -339,6 +341,15 @@ private fun codeScenes() = listOf(
         // 侧栏新行、会话头、输入框各一个
         check(nodes.count { it.endsWith(" $SHOT_HOME_PROMPT") } >= 3) { "新对话页上提示词不够三处（侧栏 / 会话头 / 输入框）" }
     }) { localHomeCreate(it) },
+    // 本机 Claude 自动恢复（本机对齐 P5）：恢复成功会把会话记录写进夹具 profile，所以放在本机场景最后（后面只有服务器场景）；同一条记录换成夹具目录里的配置目录（有一份原生历史），一个就绪的运行器指着它；
+    // 读完历史后页面自动恢复一次（resumeConnection 钩子接假的控制传输，不起进程）：历史在、模型 chip 在、停靠区不再有「恢复此会话」
+    CodeScene("local-claude-restore", verify = { state, nodes ->
+        check(shotConnects.get() == 1) { "恢复连了 ${shotConnects.get()} 次，应该只有进页面那一次" }
+        val c = checkNotNull(state.localClaudeTasks.controllers.values.singleOrNull()) { "自动恢复后没有控制器：" + nodes.filter { "x=800.0" in it || "x=793.6" in it }.map { it.substringAfter("  ") } }
+        check(c.ready && !state.localClaudeTasks.busy) { "恢复后不是就绪" }
+        check(nodes.any { it.endsWith(" 登录页的报错提示太笼统了，按错误码分开写") }) { "没读到原生历史" }
+        check(nodes.none { it.endsWith(" 恢复此会话") }) { "恢复后停靠区还有「恢复此会话」" }
+    }) { localClaudeRestore(it) },
     // 服务器 Codex 对话（本机对齐 P2）：Code 下服务器上用 Codex 运行器的会话页和本机同一套（会话头、居中对话列、停靠区）。打开 ssh-list 里那条
     // 「登录页改版」，控制器接假 app-server、只进内存。第一张一轮做完加一条目标，第二张多一轮等命令审批，第三张点开会话头的 ⋮，第四张点开模型 chip
     CodeScene("server-codex", verify = { _, nodes ->
@@ -739,6 +750,84 @@ private fun sshAcpQueue(state: AppState) {
     state.remoteAcpTasks.controllers[record.key] = AcpTaskController(record.key, record.threadId, client, state.instructions)
     check(QueuePreferences.setEnabled(record.key, false) == null) { "写排队偏好失败" }
     SHOT_ACP_QUEUED.forEachIndexed { i, text -> state.instructions.enqueue(record.key, text, id = "shot-acp-remote-${i + 1}") }
+}
+
+/**
+ * 本机 Claude 自动恢复（本机对齐 P5）：[localHome] 里那条 Claude 记录换成 UUID 会话、配置目录换到夹具目录里的 claude-home（写一份两条的原生历史），
+ * 加一个就绪的运行器指着它（只有它匹配，页面才会自动恢复）。resumeConnection 钩子照 LocalClaudeTasksTest 的写法走真的
+ * LocalClaudeSubscription.resume 核对，只把起进程换成 [ShotClaudeTransport]；次数记进 [shotConnects]。
+ */
+private fun localClaudeRestore(state: AppState) {
+    // 前面几张（和浅色那张的自己）落盘的会话记录会被读回来，先清掉，再由 localHome 摆回同样的三条
+    state.localClaudeTasks.registry.records.clear(); state.localCodexTasks.registry.records.clear()
+    state.localOpenCodeTasks.registry.records.clear(); state.localAcpTasks.registry.records.clear()
+    localHome(state)
+    val fixture = File(System.getenv("YXI_THEME_SHOT_FIXTURE")).canonicalFile
+    val home = fixture.resolve("claude-home").canonicalFile
+    val records = state.localClaudeTasks.registry.records
+    val record = records[0].copy(threadId = "00000000-0000-4000-8000-000000000005", runtimeHome = home.path, model = "claude-sonnet-4-5", provider = "official:claude")
+    records[0] = record
+    val rows = listOf(
+        JSONObject().put("type", "user").put("uuid", "shot-u1").put("parentUuid", JSONObject.NULL)
+            .put("message", JSONObject().put("role", "user").put("content", "登录页的报错提示太笼统了，按错误码分开写")),
+        JSONObject().put("type", "assistant").put("uuid", "shot-a1").put("parentUuid", "shot-u1")
+            .put("message", JSONObject().put("role", "assistant").put("content", JSONArray().put(JSONObject().put("type", "text")
+                .put("text", "好的，我按 401 / 403 / 429 分开提示，并保留原来的兜底文案。")))))
+    home.resolve("projects/demo-app").apply { deleteRecursively(); mkdirs() }.resolve("${record.threadId}.jsonl")
+        .writeText(rows.joinToString("") { it.put("sessionId", record.threadId).put("cwd", record.directory).toString() + "\n" })
+    val claude = LocalRuntimeInstallation("claude", "PATH", listOf("C:\\fixture\\bin\\claude-restore.exe"), home.path, "2.0.0 (Claude Code)")
+    state.localWorkspace.forceState("installations", state.localWorkspace.installations + claude)
+    shotConnects.set(0)
+    state.localClaudeTasks.resumeConnection = { runtime, saved ->
+        shotConnects.incrementAndGet()
+        LocalClaudeSubscription().resume(runtime, saved) { _, _, id -> ClaudeControlClient(ShotClaudeTransport(saved.model), id) }
+    }
+    state.localSelectedTaskKey = record.key
+}
+
+/** 截图用的假 Claude 控制传输（同 LocalClaudeTasksTest 的 Fixture，只答控制请求）；块队列代替管道流，同 [ShotCodexTransport]。 */
+private class ShotClaudeTransport(private var model: String) : ClaudeControlTransport {
+    private val chunks = java.util.concurrent.LinkedBlockingQueue<ByteArray>()
+    private val end = ByteArray(0)
+    private var effort = "medium"
+    override val output: java.io.InputStream = object : java.io.InputStream() {
+        private var current = ByteArray(0)
+        private var at = 0
+        private fun fill(): Boolean {
+            while (at >= current.size) {
+                val next = chunks.take()
+                if (next === end) { chunks.put(end); return false }
+                current = next; at = 0
+            }
+            return true
+        }
+        override fun read(): Int = if (fill()) current[at++].toInt() and 0xff else -1
+        override fun read(b: ByteArray, off: Int, len: Int): Int {
+            if (len == 0) return 0
+            if (!fill()) return -1
+            val n = minOf(len, current.size - at)
+            System.arraycopy(current, at, b, off, n); at += n
+            return n
+        }
+    }
+    override suspend fun write(text: String): Boolean {
+        val request = JSONObject(text)
+        if (request.optString("type") != "control_request") return true
+        val control = request.getJSONObject("request")
+        val subtype = control.getString("subtype")
+        if (subtype == "set_model") model = control.getString("model")
+        if (subtype == "apply_flag_settings") effort = control.getJSONObject("settings").optString("effortLevel", effort)
+        val value = if (subtype == "initialize") JSONObject()
+            .put("account", JSONObject().put("tokenSource", "claude.ai").put("apiProvider", "firstParty"))
+            .put("models", JSONArray(listOf("claude-sonnet-4-5", "claude-opus-4-1").map { name ->
+                JSONObject().put("resolvedModel", name).put("supportsEffort", true).put("supportedEffortLevels", JSONArray(listOf("low", "medium", "high")))
+            }))
+        else JSONObject().put("effective", ClaudeSubscriptionSettings.overlay()).put("applied", JSONObject().put("model", model).put("effort", effort))
+        chunks.put((JSONObject().put("type", "control_response").put("response", JSONObject().put("subtype", "success")
+            .put("request_id", request.getString("request_id")).put("response", value)).toString() + "\n").toByteArray())
+        return true
+    }
+    override fun close() { chunks.put(end) }
 }
 
 /** 截图用的假 OpenCode（回环，NoExec 放行）：[localOpenCode] 起，shootCode 收尾时停。 */
