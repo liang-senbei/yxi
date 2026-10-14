@@ -317,6 +317,11 @@ private fun codeScenes() = listOf(
         check(nodes.any { it.endsWith(" 重新连接") }) { "失败后没有回到「重新连接」" }
     }) { localCodexFailed(it) },
     // 本机 Codex 的输入区（P1c）：点开模型 chip（列表来自 model/list，强度条跟着当前模型）；草稿一句话 + 两张图（托盘缩略图读快照）
+    // 消息操作行（M3d-3，规格表 §3.4）：鼠标停在你的消息上，下方 8 处出现「复制」（靠右）；不停时位置照留
+    CodeScene("local-codex-message-hover", listOf("~给解析器加两组基准测试：大文件和深层嵌套。"), verify = { _, nodes ->
+        // 语义清单里没有图标的描述，按位置认：「复制」是 24×24 的按钮，右缘贴对话列右边（x 1552 − 24 = 1528）
+        check(nodes.any { "x=1528.0" in it && "w=24.0 h=24.0 Button" in it }) { "鼠标停在消息上没有出现「复制」" }
+    }) { localCodex(it, approval = false) },
     // 工具摘要行和工具组卡片（M3c，规格表 §3.4）：一轮里的命令和文件改动合成一行，点开是撑满列宽的卡片；第二张再点开命令条目（命令框 + 输出）
     CodeScene("local-codex-tools", listOf(SHOT_CODEX_TOOLS), verify = { _, nodes ->
         check(nodes.any { it.trimEnd().endsWith(" 修改") } && nodes.any { it.endsWith(" parser.rs、Cargo.toml") }) { "卡片里没有改文件的条目" }

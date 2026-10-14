@@ -41,6 +41,10 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.foundation.layout.Arrangement
 
 /*
  * Code 风格对话区的小件（规格 §3.4）。M2 先给排队用（InstructionStrip），M3 画用户消息和消息操作行时接着用。
@@ -108,11 +112,13 @@ internal fun CodeTranscriptRow(item: TranscriptItem, images: @Composable (List<I
     other: @Composable (TranscriptItem) -> Unit = { CodeToolFallback(it) }) {
     val t = Tokens.current
     when (item) {
-        is TranscriptItem.User -> Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
-            if (item.text.isNotBlank()) SelectionContainer { CodeUserBubble(item.text) }
-            if (item.images.isNotEmpty()) images(item.images)
+        is TranscriptItem.User -> CodeMessageWithActions(item.text, alignEnd = true) {
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+                if (item.text.isNotBlank()) SelectionContainer { CodeUserBubble(item.text) }
+                if (item.images.isNotEmpty()) images(item.images)
+            }
         }
-        is TranscriptItem.AssistantText -> AssistantBody(item.text)
+        is TranscriptItem.AssistantText -> CodeMessageWithActions(item.text, alignEnd = false) { AssistantBody(item.text) }
         is TranscriptItem.Thinking -> SelectionContainer {
             Text(item.text, color = t.textMuted, fontSize = 14.sp, lineHeight = 20.sp, fontStyle = FontStyle.Italic)
         }
@@ -254,5 +260,35 @@ private fun CodeToolEntry(tool: TranscriptItem.Tool, onPath: ((String) -> Unit)?
 private fun clipLines(text: String, max: Int = 80): String {
     val lines = text.trimEnd().lines()
     return if (lines.size <= max) lines.joinToString("\n") else lines.take(max).joinToString("\n") + "\n…（还有 ${lines.size - max} 行未显示）"
+}
+
+/**
+ * 消息下面的操作行（M3d-3，规格表 §3.4）：在消息下方 8、高 24；鼠标停在消息上才显示，不显示时位置照留，所以消息之间的距离不随它变
+ * （下面再留 4，加上列表的间距 10，上一条消息底到下一条顶 = 8 + 24 + 4 + 10 = 46，规格 ≈46～48）。
+ * 只放 Yxi 真能做的「复制」：你的消息靠右（同参照端的位置），助手的回复靠左。参照端的重试、分叉、置顶和相对时间 Yxi 没有对应的功能或数据，不放。
+ */
+@Composable
+internal fun CodeMessageWithActions(copyText: String, alignEnd: Boolean, content: @Composable () -> Unit) {
+    val source = remember { MutableInteractionSource() }
+    val hovered by source.collectIsHoveredAsState()
+    Column(Modifier.fillMaxWidth().hoverable(source)) {
+        content()
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth().height(24.dp), horizontalArrangement = if (alignEnd) Arrangement.End else Arrangement.Start,
+            verticalAlignment = Alignment.CenterVertically) {
+            if (hovered && copyText.isNotBlank()) CodeCopyAction(copyText)
+        }
+        Spacer(Modifier.height(4.dp))
+    }
+}
+
+/** 操作行里的「复制」：24×24 图标按钮（图标 12.8，弱色；hover 底 #F0F0EF、字形变深，同规格表 §3.4），点了写剪贴板，1.5 秒内显示成对勾。 */
+@Composable
+private fun CodeCopyAction(text: String) {
+    var done by remember { mutableStateOf(false) }
+    LaunchedEffect(done) { if (done) { kotlinx.coroutines.delay(1500); done = false } }
+    CodeIconButton(if (done) Icons.Filled.Check else Icons.Outlined.ContentCopy, if (done) "已复制" else "复制", iconSize = 12.8.dp, tint = Tokens.current.textMuted, tipAbove = true) {
+        runCatching { java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(java.awt.datatransfer.StringSelection(text), null) }.onSuccess { done = true }
+    }
 }
 
