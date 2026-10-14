@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -184,8 +185,9 @@ internal fun FilesPane(conn: Conn, taskKey: String, directory: String, onOpen: (
     }
 }
 
+/** 一行（本机对齐 P6b 起本机文件也用：本机的目录项照样装进 [Sftp.Entry]）。 */
 @Composable
-private fun FileRow(e: Sftp.Entry, onOpen: () -> Unit) {
+internal fun FileRow(e: Sftp.Entry, onOpen: () -> Unit) {
     val t = Tokens.current
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(14.dp, 7.dp),
@@ -208,7 +210,7 @@ private fun FileRow(e: Sftp.Entry, onOpen: () -> Unit) {
 }
 
 /** 图片扩展名 —— 跟手机端 [app.yxi.ui] 那份保持一致 */
-private val IMAGES = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp")
+internal val PREVIEW_IMAGES = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp")
 
 /**
  * 预览。文本直接读出来显示，图片解码成位图。
@@ -217,27 +219,34 @@ private val IMAGES = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp")
  * 就是把它整个拉进内存 —— 而用户只是想看一眼头几行。
  */
 @Composable
-private fun FilePreview(conn: Conn, path: String, sftp: Sftp?, onClose: () -> Unit) {
-    val t = Tokens.current
-    var bytes by remember(path) { mutableStateOf<ByteArray?>(null) }
-    var err by remember(path) { mutableStateOf("") }
-    val ext = Paths.extOf(path)
-
-    LaunchedEffect(path) {
-        runCatching {
-            val s = sftp ?: conn.ssh.openSftp()
-            s.read(path, max = if (ext in IMAGES) 8 shl 20 else 1 shl 20)
-        }.onSuccess { bytes = it }.onFailure { err = Sftp.explain(it) }
-    }
-
-    Column(Modifier.fillMaxSize().background(t.surface1)) {
-        Row(Modifier.fillMaxWidth().padding(12.dp, 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(Paths.nameOf(path), Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = t.textPrimary, maxLines = 1)
+private fun FilePreview(conn: Conn, path: String, sftp: Sftp?, onClose: () -> Unit) =
+    FilePreviewView(path, Paths.nameOf(path), Paths.extOf(path), { max -> (sftp ?: conn.ssh.openSftp()).read(path, max = max) }, Sftp::explain,
+        actions = { bytes ->
             TextButton({
                 pickSaveTo(Paths.nameOf(path))?.let { out ->
                     bytes?.let { runCatching { out.writeBytes(it) } }
                 }
             }) { Text("另存为") }
+        }, onClose = onClose)
+
+/** 预览（服务器和本机共用，本机对齐 P6b 抽出来）：[read] 读最多 max 字节，[explain] 把异常说成人话，[actions] 是「关闭」前面的按钮（服务器「另存为」，本机「复制路径」）。 */
+@Composable
+internal fun FilePreviewView(path: String, name: String, ext: String, read: suspend (max: Int) -> ByteArray, explain: (Throwable) -> String,
+    actions: @Composable RowScope.(ByteArray?) -> Unit, onClose: () -> Unit) {
+    val t = Tokens.current
+    var bytes by remember(path) { mutableStateOf<ByteArray?>(null) }
+    var err by remember(path) { mutableStateOf("") }
+
+    LaunchedEffect(path) {
+        runCatching {
+            read(if (ext in PREVIEW_IMAGES) 8 shl 20 else 1 shl 20)
+        }.onSuccess { bytes = it }.onFailure { err = explain(it) }
+    }
+
+    Column(Modifier.fillMaxSize().background(t.surface1)) {
+        Row(Modifier.fillMaxWidth().padding(12.dp, 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(name, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = t.textPrimary, maxLines = 1)
+            actions(bytes)
             TextButton(onClose) { Text("关闭") }
         }
         HorizontalDivider(color = t.border)
@@ -248,7 +257,7 @@ private fun FilePreview(conn: Conn, path: String, sftp: Sftp?, onClose: () -> Un
             bytes == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
             }
-            ext in IMAGES -> ImageBody(bytes!!)
+            ext in PREVIEW_IMAGES -> ImageBody(bytes!!)
             else -> Text(
                 // ⚠️ 二进制文件不能直接当文本画：满屏乱码还可能卡住排版。先看一眼有没有 NUL
                 if (bytes!!.take(4096).any { it.toInt() == 0 }) "这是个二进制文件，预览不了。用「另存为」拿下来看。"

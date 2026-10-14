@@ -248,12 +248,13 @@ import java.io.File
         val opening = resuming || controller == null && !attempted && candidates.size == 1 && historyError.isBlank() && !historyPartial
         Surface(Modifier.fillMaxSize(), color = t.surface0, contentColor = t.textPrimary) {
             Column(Modifier.fillMaxSize()) {
-                // 「改动」开着时对话列换成本机的 Git 改动视图（本机对齐 P6a，同服务器 Codex 页），停靠区不变
-                var showChanges by remember(record.key) { mutableStateOf(false) }
+                // 「改动」「文件」开着时对话列换成本机的 Git 改动 / 文件视图（本机对齐 P6a / P6b，同服务器 Codex 页），停靠区不变
+                var tool by remember(record.key) { mutableStateOf<String?>(null) }
                 CodeLocalSessionHeader(state.navigation.title(record.key) ?: record.title, record.directory, LocalRuntimeDiscovery.title(record.engine)) {
-                    CodeLocalChangesButton(showChanges) { showChanges = !showChanges }
+                    CodeLocalToolButtons(tool) { tool = it }
                 }
-                if (showChanges) Box(Modifier.weight(1f).fillMaxWidth()) { CodeLocalChanges(state, record) { showChanges = false } }
+                if (tool == "changes") Box(Modifier.weight(1f).fillMaxWidth()) { CodeLocalChanges(state, record) { tool = null } }
+                else if (tool == "files") Box(Modifier.weight(1f).fillMaxWidth()) { LocalFilesPane(record.key, record.directory) }
                 else Box(Modifier.weight(1f).fillMaxWidth()) {
                     LazyColumn(Modifier.fillMaxSize().onPointerEvent(PointerEventType.Scroll, PointerEventPass.Initial) { event ->
                         if (event.changes.any { it.scrollDelta.y < 0f }) followLatest = false

@@ -300,6 +300,14 @@ private fun codeScenes() = listOf(
         for (text in listOf("Git 改动", "未暂存", "已暂存", "MM  src/auth/errors.ts", "??  src/auth/errors.test.ts", "选择文件查看差异"))
             check(nodes.any { it.endsWith(" $text") }) { "改动视图里没有「$text」" }
     }) { localCodex(it, approval = false); shotLocalGit() },
+    // 本机文件（本机对齐 P6b）：会话头点「文件」，对话列换成本机目录（夹具 projects/demo-app，摆几个文件、时间固定）；第二张再点 README.md 看预览
+    CodeScene("local-codex-files", listOf("@文件"), verify = { _, nodes ->
+        for (text in listOf("src", "README.md", "package.json")) check(nodes.any { it.endsWith(" $text") }) { "文件列表里没有「$text」" }
+    }) { localCodex(it, approval = false); shotLocalFiles() },
+    CodeScene("local-codex-files-preview", listOf("@文件", "README.md"), verify = { _, nodes ->
+        check(nodes.any { it.endsWith(" 复制路径") } && nodes.any { it.endsWith(" 关闭") }) { "预览上没有「复制路径」「关闭」" }
+        check(nodes.any { "跑 npm test" in it }) { "预览里没有 README 的内容" }
+    }) { localCodex(it, approval = false); shotLocalFiles() },
     CodeScene("local-codex-changes-diff", listOf("@改动", "MM  src/auth/errors.ts"), verify = { _, nodes ->
         check(nodes.any { it.endsWith(" 当前显示差异：+3 / −1") }) { "差异统计不对" }
         check(nodes.any { it.endsWith(" 针对这份差异提要求") } && nodes.any { it.endsWith(" 打开文件 · src/auth/errors.ts") }) { "差异下的操作不全" }
@@ -793,6 +801,17 @@ private fun localClaudeRestore(state: AppState) {
         LocalClaudeSubscription().resume(runtime, saved) { _, _, id -> ClaudeControlClient(ShotClaudeTransport(saved.model), id) }
     }
     state.localSelectedTaskKey = record.key
+}
+
+/** 本机文件的夹具（本机对齐 P6b）：projects/demo-app 下摆一个 src 目录和两个文件，修改时间都固定（列表里显示时间），只写在夹具目录里。 */
+private fun shotLocalFiles() {
+    val demo = File(System.getenv("YXI_THEME_SHOT_FIXTURE")).canonicalFile.resolve("projects").resolve("demo-app")
+    val at = 1_760_000_000_000L
+    demo.resolve("src").mkdirs()
+    demo.resolve("src/index.ts").apply { writeText("export const parse = (input: string) => input.trim()\n"); setLastModified(at) }
+    demo.resolve("package.json").apply { writeText("{\n  \"name\": \"demo-app\",\n  \"scripts\": { \"test\": \"vitest\" }\n}\n"); setLastModified(at) }
+    demo.resolve("README.md").apply { writeText("# demo-app\n\n解析器的小示例。\n\n## 开发\n\n- 跑 npm test 看单测\n- 改 src/index.ts\n"); setLastModified(at) }
+    demo.resolve("src").setLastModified(at)
 }
 
 /** 本机 Git 改动的固定快照（本机对齐 P6a）：一个两边都改了的文件和一个未跟踪的测试文件；选了 errors.ts 时给一段差异（未暂存的那份）。 */

@@ -21,6 +21,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.Difference
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Laptop
 import androidx.compose.material3.Icon
@@ -174,9 +175,13 @@ internal fun CodeFooterSelect(
     }
 }
 
-/** 本机对话会话头右端的「改动」（本机对齐 P6a）：同服务器 Codex 页的图标；开着时对话列换成 [CodeLocalChanges]。 */
+/** 本机对话会话头右端的工具（本机对齐 P6）：「改动」（P6a，同服务器 Codex 页的图标）、「文件」（P6b，服务器页收在 ⋮ 里，本机没有 ⋮ 就直接放图标）。
+ *  两个互斥：开着时对话列换成 [CodeLocalChanges] / [LocalFilesPane]，停靠区不变。 */
 @Composable
-internal fun CodeLocalChangesButton(active: Boolean, onClick: () -> Unit) = CodeIconButton(Icons.Outlined.Difference, "改动", active = active, onClick = onClick)
+internal fun CodeLocalToolButtons(tool: String?, onTool: (String?) -> Unit) {
+    CodeIconButton(Icons.Outlined.Difference, "改动", active = tool == "changes") { onTool(if (tool == "changes") null else "changes") }
+    CodeIconButton(Icons.Outlined.FolderOpen, "文件", active = tool == "files") { onTool(if (tool == "files") null else "files") }
+}
 
 /**
  * 本机对话的 Git 改动（本机对齐 P6a）：同服务器 Codex 页的改动视图（[GitChangesView]，两种风格、本机服务器共用），数据来自本机的 [LocalGit]，只读。
