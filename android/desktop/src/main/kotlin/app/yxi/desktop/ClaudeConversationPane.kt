@@ -268,7 +268,8 @@ import java.io.File
                                 }
                             }
                         }
-                        items(history, key = { "history:" + it.key }) { CodeColumn(true) { LocalClaudeHistoryItem(it) } }
+                        // M3d：原生历史也走统一对话项。一条历史一项（工具调用画成只有一个条目的卡片）：「加载更早消息」按历史下标找回滚动位置，不能合并
+                        items(history, key = { "history:" + it.key }) { CodeColumn(true) { CodeTranscriptLine(Transcripts.rows(listOf(Transcripts.claudeHistory(it))).single()) } }
                         // M3b / M3c：统一对话项；工具结果并进前一个调用
                         items(Transcripts.rows(messages.map(Transcripts::claude)), key = { "row:" + it.key }) { row ->
                             CodeColumn(true) { CodeTranscriptLine(row, images = { ClaudeSentImages(it, state.localClaudeTasks.images) }) }

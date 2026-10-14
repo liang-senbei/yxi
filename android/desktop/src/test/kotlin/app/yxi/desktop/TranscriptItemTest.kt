@@ -80,4 +80,18 @@ class TranscriptItemTest {
         assertEquals("用了 2 个工具，搜索了一次", Transcripts.summary(listOf(tool(ToolKind.Other, title = "p"), tool(ToolKind.Other, title = "q"), tool(ToolKind.Search))))
         assertEquals(ToolKind.Edit, Transcripts.kindOf("MultiEdit")); assertEquals(ToolKind.Search, Transcripts.kindOf("glob")); assertEquals(ToolKind.Other, Transcripts.kindOf("webfetch"))
     }
+
+    @Test fun `claude native history maps to the same items and labels non-messages`() {
+        assertEquals(TranscriptItem.User("u", "你好"), Transcripts.claudeHistory(app.yxi.agent.ChatItem.UserText("u", "你好")))
+        assertEquals(TranscriptItem.AssistantText("a", "**嗯**"), Transcripts.claudeHistory(app.yxi.agent.ChatItem.AssistantText("a", "**嗯**")))
+        val call = app.yxi.agent.ChatItem.ToolCall("t", "Edit", JSONObject().put("file_path", "/w/a.kt"), result = "ok", isError = false)
+        (Transcripts.claudeHistory(call) as TranscriptItem.Tool).let {
+            assertEquals(ToolKind.Edit, it.kind); assertEquals(listOf("/w/a.kt"), it.paths); assertEquals("completed", it.status); assertTrue(it.detail.endsWith("\n\nok"))
+        }
+        assertEquals("failed", (Transcripts.claudeHistory(app.yxi.agent.ChatItem.ToolCall("e", "Bash", JSONObject().put("command", "x"), "boom", true)) as TranscriptItem.Tool).status)
+        assertEquals("", (Transcripts.claudeHistory(app.yxi.agent.ChatItem.ToolCall("p", "Bash", JSONObject())) as TranscriptItem.Tool).status, "还没有结果")
+        assertEquals(TranscriptItem.Notice("q", "原生队列 · 待处理：等会儿"), Transcripts.claudeHistory(app.yxi.agent.ChatItem.Queued("q", "等会儿")))
+        assertEquals(TranscriptItem.Notice("x", "接口报错：529"), Transcripts.claudeHistory(app.yxi.agent.ChatItem.ApiError("x", "529")))
+        assertEquals("队友消息 · ios\n在忙", (Transcripts.claudeHistory(app.yxi.agent.ChatItem.Injected("i", "队友消息", "ios", "在忙")) as TranscriptItem.Notice).text)
+    }
 }

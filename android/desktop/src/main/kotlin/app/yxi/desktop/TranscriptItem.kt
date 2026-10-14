@@ -94,6 +94,21 @@ internal object Transcripts {
         else -> TranscriptItem.Notice(m.id, m.text)
     }
 
+    /** 本机 Claude 的原生历史（core 的 ChatItem，LocalClaudeHistory 读出来的）：工具调用带着结果；注入的（队友消息、系统提醒等）、
+     *  原生队列里待处理的、接口报错和认不出的都给成 [TranscriptItem.Notice]，前面写明是什么，不冒充你说的话或助手的正文。 */
+    fun claudeHistory(item: app.yxi.agent.ChatItem): TranscriptItem = when (item) {
+        is app.yxi.agent.ChatItem.UserText -> TranscriptItem.User(item.key, item.text)
+        is app.yxi.agent.ChatItem.AssistantText -> TranscriptItem.AssistantText(item.key, item.markdown)
+        is app.yxi.agent.ChatItem.Thinking -> TranscriptItem.Thinking(item.key, item.text)
+        is app.yxi.agent.ChatItem.ToolCall -> TranscriptItem.Tool(item.key, item.name.ifBlank { "工具" },
+            listOfNotNull(item.input.toString(2), item.result?.takeIf { it.isNotBlank() }).joinToString("\n\n"),
+            if (item.isError) "failed" else if (item.result != null) "completed" else "", pathsOf(item.input), kindOf(item.name), item.input.optString("command"))
+        is app.yxi.agent.ChatItem.Queued -> TranscriptItem.Notice(item.key, "原生队列 · 待处理：" + item.text)
+        is app.yxi.agent.ChatItem.Injected -> TranscriptItem.Notice(item.key, listOfNotNull(item.kind, item.from).joinToString(" · ") + "\n" + app.yxi.agent.Transcript.clean(item.text))
+        is app.yxi.agent.ChatItem.ApiError -> TranscriptItem.Notice(item.key, "接口报错：" + item.text)
+        is app.yxi.agent.ChatItem.Unknown -> TranscriptItem.Notice(item.key, "未识别的历史内容\n" + item.raw)
+    }
+
     /** ACP（AcpTaskController，本机和服务器共用）：工具卡 kind = tool，author 是工具标题；其余 author 是 User / Assistant。 */
     fun acp(m: AcpMessage): TranscriptItem = when {
         m.kind == "tool" -> TranscriptItem.Tool(m.id, m.author.ifBlank { "工具" }, m.text, m.status)
