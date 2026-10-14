@@ -5,6 +5,7 @@ package app.yxi.desktop
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -37,6 +38,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.FrameWindowScope
 import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.WindowState
+import androidx.compose.material3.Text
+import androidx.compose.runtime.remember
+import androidx.compose.ui.focus.FocusRequester
 import app.yxi.agent.Groups
 import app.yxi.agent.Pending
 import app.yxi.agent.Session
@@ -171,6 +175,12 @@ private fun codeScenes() = listOf(
     CodeScene("home-permission-again", listOf("请求批准", "请求批准")) { codeHome(it) },
     CodeScene("ssh-chat") { remote(it, tab = 0) },
     CodeScene("approval-card", content = { ApprovalDockShot() }),
+    // 新会话页的两侧边距（M2-d）：主区只有 600 宽时，骨架两侧各留 40，输入卡宽 600 − 80 = 520、左缘 288 + 40（PRD §5.1）。只画骨架和占位的 chip / 输入卡
+    CodeScene("home-narrow", content = { NarrowHomeShot() }, verify = { _, nodes ->
+        val card = nodes.singleOrNull { it.endsWith(" 窄窗口里的输入卡") } ?: error("没有输入卡")
+        // 文字节点不含占位卡自己的内边距 12：卡片 x 328、宽 520 → 文字 x 340、宽 496
+        check(" x=340.0 " in " " + card.trim() + " " && " w=496.0 " in " " + card.trim() + " ") { "两侧不是 40：$card" }
+    }) { narrowHomeState = it },
     // 排队（§3.4）放最后：指令记录落在夹具 profile 的 instructions.json，后面的场景都会读到；固定 id，重复入队是幂等的
     CodeScene("ssh-queue") { queued(it, 2, automatic = true) },
     CodeScene("ssh-queue-manual") { queued(it, 4, automatic = false) },
@@ -449,6 +459,23 @@ private fun codeScenes() = listOf(
  * 审批卡：pending 只来自 SSH 轮询，离屏够不着（同经典夹具）；照 CodeShell + ChatPane 的停靠区摆同一个 [ApprovalCard]：
  * 左侧栏 288，主区底部是两侧 40、最宽 768 的居中列，卡片下面留输入区的 78.4。数据同经典的 approval-card。
  */
+@Composable
+private fun NarrowHomeShot() {
+    val state = narrowHomeState ?: return
+    val t = Tokens.current
+    Row(Modifier.fillMaxSize().background(t.surface0)) {
+        Spacer(Modifier.width(288.dp).fillMaxHeight())
+        Box(Modifier.width(600.dp).fillMaxHeight()) {
+            CodeHomeFrame(state, remember { FocusRequester() }, notes = {}, chips = { Text("文件夹 chip", color = t.textSecondary) },
+                footer = { Text("页脚", color = t.textMuted) },
+                card = { Text("窄窗口里的输入卡", Modifier.fillMaxWidth().background(t.surface1).padding(12.dp), color = t.textPrimary) })
+        }
+    }
+}
+
+/** [NarrowHomeShot] 用的状态：arrange 时记下（content 场景拿不到 AppState）。 */
+private var narrowHomeState: AppState? = null
+
 @Composable
 private fun ApprovalDockShot() {
     Row(Modifier.fillMaxSize().background(Tokens.current.surface0)) {
