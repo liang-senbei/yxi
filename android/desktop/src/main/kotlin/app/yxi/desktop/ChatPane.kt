@@ -517,11 +517,14 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
             ) {
                 items(rows, key = { it.key }) { row ->
                     CodeColumn(codeStyle) {
-                        when (row) {
-                            is ChatRow.Group -> GroupCard(row.calls, open = row.key in openGroups) {
-                                if (row.key in openGroups) openGroups.remove(row.key) else openGroups.add(row.key)
-                            }
-                            is ChatRow.One -> ItemView(conn, row.item) { editingMessage = it }
+                        fun toggle() { if (row.key in openGroups) openGroups.remove(row.key) else openGroups.add(row.key) }
+                        when {
+                            // M3e：Code 下走统一对话项的外观；工具仍用这里的分组和开合状态，点开的条目画原来的富渲染 ToolCard
+                            codeStyle && row is ChatRow.Group -> CodeToolGroup(row.calls.map { Transcripts.claudeHistory(it) as TranscriptItem.Tool },
+                                expanded = row.key in openGroups, onToggle = ::toggle, detail = { tool -> row.calls.firstOrNull { it.key == tool.key }?.let { ToolCard(it) } })
+                            codeStyle && row is ChatRow.One -> CodeChatItem(row.item) { editingMessage = it }
+                            row is ChatRow.Group -> GroupCard(row.calls, open = row.key in openGroups) { toggle() }
+                            row is ChatRow.One -> ItemView(conn, row.item) { editingMessage = it }
                         }
                     }
                 }
@@ -862,6 +865,29 @@ private fun ItemView(conn: Conn, item: ChatItem, onEdit: (MessageEditTarget) -> 
     is ChatItem.Injected -> Fold(listOfNotNull(item.kind, item.from).joinToString(" · "), Transcript.clean(item.text))
     is ChatItem.ApiError -> Note("⚠ " + item.text, Tokens.current.danger)
     is ChatItem.Unknown -> Unit
+}
+
+/**
+ * Code 风格下 SSH 对话的一项（M3e）：你的消息 = 右对齐气泡，操作行有复制和「编辑消息」（回退改写，同经典）；原生队列里待处理的也是气泡、上面写「排队中」；
+ * 助手正文、思考、注入的消息走统一对话项（Transcripts.claudeHistory）；单独一次工具调用画成一个条目的卡片，点开是原来的 ToolCard；接口报错同经典（危险色）。
+ */
+@Composable
+private fun CodeChatItem(item: ChatItem, onEdit: (MessageEditTarget) -> Unit) {
+    when (item) {
+        is ChatItem.UserText -> CodeMessageWithActions(item.text, alignEnd = true, onEdit = { onEdit(MessageEditTarget(item.key, item.text, sourceUuid = item.sourceUuid)) }) {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) { SelectionContainer { CodeUserBubble(item.text) } }
+        }
+        is ChatItem.Queued -> CodeMessageWithActions(item.text, alignEnd = true, onEdit = { onEdit(MessageEditTarget(item.key, item.text, queued = true)) }) {
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+                Text("排队中", color = Tokens.current.textMuted, fontSize = 12.sp, lineHeight = 17.sp)
+                SelectionContainer { CodeUserBubble(item.text) }
+            }
+        }
+        is ChatItem.ToolCall -> CodeToolGroup(listOf(Transcripts.claudeHistory(item) as TranscriptItem.Tool), detail = { ToolCard(item) })
+        is ChatItem.ApiError -> Note("⚠ " + item.text, Tokens.current.danger)
+        is ChatItem.Unknown -> Unit
+        else -> CodeTranscriptRow(Transcripts.claudeHistory(item))
+    }
 }
 
 /** Read-only local history uses the same assistant, tool, and folded-event renderers. */

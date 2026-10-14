@@ -174,6 +174,8 @@ private fun codeScenes() = listOf(
     CodeScene("home-folder-hint", listOf("~demo-app")) { codeHome(it) },
     CodeScene("home-permission-again", listOf("请求批准", "请求批准")) { codeHome(it) },
     CodeScene("ssh-chat") { remote(it, tab = 0) },
+    // SSH 对话的工具组（M3e）：Code 的摘要行 + 卡片，点开的条目里是原来的富渲染 ToolCard（这里是 Bash：命令和输出）
+    CodeScene("ssh-chat-tool", listOf("运行了一条命令", "./gradlew test --offline")) { remote(it, tab = 0) },
     CodeScene("approval-card", content = { ApprovalDockShot() }),
     // 新会话页的两侧边距（M2-d）：主区只有 600 宽时，骨架两侧各留 40，输入卡宽 600 − 80 = 520、左缘 288 + 40（PRD §5.1）。只画骨架和占位的 chip / 输入卡
     CodeScene("home-narrow", content = { NarrowHomeShot() }, verify = { _, nodes ->

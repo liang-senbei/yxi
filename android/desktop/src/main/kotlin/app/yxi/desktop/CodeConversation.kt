@@ -45,6 +45,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material.icons.outlined.Edit
 
 /*
  * Code 风格对话区的小件（规格 §3.4）。M2 先给排队用（InstructionStrip），M3 画用户消息和消息操作行时接着用。
@@ -164,16 +165,20 @@ internal fun CodeTranscriptLine(row: TranscriptRow, images: @Composable (List<In
  * 条目之间贯通的细线；每个条目收起时高 36、字起于卡片左 +10.4，点开看详情（[CodeToolEntry]）。进行中 / 失败在短语后面写一句。
  */
 @Composable
-internal fun CodeToolGroup(tools: List<TranscriptItem.Tool>, onPath: ((String) -> Unit)? = null) {
+internal fun CodeToolGroup(tools: List<TranscriptItem.Tool>, onPath: ((String) -> Unit)? = null,
+    expanded: Boolean? = null, onToggle: (() -> Unit)? = null, detail: (@Composable (TranscriptItem.Tool) -> Unit)? = null) {
     val t = Tokens.current
-    var open by remember(tools.first().key) { mutableStateOf(false) }
+    // 开合状态默认自己记；SSH 对话页（M3e）传 [expanded] / [onToggle]，用它自己的状态（「跳到某个工具」要能展开对应的组）
+    var own by remember(tools.first().key) { mutableStateOf(false) }
+    val open = expanded ?: own
+    fun toggle() { if (onToggle != null) onToggle() else own = !own }
     val source = remember { MutableInteractionSource() }
     val hovered by source.collectIsHoveredAsState()
     val running = tools.any { it.status in setOf("pending", "in_progress", "inProgress", "running") }
     val failed = tools.any { it.status in setOf("failed", "error", "declined") }
     val strong = open || hovered
     Column(Modifier.fillMaxWidth()) {
-        Row(Modifier.hoverable(source).clickable(interactionSource = source, indication = null, role = Role.Button) { open = !open },
+        Row(Modifier.hoverable(source).clickable(interactionSource = source, indication = null, role = Role.Button) { toggle() },
             verticalAlignment = Alignment.CenterVertically) {
             Text(Transcripts.summary(tools) + if (running) " · 进行中" else if (failed) " · 有失败" else "",
                 color = if (strong) t.textSecondary else t.textMuted, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
@@ -187,7 +192,7 @@ internal fun CodeToolGroup(tools: List<TranscriptItem.Tool>, onPath: ((String) -
             Column(Modifier.fillMaxWidth().border(line, t.border, RoundedCornerShape(8.dp))) {
                 tools.forEachIndexed { index, tool ->
                     if (index > 0) HorizontalDivider(thickness = line, color = t.border)
-                    CodeToolEntry(tool, onPath)
+                    CodeToolEntry(tool, onPath, detail)
                 }
             }
         }
@@ -208,7 +213,7 @@ private fun CodeToolArrow(open: Boolean, strong: Boolean) {
  * 文件改动的路径可点（[onPath]）。详情最多画 80 行，长的写明省略了多少。
  */
 @Composable
-private fun CodeToolEntry(tool: TranscriptItem.Tool, onPath: ((String) -> Unit)?) {
+private fun CodeToolEntry(tool: TranscriptItem.Tool, onPath: ((String) -> Unit)?, detail: (@Composable (TranscriptItem.Tool) -> Unit)? = null) {
     val t = Tokens.current
     var open by remember(tool.key) { mutableStateOf(false) }
     val source = remember { MutableInteractionSource() }
@@ -231,7 +236,9 @@ private fun CodeToolEntry(tool: TranscriptItem.Tool, onPath: ((String) -> Unit)?
             Spacer(Modifier.weight(1f))
             if (tool.status.isNotBlank() && tool.status != "completed") Text(toolStatusName(tool.status), color = t.textMuted, fontSize = 12.sp, lineHeight = 16.sp)
         }
-        if (open) Column(Modifier.fillMaxWidth().padding(start = 9.6.dp, end = 8.8.dp, bottom = 11.2.dp)) {
+        // [detail] 给了就用调用方自己的详情（SSH 对话页用富渲染的 ToolCard：结构化 diff、分开的 stdout / stderr 等）
+        if (open && detail != null) Box(Modifier.fillMaxWidth().padding(start = 9.6.dp, end = 8.8.dp, bottom = 11.2.dp)) { detail(tool) }
+        else if (open) Column(Modifier.fillMaxWidth().padding(start = 9.6.dp, end = 8.8.dp, bottom = 11.2.dp)) {
             val line = hairline()
             if (tool.kind == ToolKind.Command && tool.command.isNotBlank()) {
                 Row(Modifier.fillMaxWidth().border(line, t.border, RoundedCornerShape(8.dp)).background(t.surface2, RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 4.dp)) {
@@ -268,7 +275,7 @@ private fun clipLines(text: String, max: Int = 80): String {
  * 只放 Yxi 真能做的「复制」：你的消息靠右（同参照端的位置），助手的回复靠左。参照端的重试、分叉、置顶和相对时间 Yxi 没有对应的功能或数据，不放。
  */
 @Composable
-internal fun CodeMessageWithActions(copyText: String, alignEnd: Boolean, content: @Composable () -> Unit) {
+internal fun CodeMessageWithActions(copyText: String, alignEnd: Boolean, onEdit: (() -> Unit)? = null, content: @Composable () -> Unit) {
     val source = remember { MutableInteractionSource() }
     val hovered by source.collectIsHoveredAsState()
     Column(Modifier.fillMaxWidth().hoverable(source)) {
@@ -277,6 +284,8 @@ internal fun CodeMessageWithActions(copyText: String, alignEnd: Boolean, content
         Row(Modifier.fillMaxWidth().height(24.dp), horizontalArrangement = if (alignEnd) Arrangement.End else Arrangement.Start,
             verticalAlignment = Alignment.CenterVertically) {
             if (hovered && copyText.isNotBlank()) CodeCopyAction(copyText)
+            // 「编辑」（SSH 对话页的回退改写，M3e）：同一行、在复制后面
+            if (hovered && onEdit != null) CodeIconButton(Icons.Outlined.Edit, "编辑消息", iconSize = 12.8.dp, tint = Tokens.current.textMuted, tipAbove = true, onClick = onEdit)
         }
         Spacer(Modifier.height(4.dp))
     }
