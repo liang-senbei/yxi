@@ -46,6 +46,12 @@ internal fun EffortControl(model: String, levels: List<String>, selected: String
         else -> Color(0xFF3B82F6)
     }
     val change by rememberUpdatedState(onSelect)
+    // Code 风格深色（M2-e）：轨道、还没到的点、拇指描边原来写死成浅灰，深色下是一条亮带；换成 Code 深色里现成的颜色
+    // （轨道 = 深色选中底 #343434，点 = 深色闲置环 #5A5955，描边 = 深色回车图元 #4A4A48）。拇指保持白色（同系统滑块）。经典和 Code 浅色不变
+    val codeDark = LocalThemeSpec.current.style == UiStyle.Code && Tokens.current.dark
+    val track = if (codeDark) Color(0xFF343434) else Color(0xFFE8E8EA)
+    val idleDot = if (codeDark) Color(0xFF5A5955) else Color(0xFFB8B8BC)
+    val thumbRing = if (codeDark) Color(0xFF4A4A48) else Color(0xFFE4E4E8)
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
             Text(model.ifBlank { "选择模型" }, color = Tokens.current.textPrimary, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
@@ -90,13 +96,13 @@ internal fun EffortControl(model: String, levels: List<String>, selected: String
             val x = thumb + (size.width - 2 * thumb).coerceAtLeast(0f) * fraction
             val path = Path().apply { addRoundRect(RoundRect(0f, y, size.width, y + trackH, CornerRadius(radius))) }
             clipPath(path) {
-                drawRect(Color(0xFFE8E8EA), Offset(0f, y), Size(size.width, trackH))
+                drawRect(track, Offset(0f, y), Size(size.width, trackH))
                 val brush = if (selected == "max") Brush.horizontalGradient(listOf(Color(0xFF5430A5), Color(0xFFA66CEC), Color(0xFFCF8AE8)))
                     else Brush.horizontalGradient(listOf(tint, tint))
                 drawRect(brush, Offset(0f, y), Size(x, trackH))
                 repeat(levels.size + 1) { n ->
                     val dotX = thumb + (size.width - 2 * thumb) * n / levels.size
-                    drawCircle(if (n <= index + 1) Color.White.copy(alpha = .4f) else Color(0xFFB8B8BC), 2.3.dp.toPx(), Offset(dotX, size.height / 2))
+                    drawCircle(if (n <= index + 1) Color.White.copy(alpha = .4f) else idleDot, 2.3.dp.toPx(), Offset(dotX, size.height / 2))
                 }
                 if (selected == "max") repeat(21) { n ->
                     val px = 12.dp.toPx() + ((n * 43) % 257) / 257f * (size.width - 24.dp.toPx())
@@ -104,7 +110,7 @@ internal fun EffortControl(model: String, levels: List<String>, selected: String
                 }
             }
             drawCircle(Color.Black.copy(alpha = .07f), thumb + 1.dp.toPx(), Offset(x, size.height / 2 + 1.dp.toPx()))
-            drawCircle(Color(0xFFE4E4E8), thumb, Offset(x, size.height / 2))
+            drawCircle(thumbRing, thumb, Offset(x, size.height / 2))
             drawCircle(Color.White, thumb - 1.dp.toPx(), Offset(x, size.height / 2))
         }
     }
