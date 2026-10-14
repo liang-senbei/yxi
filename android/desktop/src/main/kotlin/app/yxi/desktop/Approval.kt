@@ -102,6 +102,20 @@ fun ApprovalCard(p: Pending, a: Approval, busy: Boolean, onKey: (String) -> Unit
     val t = Tokens.current
     val perm = p.isPermission(a)
     val simple = perm && !p.multiSelect && p.tabs.size <= 1 && !p.review   // 一排按钮；多选 / 多题还是列表 + 提交
+    if (LocalThemeSpec.current.style == UiStyle.Code && simple) {
+        // M3e-2：Code 的审批卡（规格表 §3.3，同本机各运行器的 CodeApprovalCard）。第一项（Enter 选它）是主按钮，「拒绝」放左边，其余是次按钮；
+        // 卡片上显示几号点下去就送几号，键位不变（Enter / Esc 还在输入框那边接）。键帽不画，号码和 Enter / Esc 照旧写在最后一行
+        val deny = p.options.firstOrNull { isReject(it.label) }
+        CodeApprovalCard(a.tool?.let { "允许 Claude 使用 $it？" } ?: p.title.ifBlank { "等你选" },
+            deny?.let { o -> CodeApprovalAction(zhOption(o.label), enabled = !busy) { onKey(o.number.toString()) } },
+            p.options.filter { it != deny }.mapIndexed { i, o -> CodeApprovalAction(zhOption(o.label), primary = o == p.options.first() && i == 0, enabled = !busy) { onKey(o.number.toString()) } },
+            Modifier.padding(top = 4.dp, bottom = 6.4.dp)) {
+            if (a.body.isNotBlank()) CodeCommandBlock(a.body)
+            Text(p.options.joinToString(" · ") { "${it.number} ${it.label}" } + "   Enter = ${zhOption(p.options.first().label)} · Esc = 拒绝",
+                fontSize = 11.sp, lineHeight = 16.sp, color = t.textMuted)
+        }
+        return
+    }
     val shape = RoundedCornerShape(Radius)
     Column(
         Modifier.fillMaxWidth().then(if (LocalThemeSpec.current.style == UiStyle.Code) Modifier.padding(top = 4.dp, bottom = 6.4.dp) else Modifier.padding(12.dp, 4.dp))   // Code：宽随停靠区 768、下缘到输入卡 6.4（规格 §3.3），样式 M3 再换
