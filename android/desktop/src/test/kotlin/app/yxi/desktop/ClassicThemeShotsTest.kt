@@ -278,7 +278,8 @@ private val REPLY = """
 internal fun ShotFrame(state: AppState, scope: FrameWindowScope, win: WindowState, body: @Composable () -> Unit) {
     val base = LocalWindowInfo.current
     // ImageComposeScene 自报窗口有焦点，输入框光标就会闪；按失焦画（不画光标），帧才稳定
-    CompositionLocalProvider(LocalWindowInfo provides remember(base) { Unfocused(base) }) {
+    // 状态行的计时（M3f）用固定时间、不刷新：真实时钟每秒变一次，画面就稳定不下来
+    CompositionLocalProvider(LocalWindowInfo provides remember(base) { Unfocused(base) }, LocalStatusClock provides SHOT_STATUS_CLOCK) {
         Zoomed {
             YxiTheme {
                 with(scope) { WindowFrame(state, win, {}) { body() } }
@@ -286,6 +287,8 @@ internal fun ShotFrame(state: AppState, scope: FrameWindowScope, win: WindowStat
         }
     }
 }
+
+private val SHOT_STATUS_CLOCK = StatusClock({ 1_760_000_000_000L }, tick = false)
 
 private class Unfocused(base: WindowInfo) : WindowInfo by base {
     override val isWindowFocused: Boolean get() = false

@@ -141,11 +141,14 @@ import org.json.JSONObject
                 if (local && tool == "changes") Box(Modifier.weight(1f).fillMaxWidth()) { CodeLocalChanges(state, record) { tool = null } }
                 else if (local && tool == "files") Box(Modifier.weight(1f).fillMaxWidth()) { LocalFilesPane(record.key, record.directory) }
                 else Box(Modifier.weight(1f).fillMaxWidth()) {
+                    // M3f：运行中的状态行（对话末尾）；开始时间记在这一层，列表滚动时不会从 0 算起
+                    val runningSince = rememberRunningSince(controller?.nativeBusy == true && controller.permissions.isEmpty() && controller.questions.isEmpty())
                     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(40.dp, 12.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         if (controller != null) {
                             // M3b / M3c：每条 OpenCode 消息拆成几项（正文、思考、工具），连着的工具调用跨消息合成摘要行 + 卡片
                             items(Transcripts.rows(controller.messages.flatMap(Transcripts::openCode)), key = { "row:" + it.key }) { row -> CodeColumn(true) { CodeTranscriptLine(row) } }
+                            if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在运行", runningSince) } }
                             items(controller.questions, key = { "question:${it.getString("id")}" }) { request ->
                                 CodeColumn(true) { OpenCodeQuestions(request, controller, ::act, Modifier.fillMaxWidth()) }
                             }

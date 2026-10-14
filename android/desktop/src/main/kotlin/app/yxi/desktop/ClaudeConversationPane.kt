@@ -256,6 +256,8 @@ import java.io.File
                 if (tool == "changes") Box(Modifier.weight(1f).fillMaxWidth()) { CodeLocalChanges(state, record) { tool = null } }
                 else if (tool == "files") Box(Modifier.weight(1f).fillMaxWidth()) { LocalFilesPane(record.key, record.directory) }
                 else Box(Modifier.weight(1f).fillMaxWidth()) {
+                    // M3f：运行中的状态行（对话末尾）；开始时间记在这一层，列表滚动时不会从 0 算起
+                    val runningSince = rememberRunningSince(controller?.busy == true && approvals.isEmpty())
                     LazyColumn(Modifier.fillMaxSize().onPointerEvent(PointerEventType.Scroll, PointerEventPass.Initial) { event ->
                         if (event.changes.any { it.scrollDelta.y < 0f }) followLatest = false
                     }, state = view.scroll, contentPadding = PaddingValues(40.dp, 12.dp),
@@ -274,6 +276,7 @@ import java.io.File
                         items(Transcripts.rows(messages.map(Transcripts::claude)), key = { "row:" + it.key }) { row ->
                             CodeColumn(true) { CodeTranscriptLine(row, images = { ClaudeSentImages(it, state.localClaudeTasks.images) }) }
                         }
+                        if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在生成回复", runningSince) } }
                         item { Spacer(Modifier.height(1.dp)) }
                     }
                     // 读历史、恢复时列表顶端一条 2 高的进度条（经典读历史时在列表上方占一行）

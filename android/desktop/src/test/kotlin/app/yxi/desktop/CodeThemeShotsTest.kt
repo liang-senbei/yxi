@@ -286,6 +286,10 @@ private fun codeScenes() = listOf(
     // 记录只改内存里的索引。第二张多一轮等审批的（审批卡、停止方块、侧栏的状态点）
     CodeScene("local-opencode") { localOpenCode(it, permission = false) },
     CodeScene("local-opencode-permission") { localOpenCode(it, permission = true) },
+    // 运行中的状态行（M3f，规格表 §3.4）：在跑、没有审批时对话末尾一行「正在运行 · Ns」；夹具的时钟固定，所以是 0s
+    CodeScene("local-opencode-running", verify = { _, nodes ->
+        check(nodes.any { it.endsWith(" 正在运行 · 0s") }) { "运行中没有状态行" }
+    }) { localOpenCode(it, permission = false, running = true) },
     // 本机 OpenCode 接回（本机对齐 P4）：同一条记录没有控制器，页面自动接回一次（serve 钩子接回环上的假 OpenCode，不起进程）：
     // 读回会话和历史、登记控制器，停靠区回到「就绪」和输入区；只起一次服务
     CodeScene("local-opencode-restore", verify = { state, nodes ->
@@ -942,7 +946,7 @@ private val shotServers = mutableListOf<HttpServer>()
  * 控制器接回环上的假 OpenCode：只答 refresh 要的几条 GET（会话归属、200 条消息、审批、提问、状态），别的给 404；
  * 在 EDT 上先同步 refresh 一次（请求跑在 IO 上），第一帧就有数据，之后面板每 2 秒刷新一次，回的内容不变。[permission] 多一轮等审批的。
  */
-private fun localOpenCode(state: AppState, permission: Boolean) {
+private fun localOpenCode(state: AppState, permission: Boolean, running: Boolean = false) {
     localHome(state)
     val records = state.localOpenCodeTasks.registry.records
     val index = records.indexOfFirst { it.threadId == "shot-local-3" }
@@ -965,6 +969,7 @@ private fun localOpenCode(state: AppState, permission: Boolean) {
             .put("patterns", JSONArray().put("npm run docs:build")))
         status.put(sid, JSONObject().put("type", "busy"))
     }
+    if (running) status.put(sid, JSONObject().put("type", "busy"))   // M3f：在跑、没有审批，对话末尾出状态行
     val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
     server.createContext("/") { exchange ->
         val body = when (exchange.requestURI.path) {

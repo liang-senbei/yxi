@@ -509,6 +509,8 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                 Modifier.matchParentSize(),
             )
             // Code 风格：对话列 768 在主区居中，窄时两侧各留 40（规格 §2）；LazyColumn 本身仍铺满，两侧留白里滚轮照样滚
+            // M3f：运行中的状态行（对话末尾）；开始时间记在这一层，列表滚动时不会从 0 算起
+            val runningSince = rememberRunningSince(codeStyle && live.busy && pending == null)
             LazyColumn(
                 Modifier.fillMaxSize().nestedScroll(scrollWatch), state = listState,
                 contentPadding = if (codeStyle) PaddingValues(40.dp, 12.dp) else PaddingValues(16.dp, 12.dp),
@@ -528,6 +530,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                         }
                     }
                 }
+                if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在运行", runningSince) } }
                 item(key = "conversation-bottom-anchor") { Spacer(Modifier.height(1.dp)) }
             }
             if (items.isEmpty()) Text(status ?: "还没有对话", Modifier.align(Alignment.Center), style = BodyStyle, color = t.textMuted)

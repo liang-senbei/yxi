@@ -46,6 +46,8 @@ import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.material.icons.outlined.Autorenew
 
 /*
  * Code 风格对话区的小件（规格 §3.4）。M2 先给排队用（InstructionStrip），M3 画用户消息和消息操作行时接着用。
@@ -298,6 +300,36 @@ private fun CodeCopyAction(text: String) {
     LaunchedEffect(done) { if (done) { kotlinx.coroutines.delay(1500); done = false } }
     CodeIconButton(if (done) Icons.Filled.Check else Icons.Outlined.ContentCopy, if (done) "已复制" else "复制", iconSize = 12.8.dp, tint = Tokens.current.textMuted, tipAbove = true) {
         runCatching { java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(java.awt.datatransfer.StringSelection(text), null) }.onSuccess { done = true }
+    }
+}
+
+/** 状态行用的时钟（M3f）：生产是系统时间、每秒刷新一次；截图夹具换成固定时间、不刷新（画面要连续几帧一样才算稳定）。 */
+internal class StatusClock(val now: () -> Long, val tick: Boolean)
+internal val LocalStatusClock = staticCompositionLocalOf { StatusClock({ System.currentTimeMillis() }, tick = true) }
+
+/** 本轮从什么时候开始跑（M3f）：[running] 变成 true 那一刻记下，变回 false 清零；放在面板这一层记，列表滚动时状态行重画也不会从 0 算起。 */
+@Composable
+internal fun rememberRunningSince(running: Boolean): Long {
+    val clock = LocalStatusClock.current
+    return remember(running) { if (running) clock.now() else 0L }
+}
+
+/**
+ * 运行中的状态行（M3f，规格表 §3.4）：在对话末尾、上一条消息的操作行下面；12 的图标（x 列左 +4）+ 次色字（列左 +34.4），形如「正在运行 · 9s」。
+ * 参照端是循环动画的品牌图标，Yxi 用静态图标（PRD §2-5）；秒数是真实计时，每秒刷新。
+ */
+@Composable
+internal fun CodeStatusLine(label: String, since: Long) {
+    val t = Tokens.current
+    val clock = LocalStatusClock.current
+    var now by remember(since) { mutableStateOf(clock.now()) }
+    if (clock.tick) LaunchedEffect(since) { while (true) { kotlinx.coroutines.delay(1000); now = clock.now() } }
+    val seconds = if (since <= 0L) 0L else ((now - since) / 1000).coerceAtLeast(0L)
+    Row(Modifier.fillMaxWidth().height(24.dp), verticalAlignment = Alignment.CenterVertically) {
+        Spacer(Modifier.width(4.dp))
+        Icon(Icons.Outlined.Autorenew, null, Modifier.size(12.dp), tint = t.textMuted)
+        Spacer(Modifier.width(18.4.dp))
+        Text("$label · ${seconds}s", color = t.textSecondary, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 1)
     }
 }
 

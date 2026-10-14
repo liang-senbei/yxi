@@ -285,6 +285,8 @@ private fun CodeServerCodexConversation(state: AppState, conn: Conn, record: Cod
                 else if (showChanges) key(record.key) {
                     GitChangesPane(conn, record.directory, ::openTaskFile) { quote -> state.appendCodexQuote(record, quote); showChanges = false }
                 } else {
+                    // M3f：运行中的状态行（对话末尾）；开始时间记在这一层，列表滚动时不会从 0 算起
+                    val runningSince = rememberRunningSince(controller?.activeTurnId != null && requests.isEmpty())
                     LazyColumn(Modifier.fillMaxSize().onPointerEvent(PointerEventType.Scroll, PointerEventPass.Initial) { event ->
                         if (event.changes.any { it.scrollDelta.y < 0f }) followLatest = false
                     }, state = view.scroll, contentPadding = PaddingValues(40.dp, 12.dp),
@@ -293,6 +295,7 @@ private fun CodeServerCodexConversation(state: AppState, conn: Conn, record: Cod
                         items(Transcripts.rows(messages.map(Transcripts::codex)), key = { "row:" + it.key }) { row ->
                             CodeColumn(true) { CompositionLocalProvider(LocalUriHandler provides taskUris) { CodeTranscriptLine(row, onPath = ::openTaskFile) } }
                         }
+                        if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在运行", runningSince) } }
                         item(key = "latest") { Spacer(Modifier.height(1.dp)) }
                     }
                     if (workspace.busy) LinearProgressIndicator(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(2.dp))

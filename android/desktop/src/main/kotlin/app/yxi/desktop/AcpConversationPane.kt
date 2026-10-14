@@ -216,6 +216,8 @@ private class AcpPendingAuthentication(val plan: AcpTerminalAuthPlan, val comple
                 if (local && tool == "changes") Box(Modifier.weight(1f).fillMaxWidth()) { CodeLocalChanges(state, record) { tool = null } }
                 else if (local && tool == "files") Box(Modifier.weight(1f).fillMaxWidth()) { LocalFilesPane(record.key, record.directory) }
                 else Box(Modifier.weight(1f).fillMaxWidth()) {
+                    // M3f：运行中的状态行（对话末尾）；开始时间记在这一层，列表滚动时不会从 0 算起
+                    val runningSince = rememberRunningSince(controller?.busy == true && approvals.isEmpty())
                     LazyColumn(Modifier.fillMaxSize().nestedScroll(scrollWatch).onPointerEvent(PointerEventType.Scroll, PointerEventPass.Initial) { event ->
                         if (event.changes.any { it.scrollDelta.y < 0f }) followLatest = false
                     }, state = view.scroll, contentPadding = PaddingValues(40.dp, 12.dp),
@@ -223,6 +225,7 @@ private class AcpPendingAuthentication(val plan: AcpTerminalAuthPlan, val comple
                         // 顺序和 key 同经典：跟随最新滚到下标 messages + approvals（末尾的占位）
                         // M3b / M3c：统一对话项，连着的工具调用合成摘要行 + 卡片
                         items(Transcripts.rows(messages.map(Transcripts::acp)), key = { "row:" + it.key }) { row -> CodeColumn(true) { CodeTranscriptLine(row) } }
+                        if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在生成回复", runningSince) } }
                         item(key = "acp-end") { Spacer(Modifier.height(1.dp)) }
                     }
                     // 接回时列表顶端一条 2 高的进度条（同本机 Codex）
