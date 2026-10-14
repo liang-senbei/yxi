@@ -10,7 +10,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun CodexGoalStrip(controller: CodexTaskController) {
+internal fun CodexGoalStrip(controller: CodexTaskController, usedLabel: String = "服务器累计") {
     val scope = rememberCoroutineScope()
     var expanded by remember(controller) { mutableStateOf(false) }
     LaunchedEffect(controller, controller.ready) { if (controller.ready) controller.refreshGoal() }
@@ -30,7 +30,7 @@ internal fun CodexGoalStrip(controller: CodexTaskController) {
                     TextButton({ scope.launch { controller.refreshGoal() } }, enabled = controller.ready && !controller.goalLoading) { Text("刷新") }
                 }
                 Text(goal.objective, maxLines = if (expanded) Int.MAX_VALUE else 1, overflow = TextOverflow.Ellipsis)
-                Text("服务器累计 ${goal.seconds.coerceAtLeast(0) / 60}分 ${goal.seconds.coerceAtLeast(0) % 60}秒 · ${goal.tokens} tokens" +
+                Text("$usedLabel ${goal.seconds.coerceAtLeast(0) / 60}分 ${goal.seconds.coerceAtLeast(0) % 60}秒 · ${goal.tokens} tokens" +
                     (goal.budget?.let { " / 预算 $it" } ?: ""), style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                 if (controller.goalError.isNotBlank()) Text(controller.goalError, style = MaterialTheme.typography.bodySmall, color = Tokens.current.danger)
             }

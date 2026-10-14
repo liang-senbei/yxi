@@ -1,5 +1,14 @@
 # handover · Yxi
 
+## 最新进展：Code 风格与本机对齐（2026-10-15，分支 `claude/code-theme`）
+
+1.4.16 之后的界面工作都在 `claude/code-theme` 分支（基于 1.4.16 的 9b5daef4），这一版提交含 M2-a、b1–b4 和本机对齐 P1a–P1f、P2、P3。界面参照是 Claude Desktop 的 Code 模式；Codex、Claude Code、OpenCode、ACP（Gemini / Grok / Hermes）只是可选的运行器。经典风格不变（M0 的 12 张经典基线零差异）。
+
+- 完整交接（机器、项目、进度、下一步、验证方法、要拍板的事、回退）：hk13 `/root/src/workspace/yunxi/yxi-handover/`，先读其中的 `README.md`（目录说明），再读 `yxi-交接.md`。本机同一份在 `E:\work\workspace\yxi\handover\`。
+- 任务规划图：同目录 `本机对齐-规划.md`；逐步记录：`progress-m2.md`；Code 风格的 PRD 和规格表：本仓库 `design/ui-style-prd.md`、`design/ui-style-spec.md`。
+- 截图基准（不进 git）：hk13 `yxi-handover/shots/`，当前 Code 基准是 `code-p3`（65 个场景、130 张），经典基线是 `m0-classic`。
+- 下一步：本机对齐 P4（本机 OpenCode 继续会话）→ P5 → P6 → M2 c–f → M3–M5。
+
 ## 最新全量交接（2026-09-27）
 
 优先阅读 [WORK-HANDOFF-2026-09-27.md](design/WORK-HANDOFF-2026-09-27.md)。线上已为 **1.4.16**（2026-09-30，含图片输入、剪贴板贴图、无界面入口的跨运行器交接底层和界面风格切换预览，见 [windows-1.4.16-release.md](design/windows-1.4.16-release.md)）；两处取消交接草稿的改动仍未提交，不在 1.4.16 里。新文档包含原始需求、源码地图、测试证据、发布回退、环境变化、未完成项和接手命令。下方为历史记录，不能把旧版本／旧分工直接当当前状态。

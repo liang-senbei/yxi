@@ -303,7 +303,7 @@ internal class CodexTaskController(
     }
 
     private suspend fun submit(item: QueuedInstruction, steeringTurn: String?) {
-        CodexAppServer.userInput(item.text, item.attachments) // Validate before changing durable delivery state.
+        client.input(item.text, item.attachments) // Validate before changing durable delivery state.
         val model = selectedModel
         val effort = selectedEffort
         val initialModelRevision = modelReportRevision

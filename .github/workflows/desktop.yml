@@ -2,6 +2,7 @@
 # jpackage 跨不了平台，所以放 GitHub 的 windows runner。触发：手动（gh workflow run desktop.yml --ref <分支>），或推 tag `desktop-v*`。
 # 产物 artifact `Yxi-windows`：Releases/（Yxi-win-Setup.exe、Yxi-<v>-full.nupkg、releases.win.json、RELEASES）+ uber jar（`java -jar …` 就能跑）。
 # 发布到 yxi.keuury.com/desktop/：android/desktop/publish.sh <run id>。
+# macOS 只出 Apple Silicon arm64，在 job `macos`：app-image → ad-hoc 重签 → hdiutil 做 dmg；artifact `Yxi-macos-arm64`（dmg + uber jar），未签名、未公证。
 #
 # ⚠️ settings.gradle 里带着 :app（Android）。实测（AGP 9.3.1，Linux 上无 local.properties、ANDROID_HOME 未设）：
 #    只跑 :desktop 的任务时配置阶段**不要** Android SDK —— AGP 把 SDK 检查推迟到了执行阶段。
@@ -139,6 +140,119 @@ jobs:
         if: always()
         with:
           name: Yxi-windows-smoke-logs
+          path: |
+            smoke-*.txt
+            smoke-browser.png
+            android/desktop/build/test-results/test/*.xml
+            android/desktop/build/reports/tests/test/
+          if-no-files-found: ignore
+
+  # 不用 packageDmg：jpackage 做 dmg 要用 osascript 让 Finder 摆图标（TCC 自动化授权），无人值守的机器上会卡住或失败。
+  # 正式签名 / 公证等 Developer ID：到时给 gradle 加 -Pyxi.mac.sign=true -Pyxi.mac.signIdentity=…、配 YXI_MAC_NOTARY_* 环境变量，
+  # 并去掉下面的 ad-hoc 重签。未公证的 dmg 下载后会被 Gatekeeper 拦（要到「隐私与安全性」里点「仍要打开」）。
+  macos:
+    if: github.event_name != 'workflow_dispatch' || inputs.transfer_only != true
+    name: macOS arm64 dmg + jar
+    runs-on: macos-15   # Apple Silicon
+    # publish.sh 要求整个 run 的 conclusion == success：macOS 还没上线，失败 / 超时不能挡 Windows 发布（本 job 自己照样标红）
+    continue-on-error: true
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - id: jdk17   # :core 的 toolchain；仓库没配 toolchain 下载源，显式告诉 gradle 装在哪
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+
+      # 与 Windows 同一份类清单（dev/test-workbench.ps1 只能在 Windows 跑，这里用 bash 展开），另加两个 macOS 专属用例。
+      # 钥匙串用例用 SecKeychainCreate 建的临时钥匙串文件（用完删），不碰登录钥匙串；runner 是一次性的，所以这里开 YXI_KEYCHAIN_TEST。
+      - name: Workbench core regression（macOS）
+        working-directory: android
+        timeout-minutes: 25
+        env:
+          YXI_KEYCHAIN_TEST: '1'
+        run: |
+          args=()
+          for c in $(tr -d '\r' < ../dev/workbench-test-classes.txt); do args+=(--tests "$c"); done
+          ./gradlew -Pyxi.desktopOnly=true "-Porg.gradle.java.installations.paths=${{ steps.jdk17.outputs.path }}" :desktop:test \
+            --no-daemon --max-workers=1 --console=plain "${args[@]}" \
+            --tests app.yxi.desktop.LoginShellPathTest --tests app.yxi.desktop.MacKeychainCredentialProtectorTest
+
+      - name: 打包（jpackage app-image + uber jar）
+        working-directory: android
+        timeout-minutes: 20
+        run: ./gradlew -Pyxi.desktopOnly=true "-Porg.gradle.java.installations.paths=${{ steps.jdk17.outputs.path }}" :desktop:createDistributable :desktop:packageUberJarForCurrentOS --no-daemon
+
+      # createDistributable 没有证书时已经给 .app 做了 ad-hoc + hardened runtime 签名、带上 entitlements.plist（Mac mini 上 codesign -dv 实测）；
+      # 这里按以后正式签名的同一套 entitlements 显式重签一遍并 --strict 校验，不依赖插件内部行为。entitlements.plist 里的
+      # disable-library-validation 不能去：ad-hoc 没有 Team ID，runtime 下连自带 JDK 的 libjli.dylib 都加载不了（实测）；JCEF 的
+      # Helper / framework 是另一个 Team ID 签的，而且是运行时解压到数据目录的（BrowserRuntime.kt），不在 .app 的签名里。
+      - name: ad-hoc 重签 + dmg（hdiutil）
+        working-directory: android/desktop
+        timeout-minutes: 10
+        run: |
+          app=build/compose/binaries/main/app/Yxi.app
+          v=$(sed -n 's/^java-options=-Djpackage.app-version=//p' "$app/Contents/app/Yxi.cfg" | tr -d '\r')
+          test -n "$v"
+          echo "version=$v"
+          codesign --force --deep --options runtime --entitlements entitlements.plist -s - "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          rm -rf build/dmgroot && mkdir -p build/dmgroot
+          ditto "$app" build/dmgroot/Yxi.app
+          ln -s /Applications build/dmgroot/Applications
+          dmg="build/Yxi-$v-macos-arm64.dmg"
+          # hosted runner 上 hdiutil create 偶发 "Resource busy"，重试几次
+          for i in 1 2 3; do
+            hdiutil create -volname Yxi -srcfolder build/dmgroot -fs HFS+ -format UDZO -imagekey zlib-level=9 -ov "$dmg" && break
+            [ "$i" = 3 ] && exit 1
+            sleep 10
+          done
+          ls -l "$dmg"
+          # 像用户那样装：挂载 dmg → 把 .app 拷出来，下一步跑拷出来的这份
+          mkdir -p "$RUNNER_TEMP/mnt"
+          hdiutil attach -nobrowse -readonly -noautoopen -mountpoint "$RUNNER_TEMP/mnt" "$dmg"
+          ditto "$RUNNER_TEMP/mnt/Yxi.app" "$RUNNER_TEMP/Yxi.app"
+          hdiutil detach "$RUNNER_TEMP/mnt"
+          codesign --verify --deep --strict "$RUNNER_TEMP/Yxi.app"
+
+      # 开窗口 3 秒退出、打印 smoke ok：uber jar 和从 dmg 拷出来的 .app 都要过，再加浏览器原生验证。隔离 HOME（JCEF 运行时也解压在里面），
+      # apple.awt.UIElement 不出 Dock 图标、不抢前台。--credential-smoke / --host-smoke 不在这跑：它们读写登录钥匙串，
+      # ad-hoc 签名下可能弹授权框卡住；钥匙串那层由上面的临时钥匙串单测覆盖。
+      - name: 冒烟（jar、.app、浏览器）
+        timeout-minutes: 10
+        run: |
+          export HOME="$RUNNER_TEMP/yxi-home" && mkdir -p "$HOME"
+          export JAVA_TOOL_OPTIONS="-Duser.home=$HOME -Dapple.awt.UIElement=true"
+          check() { grep -q "$2" "$1" || { echo "缺少标记「$2」（$1）"; cat "$1"; exit 1; }; }
+          java -jar android/desktop/build/compose/jars/*.jar --smoke > smoke-jar-out.txt 2>&1 || { cat smoke-jar-out.txt; exit 1; }
+          check smoke-jar-out.txt "smoke ok"
+          "$RUNNER_TEMP/Yxi.app/Contents/MacOS/Yxi" --smoke > smoke-out.txt 2> smoke-err.txt || { cat smoke-out.txt smoke-err.txt; exit 1; }
+          check smoke-out.txt "smoke ok"
+          export JAVA_TOOL_OPTIONS="$JAVA_TOOL_OPTIONS -Dyxi.browser.localFixture=true -Dyxi.browser.smokeImage=$GITHUB_WORKSPACE/smoke-browser.png"
+          "$RUNNER_TEMP/Yxi.app/Contents/MacOS/Yxi" --browser-smoke > smoke-browser-out.txt 2> smoke-browser-err.txt \
+            || { cat smoke-browser-out.txt smoke-browser-err.txt; exit 1; }
+          for m in 'browser native render and live style ok' 'browser native pixels ok' 'browser native shutdown ok'; do check smoke-browser-out.txt "$m"; done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Yxi-macos-arm64
+          path: |
+            android/desktop/build/Yxi-*-macos-arm64.dmg
+            android/desktop/build/compose/jars/*.jar
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Yxi-macos-smoke-logs
           path: |
             smoke-*.txt
             smoke-browser.png

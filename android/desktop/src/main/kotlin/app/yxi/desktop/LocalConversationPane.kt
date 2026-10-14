@@ -71,6 +71,8 @@ import org.json.JSONObject
 }
 
 @Composable internal fun LocalConversationPane(state: AppState, record: LocalCodexTaskRecord) {
+    // Code 风格：和服务器同一套用法的对话页（本机对齐 P1b，CodeLocalCodexPane.kt）；经典不变
+    if (LocalThemeSpec.current.style == UiStyle.Code) { CodeLocalCodexPane(state, record); return }
     val controller = state.localCodexTasks.controllers[record.key]
     val scope = rememberCoroutineScope()
     var error by remember(record.key) { mutableStateOf("") }

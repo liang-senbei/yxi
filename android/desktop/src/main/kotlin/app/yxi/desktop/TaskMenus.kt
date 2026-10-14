@@ -96,6 +96,22 @@ internal fun nativeTaskMenu(nav: WorkspaceNavigation, conn: Conn, task: LocalCod
     MenuEntry.Item(if (nav.archived(task.key)) "恢复到项目列表" else "归档", status == SessionState.Idle) { nav.setArchived(task.key, !nav.archived(task.key)) },
 ) + moveToGroup(nav, conn, task.key)
 
+/**
+ * 本机 Yxi 建的对话（各运行器）的菜单：条目同 [nativeTaskMenu]，没有「移到项目分组」（本机按文件夹分组）；
+ * 运行中或待处理（[status]）不能归档，文案同 [sessionMenu]；已归档的随时能恢复。
+ */
+internal fun localTaskMenu(nav: WorkspaceNavigation, task: LocalCodexTaskRecord, status: SessionState, onRename: () -> Unit): List<MenuEntry> {
+    val archived = nav.archived(task.key)
+    val canArchive = status != SessionState.Working && status != SessionState.NeedsYou
+    return listOf(
+        MenuEntry.Item(if (nav.pinned(task.key)) "取消置顶" else "置顶") { nav.togglePin(task.key) },
+        MenuEntry.Item(if (nav.favorite(task.key)) "取消收藏" else "收藏") { nav.setNativeFavorite(task.key, !nav.favorite(task.key)) },
+        MenuEntry.Item("修改显示名称", action = onRename),
+        MenuEntry.Item(if (nav.muted(task.key)) "恢复任务通知" else "静音此任务") { nav.setMuted(task.key, !nav.muted(task.key)) },
+        MenuEntry.Item(if (archived) "恢复到项目列表" else if (canArchive) "归档" else "运行中或待处理任务不能归档", archived || canArchive) { nav.setArchived(task.key, !archived) },
+    )
+}
+
 /** 项目分组头的菜单：标题「主机 · 分组」，点目录复制路径，末尾「编辑分组与组规」。 */
 internal fun projectGroupMenu(conn: Conn, name: String, directories: List<String>, onEdit: () -> Unit): List<MenuEntry> =
     listOf(MenuEntry.Title(conn.host.label + " · " + name.ifEmpty { "未分组" })) +

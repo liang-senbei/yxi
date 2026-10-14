@@ -27,6 +27,8 @@ internal class CodexAppServer internal constructor(private val transport: CodexT
     internal val hasIndependentProfile get() = profileOverrides != null
     internal var beforeLocalMutation: (suspend (String, JSONObject) -> Unit)? = null
     internal var beforeMutation: (suspend (String, JSONObject) -> Unit)? = null
+    /** 本机连接设上：队列里的附件是图片快照引用，发送时换成真实绝对路径；解析失败就不发。 */
+    internal var attachmentPath: ((InstructionAttachment) -> String)? = null
     internal suspend fun independentModels(): List<String> {
         check(!closed.get() && providerModelLoader != null) { "独立配置连接已关闭" }
         return providerModelLoader.invoke().map { it.id }
@@ -144,8 +146,12 @@ internal class CodexAppServer internal constructor(private val transport: CodexT
         return CodexResumeOverrides(value("model_provider"), value("model"), value("model_reasoning_effort"))
     }
 
+    /** 本轮输入：先换附件路径再校验，控制器在改投递状态前调用它做预检。 */
+    internal fun input(text: String, attachments: List<InstructionAttachment>): JSONArray =
+        userInput(text, attachments.map { a -> attachmentPath?.let { a.copy(remotePath = it(a)) } ?: a }, transport.local)
+
     suspend fun startTurn(threadId: String, text: String, attachments: List<InstructionAttachment> = emptyList(), model: String? = null, effort: String? = null): JSONObject = request("turn/start",
-        JSONObject().put("threadId", requiredId(threadId)).put("input", userInput(text, attachments, transport.local)).apply {
+        JSONObject().put("threadId", requiredId(threadId)).put("input", input(text, attachments)).apply {
             model?.let { put("model", it) }; effort?.let { put("effort", it) }
         })
 
@@ -153,7 +159,7 @@ internal class CodexAppServer internal constructor(private val transport: CodexT
         JSONObject().put("limit", 100).put("includeHidden", false).apply { cursor?.let { put("cursor", it) } })
 
     suspend fun steer(threadId: String, turnId: String, text: String, attachments: List<InstructionAttachment> = emptyList()): JSONObject = request("turn/steer",
-        JSONObject().put("threadId", requiredId(threadId)).put("expectedTurnId", requiredId(turnId)).put("input", userInput(text, attachments, transport.local)))
+        JSONObject().put("threadId", requiredId(threadId)).put("expectedTurnId", requiredId(turnId)).put("input", input(text, attachments)))
 
     suspend fun interrupt(threadId: String, turnId: String): JSONObject = request("turn/interrupt",
         JSONObject().put("threadId", requiredId(threadId)).put("turnId", requiredId(turnId)))

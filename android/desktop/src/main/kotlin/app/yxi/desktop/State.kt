@@ -68,7 +68,9 @@ class AppState internal constructor(private val localClaudeFactory: (Instruction
         select(c, null); remoteOpenCodeSelectedKey = null; remoteOpenCodeDirectory = directory; remoteOpenCodePrompt = prompt; page = Page.OpenCode
     }
     private val localWorkspaceDelegate = lazy { LocalWorkspace() }
-    private val localCodexTasksDelegate = lazy { LocalCodexTasks(instructions, java.io.File(Store.dir, "local-codex-tasks.json"), sharedMcp) }
+    private val localCodexTasksDelegate = lazy { LocalCodexTasks(instructions, java.io.File(Store.dir, "local-codex-tasks.json"), sharedMcp, onNotification = { task, title ->
+        Notify.notify(title, "任务：" + (navigation.title(task.key) ?: task.title), taskKey = task.key)
+    }) }
     internal val localCodexTasks get() = localCodexTasksDelegate.value
     private val localOpenCodeTasksDelegate = lazy { LocalOpenCodeTasks(instructions, java.io.File(Store.dir, "local-opencode-tasks.json"), sharedMcp) }
     internal val localOpenCodeTasks get() = localOpenCodeTasksDelegate.value
@@ -205,6 +207,9 @@ class AppState internal constructor(private val localClaudeFactory: (Instruction
     val documentSelection = androidx.compose.runtime.mutableStateMapOf<String, String>()
     internal val claudeImageCaptures = androidx.compose.runtime.mutableStateListOf<String>()
     internal val claudeImageDrafts = mutableMapOf<String, androidx.compose.runtime.snapshots.SnapshotStateList<InstructionAttachment>>()
+    /** Code 风格本机 Codex 对话的图片草稿（按会话存，切页面不丢；引用是 LocalCodexImages 的快照）和正在读图的会话。 */
+    internal val localCodexImageCaptures = androidx.compose.runtime.mutableStateListOf<String>()
+    internal val localCodexImageDrafts = mutableMapOf<String, androidx.compose.runtime.snapshots.SnapshotStateList<InstructionAttachment>>()
     val chatDrafts = mutableMapOf<String, androidx.compose.runtime.MutableState<androidx.compose.ui.text.input.TextFieldValue>>()
     /** 对话输入框的暂存附件，和 [chatDrafts] 一样按任务存（PRD §4.1：切风格不丢附件）。 */
     internal val chatAttachments = ChatAttachments()

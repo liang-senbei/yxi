@@ -6,7 +6,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
@@ -81,11 +83,70 @@ import org.json.JSONObject
         catch (e: Exception) { error = e.message.orEmpty(); return }
         act { controller.sendNext() }
     }
+    // Code 的停止方块运行中一直能点，所以自己判断；经典的「停止」本来就只在这几种情况下出现
+    fun stop() {
+        if (controller == null || !(controller.nativeBusy || controller.permissions.isNotEmpty() || controller.questions.isNotEmpty())) return
+        act { controller.abort() }
+    }
     LaunchedEffect(controller) {
         if (controller != null) while (true) {
             try { controller.refresh() } catch (e: CancellationException) { throw e } catch (e: Exception) { error = e.message.orEmpty() }
             delay(2000)
         }
+    }
+    if (LocalThemeSpec.current.style == UiStyle.Code) {
+        // Code 风格（PRD §5.1）：会话头 + 居中的对话列 + 停靠区；状态、函数（act / send / 2 秒轮询）和列表顺序同经典。服务器上的 OpenCode 对话
+        // （RemoteOpenCodePane）也走这里（PRD G3），会话头换成主机图标。不放「返回」（同 ACP）；不跟随最新（同经典：每次轮询都换一份 messages，留给 M3）
+        val t = Tokens.current
+        val runner = LocalRuntimeDiscovery.title(record.engine)
+        val focus = remember(record.key) { FocusRequester() }
+        LaunchedEffect(record.key) { runCatching { focus.requestFocus() } }   // 同 ACP：焦点先落输入框（没有输入区时吞掉异常）
+        Surface(Modifier.fillMaxSize(), color = t.surface0, contentColor = t.textPrimary) {
+            Column(Modifier.fillMaxSize()) {
+                CodeLocalSessionHeader(state.navigation.title(record.key) ?: record.title, record.directory, runner,
+                    host = if (record.hostKey.isBlank()) null else state.conn?.host?.label ?: "服务器")
+                LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(40.dp, 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (controller != null) {
+                        items(controller.messages, key = { it.getJSONObject("info").getString("id") }) { CodeColumn(true) { OpenCodeMessageItem(it, runner) } }
+                        items(controller.permissions, key = { "permission:${it.getString("id")}" }) { request ->
+                            CodeColumn(true) { OpenCodePermissionCard(request, controller, ::act, Modifier.fillMaxWidth()) }
+                        }
+                        items(controller.questions, key = { "question:${it.getString("id")}" }) { request ->
+                            CodeColumn(true) { OpenCodeQuestions(request, controller, ::act, Modifier.fillMaxWidth()) }
+                        }
+                    }
+                }
+                CodeDock(true) {
+                    // 没有控制器（不是当前进程建的）时只留说明，不画输入区（经典也不画）
+                    if (controller == null) {
+                        Note("此会话未由当前 Yxi 进程持有。原生会话与本地登记已保留，跨重启接管仍待接入。", t.textMuted)
+                        Spacer(Modifier.height(8.dp))   // 同 ACP：说明字和有输入区时页脚的字同高
+                    } else {
+                        // 待发送 / 待核对的指令画成对话末尾的排队气泡（同 Claude）；「发送」只给排第一的待发送项
+                        InstructionStrip(state.instructions, record.key, !controller.busy, { act { controller.sendNext() } })
+                        Note(controller.note, t.textMuted)
+                        if (error.isNotBlank()) Note(error, t.danger)
+                        CodeLocalComposer(draft.value, { draft.value = it },
+                            // 不看 ready：每次轮询 refresh 都会把它短暂置 false，提示会闪
+                            hint = when {
+                                controller.permissions.isNotEmpty() -> "先处理上面的审批"
+                                controller.questions.isNotEmpty() -> "先回答上面的提问"
+                                controller.busy || controller.nativeBusy -> "本轮结束后可发送"
+                                else -> "跟它说点什么… Enter 发送，Shift+Enter 换行"
+                            },
+                            focus = focus, canSend = controller.ready && !controller.busy && draft.value.text.isNotBlank(), onSend = ::send,
+                            // 停止方块的条件同经典的「停止」：本轮在跑，或卡在审批 / 提问上
+                            running = controller.nativeBusy || controller.permissions.isNotEmpty() || controller.questions.isNotEmpty(), onStop = ::stop,
+                            // 「核对状态」照经典保留：轮询成功不会清掉错误，点它（act 先清）才清
+                            start = { CodeFooterChip("核对状态", { act { controller.refresh() } }) },
+                            end = { CodeFooterNote("${record.provider} · ${record.model}") },   // 照经典副标题
+                        )
+                    }
+                }
+            }
+        }
+        return
     }
     Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row { Text(record.title, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge); TextButton(back) { Text(backLabel) } }
@@ -103,13 +164,7 @@ import org.json.JSONObject
                     }
                 } }
             }
-            items(controller.permissions, key = { "permission:${it.getString("id")}" }) { request ->
-                OutlinedCard { Column(Modifier.padding(12.dp)) {
-                    Text("需要审批：${request.optString("permission")}")
-                    SelectionContainer { Text(request.toString(2)) }
-                    Row { OpenCodePermissionReply.entries.forEach { reply -> TextButton({ act { controller.replyPermission(request.getString("id"), reply) } }) { Text(reply.label) } } }
-                } }
-            }
+            items(controller.permissions, key = { "permission:${it.getString("id")}" }) { request -> OpenCodePermissionCard(request, controller, ::act) }
             items(controller.questions, key = { "question:${it.getString("id")}" }) { request -> OpenCodeQuestions(request, controller, ::act) }
         }
         val pending = state.instructions.entries.filter { it.taskKey == record.key && it.status in setOf(InstructionStatus.Local, InstructionStatus.Unknown) }
@@ -127,10 +182,10 @@ import org.json.JSONObject
     }
 }
 
-@Composable private fun OpenCodeQuestions(request: JSONObject, controller: OpenCodeTaskController, act: (suspend () -> Unit) -> Unit) {
+@Composable private fun OpenCodeQuestions(request: JSONObject, controller: OpenCodeTaskController, act: (suspend () -> Unit) -> Unit, modifier: Modifier = Modifier) {
     val questions = request.getJSONArray("questions")
     val answers = remember(request.getString("id")) { mutableStateMapOf<Int, List<String>>() }
-    OutlinedCard { Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    OutlinedCard(modifier) { Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         for (i in 0 until questions.length()) {
             val question = questions.getJSONObject(i)
             Text(question.getString("question"))
@@ -152,4 +207,28 @@ import org.json.JSONObject
             TextButton({ act { controller.rejectQuestion(request.getString("id")) } }) { Text("拒绝回答") }
         }
     } }
+}
+
+/** 一条待审批（两种风格共用，经典原样）：权限名 + 原始 JSON + 三个回复。Code 下 [modifier] 给满列宽，同 ACP 的审批卡。 */
+@Composable private fun OpenCodePermissionCard(request: JSONObject, controller: OpenCodeTaskController, act: (suspend () -> Unit) -> Unit, modifier: Modifier = Modifier) {
+    OutlinedCard(modifier) { Column(Modifier.padding(12.dp)) {
+        Text("需要审批：${request.optString("permission")}")
+        SelectionContainer { Text(request.toString(2)) }
+        Row { OpenCodePermissionReply.entries.forEach { reply -> TextButton({ act { controller.replyPermission(request.getString("id"), reply) } }) { Text(reply.label) } } }
+    } }
+}
+
+/** Code 风格的一条 OpenCode 消息：作者（你 / 运行器名，同 ACP）+ 各段；助手的 text 段按 Markdown 画，其余段照经典（text / reasoning 给原文，别的类型给 JSON）。 */
+@Composable private fun OpenCodeMessageItem(message: JSONObject, runner: String) {
+    Column {
+        val role = message.getJSONObject("info").optString("role")
+        Text(when (role) { "user" -> "你"; "assistant" -> runner; else -> role }, style = MaterialTheme.typography.labelLarge)
+        val parts = message.getJSONArray("parts")
+        for (i in 0 until parts.length()) {
+            val part = parts.getJSONObject(i)
+            val type = part.optString("type")
+            if (role == "assistant" && type == "text") AssistantBody(part.optString("text"))
+            else SelectionContainer { Text(if (type in setOf("text", "reasoning")) part.optString("text") else part.toString(2)) }
+        }
+    }
 }

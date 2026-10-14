@@ -25,10 +25,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -52,30 +56,35 @@ import app.yxi.agent.SessionState
 import java.io.File
 
 /**
- * Code 侧栏在本机时的会话列表（替代经典的 [LocalWorkspaceSidebar]，经典侧栏不变）。按文件夹分组：本地项目在前，
- * 每组先列 Yxi 建的本机对话（四个运行器，过滤同经典工作台列表），再列原生历史（只读）；末尾「加载更多历史」。
+ * Code 侧栏在本机时的会话列表（替代经典的 [LocalWorkspaceSidebar]，经典侧栏不变）。最上面是置顶 / 收藏区（[CodeLocalSaved]，有了才出现）；
+ * 再按文件夹分组：本地项目在前，每组先列 Yxi 建的本机对话（四个运行器，⋮ 菜单见 [localTaskMenu]），再列原生历史（只读，去掉 Yxi 已列出的同一会话）；
+ * 末尾「加载更多历史」。全部 / 待处理 / 归档（[WorkspaceNavigation.mode]，和服务器共用）只管 Yxi 建的对话：不是「全部」时不列原生历史。
  * 文件夹不存在时标题后标「不可用」（同经典「目录已不可用」）。[query] 是去掉首尾空白的搜索词，在本地过滤；
  * 搜索框按 Enter 会去运行器里搜全部原生历史（[LocalWorkspace.query]），和它相同时原生历史不再按标题 / 目录二次过滤（以运行器的结果为准）。
  */
 @Composable
 internal fun CodeLocalSessions(state: AppState, query: String) {
     val w = state.localWorkspace
+    val nav = state.navigation
     LaunchedEffect(w) { if (!w.scanned) w.refresh() }
-    val owned = localOwnedTasks(state).filter { r -> query.isEmpty() || listOf(r.title, r.directory, LocalRuntimeDiscovery.title(r.engine)).any { it.contains(query, true) } }
-    val threads = w.threads.filter { query.isEmpty() || query == w.query || it.title.contains(query, true) || it.directory.contains(query, true) }
+    val all = localOwnedTasks(state)
+    val owned = localSidebarTasks(nav, all, query) { localTaskState(state, it) }
+    val showNative = nav.mode == "全部"
+    val home = w.selectedRuntime?.home?.let { runCatching { File(it).canonicalPath }.getOrNull() }
+    val threads = if (!showNative) emptyList() else nativeWithoutOwned(w.threads, all, home).filter {
+        query.isEmpty() || query == w.query || it.title.contains(query, true) || it.directory.contains(query, true)
+    }
     val ownedBy = owned.groupBy { File(it.directory).path }
     val threadsBy = threads.groupBy { File(it.directory).path }
     val folders = (w.projects.map { File(it).path }.filter { query.isEmpty() } + ownedBy.keys + threadsBy.keys).distinct()
     val onPage = state.page == Page.LocalWorkspace
     Column(Modifier.fillMaxWidth()) {
-        CodeLocalListNotes(w, empty = owned.isEmpty() && threads.isEmpty(), searching = query.isNotEmpty())
+        CodeLocalSaved(state, all, query)
+        CodeLocalListNotes(w, nav.mode, empty = owned.isEmpty() && threads.isEmpty(), searching = query.isNotEmpty())
         folders.forEach { folder ->
             CodeLocalFolderTitle(if (folder.isBlank()) "未分组" else localFolderName(folder), missing = folder.isNotBlank() && !File(folder).isDirectory)
-            ownedBy[folder].orEmpty().forEach { r ->
-                CodeSessionRow(r.title, LocalRuntimeDiscovery.title(r.engine), localTaskState(state, r), selected = onPage && state.localSelectedTaskKey == r.key) {
-                    state.localSelectedTaskKey = r.key; state.page = Page.LocalWorkspace
-                }
-            }
+            // 置顶会让行换位置，行里有按位置记的状态（hover、渐隐、浮层），按导航键定位
+            ownedBy[folder].orEmpty().forEach { r -> key(r.key) { CodeLocalTaskRow(state, r, selected = onPage && state.localSelectedTaskKey == r.key) } }
             threadsBy[folder].orEmpty().forEach { thread ->
                 CodeSessionRow(thread.title, "只读", SessionState.Idle, selected = onPage && state.localSelectedTaskKey == null && w.selectedThread?.id == thread.id) {
                     openNativeHistory(state, thread)
@@ -83,18 +92,30 @@ internal fun CodeLocalSessions(state: AppState, query: String) {
             }
             Spacer(Modifier.height(6.dp))
         }
-        if (w.next != null) CodeSessionRow(if (w.loading) "正在读取…" else "加载更多历史", null, dot = null, muted = true) { w.loadThreads(more = true) }
+        if (showNative && w.next != null) CodeSessionRow(if (w.loading) "正在读取…" else "加载更多历史", null, dot = null, muted = true) { w.loadThreads(more = true) }
     }
 }
 
-/** Yxi 建的本机对话：过滤同经典工作台列表（本机用户和系统；Codex 还要是当前运行器的数据目录），新的在前。 */
-private fun localOwnedTasks(state: AppState): List<LocalCodexTaskRecord> {
-    val user = System.getProperty("user.name")
-    val os = System.getProperty("os.name")
-    val home = state.localWorkspace.selectedRuntime?.home?.let { runCatching { File(it).canonicalPath }.getOrNull() }
-    val codex = state.localCodexTasks.registry.records.filter { it.runtimeHome == home }
-    val others = state.localOpenCodeTasks.registry.records + state.localAcpTasks.registry.records + state.localClaudeTasks.registry.records
-    return (codex + others).filter { it.user == user && it.platform == os }.sortedByDescending { it.createdAt }
+/** Yxi 建的本机对话：四个运行器的记录（[localOwnedRecords]），未经整理过滤。 */
+private fun localOwnedTasks(state: AppState): List<LocalCodexTaskRecord> = localOwnedRecords(
+    state.localCodexTasks.registry.records + state.localOpenCodeTasks.registry.records + state.localAcpTasks.registry.records + state.localClaudeTasks.registry.records,
+    System.getProperty("user.name"), System.getProperty("os.name"))
+
+/** 本机用户和系统的记录，新的在前。不要求 Codex 的记录是当前运行器的数据目录（经典工作台列表要求）：对话页按记录的数据目录找运行器，找不到会说明原因。 */
+internal fun localOwnedRecords(records: List<LocalCodexTaskRecord>, user: String, os: String): List<LocalCodexTaskRecord> =
+    records.filter { it.user == user && it.platform == os }.sortedByDescending { it.createdAt }
+
+/** 侧栏要列的本机对话：全部 / 待处理 / 归档（[WorkspaceNavigation.visible]）+ 搜索词（显示名称 / 原标题 / 目录 / 运行器名）；置顶的在前（按置顶次序，其余保持原顺序）。 */
+internal fun localSidebarTasks(nav: WorkspaceNavigation, records: List<LocalCodexTaskRecord>, query: String, status: (LocalCodexTaskRecord) -> SessionState): List<LocalCodexTaskRecord> =
+    records.filter { r ->
+        nav.visible(r.key, status(r)) && (query.isEmpty() ||
+            listOf(nav.title(r.key).orEmpty(), r.title, r.directory, LocalRuntimeDiscovery.title(r.engine)).any { it.contains(query, true) })
+    }.sortedBy { nav.pinOrder(it.key) }
+
+/** 原生历史去掉 Yxi 已经列出的同一会话（同一数据目录 [runtimeHome]、同一 threadId 的 Codex 记录，归档的也算），免得列两遍。 */
+internal fun nativeWithoutOwned(threads: List<NativeHistoryThread>, owned: List<LocalCodexTaskRecord>, runtimeHome: String?): List<NativeHistoryThread> {
+    val ids = owned.filter { it.engine == "codex" && it.runtimeHome == runtimeHome }.mapTo(HashSet()) { it.threadId }
+    return if (ids.isEmpty()) threads else threads.filterNot { it.id in ids }
 }
 
 /** 本机对话的状态（供行首圆点）：key 在四个运行器里唯一，按各自控制器的字段判断（同 [AppState] 的忙碌计数），
@@ -114,6 +135,70 @@ private fun localTaskState(state: AppState, r: LocalCodexTaskRecord): SessionSta
     return if (waiting) SessionState.NeedsYou else if (working) SessionState.Working else SessionState.Idle
 }
 
+/**
+ * 一条 Yxi 建的本机对话：标题用整理记录里的显示名称，右端小字是运行器名；⋮ 菜单见 [localTaskMenu]，「修改显示名称」开 [CodeLocalRenameDialog]。
+ * 点了选中它、切到本机工作台页（同经典工作台列表）。
+ */
+@Composable
+private fun CodeLocalTaskRow(state: AppState, r: LocalCodexTaskRecord, selected: Boolean) {
+    val nav = state.navigation
+    val status = localTaskState(state, r)
+    var rename by remember(r.key) { mutableStateOf(false) }
+    CodeSessionRow(nav.title(r.key) ?: r.title, LocalRuntimeDiscovery.title(r.engine), status, selected = selected,
+        menu = { close -> CodeMenuEntries(localTaskMenu(nav, r, status) { rename = true }, close) }) {
+        state.localSelectedTaskKey = r.key; state.page = Page.LocalWorkspace
+    }
+    if (rename) CodeLocalRenameDialog(nav, r) { rename = false }
+}
+
+/** 改名弹窗：写法同 Code 会话头的改名弹窗和服务器托管任务的「修改显示名称」，只改 Yxi 里的显示；留空恢复原标题。 */
+@Composable
+private fun CodeLocalRenameDialog(nav: WorkspaceNavigation, r: LocalCodexTaskRecord, close: () -> Unit) {
+    var title by remember(r.key) { mutableStateOf(nav.title(r.key) ?: r.title) }
+    WorkbenchDialog(
+        onDismissRequest = close,
+        title = { Text("修改显示名称") },
+        text = {
+            Column {
+                OutlinedTextField(title, { title = it }, singleLine = true, label = { Text("名称") })
+                Text("只改 Yxi 里的显示名称，不改运行器里的会话；留空恢复原标题。", style = MaterialTheme.typography.bodySmall)
+                if (nav.error.isNotBlank()) Text(nav.error, color = Tokens.current.danger)
+            }
+        },
+        confirmButton = { TextButton({ nav.rename(r.key, title); if (nav.error.isBlank()) close() }) { Text("保存") } },
+        dismissButton = { TextButton(close) { Text("取消") } },
+    )
+}
+
+/**
+ * 本机的置顶 / 收藏区：有置顶或收藏的本机对话时才出现（服务器的置顶区常显；本机没有就不占位置，有意偏差），放在本机列表最上面。
+ * 外观和「置顶 / 收藏」的选择同服务器（[CodeSavedLook]，存 sidebarSavedKind）；过滤和排序同下面的列表（[localSidebarTasks]）。
+ * 行右端小字是文件夹名（只有这一台电脑，不写主机名），没有 ⋮（同服务器的置顶区）。
+ */
+@Composable
+private fun CodeLocalSaved(state: AppState, all: List<LocalCodexTaskRecord>, query: String) {
+    val nav = state.navigation
+    if (all.none { nav.pinned(it.key) || nav.favorite(it.key) }) return
+    var choice by remember { mutableStateOf(Store.pref("sidebarSavedKind", "置顶").takeIf { it in listOf("置顶", "收藏") } ?: "置顶") }
+    val choose: (String) -> Unit = { value -> choice = value; Store.setPref("sidebarSavedKind", value) }
+    val look = CodeSavedLook
+    look.header(choice, choose)
+    val rows = localSidebarTasks(nav, all.filter { if (choice == "置顶") nav.pinned(it.key) else nav.favorite(it.key) }, query) { localTaskState(state, it) }
+    val onPage = state.page == Page.LocalWorkspace
+    rows.forEach { r ->
+        val folder = if (r.directory.isBlank()) "未分组" else localFolderName(File(r.directory).path)
+        look.row(SavedRow(r.key, nav.title(r.key) ?: r.title, folder, localTaskState(state, r), enabled = true, selected = onPage && state.localSelectedTaskKey == r.key) {
+            state.localSelectedTaskKey = r.key; state.page = Page.LocalWorkspace
+        })
+    }
+    if (rows.isEmpty()) look.note(when {
+        query.isNotBlank() -> "没有匹配的${choice}会话"
+        nav.mode != "全部" -> "没有${nav.mode}的${choice}会话"
+        else -> "暂无${choice}会话，可在任务菜单中添加"
+    }, false)
+    look.end()
+}
+
 /** 文件夹分组标题：13 弱色起于 x 14.4，高 26（同 [CodeGroupTitle]）；文件夹不在了后面标「不可用」。 */
 @Composable
 private fun CodeLocalFolderTitle(name: String, missing: Boolean) {
@@ -129,7 +214,7 @@ private fun CodeLocalFolderTitle(name: String, missing: Boolean) {
  * 标题 14 次色起于 x 38.4（选中变主色），过长不加省略号、右端渐隐：静止 8 宽止于 x 262，出 ⋮ 时 20 宽止于 254（伸进渐隐区才加）。
  * 选中 #EDECE8，hover #F0EFEC。停 500ms 在行右侧（离行右缘 2.4、垂直居中）出完整标题的 tooltip（[CodeRowTooltip]）。
  * [dot] 为 null 的是操作行（「加载更多历史」）：不画圆点、不出 tooltip。[trailing] 是右端的弱色小字（运行器名 / 只读 / 主机名），最宽 120、超出省略。
- * [menu] 是 ⋮ 浮层的内容：hover 或浮层开着时右端出 ⋮（中心 x 264，替掉 [trailing]）；为 null 不画（经典本机列表没有逐行菜单）。
+ * [menu] 是 ⋮ 浮层的内容：hover 或浮层开着时右端出 ⋮（中心 x 264，替掉 [trailing]）；为 null 不画（原生历史、置顶区和操作行没有逐行菜单）。
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -209,11 +294,15 @@ private fun Modifier.fadeEnd(width: Dp): Modifier = graphicsLayer { compositingS
         drawRect(Brush.horizontalGradient(listOf(Color.Black, Color.Transparent), startX = size.width - fade, endX = size.width), blendMode = BlendMode.DstIn)
     }
 
-/** 列表上方的说明（弱色 12）：检测 / 读取中；正在看归档或搜索结果；空列表。 */
+/** 列表上方的说明（弱色 12）：检测 / 读取中；正在看归档或搜索结果；空列表。[mode] 不是「全部」时只列 Yxi 建的对话，说明换成这一句。 */
 @Composable
-private fun CodeLocalListNotes(w: LocalWorkspace, empty: Boolean, searching: Boolean) {
+private fun CodeLocalListNotes(w: LocalWorkspace, mode: String, empty: Boolean, searching: Boolean) {
     val t = Tokens.current
     val notes = buildList {
+        if (mode != "全部") {
+            add(if (!empty) "只列${mode}的对话，原生历史不在其中" else if (searching) "没有找到符合条件的对话" else "没有${mode}的对话（原生历史不在其中）")
+            return@buildList
+        }
         if (w.detecting) add("正在检测本机运行器…") else if (w.loading && w.threads.isEmpty()) add("正在读取原生历史…")
         val scope = listOfNotNull("归档".takeIf { w.archived }, w.query.takeIf { it.isNotBlank() }?.let { "搜索「$it」" }).joinToString(" · ")
         if (scope.isNotEmpty()) add("原生历史：$scope")

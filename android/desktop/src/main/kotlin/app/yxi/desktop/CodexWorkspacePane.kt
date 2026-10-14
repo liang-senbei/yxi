@@ -41,7 +41,10 @@ internal fun CodexWorkspacePane(state: AppState) {
         val compact = maxWidth < 850.dp || state.previewExpanded
         val panelWidth = state.filePanelWidth.coerceAtMost((maxWidth.value - 350).coerceAtLeast(340f)).dp
         Row(Modifier.fillMaxSize()) {
-            if (!panel || !compact) Box(Modifier.weight(1f).fillMaxHeight()) { CodexConversationPane(state) }
+            if (!panel || !compact) Box(Modifier.weight(1f).fillMaxHeight()) {
+                // Code 风格：和本机同一套对话页（本机对齐 P2，CodeServerCodexPane.kt）；经典不变
+                if (LocalThemeSpec.current.style == UiStyle.Code) CodeServerCodexPane(state) else CodexConversationPane(state)
+            }
             if (panel && conn != null && task != null) {
                 if (!compact) Box(Modifier.width(6.dp).fillMaxHeight().background(Tokens.current.border).draggable(
                     rememberDraggableState { delta -> state.filePanelWidth = (state.filePanelWidth - delta / density).coerceIn(340f, 900f) },

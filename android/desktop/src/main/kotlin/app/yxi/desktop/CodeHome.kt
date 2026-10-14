@@ -42,6 +42,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
@@ -118,23 +119,29 @@ private val HomeStructured = setOf("opencode", "gemini", "grok", "hermes", NewSe
 internal fun CodeHome(state: AppState, actions: HostActions, scope: CoroutineScope) {
     val d = state.newSessionDraft
     val c = state.conn
-    val canSend = c != null && c.status == Conn.Status.Connected && !d.busy &&
-        (if (d.agent == NewSessionDraft.CODEX_WORKBENCH) !d.worktree else d.directoryFor(c).trim().startsWith('/'))
+    // 对话工作台也要绝对路径的文件夹：直接在服务器建好对话，不再进表单补填（§7-23）
+    val canSend = c != null && c.status == Conn.Status.Connected && !d.busy && d.directoryFor(c).trim().startsWith('/') &&
+        !(d.agent == NewSessionDraft.CODEX_WORKBENCH && d.worktree)
     val focus = remember { FocusRequester() }
     LaunchedEffect(d.focusTick) { runCatching { focus.requestFocus() } }
-    CodeHomeFrame(state, notes = { CodeHomeNotes(d, c) }, chips = { CodeHomeChips(state, actions, d, c) }, footer = { CodeHomeFooter(d) }) {
+    CodeHomeFrame(state, focus, notes = { CodeHomeNotes(state, d, c) }, chips = { CodeHomeChips(state, actions, d, c) }, footer = { CodeHomeFooter(state, d, c, scope) }) {
         CodeComposerCard(
-            d.text, { d.text = it }, "描述要做的事，按 Enter 开始（可留空）", focus, canSend,
+            d.text, { d.text = it },
+            if (d.agent == NewSessionDraft.CODEX_WORKBENCH) "描述要做的事，按 Enter 新建对话（不会自动发送）" else "描述要做的事，按 Enter 开始（可留空）", focus, canSend,
             onSend = { if (c != null && canSend) sendNewSession(state, actions, scope, c) },
             modifier = Modifier.fillMaxWidth(), readOnly = d.busy,
         )
     }
 }
 
-/** 新会话页的骨架，SSH（[CodeHome]）和本机（[CodeLocalHome]）共用：问候行在上；说明 → chips → 输入卡 → 页脚贴底。 */
+/**
+ * 新会话页的骨架，SSH（[CodeHome]）和本机（[CodeLocalHome]）共用：问候行在上；说明 → chips → 输入卡 → 页脚贴底。
+ * 整列是输入区（[CodeInputArea]）：chips 的浮层关掉后焦点回到输入卡的 [focus]。
+ */
 @Composable
 internal fun CodeHomeFrame(
     state: AppState,
+    focus: FocusRequester,
     notes: @Composable () -> Unit,
     chips: @Composable () -> Unit,
     footer: @Composable () -> Unit,
@@ -142,7 +149,7 @@ internal fun CodeHomeFrame(
 ) {
     val t = Tokens.current
     Box(Modifier.fillMaxSize().padding(horizontal = 24.dp), contentAlignment = Alignment.TopCenter) {
-        Column(Modifier.widthIn(max = 768.dp).fillMaxSize()) {
+        CodeInputArea(focus, Modifier.widthIn(max = 768.dp).fillMaxSize()) {
             Spacer(Modifier.height(52.4.dp))   // 页面起于 y 36；规格图标顶 91.2（§3.8），实测 92.0：52.4 和 Row 里居中的 2.8 各进 0.5px，在 §7 的 ±1px 内
             Row(Modifier.height(28.dp), verticalAlignment = Alignment.CenterVertically) {
                 Image(painterResource("icon.png"), null, Modifier.size(22.4.dp))
@@ -166,7 +173,7 @@ internal fun CodeHomeFrame(
 }
 /** 输入卡上方的说明：连接状态、收藏来源、worktree 和运行器的说明（沿用经典对话框的文案）、进度和失败原因。 */
 @Composable
-private fun CodeHomeNotes(d: NewSessionDraft, c: Conn?) {
+private fun CodeHomeNotes(state: AppState, d: NewSessionDraft, c: Conn?) {
     val notes = mutableListOf<Pair<String, Boolean>>()
     if (c == null) notes += "先在左侧选一台主机并连上，再新建会话" to false
     else {
@@ -175,12 +182,15 @@ private fun CodeHomeNotes(d: NewSessionDraft, c: Conn?) {
         d.favoriteFor(c)?.let { notes += "按收藏「${it.title}」的文件夹和运行器新建" to false }
         if (d.worktree) notes += "上方文件夹作为源仓库，在仓库旁创建独立目录并从当前 HEAD 开始；不带入未提交改动，不自动合并或清理。" to false
         when {
-            d.agent == NewSessionDraft.CODEX_WORKBENCH -> notes += "对话工作台支持排队、引导和侧栏预览；暂需使用已存在的目录，提示词先进入草稿，由你确认发送。" to false
+            d.agent == NewSessionDraft.CODEX_WORKBENCH -> notes += "对话工作台支持排队、引导和侧栏预览；暂需使用已存在的目录；建好后提示词放进对话的输入框，由你确认发送。" to false
             d.agent in HomeStructured -> notes += "使用已存在的服务器目录，连接原生运行器后创建对话；提示词先保存为草稿，确认发送后才开始工作。" to false
             d.text.text.isNotBlank() -> notes += "创建后会把这段内容直接交给运行器，可能立即开始工作。" to false
         }
     }
-    if (d.busy) notes += "正在检查运行器并创建会话…" to false
+    val workbench = d.agent == NewSessionDraft.CODEX_WORKBENCH
+    if (d.busy) notes += (if (workbench) "正在连接服务器上的 Codex 并创建对话…" else "正在检查运行器并创建会话…") to false
+    // 已在服务器建好但没登记上（同经典表单）：编号留着，页脚「恢复已有任务」会预填它
+    if (workbench && state.codexWorkspace.recoveryThreadId.isNotBlank()) notes += ("任务已在服务器创建，请保留恢复编号：" + state.codexWorkspace.recoveryThreadId) to false
     if (d.error.isNotBlank()) notes += d.error to true
     CodeNoteLines(notes)
 }
@@ -343,17 +353,24 @@ private fun CodeWorktreeToggle(checked: Boolean, enabled: Boolean, onChange: (Bo
         Text("worktree", color = if (enabled && hovered) t.textPrimary else t.textSecondary, fontSize = 13.sp, lineHeight = 18.sp, maxLines = 1)
     }
 }
-/** 页脚：左边权限（只有 Claude Code 有，同经典）；右边运行器（替代参考端的模型）和上下文环（新会话还没有用量，整环灰）。 */
+/**
+ * 页脚：左边权限（只有 Claude Code 有，同经典）；对话工作台左边是「恢复已有任务」（经典表单的恢复区）。
+ * 右边运行器（替代参考端的模型）和上下文环（新会话还没有用量，整环灰）。
+ */
 @Composable
-private fun CodeHomeFooter(d: NewSessionDraft) {
+private fun CodeHomeFooter(state: AppState, d: NewSessionDraft, c: Conn?, scope: CoroutineScope) {
+    var recovering by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().height(28.dp), verticalAlignment = Alignment.CenterVertically) {
         if (d.agent == "claude") CodePermissionChip(d)
+        else if (d.agent == NewSessionDraft.CODEX_WORKBENCH && c != null) CodeFooterChip("恢复已有任务", { recovering = true },
+            enabled = !d.busy && !state.codexWorkspace.busy && c.status == Conn.Status.Connected && state.codexWorkspace.connected(c))
         Spacer(Modifier.weight(1f))
         CodeRunnerChip(d)
         Spacer(Modifier.width(9.6.dp))
         CodeContextRing(null)
         Spacer(Modifier.width(4.dp))
     }
+    if (recovering && c != null) CodeCodexRecoverDialog(state, c, scope) { recovering = false }
 }
 
 /** 权限：每次新建都从「请求批准」开始（reset 时重置）；浮层 280 宽、向上展开，左缘对齐输入卡（规格 §3.1）。 */
@@ -404,7 +421,8 @@ catch (e: CancellationException) { throw e }
 catch (e: Exception) { "unknown" }
 
 /**
- * 发送 = 经典对话框的「开起来」，创建路径相同：对话工作台直接进；其余先探测，OpenCode / ACP 进各自的对话页（提示词存成草稿），
+ * 发送 = 经典对话框的「开起来」：对话工作台直接在服务器建好对话（提示词放进草稿，不发送），还停在首页就跳过去；
+ * 其余先探测，OpenCode / ACP 进各自的对话页（提示词存成草稿），
  * Claude Code / Codex 建 tmux 会话后交给 [HostActions.sessionCreated]（默认名、收藏跟过去）。成功才清草稿，失败留着原样和原因。
  */
 private fun sendNewSession(state: AppState, actions: HostActions, scope: CoroutineScope, c: Conn) {
@@ -412,7 +430,7 @@ private fun sendNewSession(state: AppState, actions: HostActions, scope: Corouti
     val directory = d.directoryFor(c).trim()
     val prompt = d.text.text
     val agent = d.agent
-    if (agent == NewSessionDraft.CODEX_WORKBENCH) { d.reset(); state.prepareCodexTask(c, directory, prompt); return }
+    if (agent == NewSessionDraft.CODEX_WORKBENCH) { createServerCodex(state, scope, c, directory, prompt); return }
     val runner = RunnerCatalog.find(agent) ?: return
     val worktree = d.worktree
     val permission = d.permission.takeIf { agent == "claude" }
@@ -439,6 +457,26 @@ private fun sendNewSession(state: AppState, actions: HostActions, scope: Corouti
                     )
                 }
             }
+        }
+        catch (e: CancellationException) { throw e }
+        catch (e: Exception) { d.error = e.message.orEmpty().ifBlank { "创建没成功，请重试" } }
+        finally { d.busy = false }
+    }
+}
+
+/**
+ * 对话工作台的新建（本机对齐 P2，§7-21）：用服务器默认配置直接建，提示词放进新对话的输入框、不发送；
+ * 建好清草稿并跳过去，失败留原因。不带收藏，同原 prepareCodexTask。reset 不碰 busy，所以 busy 在 finally 里清。
+ */
+private fun createServerCodex(state: AppState, scope: CoroutineScope, c: Conn, directory: String, prompt: String) {
+    val d = state.newSessionDraft
+    d.busy = true; d.error = ""
+    scope.launch {   // App 级 scope：切页面不取消
+        try {
+            val r = state.codexWorkspace.create(c, directory, firstLineTitle(prompt))
+            if (prompt.isNotBlank()) state.chatDrafts.getOrPut(r.key) { mutableStateOf(TextFieldValue()) }.value = TextFieldValue(prompt, TextRange(prompt.length))
+            d.reset()
+            showServerCodex(state, c, r.key)
         }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { d.error = e.message.orEmpty().ifBlank { "创建没成功，请重试" } }

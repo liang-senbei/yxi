@@ -197,7 +197,8 @@ private fun CodeGroupTitle(state: AppState, actions: HostActions, searchVisible:
 }
 
 /**
- * 筛选浮层：本机时先列原生历史的范围（最近 / 归档，同经典列表页的两个标签；搜过全部历史时可以清除）；
+ * 筛选浮层：本机时先列 Yxi 建的对话的状态（全部 / 待处理 / 归档，和服务器共用 [WorkspaceNavigation.mode]），
+ * 再列原生历史的范围（最近 / 归档，同经典列表页的两个标签；搜过全部历史时可以清除；原生历史只在「全部」里列，选了先切回「全部」）；
  * 有服务器时列状态（全部 / 待处理 / 归档）；最后是范围（本地 / 所有主机 / 各主机）。右缘对齐筛选按钮。
  */
 @Composable
@@ -205,11 +206,18 @@ private fun CodeFilterMenu(state: AppState, actions: HostActions, close: () -> U
     CodePopup(close, alignEnd = true, width = 240.dp) {
         if (state.isLocal) {
             val w = state.localWorkspace
+            val nav = state.navigation
             val ready = w.selectedRuntime != null && !w.loading
+            // Yxi 建的对话的状态，和服务器共用；原生历史只在「全部」里列，点下面那几项时先切回「全部」
+            CodeMenuCaption("对话")
+            listOf("全部", "待处理", "归档").forEach { mode ->
+                CodeMenuItem(mode, { close(); nav.setMode(mode) }, checked = nav.mode == mode)
+            }
+            CodeMenuDivider()
             CodeMenuCaption("原生历史")
-            CodeMenuItem("最近", { close(); w.loadThreads(w.query, false) }, enabled = ready, checked = !w.archived)
-            CodeMenuItem("归档", { close(); w.loadThreads(w.query, true) }, enabled = ready, checked = w.archived)
-            if (w.query.isNotBlank()) CodeMenuItem("清除历史搜索", { close(); w.loadThreads("", w.archived) }, enabled = ready, trailing = w.query.take(12))
+            CodeMenuItem("最近", { close(); nav.setMode("全部"); w.loadThreads(w.query, false) }, enabled = ready, checked = !w.archived)
+            CodeMenuItem("归档", { close(); nav.setMode("全部"); w.loadThreads(w.query, true) }, enabled = ready, checked = w.archived)
+            if (w.query.isNotBlank()) CodeMenuItem("清除历史搜索", { close(); nav.setMode("全部"); w.loadThreads("", w.archived) }, enabled = ready, trailing = w.query.take(12))
             CodeMenuDivider()
         }
         if (!state.isLocal && actions.hosts.isNotEmpty()) {

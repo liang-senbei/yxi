@@ -9,6 +9,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -527,10 +528,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                 item(key = "conversation-bottom-anchor") { Spacer(Modifier.height(1.dp)) }
             }
             if (items.isEmpty()) Text(status ?: "还没有对话", Modifier.align(Alignment.Center), style = BodyStyle, color = t.textMuted)
-            if (!stick) TextButton(
-                onClick = { stick = true },
-                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp).background(t.surface3, RoundedCornerShape(Radius)).border(1.dp, t.border, RoundedCornerShape(Radius)),
-            ) { Text("↓ 回到最新", color = t.textPrimary) }
+            if (!stick) JumpToLatestButton { stick = true }
         }
         CodeDock(codeStyle) {
             // 排队：Code 下画成对话末尾的消息，排在状态行之前（规格 §3.4）；经典仍在输入框正上方
@@ -814,19 +812,29 @@ internal fun kShort(tokens: Long): String = when {
 private fun Dot(color: Color) = Box(Modifier.size(8.dp).background(color, CircleShape))
 
 @Composable
-private fun Note(text: String, color: Color) = Text(text, Modifier.padding(16.dp, 2.dp), fontSize = 12.sp, lineHeight = 16.sp, color = color)
+internal fun Note(text: String, color: Color) = Text(text, Modifier.padding(16.dp, 2.dp), fontSize = 12.sp, lineHeight = 16.sp, color = color)
 
 /** Code 风格的对话列：最宽 768、在父级里居中（对齐和两侧留白由父级给）；经典原样。只是布局，不加语义节点。 */
 @Composable
-private fun CodeColumn(code: Boolean, content: @Composable () -> Unit) {
+internal fun CodeColumn(code: Boolean, content: @Composable () -> Unit) {
     if (code) Box(Modifier.widthIn(max = 768.dp).fillMaxWidth()) { content() } else content()
 }
 
 /** 停靠区（状态行 / 审批卡 / 排队 / 输入卡）：Code 风格和对话列同宽、居中，窄时两侧各留 40（规格 §2）；经典原样。 */
 @Composable
-private fun ColumnScope.CodeDock(code: Boolean, content: @Composable ColumnScope.() -> Unit) {
+internal fun ColumnScope.CodeDock(code: Boolean, content: @Composable ColumnScope.() -> Unit) {
     if (code) Column(Modifier.align(Alignment.CenterHorizontally).padding(horizontal = 40.dp).widthIn(max = 768.dp).fillMaxWidth(), content = content)
     else content()
+}
+
+/** 列表右下角浮起的「↓ 回到最新」：两种风格、SSH 和本机对话共用。 */
+@Composable
+internal fun BoxScope.JumpToLatestButton(onClick: () -> Unit) {
+    val t = Tokens.current
+    TextButton(
+        onClick = onClick,
+        modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp).background(t.surface3, RoundedCornerShape(Radius)).border(1.dp, t.border, RoundedCornerShape(Radius)),
+    ) { Text("↓ 回到最新", color = t.textPrimary) }
 }
 
 /** 等推流把屏幕换掉（指纹变了 / 面板没了），最多 [timeoutMs]；不自己抓屏，抓屏归 watchScreen 那条长连。 */

@@ -9,8 +9,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -165,6 +167,147 @@ import java.io.File
         val job = controller.dispatchNext()
         scope.launch { try { job.join() } finally { sending = false } }
     }
+    fun addImages() {
+        if (!capturingImages) {
+            val files = pickImages()
+            if (files.isNotEmpty()) {
+                capturingImages = true; state.claudeImageCaptures.add(record.key); error = ""
+                scope.launch {
+                    try {
+                        require(files.size <= 4) { "每次最多4张图片" }
+                        val captured = withContext(Dispatchers.IO) { files.map(state.localClaudeTasks.images::capture) }
+                        val existing = imageDrafts.toList()
+                        val merged = withContext(Dispatchers.IO) { state.localClaudeTasks.images.mergeDraft(existing, captured) }
+                        state.localClaudeTasks.images.commitDraft(imageDrafts, existing, merged)
+                    } catch (e: CancellationException) { throw e }
+                    catch (e: Exception) { error = e.message ?: "图片读取失败" }
+                    finally { capturingImages = false; state.claudeImageCaptures.remove(record.key) }
+                }
+            }
+        }
+    }
+    fun stop() {
+        if (controller == null || !controller.busy || controller.cancelling) return   // Code 的停止方块运行中一直能点
+        scope.launch { try { controller.cancelTurn() }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { error = e.message ?: "停止结果未确认" } }
+    }
+    fun pickModel(model: String) {
+        scope.launch { try { controller?.selectModel(model) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { error = e.message ?: "模型切换未确认" } }
+    }
+    fun applyEffort(choice: String) {
+        scope.launch {
+            try { controller?.selectEffort(choice) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { error = e.message ?: "思考强度未确认" }
+        }
+    }
+    fun resumeSession(runtime: LocalRuntimeInstallation) {
+        if (!resuming) {
+            resuming = true; error = ""
+            scope.launch {
+                try { state.localClaudeTasks.resume(runtime, record.key) }
+                catch (e: CancellationException) { throw e }
+                catch (e: Exception) { error = e.message ?: "恢复未完成" }
+                finally { resuming = false }
+            }
+        }
+    }
+    fun answer(id: String, allow: Boolean) {
+        if (id in responding || controller == null || !controller.ready || controller.cancelling) return
+        responding.add(id)
+        scope.launch { try { controller.answerPermission(id, allow) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { error = e.message.orEmpty() }
+            finally { responding.remove(id) } }
+    }
+    if (LocalThemeSpec.current.style == UiStyle.Code) {
+        // Code 风格（PRD §5.1）：会话头 + 居中的对话列 + 停靠区；状态、函数和列表顺序同经典
+        val t = Tokens.current
+        val focus = remember(record.key) { FocusRequester() }
+        LaunchedEffect(record.key) { runCatching { focus.requestFocus() } }   // 焦点先落输入框，同 SSH 对话页
+        val idle = controller != null && controller.ready && !controller.busy && !controller.cancelling && !controller.changingModel && controller.pendingApprovals.isEmpty()
+        val canSend = idle && !sending && !capturingImages && (draft.value.text.isNotBlank() || imageDrafts.isNotEmpty())
+        Surface(Modifier.fillMaxSize(), color = t.surface0, contentColor = t.textPrimary) {
+            Column(Modifier.fillMaxSize()) {
+                CodeLocalSessionHeader(state.navigation.title(record.key) ?: record.title, record.directory, LocalRuntimeDiscovery.title(record.engine))
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    LazyColumn(Modifier.fillMaxSize().onPointerEvent(PointerEventType.Scroll, PointerEventPass.Initial) { event ->
+                        if (event.changes.any { it.scrollDelta.y < 0f }) followLatest = false
+                    }, state = view.scroll, contentPadding = PaddingValues(40.dp, 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        // 顺序和 key 同经典：跟随最新的下标是 1 + history + messages + approvals
+                        item(key = "history-paging") {
+                            CodeColumn(true) {
+                                if (historyCursor != null) Box(historyPagingModifier) {
+                                    CodeTextAction(if (historyLoading) "正在加载…" else "加载更早消息", ::loadEarlier, enabled = !historyLoading)
+                                }
+                            }
+                        }
+                        items(history, key = { "history:" + it.key }) { CodeColumn(true) { LocalClaudeHistoryItem(it) } }
+                        items(messages, key = { it.id }) { CodeColumn(true) { ClaudeMessageItem(it, state.localClaudeTasks.images) } }
+                        items(approvals, key = { "permission:" + it.getString("request_id") }) { approval ->
+                            val id = approval.getString("request_id")
+                            CodeColumn(true) {
+                                ClaudePermissionCard(approval.getJSONObject("request"),
+                                    enabled = controller?.ready == true && !controller.cancelling,
+                                    responding = id in responding,
+                                    onAllowOnce = { answer(id, true) }, onDeny = { answer(id, false) })
+                            }
+                        }
+                        item { Spacer(Modifier.height(1.dp)) }
+                    }
+                    // 读历史时列表顶端一条 2 高的进度条（经典在列表上方占一行）
+                    if (historyLoading) LinearProgressIndicator(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(2.dp))
+                    if (!followLatest) JumpToLatestButton { followLatest = true }
+                }
+                CodeDock(true) {
+                    InstructionStrip(state.instructions, record.key, idle, { controller?.dispatchNext() })
+                    Note(controller?.note ?: "连接未恢复；此记录不会自动重发指令。", t.textMuted)
+                    if (historyPartial) Note("读取时历史末尾尚未写完，当前仅显示完整记录。", t.textMuted)
+                    if (historyError.isNotBlank()) {
+                        Note(historyError, t.danger)
+                        // 9.6 = Note 的 16 − chip 的 6.4：chip 的字和上面的提示字对齐
+                        if (controller == null) Row(Modifier.padding(horizontal = 9.6.dp)) { CodeFooterChip("重新加载历史", { historyRefresh++ }, enabled = !historyLoading) }
+                    }
+                    if (controller?.ready != true && controller?.busy != true && controller?.cancelling != true && controller?.changingModel != true)
+                        ClaudeResumeActions(record, installations, busy = resuming || state.localClaudeTasks.busy,
+                            detecting = state.localWorkspace.detecting, refresh = { state.localWorkspace.refresh() }) { resumeSession(it) }
+                    if (error.isNotBlank()) Note(error, t.danger)
+                    CodeLocalComposer(draft.value, { draft.value = it },
+                        hint = when {
+                            controller == null || !controller.ready -> "恢复会话后可发送"
+                            controller.pendingApprovals.isNotEmpty() -> "先处理上面的审批"
+                            controller.busy || controller.cancelling || controller.changingModel -> "本轮结束后可发送"
+                            else -> "跟它说点什么… Enter 发送，Shift+Enter 换行；截图直接 Ctrl+V"
+                        },
+                        focus = focus, canSend = canSend, onSend = ::send, running = controller?.busy == true, onStop = ::stop,
+                        attachments = imagePreviews, onRemoveAttachment = { preview -> imageDrafts.removeAll { it.remotePath == preview.stamp } },
+                        onKey = { e -> e.type == KeyEventType.KeyDown && e.key == Key.V && (e.isCtrlPressed || e.isMetaPressed) && pasteImage() },
+                        start = {
+                            // 选图是模态框，关掉后焦点还给输入框
+                            CodeLocalAttachButton(!capturingImages && imageDrafts.size < 4, capturingImages, imageButtonModifier) { addImages(); runCatching { focus.requestFocus() } }
+                            if (capturingImages) CodeFooterNote("正在读取图片…", t.textMuted)
+                            if (controller?.cancelling == true) CodeFooterNote("停止中…", t.textMuted)
+                        },
+                        end = {
+                            when {
+                                controller?.changingModel == true -> CodeFooterNote("正在应用设置…", t.textMuted)
+                                controller != null && (controller.availableModels.isNotEmpty() || controller.effortLevels.isNotEmpty()) ->
+                                    CodeLocalModelMenu(record.key, controller.model, controller.availableModels, controller.effort, controller.effortLevels,
+                                        enabled = idle, onModel = ::pickModel, onEffort = ::applyEffort)
+                                // 没有可选项时照经典副标题显示当前模型（未连接时取记录里的）
+                                else -> (controller?.model?.ifBlank { record.model } ?: record.model).takeIf { it.isNotBlank() }?.let { CodeFooterNote(it) }
+                            }
+                        },
+                    )
+                }
+            }
+        }
+        return
+    }
     Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         TextButton({ state.localSelectedTaskKey = null }) { Text("返回本地") }
         Text(state.navigation.title(record.key) ?: record.title, style = MaterialTheme.typography.headlineSmall)
@@ -180,12 +323,7 @@ import java.io.File
                         DropdownMenuItem(text = { Text(model) },
                             modifier = Modifier.padding(horizontal = 6.dp).then(if (model == controller.model)
                                 Modifier.background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp)) else Modifier),
-                            onClick = {
-                            modelMenu = false
-                            scope.launch { try { controller.selectModel(model) }
-                                catch (e: CancellationException) { throw e }
-                                catch (e: Exception) { error = e.message ?: "模型切换未确认" } }
-                        }, trailingIcon = { if (model == controller.model) Text("✓") })
+                            onClick = { modelMenu = false; pickModel(model) }, trailingIcon = { if (model == controller.model) Text("✓") })
                     }
                 }
             }
@@ -193,30 +331,14 @@ import java.io.File
         if (controller != null && controller.effortLevels.isNotEmpty()) {
             ClaudeEffortSettings(controller.model, controller.effortLevels, controller.effort,
                 enabled = controller.ready && !controller.busy && !controller.cancelling && controller.pendingApprovals.isEmpty(),
-                applying = controller.changingModel) { choice ->
-                scope.launch {
-                    try { controller.selectEffort(choice) }
-                    catch (e: CancellationException) { throw e }
-                    catch (e: Exception) { error = e.message ?: "思考强度未确认" }
-                }
-            }
+                applying = controller.changingModel) { applyEffort(it) }
         }
         Text(controller?.note ?: "连接未恢复；此记录不会自动重发指令。")
         if (controller?.ready != true && controller?.busy != true && controller?.cancelling != true && controller?.changingModel != true) {
             ClaudeResumeActions(record, installations,
                 busy = resuming || state.localClaudeTasks.busy,
                 detecting = state.localWorkspace.detecting,
-                refresh = { state.localWorkspace.refresh() }) { runtime ->
-                if (!resuming) {
-                    resuming = true; error = ""
-                    scope.launch {
-                        try { state.localClaudeTasks.resume(runtime, record.key) }
-                        catch (e: CancellationException) { throw e }
-                        catch (e: Exception) { error = e.message ?: "恢复未完成" }
-                        finally { resuming = false }
-                    }
-                }
-            }
+                refresh = { state.localWorkspace.refresh() }) { resumeSession(it) }
         }
         if (historyLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (historyPartial) Text("读取时历史末尾尚未写完，当前仅显示完整记录。", style = MaterialTheme.typography.bodySmall)
@@ -232,64 +354,39 @@ import java.io.File
                 if (historyCursor != null) TextButton(::loadEarlier, modifier = historyPagingModifier, enabled = !historyLoading) { Text(if (historyLoading) "正在加载…" else "加载更早消息") }
             }
             items(history, key = { "history:" + it.key }) { LocalClaudeHistoryItem(it) }
-            items(messages, key = { it.id }) { message ->
-                Column {
-                    Text(when (message.role) { "User" -> "你"; "Assistant" -> "Claude"; else -> "工具" }, style = MaterialTheme.typography.labelLarge)
-                    if (message.role == "Assistant" && message.kind == "text") AssistantBody(message.text)
-                    else if (message.text.isNotBlank()) SelectionContainer { Text(message.text) }
-                    if (message.attachments.isNotEmpty()) ClaudeSentImages(message.attachments, state.localClaudeTasks.images)
-                }
-            }
+            items(messages, key = { it.id }) { ClaudeMessageItem(it, state.localClaudeTasks.images) }
             items(approvals, key = { "permission:" + it.getString("request_id") }) { approval ->
                 val id = approval.getString("request_id"); val request = approval.getJSONObject("request")
-                fun answer(allow: Boolean) {
-                    if (id in responding || controller == null || !controller.ready || controller.cancelling) return
-                    responding.add(id)
-                    scope.launch { try { controller.answerPermission(id, allow) }
-                        catch (e: CancellationException) { throw e }
-                        catch (e: Exception) { error = e.message.orEmpty() }
-                        finally { responding.remove(id) } }
-                }
                 ClaudePermissionCard(request,
                     enabled = controller?.ready == true && !controller.cancelling,
                     responding = id in responding,
-                    onAllowOnce = { answer(true) }, onDeny = { answer(false) })
+                    onAllowOnce = { answer(id, true) }, onDeny = { answer(id, false) })
             }
             item { Spacer(Modifier.height(1.dp)) }
         }
         if (!followLatest) TextButton({ followLatest = true }) { Text("回到最新消息 ↓") }
         if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
         DraftAttachmentTray(imagePreviews, remove = { preview -> imageDrafts.removeAll { it.remotePath == preview.stamp } }, showTransferStatus = false)
-        TextButton({
-            if (!capturingImages) {
-                val files = pickImages()
-                if (files.isNotEmpty()) {
-                    capturingImages = true; state.claudeImageCaptures.add(record.key); error = ""
-                    scope.launch {
-                        try {
-                            require(files.size <= 4) { "每次最多4张图片" }
-                            val captured = withContext(Dispatchers.IO) { files.map(state.localClaudeTasks.images::capture) }
-                            val existing = imageDrafts.toList()
-                            val merged = withContext(Dispatchers.IO) { state.localClaudeTasks.images.mergeDraft(existing, captured) }
-                            state.localClaudeTasks.images.commitDraft(imageDrafts, existing, merged)
-                        } catch (e: CancellationException) { throw e }
-                        catch (e: Exception) { error = e.message ?: "图片读取失败" }
-                        finally { capturingImages = false; state.claudeImageCaptures.remove(record.key) }
-                    }
-                }
-            }
-        }, modifier = imageButtonModifier, enabled = !capturingImages && imageDrafts.size < 4) { Text(if (capturingImages) "正在读取图片…" else "添加图片") }
+        TextButton(::addImages, modifier = imageButtonModifier, enabled = !capturingImages && imageDrafts.size < 4) { Text(if (capturingImages) "正在读取图片…" else "添加图片") }
         OutlinedTextField(draft.value, { draft.value = it }, Modifier.fillMaxWidth().onPreviewKeyEvent { event ->
             if (event.type == KeyEventType.KeyDown && event.key == Key.V && (event.isCtrlPressed || event.isMetaPressed) && pasteImage()) true
             else if (event.type == KeyEventType.KeyDown && draft.value.composition == null && (event.key == Key.Enter || event.key == Key.NumPadEnter) && !event.isShiftPressed) { send(); true } else false
         }, label = { Text("消息 · Enter 发送，Shift+Enter 换行") }, minLines = 2, maxLines = 6)
         Row {
             TextButton(::send, modifier = sendButtonModifier, enabled = controller?.ready == true && !controller.busy && !controller.cancelling && !controller.changingModel && !sending && !capturingImages && controller.pendingApprovals.isEmpty() && (draft.value.text.isNotBlank() || imageDrafts.isNotEmpty())) { Text("发送") }
-            TextButton({ scope.launch { try { controller?.cancelTurn() }
-                catch (e: CancellationException) { throw e }
-                catch (e: Exception) { error = e.message ?: "停止结果未确认" } } },
+            TextButton(::stop,
                 enabled = controller?.busy == true && !controller.cancelling) { Text(if (controller?.cancelling == true) "停止中…" else "停止") }
         }
+    }
+}
+
+/** 一条本机 Claude 消息（两种风格共用）：角色名 + 正文 + 已发送的图片。 */
+@Composable private fun ClaudeMessageItem(message: ClaudeMessage, images: LocalClaudeImages) {
+    Column {
+        Text(when (message.role) { "User" -> "你"; "Assistant" -> "Claude"; else -> "工具" }, style = MaterialTheme.typography.labelLarge)
+        if (message.role == "Assistant" && message.kind == "text") AssistantBody(message.text)
+        else if (message.text.isNotBlank()) SelectionContainer { Text(message.text) }
+        if (message.attachments.isNotEmpty()) ClaudeSentImages(message.attachments, images)
     }
 }
 
@@ -302,6 +399,30 @@ import java.io.File
     var selectedId by remember(record.key) { mutableStateOf<String?>(null) }
     val selected = candidates.singleOrNull() ?: candidates.singleOrNull { it.id == selectedId }
     var open by remember(record.key) { mutableStateOf(false) }
+    if (LocalThemeSpec.current.style == UiStyle.Code) {
+        // Code 风格：停靠区里的提示字 + 页脚式按钮，多个候选时用 Code 浮层选；候选和语义同经典
+        val t = Tokens.current
+        NativeOverlay(open)
+        Column(Modifier.fillMaxWidth()) {
+            Note("恢复会保留原会话；请先停止其他窗口中的同一会话。", t.textMuted)
+            if (candidates.isEmpty()) Note("尚未找到匹配原配置目录的 Claude 运行器。", t.textMuted)
+            // 9.6 = Note 的 16 − chip 的 6.4：chip 的字和上面的提示字对齐
+            Row(Modifier.padding(horizontal = 9.6.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (candidates.size > 1) Box {
+                    CodeFooterChip(selected?.let { "${it.source} · ${it.version}" } ?: "选择原运行器", { open = true }, held = open, enabled = !busy && !detecting)
+                    if (open) CodePopup({ open = false }, side = PopupSide.Above, gap = 2.4.dp, width = 240.dp, maxWidth = 400.dp) {
+                        candidates.forEach { runtime ->
+                            CodeMenuItem("${runtime.source} · ${runtime.version} · ${runtime.command.firstOrNull().orEmpty()}",
+                                { selectedId = runtime.id; open = false }, checked = runtime.id == selected?.id)
+                        }
+                    }
+                }
+                CodeFooterChip(if (busy) "正在恢复…" else "恢复此会话", { selected?.let(resume) }, enabled = !busy && !detecting && selected != null)
+                CodeFooterChip(if (detecting) "正在检测…" else "重新检测运行器", refresh, enabled = !busy && !detecting)
+            }
+        }
+        return
+    }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("恢复会保留原会话；请先停止其他窗口中的同一会话。", style = MaterialTheme.typography.bodySmall)
         if (candidates.isEmpty()) Text("尚未找到匹配原配置目录的 Claude 运行器。", style = MaterialTheme.typography.bodySmall)

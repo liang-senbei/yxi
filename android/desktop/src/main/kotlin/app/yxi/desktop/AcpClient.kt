@@ -31,6 +31,8 @@ internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
     private val sessionConfigurations = ConcurrentHashMap<String, JSONArray>()
     private val activePrompts = ConcurrentHashMap.newKeySet<String>()
     private val cancellingSessions = ConcurrentHashMap.newKeySet<String>()
+    // 正在接回（session/load 回放整段对话）的会话：期间事件通道背压，回放再长也不因消费暂时落后而断开
+    private val loadingSessions = ConcurrentHashMap.newKeySet<String>()
     private val closed = AtomicBoolean()
     private val writing = Mutex()
     private sealed interface Event {
@@ -102,7 +104,8 @@ internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
                             val sessionId = message.getJSONObject("params").getString("sessionId")
                             if (sessionId in cancellingSessions) { cancelPermission(key, sessionId); continue }
                         }
-                        check(incoming.trySend(Event.Message(message)).isSuccess) { "ACP 事件消费未跟上，请核对会话" }
+                        if (loadingSessions.isEmpty()) check(incoming.trySend(Event.Message(message)).isSuccess) { "ACP 事件消费未跟上，请核对会话" }
+                        else incoming.send(Event.Message(message))
                     } else {
                         val id = message.opt("id") as? String ?: continue
                         pending.remove(id)?.complete(message)
@@ -143,6 +146,39 @@ internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
                 JSONObject(modes.toString()).apply { notifiedModes[id]?.let { current -> put("currentModeId", current) } }
             } }
         }
+    }
+    /** 运行器在 initialize 里声明了 loadSession（默认 false，没声明就不能调 session/load）。 */
+    fun supportsLoadSession() = initialization?.optJSONObject("agentCapabilities")?.optBoolean("loadSession", false) == true
+    /** 运行器声明了 sessionCapabilities.resume：能接回会话，但不回放历史。 */
+    fun supportsResume() = initialization?.optJSONObject("agentCapabilities")?.optJSONObject("sessionCapabilities")?.optJSONObject("resume") != null
+    /** 接回已有会话并回放历史：运行器先用 session/update 回放整段对话，回放完才回包。调用前必须已有人在消费事件。 */
+    suspend fun loadSession(sessionId: String, directory: String): JSONObject {
+        check(supportsLoadSession()) { "运行器没有声明可以接回会话" }
+        return restoreSession("session/load", sessionId, directory, 120_000)
+    }
+    /** 接回已有会话但不回放（运行器只声明了 resume）。 */
+    suspend fun resumeSession(sessionId: String, directory: String): JSONObject {
+        check(supportsResume()) { "运行器没有声明可以继续会话" }
+        return restoreSession("session/resume", sessionId, directory, 30_000)
+    }
+    private suspend fun restoreSession(method: String, sessionId: String, directory: String, timeout: Long): JSONObject {
+        check(initialized)
+        require(sessionId.isNotBlank() && sessionId.none { it < ' ' } && directory.isNotBlank() && directory.none { it < ' ' })
+        check(sessionId !in sessions) { "会话已在此连接上" }
+        check(consuming.get() && !closed.get()) { "ACP 事件处理器尚未就绪" }
+        check(loadingSessions.add(sessionId)) { "会话正在接回" }
+        try {
+            val result = request(method, JSONObject().put("sessionId", sessionId).put("cwd", directory).put("mcpServers", JSONArray()), timeout, emptyResult = true)
+            // 回包里的是当前值，覆盖回放里的旧值；回包没给的项保留回放留下的
+            result.optJSONArray("configOptions")?.let { options -> acpConfigSelectors(options); sessionConfigurations[sessionId] = JSONArray(options.toString()) }
+            result.optJSONObject("models")?.let { models -> sessionModels[sessionId] = JSONObject(models.toString()) }
+            result.optJSONObject("modes")?.let { modes -> sessionModes[sessionId] = JSONObject(modes.toString()) }
+            notifiedModes.remove(sessionId)
+            sessions.add(sessionId)
+            // 回放可能还有一截在通道里：消费完再解除背压，免得紧接着的实时事件把通道挤满
+            synchronizeEvents()
+            return result
+        } finally { loadingSessions.remove(sessionId) }
     }
     fun modes(sessionId: String): JSONObject? = sessionModes[sessionId]?.let { JSONObject(it.toString()) }
     fun models(sessionId: String): JSONObject? = sessionModels[sessionId]?.let { JSONObject(it.toString()) }
@@ -228,14 +264,15 @@ internal class AcpClient(private val transport: AcpTransport) : AutoCloseable {
         if (approvals.remove(key, request)) writeLocked(JSONObject().put("id", request.get("id")).put("result",
             JSONObject().put("outcome", JSONObject().put("outcome", "cancelled"))))
     }
-    private suspend fun request(method: String, params: JSONObject, timeout: Long = 30_000): JSONObject {
+    /** [emptyResult]：result 缺失或为 null 时当成空对象（session/load 和 session/resume 的回包可以是 null）。 */
+    private suspend fun request(method: String, params: JSONObject, timeout: Long = 30_000, emptyResult: Boolean = false): JSONObject {
         check(!closed.get()) { "ACP 连接已关闭" }
         val id = "yxi-" + UUID.randomUUID(); val response = CompletableDeferred<JSONObject>(); pending[id] = response
         try { return withTimeout(timeout) {
             write(JSONObject().put("id", id).put("method", method).put("params", params))
             val reply = response.await()
             reply.optJSONObject("error")?.let { throw AcpRpcException(it.getInt("code"), it.optString("message")) }
-            reply.getJSONObject("result")
+            if (emptyResult && reply.isNull("result")) JSONObject() else reply.getJSONObject("result")
         } } finally { pending.remove(id) }
     }
     private suspend fun write(message: JSONObject) = writing.withLock {

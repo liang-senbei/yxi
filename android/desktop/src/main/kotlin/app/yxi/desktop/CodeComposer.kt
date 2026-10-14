@@ -126,7 +126,8 @@ internal fun CodeComposerCard(
             // 图元 10.4 宽、中心离卡片右缘 ≈22：24 的点击区 + 右边 10；44 高时和文字行同在正中
             Box(
                 Modifier.padding(start = 8.dp, end = 10.dp, bottom = 10.dp).size(24.dp).clip(RoundedCornerShape(6.dp))
-                    .clickable(interactionSource = sendSource, indication = null, enabled = if (running) true else canSend && !readOnly, role = Role.Button, onClick = if (running) onStop else onSend),
+                    .clickable(interactionSource = sendSource, indication = null, enabled = if (running) true else canSend && !readOnly, role = Role.Button,
+                        onClick = { if (running) onStop() else onSend(); runCatching { focus.requestFocus() } }),   // clickable 按下就把焦点移到自己身上，点完还给输入框
                 contentAlignment = Alignment.Center,
             ) {
                 if (running) CodeStopGlyph() else CodeEnterGlyph(if (focused) p.enterFocused else p.enterBlurred)
@@ -260,7 +261,7 @@ internal fun CodeChatComposer(
     onAttach: () -> Unit, onHistory: () -> Unit, onSearch: (() -> Unit)?, onVoice: () -> Unit, onRoutes: (() -> Unit)?,
     permissionControl: @Composable () -> Unit, modelControl: @Composable () -> Unit,
 ) {
-    Column(Modifier.fillMaxWidth()) {
+    CodeInputArea(focus, Modifier.fillMaxWidth()) {
         CodeComposerCard(draft, onDraft, hint, focus, canSend, onSend, Modifier.fillMaxWidth(), onKey = onKey) {
             DraftAttachmentTray(attachments, onRemoveAttachment)
             AttachmentMentionList(mentions)
@@ -289,10 +290,10 @@ internal fun CodeFooterNote(label: String, color: Color = Tokens.current.textSec
 
 /**
  * 页脚的「+」：规格 #61605D、宽 11.2，离权限标签 ≈16.8（24 的点击区 + 左边 4）。点开向上展开，收着经典功能行里的
- * 附件、输入历史、搜索、语音和线路 chip（入口不少，只是换了位置）。
+ * 附件、输入历史、搜索、语音和线路 chip（入口不少，只是换了位置）。服务器上的 Codex 对话页（Code 外观）也用它。
  */
 @Composable
-private fun CodeComposerPlus(onAttach: () -> Unit, onHistory: () -> Unit, onSearch: (() -> Unit)?, onVoice: () -> Unit, onRoutes: (() -> Unit)?) {
+internal fun CodeComposerPlus(onAttach: () -> Unit, onHistory: () -> Unit, onSearch: (() -> Unit)?, onVoice: () -> Unit, onRoutes: (() -> Unit)?) {
     var open by remember { mutableStateOf(false) }
     NativeOverlay(open)
     val close = { open = false }

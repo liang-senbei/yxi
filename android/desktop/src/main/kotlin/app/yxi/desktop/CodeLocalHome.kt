@@ -42,7 +42,7 @@ internal class LocalHomeDraft {
     var error by mutableStateOf("")
     var job: Job? = null
     fun directoryOr(w: LocalWorkspace): String = directory.ifBlank { w.projects.firstOrNull() ?: System.getProperty("user.home") }
-    /** 可选运行器：就绪的安装；Codex 只列工作台选中的那个（经典新建对话框固定用它），按 [LocalRuntimeDiscovery.engines] 排。 */
+    /** 可选运行器：就绪的安装；Codex 只列工作台选中的那个（直接建和经典新建对话框都用它），按 [LocalRuntimeDiscovery.engines] 排。 */
     fun choices(w: LocalWorkspace): List<LocalRuntimeInstallation> = w.installations
         .filter { it.ready && (it.engine != "codex" || it.id == w.selectedRuntime?.id) }
         .sortedBy { LocalRuntimeDiscovery.engines.indexOf(it.engine) }
@@ -54,21 +54,24 @@ internal class LocalHomeDraft {
 
 /**
  * Code 风格的本机首页（规格 §3.8）：和 SSH 的 [CodeHome] 共用 [CodeHomeFrame]，环境 chip 显示「本机」。
- * 按 Enter：Claude Code 直接建（先核对身份和官方端点，同经典「新建官方对话」）；Codex / OpenCode / ACP 要选模型、连接或认证，
- * 打开经典的新建对话框，文件夹带过去。两条路都不自动发送：提示词放进新对话的输入框，由你确认（同经典「创建不会自动发送消息」）。
+ * 按 Enter：Claude Code 直接建（先核对身份和官方端点，同经典「新建官方对话」）；Codex 也直接建，用工作台选中的运行器和它报的默认模型
+ * （对话页的模型 chip 再改），只有上次创建待核对、索引从备份恢复时才打开经典的新建对话框去核对；OpenCode / ACP 要选模型、连接或认证，
+ * 打开经典的新建对话框，文件夹带过去。都不自动发送：提示词放进新对话的输入框，由你确认（同经典「创建不会自动发送消息」）。
  */
 @Composable
 internal fun CodeLocalHome(state: AppState, actions: HostActions, scope: CoroutineScope) {
     val w = state.localWorkspace
     val d = state.localHomeDraft
     val runtime = d.runtimeOr(w)
+    val codexReview = if (runtime?.engine == "codex") localCodexReview(state.localCodexTasks) else null
     var dialog by remember { mutableStateOf<LocalRuntimeInstallation?>(null) }
     val focus = remember { FocusRequester() }
     LaunchedEffect(d.focusTick) { runCatching { focus.requestFocus() } }
     val canSend = runtime != null && !d.busy && dialog == null
     CodeHomeFrame(
         state,
-        notes = { CodeNoteLines(localHomeNotes(w, d, runtime)) },
+        focus,
+        notes = { CodeNoteLines(localHomeNotes(w, d, runtime, codexReview)) },
         chips = {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.6.dp), verticalAlignment = Alignment.CenterVertically) {
                 CodeEnvChip(state, actions, null, local = true)
@@ -80,14 +83,22 @@ internal fun CodeLocalHome(state: AppState, actions: HostActions, scope: Corouti
         CodeComposerCard(
             d.text, { d.text = it }, "描述要做的事，按 Enter 新建对话（不会自动发送）", focus, canSend,
             onSend = {
-                if (runtime != null && canSend) {
-                    if (runtime.engine == "claude") createLocalClaude(state, scope, runtime) else dialog = runtime
+                if (runtime != null && canSend) when {
+                    runtime.engine == "claude" -> createLocal(state, scope) { dir, title -> state.localClaudeTasks.create(runtime, dir, title) }
+                    runtime.engine == "codex" && codexReview == null ->
+                        createLocal(state, scope) { dir, title -> state.localCodexTasks.create(runtime, dir, title, null, autoRun = true) }
+                    else -> dialog = runtime
                 }
             },
             modifier = Modifier.fillMaxWidth(), readOnly = d.busy,
         )
     }
-    dialog?.let { r -> LocalHomeDialog(state, r, { dialog = null }) { record -> dialog = null; openLocalHomeTask(state, record) } }
+    dialog?.let { r -> LocalHomeDialog(state, r, { dialog = null }) { record ->
+        dialog = null
+        // 经典对话框建的 Codex 会话（核对之后）：同首页直接建，按排队偏好自动逐轮（create 默认手动，Code 对话页对已连上的不再 open）
+        if (r.engine == "codex") state.localCodexTasks.controllers[record.key]?.setAutoDispatch(QueuePreferences.enabled(record.key))
+        openLocalHomeTask(state, record)
+    } }
 }
 
 /** 经典的新建对话框（和经典工作台的运行器卡是同一套：Codex 用工作台选中的运行器，Gemini / Grok / Hermes 走 ACP）。 */
@@ -118,10 +129,12 @@ private fun openLocalHomeTask(state: AppState, record: LocalCodexTaskRecord) {
 }
 
 /**
- * Claude Code：同经典「新建官方对话」，先核对身份和有效官方端点再建；标题取提示词第一行（空就用「新对话」）。
- * 在 App 级 scope 里跑，切风格不打断；「取消创建」取消这个 job（经典对话框的「取消创建」同理）。
+ * 首页直接建（Claude Code、Codex）：标题取提示词第一行，空就由 [create] 兜底（Claude 用「新对话」，Codex 用文件夹名）。
+ * Claude 同经典「新建官方对话」，先核对身份和有效官方端点再建；Codex 连上运行器、读官方模型列表再 thread/start。
+ * 在 App 级 scope 里跑，切风格不打断；「取消创建」取消这个 job（经典对话框的「取消创建」同理）。Codex 在 thread/start 发出后被取消，
+ * 结果记成待核对，下次按 Enter 进经典对话框核对（同崩溃后的恢复）。
  */
-private fun createLocalClaude(state: AppState, scope: CoroutineScope, runtime: LocalRuntimeInstallation) {
+private fun createLocal(state: AppState, scope: CoroutineScope, create: suspend (directory: String, title: String) -> LocalCodexTaskRecord) {
     val d = state.localHomeDraft
     val directory = d.directoryOr(state.localWorkspace)
     val title = d.text.text.lineSequence().map { line -> line.filter { it >= ' ' }.trim() }.firstOrNull { it.isNotEmpty() }.orEmpty().take(40)
@@ -130,7 +143,7 @@ private fun createLocalClaude(state: AppState, scope: CoroutineScope, runtime: L
         try {
             val folder = File(directory)
             check(folder.isAbsolute && folder.isDirectory) { "文件夹不可用：$directory" }
-            openLocalHomeTask(state, state.localClaudeTasks.create(runtime, directory, title))
+            openLocalHomeTask(state, create(directory, title))
         }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { d.error = e.message.orEmpty().ifBlank { "创建没成功，请重试" } }
@@ -138,14 +151,25 @@ private fun createLocalClaude(state: AppState, scope: CoroutineScope, runtime: L
     }
 }
 
-/** 输入卡上方的说明：检测状态、没有可用运行器时去哪里设、工作台的错误、创建进度和失败原因。 */
-private fun localHomeNotes(w: LocalWorkspace, d: LocalHomeDraft, runtime: LocalRuntimeInstallation?): List<Pair<String, Boolean>> {
+/** 输入卡上方的说明：检测状态、没有可用运行器时去哪里设、工作台的错误、创建进度、Codex 待核对（按 Enter 去核对）和失败原因。 */
+private fun localHomeNotes(w: LocalWorkspace, d: LocalHomeDraft, runtime: LocalRuntimeInstallation?, codexReview: String?): List<Pair<String, Boolean>> {
     val notes = mutableListOf<Pair<String, Boolean>>()
     if (runtime == null) notes += (if (w.detecting || !w.scanned) "正在检测本机运行器…" else "没有找到可用的本机运行器：在右下角「管理运行器…」里选择路径，或重新检测") to false
     if (w.error.isNotBlank()) notes += w.error to true
-    if (d.busy) notes += "正在核对身份和官方端点，并创建对话…" to false
+    if (d.busy) notes += (if (runtime?.engine == "codex") "正在启动 Codex、读取官方模型，并创建对话…" else "正在核对身份和官方端点，并创建对话…") to false
     if (d.error.isNotBlank()) notes += d.error to true
+    if (!d.busy && codexReview != null) notes += codexReview to false
     return notes
+}
+
+/**
+ * Codex 要先核对才能新建时的说明（这时按 Enter 打开经典的新建对话框，核对入口在那里）：上次创建没收尾、索引从备份恢复。
+ * 索引损坏不在这里：直接建时 create 先报错，不起进程。
+ */
+internal fun localCodexReview(tasks: LocalCodexTasks): String? = when {
+    tasks.recoveryThreadId.isNotBlank() -> "上次创建结果需要核对：${tasks.recoveryThreadId}；按 Enter 打开核对"
+    tasks.registry.recoveryReviewRequired -> tasks.registry.problem + "；按 Enter 打开核对"
+    else -> null
 }
 
 /** 页脚：左边创建中的「取消创建」；右边运行器和上下文环（新对话还没有用量，整环灰）。本机创建不带权限参数，不放权限 chip。 */

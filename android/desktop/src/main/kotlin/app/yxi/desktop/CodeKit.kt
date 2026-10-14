@@ -30,11 +30,21 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusTarget
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Paint
@@ -64,6 +74,8 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import kotlin.math.floor
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import org.jetbrains.skia.FilterBlurMode
 import org.jetbrains.skia.MaskFilter
 
@@ -275,6 +287,33 @@ private class CodePopupPosition(val side: PopupSide, val alignEnd: Boolean, val 
     }
 }
 /**
+ * 输入区（输入卡 + 上面的 chips + 页脚）里的浮层关掉后，把焦点还给输入框。桌面端点 chip 时焦点落到 chip 上，
+ * 浮层关掉后还停在那里，打字没有去处（经典的 DropdownMenu 同样）。由 [CodeInputArea] 提供（[CodeHomeFrame] / [CodeChatComposer] 用它包住输入区）：
+ * 区里有焦点时 [inside]；[CodePopup] 离开组合时 [back]。侧栏等区外的浮层拿到的是 null，焦点照旧留在触发它的控件上。
+ */
+internal class CodeFocusReturn(private val scope: CoroutineScope, private val input: FocusRequester) {
+    var inside = false
+    /**
+     * 等一帧（浮层层这一帧才摘掉）再还；焦点已经离开输入区（菜单项打开了区外的搜索框之类）就不还。
+     * 菜单项弹了对话框也照还：对话框在更上面一层，按键归它，这里挪的只是主层的焦点，对话框关掉后打字接着落在输入框。
+     */
+    fun back() {
+        scope.launch { withFrameNanos { }; if (inside) runCatching { input.requestFocus() } }
+    }
+}
+internal val LocalCodeFocusReturn = compositionLocalOf<CodeFocusReturn?> { null }
+
+/** 输入区：包住输入卡和它上下的 chips / 页脚；区里的 [CodePopup] 关掉后把焦点还给 [input]（见 [CodeFocusReturn]）。 */
+@Composable
+internal fun CodeInputArea(input: FocusRequester, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    val scope = rememberCoroutineScope()
+    val focusReturn = remember(scope, input) { CodeFocusReturn(scope, input) }
+    CompositionLocalProvider(LocalCodeFocusReturn provides focusReturn) {
+        Column(modifier.onFocusChanged { focusReturn.inside = it.hasFocus }, content = content)
+    }
+}
+
+/**
  * Code 风格浮层：白底 r10、内边距 4、1dp 外环 + 两层阴影；Esc 或点外面关闭。
  * 要放在包着触发控件的 Box 里（锚点就是那个 Box）；NativeOverlay 由持有者调用。[width] 为 null 时按内容宽；
  * 给了 [maxWidth] 就在 [width]..[maxWidth] 之间按内容宽（条目文案和经典共用、长短不定的菜单）。
@@ -292,16 +331,22 @@ internal fun CodePopup(
     val gapPx = with(LocalDensity.current) { gap.roundToPx() }
     val shape = RoundedCornerShape(10.dp)
     val p = CodePalette.current
+    val focusReturn = LocalCodeFocusReturn.current
+    if (focusReturn != null) DisposableEffect(focusReturn) { onDispose { focusReturn.back() } }
     Popup(
         popupPositionProvider = remember(side, alignEnd, gapPx) { CodePopupPosition(side, alignEnd, gapPx) },
         onDismissRequest = onDismiss,
         properties = PopupProperties(focusable = true),
     ) {
+        // 浮层里没有聚焦的节点时按键没有去处，Esc 关不掉：先让外框拿焦点（里面的搜索框自己的请求排在后面，焦点落到框上）
+        val root = remember { FocusRequester() }
+        LaunchedEffect(Unit) { runCatching { root.requestFocus() } }
         Column(
             (if (width != null && maxWidth != null) Modifier.widthIn(width, maxWidth).width(IntrinsicSize.Max)
             else if (width != null) Modifier.width(width) else Modifier.width(IntrinsicSize.Max))
                 .codeShadow(10.dp, PopupShadow).background(p.popup, shape).border(1.dp, p.popupRing, shape).padding(4.dp)
-                .onPreviewKeyEvent { if (it.type == KeyEventType.KeyDown && it.key == Key.Escape) { onDismiss(); true } else false },
+                .onPreviewKeyEvent { if (it.type == KeyEventType.KeyDown && it.key == Key.Escape) { onDismiss(); true } else false }
+                .focusRequester(root).focusTarget(),
             content = content,
         )
     }
