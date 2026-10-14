@@ -293,9 +293,6 @@ private fun CodeServerCodexConversation(state: AppState, conn: Conn, record: Cod
                         items(Transcripts.rows(messages.map(Transcripts::codex)), key = { "row:" + it.key }) { row ->
                             CodeColumn(true) { CompositionLocalProvider(LocalUriHandler provides taskUris) { CodeTranscriptLine(row, onPath = ::openTaskFile) } }
                         }
-                        if (controller != null) items(requests, key = { "request:" + it.get("id").toString() }) { request ->
-                            CodeColumn(true) { CodexRequestCard(request, controller, ::openTaskFile) { block -> act(block) } }
-                        }
                         item(key = "latest") { Spacer(Modifier.height(1.dp)) }
                     }
                     if (workspace.busy) LinearProgressIndicator(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(2.dp))
@@ -319,6 +316,8 @@ private fun CodeServerCodexConversation(state: AppState, conn: Conn, record: Cod
                 }
                 if (notice.isNotBlank()) Note(notice, t.textMuted)
                 if (error.isNotBlank()) Note(error, t.danger)
+                // M3d-2b：请求卡停靠在输入卡上方（规格表 §3.3），不进对话滚动区
+                if (controller != null) requests.forEach { request -> key(request.get("id").toString()) { CodexRequestCard(request, controller, ::openTaskFile) { block -> act(block) } } }
                 CodeLocalComposer(draft.value, { draft.value = it },
                     hint = when {
                         controller == null || !controller.ready -> "连接任务后发送；现在发送会先排队"

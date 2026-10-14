@@ -28,6 +28,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.clickable
 
 /**
  * 本机 Codex 对话的 Code 外观（本机对齐 P1b，规划图 handover/本机对齐-规划.md）：会话头 + 居中的对话列 + 停靠区，结构同 Claude / ACP 的 Code 分支。
@@ -224,9 +227,6 @@ internal fun CodeLocalCodexPane(state: AppState, record: LocalCodexTaskRecord) {
                     items(Transcripts.rows(messages.map(Transcripts::codex)), key = { "row:" + it.key }) { row ->
                         CodeColumn(true) { CompositionLocalProvider(LocalUriHandler provides links) { CodeTranscriptLine(row, onPath = ::copyPath) } }
                     }
-                    if (controller != null) items(requests, key = { "request:" + it.get("id").toString() }) { request ->
-                        CodeColumn(true) { CodexRequestCard(request, controller, ::copyPath) { block -> act(block) } }
-                    }
                     item(key = "latest") { Spacer(Modifier.height(1.dp)) }
                 }
                 // 接回时列表顶端一条 2 高的进度条（同 Claude 读历史）
@@ -262,6 +262,8 @@ internal fun CodeLocalCodexPane(state: AppState, record: LocalCodexTaskRecord) {
                 }
                 if (notice.isNotBlank()) Note(notice, t.textMuted)
                 if (error.isNotBlank()) Note(error, t.danger)
+                // M3d-2b：请求卡停靠在输入卡上方（规格表 §3.3），不进对话滚动区
+                if (controller != null) requests.forEach { request -> key(request.get("id").toString()) { CodexRequestCard(request, controller, ::copyPath) { block -> act(block) } } }
                 CodeLocalComposer(draft.value, { draft.value = it },
                     hint = when {
                         controller == null || !controller.ready -> if (opening) "正在接回会话…" else "接回会话后可发送"
@@ -290,35 +292,45 @@ internal fun CodeLocalCodexPane(state: AppState, record: LocalCodexTaskRecord) {
 /** 运行器请求卡，写法同服务器工作台（CodexWorkspacePane 的 requests 项）；服务器上的 Codex 对话页（Code 外观）也用它。外观仍是现有卡片（M3 统一）。 */
 @Composable
 internal fun CodexRequestCard(request: JSONObject, controller: CodexTaskController, onOpen: (String) -> Unit, act: (suspend () -> Unit) -> Unit) {
+    // M3d-2b：Code 审批卡（规格表 §3.3），停靠在输入卡上方（由面板放进停靠区）。相关的命令 / 改动已经在上面的工具摘要行里，这里不再重复展开活动卡
+    val t = Tokens.current
     val method = request.optString("method")
-    val supported = method == "item/commandExecution/requestApproval" || method == "item/fileChange/requestApproval"
+    val command = method == "item/commandExecution/requestApproval"
+    val files = method == "item/fileChange/requestApproval"
     val answer: (JSONObject) -> Unit = { response -> act { controller.answerRequest(request.get("id"), response) } }
-    OutlinedCard(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(if (supported) "需要你的批准" else if (method == "item/permissions/requestApproval") "额外权限申请" else "运行器需要进一步输入", style = MaterialTheme.typography.titleSmall)
-            val params = request.optJSONObject("params") ?: JSONObject()
+    val params = request.optJSONObject("params") ?: JSONObject()
+    fun text(key: String) = params.optString(key).takeIf { it.isNotBlank() && it != "null" }
+    var details by remember(request) { mutableStateOf(false) }
+    val title = when {
+        command -> "允许运行这条命令？"
+        files -> "允许修改这些文件？"
+        method == "item/permissions/requestApproval" -> "额外权限申请"
+        else -> "运行器需要进一步输入"
+    }
+    val supported = command || files
+    CodeApprovalCard(title,
+        deny = if (supported) CodeApprovalAction("拒绝", enabled = controller.ready) { answer(JSONObject().put("decision", "decline")) } else null,
+        actions = if (supported) listOf(CodeApprovalAction("仅允许本次", primary = true, enabled = controller.ready) { answer(JSONObject().put("decision", "accept")) }) else emptyList(),
+        modifier = Modifier.padding(bottom = 6.4.dp)) {
+        text("reason")?.let { CodeApprovalText(it) }
+        if (command) {
+            text("command")?.let { CodeCommandBlock(it) }
+            text("cwd")?.let { Text("目录：$it", color = t.textMuted, fontSize = 12.sp, lineHeight = 17.sp) }
+        }
+        if (files) {
             val related = controller.messages.firstOrNull { it.id == params.optString("itemId") && it.kind != "message" }
-            if (related != null) CodexActivityCard(related, onOpen, initiallyExpanded = true)
-            val description = buildString {
-                if (method == "item/fileChange/requestApproval") append("允许运行器修改文件\n")
-                params.optString("command").takeIf { it.isNotBlank() && it != "null" }?.let { append(it).append('\n') }
-                params.optString("cwd").takeIf { it.isNotBlank() && it != "null" }?.let { append("目录：").append(it).append('\n') }
-                params.optString("reason").takeIf { it.isNotBlank() && it != "null" }?.let { append(it) }
+            related?.paths?.forEach { path ->
+                Text(path, Modifier.clickable { onOpen(path) }, color = t.accent, fontSize = 13.sp, lineHeight = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            SelectionContainer { Text(description.trimEnd().ifBlank { "请查看请求详情后再决定。" }, style = MaterialTheme.typography.bodySmall) }
-            var details by remember(request) { mutableStateOf(false) }
-            TextButton({ details = !details }) { Text(if (details) "收起详情" else "查看请求详情") }
-            if (details) SelectionContainer { Text(params.toString(2), style = MaterialTheme.typography.bodySmall) }
-            when {
-                supported -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button({ answer(JSONObject().put("decision", "accept")) }, enabled = controller.ready) { Text("仅允许本次") }
-                    OutlinedButton({ answer(JSONObject().put("decision", "decline")) }, enabled = controller.ready) { Text("拒绝") }
-                }
-                method == "item/permissions/requestApproval" -> CodexPermissionRequest(params, controller.ready, answer)
-                method == "mcpServer/elicitation/request" -> CodexMcpElicitationButtons(params, controller.ready, answer)
-                method == "item/tool/requestUserInput" -> CodexQuestionForm(controller, request)
-                else -> Text("此类输入暂未接入，可中断当前轮次后调整任务。", color = Tokens.current.textMuted)
-            }
+        }
+        if (!supported && text("reason") == null && text("command") == null) CodeApprovalText("请查看请求详情后再决定。")
+        CodeTextAction(if (details) "收起详情" else "查看请求详情", { details = !details })
+        if (details) CodeCommandBlock(params.toString(2))
+        when (method) {
+            "item/permissions/requestApproval" -> CodexPermissionRequest(params, controller.ready, answer)
+            "mcpServer/elicitation/request" -> CodexMcpElicitationButtons(params, controller.ready, answer)
+            "item/tool/requestUserInput" -> CodexQuestionForm(controller, request)
+            else -> if (!supported) Text("此类输入暂未接入，可中断当前轮次后调整任务。", color = t.textMuted, fontSize = 14.sp, lineHeight = 20.sp)
         }
     }
 }
