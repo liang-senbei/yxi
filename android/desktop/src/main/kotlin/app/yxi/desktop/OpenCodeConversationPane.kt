@@ -144,10 +144,8 @@ import org.json.JSONObject
                     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(40.dp, 12.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         if (controller != null) {
-                            items(controller.messages, key = { it.getJSONObject("info").getString("id") }) {
-                                // M3b：一条 OpenCode 消息拆成几项（正文、思考、工具），同一套 Code 对话项
-                                CodeColumn(true) { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { Transcripts.openCode(it).forEach { item -> key(item.key) { CodeTranscriptRow(item) } } } }
-                            }
+                            // M3b / M3c：每条 OpenCode 消息拆成几项（正文、思考、工具），连着的工具调用跨消息合成摘要行 + 卡片
+                            items(Transcripts.rows(controller.messages.flatMap(Transcripts::openCode)), key = { "row:" + it.key }) { row -> CodeColumn(true) { CodeTranscriptLine(row) } }
                             items(controller.permissions, key = { "permission:${it.getString("id")}" }) { request ->
                                 CodeColumn(true) { OpenCodePermissionCard(request, controller, ::act, Modifier.fillMaxWidth()) }
                             }

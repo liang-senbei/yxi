@@ -302,6 +302,13 @@ private fun codeScenes() = listOf(
         check(nodes.any { it.endsWith(" 重新连接") }) { "失败后没有回到「重新连接」" }
     }) { localCodexFailed(it) },
     // 本机 Codex 的输入区（P1c）：点开模型 chip（列表来自 model/list，强度条跟着当前模型）；草稿一句话 + 两张图（托盘缩略图读快照）
+    // 工具摘要行和工具组卡片（M3c，规格表 §3.4）：一轮里的命令和文件改动合成一行，点开是撑满列宽的卡片；第二张再点开命令条目（命令框 + 输出）
+    CodeScene("local-codex-tools", listOf(SHOT_CODEX_TOOLS), verify = { _, nodes ->
+        check(nodes.any { it.trimEnd().endsWith(" 修改") } && nodes.any { it.endsWith(" parser.rs、Cargo.toml") }) { "卡片里没有改文件的条目" }
+    }) { localCodex(it, approval = false) },
+    CodeScene("local-codex-tools-command", listOf(SHOT_CODEX_TOOLS, SHOT_CODEX_COMMAND), verify = { _, nodes ->
+        check(nodes.any { it.trimEnd().endsWith(" $") } && nodes.any { it.endsWith(" $SHOT_CODEX_COMMAND") }) { "命令条目点开后没有命令框" }
+    }) { localCodex(it, approval = false) },
     CodeScene("local-codex-model", listOf("gpt-5-codex")) { localCodex(it, approval = false) },
     CodeScene("local-codex-images") { localCodexImages(it) },
     // 本机的 Git 改动（本机对齐 P6a）：会话头右端点「改动」，对话列换成改动视图（同服务器 Codex 页）；LocalGit.run 换成固定的快照，不起 git。
@@ -829,6 +836,10 @@ private fun localClaudeRestore(state: AppState) {
     }
     state.localSelectedTaskKey = record.key
 }
+
+/** localCodex 第一轮的工具摘要行（命令 + 文件改动）和其中命令条目的标题（M3c 的两个场景点它们）。 */
+private const val SHOT_CODEX_TOOLS = "运行了一条命令，改了 parser.rs、Cargo.toml"
+private const val SHOT_CODEX_COMMAND = "rg -n \"pub fn parse\" src"
 
 /** 本机文件的夹具（本机对齐 P6b）：projects/demo-app 下摆一个 src 目录和两个文件，修改时间都固定（列表里显示时间），只写在夹具目录里。 */
 private fun shotLocalFiles() {

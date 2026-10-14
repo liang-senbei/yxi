@@ -221,7 +221,8 @@ private class AcpPendingAuthentication(val plan: AcpTerminalAuthPlan, val comple
                     }, state = view.scroll, contentPadding = PaddingValues(40.dp, 12.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         // 顺序和 key 同经典：跟随最新滚到下标 messages + approvals（末尾的占位）
-                        items(messages, key = { "message:${it.id}" }) { CodeColumn(true) { CodeTranscriptRow(Transcripts.acp(it)) } }   // M3b：统一对话项
+                        // M3b / M3c：统一对话项，连着的工具调用合成摘要行 + 卡片
+                        items(Transcripts.rows(messages.map(Transcripts::acp)), key = { "row:" + it.key }) { row -> CodeColumn(true) { CodeTranscriptLine(row) } }
                         items(approvals, key = { "approval:" + org.json.JSONArray().put(it.get("id")).toString() }) { request ->
                             CodeColumn(true) {
                                 AcpPermissionCard(request.getJSONObject("params"), controller?.ready == true && !controller.cancelling) { option ->

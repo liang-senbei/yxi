@@ -269,7 +269,10 @@ import java.io.File
                             }
                         }
                         items(history, key = { "history:" + it.key }) { CodeColumn(true) { LocalClaudeHistoryItem(it) } }
-                        items(messages, key = { it.id }) { CodeColumn(true) { CodeTranscriptRow(Transcripts.claude(it), images = { ClaudeSentImages(it, state.localClaudeTasks.images) }) } }   // M3b
+                        // M3b / M3c：统一对话项；工具结果并进前一个调用
+                        items(Transcripts.rows(messages.map(Transcripts::claude)), key = { "row:" + it.key }) { row ->
+                            CodeColumn(true) { CodeTranscriptLine(row, images = { ClaudeSentImages(it, state.localClaudeTasks.images) }) }
+                        }
                         items(approvals, key = { "permission:" + it.getString("request_id") }) { approval ->
                             val id = approval.getString("request_id")
                             CodeColumn(true) {

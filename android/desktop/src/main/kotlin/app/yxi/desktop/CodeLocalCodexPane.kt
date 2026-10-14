@@ -219,12 +219,10 @@ internal fun CodeLocalCodexPane(state: AppState, record: LocalCodexTaskRecord) {
                 }, state = view.scroll, contentPadding = PaddingValues(40.dp, 12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     // 顺序和 key 同服务器工作台：跟随最新滚到下标 messages + requests（末尾的占位）
-                    items(messages, key = { "message:" + it.id }) { message ->
-                        CodeColumn(true) {
-                            if (message.kind != "message") CodexActivityCard(message, ::copyPath)
-                            // M3b：消息走统一对话项（你 = 右对齐气泡，Codex = 没有作者名的正文）；回复里的链接照旧改成复制路径
-                            else CompositionLocalProvider(LocalUriHandler provides links) { CodeTranscriptRow(Transcripts.codex(message)) }
-                        }
+                    // M3b / M3c：统一对话项（你 = 右对齐气泡，Codex = 没有作者名的正文），命令和文件改动合成摘要行 + 卡片（代替原来的活动卡）；
+                    // 回复里的链接、改动里的路径照旧是复制路径
+                    items(Transcripts.rows(messages.map(Transcripts::codex)), key = { "row:" + it.key }) { row ->
+                        CodeColumn(true) { CompositionLocalProvider(LocalUriHandler provides links) { CodeTranscriptLine(row, onPath = ::copyPath) } }
                     }
                     if (controller != null) items(requests, key = { "request:" + it.get("id").toString() }) { request ->
                         CodeColumn(true) { CodexRequestCard(request, controller, ::copyPath) { block -> act(block) } }

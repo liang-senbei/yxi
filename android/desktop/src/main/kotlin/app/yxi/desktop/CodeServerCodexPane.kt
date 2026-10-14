@@ -289,12 +289,9 @@ private fun CodeServerCodexConversation(state: AppState, conn: Conn, record: Cod
                         if (event.changes.any { it.scrollDelta.y < 0f }) followLatest = false
                     }, state = view.scroll, contentPadding = PaddingValues(40.dp, 12.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        items(messages, key = { "message:" + it.id }) { message ->
-                            CodeColumn(true) {
-                                if (message.kind != "message") CodexActivityCard(message, ::openTaskFile)
-                                // M3b：消息走统一对话项，同本机 Codex 页
-                                else CompositionLocalProvider(LocalUriHandler provides taskUris) { CodeTranscriptRow(Transcripts.codex(message)) }
-                            }
+                        // M3b / M3c：同本机 Codex 页；改动里的路径点了打开文件（同原来的活动卡）
+                        items(Transcripts.rows(messages.map(Transcripts::codex)), key = { "row:" + it.key }) { row ->
+                            CodeColumn(true) { CompositionLocalProvider(LocalUriHandler provides taskUris) { CodeTranscriptLine(row, onPath = ::openTaskFile) } }
                         }
                         if (controller != null) items(requests, key = { "request:" + it.get("id").toString() }) { request ->
                             CodeColumn(true) { CodexRequestCard(request, controller, ::openTaskFile) { block -> act(block) } }
