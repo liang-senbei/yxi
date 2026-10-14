@@ -15,19 +15,111 @@ import app.yxi.ssh.Shell
 import kotlinx.coroutines.CancellationException
 import org.json.JSONObject
 
+/** 服务器上的 Git 改动：经 SSH 跑一段只读的 Python 脚本，结果交给 [GitChangesView]（本机对齐 P6a 起本机也用它，数据来自 LocalGit）。 */
 @Composable
-internal fun GitChangesPane(conn: Conn, directory: String, openFile: (String) -> Unit, onQuote: (String) -> Unit) {
-    var snapshot by remember(conn, directory) { mutableStateOf<JSONObject?>(null) }
-    var file by remember(conn, directory) { mutableStateOf("") }
-    var staged by remember(conn, directory) { mutableStateOf(false) }
+internal fun GitChangesPane(conn: Conn, directory: String, openFile: (String) -> Unit, onQuote: (String) -> Unit) =
+    GitChangesView(conn, directory, "服务器：${conn.host.label}", { file, staged -> remoteGitSnapshot(conn, directory, file, staged) }, openFile, onQuote)
+
+/** Git 改动视图（两种风格、本机和服务器共用）：[source] 换了就重读；[load] 读一份快照（root / files / diff / clipped / head / branch / readAt）；
+ *  [sourceLine] 写进「针对这份差异提要求」的上下文第二行（服务器写主机名，本机写「本机」）。 */
+@Composable
+internal fun GitChangesView(source: Any, directory: String, sourceLine: String, load: suspend (file: String, staged: Boolean) -> JSONObject,
+    openFile: (String) -> Unit, onQuote: (String) -> Unit) {
+    var snapshot by remember(source, directory) { mutableStateOf<JSONObject?>(null) }
+    var file by remember(source, directory) { mutableStateOf("") }
+    var staged by remember(source, directory) { mutableStateOf(false) }
     var revision by remember { mutableStateOf(0) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
-    var feedbackContext by remember(conn, directory) { mutableStateOf<String?>(null) }
-    var feedback by remember(conn, directory) { mutableStateOf("") }
-    LaunchedEffect(conn, directory, file, staged, revision) {
+    var feedbackContext by remember(source, directory) { mutableStateOf<String?>(null) }
+    var feedback by remember(source, directory) { mutableStateOf("") }
+    LaunchedEffect(source, directory, file, staged, revision) {
         busy = true; error = ""; snapshot = null
-        try {
+        try { snapshot = load(file, staged) }
+        catch (e: CancellationException) { throw e }
+        catch (e: Exception) { error = e.message.orEmpty(); snapshot = null }
+        finally { busy = false }
+    }
+    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row {
+            Text("Git 改动", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+            TextButton({ revision++ }, enabled = !busy) { Text("刷新") }
+        }
+        WorkbenchTabs(listOf("未暂存", "已暂存"), if (staged) "已暂存" else "未暂存", {
+            val next = it == "已暂存"
+            if (staged != next) { staged = next; file = "" }
+        })
+        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
+        snapshot?.let { data ->
+            Text(data.getString("root"), style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
+            SelectionContainer {
+                Text("${data.optString("branch").ifBlank { "分离 HEAD" }} · ${data.optString("head").take(12).ifBlank { "尚无提交" }}", style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
+            }
+            val entries = data.getJSONArray("files")
+            val files = (0 until entries.length()).map { entries.getJSONObject(it) }.filter { entry ->
+                val code = entry.getString("code")
+                if (staged) code.getOrNull(0)?.let { it != ' ' && it != '?' } == true
+                else code == "??" || code.getOrNull(1)?.let { it != ' ' && it != '?' } == true
+            }
+            Column(Modifier.fillMaxWidth().heightIn(max = 180.dp).verticalScroll(rememberScrollState())) {
+                if (files.isEmpty()) Text(if (staged) "没有已暂存改动" else "没有未暂存改动", style = MaterialTheme.typography.bodySmall)
+                for (entry in files) {
+                    TextButton({ file = entry.getString("path") }) { Text("${entry.getString("code")}  ${entry.getString("path")}") }
+                }
+            }
+            if (file.isNotBlank() && files.any { it.getString("path") == file }) {
+                TextButton({ openFile(data.getString("root").trimEnd('/') + "/" + file) }) { Text("打开文件 · $file") }
+                if (data.optBoolean("clipped")) Text("差异较长，显示前 256 KiB", style = MaterialTheme.typography.labelSmall)
+                val diff = data.getString("diff")
+                TextButton({
+                    val excerpt = diff.take(12000)
+                    feedbackContext = "Git 差异参考\n$sourceLine\n仓库：${data.getString("root")}\n文件：$file\n范围：${if (staged) "已暂存" else "未暂存"}\n分支：${data.optString("branch").ifBlank { "分离 HEAD" }}\n提交：${data.optString("head").ifBlank { "尚无提交" }}\n读取时间：${data.optString("readAt")}\n" +
+                        excerpt.lineSequence().joinToString("\n") { "> $it" } +
+                        (if (diff.length > excerpt.length || data.optBoolean("clipped")) "\n（差异已截取，完整内容请从仓库读取。）" else "")
+                }, enabled = !busy && diff.isNotBlank()) { Text("针对这份差异提要求") }
+                val colors = Tokens.current
+                val rendered = remember(diff, colors) {
+                    buildAnnotatedString {
+                        diff.lineSequence().forEach { line ->
+                            val color = when {
+                                line.startsWith("@@") -> colors.accent
+                                line.startsWith("+++") || line.startsWith("---") || line.startsWith("diff --git") || line.startsWith("index ") -> colors.textMuted
+                                line.startsWith("+") -> colors.diffAdd
+                                line.startsWith("-") -> colors.diffDel
+                                else -> colors.textPrimary
+                            }
+                            withStyle(SpanStyle(color = color)) { append(line); append('\n') }
+                        }
+                    }
+                }
+                val added = diff.lineSequence().count { it.startsWith("+") && !it.startsWith("+++") }
+                val removed = diff.lineSequence().count { it.startsWith("-") && !it.startsWith("---") }
+                if (diff.isNotBlank()) Text("当前显示差异：+$added / −$removed" + if (data.optBoolean("clipped")) "（截取部分）" else "", style = MaterialTheme.typography.labelSmall, color = colors.textMuted)
+                SelectionContainer {
+                    if (diff.isBlank()) Text("当前范围无差异", style = CodeStyle)
+                    else Text(rendered, Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()), style = CodeStyle)
+                }
+            } else Text("选择文件查看差异", color = Tokens.current.textMuted)
+        }
+    }
+    feedbackContext?.let { context ->
+        WorkbenchDialog(onDismissRequest = { feedbackContext = null }, title = { Text("修改意见") }, text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("文件、暂存范围与当前差异摘录将加入此任务草稿。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                OutlinedTextField(feedback, { feedback = it }, modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp, max = 220.dp), label = { Text("希望怎么修改") })
+            }
+        }, confirmButton = { TextButton({
+            onQuote(context + "\n\n我的修改要求：${feedback.trim()}")
+            feedback = ""; feedbackContext = null
+        }, enabled = feedback.isNotBlank()) { Text("加入对话草稿") } },
+            dismissButton = { TextButton({ feedbackContext = null }) { Text("取消") } })
+    }
+}
+
+
+/** 服务器那份快照（原 GitChangesPane 里的脚本，内容没改）。 */
+private suspend fun remoteGitSnapshot(conn: Conn, directory: String, file: String, staged: Boolean): JSONObject {
             val script = """
 import datetime, json, pathlib, subprocess, sys
 cwd, selected, staged = sys.argv[1:]
@@ -71,84 +163,5 @@ print('__YXI_GIT__:' + json.dumps({'root': root, 'files': files, 'diff': text, '
 """.trimIndent()
             val raw = conn.ssh.exec("python3 -c " + Shell.q(script) + " " + Shell.q(directory) + " " + Shell.q(file) + " " + Shell.q(staged.toString()))
             val result = raw.lineSequence().lastOrNull { it.startsWith("__YXI_GIT__:") } ?: error("无法读取 Git 改动，请确认目录属于 Git 仓库")
-            snapshot = JSONObject(result.removePrefix("__YXI_GIT__:"))
-        } catch (e: CancellationException) { throw e }
-        catch (e: Exception) { error = e.message.orEmpty(); snapshot = null }
-        finally { busy = false }
-    }
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row {
-            Text("Git 改动", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-            TextButton({ revision++ }, enabled = !busy) { Text("刷新") }
-        }
-        WorkbenchTabs(listOf("未暂存", "已暂存"), if (staged) "已暂存" else "未暂存", {
-            val next = it == "已暂存"
-            if (staged != next) { staged = next; file = "" }
-        })
-        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-        if (error.isNotBlank()) Text(error, color = Tokens.current.danger)
-        snapshot?.let { data ->
-            Text(data.getString("root"), style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
-            SelectionContainer {
-                Text("${data.optString("branch").ifBlank { "分离 HEAD" }} · ${data.optString("head").take(12).ifBlank { "尚无提交" }}", style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
-            }
-            val entries = data.getJSONArray("files")
-            val files = (0 until entries.length()).map { entries.getJSONObject(it) }.filter { entry ->
-                val code = entry.getString("code")
-                if (staged) code.getOrNull(0)?.let { it != ' ' && it != '?' } == true
-                else code == "??" || code.getOrNull(1)?.let { it != ' ' && it != '?' } == true
-            }
-            Column(Modifier.fillMaxWidth().heightIn(max = 180.dp).verticalScroll(rememberScrollState())) {
-                if (files.isEmpty()) Text(if (staged) "没有已暂存改动" else "没有未暂存改动", style = MaterialTheme.typography.bodySmall)
-                for (entry in files) {
-                    TextButton({ file = entry.getString("path") }) { Text("${entry.getString("code")}  ${entry.getString("path")}") }
-                }
-            }
-            if (file.isNotBlank() && files.any { it.getString("path") == file }) {
-                TextButton({ openFile(data.getString("root").trimEnd('/') + "/" + file) }) { Text("打开文件 · $file") }
-                if (data.optBoolean("clipped")) Text("差异较长，显示前 256 KiB", style = MaterialTheme.typography.labelSmall)
-                val diff = data.getString("diff")
-                TextButton({
-                    val excerpt = diff.take(12000)
-                    feedbackContext = "Git 差异参考\n服务器：${conn.host.label}\n仓库：${data.getString("root")}\n文件：$file\n范围：${if (staged) "已暂存" else "未暂存"}\n分支：${data.optString("branch").ifBlank { "分离 HEAD" }}\n提交：${data.optString("head").ifBlank { "尚无提交" }}\n读取时间：${data.optString("readAt")}\n" +
-                        excerpt.lineSequence().joinToString("\n") { "> $it" } +
-                        (if (diff.length > excerpt.length || data.optBoolean("clipped")) "\n（差异已截取，完整内容请从仓库读取。）" else "")
-                }, enabled = !busy && diff.isNotBlank()) { Text("针对这份差异提要求") }
-                val colors = Tokens.current
-                val rendered = remember(diff, colors) {
-                    buildAnnotatedString {
-                        diff.lineSequence().forEach { line ->
-                            val color = when {
-                                line.startsWith("@@") -> colors.accent
-                                line.startsWith("+++") || line.startsWith("---") || line.startsWith("diff --git") || line.startsWith("index ") -> colors.textMuted
-                                line.startsWith("+") -> colors.diffAdd
-                                line.startsWith("-") -> colors.diffDel
-                                else -> colors.textPrimary
-                            }
-                            withStyle(SpanStyle(color = color)) { append(line); append('\n') }
-                        }
-                    }
-                }
-                val added = diff.lineSequence().count { it.startsWith("+") && !it.startsWith("+++") }
-                val removed = diff.lineSequence().count { it.startsWith("-") && !it.startsWith("---") }
-                if (diff.isNotBlank()) Text("当前显示差异：+$added / −$removed" + if (data.optBoolean("clipped")) "（截取部分）" else "", style = MaterialTheme.typography.labelSmall, color = colors.textMuted)
-                SelectionContainer {
-                    if (diff.isBlank()) Text("当前范围无差异", style = CodeStyle)
-                    else Text(rendered, Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()), style = CodeStyle)
-                }
-            } else Text("选择文件查看差异", color = Tokens.current.textMuted)
-        }
-    }
-    feedbackContext?.let { context ->
-        WorkbenchDialog(onDismissRequest = { feedbackContext = null }, title = { Text("修改意见") }, text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("文件、暂存范围与当前差异摘录将加入此任务草稿。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
-                OutlinedTextField(feedback, { feedback = it }, modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp, max = 220.dp), label = { Text("希望怎么修改") })
-            }
-        }, confirmButton = { TextButton({
-            onQuote(context + "\n\n我的修改要求：${feedback.trim()}")
-            feedback = ""; feedbackContext = null
-        }, enabled = feedback.isNotBlank()) { Text("加入对话草稿") } },
-            dismissButton = { TextButton({ feedbackContext = null }) { Text("取消") } })
-    }
+            return JSONObject(result.removePrefix("__YXI_GIT__:"))
 }

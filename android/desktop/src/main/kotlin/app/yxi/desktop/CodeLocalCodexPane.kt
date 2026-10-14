@@ -206,8 +206,13 @@ internal fun CodeLocalCodexPane(state: AppState, record: LocalCodexTaskRecord) {
     val opening = connecting || controller == null && !attempted && runtime != null
     Surface(Modifier.fillMaxSize(), color = t.surface0, contentColor = t.textPrimary) {
         Column(Modifier.fillMaxSize()) {
-            CodeLocalSessionHeader(state.navigation.title(record.key) ?: record.title, record.directory, LocalRuntimeDiscovery.title(record.engine))
-            Box(Modifier.weight(1f).fillMaxWidth()) {
+            // 「改动」开着时对话列换成本机的 Git 改动视图（本机对齐 P6a，同服务器 Codex 页），停靠区不变
+            var showChanges by remember(record.key) { mutableStateOf(false) }
+            CodeLocalSessionHeader(state.navigation.title(record.key) ?: record.title, record.directory, LocalRuntimeDiscovery.title(record.engine)) {
+                CodeLocalChangesButton(showChanges) { showChanges = !showChanges }
+            }
+            if (showChanges) Box(Modifier.weight(1f).fillMaxWidth()) { CodeLocalChanges(state, record) { showChanges = false } }
+            else Box(Modifier.weight(1f).fillMaxWidth()) {
                 LazyColumn(Modifier.fillMaxSize().onPointerEvent(PointerEventType.Scroll, PointerEventPass.Initial) { event ->
                     if (event.changes.any { it.scrollDelta.y < 0f }) followLatest = false
                 }, state = view.scroll, contentPadding = PaddingValues(40.dp, 12.dp),

@@ -294,6 +294,16 @@ private fun codeScenes() = listOf(
     // 本机 Codex 的输入区（P1c）：点开模型 chip（列表来自 model/list，强度条跟着当前模型）；草稿一句话 + 两张图（托盘缩略图读快照）
     CodeScene("local-codex-model", listOf("gpt-5-codex")) { localCodex(it, approval = false) },
     CodeScene("local-codex-images") { localCodexImages(it) },
+    // 本机的 Git 改动（本机对齐 P6a）：会话头右端点「改动」，对话列换成改动视图（同服务器 Codex 页）；LocalGit.run 换成固定的快照，不起 git。
+    // 第一张是文件列表，第二张再点一个文件看差异
+    CodeScene("local-codex-changes", listOf("@改动"), verify = { _, nodes ->
+        for (text in listOf("Git 改动", "未暂存", "已暂存", "MM  src/auth/errors.ts", "??  src/auth/errors.test.ts", "选择文件查看差异"))
+            check(nodes.any { it.endsWith(" $text") }) { "改动视图里没有「$text」" }
+    }) { localCodex(it, approval = false); shotLocalGit() },
+    CodeScene("local-codex-changes-diff", listOf("@改动", "MM  src/auth/errors.ts"), verify = { _, nodes ->
+        check(nodes.any { it.endsWith(" 当前显示差异：+3 / −1") }) { "差异统计不对" }
+        check(nodes.any { it.endsWith(" 针对这份差异提要求") } && nodes.any { it.endsWith(" 打开文件 · src/auth/errors.ts") }) { "差异下的操作不全" }
+    }) { localCodex(it, approval = false); shotLocalGit() },
     // 本机首页选 Codex（P1d）：创建中（输入卡只读、页脚「取消创建」、说明换成 Codex 的）；上次创建待核对（说明，按 Enter 进经典对话框核对）
     CodeScene("local-home-codex-creating") { localHomeCodex(it, review = false) },
     CodeScene("local-home-codex-review") { localHomeCodex(it, review = true) },
@@ -783,6 +793,21 @@ private fun localClaudeRestore(state: AppState) {
         LocalClaudeSubscription().resume(runtime, saved) { _, _, id -> ClaudeControlClient(ShotClaudeTransport(saved.model), id) }
     }
     state.localSelectedTaskKey = record.key
+}
+
+/** 本机 Git 改动的固定快照（本机对齐 P6a）：一个两边都改了的文件和一个未跟踪的测试文件；选了 errors.ts 时给一段差异（未暂存的那份）。 */
+private fun shotLocalGit() {
+    LocalGit.run = { directory, file, staged ->
+        val diff = if (file != "src/auth/errors.ts") "" else if (staged) "" else listOf(
+            "diff --git a/src/auth/errors.ts b/src/auth/errors.ts", "index 3f2a9c1..8b7d4e0 100644",
+            "--- a/src/auth/errors.ts", "+++ b/src/auth/errors.ts", "@@ -12,7 +12,9 @@ export function loginMessage(code: number) {",
+            "   switch (code) {", "-    default: return '登录失败，请稍后重试'", "+    case 401: return '账号或密码不对'",
+            "+    case 403: return '这个账号没有权限登录'", "+    default: return '登录失败，请稍后重试'", "   }", " }").joinToString("\n")
+        JSONObject().put("root", directory).put("branch", "fix/login-errors").put("head", "8b7d4e0c2f61a93d5e7b0c4a1f2e3d4c5b6a7980")
+            .put("files", JSONArray().put(JSONObject().put("code", "MM").put("path", "src/auth/errors.ts"))
+                .put(JSONObject().put("code", "??").put("path", "src/auth/errors.test.ts")))
+            .put("diff", diff).put("clipped", false).put("readAt", "2026-10-15T03:40:00Z")
+    }
 }
 
 /** 截图用的假 Claude 控制传输（同 LocalClaudeTasksTest 的 Fixture，只答控制请求）；块队列代替管道流，同 [ShotCodexTransport]。 */

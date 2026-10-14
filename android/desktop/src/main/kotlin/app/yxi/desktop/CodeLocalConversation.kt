@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -19,11 +20,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.outlined.Difference
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Laptop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -167,6 +170,37 @@ internal fun CodeFooterSelect(
             Column(Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState())) {
                 options.forEach { o -> CodeMenuItem(o.name, { open = false; onSelect(o.id) }, enabled = enabled, checked = o.id == current) }
             }
+        }
+    }
+}
+
+/** 本机对话会话头右端的「改动」（本机对齐 P6a）：同服务器 Codex 页的图标；开着时对话列换成 [CodeLocalChanges]。 */
+@Composable
+internal fun CodeLocalChangesButton(active: Boolean, onClick: () -> Unit) = CodeIconButton(Icons.Outlined.Difference, "改动", active = active, onClick = onClick)
+
+/**
+ * 本机对话的 Git 改动（本机对齐 P6a）：同服务器 Codex 页的改动视图（[GitChangesView]，两种风格、本机服务器共用），数据来自本机的 [LocalGit]，只读。
+ * 「打开文件」改成复制绝对路径（本机对齐的原则：模型给的路径不调 Desktop.open，本机文件面板留给 P6b）；「针对这份差异提要求」把摘录接到这条对话的草稿末尾，然后收起改动。
+ */
+@Composable
+internal fun CodeLocalChanges(state: AppState, record: LocalCodexTaskRecord, close: () -> Unit) {
+    val t = Tokens.current
+    var copied by remember(record.key) { mutableStateOf("") }
+    LaunchedEffect(copied) { if (copied.isNotBlank()) { kotlinx.coroutines.delay(3000); copied = "" } }
+    Column(Modifier.fillMaxSize()) {
+        if (copied.isNotBlank()) Note("已复制路径：$copied", t.textMuted)
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            GitChangesView(record.key, record.directory, "本机", { file, staged -> LocalGit.run(record.directory, file, staged) },
+                openFile = { path ->
+                    runCatching { java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(java.awt.datatransfer.StringSelection(path), null) }
+                        .onSuccess { copied = path }
+                },
+                onQuote = { quote ->
+                    val draft = state.chatDrafts.getOrPut(record.key) { mutableStateOf(TextFieldValue()) }
+                    val text = draft.value.text.let { it + if (it.isBlank()) "" else "\n\n" } + quote + "\n"
+                    draft.value = TextFieldValue(text, androidx.compose.ui.text.TextRange(text.length))
+                    close()
+                })
         }
     }
 }

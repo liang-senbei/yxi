@@ -133,9 +133,13 @@ import org.json.JSONObject
         val opening = local && (connecting || controller == null && !attempted && runtime != null)
         Surface(Modifier.fillMaxSize(), color = t.surface0, contentColor = t.textPrimary) {
             Column(Modifier.fillMaxSize()) {
+                // 「改动」开着时对话列换成本机的 Git 改动视图（本机对齐 P6a，同服务器 Codex 页），停靠区不变；只给本机记录，服务器 OpenCode 不变
+                var showChanges by remember(record.key) { mutableStateOf(false) }
                 CodeLocalSessionHeader(state.navigation.title(record.key) ?: record.title, record.directory, runner,
-                    host = if (record.hostKey.isBlank()) null else state.conn?.host?.label ?: "服务器")
-                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    host = if (record.hostKey.isBlank()) null else state.conn?.host?.label ?: "服务器",
+                    end = if (!local) null else ({ CodeLocalChangesButton(showChanges) { showChanges = !showChanges } }))
+                if (local && showChanges) Box(Modifier.weight(1f).fillMaxWidth()) { CodeLocalChanges(state, record) { showChanges = false } }
+                else Box(Modifier.weight(1f).fillMaxWidth()) {
                     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(40.dp, 12.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         if (controller != null) {
