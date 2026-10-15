@@ -245,6 +245,11 @@ private fun codeScenes() = listOf(
     CodeScene("local-runner", listOf("Claude Code")) { localHome(it) },
     // SSH 侧栏（第 9 步 9c）：三台主机、分组、托管任务、置顶 / 收藏。放在最后：hosts.json 和导航记录落在夹具 profile，前面各张的输入不变
     CodeScene("ssh-list") { sshList(it, saved = false) },
+    // 切换任务 Ctrl+K（M4g，规格表 §3.6；放在 ssh-list 后面：sshList 会把主机和侧栏整理落进夹具 profile，放前面会串到 ssh-queue 那几张）：遮罩 + 顶在 264 的 672 宽面板，输入区 64、结果行 36、第一行是当前行
+    CodeScene("code-task-switcher", verify = { _, nodes ->
+        check(nodes.any { "搜索任务、项目路径、服务器或地区" in it }) { "没有搜索框的占位字" }
+        check(nodes.any { it.contains("x=688.0 y=264.0 w=672.0") }) { "面板不在 x 688、y 264、宽 672：" + nodes.filter { "w=672.0" in it } }
+    }) { sshList(it, saved = false); it.showTaskSwitcher = true },
     CodeScene("ssh-list-saved") { sshList(it, saved = true) },
     CodeScene("ssh-hover", listOf("~把部署脚本从 Bash 迁到 Python，并补上回滚和健康检查")) { sshList(it, saved = false) },
     // 行 ⋮ 只在 hover 时出现，先悬停再点；同名的置顶行在上面，取最靠下的是分组里那行
