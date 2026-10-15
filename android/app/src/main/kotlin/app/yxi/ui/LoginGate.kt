@@ -10,13 +10,16 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -95,8 +98,11 @@ fun LoginGate() {
 
         // ⚠️ **放不下时要能滚**：横屏、小屏、大字号下这一列比屏幕高，原来下半截（说明、甚至按钮）直接被切掉，
         //    人又过不了这一页。heightIn(min = 屏高) 让放得下时照旧居中，放不下才滚。
+        // ⚠️ 内容避开系统栏 / 挖孔（跟 ShareActivity 一样用 safeDrawing）：横屏时三键导航条在侧边、挖孔在另一侧，
+        //    光靠 36dp 的边距，长一点的那行说明会钻到导航条底下。背景和顶上那层光晕照旧铺满。
         Column(
-            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).heightIn(min = maxHeight).padding(36.dp),
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).heightIn(min = maxHeight)
+                .windowInsetsPadding(WindowInsets.safeDrawing).padding(36.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
