@@ -194,7 +194,8 @@ internal fun CodeToolGroup(tools: List<TranscriptItem.Tool>, onPath: ((String) -
         Row(Modifier.hoverable(source).clickable(interactionSource = source, indication = null, role = Role.Button) { toggle() },
             verticalAlignment = Alignment.CenterVertically) {
             Text(Transcripts.summary(tools) + if (running) " · 进行中" else if (failed) " · 有失败" else "",
-                color = if (strong) t.textSecondary else t.textMuted, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                // M3h-3：进行中的摘要行用主色（规格表 §3.4：最深像素到 #0B0B0B）；参照端推测的流光不做（PRD §14.1，不要循环动效）
+                color = if (running) t.textPrimary else if (strong) t.textSecondary else t.textMuted, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f, fill = false))
             Spacer(Modifier.width(6.4.dp))
             CodeToolArrow(open, strong)
