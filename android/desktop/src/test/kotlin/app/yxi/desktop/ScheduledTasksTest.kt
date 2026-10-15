@@ -22,6 +22,30 @@ class ScheduledTasksTest {
             reopened.resume("test", 3000)
             assertTrue(reopened.tasks.single().enabled)
     }
+    @Test fun `run now claims once at that moment without moving the schedule, even when paused`() {
+            val store = ScheduledTasks(root.resolve("schedules.json"))
+            store.put(task(next = 10_000_000))
+            store.pause("test")
+            store.requestNow("test")
+            assertEquals(setOf("test"), store.requested)
+            val (claimed, run) = assertNotNull(store.claim(5000))
+            assertEquals("test", claimed.id); assertEquals(5000, run.due); assertEquals("手动立即运行", run.detail)
+            assertEquals(10_000_000, store.tasks.single().next)   // 不推进计划
+            assertFalse(store.tasks.single().enabled)               // 暂停的照旧暂停
+            assertTrue(store.requested.isEmpty())
+            assertNull(store.claim(6000))                           // 只跑一次
+            assertFails { store.requestNow("test") }                // 执行中不能再点
+            store.finish(run.id, "已完成", "ok")
+            store.requestNow("test")
+            assertNotNull(store.claim(7000))
+    }
+    @Test fun `run now refuses unknown plans and plans with an unconfirmed run`() {
+            val file = root.resolve("schedules.json")
+            ScheduledTasks(file).apply { put(task()); assertNotNull(claim(2000)) }
+            val reopened = ScheduledTasks(file)                    // 上次执行中退出 → 结果未确认
+            assertFails { reopened.requestNow("test") }
+            assertFails { reopened.requestNow("missing") }
+    }
     @Test fun `approval progress retains active claim and local session identity across restart`() {
             val file = root.resolve("schedules.json")
             val store = ScheduledTasks(file)

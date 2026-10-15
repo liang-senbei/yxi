@@ -586,6 +586,16 @@ private fun codeScenes() = listOf(
     CodeScene("ssh-acp-queue", verify = { _, nodes ->
         check(nodes.any { it.endsWith(" " + SHOT_ACP_QUEUED[0]) } && nodes.any { it.endsWith(" 发送") }) { "服务器 ACP 的停靠区没有排队条" }
     }) { sshAcpQueue(it) },
+    // 定时任务的 Code 页（M4l）：960 宽的列居中、标题 22、黑底「新建任务」，每个计划一张卡片（立即运行 / 暂停或恢复 / 编辑 / 执行记录 / 删除）。
+    // 写进夹具 profile 的 scheduled-tasks.json，所以放在最后
+    CodeScene("code-scheduled-tasks", verify = { _, nodes ->
+        for (text in listOf("定时任务", "新建任务", "每天整理项目进度", "立即运行", "已暂停")) check(nodes.any { it.trimEnd().endsWith(" $text") }) { "定时任务页没有「$text」" }
+    }) { state ->
+        val at = java.time.LocalDateTime.of(2030, 1, 6, 9, 0).atZone(java.time.ZoneId.of("Asia/Shanghai")).toInstant().toEpochMilli()
+        state.scheduledTasks.put(ScheduledTask("shot-daily", "每天整理项目进度", "看一下昨天合并的提交，整理成三条要点发在这个会话里。", ScheduleTarget("local", "本地 · Claude Code", "claude", "/srv/demo-app"), at, "每天", "Asia/Shanghai"))
+        state.scheduledTasks.put(ScheduledTask("shot-weekly", "每周检查依赖更新", "列出有安全更新的依赖，先不要改代码。", ScheduleTarget("local", "本地 · Codex", "codex", "/srv/demo-app"), at + 86_400_000, "每周", "Asia/Shanghai", enabled = false))
+        state.page = Page.ScheduledTasks
+    },
 )
 
 /**

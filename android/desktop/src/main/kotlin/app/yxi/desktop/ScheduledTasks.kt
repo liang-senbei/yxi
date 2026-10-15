@@ -19,6 +19,8 @@ internal class ScheduledTasks(file: File) {
     var tasks by mutableStateOf<List<ScheduledTask>>(emptyList()); private set
     var runs by mutableStateOf<List<ScheduleRun>>(emptyList()); private set
     var error by mutableStateOf(""); private set
+    /** 点了「立即运行」、还没被调度领走的计划（M4l）：只在内存里，退出就没了；领走时照常先落盘再执行。 */
+    var requested by mutableStateOf<Set<String>>(emptySet()); private set
     private var writable = true
     private val disk = DurableFile(file) { decode(it) }
     private val review = File(file.parentFile, file.name + ".needs-review")
@@ -55,9 +57,25 @@ internal class ScheduledTasks(file: File) {
         check(runs.none { it.schedule == id && it.status in setOf("执行中", "结果未确认") }) { "此计划还有未确认执行" }
         save(tasks.filterNot { it.id == id })
     }
+    /** 立即运行一次（M4l）：同恢复的条件（没有执行中、没有未确认的执行）；不改下次时间，暂停的计划也能手动跑一次。 */
+    fun requestNow(id: String) {
+        check(writable) { error }
+        check(tasks.any { it.id == id }) { "计划不存在" }
+        check(runs.none { it.schedule == id && it.status in setOf("执行中", "结果未确认") }) { "存在未完成或未确认的执行，请先查看记录与目标会话" }
+        requested = requested + id
+    }
     fun acknowledge(id: String) = save(tasks, runs.map { if (it.id == id && it.status == "结果未确认") it.copy(status = "已人工核对", detail = "用户已核对目标会话；未重新执行") else it })
     fun claim(now: Long): Pair<ScheduledTask, ScheduleRun>? {
         if (!writable) return null
+        val idle = { t: ScheduledTask -> runs.none { r -> r.schedule == t.id && r.status in setOf("执行中", "结果未确认") } }
+        // 手动请求的先领（M4l）：记成这一刻的一次执行，不推进计划
+        tasks.firstOrNull { it.id in requested && idle(it) }?.let { task ->
+            requested = requested - task.id
+            val run = ScheduleRun(UUID.randomUUID().toString(), task.id, now, "执行中", "手动立即运行", targetTaskKey = task.target.task.takeIf { task.target.kind == "local-session" })
+            save(tasks, runs + run)
+            return task to run
+        }
+        requested = requested.filter { id -> tasks.any { it.id == id } }.toSet()
         val task = tasks.filter { it.enabled && it.next <= now && runs.none { r -> r.schedule == it.id && r.status == "执行中" } }.minByOrNull { it.next } ?: return null
         val run = ScheduleRun(UUID.randomUUID().toString(), task.id, task.next, "执行中", targetTaskKey = task.target.task.takeIf { task.target.kind == "local-session" })
         val next = if (task.repeat == "一次") task.copy(enabled = false) else task.copy(next = nextTime(task, now))
@@ -114,10 +132,17 @@ internal class ScheduleDispatcher(private val state: AppState) : AutoCloseable {
                     if (queued?.status == InstructionStatus.Local) state.instructions.cancel(queued.id, queued.revision)
                     state.scheduledTasks.finish(run.id, if (queued?.status == InstructionStatus.Local) "跳过" else "结果未确认", e.message ?: "请核对目标任务")
                 } }
+                finally { notifyFinished(task, run.id) }   // 成功、跳过、失败都发（执行中的不发）
             }
         }
         delay(1000)
     } } }
+    /** 一次执行结束（M4l）：发一条通知，照设置里的「通知」偏好（从不 / 仅在未聚焦时 / 始终）；点它打开目标会话（有的话）。 */
+    private fun notifyFinished(task: ScheduledTask, runId: String) {
+        val run = state.scheduledTasks.runs.firstOrNull { it.id == runId } ?: return
+        if (run.status == "执行中") return
+        runCatching { Notify.notify("定时任务 · ${task.name}", "${run.status}：${run.detail.lineSequence().firstOrNull().orEmpty().take(120)}", taskKey = run.targetTaskKey ?: task.target.task.ifBlank { null }) }
+    }
     private suspend fun execute(task: ScheduledTask, run: ScheduleRun) {
         val target = task.target
         if (target.kind == "local-session") {

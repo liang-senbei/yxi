@@ -19,7 +19,9 @@ import java.util.UUID
     var history by remember { mutableStateOf<String?>(null) }
     var confirmRun by remember { mutableStateOf<ScheduleRun?>(null) }
     fun action(block: () -> Unit) { runCatching(block).onSuccess { error = "" }.onFailure { error = it.message.orEmpty() } }
-    LazyColumn(Modifier.fillMaxSize().padding(28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    if (LocalThemeSpec.current.style == UiStyle.Code) CodeScheduledTasksList(state, error, onCreate = { creating = true }, onEdit = { editor = it },
+        onHistory = { history = it }, action = ::action)
+    else LazyColumn(Modifier.fillMaxSize().padding(28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { Row {
             Text("定时任务", Modifier.weight(1f), style = MaterialTheme.typography.headlineMedium)
             Button({ creating = true }) { Text("新建任务") }
