@@ -128,6 +128,7 @@ class CodeThemeShotsTest {
         Store.setPref("theme", theme)
         Store.setPref("hostScope", "")
         Store.setPref(TranscriptView.PREF, TranscriptView.Normal.key)   // M3h：对话视图默认档每张都回到普通，改它的场景不串到后面
+        MacChrome.native = false   // Mac1 第二轮：Mac 原生外观只在 mac-native-* 场景里打开
         val state = AppState().apply { startupRestored = true }   // 跳过 HostEffects 的开机恢复 / 自动重连
         state.navigation.setMode("全部")   // 全部 / 待处理 / 归档落在夹具 profile 里，local-archived 改过（值没变不写盘）
         try {
@@ -204,6 +205,16 @@ private fun codeScenes() = listOf(
     CodeScene("ssh-panel-split", verify = { _, nodes -> checkPanels(nodes, "终端" to 1000f, "已打开的文件" to 1000f) }) {
         remote(it, tab = 1); it.filePanelOpen = true
     },
+    // Mac 原生（Mac1 第二轮，规格表 §7.1）：没有自绘的窗口三键（左上是系统红绿灯，离屏画不出来），左上四个图标右移到灯后面（各加 72 − 14，侧栏开关 x 102.4）；
+    // 快捷键写成 ⌘ 的样子（菜单里 ⌘N / ⌘K / ⌘B / ⌘, / ⌘/，tooltip 里 ⌘B），Ctrl 不再出现
+    CodeScene("mac-native-menu", listOf("@菜单"), verify = { _, nodes ->
+        for (key in listOf("⌘N", "⌘K", "⌘B", "⌘,", "⌘/")) check(nodes.any { it.trimEnd().endsWith(" $key") }) { "菜单里没有「$key」" }
+        check(nodes.none { "Ctrl+" in it }) { "Mac 原生时还写着 Ctrl" }
+        check(nodes.any { it.contains("x=102.4 y=4.0 w=28.0 h=28.0 Button") }) { "侧栏开关没挪到红绿灯后面（应在 44 + 72 − 14）" }
+    }) { remote(it, tab = 0); MacChrome.native = true },
+    CodeScene("mac-native-tooltip", listOf("~收起侧栏"), verify = { _, nodes ->
+        check(nodes.any { it.trimEnd().endsWith(" ⌘B") }) { "tooltip 里没有 ⌘B" }
+    }) { remote(it, tab = 0); MacChrome.native = true },
     CodeScene("approval-card", content = { ApprovalDockShot() }),
     // 新会话页的两侧边距（M2-d）：主区只有 600 宽时，骨架两侧各留 40，输入卡宽 600 − 80 = 520、左缘 288 + 40（PRD §5.1）。只画骨架和占位的 chip / 输入卡
     CodeScene("home-narrow", content = { NarrowHomeShot() }, verify = { _, nodes ->

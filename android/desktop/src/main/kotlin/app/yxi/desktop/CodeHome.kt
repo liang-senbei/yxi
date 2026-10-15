@@ -279,7 +279,7 @@ private fun CodeFolderChip(d: NewSessionDraft, c: Conn) {
 @Composable
 internal fun CodeMenuCaption(title: String) {
     Box(Modifier.fillMaxWidth().height(24.dp).padding(start = 8.8.dp), contentAlignment = Alignment.CenterStart) {
-        Text(title, color = Tokens.current.textMuted, fontSize = 12.sp, lineHeight = 17.sp, maxLines = 1)
+        Text(MacChrome.label(title), color = Tokens.current.textMuted, fontSize = 12.sp, lineHeight = 17.sp, maxLines = 1)
     }
 }
 

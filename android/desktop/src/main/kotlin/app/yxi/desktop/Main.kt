@@ -39,6 +39,12 @@ fun main(args: Array<String>) {
     }
     Updater.boot(args)   // Velopack 钩子参数（--veloapp-*）直接退；否则 10 秒后 + 每 6 小时查更新。要在单实例之前：钩子别去唤醒已开的实例
     if (!Shell.claimSingleInstance()) exitProcess(0)     // 已经有一个在跑：它会把窗口拉出来，这个直接退
+    if (MacChrome.native) {
+        // Mac1 第二轮（规格表 §7.2）：菜单放到屏幕顶的菜单栏、应用名写 Yxi、标题栏跟系统深浅。要在 AWT 起来之前设
+        System.setProperty("apple.laf.useScreenMenuBar", "true")
+        System.setProperty("apple.awt.application.name", "Yxi")
+        System.setProperty("apple.awt.application.appearance", "system")
+    }
     application {
         // --smoke：开窗口 3 秒就退并打印 smoke ok —— CI / Mac 上证明 Compose + Skia 在那个平台起得来（application 退出时 exitProcess(0)）
         if ("--smoke" in args) LaunchedEffect(Unit) { delay(3000); println("smoke ok"); exitApplication() }
@@ -93,11 +99,15 @@ fun main(args: Array<String>) {
         fun close() {
             if (Store.pref("closeToTray", "1") != "1" || !SystemTray.isSupported()) return quit()
             Shell.visible = false
-            if (Store.pref("trayHint", "0") != "1") { Store.setPref("trayHint", "1"); tray.sendNotification(Notification("Yxi", "Yxi 会在托盘里继续运行，服务器上的会话不受影响")) }
+            // Mac 上「托盘」是菜单栏图标，窗口关了 Dock 里还在、点它叫回窗口（规格表 §7.1）
+            val where = if (MacChrome.isMac) "菜单栏和 Dock" else "托盘"
+            if (Store.pref("trayHint", "0") != "1") { Store.setPref("trayHint", "1"); tray.sendNotification(Notification("Yxi", "Yxi 会在${where}里继续运行，服务器上的会话不受影响")) }
         }
+        LaunchedEffect(Unit) { installMacAppHandlers(state, ::quit) }
         Window(
             onCloseRequest = ::close, state = win, visible = Shell.visible, title = "Yxi", icon = painterResource("icon.png"),
-            decoration = WindowDecoration.Undecorated(resizerThickness = 8.dp),      // 无系统边框；边缘 8dp 仍能拖着改大小
+            // 无系统边框、边缘 8dp 仍能拖着改大小；Mac 原生时用系统边框（红绿灯、原生全屏），内容伸到透明标题栏下面（规格表 §7.2）
+            decoration = if (MacChrome.native) WindowDecoration.SystemDefault else WindowDecoration.Undecorated(resizerThickness = 8.dp),
             onPreviewKeyEvent = { shortcut(it, state, scope) },
         ) {
             DisposableEffect(Unit) {
@@ -105,6 +115,11 @@ fun main(args: Array<String>) {
                 window.setFocusTraversalKeys(java.awt.KeyboardFocusManager.FORWARD_TRAVERSAL_KEYS, emptySet())
                 window.setFocusTraversalKeys(java.awt.KeyboardFocusManager.BACKWARD_TRAVERSAL_KEYS, emptySet())
                 window.minimumSize = Dimension(720, 560)
+                if (MacChrome.native) window.rootPane.run {
+                    putClientProperty("apple.awt.fullWindowContent", true)
+                    putClientProperty("apple.awt.transparentTitleBar", true)
+                    putClientProperty("apple.awt.windowTitleVisible", false)
+                }
                 // ⚠️ **无边框窗口最大化会盖住任务栏**（审查 P2）。AWT 对 undecorated 的 MAXIMIZED_BOTH
                 //    取的是整块屏幕，不是「可用区」—— 表现是最大化之后任务栏被压在窗口下面，
                 //    而我们的标题栏是自绘的，用户连「还原」都够不着（系统边框那三颗不存在）。
@@ -119,7 +134,7 @@ fun main(args: Array<String>) {
                         b.width - ins.left - ins.right, b.height - ins.top - ins.bottom,
                     )
                 }
-                fitMaximized()
+                if (!MacChrome.native) fitMaximized()   // 系统边框的窗口最大化本来就避开 Dock 和菜单栏
                 val moved = object : java.awt.event.ComponentAdapter() {
                     override fun componentMoved(e: java.awt.event.ComponentEvent) = Unit.also { fitMaximized() }
                 }
@@ -132,6 +147,7 @@ fun main(args: Array<String>) {
                 window.addWindowFocusListener(focus)
                 onDispose { window.removeWindowFocusListener(focus); window.removeComponentListener(moved); Shell.frame = null }
             }
+            if (MacChrome.native) YxiMacMenuBar(state, win, ::close)
             Zoomed {
                 YxiTheme {
                     WindowFrame(state, win, ::close, ::quit) {

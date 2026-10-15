@@ -175,6 +175,8 @@ internal fun prepareShotProfile(fixture: File, vararg outside: File): File {
         WindowsCredentialProtector.fixtureOverride = { ShotPassthroughProtector }
         LoginShellPath.skipForFixture()
     }
+    // Mac1 第二轮的原生外观（系统标题栏、⌘ 写法）离屏画不出来，夹具一律按非原生画，基准图在 Windows、Mac 上同一套逻辑；Mac 专属场景自己打开
+    MacChrome.native = false
     return profile
 }
 

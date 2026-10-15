@@ -120,7 +120,7 @@ internal fun CodeComposerCard(
                         }
                     },
                 decorationBox = { inner ->
-                    Box { if (draft.text.isEmpty()) Text(placeholder, style = BodyStyle, color = t.textMuted, maxLines = 1); inner() }
+                    Box { if (draft.text.isEmpty()) Text(MacChrome.label(placeholder), style = BodyStyle, color = t.textMuted, maxLines = 1); inner() }
                 },
             )
             // 图元 10.4 宽、中心离卡片右缘 ≈22：24 的点击区 + 右边 10；44 高时和文字行同在正中

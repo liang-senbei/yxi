@@ -257,7 +257,7 @@ internal fun CodeTooltip(label: String, shortcut: String? = null) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(label, color = Color.White, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1)
-        if (shortcut != null) Text(shortcut, color = Tokens.current.textMuted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1)
+        if (shortcut != null) Text(MacChrome.label(shortcut), color = Tokens.current.textMuted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1)
     }
 }
 
@@ -414,7 +414,7 @@ internal fun CodeMenuItem(
         )
         if (trailing != null) {
             Spacer(Modifier.width(16.dp))
-            Text(trailing, color = Tokens.current.textMuted, fontSize = 13.sp, lineHeight = 18.sp, maxLines = 1)
+            Text(MacChrome.label(trailing), color = Tokens.current.textMuted, fontSize = 13.sp, lineHeight = 18.sp, maxLines = 1)
         }
         if (checked) Icon(Icons.Filled.Check, null, Modifier.padding(start = 8.dp).size(14.dp), tint = p.focusBlue)
         else if (submenu) Icon(Icons.Filled.ChevronRight, null, Modifier.padding(start = 8.dp).size(14.dp), tint = p.dropArrow)

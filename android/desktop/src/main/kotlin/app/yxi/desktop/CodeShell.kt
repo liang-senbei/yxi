@@ -105,17 +105,19 @@ private fun CodeIconRow(state: AppState) {
     val t = Tokens.current
     var menu by remember { mutableStateOf(false) }
     NativeOverlay(menu)
+    // Mac 原生：左上是红绿灯，四个图标整体右移到灯后面（规格表 §7.1，起点等 Mac 素材再核）
+    val shift = if (MacChrome.native) MacChrome.trafficLights - 14.dp else 0.dp
     Box(Modifier.size(288.dp, 36.dp)) {
-        Box(Modifier.offset(14.dp, 6.dp)) {
+        Box(Modifier.offset(14.dp + shift, 6.dp)) {
             CodeIconButton(Icons.Filled.Menu, "菜单", held = menu, tint = t.textPrimary) { menu = true }
             if (menu) CodeAppMenu(state) { menu = false }
         }
         CodeIconButton(
             Icons.AutoMirrored.Outlined.ViewSidebar, if (state.sidebarOpen) "收起侧栏" else "展开侧栏",
-            Modifier.offset(44.dp, 4.dp), box = 28.dp, tint = t.textPrimary, shortcut = "Ctrl+B",
+            Modifier.offset(44.dp + shift, 4.dp), box = 28.dp, tint = t.textPrimary, shortcut = "Ctrl+B",
         ) { state.sidebarOpen = !state.sidebarOpen }
-        CodeIconButton(Icons.AutoMirrored.Filled.ArrowBack, "后退", Modifier.offset(78.dp, 6.dp), enabled = false) {}
-        CodeIconButton(Icons.AutoMirrored.Filled.ArrowForward, "前进", Modifier.offset(108.dp, 6.dp), enabled = false) {}
+        CodeIconButton(Icons.AutoMirrored.Filled.ArrowBack, "后退", Modifier.offset(78.dp + shift, 6.dp), enabled = false) {}
+        CodeIconButton(Icons.AutoMirrored.Filled.ArrowForward, "前进", Modifier.offset(108.dp + shift, 6.dp), enabled = false) {}
     }
 }
 

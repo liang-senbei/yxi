@@ -37,7 +37,7 @@ fun ShortcutsDialog(state: AppState) {
                 shortcuts.forEach { (keys, what) ->
                     Row(Modifier.fillMaxWidth()) {
                         Text(what, Modifier.weight(1f))
-                        Text(keys, fontFamily = Mono, color = Tokens.current.textSecondary)
+                        Text(MacChrome.label(keys), fontFamily = Mono, color = Tokens.current.textSecondary)
                     }
                 }
             }

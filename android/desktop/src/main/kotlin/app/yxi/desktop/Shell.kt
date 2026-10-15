@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.window.WindowDraggableArea
 import androidx.compose.material3.MaterialTheme
@@ -151,6 +152,7 @@ fun FrameWindowScope.TitleBar(state: AppState, win: WindowState, onClose: () -> 
     val title = state.conn?.let { c -> c.host.alias.ifBlank { c.host.hostname } + (state.session?.let { " · " + (state.navigation.title(taskNavigationKey(c.host, it)) ?: it.short) } ?: "") } ?: "Yxi"
     WindowDraggableArea(Modifier.fillMaxWidth().height(height).background(t.sidebar).pointerInput(Unit) { detectTapGestures(onDoubleTap = { toggleMax() }) }) {
         Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+            if (MacChrome.native) Spacer(Modifier.width(MacChrome.trafficLights))   // 给红绿灯让位
             CaptionButton({ state.sidebarOpen = !state.sidebarOpen }) { sidebarGlyph(it) }
             Text(title, Modifier.weight(1f).padding(horizontal = 4.dp), color = t.textSecondary, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
             WindowButtons(win, onClose)
@@ -161,6 +163,7 @@ fun FrameWindowScope.TitleBar(state: AppState, win: WindowState, onClose: () -> 
 /** 右上角三键：最小化 / 最大化（还原）/ 关闭。经典标题栏和 Code 风格的顶部条共用，Code 传自己的字形色和关闭红。 */
 @Composable
 internal fun WindowButtons(win: WindowState, onClose: () -> Unit, glyphColor: Color = Tokens.current.textSecondary, closeFill: Color = Tokens.current.danger, closeGlyphColor: Color = Tokens.current.surface0) {
+    if (MacChrome.native) return   // Mac 原生：左上是系统的红绿灯
     val maximized = win.placement == WindowPlacement.Maximized
     CaptionButton({ win.isMinimized = true }, glyphColor = glyphColor) { minimizeGlyph(it) }
     CaptionButton({ win.placement = if (win.placement == WindowPlacement.Maximized) WindowPlacement.Floating else WindowPlacement.Maximized }, glyphColor = glyphColor) { if (maximized) restoreGlyph(it) else maximizeGlyph(it) }
@@ -241,7 +244,10 @@ fun YxiTray(state: AppState, tray: TrayState, onQuit: () -> Unit) {
 fun shortcut(e: KeyEvent, state: AppState, scope: CoroutineScope): Boolean {
     if (e.type != KeyEventType.KeyDown) return false
     if (e.key == Key.F5) { scope.launch { state.conn?.refresh() }; return true }
-    if (!e.isCtrlPressed) return false
+    // Mac 原生（Mac1 第二轮）：⌘ 当主修饰键；切会话仍是 ⌃Tab（⌘Tab 是系统切应用）；菜单栏有的键交给菜单，这里不再处理一遍
+    if (MacChrome.native && e.isCtrlPressed && e.key == Key.Tab) { state.selectByOffset(if (e.isShiftPressed) -1 else 1); return true }
+    if (!MacChrome.primary(e)) return false
+    if (MacChrome.native && e.key in MacChrome.menuKeys) return false
     val digit = (e.key.keyCode - Key.One.keyCode).toInt()     // 桌面 keyCode = VK_1…VK_9 连号
     when {
         e.key == Key.N -> state.newSessionRequest++
