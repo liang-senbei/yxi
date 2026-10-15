@@ -54,6 +54,20 @@ jobs:
         timeout-minutes: 20
         run: ./dev/test-workbench.ps1
 
+      # 1.4.17 起：1.4.16 之后新加的单测（Code 风格的对话项、差异、文件树、打开方式、本机 Git、托盘菜单、斜杠菜单、设置等）开发时只在 macOS 上跑过，
+      # 这里在 Windows 上也跑一遍。先不挡打包（continue-on-error），结果看这一步的日志；稳定之后再挪进 workbench-test-classes.txt。
+      - name: Code style unit tests（Windows，不挡打包）
+        continue-on-error: true
+        working-directory: android
+        shell: bash
+        timeout-minutes: 25
+        run: |
+          classes="TranscriptItemTest CodeDiffTest DiffCommentTest FileTreeTest LocalFilesTest LocalGitTest OpenInTest LocalSidebarListTest
+            TraySwingMenuTest MacChromeTest CodePanelWidthTest FolderPermissionsTest UsageStatsTest SlashCommandsTest HostSkillsTest
+            CodeAppearanceTest ThemeSpecTest SlashMenuUiTest CodeSettingsUiTest"
+          args=(); for c in $classes; do args+=(--tests "app.yxi.desktop.$c"); done
+          ./gradlew -Pyxi.desktopOnly=true :desktop:test --no-daemon --max-workers=1 --console=plain "${args[@]}"
+
       - name: 打包（jpackage app-image + uber jar）
         working-directory: android
         shell: bash
