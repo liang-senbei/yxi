@@ -32,7 +32,6 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.*
@@ -119,13 +118,16 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         app.yxi.agent.Plat.debug = app.yxi.BuildConfig.DEBUG; app.yxi.agent.Tr.fn = { zh -> app.yxi.ui.t(zh) }; app.yxi.agent.Plat.log = { l, tag, msg -> if (l == 'W') android.util.Log.w(tag, msg) else android.util.Log.i(tag, msg) }   // core 的翻译 / 日志缝
         app.yxi.agent.NetWatch.start(this)                       // 网络一换就通知 SSH 重连（老板 09-08：连接不稳定）
-        enableEdgeToEdge()
         val store = HostStore(applicationContext)
         val keys = KeyManager(applicationContext)
         val prefs = getSharedPreferences("yxi", MODE_PRIVATE)
         app.yxi.ui.I18n.load(this)
         app.yxi.agent.Tz.load(this)
         app.yxi.ui.Skin.load(this)
+        // ⚠️ **第一次 enableEdgeToEdge 就要按风格来**，不能先来一个不带参数的：androidx（activity 1.13）把**第一次**调用的
+        //    样式记在 decorView 里一个隐藏的 View 上，之后每次转屏 / 改尺寸（这些 configChanges 我们自己接、不重建）
+        //    都按那一份重套；后来再调只生效一次。原来第一次是不带参数的（按系统深浅），转一下屏状态栏图标又跟系统走了。
+        app.yxi.ui.Skin.applyBars(this)
         app.yxi.agent.Account.load(this)
         // 「发过的话」只留三天 —— 光靠打开面板时清是不够的：**不再打开的会话会永远留着**，
         // 主机删了之后那些文件更是没人再认得。开 App 扫一遍，三天就是三天。（磁盘活儿，别占主线程）
@@ -145,9 +147,11 @@ class MainActivity : ComponentActivity() {
         app.yxi.watch.EventService.sync(this, store.hosts.value.any { it.watch })
 
         setContent {
-            // 状态栏 / 导航栏的图标颜色跟 App 自己的风格（Skin）走，不跟系统的深色模式（理由见 Skin.applyBars）；换风格时重新套一次
+            // 状态栏 / 导航栏的图标颜色跟 App 自己的风格（Skin）走，不跟系统的深色模式（理由见 Skin.applyBars）；换风格时重新套一次。
+            // ⚠️ 配置变了（转屏等）也要再套：那个隐藏 View 记的是启动时的风格，中途换过风格的话转屏会被它改回去
             val lightSkin = app.yxi.ui.Skin.style.palette.light
-            LaunchedEffect(lightSkin) { app.yxi.ui.Skin.applyBars(this@MainActivity) }
+            val conf = androidx.compose.ui.platform.LocalConfiguration.current
+            LaunchedEffect(lightSkin, conf) { app.yxi.ui.Skin.applyBars(this@MainActivity) }
             // 已登录就在进 App 时拉一次资料。
             // ⚠️ 以前只有打开「会员中心」才拉 —— 结果刚登录完，「我的」和侧边栏都写着「未登录」。
             //    刷新令牌是串行的（见 Account.refreshLock），这里多一次调用不会并发轮换。
