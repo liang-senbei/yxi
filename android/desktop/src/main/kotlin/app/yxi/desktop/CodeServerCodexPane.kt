@@ -165,8 +165,8 @@ private fun CodeServerCodexConversation(state: AppState, conn: Conn, record: Cod
     }
     LaunchedEffect(dragging) { if (dragging) followLatest = false }
     // 文件 / 改动视图开着时列表不在组合里，不滚（同经典）；滚过末尾 1 高的占位
-    LaunchedEffect(messages.lastOrNull(), messages.size, requests.size, followLatest, showFiles, showChanges) {
-        if (followLatest && !dragging && !showFiles && !showChanges) view.scroll.scrollToItem(messages.size + requests.size, view.scroll.layoutInfo.viewportSize.height.coerceAtLeast(1))
+    LaunchedEffect(messages.lastOrNull(), messages.size, requests.size, followLatest) {
+        if (followLatest && !dragging) view.scroll.scrollToItem(messages.size + requests.size, view.scroll.layoutInfo.viewportSize.height.coerceAtLeast(1))
     }
     // 队列变了交给控制器：自动逐轮开着时由它发下一条（发送入口不再另调）
     LaunchedEffect(controller, state.instructions.entries.toList()) { controller?.queueChanged() }
@@ -266,25 +266,28 @@ private fun CodeServerCodexConversation(state: AppState, conn: Conn, record: Cod
     val mentions = rememberAttachmentMentions(attachments?.toList().orEmpty(), draft.value) { draft.value = it }
     NativeOverlay(more)
     Surface(Modifier.fillMaxSize(), color = t.surface0, contentColor = t.textPrimary) {
-        Column(Modifier.fillMaxSize()) {
-            CodeLocalSessionHeader(state.navigation.title(record.key) ?: record.title, record.directory, "Codex", host = conn.host.label) {
-                CodeIconButton(Icons.Outlined.Difference, "改动", active = showChanges) { showChanges = !showChanges; showFiles = false }
-                CodeIconButton(Icons.Outlined.Preview, "网页预览", active = state.browserPanelOpen) {
-                    if (state.browserPanelOpen) state.browserPanelOpen = false else { state.browserPanelOpen = true; state.filePanelOpen = false }
-                }
-                Box {
-                    CodeIconButton(Icons.Filled.MoreVert, "更多", held = more) { more = true }
-                    if (more) CodeServerCodexMoreMenu(state, conn, record, controller, showFiles,
-                        onFiles = { showFiles = !showFiles; showChanges = false }, onOpenFile = { fileDialog = true },
-                        onCopyId = ::copyTaskId, act = ::act) { more = false }
-                }
+        // M4b：「改动」「文件」开在右侧的卡片里（规格表 §3.12，同 SSH 会话页），对话和停靠区留在左边
+        CodePanelLayout(if (showFiles) "文件" else if (showChanges) "改动" else null, { showFiles = false; showChanges = false }, panel = {
+            key(record.key) {
+                if (showFiles) FilesPane(conn, record.key, record.directory, ::openTaskFile)
+                else GitChangesPane(conn, record.directory, ::openTaskFile) { quote -> state.appendCodexQuote(record, quote); showChanges = false }
             }
-            CodeServerCodexNotices(state, Modifier.padding(horizontal = 17.6.dp))
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                if (showFiles) key(record.key) { FilesPane(conn, record.key, record.directory, ::openTaskFile) }
-                else if (showChanges) key(record.key) {
-                    GitChangesPane(conn, record.directory, ::openTaskFile) { quote -> state.appendCodexQuote(record, quote); showChanges = false }
-                } else {
+        }) {
+            Column(Modifier.fillMaxSize()) {
+                CodeLocalSessionHeader(state.navigation.title(record.key) ?: record.title, record.directory, "Codex", host = conn.host.label) {
+                    CodeIconButton(Icons.Outlined.Difference, "改动", active = showChanges) { showChanges = !showChanges; showFiles = false }
+                    CodeIconButton(Icons.Outlined.Preview, "网页预览", active = state.browserPanelOpen) {
+                        if (state.browserPanelOpen) state.browserPanelOpen = false else { state.browserPanelOpen = true; state.filePanelOpen = false }
+                    }
+                    Box {
+                        CodeIconButton(Icons.Filled.MoreVert, "更多", held = more) { more = true }
+                        if (more) CodeServerCodexMoreMenu(state, conn, record, controller, showFiles,
+                            onFiles = { showFiles = !showFiles; showChanges = false }, onOpenFile = { fileDialog = true },
+                            onCopyId = ::copyTaskId, act = ::act) { more = false }
+                    }
+                }
+                CodeServerCodexNotices(state, Modifier.padding(horizontal = 17.6.dp))
+                Box(Modifier.weight(1f).fillMaxWidth()) {
                     // M3f：运行中的状态行（对话末尾）；开始时间记在这一层，列表滚动时不会从 0 算起
                     val transcriptMode = state.transcriptView(record.key)   // M3g：对话视图（Ctrl+O 轮换）
                     val runningSince = rememberRunningSince(controller?.activeTurnId != null && requests.isEmpty())
@@ -304,55 +307,55 @@ private fun CodeServerCodexConversation(state: AppState, conn: Conn, record: Cod
                     if (workspace.busy) LinearProgressIndicator(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(2.dp))
                     if (!followLatest) JumpToLatestButton { followLatest = true }
                 }
-            }
-            CodeDock(true) {
-                InstructionStrip(state.instructions, record.key, canDeliver = idle,
-                    onDeliver = { item -> if (controller != null) act { controller.sendNext(item.id) } },
-                    automatic = controller?.autoDispatch == true,
-                    onAutomaticChange = if (controller == null) null else { enabled -> setAutomatic(enabled) },
-                    canSteer = canSteer, onSteer = { item -> if (controller != null) act { controller.steerNext(item.id) } })
-                if (controller != null) CodexGoalStrip(controller)
-                Note(controller?.note ?: "连接后恢复对话", t.textMuted)
-                if (!ready) {
-                    // 9.6 = Note 的 16 − chip 的 6.4：chip 的字和上面的提示字对齐
-                    Row(Modifier.padding(horizontal = 9.6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        CodeFooterChip(if (connecting) "正在连接…" else "连接任务", ::connect, enabled = !workspace.busy && online)
-                        if (!online) CodeFooterNote("服务器未连接", t.textMuted)
-                    }
-                }
-                if (notice.isNotBlank()) Note(notice, t.textMuted)
-                if (error.isNotBlank()) Note(error, t.danger)
-                // M3d-2b：请求卡停靠在输入卡上方（规格表 §3.3），不进对话滚动区
-                if (controller != null) requests.forEach { request -> key(request.get("id").toString()) { CodexRequestCard(request, controller, ::openTaskFile) { block -> act(block) } } }
-                CodeLocalComposer(draft.value, { draft.value = it },
-                    hint = when {
-                        controller == null || !controller.ready -> "连接任务后发送；现在发送会先排队"
-                        controller.pendingRequests.isNotEmpty() -> "先处理上面的请求；现在发送会先排队"
-                        controller.activeTurnId != null -> "本轮进行中；现在发送会先排队"
-                        else -> "跟它说点什么… Enter 发送，Shift+Enter 换行；输入 @ 引用附件，截图直接 Ctrl+V"
-                    },
-                    focus = focus, canSend = canSend, onSend = ::send,
-                    running = controller?.activeTurnId != null, onStop = ::stop,
-                    attachments = attachments?.toList().orEmpty(),
-                    onRemoveAttachment = { a ->
-                        draft.value = draftAfterAttachmentRemoval(draft.value, attachments?.toList().orEmpty(), a)
-                        a.cancelled.set(true); attachments?.remove(a)
-                    },
-                    onKey = { e ->
-                        if (isTranscriptViewKey(e) && run { state.cycleTranscriptView(record.key); true }) return@CodeLocalComposer true
-                        when {
-                            mentions.handle(e) -> true
-                            e.type == KeyEventType.KeyDown && draft.value.composition == null && e.key == Key.V && (e.isCtrlPressed || e.isMetaPressed) &&
-                                Attach.hasClipboardImage() && !Attach.pasteBusy.get() -> { pasteImage(); true }
-                            else -> false
+                CodeDock(true) {
+                    InstructionStrip(state.instructions, record.key, canDeliver = idle,
+                        onDeliver = { item -> if (controller != null) act { controller.sendNext(item.id) } },
+                        automatic = controller?.autoDispatch == true,
+                        onAutomaticChange = if (controller == null) null else { enabled -> setAutomatic(enabled) },
+                        canSteer = canSteer, onSteer = { item -> if (controller != null) act { controller.steerNext(item.id) } })
+                    if (controller != null) CodexGoalStrip(controller)
+                    Note(controller?.note ?: "连接后恢复对话", t.textMuted)
+                    if (!ready) {
+                        // 9.6 = Note 的 16 − chip 的 6.4：chip 的字和上面的提示字对齐
+                        Row(Modifier.padding(horizontal = 9.6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            CodeFooterChip(if (connecting) "正在连接…" else "连接任务", ::connect, enabled = !workspace.busy && online)
+                            if (!online) CodeFooterNote("服务器未连接", t.textMuted)
                         }
-                    },
-                    showTransferStatus = true, mentions = mentions,
-                    start = { CodeComposerPlus(onAttach = ::attachFiles, onHistory = { historyOpen = true }, onSearch = null, onVoice = { voiceOpen = true }, onRoutes = { state.openRoutes() }) },
-                    end = {
-                        if (controller != null && controller.ready) CodeCodexModelMenu(record.key, controller, record.modelOverride.orEmpty(), onRoutes = { state.openRoutes() }) { error = it }
-                        else (controller?.currentModelLabel?.ifBlank { null } ?: record.modelOverride)?.takeIf { it.isNotBlank() }?.let { CodeFooterNote(it) }
-                    })
+                    }
+                    if (notice.isNotBlank()) Note(notice, t.textMuted)
+                    if (error.isNotBlank()) Note(error, t.danger)
+                    // M3d-2b：请求卡停靠在输入卡上方（规格表 §3.3），不进对话滚动区
+                    if (controller != null) requests.forEach { request -> key(request.get("id").toString()) { CodexRequestCard(request, controller, ::openTaskFile) { block -> act(block) } } }
+                    CodeLocalComposer(draft.value, { draft.value = it },
+                        hint = when {
+                            controller == null || !controller.ready -> "连接任务后发送；现在发送会先排队"
+                            controller.pendingRequests.isNotEmpty() -> "先处理上面的请求；现在发送会先排队"
+                            controller.activeTurnId != null -> "本轮进行中；现在发送会先排队"
+                            else -> "跟它说点什么… Enter 发送，Shift+Enter 换行；输入 @ 引用附件，截图直接 Ctrl+V"
+                        },
+                        focus = focus, canSend = canSend, onSend = ::send,
+                        running = controller?.activeTurnId != null, onStop = ::stop,
+                        attachments = attachments?.toList().orEmpty(),
+                        onRemoveAttachment = { a ->
+                            draft.value = draftAfterAttachmentRemoval(draft.value, attachments?.toList().orEmpty(), a)
+                            a.cancelled.set(true); attachments?.remove(a)
+                        },
+                        onKey = { e ->
+                            if (isTranscriptViewKey(e) && run { state.cycleTranscriptView(record.key); true }) return@CodeLocalComposer true
+                            when {
+                                mentions.handle(e) -> true
+                                e.type == KeyEventType.KeyDown && draft.value.composition == null && e.key == Key.V && (e.isCtrlPressed || e.isMetaPressed) &&
+                                    Attach.hasClipboardImage() && !Attach.pasteBusy.get() -> { pasteImage(); true }
+                                else -> false
+                            }
+                        },
+                        showTransferStatus = true, mentions = mentions,
+                        start = { CodeComposerPlus(onAttach = ::attachFiles, onHistory = { historyOpen = true }, onSearch = null, onVoice = { voiceOpen = true }, onRoutes = { state.openRoutes() }) },
+                        end = {
+                            if (controller != null && controller.ready) CodeCodexModelMenu(record.key, controller, record.modelOverride.orEmpty(), onRoutes = { state.openRoutes() }) { error = it }
+                            else (controller?.currentModelLabel?.ifBlank { null } ?: record.modelOverride)?.takeIf { it.isNotBlank() }?.let { CodeFooterNote(it) }
+                        })
+                }
             }
         }
     }

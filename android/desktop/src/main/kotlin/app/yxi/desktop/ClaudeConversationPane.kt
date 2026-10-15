@@ -247,95 +247,95 @@ import java.io.File
         // 「马上要恢复」也算恢复中：免得读完历史先闪一下「连接未恢复」
         val opening = resuming || controller == null && !attempted && candidates.size == 1 && historyError.isBlank() && !historyPartial
         Surface(Modifier.fillMaxSize(), color = t.surface0, contentColor = t.textPrimary) {
-            Column(Modifier.fillMaxSize()) {
-                // 「改动」「文件」开着时对话列换成本机的 Git 改动 / 文件视图（本机对齐 P6a / P6b，同服务器 Codex 页），停靠区不变
-                var tool by remember(record.key) { mutableStateOf<String?>(null) }
-                CodeLocalSessionHeader(state.navigation.title(record.key) ?: record.title, record.directory, LocalRuntimeDiscovery.title(record.engine)) {
-                    CodeLocalToolButtons(tool) { tool = it }
-                }
-                if (tool == "changes") Box(Modifier.weight(1f).fillMaxWidth()) { CodeLocalChanges(state, record) { tool = null } }
-                else if (tool == "files") Box(Modifier.weight(1f).fillMaxWidth()) { LocalFilesPane(record.key, record.directory) }
-                else Box(Modifier.weight(1f).fillMaxWidth()) {
-                    // M3f：运行中的状态行（对话末尾）；开始时间记在这一层，列表滚动时不会从 0 算起
-                    val transcriptMode = state.transcriptView(record.key)   // M3g：对话视图（Ctrl+O 轮换）
-                    val runningSince = rememberRunningSince(controller?.busy == true && approvals.isEmpty())
-                    val transcript = messages.map(Transcripts::claude)
-                    val thinkingSince = rememberRunningSince(runningSince > 0L && transcript.lastOrNull() is TranscriptItem.Thinking)   // M3h-4：思考行
-                    LazyColumn(Modifier.fillMaxSize().onPointerEvent(PointerEventType.Scroll, PointerEventPass.Initial) { event ->
-                        if (event.changes.any { it.scrollDelta.y < 0f }) followLatest = false
-                    }, state = view.scroll, contentPadding = PaddingValues(40.dp, 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        // 顺序和 key 同经典：跟随最新的下标是 1 + history + messages + approvals
-                        item(key = "history-paging") {
-                            CodeColumn(true) {
-                                if (historyCursor != null) Box(historyPagingModifier) {
-                                    CodeTextAction(if (historyLoading) "正在加载…" else "加载更早消息", ::loadEarlier, enabled = !historyLoading)
+            // M4b：「改动」「文件」开在右侧的卡片里（规格表 §3.12，同 SSH 会话页），对话和停靠区留在左边
+            var tool by remember(record.key) { mutableStateOf<String?>(null) }
+            CodeLocalToolPanel(state, record, tool, onClose = { tool = null }) {
+                Column(Modifier.fillMaxSize()) {
+                    CodeLocalSessionHeader(state.navigation.title(record.key) ?: record.title, record.directory, LocalRuntimeDiscovery.title(record.engine)) {
+                        CodeLocalToolButtons(tool) { tool = it }
+                    }
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        // M3f：运行中的状态行（对话末尾）；开始时间记在这一层，列表滚动时不会从 0 算起
+                        val transcriptMode = state.transcriptView(record.key)   // M3g：对话视图（Ctrl+O 轮换）
+                        val runningSince = rememberRunningSince(controller?.busy == true && approvals.isEmpty())
+                        val transcript = messages.map(Transcripts::claude)
+                        val thinkingSince = rememberRunningSince(runningSince > 0L && transcript.lastOrNull() is TranscriptItem.Thinking)   // M3h-4：思考行
+                        LazyColumn(Modifier.fillMaxSize().onPointerEvent(PointerEventType.Scroll, PointerEventPass.Initial) { event ->
+                            if (event.changes.any { it.scrollDelta.y < 0f }) followLatest = false
+                        }, state = view.scroll, contentPadding = PaddingValues(40.dp, 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            // 顺序和 key 同经典：跟随最新的下标是 1 + history + messages + approvals
+                            item(key = "history-paging") {
+                                CodeColumn(true) {
+                                    if (historyCursor != null) Box(historyPagingModifier) {
+                                        CodeTextAction(if (historyLoading) "正在加载…" else "加载更早消息", ::loadEarlier, enabled = !historyLoading)
+                                    }
                                 }
                             }
-                        }
-                        // M3d：原生历史也走统一对话项。一条历史一项（工具调用画成只有一个条目的卡片）：「加载更早消息」按历史下标找回滚动位置，不能合并
-                        items(history, key = { "history:" + it.key }) {
-                            // 普通档的思考画成空（不能从列表里拿掉：「加载更早消息」按历史下标找回位置）
-                            val item = Transcripts.claudeHistory(it)
-                            if (transcriptMode != TranscriptView.Normal || item !is TranscriptItem.Thinking) CodeColumn(true) { CodeTranscriptLine(Transcripts.rows(listOf(item)).single(), view = transcriptMode) }
-                        }
-                        // M3b / M3c：统一对话项；工具结果并进前一个调用
-                        items(Transcripts.rows(Transcripts.visible(transcript, transcriptMode)), key = { "row:" + it.key }) { row ->
-                            CodeColumn(true) { CodeTranscriptLine(row, images = { ClaudeSentImages(it, state.localClaudeTasks.images) }, view = transcriptMode) }
-                        }
-                        if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在生成回复", runningSince, thinkingSince) } }
-                        item { Spacer(Modifier.height(1.dp)) }
-                    }
-                    // 读历史、恢复时列表顶端一条 2 高的进度条（经典读历史时在列表上方占一行）
-                    if (historyLoading || opening) LinearProgressIndicator(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(2.dp))
-                    if (!followLatest) JumpToLatestButton { followLatest = true }
-                }
-                CodeDock(true) {
-                    InstructionStrip(state.instructions, record.key, idle, { controller?.dispatchNext() })
-                    Note(controller?.note ?: if (opening) "正在恢复会话…" else "连接未恢复；此记录不会自动重发指令。", t.textMuted)
-                    if (historyPartial) Note("读取时历史末尾尚未写完，当前仅显示完整记录。", t.textMuted)
-                    if (historyError.isNotBlank()) {
-                        Note(historyError, t.danger)
-                        // 9.6 = Note 的 16 − chip 的 6.4：chip 的字和上面的提示字对齐
-                        if (controller == null) Row(Modifier.padding(horizontal = 9.6.dp)) { CodeFooterChip("重新加载历史", { historyRefresh++ }, enabled = !historyLoading) }
-                    }
-                    if (controller?.ready != true && controller?.busy != true && controller?.cancelling != true && controller?.changingModel != true)
-                        ClaudeResumeActions(record, installations, busy = resuming || state.localClaudeTasks.busy,
-                            detecting = state.localWorkspace.detecting, refresh = { state.localWorkspace.refresh() }) { resumeSession(it) }
-                    if (error.isNotBlank()) Note(error, t.danger)
-                    // M3d-2：审批卡停靠在输入卡上方、和输入卡同宽，不进对话滚动区（规格表 §3.3）；下缘到输入卡 6.4
-                    approvals.forEach { approval ->
-                        val id = approval.getString("request_id")
-                        key(id) { CodeClaudeApproval(approval.getJSONObject("request"), controller?.ready == true && !controller.cancelling && id !in responding,
-                            onAllow = { answer(id, true) }, onDeny = { answer(id, false) }) }
-                    }
-                    CodeLocalComposer(draft.value, { draft.value = it },
-                        hint = when {
-                            controller == null || !controller.ready -> if (opening) "正在恢复会话…" else "恢复会话后可发送"
-                            controller.pendingApprovals.isNotEmpty() -> "先处理上面的审批"
-                            controller.busy || controller.cancelling || controller.changingModel -> "本轮结束后可发送"
-                            else -> "跟它说点什么… Enter 发送，Shift+Enter 换行；截图直接 Ctrl+V"
-                        },
-                        focus = focus, canSend = canSend, onSend = ::send, running = controller?.busy == true, onStop = ::stop,
-                        attachments = imagePreviews, onRemoveAttachment = { preview -> imageDrafts.removeAll { it.remotePath == preview.stamp } },
-                        onKey = { e -> (isTranscriptViewKey(e) && run { state.cycleTranscriptView(record.key); true }) || (e.type == KeyEventType.KeyDown && e.key == Key.V && (e.isCtrlPressed || e.isMetaPressed) && pasteImage()) },
-                        start = {
-                            // 选图是模态框，关掉后焦点还给输入框
-                            CodeLocalAttachButton(!capturingImages && imageDrafts.size < 4, capturingImages, imageButtonModifier) { addImages(); runCatching { focus.requestFocus() } }
-                            if (capturingImages) CodeFooterNote("正在读取图片…", t.textMuted)
-                            if (controller?.cancelling == true) CodeFooterNote("停止中…", t.textMuted)
-                        },
-                        end = {
-                            when {
-                                controller?.changingModel == true -> CodeFooterNote("正在应用设置…", t.textMuted)
-                                controller != null && (controller.availableModels.isNotEmpty() || controller.effortLevels.isNotEmpty()) ->
-                                    CodeLocalModelMenu(record.key, controller.model, controller.availableModels, controller.effort, controller.effortLevels,
-                                        enabled = idle, onModel = ::pickModel, onEffort = ::applyEffort)
-                                // 没有可选项时照经典副标题显示当前模型（未连接时取记录里的）
-                                else -> (controller?.model?.ifBlank { record.model } ?: record.model).takeIf { it.isNotBlank() }?.let { CodeFooterNote(it) }
+                            // M3d：原生历史也走统一对话项。一条历史一项（工具调用画成只有一个条目的卡片）：「加载更早消息」按历史下标找回滚动位置，不能合并
+                            items(history, key = { "history:" + it.key }) {
+                                // 普通档的思考画成空（不能从列表里拿掉：「加载更早消息」按历史下标找回位置）
+                                val item = Transcripts.claudeHistory(it)
+                                if (transcriptMode != TranscriptView.Normal || item !is TranscriptItem.Thinking) CodeColumn(true) { CodeTranscriptLine(Transcripts.rows(listOf(item)).single(), view = transcriptMode) }
                             }
-                        },
-                    )
+                            // M3b / M3c：统一对话项；工具结果并进前一个调用
+                            items(Transcripts.rows(Transcripts.visible(transcript, transcriptMode)), key = { "row:" + it.key }) { row ->
+                                CodeColumn(true) { CodeTranscriptLine(row, images = { ClaudeSentImages(it, state.localClaudeTasks.images) }, view = transcriptMode) }
+                            }
+                            if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在生成回复", runningSince, thinkingSince) } }
+                            item { Spacer(Modifier.height(1.dp)) }
+                        }
+                        // 读历史、恢复时列表顶端一条 2 高的进度条（经典读历史时在列表上方占一行）
+                        if (historyLoading || opening) LinearProgressIndicator(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(2.dp))
+                        if (!followLatest) JumpToLatestButton { followLatest = true }
+                    }
+                    CodeDock(true) {
+                        InstructionStrip(state.instructions, record.key, idle, { controller?.dispatchNext() })
+                        Note(controller?.note ?: if (opening) "正在恢复会话…" else "连接未恢复；此记录不会自动重发指令。", t.textMuted)
+                        if (historyPartial) Note("读取时历史末尾尚未写完，当前仅显示完整记录。", t.textMuted)
+                        if (historyError.isNotBlank()) {
+                            Note(historyError, t.danger)
+                            // 9.6 = Note 的 16 − chip 的 6.4：chip 的字和上面的提示字对齐
+                            if (controller == null) Row(Modifier.padding(horizontal = 9.6.dp)) { CodeFooterChip("重新加载历史", { historyRefresh++ }, enabled = !historyLoading) }
+                        }
+                        if (controller?.ready != true && controller?.busy != true && controller?.cancelling != true && controller?.changingModel != true)
+                            ClaudeResumeActions(record, installations, busy = resuming || state.localClaudeTasks.busy,
+                                detecting = state.localWorkspace.detecting, refresh = { state.localWorkspace.refresh() }) { resumeSession(it) }
+                        if (error.isNotBlank()) Note(error, t.danger)
+                        // M3d-2：审批卡停靠在输入卡上方、和输入卡同宽，不进对话滚动区（规格表 §3.3）；下缘到输入卡 6.4
+                        approvals.forEach { approval ->
+                            val id = approval.getString("request_id")
+                            key(id) { CodeClaudeApproval(approval.getJSONObject("request"), controller?.ready == true && !controller.cancelling && id !in responding,
+                                onAllow = { answer(id, true) }, onDeny = { answer(id, false) }) }
+                        }
+                        CodeLocalComposer(draft.value, { draft.value = it },
+                            hint = when {
+                                controller == null || !controller.ready -> if (opening) "正在恢复会话…" else "恢复会话后可发送"
+                                controller.pendingApprovals.isNotEmpty() -> "先处理上面的审批"
+                                controller.busy || controller.cancelling || controller.changingModel -> "本轮结束后可发送"
+                                else -> "跟它说点什么… Enter 发送，Shift+Enter 换行；截图直接 Ctrl+V"
+                            },
+                            focus = focus, canSend = canSend, onSend = ::send, running = controller?.busy == true, onStop = ::stop,
+                            attachments = imagePreviews, onRemoveAttachment = { preview -> imageDrafts.removeAll { it.remotePath == preview.stamp } },
+                            onKey = { e -> (isTranscriptViewKey(e) && run { state.cycleTranscriptView(record.key); true }) || (e.type == KeyEventType.KeyDown && e.key == Key.V && (e.isCtrlPressed || e.isMetaPressed) && pasteImage()) },
+                            start = {
+                                // 选图是模态框，关掉后焦点还给输入框
+                                CodeLocalAttachButton(!capturingImages && imageDrafts.size < 4, capturingImages, imageButtonModifier) { addImages(); runCatching { focus.requestFocus() } }
+                                if (capturingImages) CodeFooterNote("正在读取图片…", t.textMuted)
+                                if (controller?.cancelling == true) CodeFooterNote("停止中…", t.textMuted)
+                            },
+                            end = {
+                                when {
+                                    controller?.changingModel == true -> CodeFooterNote("正在应用设置…", t.textMuted)
+                                    controller != null && (controller.availableModels.isNotEmpty() || controller.effortLevels.isNotEmpty()) ->
+                                        CodeLocalModelMenu(record.key, controller.model, controller.availableModels, controller.effort, controller.effortLevels,
+                                            enabled = idle, onModel = ::pickModel, onEffort = ::applyEffort)
+                                    // 没有可选项时照经典副标题显示当前模型（未连接时取记录里的）
+                                    else -> (controller?.model?.ifBlank { record.model } ?: record.model).takeIf { it.isNotBlank() }?.let { CodeFooterNote(it) }
+                                }
+                            },
+                        )
+                    }
                 }
             }
         }

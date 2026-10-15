@@ -207,108 +207,108 @@ private class AcpPendingAuthentication(val plan: AcpTerminalAuthPlan, val comple
             if (!c.autoDispatch && !c.busy && !c.cancelling && !c.changingMode && c.pendingApprovals.isEmpty() && !sending) deliver()
         }
         Surface(Modifier.fillMaxSize(), color = t.surface0, contentColor = t.textPrimary) {
-            Column(Modifier.fillMaxSize()) {
-                // 「改动」「文件」开着时对话列换成本机的 Git 改动 / 文件视图（本机对齐 P6a / P6b，同服务器 Codex 页），停靠区不变；只给本机记录，服务器 ACP 不变
-                var tool by remember(record.key) { mutableStateOf<String?>(null) }
-                CodeLocalSessionHeader(state.navigation.title(record.key) ?: record.title, record.directory, runner,
-                    host = if (record.hostKey.isBlank()) null else state.conn?.host?.label ?: "服务器",
-                    end = if (!local) null else ({ CodeLocalToolButtons(tool) { tool = it } }))
-                if (local && tool == "changes") Box(Modifier.weight(1f).fillMaxWidth()) { CodeLocalChanges(state, record) { tool = null } }
-                else if (local && tool == "files") Box(Modifier.weight(1f).fillMaxWidth()) { LocalFilesPane(record.key, record.directory) }
-                else Box(Modifier.weight(1f).fillMaxWidth()) {
-                    // M3f：运行中的状态行（对话末尾）；开始时间记在这一层，列表滚动时不会从 0 算起
-                    val transcriptMode = state.transcriptView(record.key)   // M3g：对话视图（Ctrl+O 轮换）
-                    val runningSince = rememberRunningSince(controller?.busy == true && approvals.isEmpty())
-                    val transcript = messages.map(Transcripts::acp)
-                    val thinkingSince = rememberRunningSince(runningSince > 0L && transcript.lastOrNull() is TranscriptItem.Thinking)   // M3h-4：思考行
-                    LazyColumn(Modifier.fillMaxSize().nestedScroll(scrollWatch).onPointerEvent(PointerEventType.Scroll, PointerEventPass.Initial) { event ->
-                        if (event.changes.any { it.scrollDelta.y < 0f }) followLatest = false
-                    }, state = view.scroll, contentPadding = PaddingValues(40.dp, 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        // 顺序和 key 同经典：跟随最新滚到下标 messages + approvals（末尾的占位）
-                        // M3b / M3c：统一对话项，连着的工具调用合成摘要行 + 卡片
-                        items(Transcripts.rows(Transcripts.visible(transcript, transcriptMode)), key = { "row:" + it.key }) { row -> CodeColumn(true) { CodeTranscriptLine(row, view = transcriptMode) } }
-                        if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在生成回复", runningSince, thinkingSince) } }
-                        item(key = "acp-end") { Spacer(Modifier.height(1.dp)) }
+            // M4b：「改动」「文件」开在右侧的卡片里（规格表 §3.12，同 SSH 会话页），对话和停靠区留在左边；只给本机记录
+            var tool by remember(record.key) { mutableStateOf<String?>(null) }
+            CodeLocalToolPanel(state, record, if (local) tool else null, onClose = { tool = null }) {
+                Column(Modifier.fillMaxSize()) {
+                    CodeLocalSessionHeader(state.navigation.title(record.key) ?: record.title, record.directory, runner,
+                        host = if (record.hostKey.isBlank()) null else state.conn?.host?.label ?: "服务器",
+                        end = if (!local) null else ({ CodeLocalToolButtons(tool) { tool = it } }))
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        // M3f：运行中的状态行（对话末尾）；开始时间记在这一层，列表滚动时不会从 0 算起
+                        val transcriptMode = state.transcriptView(record.key)   // M3g：对话视图（Ctrl+O 轮换）
+                        val runningSince = rememberRunningSince(controller?.busy == true && approvals.isEmpty())
+                        val transcript = messages.map(Transcripts::acp)
+                        val thinkingSince = rememberRunningSince(runningSince > 0L && transcript.lastOrNull() is TranscriptItem.Thinking)   // M3h-4：思考行
+                        LazyColumn(Modifier.fillMaxSize().nestedScroll(scrollWatch).onPointerEvent(PointerEventType.Scroll, PointerEventPass.Initial) { event ->
+                            if (event.changes.any { it.scrollDelta.y < 0f }) followLatest = false
+                        }, state = view.scroll, contentPadding = PaddingValues(40.dp, 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            // 顺序和 key 同经典：跟随最新滚到下标 messages + approvals（末尾的占位）
+                            // M3b / M3c：统一对话项，连着的工具调用合成摘要行 + 卡片
+                            items(Transcripts.rows(Transcripts.visible(transcript, transcriptMode)), key = { "row:" + it.key }) { row -> CodeColumn(true) { CodeTranscriptLine(row, view = transcriptMode) } }
+                            if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在生成回复", runningSince, thinkingSince) } }
+                            item(key = "acp-end") { Spacer(Modifier.height(1.dp)) }
+                        }
+                        // 接回时列表顶端一条 2 高的进度条（同本机 Codex）
+                        if (opening) LinearProgressIndicator(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(2.dp))
+                        if (!followLatest) JumpToLatestButton { followLatest = true }
                     }
-                    // 接回时列表顶端一条 2 高的进度条（同本机 Codex）
-                    if (opening) LinearProgressIndicator(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(2.dp))
-                    if (!followLatest) JumpToLatestButton { followLatest = true }
-                }
-                CodeDock(true) {
-                    InstructionStrip(state.instructions, record.key, canDeliver = idle && !sending, onDeliver = { deliver() },
-                        automatic = controller?.autoDispatch == true, onAutomaticChange = if (controller == null) null else { enabled -> setAutomatic(enabled) })
-                    if (controller == null && !local) {
-                        // 服务器上没连着的记录只留说明，不画输入区（经典也不画）
-                        Note("此记录来自已关闭的进程。原生恢复尚未接入，请在原运行器核对历史；不会自动创建或重发。", t.textMuted)
-                        // 补上页脚的位置：说明字和有输入区时页脚的字同高（页脚 28 高、下面留 4）
-                        Spacer(Modifier.height(8.dp))
-                    } else {
-                        Note(when {
-                            controller != null -> controller.note
-                            opening -> "正在接回会话…"
-                            runtime != null -> "会话还没接回。"
-                            workspace?.detecting == true -> "正在检测本机运行器…"
-                            unavailable != null -> "$runner 运行器不可用：" + unavailable.problem.ifBlank { "未检测到版本" }
-                            workspace?.scanned != true -> "还没检测本机运行器。"
-                            else -> "没有找到使用原数据目录（${record.runtimeHome}）的 $runner 运行器，请重新检测。"
-                        }, t.textMuted)
-                        if (local && controller?.ready != true) {
-                            // 9.6 = Note 的 16 − chip 的 6.4：chip 的字和上面的提示字对齐
-                            Row(Modifier.padding(horizontal = 9.6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                CodeFooterChip(if (opening) "正在连接…" else "重新连接", { runtime?.let(::connect) }, enabled = runtime != null && !opening && tasks?.busy != true)
-                                CodeFooterChip(if (workspace?.detecting == true) "正在检测…" else "重新检测运行器", { workspace?.refresh() },
-                                    enabled = workspace?.detecting != true && !connecting)
-                            }
-                        }
-                        if (error.isNotBlank()) Note(error, t.danger)
-                        val settable = controller != null && controller.ready && !controller.busy && !controller.changingMode && controller.pendingApprovals.isEmpty()
-                        // 同经典：有 configOptions 就只画它（mode 类放左段，其余按运行器给的顺序放右段），没有时才画旧式模式（左）/ 模型（右）
-                        val options = controller?.configOptions
-                        val legacy = options == null || options.length() == 0
-                        val selectors = if (options == null || legacy) emptyList() else acpConfigSelectors(options)
-                        // M3d-2：审批卡停靠在输入卡上方、和输入卡同宽，不进对话滚动区（规格表 §3.3）；下缘到输入卡 6.4
-                        approvals.forEach { request ->
-                            key(org.json.JSONArray().put(request.get("id")).toString()) {
-                                CodeAcpApproval(request.getJSONObject("params"), controller?.ready == true && !controller.cancelling) { option -> act { answerPermission(request.get("id"), option) } }
-                            }
-                        }
-                        CodeLocalComposer(draft.value, { draft.value = it }, onKey = { e -> isTranscriptViewKey(e) && run { state.cycleTranscriptView(record.key); true } },
-                            hint = when {
-                                controller == null || !controller.ready -> if (!local) "此连接已不能再发送" else if (opening) "正在接回会话…" else "接回会话后可发送"
-                                controller.pendingApprovals.isNotEmpty() -> "先处理上面的审批；现在发送会先排队"
-                                controller.busy || controller.cancelling || controller.changingMode -> "本轮进行中；现在发送会先排队"
-                                else -> "跟它说点什么… Enter 发送，Shift+Enter 换行"
-                            },
-                            focus = focus, canSend = controller != null && controller.ready && draft.value.text.isNotBlank(), onSend = ::queueSend,
-                            running = controller?.busy == true, onStop = ::stop,
-                            start = {
-                                if (controller != null) {
-                                    if (legacy) controller.modes?.let { modes ->
-                                        CodeFooterSelect(record.key + ":mode", "模式", modes.optString("currentModeId"),
-                                            acpLegacyChoices(modes.optJSONArray("availableModes"), "id"), settable, alignEnd = false) { id -> act { changeMode(id) } }
-                                    }
-                                    else selectors.filter { it.category == "mode" }.forEach { s ->
-                                        CodeFooterSelect(record.key + ":" + s.id, s.name, s.current, s.values, settable, alignEnd = false) { v -> act { changeConfig(s.id, v) } }
-                                    }
-                                    if (controller.cancelling) CodeFooterNote("停止中…", t.textMuted)
+                    CodeDock(true) {
+                        InstructionStrip(state.instructions, record.key, canDeliver = idle && !sending, onDeliver = { deliver() },
+                            automatic = controller?.autoDispatch == true, onAutomaticChange = if (controller == null) null else { enabled -> setAutomatic(enabled) })
+                        if (controller == null && !local) {
+                            // 服务器上没连着的记录只留说明，不画输入区（经典也不画）
+                            Note("此记录来自已关闭的进程。原生恢复尚未接入，请在原运行器核对历史；不会自动创建或重发。", t.textMuted)
+                            // 补上页脚的位置：说明字和有输入区时页脚的字同高（页脚 28 高、下面留 4）
+                            Spacer(Modifier.height(8.dp))
+                        } else {
+                            Note(when {
+                                controller != null -> controller.note
+                                opening -> "正在接回会话…"
+                                runtime != null -> "会话还没接回。"
+                                workspace?.detecting == true -> "正在检测本机运行器…"
+                                unavailable != null -> "$runner 运行器不可用：" + unavailable.problem.ifBlank { "未检测到版本" }
+                                workspace?.scanned != true -> "还没检测本机运行器。"
+                                else -> "没有找到使用原数据目录（${record.runtimeHome}）的 $runner 运行器，请重新检测。"
+                            }, t.textMuted)
+                            if (local && controller?.ready != true) {
+                                // 9.6 = Note 的 16 − chip 的 6.4：chip 的字和上面的提示字对齐
+                                Row(Modifier.padding(horizontal = 9.6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    CodeFooterChip(if (opening) "正在连接…" else "重新连接", { runtime?.let(::connect) }, enabled = runtime != null && !opening && tasks?.busy != true)
+                                    CodeFooterChip(if (workspace?.detecting == true) "正在检测…" else "重新检测运行器", { workspace?.refresh() },
+                                        enabled = workspace?.detecting != true && !connecting)
                                 }
-                            },
-                            end = {
-                                when {
-                                    // 还没接回：先显示记录里的模型（运行器自己的默认值不显示）
-                                    controller == null -> record.model.takeIf { it.isNotBlank() && it != "native-default" }?.let { CodeFooterNote(it) }
-                                    controller.changingMode -> CodeFooterNote("正在应用设置…", t.textMuted)
-                                    legacy -> controller.models?.let { models ->
-                                        CodeFooterSelect(record.key + ":model", "模型", models.optString("currentModelId"),
-                                            acpLegacyChoices(models.optJSONArray("availableModels"), "modelId"), settable, alignEnd = true) { id -> act { changeModel(id) } }
-                                    }
-                                    else -> selectors.filter { it.category != "mode" }.forEach { s ->
-                                        CodeFooterSelect(record.key + ":" + s.id, s.name, s.current, s.values, settable, alignEnd = true) { v -> act { changeConfig(s.id, v) } }
-                                    }
+                            }
+                            if (error.isNotBlank()) Note(error, t.danger)
+                            val settable = controller != null && controller.ready && !controller.busy && !controller.changingMode && controller.pendingApprovals.isEmpty()
+                            // 同经典：有 configOptions 就只画它（mode 类放左段，其余按运行器给的顺序放右段），没有时才画旧式模式（左）/ 模型（右）
+                            val options = controller?.configOptions
+                            val legacy = options == null || options.length() == 0
+                            val selectors = if (options == null || legacy) emptyList() else acpConfigSelectors(options)
+                            // M3d-2：审批卡停靠在输入卡上方、和输入卡同宽，不进对话滚动区（规格表 §3.3）；下缘到输入卡 6.4
+                            approvals.forEach { request ->
+                                key(org.json.JSONArray().put(request.get("id")).toString()) {
+                                    CodeAcpApproval(request.getJSONObject("params"), controller?.ready == true && !controller.cancelling) { option -> act { answerPermission(request.get("id"), option) } }
                                 }
-                            },
-                        )
+                            }
+                            CodeLocalComposer(draft.value, { draft.value = it }, onKey = { e -> isTranscriptViewKey(e) && run { state.cycleTranscriptView(record.key); true } },
+                                hint = when {
+                                    controller == null || !controller.ready -> if (!local) "此连接已不能再发送" else if (opening) "正在接回会话…" else "接回会话后可发送"
+                                    controller.pendingApprovals.isNotEmpty() -> "先处理上面的审批；现在发送会先排队"
+                                    controller.busy || controller.cancelling || controller.changingMode -> "本轮进行中；现在发送会先排队"
+                                    else -> "跟它说点什么… Enter 发送，Shift+Enter 换行"
+                                },
+                                focus = focus, canSend = controller != null && controller.ready && draft.value.text.isNotBlank(), onSend = ::queueSend,
+                                running = controller?.busy == true, onStop = ::stop,
+                                start = {
+                                    if (controller != null) {
+                                        if (legacy) controller.modes?.let { modes ->
+                                            CodeFooterSelect(record.key + ":mode", "模式", modes.optString("currentModeId"),
+                                                acpLegacyChoices(modes.optJSONArray("availableModes"), "id"), settable, alignEnd = false) { id -> act { changeMode(id) } }
+                                        }
+                                        else selectors.filter { it.category == "mode" }.forEach { s ->
+                                            CodeFooterSelect(record.key + ":" + s.id, s.name, s.current, s.values, settable, alignEnd = false) { v -> act { changeConfig(s.id, v) } }
+                                        }
+                                        if (controller.cancelling) CodeFooterNote("停止中…", t.textMuted)
+                                    }
+                                },
+                                end = {
+                                    when {
+                                        // 还没接回：先显示记录里的模型（运行器自己的默认值不显示）
+                                        controller == null -> record.model.takeIf { it.isNotBlank() && it != "native-default" }?.let { CodeFooterNote(it) }
+                                        controller.changingMode -> CodeFooterNote("正在应用设置…", t.textMuted)
+                                        legacy -> controller.models?.let { models ->
+                                            CodeFooterSelect(record.key + ":model", "模型", models.optString("currentModelId"),
+                                                acpLegacyChoices(models.optJSONArray("availableModels"), "modelId"), settable, alignEnd = true) { id -> act { changeModel(id) } }
+                                        }
+                                        else -> selectors.filter { it.category != "mode" }.forEach { s ->
+                                            CodeFooterSelect(record.key + ":" + s.id, s.name, s.current, s.values, settable, alignEnd = true) { v -> act { changeConfig(s.id, v) } }
+                                        }
+                                    }
+                                },
+                            )
+                        }
                     }
                 }
             }

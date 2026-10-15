@@ -3,12 +3,15 @@ package app.yxi.desktop
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -53,5 +56,21 @@ internal fun CodePanelCard(title: String, onClose: () -> Unit, modifier: Modifie
             CodeIconButton(Icons.Filled.Close, "关闭$title", onClick = onClose)
         }
         Box(Modifier.fillMaxSize()) { content() }
+    }
+}
+
+/**
+ * 一张右侧面板 + 左边的主区（M4b，规格表 §3.12）：[title] 不为空时右边开一张 [CodePanelCard]（宽 [width]，离右、下 8，顶比主区低 8），
+ * 主区放不下「卡片 + 360」时卡片铺满（主区先不画）。本机 / 服务器 Codex 等 Code 对话页用它放「改动」「文件」；SSH 会话页可能两张，用自己的布局。
+ */
+@Composable
+internal fun CodePanelLayout(title: String?, onClose: () -> Unit, panel: @Composable () -> Unit, width: Float = CodePanelWidth.WIDE, main: @Composable () -> Unit) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val full = title != null && maxWidth.value - width - 8f < CodePanelWidth.MIN_MAIN
+        Row(Modifier.fillMaxSize()) {
+            if (!full) Box(Modifier.weight(1f).fillMaxHeight()) { main() }
+            if (title != null) CodePanelCard(title, onClose,
+                (if (full) Modifier.weight(1f).padding(start = 8.dp) else Modifier.width((width + 8f).dp)).fillMaxHeight().padding(top = 8.dp, end = 8.dp, bottom = 8.dp)) { panel() }
+        }
     }
 }

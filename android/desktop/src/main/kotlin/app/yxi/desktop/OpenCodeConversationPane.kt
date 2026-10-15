@@ -132,81 +132,81 @@ import org.json.JSONObject
         // 「马上要接回」也算接回中：免得进页面先闪一下「还没接回」
         val opening = local && (connecting || controller == null && !attempted && runtime != null)
         Surface(Modifier.fillMaxSize(), color = t.surface0, contentColor = t.textPrimary) {
-            Column(Modifier.fillMaxSize()) {
-                // 「改动」「文件」开着时对话列换成本机的 Git 改动 / 文件视图（本机对齐 P6a / P6b，同服务器 Codex 页），停靠区不变；只给本机记录，服务器 OpenCode 不变
-                var tool by remember(record.key) { mutableStateOf<String?>(null) }
-                CodeLocalSessionHeader(state.navigation.title(record.key) ?: record.title, record.directory, runner,
-                    host = if (record.hostKey.isBlank()) null else state.conn?.host?.label ?: "服务器",
-                    end = if (!local) null else ({ CodeLocalToolButtons(tool) { tool = it } }))
-                if (local && tool == "changes") Box(Modifier.weight(1f).fillMaxWidth()) { CodeLocalChanges(state, record) { tool = null } }
-                else if (local && tool == "files") Box(Modifier.weight(1f).fillMaxWidth()) { LocalFilesPane(record.key, record.directory) }
-                else Box(Modifier.weight(1f).fillMaxWidth()) {
-                    // M3f：运行中的状态行（对话末尾）；开始时间记在这一层，列表滚动时不会从 0 算起
-                    val transcriptMode = state.transcriptView(record.key)   // M3g：对话视图（Ctrl+O 轮换）
-                    val runningSince = rememberRunningSince(controller?.nativeBusy == true && controller.permissions.isEmpty() && controller.questions.isEmpty())
-                    val transcript = controller?.messages?.flatMap(Transcripts::openCode).orEmpty()
-                    val thinkingSince = rememberRunningSince(runningSince > 0L && transcript.lastOrNull() is TranscriptItem.Thinking)   // M3h-4：思考行
-                    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(40.dp, 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        if (controller != null) {
-                            // M3b / M3c：每条 OpenCode 消息拆成几项（正文、思考、工具），连着的工具调用跨消息合成摘要行 + 卡片
-                            items(Transcripts.rows(Transcripts.visible(transcript, transcriptMode)), key = { "row:" + it.key }) { row -> CodeColumn(true) { CodeTranscriptLine(row, view = transcriptMode) } }
-                            if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在运行", runningSince, thinkingSince) } }
-                            items(controller.questions, key = { "question:${it.getString("id")}" }) { request ->
-                                CodeColumn(true) { OpenCodeQuestions(request, controller, ::act, Modifier.fillMaxWidth()) }
+            // M4b：「改动」「文件」开在右侧的卡片里（规格表 §3.12，同 SSH 会话页），对话和停靠区留在左边；只给本机记录
+            var tool by remember(record.key) { mutableStateOf<String?>(null) }
+            CodeLocalToolPanel(state, record, if (local) tool else null, onClose = { tool = null }) {
+                Column(Modifier.fillMaxSize()) {
+                    CodeLocalSessionHeader(state.navigation.title(record.key) ?: record.title, record.directory, runner,
+                        host = if (record.hostKey.isBlank()) null else state.conn?.host?.label ?: "服务器",
+                        end = if (!local) null else ({ CodeLocalToolButtons(tool) { tool = it } }))
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        // M3f：运行中的状态行（对话末尾）；开始时间记在这一层，列表滚动时不会从 0 算起
+                        val transcriptMode = state.transcriptView(record.key)   // M3g：对话视图（Ctrl+O 轮换）
+                        val runningSince = rememberRunningSince(controller?.nativeBusy == true && controller.permissions.isEmpty() && controller.questions.isEmpty())
+                        val transcript = controller?.messages?.flatMap(Transcripts::openCode).orEmpty()
+                        val thinkingSince = rememberRunningSince(runningSince > 0L && transcript.lastOrNull() is TranscriptItem.Thinking)   // M3h-4：思考行
+                        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(40.dp, 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            if (controller != null) {
+                                // M3b / M3c：每条 OpenCode 消息拆成几项（正文、思考、工具），连着的工具调用跨消息合成摘要行 + 卡片
+                                items(Transcripts.rows(Transcripts.visible(transcript, transcriptMode)), key = { "row:" + it.key }) { row -> CodeColumn(true) { CodeTranscriptLine(row, view = transcriptMode) } }
+                                if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在运行", runningSince, thinkingSince) } }
+                                items(controller.questions, key = { "question:${it.getString("id")}" }) { request ->
+                                    CodeColumn(true) { OpenCodeQuestions(request, controller, ::act, Modifier.fillMaxWidth()) }
+                                }
                             }
                         }
+                        // 接回时列表顶端一条 2 高的进度条（同本机 Codex / ACP）
+                        if (opening) LinearProgressIndicator(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(2.dp))
                     }
-                    // 接回时列表顶端一条 2 高的进度条（同本机 Codex / ACP）
-                    if (opening) LinearProgressIndicator(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(2.dp))
-                }
-                CodeDock(true) {
-                    // 服务器上没有控制器（不是当前进程建的）时只留说明，不画输入区（经典也不画）
-                    if (controller == null && !local) {
-                        Note("此会话未由当前 Yxi 进程持有。原生会话与本地登记已保留，跨重启接管仍待接入。", t.textMuted)
-                        Spacer(Modifier.height(8.dp))   // 同 ACP：说明字和有输入区时页脚的字同高
-                    } else if (controller == null) {
-                        // 本机还没接回：说明 + 两个 chip，输入区照画但不能发送（同 ACP）
-                        Note(when {
-                            opening -> "正在接回会话…"
-                            runtime != null -> "会话还没接回。"
-                            workspace?.detecting == true -> "正在检测本机运行器…"
-                            unavailable != null -> "$runner 运行器不可用：" + unavailable.problem.ifBlank { "未检测到版本" }
-                            workspace?.scanned != true -> "还没检测本机运行器。"
-                            else -> "没有找到使用原数据目录（${record.runtimeHome}）的 $runner 运行器，请重新检测。"
-                        }, t.textMuted)
-                        // 9.6 = Note 的 16 − chip 的 6.4：chip 的字和上面的提示字对齐
-                        Row(Modifier.padding(horizontal = 9.6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            CodeFooterChip(if (opening) "正在连接…" else "重新连接", { runtime?.let(::connect) }, enabled = runtime != null && !opening && tasks?.busy != true)
-                            CodeFooterChip(if (workspace?.detecting == true) "正在检测…" else "重新检测运行器", { workspace?.refresh() },
-                                enabled = workspace?.detecting != true && !connecting)
+                    CodeDock(true) {
+                        // 服务器上没有控制器（不是当前进程建的）时只留说明，不画输入区（经典也不画）
+                        if (controller == null && !local) {
+                            Note("此会话未由当前 Yxi 进程持有。原生会话与本地登记已保留，跨重启接管仍待接入。", t.textMuted)
+                            Spacer(Modifier.height(8.dp))   // 同 ACP：说明字和有输入区时页脚的字同高
+                        } else if (controller == null) {
+                            // 本机还没接回：说明 + 两个 chip，输入区照画但不能发送（同 ACP）
+                            Note(when {
+                                opening -> "正在接回会话…"
+                                runtime != null -> "会话还没接回。"
+                                workspace?.detecting == true -> "正在检测本机运行器…"
+                                unavailable != null -> "$runner 运行器不可用：" + unavailable.problem.ifBlank { "未检测到版本" }
+                                workspace?.scanned != true -> "还没检测本机运行器。"
+                                else -> "没有找到使用原数据目录（${record.runtimeHome}）的 $runner 运行器，请重新检测。"
+                            }, t.textMuted)
+                            // 9.6 = Note 的 16 − chip 的 6.4：chip 的字和上面的提示字对齐
+                            Row(Modifier.padding(horizontal = 9.6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                CodeFooterChip(if (opening) "正在连接…" else "重新连接", { runtime?.let(::connect) }, enabled = runtime != null && !opening && tasks?.busy != true)
+                                CodeFooterChip(if (workspace?.detecting == true) "正在检测…" else "重新检测运行器", { workspace?.refresh() },
+                                    enabled = workspace?.detecting != true && !connecting)
+                            }
+                            if (error.isNotBlank()) Note(error, t.danger)
+                            CodeLocalComposer(draft.value, { draft.value = it }, hint = if (opening) "正在接回会话…" else "接回会话后可发送",
+                                focus = focus, canSend = false, onSend = {}, running = false, onStop = {},
+                                end = { CodeFooterNote("${record.provider} · ${record.model}") })
+                        } else {
+                            // 待发送 / 待核对的指令画成对话末尾的排队气泡（同 Claude）；「发送」只给排第一的待发送项
+                            InstructionStrip(state.instructions, record.key, !controller.busy, { act { controller.sendNext() } })
+                            Note(controller.note, t.textMuted)
+                            if (error.isNotBlank()) Note(error, t.danger)
+                            // M3d-2：审批卡停靠在输入卡上方、和输入卡同宽，不进对话滚动区（规格表 §3.3）；下缘到输入卡 6.4
+                            controller.permissions.forEach { request -> key(request.getString("id")) { CodeOpenCodeApproval(request, controller, ::act) } }
+                            CodeLocalComposer(draft.value, { draft.value = it }, onKey = { e -> isTranscriptViewKey(e) && run { state.cycleTranscriptView(record.key); true } },
+                                // 不看 ready：每次轮询 refresh 都会把它短暂置 false，提示会闪
+                                hint = when {
+                                    controller.permissions.isNotEmpty() -> "先处理上面的审批"
+                                    controller.questions.isNotEmpty() -> "先回答上面的提问"
+                                    controller.busy || controller.nativeBusy -> "本轮结束后可发送"
+                                    else -> "跟它说点什么… Enter 发送，Shift+Enter 换行"
+                                },
+                                focus = focus, canSend = controller.ready && !controller.busy && draft.value.text.isNotBlank(), onSend = ::send,
+                                // 停止方块的条件同经典的「停止」：本轮在跑，或卡在审批 / 提问上
+                                running = controller.nativeBusy || controller.permissions.isNotEmpty() || controller.questions.isNotEmpty(), onStop = ::stop,
+                                // 「核对状态」照经典保留：轮询成功不会清掉错误，点它（act 先清）才清
+                                start = { CodeFooterChip("核对状态", { act { controller.refresh() } }) },
+                                end = { CodeFooterNote("${record.provider} · ${record.model}") },   // 照经典副标题
+                            )
                         }
-                        if (error.isNotBlank()) Note(error, t.danger)
-                        CodeLocalComposer(draft.value, { draft.value = it }, hint = if (opening) "正在接回会话…" else "接回会话后可发送",
-                            focus = focus, canSend = false, onSend = {}, running = false, onStop = {},
-                            end = { CodeFooterNote("${record.provider} · ${record.model}") })
-                    } else {
-                        // 待发送 / 待核对的指令画成对话末尾的排队气泡（同 Claude）；「发送」只给排第一的待发送项
-                        InstructionStrip(state.instructions, record.key, !controller.busy, { act { controller.sendNext() } })
-                        Note(controller.note, t.textMuted)
-                        if (error.isNotBlank()) Note(error, t.danger)
-                        // M3d-2：审批卡停靠在输入卡上方、和输入卡同宽，不进对话滚动区（规格表 §3.3）；下缘到输入卡 6.4
-                        controller.permissions.forEach { request -> key(request.getString("id")) { CodeOpenCodeApproval(request, controller, ::act) } }
-                        CodeLocalComposer(draft.value, { draft.value = it }, onKey = { e -> isTranscriptViewKey(e) && run { state.cycleTranscriptView(record.key); true } },
-                            // 不看 ready：每次轮询 refresh 都会把它短暂置 false，提示会闪
-                            hint = when {
-                                controller.permissions.isNotEmpty() -> "先处理上面的审批"
-                                controller.questions.isNotEmpty() -> "先回答上面的提问"
-                                controller.busy || controller.nativeBusy -> "本轮结束后可发送"
-                                else -> "跟它说点什么… Enter 发送，Shift+Enter 换行"
-                            },
-                            focus = focus, canSend = controller.ready && !controller.busy && draft.value.text.isNotBlank(), onSend = ::send,
-                            // 停止方块的条件同经典的「停止」：本轮在跑，或卡在审批 / 提问上
-                            running = controller.nativeBusy || controller.permissions.isNotEmpty() || controller.questions.isNotEmpty(), onStop = ::stop,
-                            // 「核对状态」照经典保留：轮询成功不会清掉错误，点它（act 先清）才清
-                            start = { CodeFooterChip("核对状态", { act { controller.refresh() } }) },
-                            end = { CodeFooterNote("${record.provider} · ${record.model}") },   // 照经典副标题
-                        )
                     }
                 }
             }

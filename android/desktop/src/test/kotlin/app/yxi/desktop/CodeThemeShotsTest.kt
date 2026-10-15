@@ -161,13 +161,13 @@ class CodeThemeShotsTest {
  * 右侧面板（M4a）：语义节点里没有图标的描述，按位置核——每个标题字起于卡片左缘 + 13.6（外环 0.8 + 12.8）；
  * 卡片右端的关闭按钮在 x 2011.2（填充右缘 2039.2 − 4 − 24），个数 = 卡片数；会话头的图标按钮（y 48）都在卡片左边。
  */
-private fun checkPanels(nodes: List<String>, vararg cards: Pair<String, Float>) {
+private fun checkPanels(nodes: List<String>, vararg cards: Pair<String, Float>, headerButtons: Int = 4) {
     fun num(line: String, key: String) = Regex("""$key=([0-9.]+)""").find(line)!!.groupValues[1].toFloat()
     for ((title, left) in cards) check(nodes.any { it.trimEnd().endsWith(" $title") && kotlin.math.abs(num(it, "x") - (left + 13.6f)) < 1f }) { "没有起于 ${left + 13.6f} 的「$title」面板标题：" + nodes.filter { it.trimEnd().endsWith(" $title") } }
     val buttons = nodes.filter { it.contains("w=24.0 h=24.0 Button") }
     check(buttons.count { kotlin.math.abs(num(it, "x") - 2011.2f) < 1f } == cards.size) { "关闭按钮个数不等于面板数" }
     val header = buttons.filter { num(it, "y") in 47f..49f && num(it, "x") > 300f && kotlin.math.abs(num(it, "x") - 2011.2f) >= 1f }
-    check(header.size >= 4 && header.all { num(it, "x") + 24f <= cards.minOf { c -> c.second } }) { "会话头的按钮没缩到面板左边：$header" }
+    check(header.size >= headerButtons && header.all { num(it, "x") + 24f <= cards.minOf { c -> c.second } }) { "会话头的按钮没缩到面板左边：$header" }
 }
 
 /**
@@ -385,15 +385,17 @@ private fun codeScenes() = listOf(
     }) { localCodex(it, approval = false) },
     CodeScene("local-codex-model", listOf("gpt-5-codex")) { localCodex(it, approval = false) },
     CodeScene("local-codex-images") { localCodexImages(it) },
-    // 本机的 Git 改动（本机对齐 P6a）：会话头右端点「改动」，对话列换成改动视图（同服务器 Codex 页）；LocalGit.run 换成固定的快照，不起 git。
+    // 本机的 Git 改动（本机对齐 P6a）：会话头右端点「改动」，开在右侧卡片里（M4b，对话留在左边）；LocalGit.run 换成固定的快照，不起 git。
     // 第一张是文件列表，第二张再点一个文件看差异
     CodeScene("local-codex-changes", listOf("@改动"), verify = { _, nodes ->
         for (text in listOf("Git 改动", "未暂存", "已暂存", "MM  src/auth/errors.ts", "??  src/auth/errors.test.ts", "选择文件查看差异"))
             check(nodes.any { it.endsWith(" $text") }) { "改动视图里没有「$text」" }
+        checkPanels(nodes, "改动" to 1000f, headerButtons = 2)
     }) { localCodex(it, approval = false); shotLocalGit() },
-    // 本机文件（本机对齐 P6b）：会话头点「文件」，对话列换成本机目录（夹具 projects/demo-app，摆几个文件、时间固定）；第二张再点 README.md 看预览
+    // 本机文件（本机对齐 P6b）：会话头点「文件」，右侧卡片里是本机目录（M4b）（夹具 projects/demo-app，摆几个文件、时间固定）；第二张再点 README.md 看预览
     CodeScene("local-codex-files", listOf("@文件"), verify = { _, nodes ->
         for (text in listOf("src", "README.md", "package.json")) check(nodes.any { it.endsWith(" $text") }) { "文件列表里没有「$text」" }
+        checkPanels(nodes, "文件" to 1000f, headerButtons = 2)
     }) { localCodex(it, approval = false); shotLocalFiles() },
     CodeScene("local-codex-files-preview", listOf("@文件", "README.md"), verify = { _, nodes ->
         check(nodes.any { it.endsWith(" 复制路径") } && nodes.any { it.endsWith(" 关闭") }) { "预览上没有「复制路径」「关闭」" }
@@ -466,6 +468,8 @@ private fun codeScenes() = listOf(
         check(nodes.count { it.endsWith(" 登录页改版") } >= 3) { "会话头没有任务标题（侧栏两行 + 会话头）" }
     }) { serverCodex(it, approval = false) },
     CodeScene("server-codex-approval") { serverCodex(it, approval = true) },
+    // 服务器 Codex 页的「改动」（M4b）：同本机，开在右侧卡片里，对话留在左边（夹具没连服务器，卡片里是读不到改动的说明）
+    CodeScene("server-codex-changes", listOf("@改动"), verify = { _, nodes -> checkPanels(nodes, "改动" to 1000f, headerButtons = 3) }) { serverCodex(it, approval = false) },
     // 侧栏也有一行「更多」（文字），会话头的 ⋮ 是纯图标：只按 contentDescription 找（@）
     CodeScene("server-codex-more", listOf("@更多"), verify = { _, nodes ->
         for (text in listOf("在此对话应用当前服务器线路", "模型与线路", "复制任务编号"))

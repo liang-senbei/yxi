@@ -208,88 +208,88 @@ internal fun CodeLocalCodexPane(state: AppState, record: LocalCodexTaskRecord) {
     // 「马上要接回」也算接回中（比如等别的会话接完）：免得进页面先闪一下「还没接回」
     val opening = connecting || controller == null && !attempted && runtime != null
     Surface(Modifier.fillMaxSize(), color = t.surface0, contentColor = t.textPrimary) {
-        Column(Modifier.fillMaxSize()) {
-            // 「改动」「文件」开着时对话列换成本机的 Git 改动 / 文件视图（本机对齐 P6a / P6b，同服务器 Codex 页），停靠区不变
-            var tool by remember(record.key) { mutableStateOf<String?>(null) }
-            CodeLocalSessionHeader(state.navigation.title(record.key) ?: record.title, record.directory, LocalRuntimeDiscovery.title(record.engine)) {
-                CodeLocalToolButtons(tool) { tool = it }
-            }
-            if (tool == "changes") Box(Modifier.weight(1f).fillMaxWidth()) { CodeLocalChanges(state, record) { tool = null } }
-            else if (tool == "files") Box(Modifier.weight(1f).fillMaxWidth()) { LocalFilesPane(record.key, record.directory) }
-            else Box(Modifier.weight(1f).fillMaxWidth()) {
-                // M3f：运行中的状态行（对话末尾）；开始时间记在这一层，列表滚动时不会从 0 算起
-                val transcriptMode = state.transcriptView(record.key)   // M3g：对话视图（Ctrl+O 轮换）
-                val runningSince = rememberRunningSince(controller?.activeTurnId != null && requests.isEmpty())
-                val transcript = messages.map(Transcripts::codex)
-                val thinkingSince = rememberRunningSince(runningSince > 0L && transcript.lastOrNull() is TranscriptItem.Thinking)   // M3h-4：思考行
-                LazyColumn(Modifier.fillMaxSize().onPointerEvent(PointerEventType.Scroll, PointerEventPass.Initial) { event ->
-                    if (event.changes.any { it.scrollDelta.y < 0f }) followLatest = false
-                }, state = view.scroll, contentPadding = PaddingValues(40.dp, 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    // 顺序和 key 同服务器工作台：跟随最新滚到下标 messages + requests（末尾的占位）
-                    // M3b / M3c：统一对话项（你 = 右对齐气泡，Codex = 没有作者名的正文），命令和文件改动合成摘要行 + 卡片（代替原来的活动卡）；
-                    // 回复里的链接、改动里的路径照旧是复制路径
-                    items(Transcripts.rows(Transcripts.visible(transcript, transcriptMode)), key = { "row:" + it.key }) { row ->
-                        CodeColumn(true) { CompositionLocalProvider(LocalUriHandler provides links) { CodeTranscriptLine(row, onPath = ::copyPath, view = transcriptMode) } }
-                    }
-                    if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在运行", runningSince, thinkingSince) } }
-                    item(key = "latest") { Spacer(Modifier.height(1.dp)) }
+        // M4b：「改动」「文件」开在右侧的卡片里（规格表 §3.12，同 SSH 会话页），对话和停靠区留在左边
+        var tool by remember(record.key) { mutableStateOf<String?>(null) }
+        CodeLocalToolPanel(state, record, tool, onClose = { tool = null }) {
+            Column(Modifier.fillMaxSize()) {
+                CodeLocalSessionHeader(state.navigation.title(record.key) ?: record.title, record.directory, LocalRuntimeDiscovery.title(record.engine)) {
+                    CodeLocalToolButtons(tool) { tool = it }
                 }
-                // 接回时列表顶端一条 2 高的进度条（同 Claude 读历史）
-                if (opening) LinearProgressIndicator(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(2.dp))
-                if (!followLatest) JumpToLatestButton { followLatest = true }
-            }
-            CodeDock(true) {
-                InstructionStrip(state.instructions, record.key, canDeliver = idle,
-                    onDeliver = { item -> if (controller != null) act { controller.sendNext(item.id) } },
-                    automatic = controller?.autoDispatch == true,
-                    onAutomaticChange = if (controller == null) null else { enabled -> setAutomatic(enabled) },
-                    canSteer = canSteer, onSteer = { item -> if (controller != null) act { controller.steerNext(item.id) } })
-                if (controller != null) CodexGoalStrip(controller, usedLabel = "累计")
-                Note(when {
-                    controller != null -> controller.note
-                    opening -> "正在接回会话…"
-                    runtime != null -> "会话还没接回。"
-                    workspace.detecting -> "正在检测本机运行器…"
-                    unavailable != null -> "Codex 运行器不可用：" + unavailable.problem.ifBlank { "未检测到版本" }
-                    !workspace.scanned -> "还没检测本机运行器。"
-                    else -> "没有找到使用原数据目录（${record.runtimeHome}）的 Codex 运行器，请重新检测。"
-                }, t.textMuted)
-                if (!ready) {
-                    Note("接回会保留原会话；请先关掉其他窗口里的同一会话。", t.textMuted)
-                    // 9.6 = Note 的 16 − chip 的 6.4：chip 的字和上面的提示字对齐
-                    Row(Modifier.padding(horizontal = 9.6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        CodeFooterChip(if (opening) "正在连接…" else "重新连接", { runtime?.let(::connect) }, enabled = runtime != null && !opening && !tasks.busy)
-                        CodeFooterChip(if (workspace.detecting) "正在检测…" else "重新检测运行器", { workspace.refresh() }, enabled = !workspace.detecting && !connecting)
-                        CodeFooterChip("只读查看历史", {
-                            openNativeHistory(state, NativeHistoryThread(record.threadId, record.title, record.directory, "openai", "appServer", record.createdAt / 1000, "unknown"))
-                        }, enabled = !connecting && !workspace.loading && workspace.selectedRuntime?.home?.let { runCatching { File(it).canonicalPath }.getOrNull() } == record.runtimeHome)
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    // M3f：运行中的状态行（对话末尾）；开始时间记在这一层，列表滚动时不会从 0 算起
+                    val transcriptMode = state.transcriptView(record.key)   // M3g：对话视图（Ctrl+O 轮换）
+                    val runningSince = rememberRunningSince(controller?.activeTurnId != null && requests.isEmpty())
+                    val transcript = messages.map(Transcripts::codex)
+                    val thinkingSince = rememberRunningSince(runningSince > 0L && transcript.lastOrNull() is TranscriptItem.Thinking)   // M3h-4：思考行
+                    LazyColumn(Modifier.fillMaxSize().onPointerEvent(PointerEventType.Scroll, PointerEventPass.Initial) { event ->
+                        if (event.changes.any { it.scrollDelta.y < 0f }) followLatest = false
+                    }, state = view.scroll, contentPadding = PaddingValues(40.dp, 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        // 顺序和 key 同服务器工作台：跟随最新滚到下标 messages + requests（末尾的占位）
+                        // M3b / M3c：统一对话项（你 = 右对齐气泡，Codex = 没有作者名的正文），命令和文件改动合成摘要行 + 卡片（代替原来的活动卡）；
+                        // 回复里的链接、改动里的路径照旧是复制路径
+                        items(Transcripts.rows(Transcripts.visible(transcript, transcriptMode)), key = { "row:" + it.key }) { row ->
+                            CodeColumn(true) { CompositionLocalProvider(LocalUriHandler provides links) { CodeTranscriptLine(row, onPath = ::copyPath, view = transcriptMode) } }
+                        }
+                        if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在运行", runningSince, thinkingSince) } }
+                        item(key = "latest") { Spacer(Modifier.height(1.dp)) }
                     }
+                    // 接回时列表顶端一条 2 高的进度条（同 Claude 读历史）
+                    if (opening) LinearProgressIndicator(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(2.dp))
+                    if (!followLatest) JumpToLatestButton { followLatest = true }
                 }
-                if (notice.isNotBlank()) Note(notice, t.textMuted)
-                if (error.isNotBlank()) Note(error, t.danger)
-                // M3d-2b：请求卡停靠在输入卡上方（规格表 §3.3），不进对话滚动区
-                if (controller != null) requests.forEach { request -> key(request.get("id").toString()) { CodexRequestCard(request, controller, ::copyPath) { block -> act(block) } } }
-                CodeLocalComposer(draft.value, { draft.value = it },
-                    hint = when {
-                        controller == null || !controller.ready -> if (opening) "正在接回会话…" else "接回会话后可发送"
-                        controller.pendingRequests.isNotEmpty() -> "先处理上面的请求；现在发送会先排队"
-                        controller.activeTurnId != null -> "本轮进行中；现在发送会先排队"
-                        else -> "跟它说点什么… Enter 发送，Shift+Enter 换行；截图直接 Ctrl+V"
-                    },
-                    focus = focus, canSend = canSend, onSend = ::send,
-                    running = controller?.activeTurnId != null, onStop = ::stop,
-                    attachments = imagePreviews, onRemoveAttachment = { preview -> imageDrafts.removeAll { it.remotePath == preview.stamp } },
-                    onKey = { e -> (isTranscriptViewKey(e) && run { state.cycleTranscriptView(record.key); true }) || (e.type == KeyEventType.KeyDown && e.key == Key.V && (e.isCtrlPressed || e.isMetaPressed) && pasteImage()) },
-                    start = {
-                        // 选图是模态框，关掉后焦点还给输入框；没接回也能先选图（发送要等接回）
-                        CodeLocalAttachButton(!capturingImages && imageDrafts.size < 4, capturingImages) { addImages(); runCatching { focus.requestFocus() } }
-                        if (capturingImages) CodeFooterNote("正在读取图片…", t.textMuted)
-                    },
-                    end = {
-                        if (controller != null && controller.ready) CodeCodexModelMenu(record.key, controller, record.model) { error = it }
-                        else (controller?.currentModelLabel?.ifBlank { record.model } ?: record.model).takeIf { it.isNotBlank() }?.let { CodeFooterNote(it) }
-                    })
+                CodeDock(true) {
+                    InstructionStrip(state.instructions, record.key, canDeliver = idle,
+                        onDeliver = { item -> if (controller != null) act { controller.sendNext(item.id) } },
+                        automatic = controller?.autoDispatch == true,
+                        onAutomaticChange = if (controller == null) null else { enabled -> setAutomatic(enabled) },
+                        canSteer = canSteer, onSteer = { item -> if (controller != null) act { controller.steerNext(item.id) } })
+                    if (controller != null) CodexGoalStrip(controller, usedLabel = "累计")
+                    Note(when {
+                        controller != null -> controller.note
+                        opening -> "正在接回会话…"
+                        runtime != null -> "会话还没接回。"
+                        workspace.detecting -> "正在检测本机运行器…"
+                        unavailable != null -> "Codex 运行器不可用：" + unavailable.problem.ifBlank { "未检测到版本" }
+                        !workspace.scanned -> "还没检测本机运行器。"
+                        else -> "没有找到使用原数据目录（${record.runtimeHome}）的 Codex 运行器，请重新检测。"
+                    }, t.textMuted)
+                    if (!ready) {
+                        Note("接回会保留原会话；请先关掉其他窗口里的同一会话。", t.textMuted)
+                        // 9.6 = Note 的 16 − chip 的 6.4：chip 的字和上面的提示字对齐
+                        Row(Modifier.padding(horizontal = 9.6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            CodeFooterChip(if (opening) "正在连接…" else "重新连接", { runtime?.let(::connect) }, enabled = runtime != null && !opening && !tasks.busy)
+                            CodeFooterChip(if (workspace.detecting) "正在检测…" else "重新检测运行器", { workspace.refresh() }, enabled = !workspace.detecting && !connecting)
+                            CodeFooterChip("只读查看历史", {
+                                openNativeHistory(state, NativeHistoryThread(record.threadId, record.title, record.directory, "openai", "appServer", record.createdAt / 1000, "unknown"))
+                            }, enabled = !connecting && !workspace.loading && workspace.selectedRuntime?.home?.let { runCatching { File(it).canonicalPath }.getOrNull() } == record.runtimeHome)
+                        }
+                    }
+                    if (notice.isNotBlank()) Note(notice, t.textMuted)
+                    if (error.isNotBlank()) Note(error, t.danger)
+                    // M3d-2b：请求卡停靠在输入卡上方（规格表 §3.3），不进对话滚动区
+                    if (controller != null) requests.forEach { request -> key(request.get("id").toString()) { CodexRequestCard(request, controller, ::copyPath) { block -> act(block) } } }
+                    CodeLocalComposer(draft.value, { draft.value = it },
+                        hint = when {
+                            controller == null || !controller.ready -> if (opening) "正在接回会话…" else "接回会话后可发送"
+                            controller.pendingRequests.isNotEmpty() -> "先处理上面的请求；现在发送会先排队"
+                            controller.activeTurnId != null -> "本轮进行中；现在发送会先排队"
+                            else -> "跟它说点什么… Enter 发送，Shift+Enter 换行；截图直接 Ctrl+V"
+                        },
+                        focus = focus, canSend = canSend, onSend = ::send,
+                        running = controller?.activeTurnId != null, onStop = ::stop,
+                        attachments = imagePreviews, onRemoveAttachment = { preview -> imageDrafts.removeAll { it.remotePath == preview.stamp } },
+                        onKey = { e -> (isTranscriptViewKey(e) && run { state.cycleTranscriptView(record.key); true }) || (e.type == KeyEventType.KeyDown && e.key == Key.V && (e.isCtrlPressed || e.isMetaPressed) && pasteImage()) },
+                        start = {
+                            // 选图是模态框，关掉后焦点还给输入框；没接回也能先选图（发送要等接回）
+                            CodeLocalAttachButton(!capturingImages && imageDrafts.size < 4, capturingImages) { addImages(); runCatching { focus.requestFocus() } }
+                            if (capturingImages) CodeFooterNote("正在读取图片…", t.textMuted)
+                        },
+                        end = {
+                            if (controller != null && controller.ready) CodeCodexModelMenu(record.key, controller, record.model) { error = it }
+                            else (controller?.currentModelLabel?.ifBlank { record.model } ?: record.model).takeIf { it.isNotBlank() }?.let { CodeFooterNote(it) }
+                        })
+                }
             }
         }
     }

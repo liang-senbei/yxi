@@ -183,6 +183,14 @@ internal fun CodeLocalToolButtons(tool: String?, onTool: (String?) -> Unit) {
     CodeIconButton(Icons.Outlined.FolderOpen, "文件", active = tool == "files") { onTool(if (tool == "files") null else "files") }
 }
 
+/** 本机 Code 页的「改动」「文件」（M4b）：开在右侧卡片里（[CodePanelLayout]，同 SSH 会话页），对话和停靠区留在左边；[tool] 为空时只画主区。 */
+@Composable
+internal fun CodeLocalToolPanel(state: AppState, record: LocalCodexTaskRecord, tool: String?, onClose: () -> Unit, main: @Composable () -> Unit) {
+    CodePanelLayout(when (tool) { "changes" -> "改动"; "files" -> "文件"; else -> null }, onClose, panel = {
+        if (tool == "changes") CodeLocalChanges(state, record, onClose) else LocalFilesPane(record.key, record.directory)
+    }, main = main)
+}
+
 /**
  * 本机对话的 Git 改动（本机对齐 P6a）：同服务器 Codex 页的改动视图（[GitChangesView]，两种风格、本机服务器共用），数据来自本机的 [LocalGit]，只读。
  * 「打开文件」改成复制绝对路径（本机对齐的原则：模型给的路径不调 Desktop.open，本机文件面板留给 P6b）；「针对这份差异提要求」把摘录接到这条对话的草稿末尾，然后收起改动。
