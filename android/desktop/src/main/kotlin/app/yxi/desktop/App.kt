@@ -189,10 +189,10 @@ private fun ClassicWorkspace(state: AppState, conn: Conn, sess: Session, scope: 
     }
 }
 
-/** 当前会话的正文：对话 / 终端 / 文件 / 改动（state.tab）。两种外壳共用；key(taskKey) 让换会话时各面板重建。 */
+/** 当前会话的正文：对话 / 终端 / 文件 / 改动（[tab]，默认 state.tab）。两种外壳共用；key(taskKey) 让换会话时各面板重建。Code 外壳（M4a）左边固定画对话、右侧卡片里画 tab 指的那个。 */
 @Composable
-internal fun SessionContent(state: AppState, conn: Conn, sess: Session, taskKey: String, openFile: (String) -> Unit) {
-    key(taskKey) { when (state.tab) {
+internal fun SessionContent(state: AppState, conn: Conn, sess: Session, taskKey: String, openFile: (String) -> Unit, tab: Int = state.tab) {
+    key(taskKey) { when (tab) {
         0 -> ChatPane(conn, sess, state.instructions, state.chatAttachments, savedDraft = state.chatDrafts.getOrPut(taskKey) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue()) }, displayName = state.navigation.title(taskKey), onRoutes = { state.openRoutes() }, onTerminal = { state.tab = 1 }, modelSwitches = state.modelSwitches,
             transcriptView = state.transcriptView(taskKey), onCycleView = { state.cycleTranscriptView(taskKey) })
         1 -> TermPane(conn, sess)

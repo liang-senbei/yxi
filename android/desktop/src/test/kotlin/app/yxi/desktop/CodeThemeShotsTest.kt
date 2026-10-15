@@ -158,6 +158,19 @@ class CodeThemeShotsTest {
 }
 
 /**
+ * 右侧面板（M4a）：语义节点里没有图标的描述，按位置核——每个标题字起于卡片左缘 + 13.6（外环 0.8 + 12.8）；
+ * 卡片右端的关闭按钮在 x 2011.2（填充右缘 2039.2 − 4 − 24），个数 = 卡片数；会话头的图标按钮（y 48）都在卡片左边。
+ */
+private fun checkPanels(nodes: List<String>, vararg cards: Pair<String, Float>) {
+    fun num(line: String, key: String) = Regex("""$key=([0-9.]+)""").find(line)!!.groupValues[1].toFloat()
+    for ((title, left) in cards) check(nodes.any { it.trimEnd().endsWith(" $title") && kotlin.math.abs(num(it, "x") - (left + 13.6f)) < 1f }) { "没有起于 ${left + 13.6f} 的「$title」面板标题：" + nodes.filter { it.trimEnd().endsWith(" $title") } }
+    val buttons = nodes.filter { it.contains("w=24.0 h=24.0 Button") }
+    check(buttons.count { kotlin.math.abs(num(it, "x") - 2011.2f) < 1f } == cards.size) { "关闭按钮个数不等于面板数" }
+    val header = buttons.filter { num(it, "y") in 47f..49f && num(it, "x") > 300f && kotlin.math.abs(num(it, "x") - 2011.2f) >= 1f }
+    check(header.size >= 4 && header.all { num(it, "x") + 24f <= cards.minOf { c -> c.second } }) { "会话头的按钮没缩到面板左边：$header" }
+}
+
+/**
  * Code 截图场景：[taps] 依次点文字是它的控件（同名取最靠下的一个：chips 在浮层下面；带「~」前缀的只悬停、等 tooltip；带「@」前缀的只按图标的
  * contentDescription 找；[ENTER] 是在拿着焦点的输入框里按回车）；[allowed] 同经典夹具；
  * [content] 不为空就画它、不画 App（同经典夹具的 approval-card）。[verify] 在点完、画稳之后拿状态和语义节点清单核结果，抛错就算这张失败。
@@ -181,6 +194,13 @@ private fun codeScenes() = listOf(
     CodeScene("ssh-title-view-menu", listOf("@任务操作"), verify = { _, nodes ->
         for (text in listOf("对话视图 · Ctrl+O", "普通", "思考", "详细")) check(nodes.any { it.endsWith(" $text") }) { "标题菜单里没有「$text」" }
     }) { remote(it, tab = 0) },
+    // 右侧面板（M4a，规格表 §3.12）：对话留在左边，面板是浮起的卡片（顶 y 44、离右 / 下 8、圆角 10，头部 32：标题 + 关闭）；
+    // 终端宽 578.4，改动 / 文件 / 预览宽 1040；两张都开时上下分屏。会话头的右缘缩到卡片左边
+    CodeScene("ssh-panel-terminal", verify = { _, nodes -> checkPanels(nodes, "终端" to 1461.6f) }) { remote(it, tab = 1) },
+    CodeScene("ssh-panel-changes", verify = { _, nodes -> checkPanels(nodes, "改动" to 1000f) }) { remote(it, tab = 3) },
+    CodeScene("ssh-panel-split", verify = { _, nodes -> checkPanels(nodes, "终端" to 1000f, "已打开的文件" to 1000f) }) {
+        remote(it, tab = 1); it.filePanelOpen = true
+    },
     CodeScene("approval-card", content = { ApprovalDockShot() }),
     // 新会话页的两侧边距（M2-d）：主区只有 600 宽时，骨架两侧各留 40，输入卡宽 600 − 80 = 520、左缘 288 + 40（PRD §5.1）。只画骨架和占位的 chip / 输入卡
     CodeScene("home-narrow", content = { NarrowHomeShot() }, verify = { _, nodes ->

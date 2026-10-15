@@ -4,10 +4,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.TooltipArea
 import androidx.compose.foundation.TooltipPlacement
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.draggable
-import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -52,9 +49,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -141,35 +138,43 @@ private fun CodeAppMenu(state: AppState, close: () -> Unit) {
 }
 
 /**
- * 会话工作区：Code 会话头 + 内容。M2 仍按 state.tab 切对话 / 终端 / 文件 / 改动（右侧浮起面板在 M4）；
- * 文件 / 网页预览侧栏沿用经典的分栏逻辑。M4 要改成浮起卡片，所以这里单独一份，不和经典共用。
+ * 会话工作区（M4a，规格表 §3.12）：左边是会话头 + 对话（始终在），右边是浮起的面板卡片：
+ * 终端 / 文件 / 改动（state.tab 1 / 2 / 3）一张，网页预览 / 文件侧栏（browserPanelOpen / filePanelOpen）一张，两张都开时上下分屏。
+ * 卡片离窗口右、下各 8，顶在 y 44；改动 / 文件 / 预览宽 1040，只有终端时宽 578.4；会话头右缘缩到卡片左边。
+ * 主区放不下「卡片 + 360 宽的对话」或预览点了「展开」时，卡片铺满主区（同经典分栏窄时只看面板）。
+ * 经典沿用 App.kt 里的 tab 切换和分栏，不和这里共用。
  */
 @Composable
 private fun CodeWorkspace(state: AppState, conn: Conn, sess: Session, scope: CoroutineScope) {
     val taskKey = taskNavigationKey(conn.host, sess)
     val replaced = sess.runtimeId.isNotEmpty() && conn.sessions.any { it.name == sess.name && it.runtimeId.isNotEmpty() && it.runtimeId != sess.runtimeId }
     val links = sessionLinks(state, conn, sess, taskKey, scope)
-    val density = LocalDensity.current.density
-    CodeSessionHeader(state, conn, sess, taskKey)
-    if (state.workspaceError.isNotBlank()) {
-        Text(state.workspaceError, Modifier.padding(horizontal = 17.6.dp), color = Tokens.current.danger, fontSize = 13.sp, lineHeight = 18.sp)
-    }
-    DeferredRouteStatus(state)
     CompositionLocalProvider(LocalUriHandler provides links.uris) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            val panel = state.filePanelOpen || state.browserPanelOpen
-            val compact = maxWidth < 850.dp || state.previewExpanded
-            val availableWidth = maxWidth.value
+            val tool = state.tab.takeIf { it in 1..3 }
+            val side = state.filePanelOpen || state.browserPanelOpen
+            val panel = tool != null || side
+            val cardWidth = if (side || (tool != null && tool != 1)) CodePanelWidth.WIDE else CodePanelWidth.TERMINAL
+            val full = panel && (maxWidth.value - cardWidth - 8f < CodePanelWidth.MIN_MAIN || (side && state.previewExpanded))
             Row(Modifier.fillMaxSize()) {
-                if (!panel || !compact) Column(Modifier.weight(1f).fillMaxHeight()) {
+                if (!full) Column(Modifier.weight(1f).fillMaxHeight()) {
+                    CodeSessionHeader(state, conn, sess, taskKey, end = if (panel) 12.dp else 14.dp)
+                    if (state.workspaceError.isNotBlank()) {
+                        Text(state.workspaceError, Modifier.padding(horizontal = 17.6.dp), color = Tokens.current.danger, fontSize = 13.sp, lineHeight = 18.sp)
+                    }
+                    DeferredRouteStatus(state)
                     if (replaced) Text("原会话已结束，同名会话是新任务。请在左侧重新选择；旧草稿已保留。", Modifier.padding(24.dp))
-                    else SessionContent(state, conn, sess, taskKey, links.openFile)
+                    else SessionContent(state, conn, sess, taskKey, links.openFile, tab = 0)
                 }
-                if (panel) {
-                    if (!compact) Box(Modifier.width(6.dp).fillMaxHeight().background(Tokens.current.border).draggable(
-                        rememberDraggableState { delta -> state.filePanelWidth = (state.filePanelWidth - delta / density).coerceIn(340f, 900f) }, Orientation.Horizontal,
-                        onDragStopped = { state.savePreviewWidth() }))
-                    Box(if (compact) Modifier.fillMaxSize() else Modifier.width(state.filePanelWidth.coerceAtMost(availableWidth - 350).dp).fillMaxHeight()) {
+                if (panel) Column(
+                    (if (full) Modifier.weight(1f).padding(start = 8.dp) else Modifier.width((cardWidth + 8f).dp)).fillMaxHeight().padding(top = 8.dp, end = 8.dp, bottom = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.4.dp),
+                ) {
+                    if (tool != null) CodePanelCard(when (tool) { 1 -> "终端"; 2 -> "文件"; else -> "改动" }, { state.tab = 0 }, Modifier.weight(1f).fillMaxWidth()) {
+                        SessionContent(state, conn, sess, taskKey, links.openFile, tab = tool)
+                    }
+                    if (side) CodePanelCard(if (state.browserPanelOpen) "网页预览" else "已打开的文件", { state.browserPanelOpen = false; state.filePanelOpen = false; state.previewExpanded = false },
+                        Modifier.weight(1f).fillMaxWidth()) {
                         if (state.browserPanelOpen) BrowserPane(state, conn, sess) else DocumentPane(state, conn, sess)
                     }
                 }
@@ -179,19 +184,19 @@ private fun CodeWorkspace(state: AppState, conn: Conn, sess: Session, scope: Cor
 }
 /**
  * 会话头（y 36–84，高 48，无分隔线）。左：环境图标（305.6）、标题（328.8）、任务操作箭头、连接状态；
- * 右：终端 / 改动 / 预览 / ⋮，中心 1933.2 / 1962.8 / 1992.4 / 2022（end 14 + 间距 5.6）。
+ * 右：终端 / 改动 / 预览 / ⋮，中心 1933.2 / 1962.8 / 1992.4 / 2022（end 14 + 间距 5.6）；开着右侧面板时右缘缩到面板左边、end 12（规格表 §3.9）。
  * 按钮对应的视图开着时是激活态。连接状态和重连照经典 SessionHeader（Code 下 ChatPane 不再画它）。
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun CodeSessionHeader(state: AppState, conn: Conn, sess: Session, taskKey: String) {
+private fun CodeSessionHeader(state: AppState, conn: Conn, sess: Session, taskKey: String, end: Dp = 14.dp) {
     val t = Tokens.current
     val p = CodePalette.current
     var titleMenu by remember { mutableStateOf(false) }
     var more by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
     NativeOverlay(titleMenu || more)
-    Row(Modifier.fillMaxWidth().height(48.dp).padding(start = 17.6.dp, end = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().height(48.dp).padding(start = 17.6.dp, end = end), verticalAlignment = Alignment.CenterVertically) {
         Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Outlined.Dns, conn.host.label, Modifier.size(16.dp), tint = t.textSecondary)
             Spacer(Modifier.width(7.2.dp))
