@@ -23,9 +23,21 @@ internal object HostSkills {
         return claude.cats.firstOrNull { it.key == "skills" }?.items.orEmpty().asSequence()
             .map { HostSkill(it.title.trim(), it.from.substringBefore('@').trim(), it.path, it.from.trim()) }
             .filter { s -> s.name.isNotEmpty() && s.name.length <= 200 && s.name.none { it < ' ' } }
-            .filter { seen.add(it.pluginId.lowercase() + "\u0000" + it.name.lowercase()) }
+            .filter { seen.add(it.pluginId + "\u0000" + it.name) }
             .take(MAX).toList()
             .sortedWith(compareBy<HostSkill>({ it.plugin.isNotEmpty() }, { it.plugin.lowercase() }, { it.name.lowercase() }))
+    }
+
+    /** SKILL.md 最多读这么多字节（再多的截断）。 */
+    const val READ_LIMIT = 131_072
+
+    /**
+     * 读一个技能的 SKILL.md（只读）：只读普通文件（链到 /dev/zero、FIFO、设备的不读）、最多开头 [READ_LIMIT] 字节——exec 占着连接的锁、
+     * 取消不了，不能让一个第三方插件的文件把它卡住或撑爆内存（交叉审查 10-15）。读不到、空的返回 null。
+     */
+    suspend fun read(ssh: app.yxi.ssh.SshSession?, path: String): String? {
+        val p = app.yxi.ssh.Shell.q(path)
+        return ssh?.exec("[ -f $p ] && head -c $READ_LIMIT -- $p 2>/dev/null").orEmpty().ifBlank { null }
     }
 
     /** 行右端的来源：「用户」或「插件 名字」。 */

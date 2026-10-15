@@ -36,9 +36,11 @@ import androidx.compose.material.icons.outlined.Laptop
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -97,6 +99,8 @@ internal fun CodeCustomizePane(state: AppState) {
     var searchFocus by remember { mutableStateOf(false) }
     var mcpAdd by remember { mutableStateOf(false) }
     val closeSearch = { searching = false; state.pluginMarketQuery = "" }
+    // 里面还嵌着经典的子面板（插件列表、通用 MCP），它们没写颜色的字取 LocalContentColor：给主色，深色下不再是黑字（交叉审查 10-15）
+    CompositionLocalProvider(LocalContentColor provides t.textPrimary) {
     Box(Modifier.fillMaxSize().padding(end = 9.6.dp), contentAlignment = Alignment.TopCenter) {
         Column(Modifier.padding(horizontal = 40.dp).widthIn(max = 960.dp).fillMaxWidth().fillMaxHeight()) {
             Spacer(Modifier.height(CustomizeTitleTop))
@@ -130,7 +134,7 @@ internal fun CodeCustomizePane(state: AppState) {
                 } else CodeIconButton(Icons.Outlined.Search, "搜索", box = 28.dp, iconSize = 16.8.dp) { searching = true; searchFocus = true }
                 val add: (() -> Unit)? = when (tab) {
                     CustomizeTab.Skills -> null
-                    CustomizeTab.Plugins -> if (state.customizeMarket) null else ({ state.customizeMarket = true })
+                    CustomizeTab.Plugins -> if (state.customizeMarket || !local && conn?.status != Conn.Status.Connected) null else ({ state.customizeMarket = true })
                     CustomizeTab.Mcp -> if (!local && conn == null) null else ({ mcpAdd = true })
                 }
                 if (add != null) {
@@ -149,6 +153,7 @@ internal fun CodeCustomizePane(state: AppState) {
                 }
             }
         }
+    }
     }
 }
 
@@ -337,13 +342,14 @@ private fun CodeSkillsTab(state: AppState, local: Boolean, conn: Conn?) {
     val host = conn.host.id
     val label = conn.host.label
     val connected = conn.status == Conn.Status.Connected
-    LaunchedEffect(host, connected) { if (connected && conn.ssh.isConnected) RemoteSlashCommands.ensure(host) { ConfigRemote.read(conn.ssh) } }
+    LaunchedEffect(host, connected, conn.ssh) { if (connected && conn.ssh.isConnected) RemoteSlashCommands.ensure(host) { ConfigRemote.read(conn.ssh) } }
     val all = RemoteSlashCommands.skills(host)
     val reading = RemoteSlashCommands.reading(host)
     val failed = RemoteSlashCommands.failed(host)
     var open by remember(host) { mutableStateOf<HostSkill?>(null) }
     open?.let { CodeSkillDialog(conn, it) { open = null } }
     when {
+        all == null && !connected && !reading -> CodeEmptyCard("$label 未连接", "连上这台服务器后，这里列出它的 Claude Code 技能：你放在 ~/.claude/skills 里的，和插件带来的。")
         all == null && failed && !reading -> CodeEmptyCard("没读到 $label 上的技能", "连接中断了，或者读取脚本出错（要用到那台机器上的 python3）。点右上角的「重新读取」再试一次。")
         all == null && (connected || reading) -> CustomizeNote("正在读取 $label 上的技能…")
         all == null -> CodeEmptyCard("$label 未连接", "连上这台服务器后，这里列出它的 Claude Code 技能：你放在 ~/.claude/skills 里的，和插件带来的。")
@@ -357,7 +363,7 @@ private fun CodeSkillsTab(state: AppState, local: Boolean, conn: Conn?) {
                     if (query.isNotEmpty()) append(" · 匹配 ${shown.size} 个")
                     when {
                         reading -> append(" · 正在重新读取…")
-                        failed -> append(" · 刚才重新读取没成功，显示的是上次读到的")
+                        failed -> append(" · 上次读取没成功，显示的是之前读到的")
                         !connected -> append(" · 未连接，显示的是上次读到的")
                     }
                 })
@@ -407,7 +413,7 @@ private fun CodeSkillDialog(conn: Conn, skill: HostSkill, close: () -> Unit) {
         busy = true; error = ""; text = null
         try {
             check(conn.status == Conn.Status.Connected && conn.ssh.isConnected) { "${conn.host.label} 未连接，连上之后才能读 SKILL.md。" }
-            text = ConfigRemote.readFile(conn.ssh, skill.path) ?: error("读不到这个 SKILL.md：文件不存在、是空的，或者没有权限。")
+            text = HostSkills.read(conn.ssh, skill.path) ?: error("读不到这个 SKILL.md：文件不存在、是空的，或者没有权限。")
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { error = e.message.orEmpty().ifBlank { "读取失败" } }
         finally { busy = false }

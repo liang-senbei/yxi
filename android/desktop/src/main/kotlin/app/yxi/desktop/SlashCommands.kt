@@ -209,11 +209,12 @@ internal object RemoteSlashCommands {
     fun refresh(hostId: String, load: suspend () -> List<ConfigRemote.Tool>?): Job = loading[hostId] ?: start(hostId, load)
 
     private fun start(hostId: String, load: suspend () -> List<ConfigRemote.Tool>?): Job {
-        val job = scope.launch(start = CoroutineStart.LAZY) {
+        lateinit var job: Job
+        job = scope.launch(start = CoroutineStart.LAZY) {
             try { put(hostId, load()) }
             catch (e: CancellationException) { throw e }
             catch (_: Exception) { put(hostId, null) }
-            finally { loading.remove(hostId) }
+            finally { if (loading[hostId] === job) loading.remove(hostId) }
         }
         loading[hostId] = job
         job.start()

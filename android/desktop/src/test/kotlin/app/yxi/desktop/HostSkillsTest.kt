@@ -31,18 +31,19 @@ class HostSkillsTest {
                     item("pdf"),
                     item("brainstorming", "superpowers@superpowers-marketplace", "/home/dev/proj/.claude/plugins/superpowers/skills/brainstorming/SKILL.md"),
                     item("lint", "acme-kit@acme"),
+                    item("PDF"),   // 区分大小写的文件系统上是另一个技能，不当重名
                     item(""), item("bad\u0001name"), item("x".repeat(201)),
                 ),
             ),
             ConfigRemote.Tool("codex", "Codex", listOf(ConfigRemote.Cat("prompts", "提示 prompts", listOf(item("codex-only"))))),
         )
         val list = HostSkills.fromConfig(tools)
-        assertEquals(listOf("pdf", "Release-notes", "lint", "brainstorming", "writing-plans"), list.map { it.name })
-        assertEquals(listOf("", "", "acme-kit", "superpowers", "superpowers"), list.map { it.plugin })
+        assertEquals(listOf("pdf", "PDF", "Release-notes", "lint", "brainstorming", "writing-plans"), list.map { it.name })
+        assertEquals(listOf("", "", "", "acme-kit", "superpowers", "superpowers"), list.map { it.plugin })
         // 同一插件装了两份：只留第一份的路径
         assertEquals("/home/dev/.claude/skills/brainstorming/SKILL.md", list.single { it.name == "brainstorming" }.path)
         assertEquals("superpowers@superpowers-marketplace", list.single { it.name == "brainstorming" }.pluginId)
-        assertEquals(listOf("用户", "用户", "插件 acme-kit", "插件 superpowers", "插件 superpowers"), list.map(HostSkills::source))
+        assertEquals(listOf("用户", "用户", "用户", "插件 acme-kit", "插件 superpowers", "插件 superpowers"), list.map(HostSkills::source))
         assertEquals(emptyList(), HostSkills.fromConfig(emptyList()))
         assertEquals(emptyList(), HostSkills.fromConfig(listOf(claude(ConfigRemote.Cat("commands", "斜杠命令", listOf(item("deploy")))))))
     }

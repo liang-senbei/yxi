@@ -666,7 +666,7 @@ private fun codeScenes() = listOf(
     // 右端搜索图标（中心 x 1543.6）和黑底「添加」70.4×30.4（x 1572、y 148.8）；内容从 y 208 起。都不连主机。
     // 插件标签、位置是没连上的服务器：框架层的空态卡（凹陷面、圆角 12、内边距 16），不进经典子面板
     CodeScene("customize-plugins-offline", verify = { _, nodes ->
-        checkCustomizeHead(nodes, add = true)
+        checkCustomizeHead(nodes, add = false)   // 交叉审查 10-15：没连上时内容只是「未连接」卡，不放「添加」
         checkCustomizeCard(nodes, "示例服务器 未连接")
     }) { customize(it, "服务器") },
     // 「添加」进了市场：上面一行「‹ 已安装插件」，「添加」不再出；运行器 chip 的浮层（浮层头随市场换成「目录来源」）
