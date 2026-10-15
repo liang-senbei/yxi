@@ -60,6 +60,45 @@ class LocalGitTest {
         assertEquals(LocalGit.DIFF_LIMIT, data.getString("diff").toByteArray(Charsets.UTF_8).size.coerceAtMost(LocalGit.DIFF_LIMIT))
     }
 
+    // M4p：分支改动条——相对 HEAD 的增删（已暂存 + 未暂存）、未跟踪的文本文件按整份新增（二进制不算行、但算文件），子目录里的未跟踪文件逐个算
+    @Test fun `branch stat counts changes against HEAD and whole untracked text files`(): Unit = runBlocking {
+        val repo = repo()
+        repo.resolve("a.txt").writeText("one\nthree\n")
+        repo.resolve("b.txt").writeText("keep\nstaged\n"); git(repo, "add", "b.txt")
+        repo.resolve("c.txt").writeText("new\n")
+        repo.resolve("dir").mkdirs(); repo.resolve("dir/d.txt").writeText("x\ny")
+        repo.resolve("bin.dat").writeBytes(byteArrayOf(0, 1, 2))
+        val stat = LocalGit.stat(repo.resolve("dir").path)!!
+        assertEquals("main", stat.branch); assertEquals(40, stat.head.length); assertEquals("main", stat.label)
+        assertEquals(5, stat.files); assertEquals(5, stat.added); assertEquals(1, stat.removed)
+        assertNull(LocalGit.stat(File(root, "plain").apply { mkdirs() }.path), "不是仓库就不显示条")
+        // 服务器那段脚本对同一个仓库得出同样的数（机器上没有 python3 就跳过）
+        val python = System.getenv("PATH").orEmpty().split(File.pathSeparatorChar).map { File(it, "python3") }.firstOrNull { it.canExecute() }
+        org.junit.jupiter.api.Assumptions.assumeTrue(python != null && !System.getProperty("os.name").startsWith("Windows"))
+        val p = ProcessBuilder(python!!.path, "-c", BranchChanges.SCRIPT, repo.path).start()
+        val out = p.inputStream.readBytes().toString(Charsets.UTF_8)
+        assertEquals(0, p.waitFor(), p.errorStream.readBytes().toString(Charsets.UTF_8))
+        assertEquals(stat, BranchChanges.parse(out.lineSequence().last { it.startsWith("__YXI_BRANCH__:") }.removePrefix("__YXI_BRANCH__:")))
+    }
+
+    @Test fun `branch stat before the first commit adds staged and unstaged halves`(): Unit = runBlocking {
+        val repo = File(root, "fresh").apply { mkdirs() }
+        git(repo, "init", "-q", "-b", "trunk")
+        repo.resolve("x.txt").writeText("a\nb\n"); git(repo, "add", "x.txt")
+        repo.resolve("x.txt").writeText("a\nb\nc\n")
+        val stat = LocalGit.stat(repo.path)!!
+        assertEquals(BranchStat("trunk", "", 1, 3, 0), stat)
+        assertEquals("尚无提交", stat.copy(branch = "").label); assertEquals("分离 HEAD · 8b7d4e0", stat.copy(branch = "", head = "8b7d4e0c2f61").label)
+    }
+
+    @Test fun `numstat sums text rows and skips binaries, line counts follow git`() {
+        assertEquals(5 to 3, BranchChanges.numstat("3\t1\ta.txt\n-\t-\timg.png\n2\t2\tdir/b.txt\n"))
+        assertEquals(0 to 0, BranchChanges.numstat(""))
+        assertEquals(2, BranchChanges.lines("x\ny".toByteArray())); assertEquals(2, BranchChanges.lines("x\ny\n".toByteArray()))
+        assertEquals(0, BranchChanges.lines(ByteArray(0))); assertEquals(0, BranchChanges.lines(byteArrayOf(65, 0, 10)))
+        assertNull(BranchChanges.parse("null"))
+    }
+
     @Test fun `outside a repository or without git it explains instead of guessing`(): Unit = runBlocking {
         val plain = File(root, "plain").apply { mkdirs() }
         assertTrue(assertFailsWith<IllegalStateException> { LocalGit.snapshot(plain.path, "", false) }.message!!.startsWith("目录不属于 Git 仓库"))

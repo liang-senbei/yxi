@@ -308,6 +308,7 @@ import java.io.File
                             key(id) { CodeClaudeApproval(approval.getJSONObject("request"), controller?.ready == true && !controller.cancelling && id !in responding,
                                 onAllow = { answer(id, true) }, onDeny = { answer(id, false) }) }
                         }
+                        CodeBranchBar(record.key, controller?.busy == true, { BranchChanges.local(record.directory) }) { tool = "changes" }   // M4p
                         CodeLocalComposer(draft.value, { draft.value = it },
                             hint = when {
                                 controller == null || !controller.ready -> if (opening) "正在恢复会话…" else "恢复会话后可发送"

@@ -269,6 +269,8 @@ internal fun CodeLocalCodexPane(state: AppState, record: LocalCodexTaskRecord) {
                     if (error.isNotBlank()) Note(error, t.danger)
                     // M3d-2b：请求卡停靠在输入卡上方（规格表 §3.3），不进对话滚动区
                     if (controller != null) requests.forEach { request -> key(request.get("id").toString()) { CodexRequestCard(request, controller, ::copyPath) { block -> act(block) } } }
+                    // M4p：分支改动条（会话目录有未提交的改动时），点徽章开右侧「改动」
+                    CodeBranchBar(record.key, controller?.activeTurnId != null, { BranchChanges.local(record.directory) }) { tool = "changes" }
                     CodeLocalComposer(draft.value, { draft.value = it },
                         hint = when {
                             controller == null || !controller.ready -> if (opening) "正在接回会话…" else "接回会话后可发送"

@@ -272,6 +272,7 @@ private class AcpPendingAuthentication(val plan: AcpTerminalAuthPlan, val comple
                                     CodeAcpApproval(request.getJSONObject("params"), controller?.ready == true && !controller.cancelling) { option -> act { answerPermission(request.get("id"), option) } }
                                 }
                             }
+                            if (local) CodeBranchBar(record.key, controller?.busy == true, { BranchChanges.local(record.directory) }) { tool = "changes" }   // M4p
                             CodeLocalComposer(draft.value, { draft.value = it }, onKey = { e -> isTranscriptViewKey(e) && run { state.cycleTranscriptView(record.key); true } },
                                 hint = when {
                                     controller == null || !controller.ready -> if (!local) "此连接已不能再发送" else if (opening) "正在接回会话…" else "接回会话后可发送"

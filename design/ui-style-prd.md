@@ -273,10 +273,10 @@ M1 在本机（Windows）验到哪一步（2026-09-28）：
 
 Yxi 已经有这套能力，叫「线路」，本来就是参照 CC Switch 做的，不另起炉灶。
 
-- 现状：`RoutesPane`（映射区行序 Sonnet / Opus / Fable / Haiku / Subagent）、`LinePresets`（138 个模板）、`ProviderModelPicker`（可搜索的获取模型下拉）、`ConfiguredModels`、`ClaudeSubscriptionSettings`（切回官方订阅时清掉第三方变量）、`CredentialFile`（密钥怎么落盘待核实）。本机 Claude 任务启动时按会话传 `--settings`。
+- 现状：`RoutesPane`（映射区行序 Sonnet / Opus / Fable / Haiku / Subagent）、`LinePresets`（138 个模板）、`ProviderModelPicker`（可搜索的获取模型下拉）、`ConfiguredModels`、`ClaudeSubscriptionSettings`（切回官方订阅时清掉第三方变量）、`CredentialFile`。更正（10-15 逐项核代码）：线路连同密钥实际存在各服务器的 `~/.yxi/lines.json`，本机 Claude 只走官方订阅；本机 Claude 任务启动时按会话传 `--settings`。
 - Code 风格下：放进设置 →「模型供应商」，用 Code 风格的列表和表单重排；输入卡的模型下拉顶部显示当前供应商，可以直接切换。
 - 实测参考端的账号菜单里有「推理配置」入口；用第三方推理时，账号菜单头显示「名称 · 推理来源」，模型 chip 显示第三方模型名（规格表 §3.1）。建议 Yxi 也在账号菜单放一个「线路」入口，账号行显示当前线路名；只加入口和显示，线路逻辑不动。
-- 从 CC Switch 导入（M4，可选）：用户点了才做。只读打开本机 `~/.cc-switch/cc-switch.db`，只取 Claude 类供应商的名称、地址、模型映射和密钥，先列出来让用户勾选；密钥只存进 Yxi 自己的凭据存储，不打印、不写日志。
+- 从 CC Switch 导入（M4，可选；做之前要先定两件事：加不加 sqlite-jdbc 这个依赖，以及导入的线路写到哪台服务器——线路存在服务器上，见上）：用户点了才做。只读打开本机 `~/.cc-switch/cc-switch.db`，只取 Claude 类供应商的名称、地址、模型映射和密钥，先列出来让用户勾选；密钥只存进 Yxi 自己的凭据存储，不打印、不写日志。
 - 防呆：Fable 槽和主模型相同时给警告。这种写法会让 Claude Code 往系统提示词里注入 Fable 身份，模型会自称 Fable；CC Switch 的 Zhipu GLM 等模板就是这么写的，导入时也要检查。
 - SSH 远程主机：沿用现有的线路应用逻辑（`ConversationRouteApply`），M4 核实密钥不会出现在命令行参数和 tmux 历史里。
 - 不搬：CC Switch 的本地代理与故障转移、MCP / 提示词 / Skills 管理、用量计费（Yxi 已有 UsageUi）。
@@ -327,15 +327,15 @@ Mac1 第一轮（2026-09-29，Mac mini 上实测，没提交）：
 | 筛选 / 分组 / 置顶 / 归档 / 改名 | ◐ | `state.navigation` 已有置顶、归档、标题，入口分散在多个面板；按状态 / 环境筛选、按项目分组待核实 | M2 |
 | 命令面板搜索 | ◐ | TaskSwitcher（Ctrl+K）只搜 SSH 会话的标题 / 会话名 / 目录 / 主机，可勾选包含归档 | M2 / M4 |
 | 导入 CLI 原生历史 | ◐ | LocalCodexHistory（只读） | M3 |
-| 附件 / @ 文件 | ✅ 未发版 | Attach、AttachmentMentions | M2 |
-| @ 其他会话 | ？ | — | M4 核实 |
-| 斜杠命令菜单 | ？ | 控制器内部会发 /model 等命令，输入框里没见到菜单 | M4 核实 |
+| 附件 / @ 文件 | ◐ | Attach、AttachmentMentions；更正（10-15 逐项核代码）：「@」只补全草稿里已附的附件，不搜工作区文件 | M2；@ 工作区文件待定 |
+| @ 其他会话 | ✗ | 核过没有（10-15） | M4，先补拍参照端 |
+| 斜杠命令菜单 | ✅ 未发版 | M4k：内置表挪进 core；SSH Claude 加主机 ~/.claude 的命令和技能（ConfigRemote），本机 Claude 用 initialize 回包的 commands，ACP 用 available_commands_update；Codex app-server、OpenCode 没有来源，不弹 | M4 |
 | 模型 / 推理强度 | ✅ | ChatPane 输入卡的 chips；另有 ConversationModelMenu、CodexModelPicker、EffortControl，各面板用法待核实 | M2 统一进输入卡 |
 | 第三方模型配置（线路） | ◐ | RoutesPane、LinePresets、ProviderModelPicker 已有；没见到从 CC Switch 导入；Fable 防呆待核实（§5.6） | M2 换样式；M4 导入 |
-| 权限模式 | ◐ | `PermissionMode` 已覆盖官方 5 种 + dontAsk；ChatPane 的模式 chip、ConversationPermissionMenu。官方按文件夹记住上次的模式（Plan 只作用于当前会话）；Yxi 每次从运行器屏幕读取当前模式，不记忆 | M2 统一进输入卡；按文件夹记忆放 M4 |
-| 用量环（上下文 + 套餐） | ◐ | ChatPane 有「上下文 Nk」chip（只有 token 数，没有百分比）；UsageUi 显示那台机的 5 小时窗口 / 今天 / 近 7 天花费 | M2 |
+| 权限模式 | ◐ | `PermissionMode` 已覆盖官方 5 种 + dontAsk；ChatPane 的模式 chip、ConversationPermissionMenu。官方按文件夹记住上次的模式（Plan 只作用于当前会话）；Yxi 每次从运行器屏幕读取当前模式；M4i 起 SSH 新会话页按文件夹记住（计划、完全访问不记） | M2 统一进输入卡；M4i 已做 |
+| 用量环（上下文 + 套餐） | ◐ | ChatPane 有「上下文 Nk」chip（只有 token 数，没有百分比）；UsageUi 显示那台机的 5 小时窗口 / 今天 / 近 7 天花费；更正（10-15）：UsageStrip 组件已经没有调用方 | M2 |
 | 停止 / 排队 | ◐ | InstructionStrip 已有发送、调整方向、编辑、排序、撤回（§5.4）；LocalConversationPane、AcpConversationPane、OpenCodeConversationPane 没接；没有打断再发（Ctrl+Enter）和拖动 | M2 |
-| 对话视图三档（Ctrl+O） | ✗ | 各面板显示粒度不一 | M3 |
+| 对话视图三档（Ctrl+O） | ✅ 未发版 | M3g：六个 Code 对话页共用 TranscriptView，设置 → 外观可选默认档（M3h） | M3 |
 | 对话宽度 / 字体等外观设置 | ✗ | 实测参考端有：界面字体三档、对话字号小 / 中 / 大、对话宽度窄 / 中 / 宽（同时管对话列和输入卡）、默认对话视图、代码配色浅 / 深 + diff 预览、代码字体（代码和终端共用），见规格表 §3.7；Yxi 只有全局缩放（Ctrl+= / - / 0，0.8–1.5，存 `Store.pref("zoom")`） | M3 |
 | 消息操作（复制 / 重试 / 分叉） | ？ | 参考端每条用户消息下方有一行（规格表 §3.4）；Yxi 有回退（Rewind.kt），复制、分叉待核实 | M3 核实 |
 | 工具行统一 | ◐ | 见 §5.4 | M3 |
@@ -346,15 +346,15 @@ Mac1 第一轮（2026-09-29，Mac mini 上实测，没提交）：
 | 多选题卡 | ◐ | Approval.kt、ChatPane 有命中；CodexQuestionForm.kt | M3 |
 | 回退（Rewind） | ✅ | Rewind.kt、ConversationRewind.kt 等 | M3 换样式 |
 | 改动 diff 面板 | ✅ | GitChangesPane | M3 / M4 |
-| diff 逐行评论 | ✗ | — | M4 |
-| 提交 / 推送 / PR / CI 状态栏 | ？ | 只有 CodexWorkspacePane 有命中；官方的 CI 状态栏（带自动修复 / 自动合并开关）需要那台机装 GitHub CLI（gh） | M4；打不通就不放入口 |
+| diff 逐行评论 | ✅ 未发版 | M4j：点行号区开评论框，Ctrl+Enter 一起加入对话 | M4 |
+| 提交 / 推送 / PR / CI 状态栏 | ◐ | 更正（10-15）：CodexWorkspacePane 的「命中」只是一个按钮，没有状态栏。M4p 做了只读的分支改动条（规格表 §3.3：分支名、+N −N、点开改动面板、可关），「创建 PR」没有真实链路不放；官方的 CI 状态栏（带自动修复 / 自动合并开关）需要那台机装 GitHub CLI（gh） | M4；PR / CI 要 gh 登录了才做 |
 | 文件 / 浏览器 / 终端面板 | ✅ | FilesPane、BrowserPane、TermPane（深底） | M4 换样式 |
 | 面板拖动 / 弹出成窗口 | ✗ | — | M5 之后再评估 |
 | 分屏（Split View）/ 侧边对话（side chat） | ✗ | — | M5 之后再评估 |
-| 定时任务 | ？ | ScheduledTasksPane，完成度未核实 | M4 核实 |
-| 本机用量统计卡（新会话页） | ✗ | 参考端：概览 / 模型，全部 / 30 天 / 7 天，数字块 + 热力图（规格表 §3.8）；Yxi 的 UsageUi 只有花费窗口，没有热力图 | M4；只用本机历史的真实数据，没有数据就不显示 |
-| 自定义页（技能 / 插件，可上传本地插件） | ？ | 参考端侧栏有「自定义」入口（规格表 §3.10）；Yxi 对应能力待核实 | M4 核实 |
-| 在 IDE 中继续 | ？ | — | M4 核实 |
+| 定时任务 | ✅ 未发版 | ScheduledTasksPane；M4l：Code 外观的列表页、立即运行、完成通知 | M4 |
+| 本机用量统计卡（新会话页） | ◐ | 参考端：概览 / 模型，全部 / 30 天 / 7 天，数字块 + 热力图（规格表 §3.8）；M4n：SSH 主机装了 ccusage 时显示（Usage.daily，近半年），本机运行器还没有 | M4；只用真实数据，没有数据就不显示 |
+| 自定义页（技能 / 插件，可上传本地插件） | ◐ | 参考端侧栏有「自定义」入口（规格表 §3.10）；Yxi 有插件页（PluginsPane：本地 / 服务器、市场 / 已安装 / 共享配置），技能能从服务器 ~/.claude 读（ConfigRemote）；M4o 做 Code 外观 + 技能页签，上传本地插件不做 | M4 |
+| 在 IDE 中继续 | ✅ 未发版 | M4m：本机会话头「打开方式」——登录 shell 的 PATH 里找到的编辑器、在访达 / 资源管理器中显示；SSH 会话照旧复制路径 | M4 |
 | 桌面通知 | ✅ | Notify.kt | — |
 | 快捷键 | ◐ | 已有 Ctrl+N / K / B / , / /、Ctrl+Tab、Ctrl+1…9；官方另有 Ctrl+O、Ctrl+W、Ctrl+Shift+I / E / M / D / B、Ctrl+反引号（终端）、Ctrl+反斜杠（关面板）；实测还有 Ctrl+Shift+P（预览）、Ctrl+Shift+F（文件面板） | M4 对表；已有键位不改（如 Ctrl+J） |
 | 自绘标题栏 | ◐ | Windows：Main.kt `TitleBar`；Mac 上要改成系统标题栏、内容伸到标题栏下面（§5.7） | M2 换样式；Mac1 |

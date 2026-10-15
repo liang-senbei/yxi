@@ -118,7 +118,7 @@ import org.jetbrains.skia.Image as SkiaImage
  * · composer = 一张圆角卡片：无边框输入区 + 底部功能行（+ 附件 / 审批态 / 模型·强度·模式·上下文 chips / 圆形发送）。
  */
 @Composable
-internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQueue, attachments: ChatAttachments, savedDraft: androidx.compose.runtime.MutableState<TextFieldValue>? = null, displayName: String? = null, onRoutes: () -> Unit = {}, onTerminal: () -> Unit = {}, modelSwitches: ModelChangeStore? = null,
+internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQueue, attachments: ChatAttachments, savedDraft: androidx.compose.runtime.MutableState<TextFieldValue>? = null, displayName: String? = null, onRoutes: () -> Unit = {}, onTerminal: () -> Unit = {}, onChanges: () -> Unit = {}, modelSwitches: ModelChangeStore? = null,
     transcriptView: TranscriptView = TranscriptView.Normal, onCycleView: (() -> Unit)? = null) {
     val taskKey = taskNavigationKey(conn.host, session)
     val ssh = conn.ssh
@@ -624,6 +624,8 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
             // 合并表只在 Code 外观算，主机的命令表没变就不重算（经典不读它）
             val hostSlash = if (codeStyle && !session.isCodex) RemoteSlashCommands.get(conn.host.id) else null
             val slashCommands = remember(hostSlash) { hostSlash?.let { SlashCommands.merge(SlashCommands.builtIns(), it) }.orEmpty() }
+            // M4p：分支改动条（Code 外观；会话目录在服务器上的改动），点徽章开「改动」；连上 / 断开时重读
+            if (codeStyle && session.cwd.isNotBlank()) CodeBranchBar(taskKey, live.busy, { BranchChanges.remote(conn, session.cwd) }, refresh = conn.status, onOpen = onChanges)
             Composer(
                 attachments = staged.toList(),
                 onRemoveAttachment = { attachment ->

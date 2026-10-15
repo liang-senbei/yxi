@@ -131,6 +131,7 @@ class CodeThemeShotsTest {
         MacChrome.native = false   // Mac1 第二轮：Mac 原生外观只在 mac-native-* 场景里打开
         Store.setPref(FolderPermissions.PREF, "[]")   // M4i：按文件夹记住的权限模式每张都清空，记了的场景不串到后面
         UsageHistory.clearForFixture()   // M4n：统计卡的数据是全局的，每张都清空（第一遍就串到了后面 24 张新会话页）
+        BranchChanges.local = { null }; BranchChanges.remote = { _, _ -> null }   // M4p：分支改动条只在摆了数的场景里出现，也不起 git、不连主机
         val state = AppState().apply { startupRestored = true }   // 跳过 HostEffects 的开机恢复 / 自动重连
         state.navigation.setMode("全部")   // 全部 / 待处理 / 归档落在夹具 profile 里，local-archived 改过（值没变不写盘）
         try {
@@ -204,6 +205,13 @@ private fun codeScenes() = listOf(
     CodeScene("ssh-chat") { remote(it, tab = 0) },
     // SSH 对话的工具组（M3e）：Code 的摘要行 + 卡片，点开的条目里是原来的富渲染 ToolCard（这里是 Bash：命令和输出）
     CodeScene("ssh-chat-tool", listOf("运行了一条命令", "./gradlew test --offline")) { remote(it, tab = 0) },
+    // M4p：SSH 对话的分支改动条（服务器上的那段脚本由夹具换成固定的数，不连主机）；点徽章切到「改动」
+    CodeScene("ssh-chat-branch-bar", verify = { _, nodes ->
+        for (text in listOf("main", "+48", "−7")) check(nodes.any { it.trimEnd().endsWith(" $text") }) { "分支改动条里没有「$text」" }
+    }) { remote(it, tab = 0); BranchChanges.remote = { _, _ -> BranchStat("main", "4c1d9e2a7b30", 3, 48, 7) } },
+    CodeScene("ssh-chat-branch-bar-open", listOf("+48"), verify = { state, _ -> check(state.tab == 3) { "点徽章没切到「改动」：tab=${state.tab}" } }) {
+        remote(it, tab = 0); BranchChanges.remote = { _, _ -> BranchStat("main", "4c1d9e2a7b30", 3, 48, 7) }
+    },
     // M4k：斜杠菜单（SSH 上的 Claude 会话）：草稿「/mo」筛出内置的 /model 和这台主机上的 /mobile-release（主机的命令表先放进缓存，不连主机）；
     // 浮层在输入卡上方 6、和卡片同宽，第一行高亮
     CodeScene("ssh-chat-slash", verify = { _, nodes ->
@@ -492,6 +500,15 @@ private fun codeScenes() = listOf(
             check(nodes.any { it.trimEnd().endsWith(" ${text.trimEnd()}") }) { "diff 里没有「$text」" }
         check(nodes.none { it.contains("diff --git") || it.contains("+++ b/") }) { "文件头不该画出来" }
     }) { localCodex(it, approval = false); shotLocalGit() },
+    // M4p：分支改动条（规格表 §3.3）——会话目录有改动时停在输入卡上方：文件夹图标 + 分支名，右边「+N −N」徽章和关闭；
+    // 夹具把 BranchChanges.local 换成固定的数（不起 git）。这张同时开着审批卡：卡 → 条 → 输入卡
+    CodeScene("local-codex-branch-bar", verify = { _, nodes ->
+        for (text in listOf("fix/login-errors", "+12", "−3")) check(nodes.any { it.trimEnd().endsWith(" $text") }) { "分支改动条里没有「$text」" }
+    }) { localCodex(it, approval = true); BranchChanges.local = { SHOT_BRANCH } },
+    // 点徽章开右侧「改动」（同会话头的「改动」图标）
+    CodeScene("local-codex-branch-bar-open", listOf("+12"), verify = { _, nodes -> checkPanels(nodes, "改动" to 1000f, headerButtons = 2) }) {
+        localCodex(it, approval = false); shotLocalGit(); BranchChanges.local = { SHOT_BRANCH }
+    },
     // M4m：本机会话头的「打开方式」——找到的编辑器（夹具里替换成固定的两个，不看这台机器装了什么）+「在访达 / 资源管理器中显示」
     CodeScene("local-codex-open-in", listOf("@打开方式"), verify = { _, nodes ->
         for (text in listOf("Visual Studio Code", "Cursor", OpenIn.revealLabel)) check(nodes.any { it.trimEnd().endsWith(" $text") }) { "打开方式里没有「$text」" }
@@ -1078,6 +1095,9 @@ private fun shotLocalFiles() {
     demo.resolve("README.md").apply { writeText("# demo-app\n\n解析器的小示例。\n\n## 开发\n\n- 跑 npm test 看单测\n- 改 src/index.ts\n"); setLastModified(at) }
     demo.resolve("src").setLastModified(at)
 }
+
+/** M4p：本机分支改动条的固定数（同 [shotLocalGit] 的分支：两个文件、+12 −3）。 */
+private val SHOT_BRANCH = BranchStat("fix/login-errors", "8b7d4e0c2f61a93d5e7b0c4a1f2e3d4c5b6a7980", 2, 12, 3)
 
 /** 本机 Git 改动的固定快照（本机对齐 P6a）：一个两边都改了的文件和一个未跟踪的测试文件；选了 errors.ts 时给一段差异（未暂存的那份）。 */
 private fun shotLocalGit() {

@@ -181,6 +181,7 @@ import org.json.JSONObject
                                     enabled = workspace?.detecting != true && !connecting)
                             }
                             if (error.isNotBlank()) Note(error, t.danger)
+                            if (local) CodeBranchBar(record.key, false, { BranchChanges.local(record.directory) }) { tool = "changes" }   // M4p
                             CodeLocalComposer(draft.value, { draft.value = it }, hint = if (opening) "正在接回会话…" else "接回会话后可发送",
                                 focus = focus, canSend = false, onSend = {}, running = false, onStop = {},
                                 end = { CodeFooterNote("${record.provider} · ${record.model}") })
@@ -191,6 +192,7 @@ import org.json.JSONObject
                             if (error.isNotBlank()) Note(error, t.danger)
                             // M3d-2：审批卡停靠在输入卡上方、和输入卡同宽，不进对话滚动区（规格表 §3.3）；下缘到输入卡 6.4
                             controller.permissions.forEach { request -> key(request.getString("id")) { CodeOpenCodeApproval(request, controller, ::act) } }
+                            if (local) CodeBranchBar(record.key, controller.nativeBusy, { BranchChanges.local(record.directory) }) { tool = "changes" }   // M4p
                             CodeLocalComposer(draft.value, { draft.value = it }, onKey = { e -> isTranscriptViewKey(e) && run { state.cycleTranscriptView(record.key); true } },
                                 // 不看 ready：每次轮询 refresh 都会把它短暂置 false，提示会闪
                                 hint = when {
