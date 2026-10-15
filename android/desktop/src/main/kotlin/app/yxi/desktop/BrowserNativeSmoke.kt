@@ -30,6 +30,14 @@ internal fun runBrowserNativeSmoke() = runBlocking {
         val cef = withContext(Dispatchers.IO) { BrowserRuntime.get() }
         withContext(Dispatchers.Swing) {
             val (client, context) = BrowserRuntime.newClient(cef)
+            // 诊断（macOS 关不掉）：同真 App 的预览客户端一样挂生命周期处理器（doClose 返回 false = 允许关），并打出 CEF 的回调和时间
+            val t0 = System.nanoTime()
+            fun mark(event: String) = println("browser lifecycle $event at ${(System.nanoTime() - t0) / 1_000_000} ms on ${Thread.currentThread().name}")
+            if (!java.lang.Boolean.getBoolean("yxi.browser.smokeBareClient")) client.addLifeSpanHandler(object : org.cef.handler.CefLifeSpanHandlerAdapter() {
+                override fun onAfterCreated(browser: CefBrowser?) = mark("onAfterCreated")
+                override fun doClose(browser: CefBrowser?): Boolean { mark("doClose"); return false }
+                override fun onBeforeClose(browser: CefBrowser?) = mark("onBeforeClose")
+            })
             client.addLoadHandler(object : org.cef.handler.CefLoadHandlerAdapter() {
                 override fun onLoadingStateChange(browser: CefBrowser?, isLoading: Boolean, canGoBack: Boolean, canGoForward: Boolean) {
                     if (!isLoading && browser?.url?.startsWith("http://127.0.0.1:${http.address.port}/") == true) loaded.complete(Unit)
@@ -68,9 +76,9 @@ internal fun runBrowserNativeSmoke() = runBlocking {
             // Windows 照旧（它是发版的门槛，不跟着试）。关运行时的耗时和卡住时的状态都打出来。
             val mac = System.getProperty("os.name").startsWith("Mac")
             withContext(Dispatchers.Swing) {
-                if (mac) browser?.setCloseAllowed()
+                if (mac && !java.lang.Boolean.getBoolean("yxi.browser.smokeNoCloseAllowed")) browser?.setCloseAllowed()
                 browser?.close(true)
-                if (mac) frame?.let { it.contentPane.removeAll(); it.dispose() }
+                if (mac && !java.lang.Boolean.getBoolean("yxi.browser.smokeNoTeardown")) frame?.let { it.contentPane.removeAll(); it.dispose() }
             }
             val started = System.nanoTime()
             val finished = BrowserRuntime.shutdown()
