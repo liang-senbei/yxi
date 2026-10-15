@@ -17,8 +17,9 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.util.UUID
 
+/** [query]：Code 自定义页（M4o）把它自己的搜索词传进来，列表里就不再放搜索框；经典不传。 */
 @Composable
-internal fun PluginInventoryPane(state: AppState, conn: Conn) {
+internal fun PluginInventoryPane(state: AppState, conn: Conn, query: String? = null) {
     val t = Tokens.current
     var revision by remember(conn) { mutableStateOf(0) }
     var snapshot by remember(conn) { mutableStateOf<PluginInventory?>(null) }
@@ -57,7 +58,7 @@ internal fun PluginInventoryPane(state: AppState, conn: Conn) {
         if (operations.error.isNotBlank() || actionError.isNotBlank()) Text(operations.error.ifBlank { actionError }, Modifier.padding(horizontal = 24.dp), color = t.danger)
         Box(Modifier.weight(1f)) {
             PluginInventoryContent(conn.host.label, snapshot, error, busy, { revision++ },
-                readme = { reading = it },
+                readme = { reading = it }, externalQuery = query,
                 toggle = { plugin, action -> scope.launch {
                     preparing = true; actionError = ""
                     try {
@@ -96,7 +97,8 @@ internal fun PluginInventoryPane(state: AppState, conn: Conn) {
 }
 
 @Composable
-internal fun PluginInventoryContent(host: String, snapshot: PluginInventory?, error: String, busy: Boolean, refresh: () -> Unit, toggle: ((InstalledPlugin, String) -> Unit)? = null, toggleEnabled: Boolean = false, readme: ((InstalledPlugin) -> Unit)? = null) {
+internal fun PluginInventoryContent(host: String, snapshot: PluginInventory?, error: String, busy: Boolean, refresh: () -> Unit, toggle: ((InstalledPlugin, String) -> Unit)? = null, toggleEnabled: Boolean = false, readme: ((InstalledPlugin) -> Unit)? = null,
+    externalQuery: String? = null) {
     val t = Tokens.current
     var query by remember(host) { mutableStateOf("") }
     Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -111,9 +113,10 @@ internal fun PluginInventoryContent(host: String, snapshot: PluginInventory?, er
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (error.isNotBlank()) Text(error, color = t.danger)
         snapshot?.let { data ->
-            OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("搜索插件、来源或项目") }, shape = RoundedCornerShape(14.dp))
+            if (externalQuery == null) OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("搜索插件、来源或项目") }, shape = RoundedCornerShape(14.dp))
             Text("${data.plugins.size} 条安装记录 · ${data.plugins.count { it.runnerState == "reported-error" || !it.present }} 条需检查", style = MaterialTheme.typography.labelMedium, color = t.textMuted)
-            val shown = data.plugins.filter { query.isBlank() || "${it.id} ${it.project} ${it.path}".contains(query.trim(), ignoreCase = true) }
+            val q = externalQuery ?: query
+            val shown = data.plugins.filter { q.isBlank() || "${it.id} ${it.project} ${it.path}".contains(q.trim(), ignoreCase = true) }
             LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
               items(data.warnings) { Text(it, color = t.warning) }
               if (data.plugins.isEmpty()) item { Text(if (data.warnings.isEmpty()) "此主机暂无 Claude 插件安装记录" else "安装记录读取不完整，请修复后刷新", color = t.textMuted) }

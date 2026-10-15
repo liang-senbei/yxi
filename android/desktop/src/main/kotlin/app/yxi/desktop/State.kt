@@ -132,6 +132,12 @@ class AppState internal constructor(private val localClaudeFactory: (Instruction
     var pluginMarketplace by mutableStateOf(true)
     var pluginMarketQuery by mutableStateOf("")
     var pluginCatalogRuntime by mutableStateOf("codex")
+    /**
+     * Code 风格自定义页（M4o）的两项，经典不读：[customizeSkills] = 选的是「技能」标签（插件 / MCP 仍按 [sharedMcpPage] 分，和经典共用）；
+     * [customizeMarket] = 插件标签点「添加」进了市场（默认看已安装，经典的 [pluginMarketplace] 默认是市场，所以不共用）。
+     */
+    internal var customizeSkills by mutableStateOf(false)
+    internal var customizeMarket by mutableStateOf(false)
     private val nativePluginStores = mutableMapOf<String, NativePluginStore>()
     internal fun nativePlugins(target: Conn?): NativePluginStore {
         val key = target?.let { projectKey(it.host, "/") } ?: "local"
@@ -146,6 +152,7 @@ class AppState internal constructor(private val localClaudeFactory: (Instruction
         pluginLocation = "服务器"
         sharedMcpPage = false
         pluginMarketplace = false
+        customizeSkills = false; customizeMarket = false   // Code 自定义页同样落在这台服务器的已安装插件
         page = Page.Plugins
     }
     var showAndroidEmulator by mutableStateOf(false)

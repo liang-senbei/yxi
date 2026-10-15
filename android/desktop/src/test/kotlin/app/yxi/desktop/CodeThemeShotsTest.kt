@@ -132,6 +132,7 @@ class CodeThemeShotsTest {
         Store.setPref(FolderPermissions.PREF, "[]")   // M4i：按文件夹记住的权限模式每张都清空，记了的场景不串到后面
         UsageHistory.clearForFixture()   // M4n：统计卡的数据是全局的，每张都清空（第一遍就串到了后面 24 张新会话页）
         BranchChanges.local = { null }; BranchChanges.remote = { _, _ -> null }   // M4p：分支改动条只在摆了数的场景里出现，也不起 git、不连主机
+        RemoteSlashCommands.clearForFixture()   // M4o：主机的命令表、技能表也是全局的（斜杠菜单、技能页的场景各自放）
         val state = AppState().apply { startupRestored = true }   // 跳过 HostEffects 的开机恢复 / 自动重连
         state.navigation.setMode("全部")   // 全部 / 待处理 / 归档落在夹具 profile 里，local-archived 改过（值没变不写盘）
         try {
@@ -661,7 +662,101 @@ private fun codeScenes() = listOf(
         state.scheduledTasks.put(ScheduledTask("shot-weekly", "每周检查依赖更新", "列出有安全更新的依赖，先不要改代码。", ScheduleTarget("local", "本地 · Codex", "codex", "/srv/demo-app"), at + 86_400_000, "每周", "Asia/Shanghai", enabled = false))
         state.page = Page.ScheduledTasks
     },
+    // M4o：Code 自定义页（规格表 §3.10）：960 宽的列（x 683.2）、标题「自定义」28、三个 32 高的标签页（顶 y 148、紧挨），
+    // 右端搜索图标（中心 x 1543.6）和黑底「添加」70.4×30.4（x 1572、y 148.8）；内容从 y 208 起。都不连主机。
+    // 插件标签、位置是没连上的服务器：框架层的空态卡（凹陷面、圆角 12、内边距 16），不进经典子面板
+    CodeScene("customize-plugins-offline", verify = { _, nodes ->
+        checkCustomizeHead(nodes, add = true)
+        checkCustomizeCard(nodes, "示例服务器 未连接")
+    }) { customize(it, "服务器") },
+    // 「添加」进了市场：上面一行「‹ 已安装插件」，「添加」不再出；运行器 chip 的浮层（浮层头随市场换成「目录来源」）
+    CodeScene("customize-plugins-runtime", listOf("@插件运行器"), verify = { _, nodes ->
+        checkCustomizeHead(nodes, add = false)
+        for (text in listOf("已安装插件", "目录来源", "Claude Code")) check(nodes.any { it.trimEnd().endsWith(" $text") }) { "插件市场 / 运行器浮层里没有「$text」" }
+    }) { customize(it, "服务器"); it.customizeMarket = true },
+    // MCP 标签（本机）：经典的 SharedMcpPane 放进框里，它列表头的「添加」不出；右上角的「添加」开它的「添加通用 MCP 配置」
+    CodeScene("customize-mcp", verify = { _, nodes ->
+        checkCustomizeHead(nodes, add = true)
+        check(nodes.any { it.trimEnd().endsWith(" 通用 MCP") }) { "MCP 标签里没有经典的共享配置列表" }
+        check(nodes.count { it.trimEnd().endsWith(" 添加") } == 1) { "MCP 列表头自己的「添加」还在" }
+    }) { customize(it, "本地"); it.sharedMcpPage = true },
+    CodeScene("customize-mcp-add", listOf("添加"), verify = { _, nodes ->
+        check(nodes.any { it.trimEnd().endsWith(" 添加通用 MCP 配置") }) { "右上角的「添加」没开 MCP 配置弹窗" }
+    }) { customize(it, "本地"); it.sharedMcpPage = true },
+    // 技能标签：这台服务器的技能先放进和斜杠菜单共用的缓存；用户的在前、插件的按插件名，右端是来源；没连上照列、注明；没有安装入口，不放「添加」
+    CodeScene("customize-skills", verify = { _, nodes ->
+        checkCustomizeHead(nodes, add = false)
+        checkSkillRows(nodes, "pdf" to "用户", "release-notes" to "用户", "lint-fix" to "插件 acme-kit", "brainstorming" to "插件 superpowers", "writing-plans" to "插件 superpowers")
+        check(nodes.any { it.trimEnd().endsWith(" 示例服务器 · Claude Code 技能 · 5 个 · 未连接，显示的是上次读到的") }) { "技能数那一行不对" }
+    }) { customizeSkills(it) },
+    // 搜索词（和经典共用）：搜索框开着、只剩匹配的一行
+    CodeScene("customize-skills-search", verify = { _, nodes ->
+        checkSkillRows(nodes, "writing-plans" to "插件 superpowers")
+        check(nodes.any { it.contains("· 匹配 1 个") }) { "没写匹配数" }
+    }) { customizeSkills(it); it.pluginMarketQuery = "plan" },
+    // 点开一行：只读的 SKILL.md 弹窗；没连上不读，直接说明
+    CodeScene("customize-skill-open", listOf("pdf"), verify = { _, nodes ->
+        check(nodes.any { it.trimEnd().endsWith(" 示例服务器 未连接，连上之后才能读 SKILL.md。") }) { "SKILL.md 弹窗没说明未连接" }
+        check(nodes.any { it.trimEnd().endsWith(" /home/dev/.claude/skills/pdf/SKILL.md") }) { "弹窗里没有文件路径" }
+    }) { customizeSkills(it) },
+    // 读成了、没有技能：空态卡（不是「还没读到」）
+    CodeScene("customize-skills-empty", verify = { _, nodes -> checkCustomizeCard(nodes, "示例服务器 上还没有技能") }) {
+        customize(it, "服务器"); it.customizeSkills = true
+        RemoteSlashCommands.put(HOST.id, listOf(app.yxi.agent.ConfigRemote.Tool("claude", "Claude Code",
+            listOf(app.yxi.agent.ConfigRemote.Cat("commands", "斜杠命令", listOf(app.yxi.agent.ConfigRemote.Item("deploy")))))))
+    },
+    // 本机：还没有读本机 ~/.claude 的实现，只放说明卡
+    CodeScene("customize-skills-local", verify = { _, nodes -> checkCustomizeCard(nodes, "还不能列出本机的技能") }) { customize(it, "本地"); it.customizeSkills = true },
 )
+
+/** 自定义页（M4o）：[remote] 的服务器（不连），切到插件页；[location] 是「本地」或「服务器」（同经典的 pluginLocation）。 */
+private fun customize(state: AppState, location: String) {
+    remote(state, tab = 0)
+    state.pluginLocation = location
+    state.page = Page.Plugins
+}
+
+/** 技能标签：这台服务器的技能放进缓存（顺序故意打乱，页面按 用户 → 插件名 → 技能名 排）。 */
+private fun customizeSkills(state: AppState) {
+    customize(state, "服务器")
+    state.customizeSkills = true
+    fun skill(name: String, from: String = "") = app.yxi.agent.ConfigRemote.Item(name, from = from,
+        path = if (from.isEmpty()) "/home/dev/.claude/skills/$name/SKILL.md" else "/home/dev/.claude/plugins/cache/${from.substringBefore('@')}/skills/$name/SKILL.md")
+    RemoteSlashCommands.put(HOST.id, listOf(app.yxi.agent.ConfigRemote.Tool("claude", "Claude Code", listOf(app.yxi.agent.ConfigRemote.Cat("skills", "技能 Skills", listOf(
+        skill("writing-plans", "superpowers@superpowers-marketplace"), skill("pdf"), skill("brainstorming", "superpowers@superpowers-marketplace"),
+        skill("release-notes"), skill("lint-fix", "acme-kit@acme")))))))
+}
+
+/** 自定义页头部（规格表 §3.10）：标题起于内容列左缘 683.2；三个标签 32 高、顶 148、紧挨；[add] 时「添加」在 x 1572、y 148.8、70.4×30.4，搜索图标中心 x 1543.6。 */
+private fun checkCustomizeHead(nodes: List<String>, add: Boolean) {
+    fun num(line: String, key: String) = Regex("""$key=(-?[0-9.]+)""").find(line)!!.groupValues[1].toFloat()
+    val title = nodes.singleOrNull { it.trimEnd().endsWith(" 自定义") } ?: error("没有标题「自定义」")
+    check(kotlin.math.abs(num(title, "x") - 683.2f) < 0.5f) { "标题没起于内容列左缘 683.2：$title" }
+    val tabs = nodes.filter { it.trimEnd().endsWith(" Tab") }
+    check(tabs.size == 3 && tabs.all { num(it, "h") == 32f && num(it, "y") == 148f }) { "标签页不是 3 个 32 高、顶 148：$tabs" }
+    check(kotlin.math.abs(num(tabs[0], "x") - 683.2f) < 0.5f && (1..2).all { kotlin.math.abs(num(tabs[it], "x") - num(tabs[it - 1], "x") - num(tabs[it - 1], "w")) < 0.5f }) { "标签页没从 683.2 起紧挨着排：$tabs" }
+    val button = nodes.any { it.contains("x=1572.0 y=148.8 w=70.4 h=30.4 Button") }
+    check(button == add) { if (add) "「添加」不在 x 1572、y 148.8、70.4×30.4" else "这里不该有「添加」" }
+    if (add) check(nodes.any { it.contains("x=1529.6 ") && it.contains(" w=28.0 h=28.0 Button") }) { "搜索图标的中心不在 x 1543.6" }
+}
+
+/** 空态卡：标题字起于内容列左缘 + 16（x 699.2），在 y 208 起的卡片里。 */
+private fun checkCustomizeCard(nodes: List<String>, title: String) {
+    fun num(line: String, key: String) = Regex("""$key=(-?[0-9.]+)""").find(line)!!.groupValues[1].toFloat()
+    val line = nodes.singleOrNull { it.trimEnd().endsWith(" $title") } ?: error("没有空态卡「$title」")
+    check(kotlin.math.abs(num(line, "x") - 699.2f) < 0.5f && num(line, "y") in 224f..240f) { "空态卡标题不在 x 699.2、卡片 y 208 + 16 起：$line" }
+}
+
+/** 技能行：名字按 [rows] 的顺序从上到下、起于 683.2 + 12，同一行右端是来源；没有别的行。 */
+private fun checkSkillRows(nodes: List<String>, vararg rows: Pair<String, String>) {
+    fun num(line: String, key: String) = Regex("""$key=(-?[0-9.]+)""").find(line)!!.groupValues[1].toFloat()
+    val names = nodes.filter { n -> kotlin.math.abs(num(n, "x") - 695.2f) < 0.5f && num(n, "y") > 220f && n.trimEnd().substringAfterLast(' ').let { last -> rows.any { it.first == last } || last.matches(Regex("[a-z-]+")) } }
+    check(names.map { it.trimEnd().substringAfterLast(' ') } == rows.map { it.first }) { "技能行的名字或顺序不对：$names" }
+    for ((name, source) in rows) {
+        val row = names.single { it.trimEnd().endsWith(" $name") }
+        check(nodes.any { it.trimEnd().endsWith(" $source") && kotlin.math.abs(num(it, "y") - num(row, "y")) < 2f && num(it, "x") > 1400f }) { "「$name」那行右端没有「$source」" }
+    }
+}
 
 /**
  * 审批卡：pending 只来自 SSH 轮询，离屏够不着（同经典夹具）；照 CodeShell + ChatPane 的停靠区摆同一个 [ApprovalCard]：

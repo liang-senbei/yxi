@@ -21,10 +21,11 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
-/** One plugin destination with explicit local/remote ownership. */
+/** One plugin destination with explicit local/remote ownership. Code 风格换成自定义页（技能 / 插件 / MCP，[CodeCustomizePane]，M4o）。 */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun PluginsPane(state: AppState) {
+    if (LocalThemeSpec.current.style == UiStyle.Code) { CodeCustomizePane(state); return }
     val conn = state.conn
     Column(Modifier.fillMaxSize().padding(28.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {

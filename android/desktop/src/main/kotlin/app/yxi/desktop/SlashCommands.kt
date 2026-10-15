@@ -159,13 +159,20 @@ internal object SlashCommands {
  * 读成了但是空的（没有 ~/.claude、没有 python3）一分钟内不再读；没读成（连接断了、输出被截断、脚本在这台主机上一直出错）15 秒内不再读，
  * 免得每打一次「/」就在远端跑一遍 python3。
  * 读取跑在这里自己的 scope 里、不挂在对话页上：补完命令（草稿不再是「/词」）、离开对话页都不会把读到一半的取消掉，结果照样记下。
+ * Code 自定义页的「技能」标签（M4o）读的也是这一份：同一次读取顺带记下技能表（[skills]），进技能页走 [ensure]（斜杠菜单读过就不再读），
+ * 「重新读取」走 [refresh]；读的进度（[reading]）、没读成（[failed]）是快照状态，页面据此画。
  * ⚠️ 读取走 SshSession.exec，跑完之前占着这条连接的通道锁，这期间的发送（也走 exec）要等它：一台主机一次，python3 读 ~/.claude 通常不到一秒；
  * 对话页在发送中不开始读。只在界面线程上用。
  */
 internal object RemoteSlashCommands {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
     private val byHost = mutableStateMapOf<String, List<SlashCommand>>()
-    private val loading = HashMap<String, Job>()
+    /** 技能表：读成过就有（读成了但没有技能是空表），没读成过是 null。和 [byHost] 同一规则：读空不覆盖已有的表。 */
+    private val skillsByHost = mutableStateMapOf<String, List<HostSkill>>()
+    /** 正在读的主机和那一次读取；快照状态，技能页据此画「正在读取」。 */
+    private val loading = mutableStateMapOf<String, Job>()
+    /** 最近一次没读成的主机；读成一次就清掉。 */
+    private val failedHosts = mutableStateMapOf<String, Boolean>()
     /** 这台主机在这个时刻之前不再读（读空、没读成之后）。 */
     private val waitUntil = HashMap<String, Long>()
     /** 读成了但是空的、没读成，各隔多久再读。 */
@@ -175,9 +182,17 @@ internal object RemoteSlashCommands {
     internal var now: () -> Long = System::currentTimeMillis
 
     fun get(hostId: String): List<SlashCommand> = byHost[hostId].orEmpty()
+    fun skills(hostId: String): List<HostSkill>? = skillsByHost[hostId]
+    fun reading(hostId: String): Boolean = hostId in loading
+    fun failed(hostId: String): Boolean = failedHosts[hostId] == true
 
-    /** 记下一次读取：读到的覆盖旧的；空 = 读成了但没有配置、null = 没读成，都不动已有的表，只是隔一阵（[EMPTY_WAIT] / [FAILED_WAIT]）再读。 */
+    /**
+     * 记下一次读取：读到的覆盖旧的；空 = 读成了但没有配置、null = 没读成，都不动已有的表，只是隔一阵（[EMPTY_WAIT] / [FAILED_WAIT]）再读。
+     * 技能表同一规则，只是读空时还没有表就记一张空表（技能页要分得清「没有技能」和「还没读到」）。
+     */
     fun put(hostId: String, tools: List<ConfigRemote.Tool>?) {
+        if (tools == null) failedHosts[hostId] = true else failedHosts.remove(hostId)
+        if (tools != null && (tools.isNotEmpty() || hostId !in skillsByHost)) skillsByHost[hostId] = HostSkills.fromConfig(tools)
         if (!tools.isNullOrEmpty()) { byHost[hostId] = SlashCommands.fromConfig(tools); waitUntil.remove(hostId); return }
         val until = now() + if (tools == null) FAILED_WAIT else EMPTY_WAIT
         waitUntil[hostId] = maxOf(waitUntil[hostId] ?: 0L, until)
@@ -187,6 +202,13 @@ internal object RemoteSlashCommands {
     fun ensure(hostId: String, load: suspend () -> List<ConfigRemote.Tool>?): Job? {
         loading[hostId]?.let { return it }
         if (hostId in byHost || now() < (waitUntil[hostId] ?: 0L)) return null
+        return start(hostId, load)
+    }
+
+    /** 不管有没有、等不等，再读一次（技能页的「重新读取」）；正在读就返回那一次。 */
+    fun refresh(hostId: String, load: suspend () -> List<ConfigRemote.Tool>?): Job = loading[hostId] ?: start(hostId, load)
+
+    private fun start(hostId: String, load: suspend () -> List<ConfigRemote.Tool>?): Job {
         val job = scope.launch(start = CoroutineStart.LAZY) {
             try { put(hostId, load()) }
             catch (e: CancellationException) { throw e }
@@ -196,6 +218,12 @@ internal object RemoteSlashCommands {
         loading[hostId] = job
         job.start()
         return job
+    }
+
+    /** 截图夹具每张图前清空（全局的；放过命令表、技能表的场景会串到后面同一台主机）。 */
+    internal fun clearForFixture() {
+        loading.values.toList().forEach { it.cancel() }
+        loading.clear(); byHost.clear(); skillsByHost.clear(); failedHosts.clear(); waitUntil.clear()
     }
 }
 

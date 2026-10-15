@@ -22,12 +22,17 @@ internal fun parseMcpHeaderVariables(text: String): Map<String, String> {
     return result
 }
 
-@Composable internal fun SharedMcpPane(state: AppState, conn: Conn?) {
+/**
+ * [addRequested] / [onAddHandled]：Code 自定义页（M4o）的「添加」从外面开「添加通用 MCP 配置」，开了就回调清掉请求；
+ * [inlineAdd] 为 false 时列表头不再放自己的「添加」（Code 页右上角有了）。经典都不传。
+ */
+@Composable internal fun SharedMcpPane(state: AppState, conn: Conn?, addRequested: Boolean = false, onAddHandled: () -> Unit = {}, inlineAdd: Boolean = true) {
     val hostKey = if (state.pluginLocation == "本地") "@local" else conn?.let { projectKey(it.host, "/") }
     if (hostKey == null) { Text("请先选择服务器"); return }
     val registry = state.sharedMcp
     val t = Tokens.current
     var adding by remember(hostKey) { mutableStateOf(false) }
+    LaunchedEffect(addRequested) { if (addRequested) { adding = true; onAddHandled() } }
     var error by remember(hostKey) { mutableStateOf("") }
     var showHistory by remember(hostKey) { mutableStateOf(false) }
     var reviewing by remember(hostKey) { mutableStateOf(false) }
@@ -89,7 +94,7 @@ internal fun parseMcpHeaderVariables(text: String): Map<String, String> {
         item {
             Row {
                 Text("通用 MCP", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                TextButton({ adding = true }, enabled = registry.problem.isBlank()) { Text("添加") }
+                if (inlineAdd) TextButton({ adding = true }, enabled = registry.problem.isBlank()) { Text("添加") }
                 TextButton({ showHistory = !showHistory }) { Text(if (showHistory) "隐藏历史" else "版本历史") }
             }
             Text("同一机器登记一次，分别选择运行器。OpenCode 和 Codex 会在新建时核对并加载；配置保存不代表已授权。", style = MaterialTheme.typography.bodySmall, color = t.textMuted)
