@@ -5,8 +5,12 @@
          「先黑一下再变白」—— 正是这个 style 当初为了避免才存在的那种闪。
          ⚠️ 选了深色的人会反过来先白一下。取默认那一侧，因为多数人看到的是默认。
          ⚠️ 浅底必须配 `windowLightStatusBar=true`，不然状态栏图标是白的、在白底上看不见。 -->
+    <!-- ⚠️ 底色必须是**资源**（@color/…），不能直接写 #FFFFFF：Android 12 起冷启动那一屏（系统 SplashScreen）
+         只认 windowBackground 的资源 id，写字面量读出来是 0，系统就退回它自己的默认底 ——
+         系统开深色时那是**黑的**，于是先黑一下再变白（10-15 模拟器上测出来的）。 -->
+    <color name="window_bg">#FFFFFF</color>
     <style name="Theme.Yxi" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:windowBackground">#FFFFFF</item>
+        <item name="android:windowBackground">@color/window_bg</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">#FFFFFF</item>
         <item name="android:windowLightStatusBar">true</item>
