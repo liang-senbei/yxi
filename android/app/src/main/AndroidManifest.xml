@@ -41,6 +41,15 @@
          录音只是上传的原料，App 不往任何云服务发音频。 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
+    <!-- 「系统识别」那条路要先问一句手机上有没有语音识别（ChatScreen / Workspace 的 onVoice 里 resolveActivity）。
+         ⚠️ Android 11 起有包可见性：不声明这一条，别家的识别界面对我们一律不可见，
+         麦克风就会说「没有语音识别」—— 哪怕手机上明明装着。 -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
+        </intent>
+    </queries>
+
     <!-- ⚠️ `allowBackup="false"`（2026-09-04 安全审计）：这个 App 的数据本来换机就带不走 ——
          Keystore 密钥不进备份，SSH 私钥和主机密码到了新机解不开；
          而备份能带走的恰恰是 hosts.json（主机清单：地址/端口/用户名）和登录令牌。 -->
