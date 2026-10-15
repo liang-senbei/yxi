@@ -1,6 +1,6 @@
 package app.yxi.agent
 
-import app.yxi.ui.t
+import app.yxi.agent.Tr.t
 
 /**
  * 对话输入框里的**斜杠命令提示**。
@@ -13,6 +13,8 @@ import app.yxi.ui.t
  *
  * ⚠️ 顺序 = 手机上的常用度，不是字母序。列表在只打了一个 `/` 时整份显示，
  * 前几个就是你八成想按的那几个。
+ *
+ * 放在 core：桌面 Code 风格输入框的斜杠菜单也拿这份当 Claude Code 的内置命令（桌面的 SlashCommands）。
  */
 object Slash {
     data class Cmd(val name: String, val hint: String)
