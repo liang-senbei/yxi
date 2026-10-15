@@ -43,6 +43,10 @@ class ShareActivity : ComponentActivity() {
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         I18n.load(this)
+        // ⚠️ 风格也要自己读、状态栏也要自己套：分享常常是**全新进程**冷启动进来的（SEND 入口），
+        //    不读的话选了深色的人看到的是一整页默认浅色；不套的话深色下状态栏是黑字压黑底。
+        app.yxi.ui.Skin.load(this)
+        app.yxi.ui.Skin.applyBars(this)
         app.yxi.agent.Tr.fn = { zh -> app.yxi.ui.t(zh) }   // 分享可从全新进程冷启动进来（SEND 入口），不接 Tr 的话 core 里 Attachments/Uploader 的文案不翻
         val text = intent?.getStringExtra(Intent.EXTRA_TEXT)
         // ⚠️ 相册里一次分享多张走的是 SEND_MULTIPLE，EXTRA_STREAM 是个列表 —— 原来只认单个，多选进不来

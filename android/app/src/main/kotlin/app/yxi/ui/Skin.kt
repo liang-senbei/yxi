@@ -1,6 +1,9 @@
 package app.yxi.ui
 
 import android.content.Context
+import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -45,5 +48,19 @@ object Skin {
     fun set(ctx: Context, s: Style) {
         style = s
         p(ctx).edit().putString("skin", s.key).apply()
+    }
+
+    /**
+     * 状态栏 / 导航栏的图标颜色跟**本应用的风格**走，不跟系统的深色模式：两者是两回事。
+     * 不传参数的 enableEdgeToEdge() 按系统深浅挑图标色 —— 系统开深色、App 是浅色风格（默认）时，
+     * 状态栏的时间、电量变成白字压在浅色页面上，几乎看不见（10-15 在模拟器上测出来，登录页最明显）。
+     * ⚠️ **每个有界面的 Activity 都要调**：ShareActivity 原来漏了，深色风格下状态栏是黑字压黑底。
+     */
+    fun applyBars(a: ComponentActivity) {
+        val light = style.palette.light
+        val status = if (light) SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+            else SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+        val nav = if (light) SystemBarStyle.light(0xE6FFFFFF.toInt(), 0x801B1B1B.toInt()) else SystemBarStyle.dark(0x801B1B1B.toInt())
+        a.enableEdgeToEdge(statusBarStyle = status, navigationBarStyle = nav)
     }
 }
