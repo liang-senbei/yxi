@@ -158,14 +158,17 @@ class CodeThemeShotsTest {
 }
 
 /**
- * 右侧面板（M4a）：语义节点里没有图标的描述，按位置核——每个标题字起于卡片左缘 + 13.6（外环 0.8 + 12.8）；
- * 卡片右端的关闭按钮在 x 2011.2（填充右缘 2039.2 − 4 − 24），个数 = 卡片数；会话头的图标按钮（y 48）都在卡片左边。
+ * 右侧面板（M4a）：语义节点里没有图标的描述，按位置核——每个标题字起于卡片左缘 + 13.6（外环 0.8 + 12.8），
+ * 同一行右端（x 2011.2 = 填充右缘 2039.2 − 4 − 24，和标题字同一条中线）有关闭按钮；会话头的图标按钮（y 48）都在卡片左边。
  */
 private fun checkPanels(nodes: List<String>, vararg cards: Pair<String, Float>, headerButtons: Int = 4) {
     fun num(line: String, key: String) = Regex("""$key=([0-9.]+)""").find(line)!!.groupValues[1].toFloat()
-    for ((title, left) in cards) check(nodes.any { it.trimEnd().endsWith(" $title") && kotlin.math.abs(num(it, "x") - (left + 13.6f)) < 1f }) { "没有起于 ${left + 13.6f} 的「$title」面板标题：" + nodes.filter { it.trimEnd().endsWith(" $title") } }
     val buttons = nodes.filter { it.contains("w=24.0 h=24.0 Button") }
-    check(buttons.count { kotlin.math.abs(num(it, "x") - 2011.2f) < 1f } == cards.size) { "关闭按钮个数不等于面板数" }
+    for ((title, left) in cards) {
+        val head = nodes.firstOrNull { it.trimEnd().endsWith(" $title") && kotlin.math.abs(num(it, "x") - (left + 13.6f)) < 1f } ?: error("没有起于 ${left + 13.6f} 的「$title」面板标题")
+        val mid = num(head, "y") + num(head, "h") / 2
+        check(buttons.any { kotlin.math.abs(num(it, "x") - 2011.2f) < 1f && kotlin.math.abs(num(it, "y") + 12f - mid) < 1.5f }) { "「$title」面板标题那一行右端没有关闭按钮" }
+    }
     val header = buttons.filter { num(it, "y") in 47f..49f && num(it, "x") > 300f && kotlin.math.abs(num(it, "x") - 2011.2f) >= 1f }
     check(header.size >= headerButtons && header.all { num(it, "x") + 24f <= cards.minOf { c -> c.second } }) { "会话头的按钮没缩到面板左边：$header" }
 }
@@ -388,8 +391,10 @@ private fun codeScenes() = listOf(
     // 本机的 Git 改动（本机对齐 P6a）：会话头右端点「改动」，开在右侧卡片里（M4b，对话留在左边）；LocalGit.run 换成固定的快照，不起 git。
     // 第一张是文件列表，第二张再点一个文件看差异
     CodeScene("local-codex-changes", listOf("@改动"), verify = { _, nodes ->
-        for (text in listOf("Git 改动", "未暂存", "已暂存", "MM  src/auth/errors.ts", "??  src/auth/errors.test.ts", "选择文件查看差异"))
-            check(nodes.any { it.endsWith(" $text") }) { "改动视图里没有「$text」" }
+        // M4c：Code 外观——「分支 → 工作区」、仓库路径和 HEAD、每个文件一行（状态码 + 路径），还没点开时没有 diff
+        for (text in listOf("fix/login-errors → 工作区", "MM", "src/auth/errors.ts", "??", "src/auth/errors.test.ts"))
+            check(nodes.any { it.trimEnd().endsWith(" $text") }) { "改动视图里没有「$text」" }
+        check(nodes.any { it.trimEnd().endsWith("demo-app · 8b7d4e0c2f61") }) { "没有仓库路径和 HEAD" }
         checkPanels(nodes, "改动" to 1000f, headerButtons = 2)
     }) { localCodex(it, approval = false); shotLocalGit() },
     // 本机文件（本机对齐 P6b）：会话头点「文件」，右侧卡片里是本机目录（M4b）（夹具 projects/demo-app，摆几个文件、时间固定）；第二张再点 README.md 看预览
@@ -401,9 +406,12 @@ private fun codeScenes() = listOf(
         check(nodes.any { it.endsWith(" 复制路径") } && nodes.any { it.endsWith(" 关闭") }) { "预览上没有「复制路径」「关闭」" }
         check(nodes.any { "跑 npm test" in it }) { "预览里没有 README 的内容" }
     }) { localCodex(it, approval = false); shotLocalFiles() },
-    CodeScene("local-codex-changes-diff", listOf("@改动", "MM  src/auth/errors.ts"), verify = { _, nodes ->
-        check(nodes.any { it.endsWith(" 当前显示差异：+3 / −1") }) { "差异统计不对" }
-        check(nodes.any { it.endsWith(" 针对这份差异提要求") } && nodes.any { it.endsWith(" 打开文件 · src/auth/errors.ts") }) { "差异下的操作不全" }
+    // M4c：点开文件行，下面是带行号的 diff（规格表 §3.12 / §1.5：色条、行号区、增删底色）；行右端 +3 −1 和两个图标按钮
+    CodeScene("local-codex-changes-diff", listOf("@改动", "src/auth/errors.ts"), verify = { _, nodes ->
+        check(nodes.any { it.trimEnd().endsWith(" +3") } && nodes.any { it.trimEnd().endsWith(" −1") }) { "差异统计不对" }
+        for (text in listOf("12", "13", "14", "    case 401: return '账号或密码不对'", "    default: return '登录失败，请稍后重试'"))
+            check(nodes.any { it.trimEnd().endsWith(" ${text.trimEnd()}") }) { "diff 里没有「$text」" }
+        check(nodes.none { it.contains("diff --git") || it.contains("+++ b/") }) { "文件头不该画出来" }
     }) { localCodex(it, approval = false); shotLocalGit() },
     // 本机首页选 Codex（P1d）：创建中（输入卡只读、页脚「取消创建」、说明换成 Codex 的）；上次创建待核对（说明，按 Enter 进经典对话框核对）
     CodeScene("local-home-codex-creating") { localHomeCodex(it, review = false) },

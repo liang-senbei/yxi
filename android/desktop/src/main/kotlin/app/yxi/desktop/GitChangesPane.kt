@@ -40,7 +40,27 @@ internal fun GitChangesView(source: Any, directory: String, sourceLine: String, 
         catch (e: Exception) { error = e.message.orEmpty(); snapshot = null }
         finally { busy = false }
     }
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    // 当前范围里的文件（未暂存：工作区有改动或未跟踪；已暂存：索引里有改动），两种风格共用
+    fun visibleFiles(data: JSONObject): List<JSONObject> {
+        val entries = data.getJSONArray("files")
+        return (0 until entries.length()).map { entries.getJSONObject(it) }.filter { entry ->
+            val code = entry.getString("code")
+            if (staged) code.getOrNull(0)?.let { it != ' ' && it != '?' } == true
+            else code == "??" || code.getOrNull(1)?.let { it != ' ' && it != '?' } == true
+        }
+    }
+    // 「针对这份差异提要求」：把文件、范围和差异摘录拼成上下文，开修改意见对话框（两种风格共用）
+    fun ask(data: JSONObject, diff: String) {
+        val excerpt = diff.take(12000)
+        feedbackContext = "Git 差异参考\n$sourceLine\n仓库：${data.getString("root")}\n文件：$file\n范围：${if (staged) "已暂存" else "未暂存"}\n分支：${data.optString("branch").ifBlank { "分离 HEAD" }}\n提交：${data.optString("head").ifBlank { "尚无提交" }}\n读取时间：${data.optString("readAt")}\n" +
+            excerpt.lineSequence().joinToString("\n") { "> $it" } +
+            (if (diff.length > excerpt.length || data.optBoolean("clipped")) "\n（差异已截取，完整内容请从仓库读取。）" else "")
+    }
+    // M4c：Code 风格画成规格表 §3.12 的改动面板（文件行 + 行号 diff），数据、读取、对话框同经典
+    if (LocalThemeSpec.current.style == UiStyle.Code) CodeGitChanges(snapshot, staged, file, busy, error, files = { visibleFiles(it) },
+        onStaged = { if (staged != it) { staged = it; file = "" } }, onFile = { file = it }, onRefresh = { revision++ },
+        openFile = { data -> openFile(data.getString("root").trimEnd('/') + "/" + file) }, ask = ::ask)
+    else Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row {
             Text("Git 改动", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
             TextButton({ revision++ }, enabled = !busy) { Text("刷新") }
@@ -56,12 +76,7 @@ internal fun GitChangesView(source: Any, directory: String, sourceLine: String, 
             SelectionContainer {
                 Text("${data.optString("branch").ifBlank { "分离 HEAD" }} · ${data.optString("head").take(12).ifBlank { "尚无提交" }}", style = MaterialTheme.typography.labelSmall, color = Tokens.current.textMuted)
             }
-            val entries = data.getJSONArray("files")
-            val files = (0 until entries.length()).map { entries.getJSONObject(it) }.filter { entry ->
-                val code = entry.getString("code")
-                if (staged) code.getOrNull(0)?.let { it != ' ' && it != '?' } == true
-                else code == "??" || code.getOrNull(1)?.let { it != ' ' && it != '?' } == true
-            }
+            val files = visibleFiles(data)
             Column(Modifier.fillMaxWidth().heightIn(max = 180.dp).verticalScroll(rememberScrollState())) {
                 if (files.isEmpty()) Text(if (staged) "没有已暂存改动" else "没有未暂存改动", style = MaterialTheme.typography.bodySmall)
                 for (entry in files) {
@@ -72,12 +87,7 @@ internal fun GitChangesView(source: Any, directory: String, sourceLine: String, 
                 TextButton({ openFile(data.getString("root").trimEnd('/') + "/" + file) }) { Text("打开文件 · $file") }
                 if (data.optBoolean("clipped")) Text("差异较长，显示前 256 KiB", style = MaterialTheme.typography.labelSmall)
                 val diff = data.getString("diff")
-                TextButton({
-                    val excerpt = diff.take(12000)
-                    feedbackContext = "Git 差异参考\n$sourceLine\n仓库：${data.getString("root")}\n文件：$file\n范围：${if (staged) "已暂存" else "未暂存"}\n分支：${data.optString("branch").ifBlank { "分离 HEAD" }}\n提交：${data.optString("head").ifBlank { "尚无提交" }}\n读取时间：${data.optString("readAt")}\n" +
-                        excerpt.lineSequence().joinToString("\n") { "> $it" } +
-                        (if (diff.length > excerpt.length || data.optBoolean("clipped")) "\n（差异已截取，完整内容请从仓库读取。）" else "")
-                }, enabled = !busy && diff.isNotBlank()) { Text("针对这份差异提要求") }
+                TextButton({ ask(data, diff) }, enabled = !busy && diff.isNotBlank()) { Text("针对这份差异提要求") }
                 val colors = Tokens.current
                 val rendered = remember(diff, colors) {
                     buildAnnotatedString {
