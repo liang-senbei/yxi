@@ -19,7 +19,7 @@ internal class LocalClaudeSubscription(private val connect: suspend (LocalRuntim
             LocalClaudeControlTransport.start(selected, directory, resumeSessionId = id).let { ClaudeControlClient(it, it.requestedSessionId) }
         }): Prepared {
         require(record.engine == "claude" && record.provider == "official:claude" && record.hostKey.isBlank()) { "此记录不是本机官方 Claude 会话" }
-        require(record.user == System.getProperty("user.name") && record.platform == System.getProperty("os.name")) { "会话所属用户或系统不匹配" }
+        require(LocalOwner.owns(record.user, record.platform)) { "会话所属用户或系统不匹配" }
         require(runtime.engine == "claude" && runtime.ready && File(runtime.home).canonicalPath == File(record.runtimeHome).canonicalPath) { "请选择原会话使用的 Claude 安装配置" }
         require(java.util.UUID.fromString(record.threadId).toString() == record.threadId) { "会话 ID 无效" }
         val directory = File(record.directory)

@@ -40,7 +40,18 @@ internal object OpenIn {
         }
     }
 
-    fun open(editor: EditorApp, directory: String) = launch(listOf(editor.command, directory))
+    /**
+     * Windows 上 code.cmd / cursor.cmd 这类批处理是经 cmd.exe 跑的：目录名里的 & | < > ^ % ! 之类会被 cmd 当成命令符号（% 在引号里也会展开），
+     * 所以这种目录不交给 .cmd 打开、说原因（改用「在资源管理器中显示」）；.exe 和其他系统照常（发版前检查 10-15）。
+     */
+    fun open(editor: EditorApp, directory: String) {
+        require(!batchUnsafe(editor.command, directory)) { "目录名里有 cmd 的特殊字符（& | < > ^ % ! 等），不能交给 ${File(editor.command).name} 打开；请用「在资源管理器中显示」" }
+        launch(listOf(editor.command, directory))
+    }
+
+    /** [command] 是 .cmd / .bat，而且 [directory] 里有 cmd.exe 会解释的字符。 */
+    internal fun batchUnsafe(command: String, directory: String): Boolean =
+        command.lowercase().let { it.endsWith(".cmd") || it.endsWith(".bat") } && directory.any { it in "&|<>^%!" }
 
     /** 在系统的文件管理器里显示这个目录（目录是你选的，同上）。 */
     fun reveal(directory: String) {

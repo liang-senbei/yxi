@@ -134,7 +134,7 @@ internal class LocalAcpTasks(private val queue: InstructionQueue, file: File,
         registry.requireWritable()
         check(record.hostKey.isBlank() && runtime.engine == record.engine) { "运行器和会话不匹配" }
         AcpLaunch.arguments(record.engine)
-        check(record.user == System.getProperty("user.name") && record.platform == System.getProperty("os.name")) { "会话不是在此电脑和用户下创建的" }
+        check(LocalOwner.owns(record.user, record.platform)) { "会话不是在此电脑和用户下创建的" }
         check(runtime.ready) { LocalRuntimeDiscovery.title(record.engine) + " 运行器不可用：" + runtime.problem.ifBlank { "未检测到版本" } }
         check(File(runtime.home).canonicalPath == record.runtimeHome) { "会话属于另一个数据目录（${record.runtimeHome}），请在运行器里选回原来的那个" }
         require(File(record.directory).isAbsolute && File(record.directory).isDirectory) { "原工作目录在此电脑不可用：${record.directory}" }

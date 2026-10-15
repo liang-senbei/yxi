@@ -103,7 +103,7 @@ private fun localOwnedTasks(state: AppState): List<LocalCodexTaskRecord> = local
 
 /** 本机用户和系统的记录，新的在前。不要求 Codex 的记录是当前运行器的数据目录（经典工作台列表要求）：对话页按记录的数据目录找运行器，找不到会说明原因。 */
 internal fun localOwnedRecords(records: List<LocalCodexTaskRecord>, user: String, os: String): List<LocalCodexTaskRecord> =
-    records.filter { it.user == user && it.platform == os }.sortedByDescending { it.createdAt }
+    records.filter { it.user == user && LocalOwner.sameSystem(it.platform, os) }.sortedByDescending { it.createdAt }
 
 /** 侧栏要列的本机对话：全部 / 待处理 / 归档（[WorkspaceNavigation.visible]）+ 搜索词（显示名称 / 原标题 / 目录 / 运行器名）；置顶的在前（按置顶次序，其余保持原顺序）。 */
 internal fun localSidebarTasks(nav: WorkspaceNavigation, records: List<LocalCodexTaskRecord>, query: String, status: (LocalCodexTaskRecord) -> SessionState): List<LocalCodexTaskRecord> =

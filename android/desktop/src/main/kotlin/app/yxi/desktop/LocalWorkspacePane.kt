@@ -143,17 +143,17 @@ import javax.swing.JFileChooser
                         }
                         if (projectError.isNotBlank()) Text(projectError, color = t.danger)
                     }
-                    items(state.localCodexTasks.registry.records.filter { it.user == System.getProperty("user.name") && it.platform == System.getProperty("os.name") &&
+                    items(state.localCodexTasks.registry.records.filter { LocalOwner.owns(it.user, it.platform) &&
                         it.runtimeHome == workspace.selectedRuntime?.home?.let { home -> File(home).canonicalPath } }, key = { "owned:${it.key}" }) { record ->
                         TextButton({ state.localSelectedTaskKey = record.key }) { Text("${record.title} · ${record.model}") }
                     }
-                    items(state.localOpenCodeTasks.registry.records.filter { it.user == System.getProperty("user.name") && it.platform == System.getProperty("os.name") }, key = { "owned:${it.key}" }) { record ->
+                    items(state.localOpenCodeTasks.registry.records.filter { LocalOwner.owns(it.user, it.platform) }, key = { "owned:${it.key}" }) { record ->
                         TextButton({ state.localSelectedTaskKey = record.key }) { Text("${record.title} · OpenCode · ${record.model}") }
                     }
-                    items(state.localAcpTasks.registry.records.filter { it.user == System.getProperty("user.name") && it.platform == System.getProperty("os.name") }, key = { "owned:${it.key}" }) { record ->
+                    items(state.localAcpTasks.registry.records.filter { LocalOwner.owns(it.user, it.platform) }, key = { "owned:${it.key}" }) { record ->
                         TextButton({ state.localSelectedTaskKey = record.key }) { Text("${record.title} · ${LocalRuntimeDiscovery.title(record.engine)}") }
                     }
-                    items(state.localClaudeTasks.registry.records.filter { it.user == System.getProperty("user.name") && it.platform == System.getProperty("os.name") }, key = { "owned:${it.key}" }) { record ->
+                    items(state.localClaudeTasks.registry.records.filter { LocalOwner.owns(it.user, it.platform) }, key = { "owned:${it.key}" }) { record ->
                         TextButton({ state.localSelectedTaskKey = record.key }) { Text("${record.title} · Claude · ${record.model}") }
                     }
                     if (workspace.projects.isNotEmpty()) item { Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {

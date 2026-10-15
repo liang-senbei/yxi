@@ -73,8 +73,10 @@ class LocalSidebarListTest {
 
     @Test fun `owned records keep every codex data directory but only this user and system`() {
         val records = listOf(record("old", 1), record("other-home", 3, home = "C:\\home-b"), record("claude", 2, engine = "claude"),
-            record("someone", 4, user = "other"), record("mac", 5, os = "Mac OS X"))
-        assertEquals(listOf("other-home", "claude", "old"), localOwnedRecords(records, "me", "Windows 11").map { it.threadId })
+            record("someone", 4, user = "other"), record("mac", 5, os = "Mac OS X"), record("before-upgrade", 6, os = "Windows 10"))
+        // 发版前检查 10-15：Windows 10 升到 11 后 os.name 变了，会话还是这台电脑的；系统只比家族
+        assertEquals(listOf("before-upgrade", "other-home", "claude", "old"), localOwnedRecords(records, "me", "Windows 11").map { it.threadId })
+        assertTrue(LocalOwner.sameSystem("Mac OS X", "Mac OS X") && !LocalOwner.sameSystem("Linux", "Windows 11") && !LocalOwner.sameSystem("Mac OS X", "Windows 10"))
     }
 
     @Test fun `native history drops threads already listed from the same codex data directory`() {

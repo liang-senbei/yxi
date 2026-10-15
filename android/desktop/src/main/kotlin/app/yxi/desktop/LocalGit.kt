@@ -104,18 +104,26 @@ internal object LocalGit {
         fun requireOk(what: String): Result { check(code == 0) { what + stderr.trim().take(500).let { if (it.isBlank()) "" else "：$it" } }; return this }
     }
 
-    /** 起一次 git（只读命令）：stdout 最多读 [limit] 字节，超了就停；15 秒没结束就杀掉。 */
+    /**
+     * 起一次 git（只读命令）：stdout 最多读 [limit] 字节，超了就停；15 秒没读完 / 没结束就杀掉。stdout 在另一个线程里读——读是阻塞的，
+     * git 卡住时原来的写法根本走不到超时那一步。杀的时候连子进程一起杀：Windows 上 PATH 里的 git.exe 是 Git for Windows 的启动器，
+     * 真干活的 mingw64\bin\git.exe 是它的子进程，只杀启动器会留下它、还占着管道（发版前检查 10-15）。
+     */
     private fun runGit(git: String, directory: String, args: List<String>, limit: Int = 8 * 1024 * 1024): Result {
         val process = ProcessBuilder(listOf(git, "--no-pager", "-C", directory) + args).redirectInput(ProcessBuilder.Redirect.from(File(if (File.separatorChar == '\\') "NUL" else "/dev/null")))
             .apply { LoginShellPath.applyTo(environment()); environment()["GIT_TERMINAL_PROMPT"] = "0"; environment()["GIT_OPTIONAL_LOCKS"] = "0" }.start()
+        fun kill() { process.descendants().forEach { it.destroyForcibly() }; process.destroyForcibly() }
         try {
             val err = StringBuilder()
             val drain = Thread { runCatching { err.append(String(process.errorStream.readNBytes(64 * 1024), Charsets.UTF_8)) } }.apply { isDaemon = true; start() }
-            val out = process.inputStream.readNBytes(limit)
-            if (out.size >= limit) { process.destroy(); return Result(0, out, "") }
-            check(process.waitFor(15, TimeUnit.SECONDS)) { "git 15 秒内没有结束" }
+            var out = ByteArray(0)
+            val read = Thread { out = runCatching { process.inputStream.readNBytes(limit) }.getOrDefault(ByteArray(0)) }.apply { isDaemon = true; start() }
+            read.join(15_000)
+            check(!read.isAlive) { "git 15 秒内没有结束" }
+            if (out.size >= limit) return Result(0, out, "")
+            check(process.waitFor(5, TimeUnit.SECONDS)) { "git 15 秒内没有结束" }
             drain.join(1000)
             return Result(process.exitValue(), out, err.toString())
-        } finally { if (process.isAlive) process.destroyForcibly() }
+        } finally { if (process.isAlive || process.descendants().anyMatch { it.isAlive }) kill() }
     }
 }
