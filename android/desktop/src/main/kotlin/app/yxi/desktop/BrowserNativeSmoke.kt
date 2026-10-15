@@ -61,10 +61,14 @@ internal fun runBrowserNativeSmoke() = runBlocking {
         println("browser native render and live style ok")
     } finally {
         try {
-            // macOS：10-15 的 macOS CI 冒烟里页面、像素、样式都过了，只有关运行时卡住（CEF 到不了 TERMINATED）。先怀疑浏览器的原生视图还挂在
-            // 窗口里：Mac 上先关浏览器、拆掉窗口再关运行时；Windows 照旧（它是发版的门槛，不跟着试）。关运行时的耗时和卡住时的状态都打出来。
+            // macOS：10-15 的 macOS CI 冒烟里页面、像素、样式都过了，只有关运行时卡住（CEF 停在 INITIALIZED、客户端一直没回收完）。
+            // 原因（对着 jcef-api 146.0.10 的字节码核过）：客户端没有生命周期处理器时，CefClient.doClose 交给 CefBrowser_N.doClose，它在没调过
+            // setCloseAllowed() 时一律取消关闭、只给父窗口发 WINDOW_CLOSING——close(true) 也一样，所以这个浏览器永远关不掉。真 App 的预览客户端
+            // 挂了生命周期处理器（doClose 默认返回 false = 允许关），不走这条。Mac 上照 JCEF 示例先 setCloseAllowed() 再关，并拆掉窗口；
+            // Windows 照旧（它是发版的门槛，不跟着试）。关运行时的耗时和卡住时的状态都打出来。
             val mac = System.getProperty("os.name").startsWith("Mac")
             withContext(Dispatchers.Swing) {
+                if (mac) browser?.setCloseAllowed()
                 browser?.close(true)
                 if (mac) frame?.let { it.contentPane.removeAll(); it.dispose() }
             }
