@@ -220,6 +220,8 @@ internal fun CodeLocalCodexPane(state: AppState, record: LocalCodexTaskRecord) {
                 // M3f：运行中的状态行（对话末尾）；开始时间记在这一层，列表滚动时不会从 0 算起
                 val transcriptMode = state.transcriptView(record.key)   // M3g：对话视图（Ctrl+O 轮换）
                 val runningSince = rememberRunningSince(controller?.activeTurnId != null && requests.isEmpty())
+                val transcript = messages.map(Transcripts::codex)
+                val thinkingSince = rememberRunningSince(runningSince > 0L && transcript.lastOrNull() is TranscriptItem.Thinking)   // M3h-4：思考行
                 LazyColumn(Modifier.fillMaxSize().onPointerEvent(PointerEventType.Scroll, PointerEventPass.Initial) { event ->
                     if (event.changes.any { it.scrollDelta.y < 0f }) followLatest = false
                 }, state = view.scroll, contentPadding = PaddingValues(40.dp, 12.dp),
@@ -227,10 +229,10 @@ internal fun CodeLocalCodexPane(state: AppState, record: LocalCodexTaskRecord) {
                     // 顺序和 key 同服务器工作台：跟随最新滚到下标 messages + requests（末尾的占位）
                     // M3b / M3c：统一对话项（你 = 右对齐气泡，Codex = 没有作者名的正文），命令和文件改动合成摘要行 + 卡片（代替原来的活动卡）；
                     // 回复里的链接、改动里的路径照旧是复制路径
-                    items(Transcripts.rows(Transcripts.visible(messages.map(Transcripts::codex), transcriptMode)), key = { "row:" + it.key }) { row ->
+                    items(Transcripts.rows(Transcripts.visible(transcript, transcriptMode)), key = { "row:" + it.key }) { row ->
                         CodeColumn(true) { CompositionLocalProvider(LocalUriHandler provides links) { CodeTranscriptLine(row, onPath = ::copyPath, view = transcriptMode) } }
                     }
-                    if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在运行", runningSince) } }
+                    if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在运行", runningSince, thinkingSince) } }
                     item(key = "latest") { Spacer(Modifier.height(1.dp)) }
                 }
                 // 接回时列表顶端一条 2 高的进度条（同 Claude 读历史）

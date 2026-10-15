@@ -288,15 +288,17 @@ private fun CodeServerCodexConversation(state: AppState, conn: Conn, record: Cod
                     // M3f：运行中的状态行（对话末尾）；开始时间记在这一层，列表滚动时不会从 0 算起
                     val transcriptMode = state.transcriptView(record.key)   // M3g：对话视图（Ctrl+O 轮换）
                     val runningSince = rememberRunningSince(controller?.activeTurnId != null && requests.isEmpty())
+                    val transcript = messages.map(Transcripts::codex)
+                    val thinkingSince = rememberRunningSince(runningSince > 0L && transcript.lastOrNull() is TranscriptItem.Thinking)   // M3h-4：思考行
                     LazyColumn(Modifier.fillMaxSize().onPointerEvent(PointerEventType.Scroll, PointerEventPass.Initial) { event ->
                         if (event.changes.any { it.scrollDelta.y < 0f }) followLatest = false
                     }, state = view.scroll, contentPadding = PaddingValues(40.dp, 12.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         // M3b / M3c：同本机 Codex 页；改动里的路径点了打开文件（同原来的活动卡）
-                        items(Transcripts.rows(Transcripts.visible(messages.map(Transcripts::codex), transcriptMode)), key = { "row:" + it.key }) { row ->
+                        items(Transcripts.rows(Transcripts.visible(transcript, transcriptMode)), key = { "row:" + it.key }) { row ->
                             CodeColumn(true) { CompositionLocalProvider(LocalUriHandler provides taskUris) { CodeTranscriptLine(row, onPath = ::openTaskFile, view = transcriptMode) } }
                         }
-                        if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在运行", runningSince) } }
+                        if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在运行", runningSince, thinkingSince) } }
                         item(key = "latest") { Spacer(Modifier.height(1.dp)) }
                     }
                     if (workspace.busy) LinearProgressIndicator(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(2.dp))

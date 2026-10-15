@@ -219,14 +219,16 @@ private class AcpPendingAuthentication(val plan: AcpTerminalAuthPlan, val comple
                     // M3f：运行中的状态行（对话末尾）；开始时间记在这一层，列表滚动时不会从 0 算起
                     val transcriptMode = state.transcriptView(record.key)   // M3g：对话视图（Ctrl+O 轮换）
                     val runningSince = rememberRunningSince(controller?.busy == true && approvals.isEmpty())
+                    val transcript = messages.map(Transcripts::acp)
+                    val thinkingSince = rememberRunningSince(runningSince > 0L && transcript.lastOrNull() is TranscriptItem.Thinking)   // M3h-4：思考行
                     LazyColumn(Modifier.fillMaxSize().nestedScroll(scrollWatch).onPointerEvent(PointerEventType.Scroll, PointerEventPass.Initial) { event ->
                         if (event.changes.any { it.scrollDelta.y < 0f }) followLatest = false
                     }, state = view.scroll, contentPadding = PaddingValues(40.dp, 12.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         // 顺序和 key 同经典：跟随最新滚到下标 messages + approvals（末尾的占位）
                         // M3b / M3c：统一对话项，连着的工具调用合成摘要行 + 卡片
-                        items(Transcripts.rows(Transcripts.visible(messages.map(Transcripts::acp), transcriptMode)), key = { "row:" + it.key }) { row -> CodeColumn(true) { CodeTranscriptLine(row, view = transcriptMode) } }
-                        if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在生成回复", runningSince) } }
+                        items(Transcripts.rows(Transcripts.visible(transcript, transcriptMode)), key = { "row:" + it.key }) { row -> CodeColumn(true) { CodeTranscriptLine(row, view = transcriptMode) } }
+                        if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在生成回复", runningSince, thinkingSince) } }
                         item(key = "acp-end") { Spacer(Modifier.height(1.dp)) }
                     }
                     // 接回时列表顶端一条 2 高的进度条（同本机 Codex）

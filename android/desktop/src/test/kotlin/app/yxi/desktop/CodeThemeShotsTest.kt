@@ -306,6 +306,10 @@ private fun codeScenes() = listOf(
     CodeScene("local-opencode-read-pref", verify = { _, nodes ->
         check(nodes.any { it.endsWith(" - title: 快速开始") }) { "会话没跟着偏好的详细档展开" }
     }) { localOpenCode(it, permission = false, read = true); check(Store.setPref(TranscriptView.PREF, TranscriptView.Detailed.key) == null) },
+    // 思考行（M3h-4，规格表 §3.4）：在跑、对话最后一项是思考 → 状态行换成「0s · 思考中…」；普通档里思考正文不显示
+    CodeScene("local-opencode-thinking-now", verify = { _, nodes ->
+        check(nodes.any { it.contains("0s · 思考中…") } && nodes.none { it.contains("redirects.yml") } && nodes.none { it.contains("正在运行 · ") }) { "思考行没换上，或普通档里露出了思考正文" }
+    }) { localOpenCode(it, permission = false, running = true, thinkingNow = true) },
     // 运行中的状态行（M3f，规格表 §3.4）：在跑、没有审批时对话末尾一行「正在运行 · Ns」；夹具的时钟固定，所以是 0s
     CodeScene("local-opencode-running", verify = { _, nodes ->
         check(nodes.any { it.endsWith(" 正在运行 · 0s") }) { "运行中没有状态行" }
@@ -970,7 +974,7 @@ private val shotServers = mutableListOf<HttpServer>()
  * 控制器接回环上的假 OpenCode：只答 refresh 要的几条 GET（会话归属、200 条消息、审批、提问、状态），别的给 404；
  * 在 EDT 上先同步 refresh 一次（请求跑在 IO 上），第一帧就有数据，之后面板每 2 秒刷新一次，回的内容不变。[permission] 多一轮等审批的。
  */
-private fun localOpenCode(state: AppState, permission: Boolean, running: Boolean = false, thinking: Boolean = false, read: Boolean = false) {
+private fun localOpenCode(state: AppState, permission: Boolean, running: Boolean = false, thinking: Boolean = false, read: Boolean = false, thinkingNow: Boolean = false) {
     localHome(state)
     val records = state.localOpenCodeTasks.registry.records
     val index = records.indexOfFirst { it.threadId == "shot-local-3" }
@@ -997,6 +1001,8 @@ private fun localOpenCode(state: AppState, permission: Boolean, running: Boolean
             .put("patterns", JSONArray().put("npm run docs:build")))
         status.put(sid, JSONObject().put("type", "busy"))
     }
+    if (thinkingNow) history.put(message("msg_shot_5", "user", text("旧链接都跳到哪？列一下")))   // M3h-4：最后一项是思考 → 思考行
+        .put(message("msg_shot_6", "assistant", JSONObject().put("type", "reasoning").put("text", "要对照 redirects.yml 和新的分组。")))
     if (running) status.put(sid, JSONObject().put("type", "busy"))   // M3f：在跑、没有审批，对话末尾出状态行
     val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
     server.createContext("/") { exchange ->

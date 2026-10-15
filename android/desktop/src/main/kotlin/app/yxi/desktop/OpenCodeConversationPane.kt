@@ -144,12 +144,14 @@ import org.json.JSONObject
                     // M3f：运行中的状态行（对话末尾）；开始时间记在这一层，列表滚动时不会从 0 算起
                     val transcriptMode = state.transcriptView(record.key)   // M3g：对话视图（Ctrl+O 轮换）
                     val runningSince = rememberRunningSince(controller?.nativeBusy == true && controller.permissions.isEmpty() && controller.questions.isEmpty())
+                    val transcript = controller?.messages?.flatMap(Transcripts::openCode).orEmpty()
+                    val thinkingSince = rememberRunningSince(runningSince > 0L && transcript.lastOrNull() is TranscriptItem.Thinking)   // M3h-4：思考行
                     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(40.dp, 12.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         if (controller != null) {
                             // M3b / M3c：每条 OpenCode 消息拆成几项（正文、思考、工具），连着的工具调用跨消息合成摘要行 + 卡片
-                            items(Transcripts.rows(Transcripts.visible(controller.messages.flatMap(Transcripts::openCode), transcriptMode)), key = { "row:" + it.key }) { row -> CodeColumn(true) { CodeTranscriptLine(row, view = transcriptMode) } }
-                            if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在运行", runningSince) } }
+                            items(Transcripts.rows(Transcripts.visible(transcript, transcriptMode)), key = { "row:" + it.key }) { row -> CodeColumn(true) { CodeTranscriptLine(row, view = transcriptMode) } }
+                            if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在运行", runningSince, thinkingSince) } }
                             items(controller.questions, key = { "question:${it.getString("id")}" }) { request ->
                                 CodeColumn(true) { OpenCodeQuestions(request, controller, ::act, Modifier.fillMaxWidth()) }
                             }

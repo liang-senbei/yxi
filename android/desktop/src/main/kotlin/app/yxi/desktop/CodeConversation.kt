@@ -337,19 +337,21 @@ internal fun rememberRunningSince(running: Boolean): Long {
 /**
  * 运行中的状态行（M3f，规格表 §3.4）：在对话末尾、上一条消息的操作行下面；12 的图标（x 列左 +4）+ 次色字（列左 +34.4），形如「正在运行 · 9s」。
  * 参照端是循环动画的品牌图标，Yxi 用静态图标（PRD §2-5）；秒数是真实计时，每秒刷新。
+ * 思考行（M3h-4，规格表 §3.4）：[thinkingSince] > 0（对话最后一项是思考）时换成「9s · 思考中…」，秒数从这段思考开始算；
+ * 参照端中间还有「18 tokens」，各运行器都不给思考的 token 数，不写。
  */
 @Composable
-internal fun CodeStatusLine(label: String, since: Long) {
+internal fun CodeStatusLine(label: String, since: Long, thinkingSince: Long = 0L) {
     val t = Tokens.current
     val clock = LocalStatusClock.current
     var now by remember(since) { mutableStateOf(clock.now()) }
     if (clock.tick) LaunchedEffect(since) { while (true) { kotlinx.coroutines.delay(1000); now = clock.now() } }
-    val seconds = if (since <= 0L) 0L else ((now - since) / 1000).coerceAtLeast(0L)
+    fun seconds(from: Long) = if (from <= 0L) 0L else ((now - from) / 1000).coerceAtLeast(0L)
     Row(Modifier.fillMaxWidth().height(24.dp), verticalAlignment = Alignment.CenterVertically) {
         Spacer(Modifier.width(4.dp))
         Icon(Icons.Outlined.Autorenew, null, Modifier.size(12.dp), tint = t.textMuted)
         Spacer(Modifier.width(18.4.dp))
-        Text("$label · ${seconds}s", color = t.textSecondary, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 1)
+        Text(if (thinkingSince > 0L) "${seconds(thinkingSince)}s · 思考中…" else "$label · ${seconds(since)}s", color = t.textSecondary, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 1)
     }
 }
 
