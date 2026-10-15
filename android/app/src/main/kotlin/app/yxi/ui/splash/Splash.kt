@@ -11,7 +11,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,6 +27,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -104,15 +110,34 @@ fun SplashGate(content: @Composable () -> Unit) {
     var done by remember { mutableStateOf(variant == null) }
     content()
     if (!done && variant != null) {
-        BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
-            variant.content { done = true }
-            // ⚠️ 横屏时 logo 按短边（高）定大小，底下只剩一小条：竖屏那 78dp 的底距会把问候顶到 logo 上。
-            //    横屏改成贴着手势条上沿放；竖屏照旧。
+        // 底色跟开屏方案自己的底一致（浅色两支是 LightBg，深色「显影」是 surface）：横屏时问候那一条露的是这一层
+        val bg = if (dark) MaterialTheme.colorScheme.surface else LightBg
+        BoxWithConstraints(Modifier.fillMaxSize().background(bg)) {
             val land = maxWidth > maxHeight
-            Greeting(
-                Modifier.align(Alignment.BottomCenter).then(if (land) Modifier.navigationBarsPadding() else Modifier),
-                bottom = if (land) 12.dp else 78.dp,
-            )
+            // ⚠️ 横屏时 logo 按短边（高）定大小，几乎占满整个高度，问候放哪儿都会压到它（或翻面那片影子）——
+            //    两行（有昵称）、手势条、横屏还留在底部的三键导航条，哪种都可能。
+            //    所以横屏**先量问候，logo 只拿它上面那块**（各方案按那块的短边自己缩），怎么都撞不上。
+            //    竖屏照旧：logo 铺满整屏，问候离底 78dp 叠在上面（那里空间够）。
+            //    两个子项在两种朝向下是同一个位置，转屏不会让开屏动画从头再来。
+            Layout(
+                content = {
+                    Box { variant.content { done = true } }
+                    Greeting(
+                        // 只让开**底部**的导航条：三键条在侧边时问候照旧对着 logo（logo 是按整个宽度居中的）
+                        if (land) Modifier.windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom)).padding(top = 8.dp)
+                        else Modifier,
+                        bottom = if (land) 12.dp else 78.dp,
+                    )
+                },
+            ) { (logo, greet), c ->
+                val g = greet.measure(c.copy(minWidth = 0, minHeight = 0))
+                val logoH = if (land) (c.maxHeight - g.height).coerceAtLeast(0) else c.maxHeight
+                val l = logo.measure(Constraints.fixed(c.maxWidth, logoH))
+                layout(c.maxWidth, c.maxHeight) {
+                    l.place(0, 0)
+                    g.place((c.maxWidth - g.width) / 2, c.maxHeight - g.height)
+                }
+            }
         }
     }
 }

@@ -71,7 +71,7 @@ internal fun motionOn(ctx: Context): Boolean = runCatching {
  * 浅色开屏的底色 —— **不是 surface 的纯白**，是启动器图标那个 `#F4F6FA`。
  * ⚠️ 纯白会吃掉左边那片浅蓝花瓣的边缘（design/STYLE.md §1.5 记的就是这件事，图标底色也是为此定的）。
  */
-private val LightBg = Color(0xFFF4F6FA)
+internal val LightBg = Color(0xFFF4F6FA)   // internal：SplashGate 横屏时问候那一条要用同一个底
 
 // ────────────────────────────────────────────────────────────── 翻面
 
