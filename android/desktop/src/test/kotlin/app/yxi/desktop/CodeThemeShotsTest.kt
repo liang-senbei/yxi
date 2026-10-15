@@ -201,6 +201,8 @@ private fun codeScenes() = listOf(
     // 右侧面板（M4a，规格表 §3.12）：对话留在左边，面板是浮起的卡片（顶 y 44、离右 / 下 8、圆角 10，头部 32：标题 + 关闭）；
     // 终端宽 578.4，改动 / 文件 / 预览宽 1040；两张都开时上下分屏。会话头的右缘缩到卡片左边
     CodeScene("ssh-panel-terminal", verify = { _, nodes -> checkPanels(nodes, "终端" to 1461.6f) }) { remote(it, tab = 1) },
+    // M4d：SSH 会话的「文件」卡片也是左树右预览；夹具没连服务器，树那边是读不到目录的说明
+    CodeScene("ssh-panel-files", verify = { _, nodes -> checkPanels(nodes, "文件" to 1000f); check(nodes.any { "筛选文件" in it }) { "没有过滤框" } }) { remote(it, tab = 2) },
     CodeScene("ssh-panel-changes", verify = { _, nodes -> checkPanels(nodes, "改动" to 1000f) }) { remote(it, tab = 3) },
     CodeScene("ssh-panel-split", verify = { _, nodes -> checkPanels(nodes, "终端" to 1000f, "已打开的文件" to 1000f) }) {
         remote(it, tab = 1); it.filePanelOpen = true
@@ -413,9 +415,14 @@ private fun codeScenes() = listOf(
         for (text in listOf("src", "README.md", "package.json")) check(nodes.any { it.endsWith(" $text") }) { "文件列表里没有「$text」" }
         checkPanels(nodes, "文件" to 1000f, headerButtons = 2)
     }) { localCodex(it, approval = false); shotLocalFiles() },
+    // M4d：Code 外观是规格表 §3.12 的左树右预览——点 README.md，右边是带行号的内容（8 行），头部是文件名；点 src 就地展开出 index.ts
     CodeScene("local-codex-files-preview", listOf("@文件", "README.md"), verify = { _, nodes ->
-        check(nodes.any { it.endsWith(" 复制路径") } && nodes.any { it.endsWith(" 关闭") }) { "预览上没有「复制路径」「关闭」" }
-        check(nodes.any { "跑 npm test" in it }) { "预览里没有 README 的内容" }
+        check(nodes.count { it.trimEnd().endsWith(" README.md") } >= 2) { "预览头部没有文件名（树里一个 + 头部一个）" }
+        check(nodes.any { it.trimEnd().endsWith("- 跑 npm test 看单测") } && nodes.any { it.trimEnd().endsWith(" 8") }) { "预览里没有带行号的 README 内容" }
+        check(nodes.none { "从左边选一个文件预览" in it }) { "还停在没选文件的空态" }
+    }) { localCodex(it, approval = false); shotLocalFiles() },
+    CodeScene("local-codex-files-tree", listOf("@文件", "src"), verify = { _, nodes ->
+        check(nodes.any { it.trimEnd().endsWith(" index.ts") }) { "src 没有展开出 index.ts" }
     }) { localCodex(it, approval = false); shotLocalFiles() },
     // M4c：点开文件行，下面是带行号的 diff（规格表 §3.12 / §1.5：色条、行号区、增删底色）；行右端 +3 −1 和两个图标按钮
     CodeScene("local-codex-changes-diff", listOf("@改动", "src/auth/errors.ts"), verify = { _, nodes ->

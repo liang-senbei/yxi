@@ -16,6 +16,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -84,6 +86,8 @@ internal object LocalFiles {
 
 @Composable
 internal fun LocalFilesPane(taskKey: String, directory: String) {
+    // M4d：Code 风格画成规格表 §3.12 的文件面板（左树右预览，CodeFiles.kt）；经典照旧
+    if (LocalThemeSpec.current.style == UiStyle.Code) { CodeLocalFiles(taskKey, directory); return }
     val t = Tokens.current
     val scope = rememberCoroutineScope()
     var path by remember(taskKey) { mutableStateOf(File(directory.ifBlank { System.getProperty("user.home") }).absoluteFile) }
@@ -153,4 +157,26 @@ internal fun LocalFilesPane(taskKey: String, directory: String) {
                 }, onClose = { preview = null })
         }
     }
+}
+
+/** 本机文件的 Code 外观（M4d）：数据同经典（LocalFiles 只读列目录、读开头），预览头部的动作是「复制路径」（复制后 3 秒内显示对勾）。 */
+@Composable
+private fun CodeLocalFiles(taskKey: String, directory: String) {
+    var copied by remember(taskKey) { mutableStateOf("") }
+    LaunchedEffect(copied) { if (copied.isNotBlank()) { kotlinx.coroutines.delay(3000); copied = "" } }
+    val root = remember(directory) { File(directory.ifBlank { System.getProperty("user.home") }).absoluteFile.path }
+    val source = remember(root) {
+        CodeFileSource(root,
+            list = { dir -> withContext(Dispatchers.IO) { LocalFiles.list(File(dir)) } },
+            isDir = { _, entry -> entry.isDir },
+            read = { path, max -> withContext(Dispatchers.IO) { LocalFiles.read(File(path), max) } },
+            join = { dir, name -> File(dir, name).path },
+            explain = LocalFiles::explain)
+    }
+    CodeFilesView(taskKey, source, actions = { path, _ ->
+        CodeIconButton(if (copied == path) Icons.Filled.Check else Icons.Outlined.ContentCopy, if (copied == path) "已复制路径" else "复制路径") {
+            runCatching { java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(java.awt.datatransfer.StringSelection(path), null) }
+                .onSuccess { copied = path }
+        }
+    })
 }

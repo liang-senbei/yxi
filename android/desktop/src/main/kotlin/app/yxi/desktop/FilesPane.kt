@@ -23,6 +23,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Upload
@@ -47,6 +49,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.yxi.agent.Session
 import app.yxi.ssh.Paths
 import app.yxi.ssh.Sftp
@@ -70,6 +73,8 @@ fun FilesPane(conn: Conn, sess: Session, onOpen: ((String) -> Unit)? = null) {
 
 @Composable
 internal fun FilesPane(conn: Conn, taskKey: String, directory: String, onOpen: ((String) -> Unit)? = null) {
+    // M4d：Code 风格画成规格表 §3.12 的文件面板（左树右预览，CodeFiles.kt），同一条 SFTP；经典照旧
+    if (LocalThemeSpec.current.style == UiStyle.Code) { CodeRemoteFiles(conn, taskKey, directory, onOpen); return }
     val t = Tokens.current
     val scope = rememberCoroutineScope()
 
@@ -185,6 +190,55 @@ internal fun FilesPane(conn: Conn, taskKey: String, directory: String, onOpen: (
     }
 }
 
+/**
+ * 服务器文件的 Code 外观（M4d）：同经典走这条连接的 SFTP（一条通道跟着连接，离开就关）；树从会话目录起。
+ * 预览头部：「在文件侧栏打开」（调用方给了 [onOpen] 时）、「另存为」；过滤框旁「上传到选中的目录」（选的是文件就传到它所在的目录）。
+ */
+@Composable
+private fun CodeRemoteFiles(conn: Conn, taskKey: String, directory: String, onOpen: ((String) -> Unit)?) {
+    val scope = rememberCoroutineScope()
+    var sftp by remember(conn) { mutableStateOf<Sftp?>(null) }
+    var transfer by remember(conn) { mutableStateOf("") }
+    DisposableEffect(conn) { onDispose { runCatching { sftp?.close() }; sftp = null } }
+    suspend fun channel(): Sftp = sftp ?: conn.ssh.openSftp().also { sftp = it }
+    val source = remember(conn, directory) {
+        CodeFileSource(directory.ifBlank { "." },
+            list = { dir -> channel().list(dir) },
+            // 链接没解引用过（大目录只解前几个，见 Sftp.list），用到的时候再问
+            isDir = { path, e -> e.isDir || (e.isLink && runCatching { channel().isDir(path) }.getOrDefault(false)) },
+            read = { path, max -> channel().read(path, max = max) },
+            join = { dir, name -> if (dir.endsWith("/")) dir + name else "$dir/$name" },
+            // 没连上时 SFTP 报的是内部的「还没 connect()」，换成人话
+            explain = { e -> if (conn.status != Conn.Status.Connected) "服务器未连接，连上后再看文件" else Sftp.explain(e) })
+    }
+    Column(Modifier.fillMaxSize()) {
+        if (transfer.isNotBlank()) Text(transfer, Modifier.padding(12.dp, 4.dp), color = Tokens.current.textSecondary, fontSize = 12.sp, lineHeight = 17.sp)
+        CodeFilesView(conn to taskKey, source, actions = { path, bytes ->
+            if (onOpen != null) CodeIconButton(Icons.AutoMirrored.Outlined.OpenInNew, "在文件侧栏打开") { onOpen(path) }
+            CodeIconButton(Icons.Default.Download, "另存为", enabled = bytes != null) {
+                pickSaveTo(Paths.nameOf(path))?.let { out -> bytes?.let { runCatching { out.writeBytes(it) } } }
+            }
+        }, treeActions = { dir, reload ->
+            CodeIconButton(Icons.Default.Upload, "上传到选中的目录", enabled = transfer.isBlank()) {
+                pickLocalFile()?.let { f ->
+                    scope.launch {
+                        transfer = "正在上传 ${f.name}…"
+                        val to = if (dir.endsWith("/")) dir + f.name else "$dir/${f.name}"
+                        runCatching {
+                            channel().write(to, f.inputStream(), f.length(), progress = { done, total ->
+                                transfer = "正在上传 ${f.name}… " + (if (total > 0) "${done * 100 / total}%" else human(done))
+                                true
+                            })
+                        }.onFailure { transfer = ""; reload(dir); return@launch }
+                        transfer = ""
+                        reload(dir)
+                    }
+                }
+            }
+        })
+    }
+}
+
 /** 一行（本机对齐 P6b 起本机文件也用：本机的目录项照样装进 [Sftp.Entry]）。 */
 @Composable
 internal fun FileRow(e: Sftp.Entry, onOpen: () -> Unit) {
@@ -271,7 +325,7 @@ internal fun FilePreviewView(path: String, name: String, ext: String, read: susp
 }
 
 @Composable
-private fun ImageBody(bytes: ByteArray) {
+internal fun ImageBody(bytes: ByteArray) {
     val img = remember(bytes) {
         runCatching { androidx.compose.ui.res.loadImageBitmap(java.io.ByteArrayInputStream(bytes)) }.getOrNull()
     }
