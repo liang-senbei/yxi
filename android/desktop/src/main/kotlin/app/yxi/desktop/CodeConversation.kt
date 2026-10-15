@@ -260,6 +260,14 @@ private fun CodeToolEntry(tool: TranscriptItem.Tool, onPath: ((String) -> Unit)?
                 }
                 val output = clipLines(tool.detail)
                 if (output.isNotBlank()) { Spacer(Modifier.height(13.6.dp)); SelectionContainer { Text(output, style = mono, color = t.textSecondary) } }
+            } else if (tool.kind == ToolKind.Read && Transcripts.numberedLines(tool.detail).isNotEmpty()) {
+                // M3h：读文件条目（规格表 §3.4）：路径行（次色）+ 带行号的内容框（行号列 #616161，代码主色，等宽、行步距 17）
+                tool.paths.firstOrNull()?.let { path ->
+                    Text(path, Modifier.then(if (onPath != null) Modifier.clickable { onPath(path) } else Modifier), color = t.textSecondary,
+                        fontSize = 12.8.sp, lineHeight = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.height(8.8.dp))
+                }
+                CodeNumberedBox(Transcripts.numberedLines(tool.detail))
             } else {
                 if (onPath != null && tool.paths.isNotEmpty()) tool.paths.forEach { path ->
                     Text(path, Modifier.clickable { onPath(path) }.padding(vertical = 2.dp), style = mono, color = t.accent, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -341,6 +349,22 @@ internal fun CodeStatusLine(label: String, since: Long) {
         Icon(Icons.Outlined.Autorenew, null, Modifier.size(12.dp), tint = t.textMuted)
         Spacer(Modifier.width(18.4.dp))
         Text("$label · ${seconds}s", color = t.textSecondary, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 1)
+    }
+}
+
+/** 带行号的文件内容框（M3h，规格表 §3.4「读文件条目展开」）：同命令框的面（卡片底、细线边、圆角 8），左边行号列（#616161，右对齐到最宽的号），
+ *  代码在号后 17.6 起、等宽、行步距 17；内容可选中（只选代码，不带行号）。 */
+@Composable
+internal fun CodeNumberedBox(lines: List<Pair<Int, String>>) {
+    val t = Tokens.current
+    val mono = CodeStyle.copy(fontSize = 12.sp, lineHeight = 17.sp)
+    val numberColor = if (t.dark) t.textMuted else Color(0xFF616161)
+    val digits = lines.maxOfOrNull { it.first.toString().length } ?: 1
+    Row(Modifier.fillMaxWidth().border(hairline(), t.border, RoundedCornerShape(8.dp)).background(t.surface2, RoundedCornerShape(8.dp))
+        .padding(horizontal = 12.dp, vertical = 10.dp)) {
+        Column(horizontalAlignment = Alignment.End) { lines.forEach { (n, _) -> Text(n.toString().padStart(digits), style = mono, color = numberColor, maxLines = 1) } }
+        Spacer(Modifier.width(17.6.dp))
+        SelectionContainer { Column { lines.forEach { (_, code) -> Text(code.ifEmpty { " " }, style = mono, color = t.textPrimary, maxLines = 1, softWrap = false) } } }
     }
 }
 

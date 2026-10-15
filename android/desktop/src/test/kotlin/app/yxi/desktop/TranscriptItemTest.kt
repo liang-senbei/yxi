@@ -102,4 +102,12 @@ class TranscriptItemTest {
         assertEquals(listOf("u", "a"), Transcripts.visible(items, TranscriptView.Normal).map { it.key })
         assertEquals(items, Transcripts.visible(items, TranscriptView.Thinking)); assertEquals(items, Transcripts.visible(items, TranscriptView.Detailed))
     }
+
+    @Test fun `numbered file lines are read from claude, opencode and cat -n output`() {
+        assertEquals(listOf(1 to "fun a()", 2 to ""), Transcripts.numberedLines("     1→fun a()\n     2→"))
+        assertEquals(listOf(1 to "- title: 安装", 12 to "x"), Transcripts.numberedLines("<file>\n00001| - title: 安装\n00012| x\n</file>"))
+        assertEquals(listOf(7 to "\tindented"), Transcripts.numberedLines("     7\t\tindented"))
+        assertTrue(Transcripts.numberedLines("{\n  \"file_path\": \"/a\"\n}\nno numbers here").isEmpty())
+        assertEquals(3, Transcripts.numberedLines((1..10).joinToString("\n") { "$it→x" }, max = 3).size)
+    }
 }

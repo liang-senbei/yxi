@@ -49,6 +49,13 @@ internal enum class TranscriptView(val key: String, val label: String) {
 }
 
 internal object Transcripts {
+    /** 读文件的结果里带行号的行（M3h）：Claude 的 `     1→内容`、OpenCode 的 `00001| 内容`、cat -n 的 `     1\t内容`。
+     *  一行都认不出就返回空（调用方照旧给原文）；最多取 [max] 行。 */
+    fun numberedLines(text: String, max: Int = 400): List<Pair<Int, String>> {
+        val pattern = Regex("""^\s*(\d{1,7})(?:→|\t|\| ?)(.*)$""")
+        return text.lineSequence().mapNotNull { line -> pattern.matchEntire(line)?.let { it.groupValues[1].toInt() to it.groupValues[2] } }.take(max).toList()
+    }
+
     /** 按对话视图过滤：普通档不显示思考（也不留占位）。 */
     fun visible(items: List<TranscriptItem>, view: TranscriptView): List<TranscriptItem> =
         if (view == TranscriptView.Normal) items.filterNot { it is TranscriptItem.Thinking } else items

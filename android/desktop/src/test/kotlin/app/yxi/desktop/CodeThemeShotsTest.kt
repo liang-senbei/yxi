@@ -294,6 +294,10 @@ private fun codeScenes() = listOf(
     CodeScene("local-opencode-thinking", verify = { _, nodes ->
         check(nodes.any { it.endsWith(" 先看 nav.yml 里有多少个页面，再按读者路径分组。") }) { "思考档没显示思考" }
     }) { localOpenCode(it, permission = false, thinking = true); it.transcriptViews[it.localSelectedTaskKey!!] = TranscriptView.Thinking },
+    // 读文件条目（M3h，规格表 §3.4）：详细档里自动展开，路径行 + 带行号的内容框（OpenCode 的 00001| 格式）
+    CodeScene("local-opencode-read", verify = { _, nodes ->
+        check(nodes.any { it.endsWith("/nav.yml") } && nodes.any { it.endsWith(" - title: 快速开始") } && nodes.any { it.trimEnd().endsWith(" 4") }) { "读文件条目没画出路径、行号或内容" }
+    }) { localOpenCode(it, permission = false, read = true); it.transcriptViews[it.localSelectedTaskKey!!] = TranscriptView.Detailed },
     // 运行中的状态行（M3f，规格表 §3.4）：在跑、没有审批时对话末尾一行「正在运行 · Ns」；夹具的时钟固定，所以是 0s
     CodeScene("local-opencode-running", verify = { _, nodes ->
         check(nodes.any { it.endsWith(" 正在运行 · 0s") }) { "运行中没有状态行" }
@@ -958,7 +962,7 @@ private val shotServers = mutableListOf<HttpServer>()
  * 控制器接回环上的假 OpenCode：只答 refresh 要的几条 GET（会话归属、200 条消息、审批、提问、状态），别的给 404；
  * 在 EDT 上先同步 refresh 一次（请求跑在 IO 上），第一帧就有数据，之后面板每 2 秒刷新一次，回的内容不变。[permission] 多一轮等审批的。
  */
-private fun localOpenCode(state: AppState, permission: Boolean, running: Boolean = false, thinking: Boolean = false) {
+private fun localOpenCode(state: AppState, permission: Boolean, running: Boolean = false, thinking: Boolean = false, read: Boolean = false) {
     localHome(state)
     val records = state.localOpenCodeTasks.registry.records
     val index = records.indexOfFirst { it.threadId == "shot-local-3" }
@@ -970,7 +974,11 @@ private fun localOpenCode(state: AppState, permission: Boolean, running: Boolean
     fun text(value: String) = JSONObject().put("type", "text").put("text", value)
     val history = JSONArray()
         .put(message("msg_shot_1", "user", text("侧栏导航太乱了，按「入门 / 指南 / 参考」三组重排一下")))
-        .put(message("msg_shot_2", "assistant", *(if (thinking) arrayOf(JSONObject().put("type", "reasoning").put("text", "先看 nav.yml 里有多少个页面，再按读者路径分组。")) else emptyArray()), text("## 调整方案\n\n现在的 `nav.yml` 把 14 个页面平铺在一层，我按读者路径分成三组：\n\n" +
+        .put(message("msg_shot_2", "assistant", *(if (thinking) arrayOf(JSONObject().put("type", "reasoning").put("text", "先看 nav.yml 里有多少个页面，再按读者路径分组。")) else emptyArray()),
+            *(if (read) arrayOf(JSONObject().put("type", "tool").put("tool", "read").put("state", JSONObject().put("status", "completed")
+                .put("input", JSONObject().put("filePath", record.directory + "/nav.yml"))
+                .put("output", "<file>\n00001| - title: 安装\n00002|   path: install.md\n00003| - title: 快速开始\n00004|   path: quickstart.md\n</file>"))) else emptyArray()),
+            text("## 调整方案\n\n现在的 `nav.yml` 把 14 个页面平铺在一层，我按读者路径分成三组：\n\n" +
             "- **入门**：安装、快速开始\n- **指南**：部署、配置、排错\n- **参考**：命令行、配置项、API\n\n旧链接保留跳转，不会 404。")))
     val permissions = JSONArray()
     val status = JSONObject()
