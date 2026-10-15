@@ -795,6 +795,7 @@ private fun checkSkillRows(nodes: List<String>, vararg rows: Pair<String, String
         val row = names.single { it.trimEnd().endsWith(" $name") }
         check(nodes.any { it.trimEnd().endsWith(" $source") && kotlin.math.abs(num(it, "y") - num(row, "y")) < 2f && num(it, "x") > 1400f }) { "「$name」那行右端没有「$source」" }
     }
+}
 
 /** 设置弹窗（M4q）：关闭 × 在 (1496, 168) 24×24；导航项 168 宽、32 高，起于 x 524，第一项顶 215.8、步距 33；[selected] 是当前分区。 */
 private fun checkSettingsFrame(nodes: List<String>, selected: String) {
