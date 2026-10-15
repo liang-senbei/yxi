@@ -83,7 +83,8 @@ internal fun CodeSidebar(state: AppState, actions: HostActions, modifier: Modifi
         Spacer(Modifier.height(48.dp))
         UpdateBanner()   // 有新版时才画
         CodeNavRow("新会话", shortcut = "Ctrl+N", plusCircle = true) { if (state.isLocal) openLocalHome(state) else actions.newConversation() }
-        CodeNavRow("插件", Icons.Outlined.Extension, selected = state.page == Page.Plugins) { state.page = Page.Plugins }
+        // 参照端导航行是「新会话 / 自定义 / 更多」（规格表 §2）；进的是自定义页（M4o：技能 / 插件 / MCP）
+        CodeNavRow("自定义", Icons.Outlined.Extension, selected = state.page == Page.Plugins) { state.page = Page.Plugins }
         CodeMoreRow(state, actions)
         if (actions.note.isNotBlank()) Text(actions.note, Modifier.padding(14.dp, 2.dp), color = t.danger, style = MaterialTheme.typography.bodySmall)
         if (Store.warning.isNotBlank()) Text(Store.warning, Modifier.padding(14.dp, 2.dp), color = t.danger, style = MaterialTheme.typography.bodySmall)
@@ -313,7 +314,7 @@ private fun CodeAccountRow(state: AppState) {
             CodeMenuItem("设置", { close(); state.showSettings = true }, trailing = "Ctrl+,")
             CodeMenuDivider()
             CodeMenuItem("服务器配置", { close(); state.page = Page.Config })
-            CodeMenuItem("插件", { close(); state.page = Page.Plugins })
+            CodeMenuItem("自定义", { close(); state.page = Page.Plugins })
             CodeMenuDivider()
             CodeMenuItem(if (signedIn) "切换账号…" else "浏览器登录…", { close(); state.requestAccountLogin(true) }, enabled = !MeAuth.waitingBrowser)
             if (signedIn) CodeMenuItem("退出登录", { close(); MeAuth.signOut() }, color = t.danger)

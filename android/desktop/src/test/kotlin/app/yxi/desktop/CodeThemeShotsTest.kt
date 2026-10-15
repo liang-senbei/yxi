@@ -730,7 +730,8 @@ private fun customizeSkills(state: AppState) {
 /** 自定义页头部（规格表 §3.10）：标题起于内容列左缘 683.2；三个标签 32 高、顶 148、紧挨；[add] 时「添加」在 x 1572、y 148.8、70.4×30.4，搜索图标中心 x 1543.6。 */
 private fun checkCustomizeHead(nodes: List<String>, add: Boolean) {
     fun num(line: String, key: String) = Regex("""$key=(-?[0-9.]+)""").find(line)!!.groupValues[1].toFloat()
-    val title = nodes.singleOrNull { it.trimEnd().endsWith(" 自定义") } ?: error("没有标题「自定义」")
+    // 侧栏导航行也叫「自定义」（规格表 §2）：标题是内容区里的那个（x > 288）
+    val title = nodes.singleOrNull { it.trimEnd().endsWith(" 自定义") && num(it, "x") > 288f } ?: error("没有标题「自定义」")
     check(kotlin.math.abs(num(title, "x") - 683.2f) < 0.5f) { "标题没起于内容列左缘 683.2：$title" }
     val tabs = nodes.filter { it.trimEnd().endsWith(" Tab") }
     check(tabs.size == 3 && tabs.all { num(it, "h") == 32f && num(it, "y") == 148f }) { "标签页不是 3 个 32 高、顶 148：$tabs" }
