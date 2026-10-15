@@ -5,11 +5,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -102,9 +104,15 @@ fun SplashGate(content: @Composable () -> Unit) {
     var done by remember { mutableStateOf(variant == null) }
     content()
     if (!done && variant != null) {
-        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+        BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
             variant.content { done = true }
-            Greeting(Modifier.align(Alignment.BottomCenter))
+            // ⚠️ 横屏时 logo 按短边（高）定大小，底下只剩一小条：竖屏那 78dp 的底距会把问候顶到 logo 上。
+            //    横屏改成贴着手势条上沿放；竖屏照旧。
+            val land = maxWidth > maxHeight
+            Greeting(
+                Modifier.align(Alignment.BottomCenter).then(if (land) Modifier.navigationBarsPadding() else Modifier),
+                bottom = if (land) 12.dp else 78.dp,
+            )
         }
     }
 }
@@ -125,7 +133,7 @@ fun SplashGate(content: @Composable () -> Unit) {
  *    图标落点各不相同，贴着谁都会撞上某一种。
  */
 @Composable
-private fun Greeting(modifier: Modifier = Modifier) {
+private fun Greeting(modifier: Modifier = Modifier, bottom: androidx.compose.ui.unit.Dp = 78.dp) {
     val name = app.yxi.agent.Account.me?.nickname?.takeIf { it.isNotBlank() }
     // 比图标晚一点浮出来 —— 跟图标同时出现会抢戏
     val a = remember { androidx.compose.animation.core.Animatable(0f) }
@@ -134,7 +142,7 @@ private fun Greeting(modifier: Modifier = Modifier) {
         a.animateTo(1f, androidx.compose.animation.core.tween(420))
     }
     Column(
-        modifier.padding(bottom = 78.dp).graphicsLayer { alpha = a.value },
+        modifier.padding(bottom = bottom).graphicsLayer { alpha = a.value },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
