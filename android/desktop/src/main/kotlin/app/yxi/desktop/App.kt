@@ -156,7 +156,7 @@ private fun ClassicWorkspace(state: AppState, conn: Conn, sess: Session, scope: 
                 DropdownMenuItem(text = { Text("模型与线路") }, onClick = { taskMenu.value = false; state.openRoutes() })
                 DropdownMenuItem(text = { Text("Android 模拟器") }, onClick = { taskMenu.value = false; state.showAndroidEmulator = true })
                 DropdownMenuItem(text = { Text("协作组") }, onClick = { taskMenu.value = false; state.showCollaboration = true })
-                DropdownMenuItem(text = { Text("切换任务 · Ctrl+K") }, onClick = { taskMenu.value = false; state.showTaskSwitcher = true })
+                DropdownMenuItem(text = { Text(MacChrome.label("切换任务 · Ctrl+K")) }, onClick = { taskMenu.value = false; state.showTaskSwitcher = true })
                 DropdownMenuItem(text = { Text("键盘快捷键") }, onClick = { taskMenu.value = false; state.showShortcuts = true })
             }
         }

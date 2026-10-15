@@ -114,7 +114,7 @@ internal fun CodeLocalComposer(
 /** 本机只能加图片：「+」直接开选择框，不开浮层。框和图标的尺寸同 SSH 输入区的「+」（24 / 19.2）。 */
 @Composable
 internal fun CodeLocalAttachButton(enabled: Boolean, capturing: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    CodeIconButton(Icons.Filled.Add, if (capturing) "正在读取图片…" else "添加图片（最多 4 张，截图可直接 Ctrl+V）", modifier,
+    CodeIconButton(Icons.Filled.Add, if (capturing) "正在读取图片…" else MacChrome.label("添加图片（最多 4 张，截图可直接 Ctrl+V）"), modifier,
         iconSize = 19.2.dp, enabled = enabled, tint = CodePalette.current.cardPlus, tipAbove = true, onClick = onClick)
 }
 

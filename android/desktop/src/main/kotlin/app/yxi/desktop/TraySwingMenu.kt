@@ -32,8 +32,18 @@ internal fun trayPopup(entries: List<TrayEntry>): JPopupMenu {
 }
 
 /**
+ * 菜单左上角放哪（纯函数，单测用）：从鼠标处往右下开；右边、下边放不下就往左、往上翻；始终留在 [area]（屏幕去掉任务栏的可用区）里，
+ * 所以任务栏在底部时菜单在它上面、不压住任务栏。
+ */
+internal fun trayMenuOrigin(pointer: java.awt.Point, area: java.awt.Rectangle, size: java.awt.Dimension): java.awt.Point {
+    val x = if (pointer.x + size.width > area.x + area.width) pointer.x - size.width else pointer.x
+    val y = if (pointer.y + size.height > area.y + area.height) pointer.y - size.height else pointer.y
+    return java.awt.Point(x.coerceIn(area.x, maxOf(area.x, area.x + area.width - size.width)), y.coerceIn(area.y, maxOf(area.y, area.y + area.height - size.height)))
+}
+
+/**
  * 把 [trayPopup] 挂到托盘图标上：右键松开时在鼠标处弹出。JPopupMenu 要有个能拿焦点的宿主窗口才会在点别处时自己收起，
- * 所以先在鼠标处显示一个 1×1、无边框、置顶的小窗当宿主，菜单收起时把它藏掉。托盘事件的坐标本来就是屏幕坐标。
+ * 所以先在菜单的位置（[trayMenuOrigin]）显示一个 1×1、无边框、置顶的小窗当宿主，菜单收起时把它藏掉。
  */
 internal fun attachTrayPopup(icon: java.awt.TrayIcon, entries: List<TrayEntry>): () -> Unit {
     val menu = trayPopup(entries)
@@ -49,10 +59,19 @@ internal fun attachTrayPopup(icon: java.awt.TrayIcon, entries: List<TrayEntry>):
     val mouse = object : MouseAdapter() {
         override fun mouseReleased(e: MouseEvent) {
             if (!e.isPopupTrigger && e.button != MouseEvent.BUTTON3) return
-            host.setLocation(e.xOnScreen, e.yOnScreen)
+            // ⚠️ Windows 托盘事件里的坐标是物理像素（awt_TrayIcon.cpp 直接用 GetCursorPos），缩放 125% / 150% 时和窗口的坐标对不上，
+            //    菜单会跑到别处甚至别的显示器上（交叉审查 10-15 指出）。MouseInfo 给的是缩放后的坐标，和 setLocation 同一套
+            val pointer = runCatching { java.awt.MouseInfo.getPointerInfo().location }.getOrNull() ?: java.awt.Point(e.xOnScreen, e.yOnScreen)
+            val gc = runCatching { java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment().screenDevices.map { it.defaultConfiguration }
+                .firstOrNull { it.bounds.contains(pointer) } }.getOrNull() ?: host.graphicsConfiguration
+            val insets = java.awt.Toolkit.getDefaultToolkit().getScreenInsets(gc)
+            val b = gc.bounds
+            val area = java.awt.Rectangle(b.x + insets.left, b.y + insets.top, b.width - insets.left - insets.right, b.height - insets.top - insets.bottom)
+            val at = trayMenuOrigin(pointer, area, menu.preferredSize)
+            host.setLocation(at.x, at.y)
             host.isVisible = true
             host.toFront()
-            menu.show(host, 0, 0)   // 超出屏幕底（任务栏在下面）时 JPopupMenu 自己往上挪
+            menu.show(host, 0, 0)
         }
     }
     icon.addMouseListener(mouse)

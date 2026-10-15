@@ -724,7 +724,7 @@ internal fun Composer(
                 .onFocusChanged { focused = it.isFocused }
                 .onPreviewKeyEvent(onKey),
             decorationBox = { inner ->
-                Box { if (draft.text.isEmpty()) Text(hint, style = BodyStyle, color = t.textMuted); inner() }
+                Box { if (draft.text.isEmpty()) Text(MacChrome.label(hint), style = BodyStyle, color = t.textMuted); inner() }
             },
         )
         ctx?.let { c ->

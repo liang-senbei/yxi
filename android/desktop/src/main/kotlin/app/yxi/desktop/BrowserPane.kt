@@ -153,7 +153,7 @@ internal fun BrowserPane(state: AppState, conn: Conn, key: String, directory: St
                 try {
                     val screenshot = preview.captureImage()
                     screenshot.copyTo(java.awt.Toolkit.getDefaultToolkit().systemClipboard)
-                    preview.error = ""; preview.status = "截图已复制，可在对话输入框按 Ctrl+V 添加"
+                    preview.error = ""; preview.status = MacChrome.label("截图已复制，可在对话输入框按 Ctrl+V 添加")
                 } catch (e: CancellationException) { throw e }
                 catch (e: Exception) { preview.error = "截图未复制：${e.message}" }
             } }, enabled = preview.handle != null && !preview.loading && !preview.preparing && !preview.capturing && !preview.needsReconnect) { Text(if (preview.capturing) "正在截图…" else "复制截图") }

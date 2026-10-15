@@ -87,7 +87,8 @@ fun main(args: Array<String>) {
             }
         }
         fun quit() {
-            if (quitting.value || reviewingExit.value) return
+            if (reviewingExit.value) { Shell.show(); return }   // 确认框开着时窗口被关了：叫回来，确认框还在
+            if (quitting.value) return
             if (state.pendingWork().needsReview) {
                 if (!Shell.visible || Shell.frame?.isFocused != true) {
                     Shell.show()
@@ -136,7 +137,7 @@ fun main(args: Array<String>) {
                 }
                 if (!MacChrome.native) fitMaximized()   // 系统边框的窗口最大化本来就避开 Dock 和菜单栏
                 val moved = object : java.awt.event.ComponentAdapter() {
-                    override fun componentMoved(e: java.awt.event.ComponentEvent) = Unit.also { fitMaximized() }
+                    override fun componentMoved(e: java.awt.event.ComponentEvent) = Unit.also { if (!MacChrome.native) fitMaximized() }
                 }
                 window.addComponentListener(moved)
                 Shell.frame = window

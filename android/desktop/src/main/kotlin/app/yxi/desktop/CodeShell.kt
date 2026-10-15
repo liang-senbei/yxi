@@ -106,7 +106,7 @@ private fun CodeIconRow(state: AppState) {
     var menu by remember { mutableStateOf(false) }
     NativeOverlay(menu)
     // Mac 原生：左上是红绿灯，四个图标整体右移到灯后面（规格表 §7.1，起点等 Mac 素材再核）
-    val shift = if (MacChrome.native) MacChrome.trafficLights - 14.dp else 0.dp
+    val shift = if (MacChrome.native) MacChrome.trafficLightsAt(Store.pref("zoom", "1").toFloatOrNull() ?: 1f) - 14.dp else 0.dp
     Box(Modifier.size(288.dp, 36.dp)) {
         Box(Modifier.offset(14.dp + shift, 6.dp)) {
             CodeIconButton(Icons.Filled.Menu, "菜单", held = menu, tint = t.textPrimary) { menu = true }
@@ -143,7 +143,7 @@ private fun CodeAppMenu(state: AppState, close: () -> Unit) {
  * 会话工作区（M4a，规格表 §3.12）：左边是会话头 + 对话（始终在），右边是浮起的面板卡片：
  * 终端 / 文件 / 改动（state.tab 1 / 2 / 3）一张，网页预览 / 文件侧栏（browserPanelOpen / filePanelOpen）一张，两张都开时上下分屏。
  * 卡片离窗口右、下各 8，顶在 y 44；改动 / 文件 / 预览宽 1040，只有终端时宽 578.4；会话头右缘缩到卡片左边。
- * 主区放不下「卡片 + 360 宽的对话」或预览点了「展开」时，卡片铺满主区（同经典分栏窄时只看面板）。
+ * 主区放不下「卡片 + 360 宽的对话」时卡片先往窄里缩（CodePanelWidth.fit），还放不下或预览点了「展开」时卡片铺满主区（同经典分栏窄时只看面板）。
  * 经典沿用 App.kt 里的 tab 切换和分栏，不和这里共用。
  */
 @Composable
@@ -156,8 +156,10 @@ private fun CodeWorkspace(state: AppState, conn: Conn, sess: Session, scope: Cor
             val tool = state.tab.takeIf { it in 1..3 }
             val side = state.filePanelOpen || state.browserPanelOpen
             val panel = tool != null || side
-            val cardWidth = if (side || (tool != null && tool != 1)) CodePanelWidth.WIDE else CodePanelWidth.TERMINAL
-            val full = panel && (maxWidth.value - cardWidth - 8f < CodePanelWidth.MIN_MAIN || (side && state.previewExpanded))
+            val target = if (side || (tool != null && tool != 1)) CodePanelWidth.WIDE else CodePanelWidth.TERMINAL
+            val fitted = CodePanelWidth.fit(target, maxWidth.value)
+            val full = panel && (fitted == null || (side && state.previewExpanded))
+            val cardWidth = fitted ?: target
             Row(Modifier.fillMaxSize()) {
                 if (!full) Column(Modifier.weight(1f).fillMaxHeight()) {
                     CodeSessionHeader(state, conn, sess, taskKey, end = if (panel) 12.dp else 14.dp)
@@ -173,7 +175,9 @@ private fun CodeWorkspace(state: AppState, conn: Conn, sess: Session, scope: Cor
                     verticalArrangement = Arrangement.spacedBy(10.4.dp),
                 ) {
                     if (tool != null) CodePanelCard(when (tool) { 1 -> "终端"; 2 -> "文件"; else -> "改动" }, { state.tab = 0 }, Modifier.weight(1f).fillMaxWidth()) {
-                        SessionContent(state, conn, sess, taskKey, links.openFile, tab = tool)
+                        // 同左边：原会话已被同名新任务顶掉时不接上去（终端会 attach 到别的任务上，交叉审查 10-15）
+                        if (replaced) Text("原会话已结束，同名会话是新任务。请在左侧重新选择。", Modifier.padding(16.dp), color = Tokens.current.textSecondary, fontSize = 13.sp, lineHeight = 18.sp)
+                        else SessionContent(state, conn, sess, taskKey, links.openFile, tab = tool)
                     }
                     if (side) CodePanelCard(if (state.browserPanelOpen) "网页预览" else "已打开的文件", { state.browserPanelOpen = false; state.filePanelOpen = false; state.previewExpanded = false },
                         Modifier.weight(1f).fillMaxWidth()) {

@@ -44,20 +44,33 @@ internal data class DiffLine(val kind: Kind, val old: Int?, val new: Int?, val t
 
 internal object CodeDiff {
     private val hunk = Regex("""^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@.*$""")
+    /** 合并冲突的组合 diff（`diff --cc`）：`@@@ -a -b +c @@@`，每行前面有「父提交数」个标记列。 */
+    private val combinedHunk = Regex("""^(@@@+) .* @@@+.*$""")
 
     /**
      * 把 `git diff` 的输出拆成行（M4c）：第一个 @@ 之前和每段 `diff --git` 起的文件头是 Meta；@@ 行是 Hunk，从它读出旧 / 新的起始行号；
      * 段内 + / − / 空格开头的分别是新增 / 删除 / 上下文，按行号往下数；`\ No newline at end of file` 是 Note。最多 [max] 行。
      */
-    fun parse(diff: String, max: Int = 6000): List<DiffLine> {
-        var old = 0; var new = 0; var inHunk = false
+    const val MAX_LINES = 6000
+    /** [diff] 的行数超过 [MAX_LINES]（[parse] 截掉了后面的）。 */
+    fun clipped(diff: String): Boolean = diff.count { it == '\n' } > MAX_LINES
+
+    fun parse(diff: String, max: Int = MAX_LINES): List<DiffLine> {
+        var old = 0; var new = 0; var inHunk = false; var marks = 0   // marks > 0：在组合 diff 的段里（不写行号，按标记列着色）
         val lines = diff.lines().let { if (it.lastOrNull()?.isEmpty() == true) it.dropLast(1) else it }
         return lines.asSequence().take(max).map { line ->
             val head = hunk.matchEntire(line)
+            val combined = if (head == null) combinedHunk.matchEntire(line) else null
             when {
-                head != null -> { inHunk = true; old = head.groupValues[1].toInt(); new = head.groupValues[2].toInt(); DiffLine(DiffLine.Kind.Hunk, null, null, line) }
-                line.startsWith("diff --git ") -> { inHunk = false; DiffLine(DiffLine.Kind.Meta, null, null, line) }
+                head != null -> { inHunk = true; marks = 0; old = head.groupValues[1].toInt(); new = head.groupValues[2].toInt(); DiffLine(DiffLine.Kind.Hunk, null, null, line) }
+                combined != null -> { inHunk = true; marks = combined.groupValues[1].length - 1; DiffLine(DiffLine.Kind.Hunk, null, null, line) }
+                line.startsWith("diff --git ") || line.startsWith("diff --cc ") || line.startsWith("diff --combined ") -> { inHunk = false; marks = 0; DiffLine(DiffLine.Kind.Meta, null, null, line) }
                 !inHunk -> DiffLine(DiffLine.Kind.Meta, null, null, line)
+                marks > 0 -> {
+                    val col = line.take(marks)
+                    val kind = when { line.startsWith("\\") -> DiffLine.Kind.Note; '+' in col -> DiffLine.Kind.Add; '-' in col -> DiffLine.Kind.Del; else -> DiffLine.Kind.Context }
+                    DiffLine(kind, null, null, if (kind == DiffLine.Kind.Note) line else line.drop(marks))
+                }
                 line.startsWith("+") -> DiffLine(DiffLine.Kind.Add, null, new++, line.substring(1))
                 line.startsWith("-") -> DiffLine(DiffLine.Kind.Del, old++, null, line.substring(1))
                 line.startsWith("\\") -> DiffLine(DiffLine.Kind.Note, null, null, line)
@@ -164,7 +177,7 @@ internal fun CodeGitChanges(snapshot: JSONObject?, staged: Boolean, file: String
                     if (open && snapshot != null) {
                         val added = lines.count { it.kind == DiffLine.Kind.Add }
                         val removed = lines.count { it.kind == DiffLine.Kind.Del }
-                        if (diff.isNotBlank()) {
+                        if (added + removed > 0) {
                             Text("+$added", color = t.diffAdd, fontSize = 12.sp, lineHeight = 17.sp)
                             Spacer(Modifier.width(4.dp))
                             Text("−$removed", color = t.diffDel, fontSize = 12.sp, lineHeight = 17.sp)
@@ -182,7 +195,16 @@ internal fun CodeGitChanges(snapshot: JSONObject?, staged: Boolean, file: String
                 if (diff.isBlank()) item(key = "nodiff") {
                     Text("当前范围无差异", Modifier.padding(horizontal = 12.8.dp, vertical = 8.dp), color = t.textMuted, fontSize = 13.sp, lineHeight = 18.sp)
                 }
-                else items(lines.size, key = { "line:$it" }) { CodeDiffRow(lines[it]) }
+                // 没有 @@ 段的（未跟踪文件的说明、Binary files differ、只改了权限）：原文照画，不是空着的「+0 −0」（交叉审查 10-15）
+                else if (lines.isEmpty()) item(key = "raw") {
+                    Text(diff.trim(), Modifier.padding(horizontal = 12.8.dp, vertical = 8.dp), style = mono, color = t.textSecondary)
+                }
+                else {
+                    items(lines.size, key = { "line:$it" }) { CodeDiffRow(lines[it]) }
+                    if (CodeDiff.clipped(diff)) item(key = "cap") {
+                        Text("差异太长，只画了前 ${CodeDiff.MAX_LINES} 行", Modifier.padding(horizontal = 12.8.dp, vertical = 6.dp), color = t.textMuted, fontSize = 12.sp, lineHeight = 17.sp)
+                    }
+                }
             }
         }
     }

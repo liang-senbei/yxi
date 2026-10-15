@@ -142,7 +142,7 @@ private fun CodeNavRow(
         }
         Spacer(Modifier.width(7.4.dp))
         Text(label, Modifier.weight(1f), color = fg, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 1, overflow = TextOverflow.Clip)
-        if (shortcut != null && hovered) Text(shortcut, color = t.textMuted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1)
+        if (shortcut != null && hovered) Text(MacChrome.label(shortcut), color = t.textMuted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1)
     }
 }
 /**

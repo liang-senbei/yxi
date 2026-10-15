@@ -181,7 +181,7 @@ private fun DocumentBody(conn: Conn, doc: FileDocument, onQuote: (String) -> Uni
     }
     Column(Modifier.fillMaxSize().onPreviewKeyEvent {
         when {
-            it.type != KeyEventType.KeyDown || !it.isCtrlPressed -> false
+            it.type != KeyEventType.KeyDown || !MacChrome.primary(it) -> false   // Mac 原生时 ⌘F / ⌘H / ⌘S / ⌘A
             it.key == Key.F && !doc.image -> { openSearch(); true }
             it.key == Key.H && !doc.image -> { replaceOpen = true; openSearch(); true }
             it.key == Key.S && doc.dirty && !doc.conflict && !doc.busy -> { save(); true }

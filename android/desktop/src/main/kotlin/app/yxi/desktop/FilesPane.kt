@@ -54,6 +54,7 @@ import app.yxi.agent.Session
 import app.yxi.ssh.Paths
 import app.yxi.ssh.Sftp
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -199,13 +200,15 @@ private fun CodeRemoteFiles(conn: Conn, taskKey: String, directory: String, onOp
     val scope = rememberCoroutineScope()
     var sftp by remember(conn) { mutableStateOf<Sftp?>(null) }
     var transfer by remember(conn) { mutableStateOf("") }
+    var note by remember(conn) { mutableStateOf("") }
     DisposableEffect(conn) { onDispose { runCatching { sftp?.close() }; sftp = null } }
-    suspend fun channel(): Sftp = sftp ?: conn.ssh.openSftp().also { sftp = it }
+    val opening = remember(conn) { kotlinx.coroutines.sync.Mutex() }
+    // 一条 SFTP 通道：首次列目录和上传同时要时只开一条（不然多开的那条没人关）
+    suspend fun channel(): Sftp = sftp ?: opening.withLock { sftp ?: conn.ssh.openSftp().also { sftp = it } }
     val source = remember(conn, directory) {
         CodeFileSource(directory.ifBlank { "." },
             list = { dir -> channel().list(dir) },
-            // 链接没解引用过（大目录只解前几个，见 Sftp.list），用到的时候再问
-            isDir = { path, e -> e.isDir || (e.isLink && runCatching { channel().isDir(path) }.getOrDefault(false)) },
+            isDir = { path -> channel().isDir(path) },   // 只问点了的、还没判过的符号链接（大目录 Sftp.list 只解前几个）
             read = { path, max -> channel().read(path, max = max) },
             join = { dir, name -> if (dir.endsWith("/")) dir + name else "$dir/$name" },
             // 没连上时 SFTP 报的是内部的「还没 connect()」，换成人话
@@ -213,23 +216,31 @@ private fun CodeRemoteFiles(conn: Conn, taskKey: String, directory: String, onOp
     }
     Column(Modifier.fillMaxSize()) {
         if (transfer.isNotBlank()) Text(transfer, Modifier.padding(12.dp, 4.dp), color = Tokens.current.textSecondary, fontSize = 12.sp, lineHeight = 17.sp)
-        CodeFilesView(conn to taskKey, source, actions = { path, bytes ->
+        if (note.isNotBlank()) Text(note, Modifier.padding(12.dp, 4.dp), color = Tokens.current.danger, fontSize = 12.sp, lineHeight = 17.sp)
+        CodeFilesView(remember(conn, taskKey) { conn to taskKey }, source, actions = { path, bytes ->
             if (onOpen != null) CodeIconButton(Icons.AutoMirrored.Outlined.OpenInNew, "在文件侧栏打开") { onOpen(path) }
-            CodeIconButton(Icons.Default.Download, "另存为", enabled = bytes != null) {
-                pickSaveTo(Paths.nameOf(path))?.let { out -> bytes?.let { runCatching { out.writeBytes(it) } } }
+            CodeIconButton(Icons.Default.Download, "另存为") {
+                // 存整个文件（Sftp.download 流式写盘）；预览的 bytes 只是开头 1 MB / 8 MB，拿它另存会悄悄截断（经典仍是那样）
+                pickSaveTo(Paths.nameOf(path))?.let { out ->
+                    scope.launch {
+                        transfer = "正在下载 ${Paths.nameOf(path)}…"; note = ""
+                        runCatching { channel().download(path, out) }.onFailure { note = "下载失败：" + Sftp.explain(it) }
+                        transfer = ""
+                    }
+                }
             }
         }, treeActions = { dir, reload ->
             CodeIconButton(Icons.Default.Upload, "上传到选中的目录", enabled = transfer.isBlank()) {
                 pickLocalFile()?.let { f ->
                     scope.launch {
-                        transfer = "正在上传 ${f.name}…"
+                        transfer = "正在上传 ${f.name}…"; note = ""
                         val to = if (dir.endsWith("/")) dir + f.name else "$dir/${f.name}"
                         runCatching {
                             channel().write(to, f.inputStream(), f.length(), progress = { done, total ->
                                 transfer = "正在上传 ${f.name}… " + (if (total > 0) "${done * 100 / total}%" else human(done))
                                 true
                             })
-                        }.onFailure { transfer = ""; reload(dir); return@launch }
+                        }.onFailure { note = "上传失败：" + Sftp.explain(it) }   // 同经典：失败原因要说出来（交叉审查 10-15）
                         transfer = ""
                         reload(dir)
                     }

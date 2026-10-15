@@ -33,8 +33,10 @@ internal fun GitChangesView(source: Any, directory: String, sourceLine: String, 
     var error by remember { mutableStateOf("") }
     var feedbackContext by remember(source, directory) { mutableStateOf<String?>(null) }
     var feedback by remember(source, directory) { mutableStateOf("") }
+    val code = LocalThemeSpec.current.style == UiStyle.Code
     LaunchedEffect(source, directory, file, staged, revision) {
-        busy = true; error = ""; snapshot = null
+        // Code 的手风琴（M4c）点一个文件就重读：留着上一份直到新的到，列表不闪、不跳回顶上（交叉审查 10-15）；经典照旧先清空
+        busy = true; error = ""; if (!code) snapshot = null
         try { snapshot = load(file, staged) }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { error = e.message.orEmpty(); snapshot = null }

@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -51,20 +52,20 @@ import kotlinx.coroutines.launch
 
 /**
  * Code 风格文件面板的数据来源（M4d）：本机读磁盘（LocalFiles），服务器走这条 SSH 的 SFTP。[root] 是起点目录（会话的工作目录），
- * [list] 列一个目录（目录在前、按名字排，同 Sftp.list），[isDir] 判断一项是不是目录（服务器上的符号链接要点的时候才问），
+ * [list] 列一个目录（目录在前、按名字排，同 Sftp.list），[isDir] 问一个路径是不是目录（只在点了还没判过的符号链接时才问，同经典），
  * [read] 读文件开头最多 max 字节，[join] 拼路径，[explain] 把异常说成人话。
  */
 internal class CodeFileSource(
     val root: String,
     val list: suspend (String) -> List<Sftp.Entry>,
-    val isDir: suspend (path: String, entry: Sftp.Entry) -> Boolean,
+    val isDir: suspend (path: String) -> Boolean,
     val read: suspend (path: String, max: Int) -> ByteArray,
     val join: (dir: String, name: String) -> String,
     val explain: (Throwable) -> String,
 )
 
-/** 树里看得见的一行：[depth] 是缩进层级，[dir] 已判好是不是目录。 */
-internal data class FileTreeRow(val path: String, val name: String, val depth: Int, val dir: Boolean)
+/** 树里看得见的一行：[depth] 是缩进层级，[dir] 是不是目录，[link] 是还没判过指向的符号链接（点的时候再问 [CodeFileSource.isDir]）。 */
+internal data class FileTreeRow(val path: String, val name: String, val depth: Int, val dir: Boolean, val link: Boolean = false)
 
 internal object FileTree {
     /**
@@ -111,6 +112,8 @@ internal fun CodeFilesView(key: Any, source: CodeFileSource, actions: @Composabl
     val t = Tokens.current
     val scope = rememberCoroutineScope()
     val line = if (t.dark) t.border else Color(0xFFE6E6E6)
+    // 状态跟着「这个会话 + 起点目录」：同一个会话 cd 到别处后重选，树要从新目录重读（交叉审查 10-15）
+    @Suppress("NAME_SHADOWING") val key = remember(key, source.root) { key to source.root }
     val children = remember(key) { mutableStateMapOf<String, List<FileTreeRow>>() }
     val expanded = remember(key) { mutableStateListOf<String>() }
     var filter by remember(key) { mutableStateOf("") }
@@ -121,7 +124,8 @@ internal fun CodeFilesView(key: Any, source: CodeFileSource, actions: @Composabl
 
     suspend fun load(dir: String, depth: Int) {
         try {
-            children[dir] = source.list(dir).map { e -> val path = source.join(dir, e.name); FileTreeRow(path, e.name, depth, source.isDir(path, e)) }
+            // ⚠️ 不在列目录时逐个 stat 符号链接（服务器上 node_modules/.bin 这种目录会一条条串行地问，几十秒），同经典：点的时候再判
+            children[dir] = source.list(dir).map { e -> FileTreeRow(source.join(dir, e.name), e.name, depth, e.isDir, link = e.isLink && !e.isDir) }
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { error = source.explain(e) }
     }
@@ -162,7 +166,13 @@ internal fun CodeFilesView(key: Any, source: CodeFileSource, actions: @Composabl
                             .background(if (row.path == selected) line else Color.Transparent, RoundedCornerShape(6.dp))
                             .clickable {
                                 selected = row.path
-                                if (!row.dir) file = row.path
+                                if (row.link) scope.launch {
+                                    val parent = children.entries.firstOrNull { (_, rows) -> rows.any { it.path == row.path } }?.key
+                                    val dir = runCatching { source.isDir(row.path) }.getOrDefault(false)
+                                    if (parent != null) children[parent] = children[parent].orEmpty().map { if (it.path == row.path) it.copy(dir = dir, link = false) else it }
+                                    if (!dir) file = row.path
+                                    else { expanded.add(row.path); load(row.path, row.depth + 1) }
+                                } else if (!row.dir) file = row.path
                                 else {
                                     if (open) expanded.remove(row.path) else {
                                         expanded.add(row.path)
@@ -223,8 +233,10 @@ private fun CodeFilePreview(path: String, source: CodeFileSource, line: Color, a
                     LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 8.8.dp, bottom = 12.dp)) {
                         items(lines.size) { i ->
                             Row(Modifier.fillMaxWidth().height(16.8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text((i + 1).toString(), Modifier.width(40.dp), style = mono, color = if (t.dark) t.textMuted else Color(0xFF6C6C6C),
-                                    textAlign = TextAlign.End, maxLines = 1)
+                                DisableSelection {   // 复制时只带代码，不带行号（交叉审查 10-15）
+                                    Text((i + 1).toString(), Modifier.width(40.dp), style = mono, color = if (t.dark) t.textMuted else Color(0xFF6C6C6C),
+                                        textAlign = TextAlign.End, maxLines = 1)
+                                }
                                 Spacer(Modifier.width(10.4.dp))
                                 Text(lines[i].ifEmpty { " " }, style = mono, color = t.textPrimary, maxLines = 1, softWrap = false)
                             }

@@ -309,7 +309,7 @@ internal fun CodeComposerPlus(onAttach: () -> Unit, onHistory: () -> Unit, onSea
             ) { Icon(Icons.Filled.Add, "附件、输入历史、搜索、语音", Modifier.size(19.2.dp), tint = p.cardPlus) }
         }
         if (open) CodePopup(close, side = PopupSide.Above, gap = 2.4.dp, width = 240.dp) {
-            CodeMenuItem("添加附件（截图可直接 Ctrl+V）", { close(); onAttach() })
+            CodeMenuItem(MacChrome.label("添加附件（截图可直接 Ctrl+V）"), { close(); onAttach() })
             CodeMenuItem("输入历史", { close(); onHistory() })
             if (onSearch != null) CodeMenuItem("搜索当前对话", { close(); onSearch() })
             CodeMenuItem("语音输入", { close(); onVoice() })

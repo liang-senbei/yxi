@@ -35,8 +35,19 @@ internal val PanelShadow = listOf(
 internal object CodePanelWidth {
     const val WIDE = 1040f
     const val TERMINAL = 578.4f
-    /** 对话那一列至少留这么宽，不够就让面板铺满主区（同经典分栏的「窄时只看面板」）。 */
+    /** 对话那一列至少留这么宽。 */
     const val MIN_MAIN = 360f
+    /** 卡片最窄缩到这么宽；连这都放不下才铺满主区（同经典分栏的「窄时只看面板」）。 */
+    const val MIN_CARD = 440f
+
+    /**
+     * 主区宽 [main] 时卡片多宽（含右边 8 的留白不算在内）；返回 null 表示铺满主区。先按 [target]（规格的宽度），
+     * 放不下「卡片 + 8 + 360 的对话」时卡片往窄里缩，最窄 [MIN_CARD]：1920×1080、125% 这类常见屏上（主区约 1248）对话就还在左边（交叉审查 10-15）。
+     */
+    fun fit(target: Float, main: Float): Float? {
+        val room = main - 8f - MIN_MAIN
+        return if (room >= MIN_CARD.coerceAtMost(target)) minOf(target, room) else null
+    }
 }
 
 /**
@@ -61,16 +72,17 @@ internal fun CodePanelCard(title: String, onClose: () -> Unit, modifier: Modifie
 
 /**
  * 一张右侧面板 + 左边的主区（M4b，规格表 §3.12）：[title] 不为空时右边开一张 [CodePanelCard]（宽 [width]，离右、下 8，顶比主区低 8），
- * 主区放不下「卡片 + 360」时卡片铺满（主区先不画）。本机 / 服务器 Codex 等 Code 对话页用它放「改动」「文件」；SSH 会话页可能两张，用自己的布局。
+ * 主区放不下「卡片 + 360」时卡片先往窄里缩（最窄 [CodePanelWidth.MIN_CARD]），还放不下才铺满（主区先不画）。本机 / 服务器 Codex 等 Code 对话页用它放「改动」「文件」；SSH 会话页可能两张，用自己的布局。
  */
 @Composable
 internal fun CodePanelLayout(title: String?, onClose: () -> Unit, panel: @Composable () -> Unit, width: Float = CodePanelWidth.WIDE, main: @Composable () -> Unit) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val full = title != null && maxWidth.value - width - 8f < CodePanelWidth.MIN_MAIN
+        val fitted = if (title == null) null else CodePanelWidth.fit(width, maxWidth.value)
+        val full = title != null && fitted == null
         Row(Modifier.fillMaxSize()) {
             if (!full) Box(Modifier.weight(1f).fillMaxHeight()) { main() }
             if (title != null) CodePanelCard(title, onClose,
-                (if (full) Modifier.weight(1f).padding(start = 8.dp) else Modifier.width((width + 8f).dp)).fillMaxHeight().padding(top = 8.dp, end = 8.dp, bottom = 8.dp)) { panel() }
+                (if (fitted == null) Modifier.weight(1f).padding(start = 8.dp) else Modifier.width((fitted + 8f).dp)).fillMaxHeight().padding(top = 8.dp, end = 8.dp, bottom = 8.dp)) { panel() }
         }
     }
 }

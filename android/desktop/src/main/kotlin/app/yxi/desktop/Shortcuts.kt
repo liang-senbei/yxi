@@ -16,7 +16,7 @@ private val shortcuts = listOf(
     "Ctrl+N" to "新建会话",
     "Ctrl+K" to "搜索并切换任务",
     "Ctrl+B" to "切换侧边栏",
-    "Ctrl+J · Ctrl+`" to "打开 / 关闭终端",
+    (if (MacChrome.native) "Ctrl+J" else "Ctrl+J · Ctrl+`") to "打开 / 关闭终端",   // ⌘` 在 Mac 上是系统的切窗口
     "Ctrl+Shift+F" to "打开 / 关闭文件",
     "Ctrl+Shift+P" to "打开 / 关闭网页预览",
     "Ctrl+\\" to "关掉右侧面板",

@@ -39,4 +39,18 @@ class CodeDiffTest {
         assertEquals(1, second[4].old); assertEquals(1, second[5].new)
         assertEquals(3, CodeDiff.parse(two, max = 3).size)
     }
+
+    @Test fun `combined diffs of conflicted files keep their lines without line numbers`() {
+        val cc = "diff --cc a.txt\nindex 1,2..3\n--- a/a.txt\n+++ b/a.txt\n@@@ -1,2 -1,2 +1,3 @@@\n  same\n+ ours\n -theirs\n++both\n"
+        val lines = CodeDiff.parse(cc).filter { it.kind != DiffLine.Kind.Meta }
+        assertEquals(listOf(DiffLine.Kind.Hunk, DiffLine.Kind.Context, DiffLine.Kind.Add, DiffLine.Kind.Del, DiffLine.Kind.Add), lines.map { it.kind })
+        assertEquals(listOf("same", "ours", "theirs", "both"), lines.drop(1).map { it.text })
+        assertEquals(null, lines[2].new)
+    }
+
+    @Test fun `long diffs are flagged as clipped at the parse cap`() {
+        val long = (1..CodeDiff.MAX_LINES + 5).joinToString("\n") { "+x" }
+        assertEquals(true, CodeDiff.clipped(long))
+        assertEquals(false, CodeDiff.clipped(sample))
+    }
 }

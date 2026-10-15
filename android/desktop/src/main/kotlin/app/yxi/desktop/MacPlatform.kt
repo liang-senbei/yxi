@@ -27,6 +27,8 @@ internal object MacChrome {
 
     /** 红绿灯占的宽度（三颗灯 + 左右留白）：顶部条在这之后才放东西。实测值等 Mac 素材（规格表 §7.3），先按系统默认的位置留。 */
     val trafficLights = 72.dp
+    /** 界面缩放 [zoom] 下要留多少 dp：红绿灯是系统画的、不跟着缩放，所以除掉缩放（0.8 倍时不会压到绿灯）。 */
+    fun trafficLightsAt(zoom: Float) = trafficLights / zoom.coerceIn(0.5f, 2f)
 
     /** 主修饰键：Mac 原生时是 ⌘，其余是 Ctrl。 */
     fun primary(e: KeyEvent): Boolean = if (native) e.isMetaPressed else e.isCtrlPressed
@@ -34,7 +36,7 @@ internal object MacChrome {
     /** 菜单栏接管的键（Mac 原生时 [shortcut] 不再处理它们，免得菜单项和窗口各触发一次）。 */
     val menuKeys = setOf(Key.N, Key.K, Key.B, Key.J, Key.Comma, Key.Slash, Key.Equals, Key.Minus, Key.Zero, Key.M, Key.W, Key.P, Key.F, Key.Backslash)
 
-    private val combo = Regex("""(?:(?:Ctrl|Shift|Alt)\+)+(?:Enter|Tab|Esc|[A-Za-z0-9,./=\-`\\])""")
+    private val combo = Regex("""(?:(?:Ctrl|Shift|Alt)\+)+(?:Enter|Tab|Esc|[A-Za-z0-9,./=\-`\\])(?![A-Za-z])""")
 
     /**
      * 把界面文字里的快捷键（「Ctrl+B」「Ctrl+Shift+P」「Shift+Enter」）换成 Mac 的写法（「⌘B」「⇧⌘P」「⇧↩」：按 ⌃⌥⇧⌘ 的顺序、不加 +）。
@@ -96,11 +98,13 @@ internal fun FrameWindowScope.YxiMacMenuBar(state: AppState, win: WindowState, o
  * 退出 → 走 [quit]（有未完成的活先确认，所以先取消系统的退出、由我们自己决定），点 Dock 图标 → 把窗口叫回来。只在 Mac 原生时装。
  */
 internal fun installMacAppHandlers(state: AppState, quit: () -> Unit) {
+    // ⚠️ 退出（⌘Q、Dock 的「退出」、注销 / 关机）：只有要你确认未完成的活时才 cancelQuit 弹确认；
+    //    否则不取消，直接走我们的收尾（finishQuit → exitApplication 退出进程），系统的注销 / 关机接着走（交叉审查 10-15）
     if (!MacChrome.native || !java.awt.Desktop.isDesktopSupported()) return
     val desktop = java.awt.Desktop.getDesktop()
     fun onUi(block: () -> Unit) = javax.swing.SwingUtilities.invokeLater(block)
     runCatching { desktop.setAboutHandler { onUi { Shell.show(); state.settingsSection = "关于"; state.showSettings = true } } }
     runCatching { desktop.setPreferencesHandler { onUi { Shell.show(); state.showSettings = true } } }
-    runCatching { desktop.setQuitHandler { _, response -> response.cancelQuit(); onUi { quit() } } }
+    runCatching { desktop.setQuitHandler { _, response -> if (state.pendingWork().needsReview) response.cancelQuit(); onUi { quit() } } }
     runCatching { desktop.addAppEventListener(java.awt.desktop.AppReopenedListener { onUi { Shell.show() } }) }
 }

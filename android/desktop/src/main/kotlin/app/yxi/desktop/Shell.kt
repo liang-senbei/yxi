@@ -152,7 +152,7 @@ fun FrameWindowScope.TitleBar(state: AppState, win: WindowState, onClose: () -> 
     val title = state.conn?.let { c -> c.host.alias.ifBlank { c.host.hostname } + (state.session?.let { " · " + (state.navigation.title(taskNavigationKey(c.host, it)) ?: it.short) } ?: "") } ?: "Yxi"
     WindowDraggableArea(Modifier.fillMaxWidth().height(height).background(t.sidebar).pointerInput(Unit) { detectTapGestures(onDoubleTap = { toggleMax() }) }) {
         Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
-            if (MacChrome.native) Spacer(Modifier.width(MacChrome.trafficLights))   // 给红绿灯让位
+            if (MacChrome.native) Spacer(Modifier.width(MacChrome.trafficLightsAt(Store.pref("zoom", "1").toFloatOrNull() ?: 1f)))   // 给红绿灯让位
             CaptionButton({ state.sidebarOpen = !state.sidebarOpen }) { sidebarGlyph(it) }
             Text(title, Modifier.weight(1f).padding(horizontal = 4.dp), color = t.textSecondary, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
             WindowButtons(win, onClose)
@@ -254,7 +254,7 @@ fun shortcut(e: KeyEvent, state: AppState, scope: CoroutineScope): Boolean {
     // Mac 原生（Mac1 第二轮）：⌘ 当主修饰键；切会话仍是 ⌃Tab（⌘Tab 是系统切应用）；菜单栏有的键交给菜单，这里不再处理一遍
     if (MacChrome.native && e.isCtrlPressed && e.key == Key.Tab) { state.selectByOffset(if (e.isShiftPressed) -1 else 1); return true }
     if (!MacChrome.primary(e)) return false
-    if (MacChrome.native && e.key in MacChrome.menuKeys) return false
+    if (MacChrome.native && e.key in MacChrome.menuKeys && !(e.key == Key.Equals && e.isShiftPressed)) return false   // ⌘⇧=（⌘+）菜单不认，这里接
     val digit = (e.key.keyCode - Key.One.keyCode).toInt()     // 桌面 keyCode = VK_1…VK_9 连号
     when {
         // M4e：右侧面板的键（同参照端，规格表 §3.9 / PRD §6「快捷键」）：Ctrl+Shift+P 网页预览、Ctrl+Shift+F 文件、Ctrl+` 终端（同 Ctrl+J）、Ctrl+\ 关掉右侧面板

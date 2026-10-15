@@ -19,4 +19,12 @@ class TraySwingMenuTest {
         labels.last().doClick()
         assertEquals("quit", fired)
     }
+
+    @Test fun `menu opens at the pointer and flips up and left to stay above a bottom taskbar`() {
+        val area = java.awt.Rectangle(0, 0, 1536, 824)   // 1920×1080 @125% 去掉底部任务栏
+        val size = java.awt.Dimension(160, 120)
+        assertEquals(java.awt.Point(100, 100), trayMenuOrigin(java.awt.Point(100, 100), area, size))
+        assertEquals(java.awt.Point(1500 - 160, 824 - 120), trayMenuOrigin(java.awt.Point(1500, 850), area, size))   // 托盘在任务栏里：往上翻、不压任务栏
+        assertEquals(java.awt.Point(1340, 704), trayMenuOrigin(java.awt.Point(1500, 830), area, size))
+    }
 }

@@ -138,7 +138,7 @@ internal fun Sidebar(state: AppState, actions: HostActions, modifier: Modifier =
         Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp).clip(RoundedCornerShape(8.dp)).clickable { state.showTaskSwitcher = true }.padding(horizontal = 10.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Icon(Icons.Outlined.SwapHoriz, null, Modifier.size(18.dp), tint = t.textSecondary)
             Text("切换任务", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = t.textPrimary)
-            Text("Ctrl+K", style = MaterialTheme.typography.labelSmall, color = t.textMuted)
+            Text(MacChrome.label("Ctrl+K"), style = MaterialTheme.typography.labelSmall, color = t.textMuted)
         }
         NavItem(Icons.Outlined.Extension, "插件", state.page == Page.Plugins, Modifier.fillMaxWidth().padding(horizontal = 10.dp)) { state.page = Page.Plugins }
         NavItem(Icons.Default.Tune, "配置", state.page == Page.Config, Modifier.fillMaxWidth().padding(horizontal = 10.dp)) { state.page = Page.Config }
@@ -358,7 +358,7 @@ private fun AccountRow(state: AppState) {
         HorizontalDivider(color = t.border)
         DropdownMenuItem(text = { Text("我的 · 账号与使用情况") }, leadingIcon = { Icon(Icons.Outlined.AccountCircle, null, Modifier.size(18.dp)) }, onClick = { menu = false; state.meSection = "个人资料"; state.page = Page.Me })
         DropdownMenuItem(text = { Text("版本与更新 · $ver") }, leadingIcon = { Icon(Icons.Outlined.SystemUpdateAlt, null, Modifier.size(18.dp)) }, onClick = { menu = false; state.settingsSection = "关于"; state.showSettings = true })
-        DropdownMenuItem(text = { Text("设置") }, trailingIcon = { Text("Ctrl+,", style = MaterialTheme.typography.labelSmall, color = t.textMuted) }, leadingIcon = { Icon(Icons.Outlined.Tune, null, Modifier.size(18.dp)) }, onClick = { menu = false; state.showSettings = true })
+        DropdownMenuItem(text = { Text("设置") }, trailingIcon = { Text(MacChrome.label("Ctrl+,"), style = MaterialTheme.typography.labelSmall, color = t.textMuted) }, leadingIcon = { Icon(Icons.Outlined.Tune, null, Modifier.size(18.dp)) }, onClick = { menu = false; state.showSettings = true })
         HorizontalDivider(color = t.border)
         DropdownMenuItem(text = { Text("服务器配置") }, leadingIcon = { Icon(Icons.Outlined.Dns, null, Modifier.size(18.dp)) }, onClick = { menu = false; state.page = Page.Config })
         DropdownMenuItem(text = { Text("插件") }, leadingIcon = { Icon(Icons.Outlined.Extension, null, Modifier.size(18.dp)) }, onClick = { menu = false; state.page = Page.Plugins })

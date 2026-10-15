@@ -168,7 +168,7 @@ private fun CodeLocalFiles(taskKey: String, directory: String) {
     val source = remember(root) {
         CodeFileSource(root,
             list = { dir -> withContext(Dispatchers.IO) { LocalFiles.list(File(dir)) } },
-            isDir = { _, entry -> entry.isDir },
+            isDir = { path -> withContext(Dispatchers.IO) { File(path).isDirectory } },
             read = { path, max -> withContext(Dispatchers.IO) { LocalFiles.read(File(path), max) } },
             join = { dir, name -> File(dir, name).path },
             explain = LocalFiles::explain)
