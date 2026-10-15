@@ -217,6 +217,13 @@ private fun codeScenes() = listOf(
     CodeScene("mac-native-tooltip", listOf("~收起侧栏"), verify = { _, nodes ->
         check(nodes.any { it.trimEnd().endsWith(" ⌘B") }) { "tooltip 里没有 ⌘B" }
     }) { remote(it, tab = 0); MacChrome.native = true },
+    // M4e：右侧面板的快捷键写在入口上——会话头 ⋮ 里「文件」右侧 Ctrl+Shift+F，「网页预览」的 tooltip 带 Ctrl+Shift+P
+    CodeScene("ssh-more-menu", listOf("@更多"), verify = { _, nodes ->
+        check(nodes.any { it.trimEnd().endsWith(" Ctrl+Shift+F") }) { "「文件」右侧没有 Ctrl+Shift+F" }
+    }) { remote(it, tab = 0) },
+    CodeScene("ssh-preview-tooltip", listOf("~网页预览"), verify = { _, nodes ->
+        check(nodes.any { it.trimEnd().endsWith(" Ctrl+Shift+P") }) { "tooltip 里没有 Ctrl+Shift+P" }
+    }) { remote(it, tab = 0) },
     CodeScene("approval-card", content = { ApprovalDockShot() }),
     // 新会话页的两侧边距（M2-d）：主区只有 600 宽时，骨架两侧各留 40，输入卡宽 600 − 80 = 520、左缘 288 + 40（PRD §5.1）。只画骨架和占位的 chip / 输入卡
     CodeScene("home-narrow", content = { NarrowHomeShot() }, verify = { _, nodes ->

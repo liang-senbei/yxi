@@ -219,7 +219,7 @@ private fun CodeSessionHeader(state: AppState, conn: Conn, sess: Session, taskKe
         Row(horizontalArrangement = Arrangement.spacedBy(5.6.dp), verticalAlignment = Alignment.CenterVertically) {
             CodeIconButton(Icons.Outlined.Terminal, "终端", active = state.tab == 1, shortcut = "Ctrl+J") { state.tab = if (state.tab == 1) 0 else 1 }
             CodeIconButton(Icons.Outlined.Difference, "改动", active = state.tab == 3) { state.tab = if (state.tab == 3) 0 else 3 }
-            CodeIconButton(Icons.Outlined.Preview, "网页预览", active = state.browserPanelOpen) {
+            CodeIconButton(Icons.Outlined.Preview, "网页预览", active = state.browserPanelOpen, shortcut = "Ctrl+Shift+P") {
                 if (state.browserPanelOpen) state.browserPanelOpen = false else { state.browserPanelOpen = true; state.filePanelOpen = false }
             }
             Box {
@@ -281,7 +281,7 @@ private fun CodeRenameDialog(state: AppState, sess: Session, taskKey: String, cl
 private fun CodeMoreMenu(state: AppState, conn: Conn, sess: Session, close: () -> Unit) {
     val docs = !state.filePanelOpen && !state.browserPanelOpen && state.documents.any { it.hostId == conn.host.id && it.matchesTask(sess) }
     CodePopup(close, alignEnd = true, gap = 6.4.dp) {
-        CodeMenuItem("文件", { close(); state.tab = if (state.tab == 2) 0 else 2 }, checked = state.tab == 2)
+        CodeMenuItem("文件", { close(); state.tab = if (state.tab == 2) 0 else 2 }, trailing = "Ctrl+Shift+F", checked = state.tab == 2)
         if (docs) CodeMenuItem("打开文件侧栏", { close(); state.filePanelOpen = true })
         CodeMenuDivider()
         CodeMenuItem("模型与线路", { close(); state.openRoutes() })

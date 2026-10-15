@@ -257,6 +257,11 @@ fun shortcut(e: KeyEvent, state: AppState, scope: CoroutineScope): Boolean {
     if (MacChrome.native && e.key in MacChrome.menuKeys) return false
     val digit = (e.key.keyCode - Key.One.keyCode).toInt()     // 桌面 keyCode = VK_1…VK_9 连号
     when {
+        // M4e：右侧面板的键（同参照端，规格表 §3.9 / PRD §6「快捷键」）：Ctrl+Shift+P 网页预览、Ctrl+Shift+F 文件、Ctrl+` 终端（同 Ctrl+J）、Ctrl+\ 关掉右侧面板
+        e.key == Key.P && e.isShiftPressed -> if (state.browserPanelOpen) state.browserPanelOpen = false else { state.browserPanelOpen = true; state.filePanelOpen = false }
+        e.key == Key.F && e.isShiftPressed -> state.tab = if (state.tab == 2) 0 else 2
+        e.key == Key.Grave -> state.tab = if (state.tab == 1) 0 else 1
+        e.key == Key.Backslash -> { state.tab = 0; state.browserPanelOpen = false; state.filePanelOpen = false; state.previewExpanded = false }
         e.key == Key.N -> state.newSessionRequest++
         e.key == Key.K -> state.showTaskSwitcher = true
         e.key == Key.B -> state.sidebarOpen = !state.sidebarOpen

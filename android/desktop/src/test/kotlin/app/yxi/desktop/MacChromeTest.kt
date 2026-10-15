@@ -14,6 +14,7 @@ class MacChromeTest {
         assertEquals("⇧⌘P", MacChrome.label("Ctrl+Shift+P"))
         assertEquals("⌥⌘A", MacChrome.label("Ctrl+Alt+A"))
         assertEquals("⌘,", MacChrome.label("Ctrl+,"))
+        assertEquals("⌘\\ · ⇧⌘F · ⌘`", MacChrome.label("Ctrl+\\ · Ctrl+Shift+F · Ctrl+`"))
         assertEquals("⌘= · ⌘- · ⌘0", MacChrome.label("Ctrl+= · Ctrl+- · Ctrl+0"))
         assertEquals("⌘1 … 9", MacChrome.label("Ctrl+1 … 9"))
         assertEquals("对话视图 · ⌘O", MacChrome.label("对话视图 · Ctrl+O"))

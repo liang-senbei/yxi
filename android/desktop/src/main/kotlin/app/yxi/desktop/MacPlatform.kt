@@ -32,9 +32,9 @@ internal object MacChrome {
     fun primary(e: KeyEvent): Boolean = if (native) e.isMetaPressed else e.isCtrlPressed
 
     /** 菜单栏接管的键（Mac 原生时 [shortcut] 不再处理它们，免得菜单项和窗口各触发一次）。 */
-    val menuKeys = setOf(Key.N, Key.K, Key.B, Key.J, Key.Comma, Key.Slash, Key.Equals, Key.Minus, Key.Zero, Key.M, Key.W)
+    val menuKeys = setOf(Key.N, Key.K, Key.B, Key.J, Key.Comma, Key.Slash, Key.Equals, Key.Minus, Key.Zero, Key.M, Key.W, Key.P, Key.F, Key.Backslash)
 
-    private val combo = Regex("""(?:(?:Ctrl|Shift|Alt)\+)+(?:Enter|Tab|Esc|[A-Za-z0-9,./=\-])""")
+    private val combo = Regex("""(?:(?:Ctrl|Shift|Alt)\+)+(?:Enter|Tab|Esc|[A-Za-z0-9,./=\-`\\])""")
 
     /**
      * 把界面文字里的快捷键（「Ctrl+B」「Ctrl+Shift+P」「Shift+Enter」）换成 Mac 的写法（「⌘B」「⇧⌘P」「⇧↩」：按 ⌃⌥⇧⌘ 的顺序、不加 +）。
@@ -70,7 +70,12 @@ internal fun FrameWindowScope.YxiMacMenuBar(state: AppState, win: WindowState, o
         }
         Menu("显示") {
             Item(if (state.sidebarOpen) "隐藏侧栏" else "显示侧栏", onClick = { state.sidebarOpen = !state.sidebarOpen }, shortcut = KeyShortcut(Key.B, meta = true))
-            Item("对话 / 终端", onClick = { state.tab = if (state.tab == 1) 0 else 1 }, shortcut = KeyShortcut(Key.J, meta = true))
+            Item("终端", onClick = { state.tab = if (state.tab == 1) 0 else 1 }, shortcut = KeyShortcut(Key.J, meta = true))
+            Item("文件", onClick = { state.tab = if (state.tab == 2) 0 else 2 }, shortcut = KeyShortcut(Key.F, meta = true, shift = true))
+            Item("网页预览", onClick = { if (state.browserPanelOpen) state.browserPanelOpen = false else { state.browserPanelOpen = true; state.filePanelOpen = false } },
+                shortcut = KeyShortcut(Key.P, meta = true, shift = true))
+            Item("关掉右侧面板", onClick = { state.tab = 0; state.browserPanelOpen = false; state.filePanelOpen = false; state.previewExpanded = false },
+                shortcut = KeyShortcut(Key.Backslash, meta = true))
             Separator()
             Item("放大", onClick = { zoom(+1) }, shortcut = KeyShortcut(Key.Equals, meta = true))
             Item("缩小", onClick = { zoom(-1) }, shortcut = KeyShortcut(Key.Minus, meta = true))
