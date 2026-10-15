@@ -103,6 +103,24 @@ internal class HostActions(val state: AppState, private val scope: CoroutineScop
         }
     }
     /**
+     * M4s「在 Yxi 里继续」：把服务器上 Yxi 之外起的 Claude Code 会话接到一个新的 Yxi tmux 会话里跑（[continueExternalClaude]），
+     * 成功后照新会话的老路选中它（[sessionCreated]）。App 级协程：切页面、收侧栏都不取消；进行中 / 出错记在 [ExternalClaude] 里，侧栏和只读页都看得到。
+     */
+    fun continueClaude(c: Conn, row: app.yxi.agent.ClaudeSessions.Row) {
+        val key = ExternalClaude.key(c.host, row.entry.id)
+        if (ExternalClaude.continuing[key] == true) return
+        ExternalClaude.continuing[key] = true; ExternalClaude.errors.remove(key)
+        scope.launch {
+            try {
+                val s = continueExternalClaude(state, c, row)
+                sessionCreated(c, s, null)
+                c.refreshClaudeSessions()
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { ExternalClaude.errors[key] = e.message.orEmpty().ifBlank { "没能在 Yxi 里接着跑，请重试" } }
+            finally { ExternalClaude.continuing.remove(key) }
+        }
+    }
+    /**
      * 新会话建好以后（经典对话框、Code 新会话页共用）：没名字就起个默认名，从收藏来的按收藏改名并把收藏挪过去，再选中。
      */
     fun sessionCreated(c: Conn, s: Session, favorite: FavoriteLaunch?) {

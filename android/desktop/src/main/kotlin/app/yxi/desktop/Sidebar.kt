@@ -198,7 +198,11 @@ internal fun SidebarHostList(state: AppState, actions: HostActions, filter: Stri
             } || state.remoteOpenCodeTasks.tasks(h).any { it.title.contains(f, true) || it.directory.contains(f, true) } || state.codexWorkspace.tasks(h).any { record ->
                 listOf(record.title, record.directory, state.navigation.title(record.key).orEmpty(), state.navigation.group(record.key)).any { it.contains(f, true) }
             }
-            if (!hostMatch && sessions.isEmpty() && favorites.isEmpty() && !managedMatch) return@forEachIndexed
+            // M4s：Code 侧栏还列这台主机上 Yxi 之外的 Claude Code 会话，搜到的只有它们也要留着这台主机（经典不列，不看它）
+            val externalMatch = host != null && f.isNotEmpty() && c != null && ExternalClaude.rows(c).any { r ->
+                listOf(r.entry.title, r.entry.cwd, r.origin, r.entry.branch).any { it.contains(f, true) }
+            }
+            if (!hostMatch && sessions.isEmpty() && favorites.isEmpty() && !managedMatch && !externalMatch) return@forEachIndexed
             val section = HostSection(i, h, c, sessions, favorites, f)
             // Code 的分组里有按位置记的状态（⋮ 开关），主机按 id 定位，滤掉前面的主机时不串
             if (host != null) key(h.id) { host(section) } else ClassicHostSection(state, actions, section)

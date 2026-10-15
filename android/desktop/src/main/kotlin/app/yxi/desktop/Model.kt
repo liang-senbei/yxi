@@ -198,6 +198,20 @@ class Conn(val host: Host, hostKeys: HostKeys) {
     var groupsLoaded by mutableStateOf(false); private set
     var groupsError by mutableStateOf(""); private set
     private var lastGroupsRead = 0L
+    /** 连上过几次（每次连接 / 重连成功 +1）：[ensureClaudeSessions] 按它判断「这一次连上之后读过没有」。 */
+    private var connections = 0
+    /**
+     * M4s：这台主机上 Yxi 之外起的 Claude Code 会话（[ClaudeSessions]，Code 侧栏的「Claude Code 会话」组和只读页用）。
+     * 每次连上（含重连）读一次、手动刷新再读；不跟 5 秒一轮的会话刷新一起轮询 —— 读的是几百个历史文件的头尾，而且 exec 占着连接的锁。
+     * null = 还没读成过；读不成留着上一份，原因进 [claudeSessionsError]。
+     */
+    internal var claudeSessions by mutableStateOf<app.yxi.agent.ClaudeSessions.Snapshot?>(null)
+    internal var claudeSessionsLoading by mutableStateOf(false); private set
+    internal var claudeSessionsError by mutableStateOf(""); private set
+    private var claudeSessionsRound = 0
+    private var claudeSessionsJob: kotlinx.coroutines.Job? = null
+    /** 在 Yxi 里接着跑的：会话编号 → 新 tmux 会话名。新进程的登记写出来之前靠它去重（[app.yxi.agent.ClaudeSessions.visible]），只在内存里。 */
+    internal val claudeAdopted = androidx.compose.runtime.mutableStateMapOf<String, String>()
     // 自己一个 scope，不挂在 Composable 的 LaunchedEffect 上：侧栏收起（Ctrl+B）时 Sidebar 整个不在组合里，
     // 挂那儿的循环会跟着停 —— 收着侧栏就既不刷新也不重连。Swing 线程上写状态，跟界面同一条线。
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
@@ -222,6 +236,7 @@ class Conn(val host: Host, hostKeys: HostKeys) {
                     delay(backoff); backoff = minOf(backoff * 2, 10_000); continue
                 }
                 backoff = 1_000; error = ""; status = Status.Connected
+                connections++
             }
             refresh()
             // 每秒看一眼还活着没（jsch 心跳判死后 isConnected 立刻变 false），断了马上进重连，不用等满 5 秒
@@ -267,6 +282,24 @@ class Conn(val host: Host, hostKeys: HostKeys) {
                     s.detail.replace(Regex("\\s+"), " ").trim().take(60).let { d -> if (d.isBlank()) "" else " · $d" }, host.id, s.name, taskNavigationKey(host, s))
         }
         sessions = fresh
+    }
+
+    /** 这一次连上之后还没读过 Yxi 之外的 Claude Code 会话就读一次（Code 侧栏的主机组进组合、连接状态变了时调；截图夹具不连，[connections] 是 0，不读）。 */
+    internal fun ensureClaudeSessions() {
+        if (status == Status.Connected && connections > 0 && claudeSessionsRound != connections) refreshClaudeSessions()
+    }
+
+    /** 重读一次（[ExternalClaude.list]，可替换）；正在读就不重复起。在这条连接自己的 scope 里跑：侧栏收起、换页都不取消。 */
+    internal fun refreshClaudeSessions(): kotlinx.coroutines.Job {
+        claudeSessionsJob?.takeIf { it.isActive }?.let { return it }
+        claudeSessionsRound = connections
+        claudeSessionsLoading = true
+        return scope.launch {
+            try { claudeSessions = ExternalClaude.list(this@Conn); claudeSessionsError = "" }
+            catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { claudeSessionsError = e.message.orEmpty().ifBlank { "读不到这台主机的 Claude Code 会话" } }
+            finally { claudeSessionsLoading = false }
+        }.also { claudeSessionsJob = it }
     }
 
     fun close() { scope.cancel(); ssh.disconnect(); status = Status.Idle }

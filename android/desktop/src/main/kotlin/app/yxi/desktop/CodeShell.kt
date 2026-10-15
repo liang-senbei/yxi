@@ -72,7 +72,7 @@ internal fun CodeShell(state: AppState, actions: HostActions, scope: CoroutineSc
             if (state.sidebarOpen && state.page != Page.Me) CodeSidebar(state, actions, Modifier.width(288.dp).fillMaxHeight())
             Column(Modifier.weight(1f).fillMaxHeight()) {
                 Spacer(Modifier.height(36.dp))
-                PageBody(state, localHome = { CodeLocalHome(state, actions, scope) }) {
+                PageBody(state, localHome = { CodeLocalHome(state, actions, scope) }, external = { ExternalClaudePane(state, actions) }) {
                     val conn = state.conn
                     val sess = state.session
                     if (conn == null || sess == null) CodeHome(state, actions, scope) else CodeWorkspace(state, conn, sess, scope)

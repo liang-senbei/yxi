@@ -904,12 +904,12 @@ private fun ItemView(conn: Conn, item: ChatItem, onEdit: (MessageEditTarget) -> 
  * 助手正文、思考、注入的消息走统一对话项（Transcripts.claudeHistory）；单独一次工具调用画成一个条目的卡片，点开是原来的 ToolCard；接口报错同经典（危险色）。
  */
 @Composable
-private fun CodeChatItem(item: ChatItem, onEdit: (MessageEditTarget) -> Unit) {
+private fun CodeChatItem(item: ChatItem, onEdit: ((MessageEditTarget) -> Unit)?) {
     when (item) {
-        is ChatItem.UserText -> CodeMessageWithActions(item.text, alignEnd = true, onEdit = { onEdit(MessageEditTarget(item.key, item.text, sourceUuid = item.sourceUuid)) }) {
+        is ChatItem.UserText -> CodeMessageWithActions(item.text, alignEnd = true, onEdit = onEdit?.let { edit -> { edit(MessageEditTarget(item.key, item.text, sourceUuid = item.sourceUuid)) } }) {
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) { SelectionContainer { CodeUserBubble(item.text) } }
         }
-        is ChatItem.Queued -> CodeMessageWithActions(item.text, alignEnd = true, onEdit = { onEdit(MessageEditTarget(item.key, item.text, queued = true)) }) {
+        is ChatItem.Queued -> CodeMessageWithActions(item.text, alignEnd = true, onEdit = onEdit?.let { edit -> { edit(MessageEditTarget(item.key, item.text, queued = true)) } }) {
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
                 Text("排队中", color = Tokens.current.textMuted, fontSize = 12.sp, lineHeight = 17.sp)
                 SelectionContainer { CodeUserBubble(item.text) }
@@ -919,6 +919,21 @@ private fun CodeChatItem(item: ChatItem, onEdit: (MessageEditTarget) -> Unit) {
         is ChatItem.ApiError -> Note("⚠ " + item.text, Tokens.current.danger)
         is ChatItem.Unknown -> Unit
         else -> CodeTranscriptRow(Transcripts.claudeHistory(item))
+    }
+}
+
+/**
+ * M4s：只读的服务器转录（Yxi 之外起的 Claude Code 会话，[ExternalClaudePane]）的一行，和上面 SSH 对话页 Code 外观那一支画法相同：
+ * 连着的工具调用一组（[open] 是手动开合，详细档反过来）、点开的条目是原来的富渲染 ToolCard；普通档的思考不画；
+ * 你的消息只有「复制」，没有「编辑消息」—— 那是回退改写，不能动别人正在用（或可能还会接着用）的会话。
+ */
+@Composable
+internal fun CodeReadOnlyChatRow(row: ChatRow, view: TranscriptView, open: Boolean, onToggle: () -> Unit) {
+    when (row) {
+        is ChatRow.Group -> CodeToolGroup(row.calls.map { Transcripts.claudeHistory(it) as TranscriptItem.Tool },
+            expanded = open != (view == TranscriptView.Detailed), onToggle = onToggle, startOpen = view == TranscriptView.Detailed,
+            detail = { tool -> row.calls.firstOrNull { it.key == tool.key }?.let { ToolCard(it) } })
+        is ChatRow.One -> if (!(row.item is ChatItem.Thinking && view == TranscriptView.Normal)) CodeChatItem(row.item, null)
     }
 }
 

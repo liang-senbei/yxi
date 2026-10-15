@@ -116,7 +116,7 @@ private fun ClassicShell(state: AppState, actions: HostActions, scope: Coroutine
 
 /** 整页入口（左栏底部的「配置」「我的」）盖住工作区；再点一次那个入口就回来。两种外壳共用，[workspace] 是各自的工作区；[localHome] 是本机工作台的首页（Code 传入，经典为空、照旧）。 */
 @Composable
-internal fun PageBody(state: AppState, localHome: (@Composable () -> Unit)? = null, workspace: @Composable () -> Unit) {
+internal fun PageBody(state: AppState, localHome: (@Composable () -> Unit)? = null, external: (@Composable () -> Unit)? = null, workspace: @Composable () -> Unit) {
     when (state.page) {
         Page.Config -> RoutesPane(state)
         Page.ConfigFiles -> ConfigPane(state)
@@ -131,6 +131,8 @@ internal fun PageBody(state: AppState, localHome: (@Composable () -> Unit)? = nu
         Page.OpenCode -> RemoteOpenCodePane(state)
         Page.Acp -> RemoteAcpPane(state)
         Page.Workspace -> workspace()
+        // M4s：只有 Code 外壳传了只读页；经典没有入口，万一停在这页（切风格）就回工作区
+        Page.ExternalClaude -> if (external != null) external() else workspace()
     }
 }
 

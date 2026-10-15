@@ -135,6 +135,7 @@ class CodeThemeShotsTest {
         RemoteSlashCommands.clearForFixture()   // M4o：主机的命令表、技能表也是全局的（斜杠菜单、技能页的场景各自放）
         Store.setPref(ChatFontSize.PREF, ChatFontSize.Medium.key)   // M4q：对话字号 / 宽度每张都回到默认档，改它的场景不串到后面
         Store.setPref(ChatWidth.PREF, ChatWidth.Narrow.key)
+        ExternalClaude.clearForFixture()   // M4s：Yxi 之外的 Claude Code 会话的读取口换成空的（不连主机），摆了数的场景自己再放
         val state = AppState().apply { startupRestored = true }   // 跳过 HostEffects 的开机恢复 / 自动重连
         state.navigation.setMode("全部")   // 全部 / 待处理 / 归档落在夹具 profile 里，local-archived 改过（值没变不写盘）
         try {
@@ -745,7 +746,102 @@ private fun codeScenes() = listOf(
         check(!state.showSettings) { "Esc 没关掉设置弹窗" }
         check(nodes.none { it.trimEnd().endsWith(" 关闭设置") || it.contains(" w=168.0 h=32.0 Tab") }) { "弹窗还在" }
     }) { remote(it, tab = 0); it.showSettings = true },
+    // M4s：主机组里 Yxi 会话下面的「Claude Code 会话」组：终端起的、Claude App（sdk-cli）起的、正在终端里跑的（实心点）；
+    // 在 Yxi 的 tmux 会话里跑着的那条（登记里 tmux = cc-demo-app）不列。右端是来源小字
+    CodeScene("ssh-external-list", verify = { state, nodes ->
+        checkExternalRows(nodes, SHOT_EXT_LIVE to "终端", SHOT_EXT_CLI to "终端", SHOT_EXT_APP to "Claude App / SDK")
+        check(nodes.none { it.endsWith(" $SHOT_EXT_MANAGED") }) { "Yxi 的 tmux 会话里跑着的那条不该列出来" }
+        check(nodes.any { it.trimEnd().endsWith(" Claude Code 会话") }) { "没有「Claude Code 会话」组标题" }
+        check(state.page == Page.Workspace && state.externalClaude == null) { "列表场景不该打开只读页" }
+    }) { sshExternal(it, null) },
+    // 点一行：只读页 —— 会话头「只读 · 终端」，对话用 SSH 对话页同一套画法（工具摘要行、助手正文），停靠区有「在 Yxi 里继续」和权限说明
+    CodeScene("ssh-external-open", listOf(SHOT_EXT_CLI), verify = { state, nodes ->
+        check(state.page == Page.ExternalClaude && state.externalClaude == (HOST.id to SHOT_EXT_ID_CLI)) { "点行没打开只读页：${state.page} ${state.externalClaude}" }
+        for (text in listOf("只读 · 终端", "给解析器补上空输入的单元测试", "加了两个用例，空字符串和只有空白的输入现在都返回空列表。", "在 Yxi 里继续", "权限：请求批准"))
+            check(nodes.any { it.trimEnd().endsWith(" $text") }) { "只读页上没有「$text」" }
+        check(nodes.none { it.contains("编辑消息") }) { "只读页不该有「编辑消息」" }
+    }) { sshExternal(it, null) },
+    // 正在终端里跑的：说明「正在终端里运行，这里只读」，「在 Yxi 里继续」灰掉（点了不动、不起任何东西）
+    CodeScene("ssh-external-live", listOf("在 Yxi 里继续"), verify = { state, nodes ->
+        check(state.page == Page.ExternalClaude && state.externalClaude == (HOST.id to SHOT_EXT_ID_LIVE)) { "没停在在跑那条的只读页" }
+        check(nodes.any { it.contains("正在终端里运行，这里只读") }) { "没有在跑的说明" }
+        check(nodes.any { it.trimEnd().endsWith(" 运行结束后才能在 Yxi 里继续") }) { "没写为什么不能继续" }
+        check(ExternalClaude.continuing.isEmpty() && ExternalClaude.errors.isEmpty()) { "在跑的会话点「在 Yxi 里继续」不该有动作" }
+    }) { sshExternal(it, SHOT_EXT_ID_LIVE) },
+    // 行的 ⋮：标题和目录；在跑的那条「在 Yxi 里继续」灰掉、下面写原因
+    CodeScene("ssh-external-row-menu", listOf("~$SHOT_EXT_LIVE", "会话操作"), verify = { _, nodes ->
+        for (text in listOf("打开（只读）", "在 Yxi 里继续", "复制会话编号", "/srv/api")) check(nodes.any { it.trimEnd().endsWith(" $text") }) { "⋮ 里没有「$text」" }
+        check(nodes.any { it.contains("正在终端里运行，这里只读；运行结束后才能在 Yxi 里继续") }) { "⋮ 里没写为什么不能继续" }
+    }) { sshExternal(it, null) },
 )
+
+private const val SHOT_EXT_ID_CLI = "5f1c2d3e-4a5b-4c6d-8e7f-001122334455"
+private const val SHOT_EXT_ID_APP = "6a2b3c4d-5e6f-4a7b-8c9d-112233445566"
+private const val SHOT_EXT_ID_LIVE = "7b3c4d5e-6f7a-4b8c-9d0e-223344556677"
+private const val SHOT_EXT_ID_MANAGED = "8c4d5e6f-7a8b-4c9d-8e1f-334455667788"
+private const val SHOT_EXT_CLI = "给解析器补上空输入的单元测试"
+private const val SHOT_EXT_APP = "整理文档站的导航结构"
+private const val SHOT_EXT_LIVE = "排查接口偶发的 502"
+private const val SHOT_EXT_MANAGED = "这条在 Yxi 的 tmux 会话里跑着"
+
+/**
+ * M4s 的场景：[remote] 的服务器（连着、不真连），这台主机上 Yxi 之外的 Claude Code 会话直接放进 [Conn.claudeSessions]；读取口换成同一份固定数据
+ * （点刷新也不碰网络），转录口给一段合成的对话。[open] 不为空就直接打开那条的只读页。时间是固定的（2030-01-06 上午），不随运行日期变。
+ */
+private fun sshExternal(state: AppState, open: String?) {
+    remote(state, tab = 0)
+    val c = state.conns.single()
+    c.status = Conn.Status.Connected
+    state.session = null
+    val at = java.time.LocalDateTime.of(2030, 1, 6, 9, 0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+    fun entry(id: String, cwd: String, title: String, back: Long, entry: String, branch: String, messages: Int, exact: Boolean = true) =
+        app.yxi.agent.ClaudeSessions.Entry(id, "/home/dev/.claude/projects/${cwd.replace('/', '-')}/$id.jsonl", cwd, title, at - back, entry, branch, messages, exact, 4096)
+    val snapshot = app.yxi.agent.ClaudeSessions.Snapshot(
+        listOf(
+            entry(SHOT_EXT_ID_MANAGED, "/srv/demo-app", SHOT_EXT_MANAGED, 0, "cli", "main", 12),
+            entry(SHOT_EXT_ID_LIVE, "/srv/api", SHOT_EXT_LIVE, 10 * 60_000L, "cli", "fix/502", 96, exact = false),
+            entry(SHOT_EXT_ID_CLI, "/srv/demo-app", SHOT_EXT_CLI, 60 * 60_000L, "cli", "main", 4),
+            entry(SHOT_EXT_ID_APP, "/srv/docs", SHOT_EXT_APP, 3 * 60 * 60_000L, "sdk-cli", "docs/nav", 18),
+        ),
+        listOf(
+            app.yxi.agent.ClaudeSessions.Process(4242, SHOT_EXT_ID_LIVE, live = true, status = "busy", entrypoint = "cli"),
+            app.yxi.agent.ClaudeSessions.Process(4243, SHOT_EXT_ID_MANAGED, live = true, tmux = SESSION.name, status = "idle", entrypoint = "cli"),
+        ))
+    c.claudeSessions = snapshot
+    ExternalClaude.list = { snapshot }
+    ExternalClaude.transcript = { _, e, _ -> shotExternalTranscript(e) }
+    if (open != null) state.openExternalClaude(c, open)
+}
+
+/** 合成的外部会话转录：提问 → 读文件、跑测试（两次工具调用）→ 回复。 */
+private fun shotExternalTranscript(e: app.yxi.agent.ClaudeSessions.Entry): List<String> {
+    fun user(uuid: String, content: Any) = JSONObject().put("type", "user").put("uuid", uuid).put("sessionId", e.id).put("cwd", e.cwd)
+        .put("message", JSONObject().put("role", "user").put("content", content)).toString()
+    fun assistant(uuid: String, vararg blocks: JSONObject) = JSONObject().put("type", "assistant").put("uuid", uuid).put("sessionId", e.id).put("cwd", e.cwd)
+        .put("message", JSONObject().put("role", "assistant").put("content", JSONArray(blocks.toList()))).toString()
+    fun text(s: String) = JSONObject().put("type", "text").put("text", s)
+    fun tool(id: String, name: String, input: JSONObject) = JSONObject().put("type", "tool_use").put("id", id).put("name", name).put("input", input)
+    fun result(id: String, content: String) = JSONObject().put("type", "tool_result").put("tool_use_id", id).put("is_error", false).put("content", content)
+    return listOf(
+        user("ext-u1", e.title),
+        assistant("ext-a1", text("先看一下解析器现在怎么处理空输入。"), tool("ext-t1", "Read", JSONObject().put("file_path", "${e.cwd}/src/parser.ts"))),
+        user("ext-u2", JSONArray().put(result("ext-t1", "export function parse(input: string) {\n  return input.split(',')\n}"))),
+        assistant("ext-a2", tool("ext-t2", "Bash", JSONObject().put("command", "npm test -- parser").put("description", "跑解析器的测试"))),
+        user("ext-u3", JSONArray().put(result("ext-t2", "Tests: 14 passed, 14 total"))),
+        assistant("ext-a3", text("加了两个用例，空字符串和只有空白的输入现在都返回空列表。")),
+    )
+}
+
+/** 「Claude Code 会话」组的行：标题按 [rows] 的顺序从上到下（新的在前），同一行右端是来源小字。 */
+private fun checkExternalRows(nodes: List<String>, vararg rows: Pair<String, String>) {
+    fun num(line: String, key: String) = Regex("""$key=(-?[0-9.]+)""").find(line)!!.groupValues[1].toFloat()
+    val titles = rows.map { (title, _) -> nodes.singleOrNull { it.trimEnd().endsWith(" $title") && num(it, "x") < 288f } ?: error("侧栏里没有（或不止一个）「$title」") }
+    check(titles.zipWithNext().all { (a, b) -> num(a, "y") < num(b, "y") }) { "外部会话的顺序不对：$titles" }
+    for ((i, pair) in rows.withIndex()) {
+        val y = num(titles[i], "y")
+        check(nodes.any { it.trimEnd().endsWith(" ${pair.second}") && num(it, "x") in 150f..288f && kotlin.math.abs(num(it, "y") - y) < 4f }) { "「${pair.first}」那行右端没有「${pair.second}」" }
+    }
+}
 
 /** 自定义页（M4o）：[remote] 的服务器（不连），切到插件页；[location] 是「本地」或「服务器」（同经典的 pluginLocation）。 */
 private fun customize(state: AppState, location: String) {

@@ -223,7 +223,7 @@ internal suspend fun createSession(conn: Conn, original: DesktopLaunchPlan, shar
         "group-failed" -> "加入协作组失败，请刷新分组后重试；尚未启动新任务"
         "worktree-failed" -> "无法准备独立工作树，请确认路径是 Git 仓库、有已提交的 HEAD、父目录可写且 Git/Python3 可用。已有目录不会删除。"
         "missing-runtime" -> "未找到可执行的 ${plan.agent}，请先在该服务器安装并完成登录"
-        "nodir" -> "无法创建或进入目录，请检查路径与访问权限"
+        "nodir" -> if (plan.resumeSessionId != null) "原会话的目录在服务器上已经不在了或进不去：${plan.directory}" else "无法创建或进入目录，请检查路径与访问权限"
         "failed" -> "tmux 未能创建会话，请刷新核对后重试"
         "exited" -> "运行器已提前退出，请在服务器终端检查其登录与配置"
         "conflict" -> "同一启动请求对应的目录不一致，未复用已有会话"

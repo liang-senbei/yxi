@@ -55,7 +55,9 @@ internal fun CodeHostGroup(state: AppState, actions: HostActions, section: HostS
         // 断线重连中列表照旧摆着（服务器上的会话还在），不清；搜索时只画滤剩下的
         if (c != null) {
             ProjectTree(state, c, section.sessions, searching = section.filter.isNotEmpty(), query = section.filter, look = CodeTreeLook)
-            if (hostIsEmpty(state, h, c, section.filter)) CodeTreeNote("这台机器上还没有会话", false)
+            // 有 Yxi 之外的 Claude Code 会话（下面那组）时不说「还没有会话」
+            if (hostIsEmpty(state, h, c, section.filter) && ExternalClaude.rows(c).isEmpty()) CodeTreeNote("这台机器上还没有会话", false)
+            CodeExternalClaudeGroup(state, actions, c, section.filter)   // M4s
         }
         CodeHostFavorites(actions, c, section.favorites, state.navigation)
         // 组尾留 6：下一台主机的标题和上一行拉开，同「会话 → 下一个分组标题」≈34（规格 §3.8）；颜色条跟着画满，相邻主机仍然连着
@@ -122,7 +124,12 @@ private fun CodeHostTitle(h: Host, c: Conn?, actions: HostActions) {
         CodeIconButton(Icons.Filled.Add, "新会话", enabled = st == Conn.Status.Connected, hoverFill = p.groupPlusHover) { actions.creatingOn = c }
         Box {
             CodeIconButton(Icons.Filled.MoreVert, "主机操作", held = menu, hoverFill = p.groupPlusHover) { menu = true }
-            if (menu) CodePopup({ menu = false }, alignEnd = true) { CodeMenuEntries(hostMenu(h, c, actions)) { menu = false } }
+            // M4s：Code 多一项「刷新 Claude Code 会话」（经典没有那一组，菜单不变）；列表为空时整组不画，靠这里手动再读
+            if (menu) CodePopup({ menu = false }, alignEnd = true) {
+                CodeMenuEntries(hostMenu(h, c, actions).toMutableList().apply {
+                    add(2, MenuEntry.Item("刷新 Claude Code 会话", st == Conn.Status.Connected) { c?.refreshClaudeSessions() })
+                }) { menu = false }
+            }
         }
     }
 }

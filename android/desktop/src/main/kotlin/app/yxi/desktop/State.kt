@@ -19,7 +19,7 @@ import app.yxi.agent.SessionState
  * 主机分组 → 会话行都在侧栏里），所以这里只剩另外两个整页入口。
  * 它跟 [AppState.tab] 是两层：`page` 决定右边整块是什么，`tab` 只在工作区里选 对话/终端/文件。
  */
-enum class Page { Workspace, Config, Me, Routes, Codex, OpenCode, Acp, Plugins, ConfigFiles, Connections, LocalAgents, LocalWorkspace, ScheduledTasks }
+enum class Page { Workspace, Config, Me, Routes, Codex, OpenCode, Acp, Plugins, ConfigFiles, Connections, LocalAgents, LocalWorkspace, ScheduledTasks, ExternalClaude }
 
 internal class CodexConversationView {
     val scroll = androidx.compose.foundation.lazy.LazyListState()
@@ -60,6 +60,14 @@ class AppState internal constructor(private val localClaudeFactory: (Instruction
             return true
         }
         return false
+    }
+    /** M4s：只读页（[Page.ExternalClaude]）正在看的 Yxi 之外的 Claude Code 会话：主机 id → 会话编号。只有 Code 侧栏能点进来。 */
+    internal var externalClaude by mutableStateOf<Pair<String, String>?>(null)
+    /** 打开一个 Yxi 之外的 Claude Code 会话（只读）：先按选主机的老路回工作区（记住主机、清掉选中的 tmux 会话），再换到只读页。 */
+    internal fun openExternalClaude(c: Conn, id: String) {
+        select(c, null)
+        externalClaude = c.host.id to id
+        page = Page.ExternalClaude
     }
     internal var remoteOpenCodeSelectedKey by mutableStateOf<String?>(null)
     internal var remoteOpenCodeDirectory by mutableStateOf("")

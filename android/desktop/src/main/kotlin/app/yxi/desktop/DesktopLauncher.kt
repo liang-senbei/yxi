@@ -6,7 +6,13 @@ import app.yxi.ssh.Shell
 import java.util.UUID
 
 data class DesktopLaunchPlan(val directory: String, val agent: String, val requestId: String, val initialPrompt: String = "", val collaborationGroup: String = "", val isolatedWorktree: Boolean = false,
-    val permissionMode: PermissionMode? = null, val mcpConfigPath: String? = null, val mcpConfigHash: String? = null, val codexMcpArguments: List<String> = emptyList()) {
+    val permissionMode: PermissionMode? = null, val mcpConfigPath: String? = null, val mcpConfigHash: String? = null, val codexMcpArguments: List<String> = emptyList(),
+    /**
+     * M4s「在 Yxi 里继续」：接着跑服务器上已有的 Claude Code 会话（`claude --resume <编号>`），别的照常（权限模式、共享 MCP、tmux 会话名）。
+     * 只给 Claude Code、编号必须是 UUID（它会拼进命令行）；不带启动提示词、不建独立工作树（会话按启动目录归档，换了目录 resume 找不到它）；
+     * 目录必须已经存在 —— 新建会话那条路会 `mkdir -p`，接着跑的不该凭空造出原来的目录。
+     */
+    val resumeSessionId: String? = null) {
     init {
         require(RunnerCatalog.find(agent)?.serverCreation == true) { "此运行器的会话创建适配尚未完成" }
         require(directory.startsWith('/') && directory.none { it < ' ' || it == '\u007f' }) { "请输入服务器上的绝对路径，不含控制字符" }
@@ -17,6 +23,10 @@ data class DesktopLaunchPlan(val directory: String, val agent: String, val reque
         require(codexMcpArguments.isEmpty() || agent == "codex")
         require(codexMcpArguments.size % 2 == 0 && codexMcpArguments.chunked(2).all { it[0] == "-c" && Regex("^mcp_servers\\.[A-Za-z0-9_-]+=").containsMatchIn(it[1]) })
         require(codexMcpArguments.sumOf { it.toByteArray().size } <= 65536 && codexMcpArguments.none { '\u0000' in it }) { "共享 MCP 启动参数过大或包含空字符" }
+        if (resumeSessionId != null) {
+            require(agent == "claude" && RESUME_ID.matches(resumeSessionId)) { "要接着跑的会话编号无效" }
+            require(initialPrompt.isEmpty() && !isolatedWorktree) { "接着跑已有会话时不带启动提示词、不建独立工作树" }
+        }
     }
     val sessionName: String get() {
         val slug = directory.trimEnd('/').substringAfterLast('/').map { if (it.isLetterOrDigit() || it in "_-") it else '_' }.joinToString("").take(40).ifBlank { "workspace" }
@@ -29,14 +39,15 @@ data class DesktopLaunchPlan(val directory: String, val agent: String, val reque
         require(permissionMode == null || agent == "claude") { "此权限模式仅适用于 Claude Code" }
         // Native root bypass requires this compatibility flag; it does not create a sandbox.
         val execPrefix = if (permissionMode == PermissionMode.Bypass) "exec env IS_SANDBOX=1" else "exec"
-        val launchArguments = permissionMode?.let { listOf("--permission-mode", it.nativeId) }.orEmpty() +
+        val launchArguments = resumeSessionId?.let { listOf("--resume", it) }.orEmpty() + permissionMode?.let { listOf("--permission-mode", it.nativeId) }.orEmpty() +
             mcpConfigPath?.let { listOf("--mcp-config", it) }.orEmpty() + codexMcpArguments
         val quotedArguments = launchArguments.joinToString(" ") { Shell.q(it) }
         val checkMcp = if (mcpConfigPath == null) "" else """
 mcp_status=${'$'}(python3 -c ${Shell.q(RemoteClaudeSharedMcp.preflightScript)} ${Shell.q(mcpConfigPath)} ${Shell.q(mcpConfigHash!!)} "${'$'}bin" "${'$'}want")
 case "${'$'}mcp_status" in ready) ;; mcp-conflict|mcp-config-invalid|mcp-config-changed|mcp-check-failed) echo "$tag:${'$'}mcp_status"; exit 0;; *) echo '$tag:mcp-check-failed'; exit 0;; esac
 """.trimIndent()
-        val prepareDirectory = if (!isolatedWorktree) "mkdir -p -- \"${'$'}d\" 2>/dev/null || { echo '$tag:nodir'; exit 0; }" else {
+        val prepareDirectory = if (resumeSessionId != null) "[ -d \"${'$'}d\" ] || { echo '$tag:nodir'; exit 0; }"
+        else if (!isolatedWorktree) "mkdir -p -- \"${'$'}d\" 2>/dev/null || { echo '$tag:nodir'; exit 0; }" else {
             val script = """
 import pathlib, subprocess, sys
 source, request = sys.argv[1:]
@@ -108,5 +119,6 @@ echo '$tag:ok'
     }
     companion object {
         fun newRequestId() = UUID.randomUUID().toString().replace("-", "")
+        private val RESUME_ID = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
     }
 }
