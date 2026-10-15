@@ -61,8 +61,17 @@ internal fun runBrowserNativeSmoke() = runBlocking {
         println("browser native render and live style ok")
     } finally {
         try {
-            withContext(Dispatchers.Swing) { browser?.close(true) }
-            check(BrowserRuntime.shutdown()) { "Native browser shutdown did not finish" }
+            // macOS：10-15 的 macOS CI 冒烟里页面、像素、样式都过了，只有关运行时卡住（CEF 到不了 TERMINATED）。先怀疑浏览器的原生视图还挂在
+            // 窗口里：Mac 上先关浏览器、拆掉窗口再关运行时；Windows 照旧（它是发版的门槛，不跟着试）。关运行时的耗时和卡住时的状态都打出来。
+            val mac = System.getProperty("os.name").startsWith("Mac")
+            withContext(Dispatchers.Swing) {
+                browser?.close(true)
+                if (mac) frame?.let { it.contentPane.removeAll(); it.dispose() }
+            }
+            val started = System.nanoTime()
+            val finished = BrowserRuntime.shutdown()
+            println("browser native shutdown ${if (finished) "finished" else "timed out"} after ${(System.nanoTime() - started) / 1_000_000} ms (${BrowserRuntime.describe()})")
+            check(finished) { "Native browser shutdown did not finish (${BrowserRuntime.describe()})" }
         } finally {
             withContext(Dispatchers.Swing) { frame?.dispose() }
             http.stop(0)

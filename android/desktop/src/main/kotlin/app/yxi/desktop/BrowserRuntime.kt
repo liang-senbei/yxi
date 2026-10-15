@@ -51,6 +51,9 @@ object BrowserRuntime {
         }
         if (SwingUtilities.isEventDispatchThread()) dispose() else SwingUtilities.invokeLater(dispose)
     }
+    /** 退出卡住时写进日志的现状：CEF 的状态、还没回收完的客户端数（冒烟用）。 */
+    internal fun describe(): String = "state=${runCatching { CefApp.getState() }.getOrNull()} clients=${clients.size} retiring=${retiring.size}"
+
     suspend fun shutdown(): Boolean = withContext(Dispatchers.IO) {
         val current = synchronized(this@BrowserRuntime) { stopping.set(true); app } ?: return@withContext true
         clients.keys.toList().forEach(::retire)
