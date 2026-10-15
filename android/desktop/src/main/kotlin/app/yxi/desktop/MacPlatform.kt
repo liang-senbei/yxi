@@ -63,20 +63,22 @@ internal object MacChrome {
  */
 @Composable
 internal fun FrameWindowScope.YxiMacMenuBar(state: AppState, win: WindowState, onClose: () -> Unit) {
+    // M4q：Code 风格的设置弹窗开着时是模态的，菜单里会动到底下页面的项置灰（同 [shortcut] 的 [codeSettingsModal]）；缩放、关窗、最小化照常
+    val free = !codeSettingsModal(state)
     MenuBar {
         Menu("文件") {
-            Item("新会话", onClick = { state.newSessionRequest++ }, shortcut = KeyShortcut(Key.N, meta = true))
-            Item("切换任务…", onClick = { state.showTaskSwitcher = true }, shortcut = KeyShortcut(Key.K, meta = true))
+            Item("新会话", enabled = free, onClick = { state.newSessionRequest++ }, shortcut = KeyShortcut(Key.N, meta = true))
+            Item("切换任务…", enabled = free, onClick = { state.showTaskSwitcher = true }, shortcut = KeyShortcut(Key.K, meta = true))
             Separator()
             Item("关闭窗口", onClick = onClose, shortcut = KeyShortcut(Key.W, meta = true))
         }
         Menu("显示") {
-            Item(if (state.sidebarOpen) "隐藏侧栏" else "显示侧栏", onClick = { state.sidebarOpen = !state.sidebarOpen }, shortcut = KeyShortcut(Key.B, meta = true))
-            Item("终端", onClick = { state.tab = if (state.tab == 1) 0 else 1 }, shortcut = KeyShortcut(Key.J, meta = true))
-            Item("文件", onClick = { state.tab = if (state.tab == 2) 0 else 2 }, shortcut = KeyShortcut(Key.F, meta = true, shift = true))
-            Item("网页预览", onClick = { if (state.browserPanelOpen) state.browserPanelOpen = false else { state.browserPanelOpen = true; state.filePanelOpen = false } },
+            Item(if (state.sidebarOpen) "隐藏侧栏" else "显示侧栏", enabled = free, onClick = { state.sidebarOpen = !state.sidebarOpen }, shortcut = KeyShortcut(Key.B, meta = true))
+            Item("终端", enabled = free, onClick = { state.tab = if (state.tab == 1) 0 else 1 }, shortcut = KeyShortcut(Key.J, meta = true))
+            Item("文件", enabled = free, onClick = { state.tab = if (state.tab == 2) 0 else 2 }, shortcut = KeyShortcut(Key.F, meta = true, shift = true))
+            Item("网页预览", enabled = free, onClick = { if (state.browserPanelOpen) state.browserPanelOpen = false else { state.browserPanelOpen = true; state.filePanelOpen = false } },
                 shortcut = KeyShortcut(Key.P, meta = true, shift = true))
-            Item("关掉右侧面板", onClick = { state.tab = 0; state.browserPanelOpen = false; state.filePanelOpen = false; state.previewExpanded = false },
+            Item("关掉右侧面板", enabled = free, onClick = { state.tab = 0; state.browserPanelOpen = false; state.filePanelOpen = false; state.previewExpanded = false },
                 shortcut = KeyShortcut(Key.Backslash, meta = true))
             Separator()
             Item("放大", onClick = { zoom(+1) }, shortcut = KeyShortcut(Key.Equals, meta = true))
@@ -88,7 +90,7 @@ internal fun FrameWindowScope.YxiMacMenuBar(state: AppState, win: WindowState, o
             Item("缩放", onClick = { win.placement = if (win.placement == WindowPlacement.Maximized) WindowPlacement.Floating else WindowPlacement.Maximized })
         }
         Menu("帮助") {
-            Item("键盘快捷键", onClick = { state.showShortcuts = true }, shortcut = KeyShortcut(Key.Slash, meta = true))
+            Item("键盘快捷键", enabled = free, onClick = { state.showShortcuts = true }, shortcut = KeyShortcut(Key.Slash, meta = true))
         }
     }
 }

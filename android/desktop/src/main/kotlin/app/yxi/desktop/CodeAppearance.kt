@@ -2,6 +2,7 @@ package app.yxi.desktop
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
@@ -52,11 +53,25 @@ internal enum class ChatWidth(val key: String, val label: String, val column: Dp
 /**
  * 按对话字号缩放 [content] 里的文字：把 [ChatFontSize.scale] 乘进 LocalDensity 的 fontScale（dp 不变，图标、留白、框的尺寸都不动）。
  * 「中」时乘 1，提供的 Density 和外层相等，画出来逐像素不变。一直提供（不按档分支），切档时行里的 remember 状态不丢。
- * 只包对话内容（[CodeColumn] 和排队的气泡），输入卡、审批卡、侧栏不跟。
+ *
+ * 缩放的范围（M4q 交叉审查后收窄）：只有消息和对话项——[CodeColumn] 默认包的那些行（你的消息、助手正文、思考、工具摘要行和卡片、
+ * 代码块、消息操作行里的时间）和排队的气泡。不缩放的：状态行 / 思考行、OpenCode 的提问卡、「加载更早消息」（调用处 `CodeColumn(scaled = false)`），
+ * 停靠区里的审批卡、输入卡、页脚，侧栏和会话头。行里弹出的 tooltip 和浮层（[CodeTooltip]、[CodePopup]）也不缩放：
+ * 这里把缩放前的 Density 记进 [LocalChatBaseDensity]，它们画内容时换回去（[CodeChromeText]）。
  */
 @Composable
 internal fun CodeChatText(content: @Composable () -> Unit) {
     val d = LocalDensity.current
     val scale = ChatFontSize.current.scale
-    CompositionLocalProvider(LocalDensity provides Density(d.density, d.fontScale * scale), content = content)
+    CompositionLocalProvider(LocalDensity provides Density(d.density, d.fontScale * scale), LocalChatBaseDensity provides d, content = content)
+}
+
+/** [CodeChatText] 缩放前的 Density；对话内容之外是 null。 */
+internal val LocalChatBaseDensity = compositionLocalOf<Density?> { null }
+
+/** 界面件（tooltip、浮层）的内容：在对话里弹出时换回缩放前的 Density，字号和界面其余部分一致；对话外原样。 */
+@Composable
+internal fun CodeChromeText(content: @Composable () -> Unit) {
+    val base = LocalChatBaseDensity.current ?: LocalDensity.current
+    CompositionLocalProvider(LocalDensity provides base, LocalChatBaseDensity provides null, content = content)
 }

@@ -148,7 +148,7 @@ class CodeThemeShotsTest {
                 val clock = SceneClock(image)
                 var png = clock.settle()
                 for (label in scene.taps) {
-                    if (label == ENTER) pressEnter(image) else tapLowest(image, label)
+                    if (label == ENTER) pressEnter(image) else if (label == ESCAPE) pressEscape(image) else tapLowest(image, label)
                     if (label.startsWith("~")) delay(900)   // tooltip 的 500ms 延时按真实时间走（Swing 调度器）
                     png = clock.settle()
                 }
@@ -738,6 +738,13 @@ private fun codeScenes() = listOf(
         val h = Regex("""h=([0-9.]+)""").find(bubble)!!.groupValues[1].toFloat()
         check(h in 22.5f..23.5f) { "你的消息一行高 $h，不是「大」的 ≈22.9" }
     }) { serverCodex(it, approval = false); check(Store.setPref(ChatFontSize.PREF, ChatFontSize.Large.key) == null) },
+    // M4q 交叉审查：设置弹窗是模态的——SSH 对话页上打开（输入框原本拿着焦点），焦点进弹窗，Esc 由弹窗处理、关掉弹窗
+    // （焦点留在底下的输入框的话 Esc 没人处理，pressEscape 就失败；有待审批时那一下 Esc 会被当成「拒绝」）。
+    // 画面是关掉弹窗后的 ssh-chat，另有前面场景留在夹具 profile 里的排队和侧栏整理（放在最后，不和 ssh-chat 逐像素比）
+    CodeScene("code-settings-escape", listOf(ESCAPE), verify = { state, nodes ->
+        check(!state.showSettings) { "Esc 没关掉设置弹窗" }
+        check(nodes.none { it.trimEnd().endsWith(" 关闭设置") || it.contains(" w=168.0 h=32.0 Tab") }) { "弹窗还在" }
+    }) { remote(it, tab = 0); it.showSettings = true },
 )
 
 /** 自定义页（M4o）：[remote] 的服务器（不连），切到插件页；[location] 是「本地」或「服务器」（同经典的 pluginLocation）。 */
@@ -1657,6 +1664,17 @@ private fun shotCodexModel(id: String, vararg efforts: String) = JSONObject().pu
 
 /** [CodeScene.taps] 里的这一项不点控件，在拿着焦点的输入框里按回车（[pressEnter]）。 */
 private const val ENTER = "⏎"
+/** taps 里的「按一次 Esc」（M4q：Code 设置弹窗）。 */
+private const val ESCAPE = "⎋"
+
+/** 合成一次 Esc 按下 + 抬起；按下没人处理就失败（焦点不在弹窗里）。 */
+private fun pressEscape(scene: ImageComposeScene) {
+    val src = java.awt.Canvas()
+    fun key(id: Int, type: KeyEventType) = KeyEvent(Key.Escape, type, 0, false, false, false, false,
+        java.awt.event.KeyEvent(src, id, System.currentTimeMillis(), 0, java.awt.event.KeyEvent.VK_ESCAPE, java.awt.event.KeyEvent.CHAR_UNDEFINED))
+    check(scene.sendKeyEvent(key(java.awt.event.KeyEvent.KEY_PRESSED, KeyEventType.KeyDown))) { "Esc 没人处理：焦点不在弹窗里" }
+    scene.sendKeyEvent(key(java.awt.event.KeyEvent.KEY_RELEASED, KeyEventType.KeyUp))
+}
 
 /** 合成一次回车按下 + 抬起（带上 AWT 原生事件，同 CodePopupFocusTest 的 Esc）；按下没人处理就失败（焦点不在输入框）。 */
 private fun pressEnter(scene: ImageComposeScene) {

@@ -231,7 +231,7 @@ internal fun CodeLocalCodexPane(state: AppState, record: LocalCodexTaskRecord) {
                         items(Transcripts.rows(Transcripts.visible(transcript, transcriptMode)), key = { "row:" + it.key }) { row ->
                             CodeColumn(true) { CompositionLocalProvider(LocalUriHandler provides links) { CodeTranscriptLine(row, onPath = ::copyPath, view = transcriptMode) } }
                         }
-                        if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在运行", runningSince, thinkingSince) } }
+                        if (runningSince > 0L) item(key = "status") { CodeColumn(true, scaled = false) { CodeStatusLine("正在运行", runningSince, thinkingSince) } }
                         item(key = "latest") { Spacer(Modifier.height(1.dp)) }
                     }
                     // 接回时列表顶端一条 2 高的进度条（同 Claude 读历史）

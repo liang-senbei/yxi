@@ -96,7 +96,6 @@ class ThemeSpecTest {
             assertEquals(288.dp, spec.metrics.sidebarWidth)
             assertEquals(40.dp, spec.metrics.titleBarHeight)
             assertEquals(48.dp, spec.metrics.headerHeight)
-            assertTrue(spec.metrics.messageMaxWidth.isUnspecified)
             assertTrue(spec.metrics.rowHeight.isUnspecified)
         }
     }
@@ -110,7 +109,7 @@ class ThemeSpecTest {
             assertEquals(TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 17.sp), spec.code)
             assertEquals(10.dp, spec.radius)
             assertEquals(10.dp, spec.radiusComposer)
-            assertEquals(Metrics(sidebarWidth = 288.dp, titleBarHeight = 36.dp, headerHeight = 48.dp, messageMaxWidth = 768.dp, rowHeight = 26.4.dp), spec.metrics)
+            assertEquals(Metrics(sidebarWidth = 288.dp, titleBarHeight = 36.dp, headerHeight = 48.dp, rowHeight = 26.4.dp), spec.metrics)
             assertEquals(t.menu, spec.colors.surfaceContainer)
             assertEquals(t.dialog, spec.colors.surfaceContainerHigh)
             val slots = listOf(t.hover, t.selected, t.border, t.sidebar, t.codeBg, t.diffAdd, t.diffDel, t.brand, t.onBrand,

@@ -227,7 +227,7 @@ private class AcpPendingAuthentication(val plan: AcpTerminalAuthPlan, val comple
                             // 顺序和 key 同经典：跟随最新滚到下标 messages + approvals（末尾的占位）
                             // M3b / M3c：统一对话项，连着的工具调用合成摘要行 + 卡片
                             items(Transcripts.rows(Transcripts.visible(transcript, transcriptMode)), key = { "row:" + it.key }) { row -> CodeColumn(true) { CodeTranscriptLine(row, view = transcriptMode) } }
-                            if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在生成回复", runningSince, thinkingSince) } }
+                            if (runningSince > 0L) item(key = "status") { CodeColumn(true, scaled = false) { CodeStatusLine("正在生成回复", runningSince, thinkingSince) } }
                             item(key = "acp-end") { Spacer(Modifier.height(1.dp)) }
                         }
                         // 接回时列表顶端一条 2 高的进度条（同本机 Codex）

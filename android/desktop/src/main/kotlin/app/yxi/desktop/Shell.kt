@@ -247,36 +247,56 @@ fun YxiTray(state: AppState, tray: TrayState, onQuit: () -> Unit) {
     }
 }
 
-/** 全局快捷键（Window.onPreviewKeyEvent）：只认 Ctrl 组合和 F5，普通按键放行给输入框。表在 Shortcuts.kt，改这边记得改那边。 */
+/**
+ * 全局快捷键（Window.onPreviewKeyEvent）：只认 Ctrl 组合和 F5，普通按键放行给输入框。表在 [shortcutAction]（和 Shortcuts.kt 一致，改这边记得改那边）。
+ * M4q：Code 风格的设置弹窗开着时是模态的（[codeSettingsModal]）：表里的键只放行缩放和 Ctrl+,（[modalShortcut]），其余吞掉不执行——
+ * 窗口层先于弹窗拿到按键，不挡的话 Ctrl+N / Ctrl+K / 切会话 / 开面板都会落到遮罩底下的页面。不在表里的组合（Ctrl+C / V / A…）照旧放给弹窗里的输入框。
+ */
 fun shortcut(e: KeyEvent, state: AppState, scope: CoroutineScope): Boolean {
     if (e.type != KeyEventType.KeyDown) return false
-    if (e.key == Key.F5) { scope.launch { state.conn?.refresh() }; return true }
-    // Mac 原生（Mac1 第二轮）：⌘ 当主修饰键；切会话仍是 ⌃Tab（⌘Tab 是系统切应用）；菜单栏有的键交给菜单，这里不再处理一遍
-    if (MacChrome.native && e.isCtrlPressed && e.key == Key.Tab) { state.selectByOffset(if (e.isShiftPressed) -1 else 1); return true }
-    if (!MacChrome.primary(e)) return false
-    if (MacChrome.native && e.key in MacChrome.menuKeys && !(e.key == Key.Equals && e.isShiftPressed)) return false   // ⌘⇧=（⌘+）菜单不认，这里接
-    val digit = (e.key.keyCode - Key.One.keyCode).toInt()     // 桌面 keyCode = VK_1…VK_9 连号
-    when {
-        // M4e：右侧面板的键（同参照端，规格表 §3.9 / PRD §6「快捷键」）：Ctrl+Shift+P 网页预览、Ctrl+Shift+F 文件、Ctrl+` 终端（同 Ctrl+J）、Ctrl+\ 关掉右侧面板
-        e.key == Key.P && e.isShiftPressed -> if (state.browserPanelOpen) state.browserPanelOpen = false else { state.browserPanelOpen = true; state.filePanelOpen = false }
-        e.key == Key.F && e.isShiftPressed -> state.tab = if (state.tab == 2) 0 else 2
-        e.key == Key.Grave -> state.tab = if (state.tab == 1) 0 else 1
-        e.key == Key.Backslash -> { state.tab = 0; state.browserPanelOpen = false; state.filePanelOpen = false; state.previewExpanded = false }
-        e.key == Key.N -> state.newSessionRequest++
-        e.key == Key.K -> state.showTaskSwitcher = true
-        e.key == Key.B -> state.sidebarOpen = !state.sidebarOpen
-        e.key == Key.J -> state.tab = if (state.tab == 1) 0 else 1
-        e.key == Key.Tab -> state.selectByOffset(if (e.isShiftPressed) -1 else 1)
-        e.key == Key.A && e.isAltPressed -> state.jumpToAttention()
-        e.key == Key.Comma -> state.showSettings = true
-        e.key == Key.Slash -> state.showShortcuts = true
-        e.key == Key.Equals || e.key == Key.NumPadAdd -> zoom(+1)
-        e.key == Key.Minus || e.key == Key.NumPadSubtract -> zoom(-1)
-        e.key == Key.Zero || e.key == Key.NumPad0 -> zoom(0)
-        digit in 0..8 -> state.selectIndex(digit)
-        else -> return false
-    }
+    val action = shortcutAction(e, state, scope) ?: return false
+    if (codeSettingsModal(state) && !modalShortcut(e)) return true
+    action()
     return true
+}
+
+/** Code 风格的设置弹窗开着（模态，见 [CodeModalFocus]）；经典的设置是整页，不算。 */
+internal fun codeSettingsModal(state: AppState): Boolean =
+    state.showSettings && UiStyle.from(Store.pref(UiStyle.PREF, UiStyle.Classic.key)) == UiStyle.Code
+
+/** 模态弹窗开着时照样生效的全局键：缩放（不碰底下的页面）和 Ctrl+,（设置已经开着，什么也不做）。只看键，主修饰键由 [shortcutAction] 核过。 */
+internal fun modalShortcut(e: KeyEvent): Boolean =
+    e.key in setOf(Key.Equals, Key.NumPadAdd, Key.Minus, Key.NumPadSubtract, Key.Zero, Key.NumPad0, Key.Comma)
+
+/** 键 → 动作；不是全局快捷键返回 null（放行）。 */
+private fun shortcutAction(e: KeyEvent, state: AppState, scope: CoroutineScope): (() -> Unit)? {
+    fun act(run: () -> Unit) = run
+    if (e.key == Key.F5) return act { scope.launch { state.conn?.refresh() } }
+    // Mac 原生（Mac1 第二轮）：⌘ 当主修饰键；切会话仍是 ⌃Tab（⌘Tab 是系统切应用）；菜单栏有的键交给菜单，这里不再处理一遍
+    if (MacChrome.native && e.isCtrlPressed && e.key == Key.Tab) return act { state.selectByOffset(if (e.isShiftPressed) -1 else 1) }
+    if (!MacChrome.primary(e)) return null
+    if (MacChrome.native && e.key in MacChrome.menuKeys && !(e.key == Key.Equals && e.isShiftPressed)) return null   // ⌘⇧=（⌘+）菜单不认，这里接
+    val digit = (e.key.keyCode - Key.One.keyCode).toInt()     // 桌面 keyCode = VK_1…VK_9 连号
+    return when {
+        // M4e：右侧面板的键（同参照端，规格表 §3.9 / PRD §6「快捷键」）：Ctrl+Shift+P 网页预览、Ctrl+Shift+F 文件、Ctrl+` 终端（同 Ctrl+J）、Ctrl+\ 关掉右侧面板
+        e.key == Key.P && e.isShiftPressed -> act { if (state.browserPanelOpen) state.browserPanelOpen = false else { state.browserPanelOpen = true; state.filePanelOpen = false } }
+        e.key == Key.F && e.isShiftPressed -> act { state.tab = if (state.tab == 2) 0 else 2 }
+        e.key == Key.Grave -> act { state.tab = if (state.tab == 1) 0 else 1 }
+        e.key == Key.Backslash -> act { state.tab = 0; state.browserPanelOpen = false; state.filePanelOpen = false; state.previewExpanded = false }
+        e.key == Key.N -> act { state.newSessionRequest++ }
+        e.key == Key.K -> act { state.showTaskSwitcher = true }
+        e.key == Key.B -> act { state.sidebarOpen = !state.sidebarOpen }
+        e.key == Key.J -> act { state.tab = if (state.tab == 1) 0 else 1 }
+        e.key == Key.Tab -> act { state.selectByOffset(if (e.isShiftPressed) -1 else 1) }
+        e.key == Key.A && e.isAltPressed -> act { state.jumpToAttention() }
+        e.key == Key.Comma -> act { state.showSettings = true }
+        e.key == Key.Slash -> act { state.showShortcuts = true }
+        e.key == Key.Equals || e.key == Key.NumPadAdd -> act { zoom(+1) }
+        e.key == Key.Minus || e.key == Key.NumPadSubtract -> act { zoom(-1) }
+        e.key == Key.Zero || e.key == Key.NumPad0 -> act { zoom(0) }
+        digit in 0..8 -> act { state.selectIndex(digit) }
+        else -> null
+    }
 }
 
 /** 界面缩放：0.8…1.5 步进 0.1，存 Store.pref("zoom")；[step] 0 = 回 1.0。 */

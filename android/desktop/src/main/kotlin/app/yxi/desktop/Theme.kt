@@ -124,13 +124,15 @@ enum class UiStyle(val key: String, val label: String) {
     }
 }
 
-/** 外壳尺寸。M1 接侧栏宽、顶部条、会话头三处；对话列宽、列表行高留给 M2 的 CodeShell，经典填 [Dp.Unspecified]。 */
+/**
+ * 外壳尺寸。M1 接侧栏宽、顶部条、会话头三处；列表行高留给 M2 的 CodeShell，经典填 [Dp.Unspecified]。
+ * 对话列宽不在这里：Code 风格由设置里的对话宽度决定（[ChatWidth]，M4q），原来写死 768 的 messageMaxWidth 没人读，已删。
+ */
 @Immutable
 data class Metrics(
     val sidebarWidth: Dp,
     val titleBarHeight: Dp,
     val headerHeight: Dp,       // 会话头：对话 / 终端 / 文件 / 改动那一排
-    val messageMaxWidth: Dp,
     val rowHeight: Dp,
 )
 
@@ -179,7 +181,7 @@ data class ThemeSpec(
                 // 手机端的呼吸感（手机 Theme.kt AiryType 的注释）：字号大一点、行距松一点——光换色不改行距，看着还是「另一个 app」
                 body = TextStyle(fontSize = 15.sp, lineHeight = 24.sp),
                 code = TextStyle(fontFamily = mono, fontSize = 13.sp, lineHeight = 19.sp),
-                metrics = Metrics(sidebarWidth = 288.dp, titleBarHeight = 40.dp, headerHeight = 48.dp, messageMaxWidth = Dp.Unspecified, rowHeight = Dp.Unspecified),
+                metrics = Metrics(sidebarWidth = 288.dp, titleBarHeight = 40.dp, headerHeight = 48.dp, rowHeight = Dp.Unspecified),
             )
         }
 
@@ -199,7 +201,7 @@ data class ThemeSpec(
                 radius = 10.dp, radiusComposer = 10.dp, mono = mono,
                 body = body,
                 code = TextStyle(fontFamily = mono, fontSize = 13.sp, lineHeight = 17.sp),
-                metrics = Metrics(sidebarWidth = 288.dp, titleBarHeight = 36.dp, headerHeight = 48.dp, messageMaxWidth = 768.dp, rowHeight = 26.4.dp),
+                metrics = Metrics(sidebarWidth = 288.dp, titleBarHeight = 36.dp, headerHeight = 48.dp, rowHeight = 26.4.dp),
             )
         }
     }

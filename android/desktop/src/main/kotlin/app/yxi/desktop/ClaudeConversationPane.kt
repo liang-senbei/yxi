@@ -266,7 +266,7 @@ import java.io.File
                             verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             // 顺序和 key 同经典：跟随最新的下标是 1 + history + messages + approvals
                             item(key = "history-paging") {
-                                CodeColumn(true) {
+                                CodeColumn(true, scaled = false) {
                                     if (historyCursor != null) Box(historyPagingModifier) {
                                         CodeTextAction(if (historyLoading) "正在加载…" else "加载更早消息", ::loadEarlier, enabled = !historyLoading)
                                     }
@@ -282,7 +282,7 @@ import java.io.File
                             items(Transcripts.rows(Transcripts.visible(transcript, transcriptMode)), key = { "row:" + it.key }) { row ->
                                 CodeColumn(true) { CodeTranscriptLine(row, images = { ClaudeSentImages(it, state.localClaudeTasks.images) }, view = transcriptMode) }
                             }
-                            if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在生成回复", runningSince, thinkingSince) } }
+                            if (runningSince > 0L) item(key = "status") { CodeColumn(true, scaled = false) { CodeStatusLine("正在生成回复", runningSince, thinkingSince) } }
                             item { Spacer(Modifier.height(1.dp)) }
                         }
                         // 读历史、恢复时列表顶端一条 2 高的进度条（经典读历史时在列表上方占一行）

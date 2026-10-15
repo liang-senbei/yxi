@@ -25,6 +25,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.rememberScrollbarAdapter
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -51,6 +53,15 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusTarget
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -113,49 +124,70 @@ private val SETTINGS_GROUPS = listOf(
     "其他" to listOf("快捷键", "关于"),
 )
 
+/**
+ * 模态弹窗的键盘焦点（M4q 交叉审查）：打开时把焦点拿进来（先给 [initial]，拿不到给外框），Esc 关（[onClose]），
+ * 焦点不许移出（Tab 走到头不会落回遮罩底下的输入框）。底下的输入框因此收不到按键——不然打字落进看不见的输入框，
+ * 有待审批时 Esc 还会被它当成「拒绝」（ChatPane 的 Composer）。窗口层的全局快捷键先于这里，模态时由 [shortcut] 自己挡（[codeSettingsModal]）。
+ */
+@Composable
+internal fun CodeModalFocus(onClose: () -> Unit, initial: FocusRequester?, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    val root = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        if (initial == null || runCatching { initial.requestFocus() }.isFailure) runCatching { root.requestFocus() }
+    }
+    Box(
+        modifier.onPreviewKeyEvent { if (it.type == KeyEventType.KeyDown && it.key == Key.Escape) { onClose(); true } else false }
+            .focusProperties { onExit = { cancelFocusChange() } }
+            .focusRequester(root).focusTarget(),
+    ) { content() }
+}
+
 @Composable
 internal fun CodeSettingsDialog(state: AppState, select: (String) -> Unit, actions: CodeSettingsActions) {
     val t = Tokens.current
     var query by remember { mutableStateOf("") }
     val shown = settingsMatches(query)
+    val search = remember { FocusRequester() }
     // 搜索命中但当前分区被筛掉了：换到第一个命中的、在弹窗里看的分区（跳页面的不自动点）
     LaunchedEffect(query) {
         if (query.isNotBlank() && state.settingsSection !in shown) shown.firstOrNull { it !in SETTINGS_JUMPS }?.let { state.settingsSection = it }
     }
-    Row(Modifier.fillMaxSize()) {
-        val line = hairline()
-        Column(
-            Modifier.width(192.dp).fillMaxHeight().background(t.surface0)
-                .drawBehind { val x = size.width - line.toPx() / 2; drawLine(t.border, Offset(x, 0f), Offset(x, size.height), line.toPx()) }
-                .padding(12.dp),
-        ) {
-            CodeSettingsSearch(query) { query = it }
-            Spacer(Modifier.height(19.8.dp))   // 规格 §3.7：搜索框 164–196，第二项 248.8–280.8、步距 33 → 第一项顶 215.8
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                SETTINGS_GROUPS.forEach { (group, items) ->
-                    val visible = items.filter { it in shown }
-                    if (visible.isEmpty()) return@forEach
-                    if (group != null) Text(group, Modifier.padding(start = 10.dp, top = 12.dp, bottom = 4.dp), color = t.textMuted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1)
-                    visible.forEach { CodeSettingsNavItem(it, it == state.settingsSection, jump = it in SETTINGS_JUMPS) { select(it) } }
+    CodeModalFocus({ state.showSettings = false }, search, Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxSize()) {
+            val line = hairline()
+            Column(
+                Modifier.width(192.dp).fillMaxHeight().background(t.surface0)
+                    .drawBehind { val x = size.width - line.toPx() / 2; drawLine(t.border, Offset(x, 0f), Offset(x, size.height), line.toPx()) }
+                    .padding(12.dp),
+            ) {
+                CodeSettingsSearch(query, search) { query = it }
+                Spacer(Modifier.height(19.8.dp))   // 规格 §3.7：搜索框 164–196，第二项 248.8–280.8、步距 33 → 第一项顶 215.8
+                Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                    SETTINGS_GROUPS.forEach { (group, items) ->
+                        val visible = items.filter { it in shown }
+                        if (visible.isEmpty()) return@forEach
+                        if (group != null) Text(group, Modifier.padding(start = 10.dp, top = 12.dp, bottom = 4.dp), color = t.textMuted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1)
+                        visible.forEach { CodeSettingsNavItem(it, it == state.settingsSection, jump = it in SETTINGS_JUMPS) { select(it) } }
+                    }
+                    if (shown.isEmpty()) Text("没有匹配的设置", Modifier.padding(start = 10.dp, top = 6.dp), color = t.textMuted, fontSize = 13.sp, lineHeight = 18.sp)
                 }
-                if (shown.isEmpty()) Text("没有匹配的设置", Modifier.padding(start = 10.dp, top = 6.dp), color = t.textMuted, fontSize = 13.sp, lineHeight = 18.sp)
             }
-        }
-        Box(Modifier.weight(1f).fillMaxHeight().background(t.dialog)) {
-            val scroll = rememberScrollState()
-            // 控件右缘在 x 1501.6（规格 §3.7）= 弹窗右缘 1536 − 34.4：内边距 24 之外再给滚动条让出 10.4
-            Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(start = 24.dp, top = 24.dp, end = 34.4.dp, bottom = 24.dp)) {
-                CodeSettingsContent(state, actions)
+            Box(Modifier.weight(1f).fillMaxHeight().background(t.dialog)) {
+                val scroll = rememberScrollState()
+                // 控件右缘在 x 1501.6（规格 §3.7）= 弹窗右缘 1536 − 34.4：内边距 24 之外再给滚动条让出 10.4
+                Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(start = 24.dp, top = 24.dp, end = 34.4.dp, bottom = 24.dp)) {
+                    CodeSettingsContent(state, actions)
+                }
+                CompositionLocalProvider(LocalScrollbarStyle provides ScrollbarStyle(
+                    minimalHeight = 16.dp, thickness = 5.6.dp, shape = RoundedCornerShape(2.8.dp), hoverDurationMillis = 300,
+                    unhoverColor = CodePalette.current.scrollbar, hoverColor = CodePalette.current.scrollbar,
+                )) {
+                    VerticalScrollbar(rememberScrollbarAdapter(scroll), Modifier.align(Alignment.CenterEnd).fillMaxHeight().padding(end = 3.2.dp, top = 4.dp, bottom = 4.dp))
+                }
+                // 关闭 ×：中心距弹窗右、上各 28（规格 §3.7 中心 ≈(1508, 180)）
+                CodeIconButton(Icons.Filled.Close, "关闭设置", Modifier.align(Alignment.TopEnd).padding(top = 16.dp, end = 16.dp), iconSize = 16.dp,
+                    tint = CodePalette.current.dropArrow) { state.showSettings = false }
             }
-            CompositionLocalProvider(LocalScrollbarStyle provides ScrollbarStyle(
-                minimalHeight = 16.dp, thickness = 5.6.dp, shape = RoundedCornerShape(2.8.dp), hoverDurationMillis = 300,
-                unhoverColor = CodePalette.current.scrollbar, hoverColor = CodePalette.current.scrollbar,
-            )) {
-                VerticalScrollbar(rememberScrollbarAdapter(scroll), Modifier.align(Alignment.CenterEnd).fillMaxHeight().padding(end = 3.2.dp, top = 4.dp, bottom = 4.dp))
-            }
-            // 关闭 ×：中心距弹窗右、上各 28（规格 §3.7 中心 ≈(1508, 180)）
-            CodeIconButton(Icons.Filled.Close, "关闭设置", Modifier.align(Alignment.TopEnd).padding(top = 16.dp, end = 16.dp), iconSize = 16.dp,
-                tint = CodePalette.current.dropArrow) { state.showSettings = false }
         }
     }
 }
@@ -278,9 +310,12 @@ private fun CodeUserDataRow() {
     if (error.isNotBlank()) CodeSettingsNote(error, t.danger)
 }
 
-/** 导航顶上的搜索框：#FEFEFD 底、控件边框细线、高 32、圆角 8；放大镜 + 占位「搜索」弱色。按分区名和各项标题筛导航（[settingsMatches]）。 */
+/**
+ * 导航顶上的搜索框：#FEFEFD 底、控件边框细线、高 32、圆角 8；放大镜 + 占位「搜索」弱色。按分区名和各项标题筛导航（[settingsMatches]）。
+ * 弹窗打开时焦点落在这里（[focus]，见 [CodeModalFocus]）。
+ */
 @Composable
-private fun CodeSettingsSearch(query: String, onChange: (String) -> Unit) {
+private fun CodeSettingsSearch(query: String, focus: FocusRequester, onChange: (String) -> Unit) {
     val t = Tokens.current
     val p = CodePalette.current
     val shape = RoundedCornerShape(8.dp)
@@ -291,14 +326,17 @@ private fun CodeSettingsSearch(query: String, onChange: (String) -> Unit) {
         Icon(Icons.Outlined.Search, null, Modifier.size(14.dp), tint = t.textMuted)
         Spacer(Modifier.width(8.dp))
         val style = TextStyle(color = t.textPrimary, fontSize = 14.sp, lineHeight = 20.sp)
-        BasicTextField(query, onChange, Modifier.weight(1f), singleLine = true, textStyle = style, cursorBrush = SolidColor(t.textPrimary),
+        BasicTextField(query, onChange, Modifier.weight(1f).focusRequester(focus), singleLine = true, textStyle = style, cursorBrush = SolidColor(t.textPrimary),
             decorationBox = { inner -> Box { if (query.isEmpty()) Text("搜索", color = t.textMuted, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 1); inner() } })
     }
 }
 
-/** 导航项：高 32、圆角 9.5、字 14；选中 #E3E3E2 底、主色字，其余次色，hover 用浮层项的浅底。[jump]：点了去别的页面，右端一个弱色「›」。 */
+/**
+ * 导航项：高 32、圆角 9.5、字 14；选中 #E3E3E2 底、主色字，其余次色，hover 用浮层项的浅底。[jump]：点了去别的页面，右端一个弱色「›」。
+ * 语义：在弹窗里换内容的是 Tab，带选中态（selectable）；跳页面的是 Button。
+ */
 @Composable
-private fun CodeSettingsNavItem(label: String, selected: Boolean, jump: Boolean, onClick: () -> Unit) {
+internal fun CodeSettingsNavItem(label: String, selected: Boolean, jump: Boolean, onClick: () -> Unit) {
     val t = Tokens.current
     val p = CodePalette.current
     val source = remember { MutableInteractionSource() }
@@ -306,7 +344,9 @@ private fun CodeSettingsNavItem(label: String, selected: Boolean, jump: Boolean,
     Row(
         Modifier.fillMaxWidth().height(32.dp).clip(RoundedCornerShape(9.5.dp))
             .background(if (selected) p.navSelected else if (hovered) p.menuHover else Color.Transparent)
-            .hoverable(source).clickable(interactionSource = source, indication = null, role = Role.Tab, onClick = onClick)
+            .hoverable(source)
+            .then(if (jump) Modifier.clickable(interactionSource = source, indication = null, role = Role.Button, onClick = onClick)
+                else Modifier.selectable(selected, interactionSource = source, indication = null, role = Role.Tab, onClick = onClick))
             .padding(start = 10.dp, end = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -317,19 +357,19 @@ private fun CodeSettingsNavItem(label: String, selected: Boolean, jump: Boolean,
 
 /**
  * 分段控件（规格 §3.7）：轨道 #F3F3F3、高 32、圆角 8.7；滑块白、控件边框细线、圆角 5，内缩 2，宽度跟着文字；
- * 字 14，选中主色、其余弱色。[options] = 存的值 to 显示名。
+ * 字 14，选中主色、其余弱色。[options] = 存的值 to 显示名。语义是一组单选（selectableGroup + 每格 RadioButton，带选中态）。
  */
 @Composable
 internal fun CodeSegmented(options: List<Pair<String, String>>, value: String, onSelect: (String) -> Unit) {
     val t = Tokens.current
     val p = CodePalette.current
     val thumb = RoundedCornerShape(5.dp)
-    Row(Modifier.height(32.dp).clip(RoundedCornerShape(8.7.dp)).background(p.menuHover).padding(2.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.height(32.dp).clip(RoundedCornerShape(8.7.dp)).background(p.menuHover).selectableGroup().padding(2.dp), verticalAlignment = Alignment.CenterVertically) {
         options.forEach { (key, label) ->
             val selected = key == value
             Box(
                 Modifier.fillMaxHeight().then(if (selected) Modifier.background(p.segmentThumb, thumb).border(hairline(), p.controlBorder, thumb) else Modifier)
-                    .clickable(remember { MutableInteractionSource() }, indication = null, role = Role.RadioButton) { onSelect(key) }
+                    .selectable(selected, remember { MutableInteractionSource() }, indication = null, role = Role.RadioButton) { onSelect(key) }
                     .padding(horizontal = 12.dp),
                 contentAlignment = Alignment.Center,
             ) {

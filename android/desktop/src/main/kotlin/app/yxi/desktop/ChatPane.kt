@@ -536,7 +536,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                         }
                     }
                 }
-                if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在运行", runningSince, thinkingSince) } }
+                if (runningSince > 0L) item(key = "status") { CodeColumn(true, scaled = false) { CodeStatusLine("正在运行", runningSince, thinkingSince) } }
                 item(key = "conversation-bottom-anchor") { Spacer(Modifier.height(1.dp)) }
             }
             if (items.isEmpty()) Text(status ?: "还没有对话", Modifier.align(Alignment.Center), style = BodyStyle, color = t.textMuted)
@@ -847,11 +847,12 @@ internal fun Note(text: String, color: Color) = Text(text, Modifier.padding(16.d
 
 /**
  * Code 风格的对话列：最宽 = 设置里的对话宽度（默认「窄」768，[ChatWidth]）、在父级里居中（对齐和两侧留白由父级给），
- * 里面的文字按对话字号缩放（[CodeChatText]，默认「中」不变）；经典原样。只是布局，不加语义节点。
+ * 里面的文字按对话字号缩放（[CodeChatText]，默认「中」不变）；[scaled] 为 false 的不缩放（状态行、提问卡这类界面件，见 [CodeChatText]）。
+ * 经典原样。只是布局，不加语义节点。
  */
 @Composable
-internal fun CodeColumn(code: Boolean, content: @Composable () -> Unit) {
-    if (code) Box(Modifier.widthIn(max = ChatWidth.current.column).fillMaxWidth()) { CodeChatText(content) } else content()
+internal fun CodeColumn(code: Boolean, scaled: Boolean = true, content: @Composable () -> Unit) {
+    if (code) Box(Modifier.widthIn(max = ChatWidth.current.column).fillMaxWidth()) { if (scaled) CodeChatText(content) else content() } else content()
 }
 
 /** 停靠区（状态行 / 审批卡 / 排队 / 输入卡）：Code 风格和对话列同宽（[ChatWidth]）、居中，窄时两侧各留 40（规格 §2）；经典原样。 */

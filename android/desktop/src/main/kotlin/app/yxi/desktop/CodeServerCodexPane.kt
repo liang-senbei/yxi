@@ -301,7 +301,7 @@ private fun CodeServerCodexConversation(state: AppState, conn: Conn, record: Cod
                         items(Transcripts.rows(Transcripts.visible(transcript, transcriptMode)), key = { "row:" + it.key }) { row ->
                             CodeColumn(true) { CompositionLocalProvider(LocalUriHandler provides taskUris) { CodeTranscriptLine(row, onPath = ::openTaskFile, view = transcriptMode) } }
                         }
-                        if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在运行", runningSince, thinkingSince) } }
+                        if (runningSince > 0L) item(key = "status") { CodeColumn(true, scaled = false) { CodeStatusLine("正在运行", runningSince, thinkingSince) } }
                         item(key = "latest") { Spacer(Modifier.height(1.dp)) }
                     }
                     if (workspace.busy) LinearProgressIndicator(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(2.dp))

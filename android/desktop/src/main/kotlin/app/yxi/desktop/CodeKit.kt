@@ -264,8 +264,11 @@ internal fun CodeTooltip(label: String, shortcut: String? = null) {
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, color = Color.White, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1)
-        if (shortcut != null) Text(MacChrome.label(shortcut), color = Tokens.current.textMuted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1)
+        // 在对话行里弹出时也不跟对话字号缩放（[CodeChromeText]）
+        CodeChromeText {
+            Text(label, color = Color.White, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1)
+            if (shortcut != null) Text(MacChrome.label(shortcut), color = Tokens.current.textMuted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1)
+        }
     }
 }
 
@@ -355,8 +358,7 @@ internal fun CodePopup(
                 .codeShadow(10.dp, PopupShadow).background(p.popup, shape).border(1.dp, p.popupRing, shape).padding(4.dp)
                 .onPreviewKeyEvent { if (it.type == KeyEventType.KeyDown && it.key == Key.Escape) { onDismiss(); true } else false }
                 .focusRequester(root).focusTarget(),
-            content = content,
-        )
+        ) { CodeChromeText { content() } }   // 对话行里开的浮层不跟对话字号缩放
     }
 }
 /** 侧栏里右对齐 ⋮ 的浮层按内容宽的上限：⋮ 右缘在 x ≈274–276，再宽左缘就出窗，会被夹回、脱离 ⋮；264 时左边留 ≈12，和侧栏行的右内边距对称。 */
