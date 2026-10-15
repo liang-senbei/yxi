@@ -99,7 +99,9 @@ fun LoginGate() {
                 modifier = Modifier.size(96.dp),
             )
             Spacer(Modifier.height(18.dp))
-            Text("Yxi", style = MaterialTheme.typography.headlineSmall)
+            // ⚠️ 颜色要写明：这一层外面没有 Surface / Scaffold，不写就是 LocalContentColor 的默认黑 ——
+            //    深色风格下黑字压在深底上，等于没有（10-15 模拟器上测出来的）
+            Text("Yxi", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onSurface)
             Spacer(Modifier.height(6.dp))
             Text(
                 t("你的 agent 在服务器上跑，你在这儿把关"),
