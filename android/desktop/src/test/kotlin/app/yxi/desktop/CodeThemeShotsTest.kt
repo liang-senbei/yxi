@@ -129,6 +129,7 @@ class CodeThemeShotsTest {
         Store.setPref("hostScope", "")
         Store.setPref(TranscriptView.PREF, TranscriptView.Normal.key)   // M3h：对话视图默认档每张都回到普通，改它的场景不串到后面
         MacChrome.native = false   // Mac1 第二轮：Mac 原生外观只在 mac-native-* 场景里打开
+        Store.setPref(FolderPermissions.PREF, "[]")   // M4i：按文件夹记住的权限模式每张都清空，记了的场景不串到后面
         val state = AppState().apply { startupRestored = true }   // 跳过 HostEffects 的开机恢复 / 自动重连
         state.navigation.setMode("全部")   // 全部 / 待处理 / 归档落在夹具 profile 里，local-archived 改过（值没变不写盘）
         try {
@@ -191,6 +192,10 @@ private fun codeScenes() = listOf(
     CodeScene("home-folder", listOf("demo-app")) { codeHome(it) },
     CodeScene("home-folder-hint", listOf("~demo-app")) { codeHome(it) },
     CodeScene("home-permission-again", listOf("请求批准", "请求批准")) { codeHome(it) },
+    // M4i：这个文件夹上次建会话用的是「自动审批」，新会话页的权限 chip 就从它开始（PRD §6，参照端按文件夹记住）
+    CodeScene("home-permission-remembered", verify = { _, nodes ->
+        check(nodes.any { it.trimEnd().endsWith(" 自动审批") } && nodes.none { it.trimEnd().endsWith(" 请求批准") }) { "权限 chip 没换成这个文件夹记住的「自动审批」" }
+    }) { codeHome(it); val c = it.conn!!; FolderPermissions.remember(c.host.id, it.newSessionDraft.directoryFor(c), app.yxi.agent.PermissionMode.Auto) },
     CodeScene("ssh-chat") { remote(it, tab = 0) },
     // SSH 对话的工具组（M3e）：Code 的摘要行 + 卡片，点开的条目里是原来的富渲染 ToolCard（这里是 Bash：命令和输出）
     CodeScene("ssh-chat-tool", listOf("运行了一条命令", "./gradlew test --offline")) { remote(it, tab = 0) },

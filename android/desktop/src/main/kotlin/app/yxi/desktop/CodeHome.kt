@@ -66,6 +66,19 @@ internal class NewSessionDraft {
     var agent by mutableStateOf("claude")
     var worktree by mutableStateOf(false)
     var permission by mutableStateOf(PermissionMode.Manual)
+    /** [permission] 是按哪台主机、哪个目录定的（M4i）：目录换了才去取那个目录记住的模式，你手动选的不会被换页面冲掉。 */
+    private var permissionFor by mutableStateOf("")
+    /** reset 一次加一：同一个目录建完会话回到这页时，也要重新取一次记住的模式。 */
+    var resets by mutableStateOf(0)
+        private set
+    /** 当前目录记住的权限模式（没记过就是「请求批准」）；只在目录变了（或刚 reset）时才换。 */
+    fun syncPermission(c: Conn) {
+        val dir = directoryFor(c).trim()
+        val key = c.host.id + "\n" + dir
+        if (key == permissionFor) return
+        permissionFor = key
+        permission = (if (dir.isEmpty()) null else FolderPermissions.recall(c.host.id, dir)) ?: PermissionMode.Manual
+    }
     /** 每次「新建会话」（Ctrl+N、侧栏、托盘、收藏）加一：CodeHome 已经开着也把焦点放回输入卡。 */
     var focusTick by mutableStateOf(0)
     /** 从收藏进来时带着，只对那台主机算数：创建成功后按收藏改名、挪收藏（和经典对话框一致）。 */
@@ -87,7 +100,7 @@ internal class NewSessionDraft {
     }
     /** 建好以后清空，下次回到这里是新的一页；运行器留着（和参考端的模型选择一样沿用上次）。 */
     fun reset() {
-        text = TextFieldValue(); directory = ""; directoryHost = ""; worktree = false; permission = PermissionMode.Manual
+        text = TextFieldValue(); directory = ""; directoryHost = ""; worktree = false; permission = PermissionMode.Manual; permissionFor = ""; resets++
         favorite = null; favoriteHost = ""; error = ""; requestKey = null
     }
 
@@ -362,6 +375,8 @@ private fun CodeWorktreeToggle(checked: Boolean, enabled: Boolean, onChange: (Bo
 @Composable
 private fun CodeHomeFooter(state: AppState, d: NewSessionDraft, c: Conn?, scope: CoroutineScope) {
     var recovering by remember { mutableStateOf(false) }
+    // M4i：目录（或主机）变了、或刚建完一个会话，就换成这个目录记住的权限模式
+    if (c != null) { val dir = d.directoryFor(c).trim(); LaunchedEffect(c.host.id, dir, d.resets) { d.syncPermission(c) } }
     Row(Modifier.fillMaxWidth().height(28.dp), verticalAlignment = Alignment.CenterVertically) {
         if (d.agent == "claude") CodePermissionChip(d)
         else if (d.agent == NewSessionDraft.CODEX_WORKBENCH && c != null) CodeFooterChip("恢复已有任务", { recovering = true },
@@ -375,7 +390,7 @@ private fun CodeHomeFooter(state: AppState, d: NewSessionDraft, c: Conn?, scope:
     if (recovering && c != null) CodeCodexRecoverDialog(state, c, scope) { recovering = false }
 }
 
-/** 权限：每次新建都从「请求批准」开始（reset 时重置）；浮层 280 宽、向上展开，左缘对齐输入卡（规格 §3.1）。 */
+/** 权限：按文件夹记住上次建会话用的模式（M4i，FolderPermissions；没记过是「请求批准」，计划 / 完全访问不记）；浮层 280 宽、向上展开，左缘对齐输入卡（规格 §3.1）。 */
 @Composable
 private fun CodePermissionChip(d: NewSessionDraft) {
     var open by remember { mutableStateOf(false) }
@@ -454,7 +469,7 @@ private fun sendNewSession(state: AppState, actions: HostActions, scope: Corouti
                     val shared = registry.forHost(projectKey(c.host, "/")).filter { agent in it.desiredRunners }
                     val requestId = d.requestIdFor(listOf(c.host.id, directory, agent, prompt, worktree, permission, shared))
                     createSession(c, DesktopLaunchPlan(directory, agent, requestId, prompt, "", worktree, permission), shared).fold(
-                        { s -> d.reset(); actions.sessionCreated(c, s, favorite) },
+                        { s -> permission?.let { FolderPermissions.remember(c.host.id, directory, it) }; d.reset(); actions.sessionCreated(c, s, favorite) },
                         { err -> d.error = err.message.orEmpty().ifBlank { "创建没成功，请重试" } },
                     )
                 }
