@@ -48,6 +48,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.material.icons.outlined.Autorenew
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isCtrlPressed
 
 /*
  * Code 风格对话区的小件（规格 §3.4）。M2 先给排队用（InstructionStrip），M3 画用户消息和消息操作行时接着用。
@@ -154,12 +159,18 @@ internal fun toolStatusName(status: String) = when (status) {
 
 /** 对话里的一行（M3c）：单独一项走 [CodeTranscriptRow]，连着的工具调用走 [CodeToolGroup]。[onPath] 给文件改动里的路径用（本机复制路径，服务器打开文件）。 */
 @Composable
-internal fun CodeTranscriptLine(row: TranscriptRow, images: @Composable (List<InstructionAttachment>) -> Unit = {}, onPath: ((String) -> Unit)? = null) {
+internal fun CodeTranscriptLine(row: TranscriptRow, images: @Composable (List<InstructionAttachment>) -> Unit = {}, onPath: ((String) -> Unit)? = null,
+    view: TranscriptView = TranscriptView.Normal) {
     when (row) {
         is TranscriptRow.Single -> CodeTranscriptRow(row.item, images)
-        is TranscriptRow.Tools -> CodeToolGroup(row.tools, onPath)
+        // 详细档：工具组卡片和每个条目一开始就展开（M3g）；思考的显示与否由面板先按 Transcripts.visible 过滤
+        is TranscriptRow.Tools -> CodeToolGroup(row.tools, onPath, startOpen = view == TranscriptView.Detailed)
     }
 }
+
+/** Ctrl+O（macOS 上 ⌘O 也算）：轮换对话视图（M3g，规格表 §3.4）。各 Code 对话页在输入框的按键处理里接它。 */
+internal fun isTranscriptViewKey(e: androidx.compose.ui.input.key.KeyEvent): Boolean =
+    e.type == androidx.compose.ui.input.key.KeyEventType.KeyDown && e.key == androidx.compose.ui.input.key.Key.O && (e.isCtrlPressed || e.isMetaPressed) && !e.isShiftPressed
 
 /**
  * 工具摘要行 + 工具组卡片（M3c，规格表 §3.4）：一个回合里连着的几次调用合成一行（[Transcripts.summary] 的短语），弱色 14 / 20，
@@ -168,10 +179,10 @@ internal fun CodeTranscriptLine(row: TranscriptRow, images: @Composable (List<In
  */
 @Composable
 internal fun CodeToolGroup(tools: List<TranscriptItem.Tool>, onPath: ((String) -> Unit)? = null,
-    expanded: Boolean? = null, onToggle: (() -> Unit)? = null, detail: (@Composable (TranscriptItem.Tool) -> Unit)? = null) {
+    expanded: Boolean? = null, onToggle: (() -> Unit)? = null, detail: (@Composable (TranscriptItem.Tool) -> Unit)? = null, startOpen: Boolean = false) {
     val t = Tokens.current
     // 开合状态默认自己记；SSH 对话页（M3e）传 [expanded] / [onToggle]，用它自己的状态（「跳到某个工具」要能展开对应的组）
-    var own by remember(tools.first().key) { mutableStateOf(false) }
+    var own by remember(tools.first().key, startOpen) { mutableStateOf(startOpen) }
     val open = expanded ?: own
     fun toggle() { if (onToggle != null) onToggle() else own = !own }
     val source = remember { MutableInteractionSource() }
@@ -194,7 +205,7 @@ internal fun CodeToolGroup(tools: List<TranscriptItem.Tool>, onPath: ((String) -
             Column(Modifier.fillMaxWidth().border(line, t.border, RoundedCornerShape(8.dp))) {
                 tools.forEachIndexed { index, tool ->
                     if (index > 0) HorizontalDivider(thickness = line, color = t.border)
-                    CodeToolEntry(tool, onPath, detail)
+                    CodeToolEntry(tool, onPath, detail, startOpen)
                 }
             }
         }
@@ -215,9 +226,9 @@ private fun CodeToolArrow(open: Boolean, strong: Boolean) {
  * 文件改动的路径可点（[onPath]）。详情最多画 80 行，长的写明省略了多少。
  */
 @Composable
-private fun CodeToolEntry(tool: TranscriptItem.Tool, onPath: ((String) -> Unit)?, detail: (@Composable (TranscriptItem.Tool) -> Unit)? = null) {
+private fun CodeToolEntry(tool: TranscriptItem.Tool, onPath: ((String) -> Unit)?, detail: (@Composable (TranscriptItem.Tool) -> Unit)? = null, startOpen: Boolean = false) {
     val t = Tokens.current
-    var open by remember(tool.key) { mutableStateOf(false) }
+    var open by remember(tool.key, startOpen) { mutableStateOf(startOpen) }
     val source = remember { MutableInteractionSource() }
     val hovered by source.collectIsHoveredAsState()
     val mono = CodeStyle.copy(fontSize = 12.sp, lineHeight = 17.sp)

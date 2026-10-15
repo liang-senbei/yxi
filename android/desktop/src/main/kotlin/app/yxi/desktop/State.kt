@@ -150,6 +150,10 @@ class AppState internal constructor(private val localClaudeFactory: (Instruction
     }
     var showAndroidEmulator by mutableStateOf(false)
     internal val codexConversationViews = mutableMapOf<String, CodexConversationView>()
+    /** 对话视图（M3g）：每个会话一档，只在内存里（同参照端：会话里改只影响那个会话）；没设过的取偏好，默认普通。 */
+    internal val transcriptViews = androidx.compose.runtime.mutableStateMapOf<String, TranscriptView>()
+    internal fun transcriptView(key: String): TranscriptView = transcriptViews[key] ?: TranscriptView.of(Store.pref(TranscriptView.PREF, TranscriptView.Normal.key))
+    internal fun cycleTranscriptView(key: String) { transcriptViews[key] = transcriptView(key).next() }
     internal var codexSelectedTaskKey by mutableStateOf<String?>(null)
     internal var codexCreateRequest by mutableStateOf<Pair<String, String>?>(null)
     internal var codexCreateGroup by mutableStateOf("")

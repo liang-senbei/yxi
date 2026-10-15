@@ -257,6 +257,7 @@ import java.io.File
                 else if (tool == "files") Box(Modifier.weight(1f).fillMaxWidth()) { LocalFilesPane(record.key, record.directory) }
                 else Box(Modifier.weight(1f).fillMaxWidth()) {
                     // M3f：运行中的状态行（对话末尾）；开始时间记在这一层，列表滚动时不会从 0 算起
+                    val transcriptMode = state.transcriptView(record.key)   // M3g：对话视图（Ctrl+O 轮换）
                     val runningSince = rememberRunningSince(controller?.busy == true && approvals.isEmpty())
                     LazyColumn(Modifier.fillMaxSize().onPointerEvent(PointerEventType.Scroll, PointerEventPass.Initial) { event ->
                         if (event.changes.any { it.scrollDelta.y < 0f }) followLatest = false
@@ -271,10 +272,14 @@ import java.io.File
                             }
                         }
                         // M3d：原生历史也走统一对话项。一条历史一项（工具调用画成只有一个条目的卡片）：「加载更早消息」按历史下标找回滚动位置，不能合并
-                        items(history, key = { "history:" + it.key }) { CodeColumn(true) { CodeTranscriptLine(Transcripts.rows(listOf(Transcripts.claudeHistory(it))).single()) } }
+                        items(history, key = { "history:" + it.key }) {
+                            // 普通档的思考画成空（不能从列表里拿掉：「加载更早消息」按历史下标找回位置）
+                            val item = Transcripts.claudeHistory(it)
+                            if (transcriptMode != TranscriptView.Normal || item !is TranscriptItem.Thinking) CodeColumn(true) { CodeTranscriptLine(Transcripts.rows(listOf(item)).single(), view = transcriptMode) }
+                        }
                         // M3b / M3c：统一对话项；工具结果并进前一个调用
-                        items(Transcripts.rows(messages.map(Transcripts::claude)), key = { "row:" + it.key }) { row ->
-                            CodeColumn(true) { CodeTranscriptLine(row, images = { ClaudeSentImages(it, state.localClaudeTasks.images) }) }
+                        items(Transcripts.rows(Transcripts.visible(messages.map(Transcripts::claude), transcriptMode)), key = { "row:" + it.key }) { row ->
+                            CodeColumn(true) { CodeTranscriptLine(row, images = { ClaudeSentImages(it, state.localClaudeTasks.images) }, view = transcriptMode) }
                         }
                         if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在生成回复", runningSince) } }
                         item { Spacer(Modifier.height(1.dp)) }
@@ -311,7 +316,7 @@ import java.io.File
                         },
                         focus = focus, canSend = canSend, onSend = ::send, running = controller?.busy == true, onStop = ::stop,
                         attachments = imagePreviews, onRemoveAttachment = { preview -> imageDrafts.removeAll { it.remotePath == preview.stamp } },
-                        onKey = { e -> e.type == KeyEventType.KeyDown && e.key == Key.V && (e.isCtrlPressed || e.isMetaPressed) && pasteImage() },
+                        onKey = { e -> (isTranscriptViewKey(e) && run { state.cycleTranscriptView(record.key); true }) || (e.type == KeyEventType.KeyDown && e.key == Key.V && (e.isCtrlPressed || e.isMetaPressed) && pasteImage()) },
                         start = {
                             // 选图是模态框，关掉后焦点还给输入框
                             CodeLocalAttachButton(!capturingImages && imageDrafts.size < 4, capturingImages, imageButtonModifier) { addImages(); runCatching { focus.requestFocus() } }

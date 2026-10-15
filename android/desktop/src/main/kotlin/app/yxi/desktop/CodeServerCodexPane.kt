@@ -286,14 +286,15 @@ private fun CodeServerCodexConversation(state: AppState, conn: Conn, record: Cod
                     GitChangesPane(conn, record.directory, ::openTaskFile) { quote -> state.appendCodexQuote(record, quote); showChanges = false }
                 } else {
                     // M3f：运行中的状态行（对话末尾）；开始时间记在这一层，列表滚动时不会从 0 算起
+                    val transcriptMode = state.transcriptView(record.key)   // M3g：对话视图（Ctrl+O 轮换）
                     val runningSince = rememberRunningSince(controller?.activeTurnId != null && requests.isEmpty())
                     LazyColumn(Modifier.fillMaxSize().onPointerEvent(PointerEventType.Scroll, PointerEventPass.Initial) { event ->
                         if (event.changes.any { it.scrollDelta.y < 0f }) followLatest = false
                     }, state = view.scroll, contentPadding = PaddingValues(40.dp, 12.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         // M3b / M3c：同本机 Codex 页；改动里的路径点了打开文件（同原来的活动卡）
-                        items(Transcripts.rows(messages.map(Transcripts::codex)), key = { "row:" + it.key }) { row ->
-                            CodeColumn(true) { CompositionLocalProvider(LocalUriHandler provides taskUris) { CodeTranscriptLine(row, onPath = ::openTaskFile) } }
+                        items(Transcripts.rows(Transcripts.visible(messages.map(Transcripts::codex), transcriptMode)), key = { "row:" + it.key }) { row ->
+                            CodeColumn(true) { CompositionLocalProvider(LocalUriHandler provides taskUris) { CodeTranscriptLine(row, onPath = ::openTaskFile, view = transcriptMode) } }
                         }
                         if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在运行", runningSince) } }
                         item(key = "latest") { Spacer(Modifier.height(1.dp)) }
@@ -336,6 +337,7 @@ private fun CodeServerCodexConversation(state: AppState, conn: Conn, record: Cod
                         a.cancelled.set(true); attachments?.remove(a)
                     },
                     onKey = { e ->
+                        if (isTranscriptViewKey(e) && run { state.cycleTranscriptView(record.key); true }) return@CodeLocalComposer true
                         when {
                             mentions.handle(e) -> true
                             e.type == KeyEventType.KeyDown && draft.value.composition == null && e.key == Key.V && (e.isCtrlPressed || e.isMetaPressed) &&

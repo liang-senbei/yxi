@@ -217,6 +217,7 @@ private class AcpPendingAuthentication(val plan: AcpTerminalAuthPlan, val comple
                 else if (local && tool == "files") Box(Modifier.weight(1f).fillMaxWidth()) { LocalFilesPane(record.key, record.directory) }
                 else Box(Modifier.weight(1f).fillMaxWidth()) {
                     // M3f：运行中的状态行（对话末尾）；开始时间记在这一层，列表滚动时不会从 0 算起
+                    val transcriptMode = state.transcriptView(record.key)   // M3g：对话视图（Ctrl+O 轮换）
                     val runningSince = rememberRunningSince(controller?.busy == true && approvals.isEmpty())
                     LazyColumn(Modifier.fillMaxSize().nestedScroll(scrollWatch).onPointerEvent(PointerEventType.Scroll, PointerEventPass.Initial) { event ->
                         if (event.changes.any { it.scrollDelta.y < 0f }) followLatest = false
@@ -224,7 +225,7 @@ private class AcpPendingAuthentication(val plan: AcpTerminalAuthPlan, val comple
                         verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         // 顺序和 key 同经典：跟随最新滚到下标 messages + approvals（末尾的占位）
                         // M3b / M3c：统一对话项，连着的工具调用合成摘要行 + 卡片
-                        items(Transcripts.rows(messages.map(Transcripts::acp)), key = { "row:" + it.key }) { row -> CodeColumn(true) { CodeTranscriptLine(row) } }
+                        items(Transcripts.rows(Transcripts.visible(messages.map(Transcripts::acp), transcriptMode)), key = { "row:" + it.key }) { row -> CodeColumn(true) { CodeTranscriptLine(row, view = transcriptMode) } }
                         if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在生成回复", runningSince) } }
                         item(key = "acp-end") { Spacer(Modifier.height(1.dp)) }
                     }
@@ -270,7 +271,7 @@ private class AcpPendingAuthentication(val plan: AcpTerminalAuthPlan, val comple
                                 CodeAcpApproval(request.getJSONObject("params"), controller?.ready == true && !controller.cancelling) { option -> act { answerPermission(request.get("id"), option) } }
                             }
                         }
-                        CodeLocalComposer(draft.value, { draft.value = it },
+                        CodeLocalComposer(draft.value, { draft.value = it }, onKey = { e -> isTranscriptViewKey(e) && run { state.cycleTranscriptView(record.key); true } },
                             hint = when {
                                 controller == null || !controller.ready -> if (!local) "此连接已不能再发送" else if (opening) "正在接回会话…" else "接回会话后可发送"
                                 controller.pendingApprovals.isNotEmpty() -> "先处理上面的审批；现在发送会先排队"

@@ -218,6 +218,7 @@ internal fun CodeLocalCodexPane(state: AppState, record: LocalCodexTaskRecord) {
             else if (tool == "files") Box(Modifier.weight(1f).fillMaxWidth()) { LocalFilesPane(record.key, record.directory) }
             else Box(Modifier.weight(1f).fillMaxWidth()) {
                 // M3f：运行中的状态行（对话末尾）；开始时间记在这一层，列表滚动时不会从 0 算起
+                val transcriptMode = state.transcriptView(record.key)   // M3g：对话视图（Ctrl+O 轮换）
                 val runningSince = rememberRunningSince(controller?.activeTurnId != null && requests.isEmpty())
                 LazyColumn(Modifier.fillMaxSize().onPointerEvent(PointerEventType.Scroll, PointerEventPass.Initial) { event ->
                     if (event.changes.any { it.scrollDelta.y < 0f }) followLatest = false
@@ -226,8 +227,8 @@ internal fun CodeLocalCodexPane(state: AppState, record: LocalCodexTaskRecord) {
                     // 顺序和 key 同服务器工作台：跟随最新滚到下标 messages + requests（末尾的占位）
                     // M3b / M3c：统一对话项（你 = 右对齐气泡，Codex = 没有作者名的正文），命令和文件改动合成摘要行 + 卡片（代替原来的活动卡）；
                     // 回复里的链接、改动里的路径照旧是复制路径
-                    items(Transcripts.rows(messages.map(Transcripts::codex)), key = { "row:" + it.key }) { row ->
-                        CodeColumn(true) { CompositionLocalProvider(LocalUriHandler provides links) { CodeTranscriptLine(row, onPath = ::copyPath) } }
+                    items(Transcripts.rows(Transcripts.visible(messages.map(Transcripts::codex), transcriptMode)), key = { "row:" + it.key }) { row ->
+                        CodeColumn(true) { CompositionLocalProvider(LocalUriHandler provides links) { CodeTranscriptLine(row, onPath = ::copyPath, view = transcriptMode) } }
                     }
                     if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在运行", runningSince) } }
                     item(key = "latest") { Spacer(Modifier.height(1.dp)) }
@@ -277,7 +278,7 @@ internal fun CodeLocalCodexPane(state: AppState, record: LocalCodexTaskRecord) {
                     focus = focus, canSend = canSend, onSend = ::send,
                     running = controller?.activeTurnId != null, onStop = ::stop,
                     attachments = imagePreviews, onRemoveAttachment = { preview -> imageDrafts.removeAll { it.remotePath == preview.stamp } },
-                    onKey = { e -> e.type == KeyEventType.KeyDown && e.key == Key.V && (e.isCtrlPressed || e.isMetaPressed) && pasteImage() },
+                    onKey = { e -> (isTranscriptViewKey(e) && run { state.cycleTranscriptView(record.key); true }) || (e.type == KeyEventType.KeyDown && e.key == Key.V && (e.isCtrlPressed || e.isMetaPressed) && pasteImage()) },
                     start = {
                         // 选图是模态框，关掉后焦点还给输入框；没接回也能先选图（发送要等接回）
                         CodeLocalAttachButton(!capturingImages && imageDrafts.size < 4, capturingImages) { addImages(); runCatching { focus.requestFocus() } }

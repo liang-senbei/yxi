@@ -35,7 +35,24 @@ internal sealed interface TranscriptRow {
     data class Tools(val tools: List<TranscriptItem.Tool>) : TranscriptRow { override val key get() = "tools:" + tools.first().key }
 }
 
+/**
+ * 对话视图三档（M3g，规格表 §3.4）：普通 = 不显示思考、工具只有折叠的摘要行；思考 = 再显示思考，摘要行仍折叠；详细 = 显示思考，工具组卡片和每个条目都展开。
+ * 每个会话一档（AppState.transcriptViews），没设过的取偏好 [PREF]（默认普通，同参照端）；Ctrl+O 轮换。
+ */
+internal enum class TranscriptView(val key: String, val label: String) {
+    Normal("normal", "普通"), Thinking("thinking", "思考"), Detailed("detailed", "详细");
+    fun next() = entries[(ordinal + 1) % entries.size]
+    companion object {
+        const val PREF = "ui.transcriptView"
+        fun of(key: String) = entries.firstOrNull { it.key == key } ?: Normal
+    }
+}
+
 internal object Transcripts {
+    /** 按对话视图过滤：普通档不显示思考（也不留占位）。 */
+    fun visible(items: List<TranscriptItem>, view: TranscriptView): List<TranscriptItem> =
+        if (view == TranscriptView.Normal) items.filterNot { it is TranscriptItem.Thinking } else items
+
     /** 连在一起的工具调用合成一组（规格表 §3.4）；Claude 的工具结果并进组里前一个调用的详情（没有前一个时自成一项）。 */
     fun rows(items: List<TranscriptItem>): List<TranscriptRow> {
         val rows = ArrayList<TranscriptRow>()

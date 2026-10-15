@@ -116,7 +116,8 @@ import org.jetbrains.skia.Image as SkiaImage
  * · composer = 一张圆角卡片：无边框输入区 + 底部功能行（+ 附件 / 审批态 / 模型·强度·模式·上下文 chips / 圆形发送）。
  */
 @Composable
-internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQueue, attachments: ChatAttachments, savedDraft: androidx.compose.runtime.MutableState<TextFieldValue>? = null, displayName: String? = null, onRoutes: () -> Unit = {}, onTerminal: () -> Unit = {}, modelSwitches: ModelChangeStore? = null) {
+internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQueue, attachments: ChatAttachments, savedDraft: androidx.compose.runtime.MutableState<TextFieldValue>? = null, displayName: String? = null, onRoutes: () -> Unit = {}, onTerminal: () -> Unit = {}, modelSwitches: ModelChangeStore? = null,
+    transcriptView: TranscriptView = TranscriptView.Normal, onCycleView: (() -> Unit)? = null) {
     val taskKey = taskNavigationKey(conn.host, session)
     val ssh = conn.ssh
     val t = Tokens.current
@@ -522,8 +523,10 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                         fun toggle() { if (row.key in openGroups) openGroups.remove(row.key) else openGroups.add(row.key) }
                         when {
                             // M3e：Code 下走统一对话项的外观；工具仍用这里的分组和开合状态，点开的条目画原来的富渲染 ToolCard
+                            // M3g：详细档一开始就展开（用「详细 XOR 手动开合」，手动照样能收起）；普通档的思考画成空
                             codeStyle && row is ChatRow.Group -> CodeToolGroup(row.calls.map { Transcripts.claudeHistory(it) as TranscriptItem.Tool },
-                                expanded = row.key in openGroups, onToggle = ::toggle, detail = { tool -> row.calls.firstOrNull { it.key == tool.key }?.let { ToolCard(it) } })
+                                expanded = (row.key in openGroups) != (transcriptView == TranscriptView.Detailed), onToggle = ::toggle, startOpen = transcriptView == TranscriptView.Detailed, detail = { tool -> row.calls.firstOrNull { it.key == tool.key }?.let { ToolCard(it) } })
+                            codeStyle && row is ChatRow.One && row.item is ChatItem.Thinking && transcriptView == TranscriptView.Normal -> Unit
                             codeStyle && row is ChatRow.One -> CodeChatItem(row.item) { editingMessage = it }
                             row is ChatRow.Group -> GroupCard(row.calls, open = row.key in openGroups) { toggle() }
                             row is ChatRow.One -> ItemView(conn, row.item) { editingMessage = it }
@@ -642,6 +645,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                 modelControl = { if (rewindRunning || rewindBlocked) { if (codeStyle) CodeFooterNote("回退处理中", t.textMuted) else Text("回退处理中", color = t.textMuted) }
                     else if (session.isCodex) { if (codeStyle) CodeFooterChip("模型与思考", onRoutes) else TextButton(onRoutes) { Text("模型与思考 ⌄") } }
                     else ConversationModelMenu(conn, session, ctx?.model.orEmpty(), ctx?.effort.orEmpty(), onRoutes, modelSwitches, onTerminal) },
+                onCycleView = onCycleView,
             )
         }
     }
@@ -668,6 +672,7 @@ internal fun Composer(
     onRoutes: () -> Unit,
     modelControl: @Composable () -> Unit,
     permissionControl: @Composable () -> Unit = {},
+    onCycleView: (() -> Unit)? = null,
 ) {
     val t = Tokens.current
     val mentions = rememberAttachmentMentions(attachments, draft, onDraft)
@@ -687,7 +692,9 @@ internal fun Composer(
     }
     if (LocalThemeSpec.current.style == UiStyle.Code) {
         CodeChatComposer(
-            attachments, onRemoveAttachment, mentions, draft, onDraft, focus, hint, canSend, onSend, onKey,
+            attachments, onRemoveAttachment, mentions, draft, onDraft, focus, hint, canSend, onSend,
+            // M3g：Code 下 Ctrl+O 轮换对话视图（经典不接）
+            { e -> (onCycleView != null && isTranscriptViewKey(e) && run { onCycleView(); true }) || onKey(e) },
             canAct = canAct, planMode = ctx?.mode == "plan", tokens = ctx?.tokens ?: 0L,
             onAttach = onAttach, onHistory = onHistory, onSearch = onSearch, onVoice = onVoice, onRoutes = if (ctx != null) onRoutes else null,
             permissionControl = permissionControl, modelControl = modelControl,

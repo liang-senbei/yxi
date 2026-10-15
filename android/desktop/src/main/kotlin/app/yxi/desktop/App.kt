@@ -193,7 +193,8 @@ private fun ClassicWorkspace(state: AppState, conn: Conn, sess: Session, scope: 
 @Composable
 internal fun SessionContent(state: AppState, conn: Conn, sess: Session, taskKey: String, openFile: (String) -> Unit) {
     key(taskKey) { when (state.tab) {
-        0 -> ChatPane(conn, sess, state.instructions, state.chatAttachments, savedDraft = state.chatDrafts.getOrPut(taskKey) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue()) }, displayName = state.navigation.title(taskKey), onRoutes = { state.openRoutes() }, onTerminal = { state.tab = 1 }, modelSwitches = state.modelSwitches)
+        0 -> ChatPane(conn, sess, state.instructions, state.chatAttachments, savedDraft = state.chatDrafts.getOrPut(taskKey) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue()) }, displayName = state.navigation.title(taskKey), onRoutes = { state.openRoutes() }, onTerminal = { state.tab = 1 }, modelSwitches = state.modelSwitches,
+            transcriptView = state.transcriptView(taskKey), onCycleView = { state.cycleTranscriptView(taskKey) })
         1 -> TermPane(conn, sess)
         2 -> FilesPane(conn, sess, openFile)
         else -> GitChangesPane(conn, sess.cwd, openFile) { quote -> state.appendDocumentQuote(conn.host, sess, quote); state.tab = 0 }

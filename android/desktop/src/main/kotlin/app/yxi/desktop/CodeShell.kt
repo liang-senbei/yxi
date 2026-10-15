@@ -238,6 +238,11 @@ private fun CodeTitleMenu(state: AppState, sess: Session, taskKey: String, onRen
             { close(); nav.setArchived(taskKey, !archived) }, enabled = stable && (archived || canArchive),
         )
         CodeMenuDivider()
+        // 对话视图（M3g，规格表 §3.9 的「对话视图 >」）：三档平铺在这里、当前档打勾，只影响这个会话；输入框里 Ctrl+O 轮换
+        CodeMenuCaption("对话视图 · Ctrl+O")
+        val current = state.transcriptView(taskKey)
+        TranscriptView.entries.forEach { v -> CodeMenuItem(v.label, { close(); state.transcriptViews[taskKey] = v }, checked = v == current) }
+        CodeMenuDivider()
         CodeMenuItem("复制项目路径", {
             close()
             runCatching { java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(java.awt.datatransfer.StringSelection(sess.cwd), null) }

@@ -142,12 +142,13 @@ import org.json.JSONObject
                 else if (local && tool == "files") Box(Modifier.weight(1f).fillMaxWidth()) { LocalFilesPane(record.key, record.directory) }
                 else Box(Modifier.weight(1f).fillMaxWidth()) {
                     // M3f：运行中的状态行（对话末尾）；开始时间记在这一层，列表滚动时不会从 0 算起
+                    val transcriptMode = state.transcriptView(record.key)   // M3g：对话视图（Ctrl+O 轮换）
                     val runningSince = rememberRunningSince(controller?.nativeBusy == true && controller.permissions.isEmpty() && controller.questions.isEmpty())
                     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(40.dp, 12.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         if (controller != null) {
                             // M3b / M3c：每条 OpenCode 消息拆成几项（正文、思考、工具），连着的工具调用跨消息合成摘要行 + 卡片
-                            items(Transcripts.rows(controller.messages.flatMap(Transcripts::openCode)), key = { "row:" + it.key }) { row -> CodeColumn(true) { CodeTranscriptLine(row) } }
+                            items(Transcripts.rows(Transcripts.visible(controller.messages.flatMap(Transcripts::openCode), transcriptMode)), key = { "row:" + it.key }) { row -> CodeColumn(true) { CodeTranscriptLine(row, view = transcriptMode) } }
                             if (runningSince > 0L) item(key = "status") { CodeColumn(true) { CodeStatusLine("正在运行", runningSince) } }
                             items(controller.questions, key = { "question:${it.getString("id")}" }) { request ->
                                 CodeColumn(true) { OpenCodeQuestions(request, controller, ::act, Modifier.fillMaxWidth()) }
@@ -189,7 +190,7 @@ import org.json.JSONObject
                         if (error.isNotBlank()) Note(error, t.danger)
                         // M3d-2：审批卡停靠在输入卡上方、和输入卡同宽，不进对话滚动区（规格表 §3.3）；下缘到输入卡 6.4
                         controller.permissions.forEach { request -> key(request.getString("id")) { CodeOpenCodeApproval(request, controller, ::act) } }
-                        CodeLocalComposer(draft.value, { draft.value = it },
+                        CodeLocalComposer(draft.value, { draft.value = it }, onKey = { e -> isTranscriptViewKey(e) && run { state.cycleTranscriptView(record.key); true } },
                             // 不看 ready：每次轮询 refresh 都会把它短暂置 false，提示会闪
                             hint = when {
                                 controller.permissions.isNotEmpty() -> "先处理上面的审批"

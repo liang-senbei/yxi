@@ -94,4 +94,12 @@ class TranscriptItemTest {
         assertEquals(TranscriptItem.Notice("x", "接口报错：529"), Transcripts.claudeHistory(app.yxi.agent.ChatItem.ApiError("x", "529")))
         assertEquals("队友消息 · ios\n在忙", (Transcripts.claudeHistory(app.yxi.agent.ChatItem.Injected("i", "队友消息", "ios", "在忙")) as TranscriptItem.Notice).text)
     }
+
+    @Test fun `view modes cycle, parse from prefs and normal hides thinking`() {
+        assertEquals(listOf(TranscriptView.Thinking, TranscriptView.Detailed, TranscriptView.Normal), TranscriptView.entries.map { it.next() })
+        assertEquals(TranscriptView.Detailed, TranscriptView.of("detailed")); assertEquals(TranscriptView.Normal, TranscriptView.of("什么"))
+        val items = listOf(TranscriptItem.User("u", "q"), TranscriptItem.Thinking("t", "想"), TranscriptItem.AssistantText("a", "答"))
+        assertEquals(listOf("u", "a"), Transcripts.visible(items, TranscriptView.Normal).map { it.key })
+        assertEquals(items, Transcripts.visible(items, TranscriptView.Thinking)); assertEquals(items, Transcripts.visible(items, TranscriptView.Detailed))
+    }
 }

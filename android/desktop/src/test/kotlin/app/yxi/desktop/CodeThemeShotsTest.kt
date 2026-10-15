@@ -176,6 +176,10 @@ private fun codeScenes() = listOf(
     CodeScene("ssh-chat") { remote(it, tab = 0) },
     // SSH 对话的工具组（M3e）：Code 的摘要行 + 卡片，点开的条目里是原来的富渲染 ToolCard（这里是 Bash：命令和输出）
     CodeScene("ssh-chat-tool", listOf("运行了一条命令", "./gradlew test --offline")) { remote(it, tab = 0) },
+    // SSH 会话的标题菜单里的「对话视图」（M3g）：三档平铺、当前档（普通）打勾
+    CodeScene("ssh-title-view-menu", listOf("@任务操作"), verify = { _, nodes ->
+        for (text in listOf("对话视图 · Ctrl+O", "普通", "思考", "详细")) check(nodes.any { it.endsWith(" $text") }) { "标题菜单里没有「$text」" }
+    }) { remote(it, tab = 0) },
     CodeScene("approval-card", content = { ApprovalDockShot() }),
     // 新会话页的两侧边距（M2-d）：主区只有 600 宽时，骨架两侧各留 40，输入卡宽 600 − 80 = 520、左缘 288 + 40（PRD §5.1）。只画骨架和占位的 chip / 输入卡
     CodeScene("home-narrow", content = { NarrowHomeShot() }, verify = { _, nodes ->
@@ -286,6 +290,10 @@ private fun codeScenes() = listOf(
     // 记录只改内存里的索引。第二张多一轮等审批的（审批卡、停止方块、侧栏的状态点）
     CodeScene("local-opencode") { localOpenCode(it, permission = false) },
     CodeScene("local-opencode-permission") { localOpenCode(it, permission = true) },
+    // 对话视图（M3g，规格表 §3.4）：助手回复里带一段思考；普通档（默认）不显示，切到「思考」档才显示（弱色斜体）
+    CodeScene("local-opencode-thinking", verify = { _, nodes ->
+        check(nodes.any { it.endsWith(" 先看 nav.yml 里有多少个页面，再按读者路径分组。") }) { "思考档没显示思考" }
+    }) { localOpenCode(it, permission = false, thinking = true); it.transcriptViews[it.localSelectedTaskKey!!] = TranscriptView.Thinking },
     // 运行中的状态行（M3f，规格表 §3.4）：在跑、没有审批时对话末尾一行「正在运行 · Ns」；夹具的时钟固定，所以是 0s
     CodeScene("local-opencode-running", verify = { _, nodes ->
         check(nodes.any { it.endsWith(" 正在运行 · 0s") }) { "运行中没有状态行" }
@@ -328,6 +336,10 @@ private fun codeScenes() = listOf(
         // 语义清单里没有图标的描述，按位置认：「复制」是 24×24 的按钮，右缘贴对话列右边（x 1552 − 24 = 1528）
         check(nodes.any { "x=1528.0" in it && "w=24.0 h=24.0 Button" in it }) { "鼠标停在消息上没有出现「复制」" }
     }) { localCodex(it, approval = false) },
+    // 详细档（M3g）：工具组卡片和每个条目一开始就展开（命令框可见），不用点
+    CodeScene("local-codex-detailed", verify = { _, nodes ->
+        check(nodes.any { it.trimEnd().endsWith(" $") } && nodes.any { it.trimEnd().endsWith(" 修改") }) { "详细档没把工具组和条目展开" }
+    }) { localCodex(it, approval = false); it.transcriptViews[it.localSelectedTaskKey!!] = TranscriptView.Detailed },
     // 工具摘要行和工具组卡片（M3c，规格表 §3.4）：一轮里的命令和文件改动合成一行，点开是撑满列宽的卡片；第二张再点开命令条目（命令框 + 输出）
     CodeScene("local-codex-tools", listOf(SHOT_CODEX_TOOLS), verify = { _, nodes ->
         check(nodes.any { it.trimEnd().endsWith(" 修改") } && nodes.any { it.endsWith(" parser.rs、Cargo.toml") }) { "卡片里没有改文件的条目" }
@@ -946,7 +958,7 @@ private val shotServers = mutableListOf<HttpServer>()
  * 控制器接回环上的假 OpenCode：只答 refresh 要的几条 GET（会话归属、200 条消息、审批、提问、状态），别的给 404；
  * 在 EDT 上先同步 refresh 一次（请求跑在 IO 上），第一帧就有数据，之后面板每 2 秒刷新一次，回的内容不变。[permission] 多一轮等审批的。
  */
-private fun localOpenCode(state: AppState, permission: Boolean, running: Boolean = false) {
+private fun localOpenCode(state: AppState, permission: Boolean, running: Boolean = false, thinking: Boolean = false) {
     localHome(state)
     val records = state.localOpenCodeTasks.registry.records
     val index = records.indexOfFirst { it.threadId == "shot-local-3" }
@@ -958,7 +970,7 @@ private fun localOpenCode(state: AppState, permission: Boolean, running: Boolean
     fun text(value: String) = JSONObject().put("type", "text").put("text", value)
     val history = JSONArray()
         .put(message("msg_shot_1", "user", text("侧栏导航太乱了，按「入门 / 指南 / 参考」三组重排一下")))
-        .put(message("msg_shot_2", "assistant", text("## 调整方案\n\n现在的 `nav.yml` 把 14 个页面平铺在一层，我按读者路径分成三组：\n\n" +
+        .put(message("msg_shot_2", "assistant", *(if (thinking) arrayOf(JSONObject().put("type", "reasoning").put("text", "先看 nav.yml 里有多少个页面，再按读者路径分组。")) else emptyArray()), text("## 调整方案\n\n现在的 `nav.yml` 把 14 个页面平铺在一层，我按读者路径分成三组：\n\n" +
             "- **入门**：安装、快速开始\n- **指南**：部署、配置、排错\n- **参考**：命令行、配置项、API\n\n旧链接保留跳转，不会 404。")))
     val permissions = JSONArray()
     val status = JSONObject()
