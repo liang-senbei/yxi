@@ -149,7 +149,8 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             // 状态栏 / 导航栏的图标颜色跟 App 自己的风格（Skin）走，不跟系统的深色模式（理由见 Skin.applyBars）；换风格时重新套一次。
-            // ⚠️ 配置变了（转屏等）也要再套：那个隐藏 View 记的是启动时的风格，中途换过风格的话转屏会被它改回去
+            // ⚠️ 配置变了（转屏等）也要再套 —— 为的是**导航栏**：androidx 那个隐藏 View 记的导航栏样式是启动时的风格，
+            //    中途换过风格的话转屏会被它改回去（状态栏用的是现读 Skin 的 auto，不受影响，见 Skin.applyBars）
             val lightSkin = app.yxi.ui.Skin.style.palette.light
             val conf = androidx.compose.ui.platform.LocalConfiguration.current
             LaunchedEffect(lightSkin, conf) { app.yxi.ui.Skin.applyBars(this@MainActivity) }

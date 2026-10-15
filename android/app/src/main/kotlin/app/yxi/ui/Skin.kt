@@ -61,6 +61,8 @@ object Skin {
         // 状态栏用 auto + 自己的判定：androidx 会把第一次调用的样式存起来、转屏时重套（见 MainActivity）——
         // 判定每次现读 Skin，中途换过风格也不会在转屏那一帧闪回旧的图标色。底色两边都是透明，跟原来一样。
         val status = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT) { !style.palette.light }
+        // 导航栏不能也换成 auto：auto 在 API 29+ 会把导航栏底色清成透明、打开 isNavigationBarContrastEnforced，
+        // 35+ 还把 ProtectionLayout 的颜色归零 —— 0xE6FFFFFF / 0x801B1B1B 这层底就没了。所以它保持固定样式，转屏由 MainActivity 重套。
         val nav = if (light) SystemBarStyle.light(0xE6FFFFFF.toInt(), 0x801B1B1B.toInt()) else SystemBarStyle.dark(0x801B1B1B.toInt())
         a.enableEdgeToEdge(statusBarStyle = status, navigationBarStyle = nav)
     }
