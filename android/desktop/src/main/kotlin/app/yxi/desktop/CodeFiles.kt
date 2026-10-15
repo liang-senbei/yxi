@@ -168,7 +168,8 @@ internal fun CodeFilesView(key: Any, source: CodeFileSource, actions: @Composabl
                                 selected = row.path
                                 if (row.link) scope.launch {
                                     val parent = children.entries.firstOrNull { (_, rows) -> rows.any { it.path == row.path } }?.key
-                                    val dir = runCatching { source.isDir(row.path) }.getOrDefault(false)
+                                    // 问不到（断线、stat 失败）就留着它是没判过的链接，下次还能再点（交叉审查 10-15）
+                                    val dir = try { source.isDir(row.path) } catch (e: CancellationException) { throw e } catch (e: Exception) { error = source.explain(e); return@launch }
                                     if (parent != null) children[parent] = children[parent].orEmpty().map { if (it.path == row.path) it.copy(dir = dir, link = false) else it }
                                     if (!dir) file = row.path
                                     else { expanded.add(row.path); load(row.path, row.depth + 1) }

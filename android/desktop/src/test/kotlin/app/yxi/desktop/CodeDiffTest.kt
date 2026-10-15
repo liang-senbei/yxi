@@ -52,5 +52,8 @@ class CodeDiffTest {
         val long = (1..CodeDiff.MAX_LINES + 5).joinToString("\n") { "+x" }
         assertEquals(true, CodeDiff.clipped(long))
         assertEquals(false, CodeDiff.clipped(sample))
+        // 末尾没有换行的 6001 行也算截断（同 parse 的数法）
+        assertEquals(true, CodeDiff.clipped((1..CodeDiff.MAX_LINES + 1).joinToString("\n") { "+x" }))
+        assertEquals(false, CodeDiff.clipped((1..CodeDiff.MAX_LINES).joinToString("\n") { "+x" } + "\n"))
     }
 }

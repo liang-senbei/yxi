@@ -224,7 +224,7 @@ private fun CodeRemoteFiles(conn: Conn, taskKey: String, directory: String, onOp
                 pickSaveTo(Paths.nameOf(path))?.let { out ->
                     scope.launch {
                         transfer = "正在下载 ${Paths.nameOf(path)}…"; note = ""
-                        runCatching { channel().download(path, out) }.onFailure { note = "下载失败：" + Sftp.explain(it) }
+                        try { channel().download(path, out) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { note = "下载失败：" + Sftp.explain(e) }
                         transfer = ""
                     }
                 }
@@ -235,12 +235,13 @@ private fun CodeRemoteFiles(conn: Conn, taskKey: String, directory: String, onOp
                     scope.launch {
                         transfer = "正在上传 ${f.name}…"; note = ""
                         val to = if (dir.endsWith("/")) dir + f.name else "$dir/${f.name}"
-                        runCatching {
+                        try {
                             channel().write(to, f.inputStream(), f.length(), progress = { done, total ->
                                 transfer = "正在上传 ${f.name}… " + (if (total > 0) "${done * 100 / total}%" else human(done))
                                 true
                             })
-                        }.onFailure { note = "上传失败：" + Sftp.explain(it) }   // 同经典：失败原因要说出来（交叉审查 10-15）
+                        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                        catch (e: Exception) { note = "上传失败：" + Sftp.explain(e) }   // 同经典：失败原因要说出来（交叉审查 10-15）
                         transfer = ""
                         reload(dir)
                     }

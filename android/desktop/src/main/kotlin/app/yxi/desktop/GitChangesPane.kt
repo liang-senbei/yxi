@@ -29,6 +29,7 @@ internal fun GitChangesView(source: Any, directory: String, sourceLine: String, 
     var file by remember(source, directory) { mutableStateOf("") }
     var staged by remember(source, directory) { mutableStateOf(false) }
     var revision by remember { mutableStateOf(0) }
+    var loadedFor by remember(source, directory) { mutableStateOf<Pair<String, Boolean>?>(null) }   // 当前快照是按哪个文件、哪个范围读的
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var feedbackContext by remember(source, directory) { mutableStateOf<String?>(null) }
@@ -37,7 +38,7 @@ internal fun GitChangesView(source: Any, directory: String, sourceLine: String, 
     LaunchedEffect(source, directory, file, staged, revision) {
         // Code 的手风琴（M4c）点一个文件就重读：留着上一份直到新的到，列表不闪、不跳回顶上（交叉审查 10-15）；经典照旧先清空
         busy = true; error = ""; if (!code) snapshot = null
-        try { snapshot = load(file, staged) }
+        try { snapshot = load(file, staged); loadedFor = file to staged }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { error = e.message.orEmpty(); snapshot = null }
         finally { busy = false }
@@ -59,7 +60,7 @@ internal fun GitChangesView(source: Any, directory: String, sourceLine: String, 
             (if (diff.length > excerpt.length || data.optBoolean("clipped")) "\n（差异已截取，完整内容请从仓库读取。）" else "")
     }
     // M4c：Code 风格画成规格表 §3.12 的改动面板（文件行 + 行号 diff），数据、读取、对话框同经典
-    if (LocalThemeSpec.current.style == UiStyle.Code) CodeGitChanges(snapshot, staged, file, busy, error, files = { visibleFiles(it) },
+    if (LocalThemeSpec.current.style == UiStyle.Code) CodeGitChanges(snapshot, staged, file, busy, error, files = { visibleFiles(it) }, diffReady = loadedFor == file to staged,
         onStaged = { if (staged != it) { staged = it; file = "" } }, onFile = { file = it }, onRefresh = { revision++ },
         openFile = { data -> openFile(data.getString("root").trimEnd('/') + "/" + file) }, ask = ::ask)
     else Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

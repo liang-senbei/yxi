@@ -53,7 +53,7 @@ internal object CodeDiff {
      */
     const val MAX_LINES = 6000
     /** [diff] 的行数超过 [MAX_LINES]（[parse] 截掉了后面的）。 */
-    fun clipped(diff: String): Boolean = diff.count { it == '\n' } > MAX_LINES
+    fun clipped(diff: String): Boolean = diff.lines().let { if (it.lastOrNull()?.isEmpty() == true) it.size - 1 else it.size } > MAX_LINES
 
     fun parse(diff: String, max: Int = MAX_LINES): List<DiffLine> {
         var old = 0; var new = 0; var inHunk = false; var marks = 0   // marks > 0：在组合 diff 的段里（不写行号，按标记列着色）
@@ -126,7 +126,7 @@ internal fun CodeDiffRow(line: DiffLine) {
  * 数据、读取、修改意见对话框都是 [GitChangesView] 的（两种风格共用），这里只管外观。
  */
 @Composable
-internal fun CodeGitChanges(snapshot: JSONObject?, staged: Boolean, file: String, busy: Boolean, error: String, files: (JSONObject) -> List<JSONObject>,
+internal fun CodeGitChanges(snapshot: JSONObject?, staged: Boolean, file: String, busy: Boolean, error: String, files: (JSONObject) -> List<JSONObject>, diffReady: Boolean,
     onStaged: (Boolean) -> Unit, onFile: (String) -> Unit, onRefresh: () -> Unit, openFile: (JSONObject) -> Unit, ask: (JSONObject, String) -> Unit) {
     val t = Tokens.current
     val p = CodePalette.current
@@ -135,7 +135,8 @@ internal fun CodeGitChanges(snapshot: JSONObject?, staged: Boolean, file: String
     var scopeMenu by remember { mutableStateOf(false) }
     NativeOverlay(scopeMenu)
     val list = snapshot?.let(files).orEmpty()
-    val diff = snapshot?.optString("diff").orEmpty()
+    // 换了文件、新快照还没回来时，快照里的 diff 还是上一个文件的：不画（交叉审查 10-15），那一行下面写「正在读取」
+    val diff = if (diffReady) snapshot?.optString("diff").orEmpty() else ""
     val lines = remember(diff) { CodeDiff.parse(diff).filter { it.kind != DiffLine.Kind.Meta } }
     LazyColumn(Modifier.fillMaxSize()) {
         item(key = "head") {
@@ -188,7 +189,10 @@ internal fun CodeGitChanges(snapshot: JSONObject?, staged: Boolean, file: String
                     }
                 }
             }
-            if (open && snapshot != null) {
+            if (open && snapshot != null && !diffReady) item(key = "loading") {
+                Text("正在读取差异…", Modifier.padding(horizontal = 12.8.dp, vertical = 8.dp), color = t.textMuted, fontSize = 13.sp, lineHeight = 18.sp)
+            }
+            else if (open && snapshot != null) {
                 if (snapshot.optBoolean("clipped")) item(key = "clipped") {
                     Text("差异较长，只显示前 256 KiB", Modifier.padding(horizontal = 12.8.dp, vertical = 4.dp), color = t.textMuted, fontSize = 12.sp, lineHeight = 17.sp)
                 }

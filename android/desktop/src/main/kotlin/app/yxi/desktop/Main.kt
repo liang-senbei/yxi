@@ -104,7 +104,7 @@ fun main(args: Array<String>) {
             val where = if (MacChrome.isMac) "菜单栏和 Dock" else "托盘"
             if (Store.pref("trayHint", "0") != "1") { Store.setPref("trayHint", "1"); tray.sendNotification(Notification("Yxi", "Yxi 会在${where}里继续运行，服务器上的会话不受影响")) }
         }
-        LaunchedEffect(Unit) { installMacAppHandlers(state, ::quit) }
+        LaunchedEffect(Unit) { installMacAppHandlers(state, ::quit, ::finishQuit) { reviewingExit.value } }
         Window(
             onCloseRequest = ::close, state = win, visible = Shell.visible, title = "Yxi", icon = painterResource("icon.png"),
             // 无系统边框、边缘 8dp 仍能拖着改大小；Mac 原生时用系统边框（红绿灯、原生全屏），内容伸到透明标题栏下面（规格表 §7.2）

@@ -97,7 +97,7 @@ internal fun FrameWindowScope.YxiMacMenuBar(state: AppState, win: WindowState, o
  * 应用菜单里的「关于 Yxi」「设置…」「退出 Yxi」和点 Dock 图标（规格表 §7.2）：关于 → 设置的「关于」页，设置… → 设置，
  * 退出 → 走 [quit]（有未完成的活先确认，所以先取消系统的退出、由我们自己决定），点 Dock 图标 → 把窗口叫回来。只在 Mac 原生时装。
  */
-internal fun installMacAppHandlers(state: AppState, quit: () -> Unit) {
+internal fun installMacAppHandlers(state: AppState, quit: () -> Unit, finishQuit: () -> Unit, reviewing: () -> Boolean) {
     // ⚠️ 退出（⌘Q、Dock 的「退出」、注销 / 关机）：只有要你确认未完成的活时才 cancelQuit 弹确认；
     //    否则不取消，直接走我们的收尾（finishQuit → exitApplication 退出进程），系统的注销 / 关机接着走（交叉审查 10-15）
     if (!MacChrome.native || !java.awt.Desktop.isDesktopSupported()) return
@@ -105,6 +105,12 @@ internal fun installMacAppHandlers(state: AppState, quit: () -> Unit) {
     fun onUi(block: () -> Unit) = javax.swing.SwingUtilities.invokeLater(block)
     runCatching { desktop.setAboutHandler { onUi { Shell.show(); state.settingsSection = "关于"; state.showSettings = true } } }
     runCatching { desktop.setPreferencesHandler { onUi { Shell.show(); state.showSettings = true } } }
-    runCatching { desktop.setQuitHandler { _, response -> if (state.pendingWork().needsReview) response.cancelQuit(); onUi { quit() } } }
+    runCatching {
+        desktop.setQuitHandler { _, response ->
+            // 在这里一次决定，不让 quit() 隔一跳再判（中间状态变了会让系统的退出一直挂着，交叉审查 10-15）
+            if (state.pendingWork().needsReview || reviewing()) { response.cancelQuit(); onUi { quit() } }
+            else onUi { finishQuit() }
+        }
+    }
     runCatching { desktop.addAppEventListener(java.awt.desktop.AppReopenedListener { onUi { Shell.show() } }) }
 }
