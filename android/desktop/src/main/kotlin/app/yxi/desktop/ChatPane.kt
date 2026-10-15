@@ -615,11 +615,15 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
             }
             sendErr?.let { Note(it, t.danger) }
             if (!codeStyle) queueStrip()
-            // M4k：Claude 会话的斜杠菜单 = 内置 + 这台主机的命令和技能（Code 外观第一次打「/」时读一次，按主机记住）；Codex 会话没有来源，不弹
+            // M4k：Claude 会话的斜杠菜单 = 内置 + 这台主机的命令和技能（Code 外观第一次打「/」时读一次，按主机记住）；Codex 会话没有来源，不弹。
+            // 读取在 RemoteSlashCommands 自己的 scope 里跑完（草稿变了、离开页面都不取消）；它占着连接的 exec 锁，发送中先不开始
             val slashWanted = codeStyle && !session.isCodex && SlashCommands.word(draft.text) != null
-            LaunchedEffect(conn.host.id, slashWanted, conn.status) {
-                if (slashWanted && conn.ssh.isConnected) RemoteSlashCommands.ensure(conn.host.id) { ConfigRemote.load(conn.ssh) }
+            LaunchedEffect(conn.host.id, slashWanted, conn.status, sending) {
+                if (slashWanted && !sending && conn.ssh.isConnected) RemoteSlashCommands.ensure(conn.host.id) { ConfigRemote.read(conn.ssh) }
             }
+            // 合并表只在 Code 外观算，主机的命令表没变就不重算（经典不读它）
+            val hostSlash = if (codeStyle && !session.isCodex) RemoteSlashCommands.get(conn.host.id) else null
+            val slashCommands = remember(hostSlash) { hostSlash?.let { SlashCommands.merge(SlashCommands.builtIns(), it) }.orEmpty() }
             Composer(
                 attachments = staged.toList(),
                 onRemoveAttachment = { attachment ->
@@ -654,7 +658,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                     else if (session.isCodex) { if (codeStyle) CodeFooterChip("模型与思考", onRoutes) else TextButton(onRoutes) { Text("模型与思考 ⌄") } }
                     else ConversationModelMenu(conn, session, ctx?.model.orEmpty(), ctx?.effort.orEmpty(), onRoutes, modelSwitches, onTerminal) },
                 onCycleView = onCycleView,
-                slashCommands = if (session.isCodex) emptyList() else SlashCommands.merge(SlashCommands.builtIns(), RemoteSlashCommands.get(conn.host.id)),
+                slashCommands = slashCommands,
             )
         }
     }
@@ -701,15 +705,13 @@ internal fun Composer(
         }
     }
     if (LocalThemeSpec.current.style == UiStyle.Code) {
-        // M4k：斜杠菜单开着时 ↑↓ / Enter / Tab / Esc 先归它
-        val slash = rememberSlashMenu(slashCommands, draft, onDraft)
         CodeChatComposer(
             attachments, onRemoveAttachment, mentions, draft, onDraft, focus, hint, canSend, onSend,
             // M3g：Code 下 Ctrl+O 轮换对话视图（经典不接）
-            { e -> slash.handle(e) || (onCycleView != null && isTranscriptViewKey(e) && run { onCycleView(); true }) || onKey(e) },
+            { e -> (onCycleView != null && isTranscriptViewKey(e) && run { onCycleView(); true }) || onKey(e) },
             canAct = canAct, planMode = ctx?.mode == "plan", tokens = ctx?.tokens ?: 0L,
             onAttach = onAttach, onHistory = onHistory, onSearch = onSearch, onVoice = onVoice, onRoutes = if (ctx != null) onRoutes else null,
-            permissionControl = permissionControl, modelControl = modelControl, slash = slash,
+            permissionControl = permissionControl, modelControl = modelControl, slashCommands = slashCommands,
         )
         return
     }

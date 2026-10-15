@@ -97,10 +97,11 @@ internal fun CodeLocalComposer(
     slashCommands: List<SlashCommand> = emptyList(),
     start: @Composable RowScope.() -> Unit = {}, end: @Composable RowScope.() -> Unit = {},
 ) {
-    val slash = rememberSlashMenu(slashCommands, draft, onDraft)
+    var inputFocused by remember { mutableStateOf(false) }
+    val slash = rememberSlashMenu(slashCommands, draft, onDraft, active = inputFocused)
     CodeInputArea(focus, Modifier.fillMaxWidth()) {
         CodeComposerCard(draft, onDraft, hint, focus, canSend, onSend, Modifier.fillMaxWidth(), running = running, onStop = onStop,
-            onKey = { e -> slash.handle(e) || onKey(e) }) {
+            onKey = { e -> slash.handle(e) || onKey(e) }, onFocus = { inputFocused = it }) {
             CodeSlashMenu(slash, focus)
             DraftAttachmentTray(attachments, onRemoveAttachment, showTransferStatus = showTransferStatus)
             mentions?.let { AttachmentMentionList(it) }

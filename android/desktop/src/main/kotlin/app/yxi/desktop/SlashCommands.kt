@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -46,6 +47,14 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import app.yxi.agent.ConfigRemote
 import app.yxi.agent.Slash
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.swing.Swing
 import org.json.JSONObject
 
 /*
@@ -88,6 +97,9 @@ internal object SlashCommands {
         val names = reported.map { it.name.lowercase() }.toSet()
         return merge(builtIns.filter { it.name.lowercase() in names }, reported)
     }
+
+    /** 高亮行：[picked]（按 ↑↓ 或鼠标选过的命令名）还在 [choices] 里就是它，否则第一行。 */
+    fun highlight(choices: List<SlashCommand>, picked: String?): Int = choices.indexOfFirst { it.name == picked }.coerceAtLeast(0)
 
     /** 草稿整条是「/词」（还没打空格、没换行）时返回那个词（可以是空的），否则 null。 */
     fun word(draft: String): String? {
@@ -143,31 +155,44 @@ internal object SlashCommands {
 
 /**
  * SSH 主机上的命令和技能（[SlashCommands.fromConfig]），按主机记在进程里：第一次在 Claude 会话的输入框里打「/」时读一次
- * （和配置页同一条 [ConfigRemote.load] 命令），配置页读过的也顺带记下。打字不会多出往返；读空（没连上、没 python3）一分钟内不重试。
- * 只在界面线程上用。
+ * （和配置页同一条 [ConfigRemote.read] 命令），配置页读过的也顺带记下。同一台主机同时只读一次，所有对话共用；打字不会多出往返。
+ * 没读成（没连上、命令没跑完）什么都不记，下次打「/」再读；读成了但是空的（没有 ~/.claude、没有 python3）一分钟内不再读。
+ * 读取跑在这里自己的 scope 里、不挂在对话页上：补完命令（草稿不再是「/词」）、离开对话页都不会把读到一半的取消掉，结果照样记下。
+ * ⚠️ 读取走 SshSession.exec，跑完之前占着这条连接的通道锁，这期间的发送（也走 exec）要等它：一台主机一次，python3 读 ~/.claude 通常不到一秒；
+ * 对话页在发送中不开始读。只在界面线程上用。
  */
 internal object RemoteSlashCommands {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
     private val byHost = mutableStateMapOf<String, List<SlashCommand>>()
-    private val loading = HashSet<String>()
+    private val loading = HashMap<String, Job>()
     private val emptyAt = HashMap<String, Long>()
 
     fun get(hostId: String): List<SlashCommand> = byHost[hostId].orEmpty()
 
-    /** 记下一次读取的结果；读空不覆盖已有的，只记时间。 */
-    fun put(hostId: String, tools: List<ConfigRemote.Tool>) {
+    /** 记下一次读取：null = 没读成，不记；空 = 读成了但没有配置，只记时间（一分钟内不再读）；读到的覆盖旧的。 */
+    fun put(hostId: String, tools: List<ConfigRemote.Tool>?) {
+        if (tools == null) return
         if (tools.isEmpty()) { emptyAt[hostId] = System.currentTimeMillis(); return }
         byHost[hostId] = SlashCommands.fromConfig(tools)
     }
 
-    suspend fun ensure(hostId: String, load: suspend () -> List<ConfigRemote.Tool>) {
-        if (hostId in byHost || hostId in loading) return
-        if (System.currentTimeMillis() - (emptyAt[hostId] ?: 0L) < 60_000) return
-        loading += hostId
-        try { put(hostId, load()) } finally { loading -= hostId }
+    /** 这台主机还没有命令表就开始读（[load] 返回 null = 没读成）；正在读就返回那一次。已经有了、刚读空过返回 null。 */
+    fun ensure(hostId: String, load: suspend () -> List<ConfigRemote.Tool>?): Job? {
+        loading[hostId]?.let { return it }
+        if (hostId in byHost || System.currentTimeMillis() - (emptyAt[hostId] ?: 0L) < 60_000) return null
+        val job = scope.launch(start = CoroutineStart.LAZY) {
+            try { put(hostId, load()) }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { /* 当没读成：下次打「/」再读 */ }
+            finally { loading.remove(hostId) }
+        }
+        loading[hostId] = job
+        job.start()
+        return job
     }
 }
 
-/** 斜杠菜单的状态：[choices] 为空时不画、[handle] 不接键。[selected] 是高亮行，[choose] 把那条补进草稿，[dismiss] 收起（同 Esc）。 */
+/** 斜杠菜单的状态：[choices] 为空时不画、[handle] 不接键。[selected] 是高亮行，[select] 换高亮，[choose] 把那条补进草稿，[dismiss] 收起（同 Esc）。 */
 internal class SlashMenu(
     val choices: List<SlashCommand>, val selected: Int,
     val choose: (Int) -> Unit, val select: (Int) -> Unit, val dismiss: () -> Unit, val handle: (KeyEvent) -> Boolean,
@@ -184,26 +209,30 @@ internal fun handleSlashKey(
 }
 
 /**
- * 草稿跟着 [commands] 筛出的菜单；Esc / 点外面收起后，草稿再变才重新弹（草稿不再以「/」开头时忘掉收起过的那次）。输入法组字时不弹。
+ * 草稿跟着 [commands] 筛出的菜单；Esc / 点外面收起后，草稿再变才重新弹（草稿不再以「/」开头时忘掉收起过的那次）。
+ * 输入法组字时、输入框没有焦点（[active] 为 false：Shift+Tab 走开、切到别的任务）时不弹，焦点回来再弹。
+ * 高亮记的是命令名、不是行号（[SlashCommands.highlight]）：主机的命令表晚到、列表变了，按 ↓ 选中的那条还在就还是它；草稿一变回到第一行。
  * 选中一条 = 草稿换成「/命令 」、光标放末尾。
  */
 @Composable
-internal fun rememberSlashMenu(commands: List<SlashCommand>, draft: TextFieldValue, update: (TextFieldValue) -> Unit): SlashMenu {
+internal fun rememberSlashMenu(commands: List<SlashCommand>, draft: TextFieldValue, update: (TextFieldValue) -> Unit, active: Boolean = true): SlashMenu {
     var dismissed by remember { mutableStateOf<String?>(null) }
     val typing = SlashCommands.word(draft.text) != null
     LaunchedEffect(typing) { if (!typing) dismissed = null }
     val composing = draft.composition != null
-    val choices = if (!composing && dismissed != draft.text) SlashCommands.suggest(commands, draft.text) else emptyList()
-    var selected by remember(choices) { mutableStateOf(0) }
+    val choices = if (active && !composing && dismissed != draft.text) SlashCommands.suggest(commands, draft.text) else emptyList()
+    var picked by remember(draft.text) { mutableStateOf<String?>(null) }
+    val selected = SlashCommands.highlight(choices, picked)
+    fun select(index: Int) { choices.getOrNull(index)?.let { picked = it.name } }
     fun choose(index: Int) {
         val command = choices.getOrNull(index) ?: return
         val text = "/${command.name} "
         update(TextFieldValue(text, TextRange(text.length)))
     }
     val dismiss = { dismissed = draft.text }
-    return SlashMenu(choices, selected, ::choose, { selected = it }, dismiss) { event ->
+    return SlashMenu(choices, selected, ::choose, ::select, dismiss) { event ->
         handleSlashKey(event.type, event.key, event.isShiftPressed, choices.size, composing, selected,
-            move = { selected = it }, accept = { choose(selected) }, dismiss = dismiss)
+            move = ::select, accept = { choose(selected) }, dismiss = dismiss)
     }
 }
 
@@ -215,7 +244,8 @@ private const val SlashMenuRows = 8
  * 底边离卡片顶 6（浮层离触发控件 ≈5.6～6.4）；白底 r10、内边距 4、外环 + 两层阴影，同 [CodePopup]。
  * 行高 24、圆角 6，字墨起于填充左 +12.8（外层 4 + 自身 8.8）：「/命令」14 主色，说明 13 弱色、隔 12 跟在后面，放不下省略。
  * 高亮行铺菜单 hover 底（#F3F3F3），鼠标移上去就换高亮；最多露 [SlashMenuRows] 行，高亮行跟着滚进来。
- * 浮层不拿焦点：按键留在输入框、由 [SlashMenu.handle] 接；点一条补进草稿后焦点还给 [focus]，点外面收起。
+ * 浮层不拿焦点：按键留在输入框、由 [SlashMenu.handle] 接；点一条补进草稿后焦点还给 [focus]，点外面收起，输入框失焦也收起（[rememberSlashMenu]）。
+ * 行按命令名做 key，列表变了（主机的命令表晚到）行状态跟着命令走。
  * 不占 [NativeOverlay]：浮层只在输入卡正上方，盖不到右侧的网页预览 / 终端，打「/」时不必把它们藏起来。
  * 要放在 [CodeComposerCard] 的 top 槽最前面：锚点是卡片，0 高、和卡片同宽。
  */
@@ -244,8 +274,7 @@ internal fun CodeSlashMenu(menu: SlashMenu, focus: FocusRequester) {
                     .background(p.popup, shape).border(1.dp, p.popupRing, shape).padding(4.dp),
                 state = list,
             ) {
-                items(menu.choices.size) { index ->
-                    val command = menu.choices[index]
+                itemsIndexed(menu.choices, key = { _, command -> command.name }) { index, command ->
                     val source = remember { MutableInteractionSource() }
                     val hovered by source.collectIsHoveredAsState()
                     LaunchedEffect(hovered) { if (hovered) menu.select(index) }

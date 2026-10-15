@@ -32,8 +32,15 @@ object ConfigRemote {
     data class Tool(val key: String, val name: String, val cats: List<Cat>)
 
     /** 抓取整棵配置树。读不到就返回空列表。 */
-    suspend fun load(ssh: SshSession?): List<Tool> {
-        val raw = ssh?.exec(GATHER).orEmpty()
+    suspend fun load(ssh: SshSession?): List<Tool> = read(ssh).orEmpty()
+
+    /**
+     * 同 [load]，但分得清「没读成」：没连上、命令没跑完（输出里没有标记）返回 null；
+     * 跑完了但两样都没装（或没有 python3）是空列表。
+     */
+    suspend fun read(ssh: SshSession?): List<Tool>? {
+        val raw = ssh?.exec(GATHER) ?: return null
+        if (MARKER !in raw) return null
         val json = raw.substringAfter(MARKER, "").trim().ifBlank { return emptyList() }
         return runCatching { parse(JSONObject(json)) }.getOrDefault(emptyList())
     }

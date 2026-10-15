@@ -4,7 +4,15 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import app.yxi.agent.ConfigRemote
 import app.yxi.agent.Slash
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.swing.Swing
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.test.Test
@@ -13,7 +21,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-/** 斜杠菜单（M4k）的纯函数：筛选、合并去重、三种来源的解析、键盘语义、按主机的缓存。不组合 UI、不连主机。 */
+/** 斜杠菜单（M4k）的纯函数：筛选、合并去重、三种来源的解析、键盘语义、高亮、按主机的缓存。不组合 UI、不连主机。 */
 class SlashCommandsTest {
     private fun names(list: List<SlashCommand>) = list.map { it.name }
     private val server = listOf(SlashCommand("mobile-release", "自定义命令"), SlashCommand("superpowers:brainstorm", "插件 superpowers 的技能"))
@@ -137,21 +145,54 @@ class SlashCommandsTest {
         assertEquals(2, accepted)
     }
 
-    @Test fun `server commands load once per host and an empty read is not retried right away`() = runBlocking {
-        val host = "slash-test-" + System.nanoTime()
+    @Test fun `highlight follows the picked name and falls back to the first row`() {
+        val list = listOf(SlashCommand("compact"), SlashCommand("context"), SlashCommand("cost"))
+        assertEquals(1, SlashCommands.highlight(list, "context"))
+        // 主机的命令表晚到、前面多了一条：按 ↓ 选中的那条还是它
+        assertEquals(2, SlashCommands.highlight(listOf(SlashCommand("codegen")) + list, "context"))
+        assertEquals(0, SlashCommands.highlight(list, "gone"))
+        assertEquals(0, SlashCommands.highlight(list, null))
+        assertEquals(0, SlashCommands.highlight(emptyList(), "context"))
+    }
+
+    private val deploy = listOf(ConfigRemote.Tool("claude", "Claude Code", listOf(ConfigRemote.Cat("commands", "斜杠命令", listOf(ConfigRemote.Item("deploy"))))))
+
+    @Test fun `a host load survives its requester and runs once for all chats on that host`(): Unit = runBlocking(Dispatchers.Swing) {
+        val host = "slash-cancel-" + System.nanoTime()
+        val gate = CompletableDeferred<Unit>()
         var loads = 0
-        val tools = listOf(ConfigRemote.Tool("claude", "Claude Code", listOf(ConfigRemote.Cat("commands", "斜杠命令", listOf(ConfigRemote.Item("deploy"))))))
-        RemoteSlashCommands.ensure(host) { loads++; tools }
-        RemoteSlashCommands.ensure(host) { loads++; tools }
+        // 第一个对话开始读，随即草稿补完 / 离开页面（请求它的协程被取消）
+        val requester = launch { RemoteSlashCommands.ensure(host) { loads++; gate.await(); deploy }; awaitCancellation() }
+        yield()
+        requester.cancelAndJoin()
+        // 同一台主机的另一个对话也打了「/」：在读就不再读，拿到的是同一次
+        val shared = RemoteSlashCommands.ensure(host) { loads++; deploy }
+        assertTrue(shared != null && shared.isActive)
+        gate.complete(Unit)
+        withTimeout(2000) { shared.join() }
         assertEquals(1, loads)
         assertEquals(listOf("deploy"), names(RemoteSlashCommands.get(host)))
-        // 读空（没连上）：不覆盖、一分钟内不再去读
-        val other = "$host-empty"
-        RemoteSlashCommands.ensure(other) { loads++; emptyList() }
-        RemoteSlashCommands.ensure(other) { loads++; tools }
-        assertEquals(2, loads)
-        assertEquals(emptyList(), RemoteSlashCommands.get(other))
+        assertNull(RemoteSlashCommands.ensure(host) { loads++; deploy })   // 有了就不再读
+        assertEquals(1, loads)
+    }
+
+    @Test fun `a failed read is retried, an empty read waits a minute, and an empty read never overwrites`(): Unit = runBlocking(Dispatchers.Swing) {
+        val host = "slash-retry-" + System.nanoTime()
+        var loads = 0
+        // 没读成（没连上 / 命令没跑完）：不记，下次再读
+        RemoteSlashCommands.ensure(host) { loads++; null }?.join()
+        RemoteSlashCommands.ensure(host) { loads++; error("连接断了") }?.join()
+        RemoteSlashCommands.ensure(host) { loads++; deploy }?.join()
+        assertEquals(3, loads)
+        assertEquals(listOf("deploy"), names(RemoteSlashCommands.get(host)))
+        // 读成了但是空的：一分钟内不再读；也不覆盖已有的
+        val empty = "$host-empty"
+        RemoteSlashCommands.ensure(empty) { loads++; emptyList() }?.join()
+        assertNull(RemoteSlashCommands.ensure(empty) { loads++; deploy })
+        assertEquals(4, loads)
+        assertEquals(emptyList(), RemoteSlashCommands.get(empty))
         RemoteSlashCommands.put(host, emptyList())
+        RemoteSlashCommands.put(host, null)
         assertEquals(listOf("deploy"), names(RemoteSlashCommands.get(host)))
     }
 }
