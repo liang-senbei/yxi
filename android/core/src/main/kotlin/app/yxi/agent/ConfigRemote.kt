@@ -34,15 +34,17 @@ object ConfigRemote {
     /** 抓取整棵配置树。读不到就返回空列表。 */
     suspend fun load(ssh: SshSession?): List<Tool> = read(ssh).orEmpty()
 
+    /** 同 [load]，但分得清「没读成」（见 [parseOutput]）：没读成返回 null，读成了但两样都没装是空列表。 */
+    suspend fun read(ssh: SshSession?): List<Tool>? = ssh?.exec(GATHER)?.let(::parseOutput)
+
     /**
-     * 同 [load]，但分得清「没读成」：没连上、命令没跑完（输出里没有标记）返回 null；
-     * 跑完了但两样都没装（或没有 python3）是空列表。
+     * 抓取脚本的输出 → 配置树。没读成返回 null：输出里没有标记（没连上、命令没跑），或者标记后面是空的、JSON 解析不了
+     * （连接中途断了、输出被截断——半份结果不算读完）。跑完了但两样都没装（或没有 python3，脚本输出 `{}`）是空列表。
      */
-    suspend fun read(ssh: SshSession?): List<Tool>? {
-        val raw = ssh?.exec(GATHER) ?: return null
+    fun parseOutput(raw: String): List<Tool>? {
         if (MARKER !in raw) return null
-        val json = raw.substringAfter(MARKER, "").trim().ifBlank { return emptyList() }
-        return runCatching { parse(JSONObject(json)) }.getOrDefault(emptyList())
+        val json = raw.substringAfter(MARKER, "").trim().ifBlank { return null }
+        return runCatching { parse(JSONObject(json)) }.getOrNull()
     }
 
     /** 取一个文件的原文（编辑用；不打码）。 */

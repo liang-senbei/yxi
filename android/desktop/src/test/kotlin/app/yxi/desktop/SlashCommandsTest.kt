@@ -18,6 +18,7 @@ import org.json.JSONObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -176,23 +177,53 @@ class SlashCommandsTest {
         assertEquals(1, loads)
     }
 
-    @Test fun `a failed read is retried, an empty read waits a minute, and an empty read never overwrites`(): Unit = runBlocking(Dispatchers.Swing) {
+    @Test fun `failed reads back off briefly, empty reads for a minute, and neither overwrites a list`(): Unit = runBlocking(Dispatchers.Swing) {
         val host = "slash-retry-" + System.nanoTime()
-        var loads = 0
-        // 没读成（没连上 / 命令没跑完）：不记，下次再读
-        RemoteSlashCommands.ensure(host) { loads++; null }?.join()
-        RemoteSlashCommands.ensure(host) { loads++; error("连接断了") }?.join()
-        RemoteSlashCommands.ensure(host) { loads++; deploy }?.join()
-        assertEquals(3, loads)
-        assertEquals(listOf("deploy"), names(RemoteSlashCommands.get(host)))
-        // 读成了但是空的：一分钟内不再读；也不覆盖已有的
-        val empty = "$host-empty"
-        RemoteSlashCommands.ensure(empty) { loads++; emptyList() }?.join()
-        assertNull(RemoteSlashCommands.ensure(empty) { loads++; deploy })
-        assertEquals(4, loads)
-        assertEquals(emptyList(), RemoteSlashCommands.get(empty))
-        RemoteSlashCommands.put(host, emptyList())
-        RemoteSlashCommands.put(host, null)
-        assertEquals(listOf("deploy"), names(RemoteSlashCommands.get(host)))
+        var clock = 1_000_000L
+        val real = RemoteSlashCommands.now
+        RemoteSlashCommands.now = { clock }
+        try {
+            var loads = 0
+            // 没读成（截断、脚本出错、抛错）：15 秒内再打「/」不再去读，过了再读
+            RemoteSlashCommands.ensure(host) { loads++; null }?.join()
+            assertNull(RemoteSlashCommands.ensure(host) { loads++; deploy })
+            clock += RemoteSlashCommands.FAILED_WAIT - 1
+            assertNull(RemoteSlashCommands.ensure(host) { loads++; deploy })
+            clock += 1
+            RemoteSlashCommands.ensure(host) { loads++; error("连接断了") }?.join()
+            assertNull(RemoteSlashCommands.ensure(host) { loads++; deploy })
+            clock += RemoteSlashCommands.FAILED_WAIT
+            RemoteSlashCommands.ensure(host) { loads++; deploy }?.join()
+            assertEquals(3, loads)
+            assertEquals(listOf("deploy"), names(RemoteSlashCommands.get(host)))
+            // 读成了但是空的：一分钟内不再读，没读成也不会把它缩短
+            val empty = "$host-empty"
+            RemoteSlashCommands.ensure(empty) { loads++; emptyList() }?.join()
+            RemoteSlashCommands.put(empty, null)
+            clock += RemoteSlashCommands.FAILED_WAIT
+            assertNull(RemoteSlashCommands.ensure(empty) { loads++; deploy })
+            clock += RemoteSlashCommands.EMPTY_WAIT
+            RemoteSlashCommands.ensure(empty) { loads++; deploy }?.join()
+            assertEquals(5, loads)
+            assertEquals(listOf("deploy"), names(RemoteSlashCommands.get(empty)))
+            // 有了表之后，读空、没读成都不覆盖
+            RemoteSlashCommands.put(host, emptyList())
+            RemoteSlashCommands.put(host, null)
+            assertEquals(listOf("deploy"), names(RemoteSlashCommands.get(host)))
+        } finally { RemoteSlashCommands.now = real }
+    }
+
+    @Test fun `a truncated or missing config output is a failed read, an empty one is not`() {
+        val marker = "__YXI_CFG_V1__"   // ConfigRemote 抓取脚本的输出标记
+        val full = "$marker\n" + JSONObject().put("claude", JSONObject().put("commands", JSONArray()
+            .put(JSONObject().put("name", "deploy").put("path", "/home/dev/.claude/commands/deploy.md")))).toString()
+        assertEquals(listOf("deploy"), SlashCommands.fromConfig(assertNotNull(ConfigRemote.parseOutput(full))).map { it.name })
+        // 连接中途断了：标记有、JSON 只到一半；或者标记后面什么都没有
+        assertNull(ConfigRemote.parseOutput(full.dropLast(12)))
+        assertNull(ConfigRemote.parseOutput("$marker\n"))
+        assertNull(ConfigRemote.parseOutput(""))   // 没连上：exec 吞掉错误返回空串
+        assertNull(ConfigRemote.parseOutput("Traceback (most recent call last):"))
+        // 跑完了但没有 ~/.claude、~/.codex（或没有 python3，脚本输出 {}）：读成了，是空的
+        assertEquals(emptyList(), ConfigRemote.parseOutput("$marker\n{}"))
     }
 }

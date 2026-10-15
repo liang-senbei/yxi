@@ -156,7 +156,8 @@ internal object SlashCommands {
 /**
  * SSH 主机上的命令和技能（[SlashCommands.fromConfig]），按主机记在进程里：第一次在 Claude 会话的输入框里打「/」时读一次
  * （和配置页同一条 [ConfigRemote.read] 命令），配置页读过的也顺带记下。同一台主机同时只读一次，所有对话共用；打字不会多出往返。
- * 没读成（没连上、命令没跑完）什么都不记，下次打「/」再读；读成了但是空的（没有 ~/.claude、没有 python3）一分钟内不再读。
+ * 读成了但是空的（没有 ~/.claude、没有 python3）一分钟内不再读；没读成（连接断了、输出被截断、脚本在这台主机上一直出错）15 秒内不再读，
+ * 免得每打一次「/」就在远端跑一遍 python3。
  * 读取跑在这里自己的 scope 里、不挂在对话页上：补完命令（草稿不再是「/词」）、离开对话页都不会把读到一半的取消掉，结果照样记下。
  * ⚠️ 读取走 SshSession.exec，跑完之前占着这条连接的通道锁，这期间的发送（也走 exec）要等它：一台主机一次，python3 读 ~/.claude 通常不到一秒；
  * 对话页在发送中不开始读。只在界面线程上用。
@@ -165,25 +166,31 @@ internal object RemoteSlashCommands {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
     private val byHost = mutableStateMapOf<String, List<SlashCommand>>()
     private val loading = HashMap<String, Job>()
-    private val emptyAt = HashMap<String, Long>()
+    /** 这台主机在这个时刻之前不再读（读空、没读成之后）。 */
+    private val waitUntil = HashMap<String, Long>()
+    /** 读成了但是空的、没读成，各隔多久再读。 */
+    internal const val EMPTY_WAIT = 60_000L
+    internal const val FAILED_WAIT = 15_000L
+    /** 时钟：单测换成假的。 */
+    internal var now: () -> Long = System::currentTimeMillis
 
     fun get(hostId: String): List<SlashCommand> = byHost[hostId].orEmpty()
 
-    /** 记下一次读取：null = 没读成，不记；空 = 读成了但没有配置，只记时间（一分钟内不再读）；读到的覆盖旧的。 */
+    /** 记下一次读取：读到的覆盖旧的；空 = 读成了但没有配置、null = 没读成，都不动已有的表，只是隔一阵（[EMPTY_WAIT] / [FAILED_WAIT]）再读。 */
     fun put(hostId: String, tools: List<ConfigRemote.Tool>?) {
-        if (tools == null) return
-        if (tools.isEmpty()) { emptyAt[hostId] = System.currentTimeMillis(); return }
-        byHost[hostId] = SlashCommands.fromConfig(tools)
+        if (!tools.isNullOrEmpty()) { byHost[hostId] = SlashCommands.fromConfig(tools); waitUntil.remove(hostId); return }
+        val until = now() + if (tools == null) FAILED_WAIT else EMPTY_WAIT
+        waitUntil[hostId] = maxOf(waitUntil[hostId] ?: 0L, until)
     }
 
-    /** 这台主机还没有命令表就开始读（[load] 返回 null = 没读成）；正在读就返回那一次。已经有了、刚读空过返回 null。 */
+    /** 这台主机还没有命令表就开始读（[load] 返回 null 或抛错 = 没读成）；正在读就返回那一次。已经有了、还在等的时间里返回 null。 */
     fun ensure(hostId: String, load: suspend () -> List<ConfigRemote.Tool>?): Job? {
         loading[hostId]?.let { return it }
-        if (hostId in byHost || System.currentTimeMillis() - (emptyAt[hostId] ?: 0L) < 60_000) return null
+        if (hostId in byHost || now() < (waitUntil[hostId] ?: 0L)) return null
         val job = scope.launch(start = CoroutineStart.LAZY) {
             try { put(hostId, load()) }
             catch (e: CancellationException) { throw e }
-            catch (_: Exception) { /* 当没读成：下次打「/」再读 */ }
+            catch (_: Exception) { put(hostId, null) }
             finally { loading.remove(hostId) }
         }
         loading[hostId] = job
