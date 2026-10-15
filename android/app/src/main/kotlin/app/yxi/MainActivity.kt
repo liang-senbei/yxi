@@ -99,7 +99,8 @@ class MainActivity : ComponentActivity() {
                 app.yxi.agent.Connect.pendingRedirect = u.toString()
             else -> return
         }
-        // ⚠️ 吃掉就抹掉：onCreate 也会读一次 intent，而切深浅色 / 转屏会重建 Activity，
+        // ⚠️ 吃掉就抹掉：onCreate 也会读一次 intent，而切系统深浅色 / 改字号 / 换系统语言会重建 Activity
+        //    （转屏不会 —— manifest 的 configChanges 接住了，见下面 onCreate 里 applyBars 那段），
         //    不抹的话同一个回调会被再放一遍，落进下一个流程里。
         i.data = null
     }
