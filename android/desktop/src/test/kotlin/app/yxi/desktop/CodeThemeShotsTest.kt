@@ -130,6 +130,7 @@ class CodeThemeShotsTest {
         Store.setPref(TranscriptView.PREF, TranscriptView.Normal.key)   // M3h：对话视图默认档每张都回到普通，改它的场景不串到后面
         MacChrome.native = false   // Mac1 第二轮：Mac 原生外观只在 mac-native-* 场景里打开
         Store.setPref(FolderPermissions.PREF, "[]")   // M4i：按文件夹记住的权限模式每张都清空，记了的场景不串到后面
+        UsageHistory.clearForFixture()   // M4n：统计卡的数据是全局的，每张都清空（第一遍就串到了后面 24 张新会话页）
         val state = AppState().apply { startupRestored = true }   // 跳过 HostEffects 的开机恢复 / 自动重连
         state.navigation.setMode("全部")   // 全部 / 待处理 / 归档落在夹具 profile 里，local-archived 改过（值没变不写盘）
         try {
@@ -192,6 +193,10 @@ private fun codeScenes() = listOf(
     CodeScene("home-folder", listOf("demo-app")) { codeHome(it) },
     CodeScene("home-folder-hint", listOf("~demo-app")) { codeHome(it) },
     CodeScene("home-permission-again", listOf("请求批准", "请求批准")) { codeHome(it) },
+    // M4n：新会话页的统计卡（规格表 §3.8）——这台服务器 ccusage 的近半年用量（夹具直接放数据，「今天」是固定时钟 2025-10-09）
+    CodeScene("home-usage-card", verify = { _, nodes ->
+        for (text in listOf("概览", "模型", "全部", "30 天", "7 天", "用量（tokens）", "最长连续", "最常用模型")) check(nodes.any { it.trimEnd().endsWith(" $text") }) { "统计卡没有「$text」" }
+    }) { codeHome(it); UsageHistory.put(it.conn!!.host.id, shotUsageDays()) },
     // M4i：这个文件夹上次建会话用的是「自动审批」，新会话页的权限 chip 就从它开始（PRD §6，参照端按文件夹记住）
     CodeScene("home-permission-remembered", verify = { _, nodes ->
         check(nodes.any { it.trimEnd().endsWith(" 自动审批") } && nodes.none { it.trimEnd().endsWith(" 请求批准") }) { "权限 chip 没换成这个文件夹记住的「自动审批」" }
@@ -448,6 +453,10 @@ private fun codeScenes() = listOf(
             check(nodes.any { it.trimEnd().endsWith(" ${text.trimEnd()}") }) { "diff 里没有「$text」" }
         check(nodes.none { it.contains("diff --git") || it.contains("+++ b/") }) { "文件头不该画出来" }
     }) { localCodex(it, approval = false); shotLocalGit() },
+    // M4m：本机会话头的「打开方式」——找到的编辑器（夹具里替换成固定的两个，不看这台机器装了什么）+「在访达 / 资源管理器中显示」
+    CodeScene("local-codex-open-in", listOf("@打开方式"), verify = { _, nodes ->
+        for (text in listOf("Visual Studio Code", "Cursor", OpenIn.revealLabel)) check(nodes.any { it.trimEnd().endsWith(" $text") }) { "打开方式里没有「$text」" }
+    }) { localCodex(it, approval = false); OpenIn.detect = { listOf(EditorApp("Visual Studio Code", "/usr/local/bin/code"), EditorApp("Cursor", "/usr/local/bin/cursor")) } },
     // M4j：diff 逐行评论——点行号区（这里点新文件的第 13 行）在那一行下面开评论框（取消 / 保存，Ctrl+Enter 一起加入对话）
     CodeScene("local-codex-diff-comment", listOf("@改动", "src/auth/errors.ts", "13"), verify = { _, nodes ->
         check(nodes.any { "对这一行的意见" in it }) { "没开出评论框" }
@@ -1457,4 +1466,19 @@ private fun semanticsDump(scene: ImageComposeScene, density: Float): List<String
     }
     scene.semanticsOwners.forEachIndexed { i, owner -> walk(i, 0, owner.unmergedRootSemanticsNode) }
     return lines
+}
+
+/** 统计卡的假数据（M4n）：从 2025-04 到「今天」（固定时钟 2025-10-09）每隔几天用一次，两个模型，量有大有小，热力图三档都出得来。 */
+private fun shotUsageDays(): List<app.yxi.agent.Day> {
+    val today = java.time.LocalDate.of(2025, 10, 9)
+    return (0L until 182L).mapNotNull { back ->
+        val date = today.minusDays(back)
+        val seed = (date.dayOfYear * 37 + date.dayOfMonth * 11) % 23
+        if (seed < 9) null else {
+            val tokens = seed * 180_000L + (if (date.dayOfWeek.value <= 5) 900_000L else 0L)
+            val cost = tokens / 1e6 * 4.2
+            app.yxi.agent.Day(date.toString(), tokens, cost, listOf(
+                app.yxi.agent.ModelCost("opus-4-1", tokens * 2 / 3, cost * 0.8), app.yxi.agent.ModelCost("sonnet-4-5", tokens / 3, cost * 0.2)))
+        }
+    }.reversed()
 }

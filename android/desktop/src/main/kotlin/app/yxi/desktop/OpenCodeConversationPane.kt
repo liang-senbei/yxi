@@ -138,7 +138,7 @@ import org.json.JSONObject
                 Column(Modifier.fillMaxSize()) {
                     CodeLocalSessionHeader(state.navigation.title(record.key) ?: record.title, record.directory, runner,
                         host = if (record.hostKey.isBlank()) null else state.conn?.host?.label ?: "服务器",
-                        end = if (!local) null else ({ CodeLocalToolButtons(tool) { tool = it } }))
+                        end = if (!local) null else ({ CodeLocalToolButtons(tool, record.directory) { tool = it } }))
                     Box(Modifier.weight(1f).fillMaxWidth()) {
                         // M3f：运行中的状态行（对话末尾）；开始时间记在这一层，列表滚动时不会从 0 算起
                         val transcriptMode = state.transcriptView(record.key)   // M3g：对话视图（Ctrl+O 轮换）

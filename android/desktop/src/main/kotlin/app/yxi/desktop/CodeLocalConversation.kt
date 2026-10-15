@@ -178,9 +178,10 @@ internal fun CodeFooterSelect(
 /** 本机对话会话头右端的工具（本机对齐 P6）：「改动」（P6a，同服务器 Codex 页的图标）、「文件」（P6b，服务器页收在 ⋮ 里，本机没有 ⋮ 就直接放图标）。
  *  两个互斥：开着时对话列换成 [CodeLocalChanges] / [LocalFilesPane]，停靠区不变。 */
 @Composable
-internal fun CodeLocalToolButtons(tool: String?, onTool: (String?) -> Unit) {
+internal fun CodeLocalToolButtons(tool: String?, directory: String, onTool: (String?) -> Unit) {
     CodeIconButton(Icons.Outlined.Difference, "改动", active = tool == "changes") { onTool(if (tool == "changes") null else "changes") }
     CodeIconButton(Icons.Outlined.FolderOpen, "文件", active = tool == "files") { onTool(if (tool == "files") null else "files") }
+    CodeOpenInButton(directory)   // M4m：在编辑器 / 访达中打开这个会话的目录
 }
 
 /** 本机 Code 页的「改动」「文件」（M4b）：开在右侧卡片里（[CodePanelLayout]，同 SSH 会话页），对话和停靠区留在左边；[tool] 为空时只画主区。 */

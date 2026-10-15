@@ -252,7 +252,7 @@ import java.io.File
             CodeLocalToolPanel(state, record, tool, onClose = { tool = null }) {
                 Column(Modifier.fillMaxSize()) {
                     CodeLocalSessionHeader(state.navigation.title(record.key) ?: record.title, record.directory, LocalRuntimeDiscovery.title(record.engine)) {
-                        CodeLocalToolButtons(tool) { tool = it }
+                        CodeLocalToolButtons(tool, record.directory) { tool = it }
                     }
                     Box(Modifier.weight(1f).fillMaxWidth()) {
                         // M3f：运行中的状态行（对话末尾）；开始时间记在这一层，列表滚动时不会从 0 算起

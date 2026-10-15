@@ -137,7 +137,12 @@ internal fun CodeHome(state: AppState, actions: HostActions, scope: CoroutineSco
         !(d.agent == NewSessionDraft.CODEX_WORKBENCH && d.worktree)
     val focus = remember { FocusRequester() }
     LaunchedEffect(d.focusTick) { runCatching { focus.requestFocus() } }
-    CodeHomeFrame(state, focus, notes = { CodeHomeNotes(state, d, c) }, chips = { CodeHomeChips(state, actions, d, c) }, footer = { CodeHomeFooter(state, d, c, scope) }) {
+    // M4n：这台服务器近半年的用量（ccusage），每台主机这次运行读一次；没数据就不显示统计卡
+    if (c != null) LaunchedEffect(c.host.id, c.status) { UsageHistory.load(c, scope) }
+    val usage = c?.let { UsageHistory.of(it.host.id) }?.takeIf { days -> days.any { it.tokens > 0 } }
+    val today = usageToday()
+    CodeHomeFrame(state, focus, notes = { CodeHomeNotes(state, d, c) }, chips = { CodeHomeChips(state, actions, d, c) }, footer = { CodeHomeFooter(state, d, c, scope) },
+        stats = if (c == null || usage == null) null else ({ CodeUsageCard(usage, c.host.label, today) })) {
         CodeComposerCard(
             d.text, { d.text = it },
             if (d.agent == NewSessionDraft.CODEX_WORKBENCH) "描述要做的事，按 Enter 新建对话（不会自动发送）" else "描述要做的事，按 Enter 开始（可留空）", focus, canSend,
@@ -158,6 +163,7 @@ internal fun CodeHomeFrame(
     notes: @Composable () -> Unit,
     chips: @Composable () -> Unit,
     footer: @Composable () -> Unit,
+    stats: (@Composable () -> Unit)? = null,
     card: @Composable () -> Unit,
 ) {
     val t = Tokens.current
@@ -175,6 +181,8 @@ internal fun CodeHomeFrame(
                 Spacer(Modifier.height(12.dp))
                 DeferredRouteStatus(state)
             }
+            // 统计卡（M4n，规格表 §3.8）：卡片顶 y 161.6 = 问候行底 + 45.2；只在有真实数据时有
+            if (stats != null) { Spacer(Modifier.height(45.2.dp)); stats() }
             Spacer(Modifier.weight(1f))
             notes()
             chips()
