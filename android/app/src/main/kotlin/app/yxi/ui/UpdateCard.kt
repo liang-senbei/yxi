@@ -218,13 +218,28 @@ internal fun install(ctx: Context, apk: File): String? {
  * ⚠️ 只在**明确读到两边的证书**时才判不一致。读不出来就放行 —— 这里的目的是挡「换包名的冒牌货」，
  * 不是给系统的签名校验加锁；因为读不出来而把正常更新拦下来，代价比放行大。
  */
-private fun signatureMismatch(ctx: Context, apk: File): String? = runCatching {
-    val pm = ctx.packageManager
-    val flag = android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES
-    val theirs = pm.getPackageArchiveInfo(apk.absolutePath, flag)?.signingInfo?.apkContentsSigners
-    val ours = pm.getPackageInfo(ctx.packageName, flag).signingInfo?.apkContentsSigners
+internal fun signatureMismatch(ctx: Context, apk: File): String? = runCatching {
+    val theirs = apkSigners(ctx, apk)
+    val ours = installedSigners(ctx)
     if (theirs.isNullOrEmpty() || ours.isNullOrEmpty()) return@runCatching null
-    val a = theirs.map { it.toCharsString() }.toSet()
-    val b = ours.map { it.toCharsString() }.toSet()
-    if (a != b) t("这个包的签名跟本机不一致，没装") else null
+    if (theirs != ours) t("这个包的签名跟本机不一致，没装") else null
 }.getOrNull()
+
+/**
+ * 读签名证书（每个证书的十六进制串）。Android 9（API 28）起用 GET_SIGNING_CERTIFICATES / signingInfo；
+ * 8.x 没有这两个，原来一读就抛异常、按「读不到不拦」整条放行，等于 8.x 上没有这道检查（交接 §7-38，用户 10-16 定的补）——
+ * 8.x 改用老的 GET_SIGNATURES / signatures（8.x 上它也认 v2 签名）。还是读不到就照旧不拦。
+ */
+internal fun apkSigners(ctx: Context, apk: File): Set<String>? =
+    signerSet(ctx.packageManager.getPackageArchiveInfo(apk.absolutePath, signerFlag()))
+
+internal fun installedSigners(ctx: Context): Set<String>? =
+    signerSet(ctx.packageManager.getPackageInfo(ctx.packageName, signerFlag()))
+
+private fun signerFlag(): Int =
+    if (android.os.Build.VERSION.SDK_INT >= 28) android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES
+    else @Suppress("DEPRECATION") android.content.pm.PackageManager.GET_SIGNATURES
+
+private fun signerSet(info: android.content.pm.PackageInfo?): Set<String>? =
+    if (android.os.Build.VERSION.SDK_INT >= 28) info?.signingInfo?.apkContentsSigners?.map { it.toCharsString() }?.toSet()
+    else @Suppress("DEPRECATION") info?.signatures?.map { it.toCharsString() }?.toSet()

@@ -57,9 +57,38 @@ class ShareActivity : ComponentActivity() {
             if (Build.VERSION.SDK_INT >= 33) intent?.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
             else @Suppress("DEPRECATION") intent?.getParcelableExtra(Intent.EXTRA_STREAM)
         )
+        // 没登录不让分享（用户 10-16 定的，同 App 本体「没登录的不允许使用」）：分享常从全新进程进来，这里自己读一次登录状态；
+        // 判据同 MainActivity 的登录门（本机令牌解得开），不问服务器。没登录只给一页说明，不连主机、不读主机列表、不发任何东西
+        app.yxi.agent.Account.load(this)
         val store = HostStore(applicationContext)
         val keys = KeyManager(applicationContext)
-        setContent { YxiTheme { SharePicker(store, keys, text, uris) { finish() } } }
+        setContent {
+            YxiTheme {
+                if (app.yxi.agent.Account.signedIn) SharePicker(store, keys, text, uris) { finish() }
+                else ShareNeedsLogin(
+                    onLogin = { startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); finish() },
+                    onClose = { finish() },
+                )
+            }
+        }
+    }
+}
+
+/** 没登录时的分享页：说明 + 「打开 Yxi 登录」（登录在 App 本体里做，登好再分享一次）+「取消」。 */
+@Composable
+private fun ShareNeedsLogin(onLogin: () -> Unit, onClose: () -> Unit) {
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
+        Column(
+            Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).padding(24.dp),
+            verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(t("先登录再分享"), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
+            Spacer(Modifier.height(8.dp))
+            Text(t("登录之后才能把内容发进会话。"), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(24.dp))
+            Button(onClick = onLogin) { Text(t("打开 Yxi 登录")) }
+            TextButton(onClick = onClose) { Text(t("取消")) }
+        }
     }
 }
 
