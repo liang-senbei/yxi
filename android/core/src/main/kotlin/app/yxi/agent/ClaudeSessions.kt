@@ -20,12 +20,21 @@ import org.json.JSONObject
  *   · 「活着」= pid 在、而且是同一个进程：procStart 对得上 /proc 里的启动时刻，对不上格式时退回「进程启动早于登记的 startedAt」
  *     （pid 被复用的话新进程一定起得更晚）；没有 /proc 的系统只看 pid 在不在（保守：宁可当活着、不给接着跑）。
  *     活着的进程顺手从 /proc/<pid>/cmdline 认出 `--resume <id>`（老版本 resume 会换新编号，靠它对回原会话）。
+ *     `~/.claude/sessions` 不存在（老版本 Claude Code 没有这份登记）时输出 null，**不是「没有在跑的」**：判不了活，就不给接着跑（[Row.blocked]）；
+ *     pid 看不见（容器、多台机器共用一个 NFS 家目录）也判不出活，所以另加一道：历史文件 3 分钟内还在写的也不给接着跑；
+ *   · 目录：会话中途 `cd` 过的话头尾里的 cwd 不止一个，只认按 Claude Code 的编码（非字母数字换成横杠）正好等于项目目录名的那个
+ *     —— 从别的目录 `claude --resume` 找不到这个会话、进程马上退出；一个都对不上就标出来、不给接着跑。
+ * 「在 Yxi 里继续」真正启动前，启动脚本里再用同一段脚本的 guard 模式核一次（[GUARD_MARKER]，[DesktopLaunchPlan] 里），堵住读列表到启动之间的空档。
  *
  * 去重和标活在 Kotlin 里做（[visible]，纯函数、单测覆盖）：Yxi 侧栏已经列着的 tmux 会话里跑的那些不再列。
  * 手机端以后要用也是这一份：只依赖 SshSession，不碰界面。
+ *
+ * 已知限制：Yxi 自己起过、tmux 会话已经结束的会话也在这里，来源写「终端」—— tmux 没了以后它和终端里起的分不开（文件里没有 tmux 的痕迹）。
  */
 object ClaudeSessions {
     const val MARKER = "__YXI_CLAUDE_SESSIONS__:"
+    /** guard 模式（`SCRIPT guard <编号> <启动目录>`）的输出标记，后面是 ok / live / recent / unknown / elsewhere / missing。 */
+    const val GUARD_MARKER = "__YXI_CLAUDE_GUARD__:"
     /** 最多列这么多个历史（按修改时间取最新的）。 */
     const val LIMIT = 200
     /** 服务器上整段最多跑这么多秒：exec 占着这条连接的锁（审批按键、发送、抓屏都排在后面）。 */
@@ -35,10 +44,12 @@ object ClaudeSessions {
      * 一份历史：[id] 是会话编号（= 文件名，`claude --resume` 用它），[path] 是服务器上的完整路径；[title] 依次取 /rename 起的名字、
      * 第一句真正由人打的话（斜杠命令、系统提醒、工具结果都不算）、summary、lastPrompt，压成一行最多 200 字；
      * [lastActivity] 毫秒（末尾那段里最大的 timestamp，没有就用修改时间）；[messages] 是 user / assistant 行数，[exact] 为假时按读到的比例估的。
+     * [cwdVerified] = [cwd] 按 Claude Code 的编码正好是这份历史所在的项目目录（从它 `--resume` 才找得到）；[recent] = 读的时候文件 3 分钟内还在写（服务器的时钟）。
      */
     data class Entry(
         val id: String, val path: String, val cwd: String, val title: String, val lastActivity: Long,
         val entrypoint: String = "", val branch: String = "", val messages: Int = 0, val exact: Boolean = true, val bytes: Long = 0,
+        val cwdVerified: Boolean = true, val recent: Boolean = false,
     )
 
     /** 一条在跑登记（`~/.claude/sessions/<pid>.json`）：[live] 见类注释；[tmux] 是 tmux 会话名（登记里 `名字:@窗口.%窗格` 冒号前那段），不在 tmux 里为空；[resumed] 是命令行里 `--resume` 的编号。 */
@@ -47,15 +58,35 @@ object ClaudeSessions {
         val cwd: String = "", val entrypoint: String = "", val status: String = "",
     )
 
-    /** 一次读取的结果：[scanned] 是一共见到几个历史文件，[truncated] = 超过 [LIMIT] 只列了最新的；[millis] 是脚本在服务器上跑了多久。 */
-    data class Snapshot(val history: List<Entry>, val registry: List<Process>, val scanned: Int = 0, val truncated: Boolean = false, val millis: Long = 0)
+    /**
+     * 一次读取的结果：[scanned] 是一共见到几个历史文件，[truncated] = 超过 [LIMIT] 只列了最新的；[millis] 是脚本在服务器上跑了多久。
+     * [registryKnown] 为假 = 服务器上没有 `~/.claude/sessions`（老版本 Claude Code）：[registry] 是空的，但那不说明没有在跑的。
+     */
+    data class Snapshot(val history: List<Entry>, val registry: List<Process>, val scanned: Int = 0, val truncated: Boolean = false, val millis: Long = 0,
+        val registryKnown: Boolean = true)
 
-    /** 侧栏的一行：[process] 不为空 = 正在别处跑着（只读，不能在 Yxi 里接着跑）。 */
-    data class Row(val entry: Entry, val process: Process?) {
+    /** 侧栏的一行：[process] 不为空 = 正在别处跑着（只读，不能在 Yxi 里接着跑）；[registryKnown] 同 [Snapshot.registryKnown]。 */
+    data class Row(val entry: Entry, val process: Process?, val registryKnown: Boolean = true) {
         val live: Boolean get() = process != null
         val entrypoint: String get() = entry.entrypoint.ifBlank { process?.entrypoint.orEmpty() }
-        /** 来源小字：终端 / Claude App / SDK / … */
+        /** 侧栏右端的来源小字（短）：终端 / App / SDK / … */
         val origin: String get() = originOf(entrypoint)
+        /** 会话头、说明里的来源（长）：`sdk-cli` 写全「Claude App / SDK」。 */
+        val originLong: String get() = originOf(entrypoint, long = true)
+        /** 「正在…里运行，这里只读」。 */
+        val liveNote: String get() = t("正在") + spaced(originLong) + t("里运行，这里只读")
+        /**
+         * 为什么不能「在 Yxi 里继续」，能的话是 null。两个进程同时写一份会话会把历史写乱，所以拿不准就不给：在别处跑着；
+         * 判不了活（没有登记）；3 分钟内还在写（可能是看不见的进程）；目录核对不上（从那里 resume 找不到它）；目录里有 `#`（tmux 会把 -c 的目录当格式展开）。
+         */
+        val blocked: String? get() = when {
+            process != null -> liveNote + t("；运行结束后才能在 Yxi 里继续")
+            !registryKnown -> t("这台主机的 Claude Code 没有会话登记（~/.claude/sessions），判断不了它是不是还在别处运行，不能在 Yxi 里继续")
+            entry.recent -> t("3 分钟内还在写入，可能还在别处运行；停下 3 分钟后刷新再试")
+            !entry.cwdVerified -> t("核对不上这个会话的启动目录，从别的目录接着跑会找不到它")
+            '#' in entry.cwd -> t("目录名里有 #，tmux 会把它当格式展开，不能在 Yxi 里继续")
+            else -> null
+        }
         /** 圆点：在等人 = 等你，活着 = 干活中（实心），不在跑 = 空闲（空心环）。 */
         val state: SessionState get() = when {
             process == null -> SessionState.Idle
@@ -64,10 +95,13 @@ object ClaudeSessions {
         }
     }
 
-    /** entrypoint → 给人看的来源。`sdk-cli` 是 SDK 驱动的 claude CLI，Claude App 的 Code 模式就是这条路，但别的 SDK 程序也是，所以两个都写上。 */
-    fun originOf(entrypoint: String): String = when {
+    /**
+     * entrypoint → 给人看的来源。`sdk-cli` 是 SDK 驱动的 claude CLI，Claude App 的 Code 模式就是这条路，但别的 SDK 程序也是：
+     * 长的写「Claude App / SDK」，侧栏的小字放不下，短的写「App」。
+     */
+    fun originOf(entrypoint: String, long: Boolean = false): String = when {
         entrypoint == "cli" -> t("终端")
-        entrypoint == "sdk-cli" -> "Claude App / SDK"
+        entrypoint == "sdk-cli" -> if (long) "Claude App / SDK" else "App"
         entrypoint == "claude-vscode" -> "VS Code"
         entrypoint.startsWith("sdk") -> "SDK"
         entrypoint.isBlank() -> "Claude Code"
@@ -83,6 +117,9 @@ object ClaudeSessions {
 
     /** 跑一次。读不成抛异常（消息是给人看的原因），调用方留着上一份。 */
     suspend fun read(ssh: SshSession, limit: Int = LIMIT): Snapshot = parse(ssh.exec(command(limit)))
+
+    /** 拉丁字母开头的来源前后补空格（「正在 Claude App / SDK 里运行」），中文的不补（「正在终端里运行」）。 */
+    private fun spaced(origin: String) = if (origin.firstOrNull()?.let { it.code < 128 } == true) " $origin " else origin
 
     private val UUID = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
     /** 项目目录名：Claude Code 把 cwd 里不是字母数字的字符都换成横杠（[Transcript.projectDirOf]），所以只放行这些字符（路径会拼进读转录的命令）。 */
@@ -114,10 +151,13 @@ object ClaudeSessions {
             if (id in history) continue
             history[id] = Entry(id, path, cwd, h.optString("title").clean(200), h.optLong("last").coerceAtLeast(0),
                 h.optString("entrypoint").clean(40), h.optString("branch").clean(200), h.optInt("messages").coerceAtLeast(0),
-                h.optBoolean("exact", true), h.optLong("bytes").coerceAtLeast(0))
+                h.optBoolean("exact", true), h.optLong("bytes").coerceAtLeast(0),
+                // 脚本说对上了还不够：这里按同一套编码再核一次（只认字母数字，和 [Transcript.projectDirOf] 一样）
+                cwdVerified = h.optBoolean("cwdOk", false) && Transcript.projectDirOf(cwd) == dir, recent = h.optBoolean("recent", true))
         }
         val registry = ArrayList<Process>()
-        val procs = o.optJSONArray("registry")
+        // null（或老脚本没给）= 服务器上没有登记目录，不是「没有在跑的」
+        val procs = if (o.isNull("registry")) null else o.optJSONArray("registry")
         for (i in 0 until (procs?.length() ?: 0)) {
             val p = procs!!.optJSONObject(i) ?: continue
             val pid = p.optLong("pid"); val id = p.optString("id")
@@ -125,7 +165,7 @@ object ClaudeSessions {
             registry += Process(pid, id, p.optBoolean("live"), p.optString("resumed").takeIf { UUID.matches(it) }.orEmpty(),
                 p.optString("tmux").clean(64), p.optString("cwd").clean(4096), p.optString("entrypoint").clean(40), p.optString("status").clean(40))
         }
-        return Snapshot(history.values.toList(), registry, o.optInt("scanned"), o.optBoolean("truncated"), o.optLong("ms"))
+        return Snapshot(history.values.toList(), registry, o.optInt("scanned"), o.optBoolean("truncated"), o.optLong("ms"), registryKnown = procs != null)
     }
 
     /**
@@ -145,21 +185,25 @@ object ClaudeSessions {
             else if (p.live) ids.forEach { running.putIfAbsent(it, p) }
         }
         adopted.forEach { (id, name) -> if (name in names) managed += id }
-        return snapshot.history.filter { it.id !in managed }.map { Row(it, running[it.id]) }.sortedByDescending { it.entry.lastActivity }
+        return snapshot.history.filter { it.id !in managed }.map { Row(it, running[it.id], snapshot.registryKnown) }.sortedByDescending { it.entry.lastActivity }
     }
 
     /**
      * 服务器上跑的那段 Python（3.5 起都能跑：不用 f-string、海象、fromisoformat）。参数是最多列几个。输出只有一行：[MARKER] + JSON。
+     * `guard <编号> <启动目录>`：只核这一个会话能不能接着跑（[GUARD_MARKER] + 结果），启动脚本在 tmux new-session 之前调。
+     * 登记按修改时间取最新的 500 个（多出来的多半是早就退出的进程留下的）。
      * 历史文件只认 `<UUID>.jsonl`，不跟符号链接，最多看 5 万个；每个读开头 64 KiB（单行最多 256 KiB）和末尾 32 KiB。
      * 时间戳自己解析（带时区偏移的也换成 UTC 毫秒）。输出用 ensure_ascii：服务器的 LANG=C 时 stdout 是 ASCII，直接写中文会抛错。
      * ⚠️ 不加 internal：测试在 desktop 模块里拿它在本机对拍，internal 跨模块看不见（同 [SessionProbe.sent]）。
      */
     val SCRIPT = """
-import calendar, json, os, re, sys, time
+import calendar, json, os, re, stat, sys, time
 began = time.time()
-limit = max(1, min(int(sys.argv[1]), 500)) if len(sys.argv) > 1 else 200
-HEAD, TAIL, LINE, FILES = 65536, 32768, 262144, 50000
+GUARD = len(sys.argv) > 2 and sys.argv[1] == 'guard'
+limit = 200 if GUARD or len(sys.argv) < 2 else max(1, min(int(sys.argv[1]), 500))
+HEAD, TAIL, LINE, FILES, RECENT = 65536, 32768, 262144, 50000, 180
 UUID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
+ENCODE = re.compile(r'[^A-Za-z0-9]')
 NOISE = ('<command-name', '<command-message', '<command-args', '<local-command-', '<system-reminder', '<bash-input', '<bash-stdout',
          '<bash-stderr', '<user-prompt-submit-hook', '<task-notification', '<teammate-message', '<agent-message', '<cross-session-message',
          'Caveat: The messages below', '[Request interrupted')
@@ -240,31 +284,34 @@ def history():
             scanned += 1
             try: st = f.stat(follow_symlinks=False)
             except OSError: continue
-            found.append((st.st_mtime, f.path, name[:-6], st.st_size))
+            found.append((st.st_mtime, f.path, name[:-6], st.st_size, d.name))
     found.sort(reverse=True)
     out = []
-    for mtime, path, sid, size in found[:limit]:
+    for mtime, path, sid, size, folder in found[:limit]:
         try: head, tail, whole, read = slices(path, size)
         except OSError: continue
         first, last = parse(head), parse(tail)
         rows = first + last
         side = [r for r in rows if 'isSidechain' in r]
         if side and all(r.get('isSidechain') for r in side): continue
-        cwd = next((r['cwd'] for r in rows if isinstance(r.get('cwd'), str) and r['cwd']), '')
+        cwds = [r['cwd'] for r in rows if isinstance(r.get('cwd'), str) and r['cwd']]
+        cwd = next((c for c in cwds if ENCODE.sub('-', c) == folder), '')
+        verified = bool(cwd)
+        cwd = cwd or (cwds[0] if cwds else '')
         if not cwd: continue
         entry = next((r['entrypoint'] for r in rows if isinstance(r.get('entrypoint'), str) and r['entrypoint']), '')
         branch = next((r['gitBranch'] for r in reversed(rows) if isinstance(r.get('gitBranch'), str) and r['gitBranch']), '')
         custom = next((r['customTitle'] for r in reversed(rows) if r.get('type') == 'custom-title' and isinstance(r.get('customTitle'), str)), '')
         prompt = next((p for p in (prompt_of(r) for r in rows) if p), '')
         summary = next((r['summary'] for r in reversed(rows) if r.get('type') == 'summary' and isinstance(r.get('summary'), str)), '')
-        recent = next((r['lastPrompt'] for r in reversed(rows) if isinstance(r.get('lastPrompt'), str) and r['lastPrompt'].strip()), '')
-        title = ' '.join((custom or prompt or summary or recent).split())[:200]
+        last_prompt = next((r['lastPrompt'] for r in reversed(rows) if isinstance(r.get('lastPrompt'), str) and r['lastPrompt'].strip()), '')
+        title = ' '.join((custom or prompt or summary or last_prompt).split())[:200]
         count = sum(1 for r in rows if r.get('type') in ('user', 'assistant') and not r.get('isSidechain') and not r.get('isMeta'))
         if count == 0 and not title: continue
         if not whole and read: count = int(round(count * size / float(read)))
         latest = max([stamp(r.get('timestamp')) for r in (last or first)] or [0]) or int(mtime * 1000)
-        out.append({'id': sid, 'path': path, 'cwd': cwd, 'title': title, 'last': latest, 'entrypoint': entry, 'branch': branch,
-                    'messages': count, 'exact': whole, 'bytes': size})
+        out.append({'id': sid, 'path': path, 'cwd': cwd, 'cwdOk': verified, 'title': title, 'last': latest, 'entrypoint': entry,
+                    'branch': branch, 'messages': count, 'exact': whole, 'bytes': size, 'recent': began - mtime < RECENT})
     return out, scanned, len(found) > limit
 
 def boot():
@@ -312,14 +359,20 @@ def resumed(pid):
 
 def registry():
     folder = os.path.join(base, 'sessions')
-    try: names = sorted(n for n in os.listdir(folder) if n.endswith('.json'))[:500]
-    except OSError: return []
-    out = []
+    if not os.path.isdir(folder): return None
+    try: names = [n for n in os.listdir(folder) if n.endswith('.json')]
+    except OSError: return None
+    stamped = []
     for n in names:
         p = os.path.join(folder, n)
+        try: st = os.lstat(p)
+        except OSError: continue
+        if stat.S_ISREG(st.st_mode) and st.st_size <= 65536: stamped.append((st.st_mtime, p))
+    stamped.sort(reverse=True)
+    out = []
+    for _, p in stamped[:500]:
         try:
-            if os.path.islink(p) or not os.path.isfile(p) or os.path.getsize(p) > 65536: continue
-            with open(p, 'rb') as f: o = json.loads(f.read().decode('utf-8', 'replace'))
+            with open(p, 'rb') as f: o = json.loads(f.read(65537).decode('utf-8', 'replace'))
         except (OSError, ValueError): continue
         if not isinstance(o, dict): continue
         pid, sid = o.get('pid'), o.get('sessionId')
@@ -331,8 +384,21 @@ def registry():
                     'status': o.get('status') if isinstance(o.get('status'), str) else ''})
     return out
 
-items, scanned, truncated = history()
-print('$MARKER' + json.dumps({'v': 1, 'home': home, 'history': items, 'registry': registry(), 'scanned': scanned,
-                                               'truncated': truncated, 'ms': int((time.time() - began) * 1000)}))
+def guard(sid, cwd):
+    if not UUID.fullmatch(sid) or not cwd.startswith('/'): return 'missing'
+    procs = registry()
+    if procs is None: return 'unknown'
+    if any(p['live'] and sid in (p['id'], p['resumed']) for p in procs): return 'live'
+    try: st = os.stat(os.path.join(projects, ENCODE.sub('-', cwd), sid + '.jsonl'))
+    except OSError: return 'elsewhere'
+    if time.time() - st.st_mtime < RECENT: return 'recent'
+    return 'ok'
+
+if GUARD:
+    print('$GUARD_MARKER' + guard(sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else ''))
+else:
+    items, scanned, truncated = history()
+    print('$MARKER' + json.dumps({'v': 2, 'home': home, 'history': items, 'registry': registry(), 'scanned': scanned,
+                                                   'truncated': truncated, 'ms': int((time.time() - began) * 1000)}))
 """.trimIndent()
 }

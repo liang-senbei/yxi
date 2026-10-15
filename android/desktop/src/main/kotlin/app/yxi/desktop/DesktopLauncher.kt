@@ -10,7 +10,10 @@ data class DesktopLaunchPlan(val directory: String, val agent: String, val reque
     /**
      * M4s「在 Yxi 里继续」：接着跑服务器上已有的 Claude Code 会话（`claude --resume <编号>`），别的照常（权限模式、共享 MCP、tmux 会话名）。
      * 只给 Claude Code、编号必须是 UUID（它会拼进命令行）；不带启动提示词、不建独立工作树（会话按启动目录归档，换了目录 resume 找不到它）；
-     * 目录必须已经存在 —— 新建会话那条路会 `mkdir -p`，接着跑的不该凭空造出原来的目录。
+     * 目录必须已经存在 —— 新建会话那条路会 `mkdir -p`，接着跑的不该凭空造出原来的目录。目录（含解析符号链接后的）里不许有 `#`：
+     * tmux 把 `-c` 的目录当格式展开（`#(命令)` 会被执行），而这个目录是服务器上的文件给的。
+     * tmux new-session 之前在服务器上再核一次（[app.yxi.agent.ClaudeSessions] 的 guard 模式）：这个编号没有活着的进程、3 分钟内没在写、
+     * 历史正好在这个目录的项目里（不然 resume 找不到它、进程启动就退出）、有会话登记可查；任何一条不满足就不起，回 `resume-<原因>`。
      */
     val resumeSessionId: String? = null) {
     init {
@@ -26,6 +29,7 @@ data class DesktopLaunchPlan(val directory: String, val agent: String, val reque
         if (resumeSessionId != null) {
             require(agent == "claude" && RESUME_ID.matches(resumeSessionId)) { "要接着跑的会话编号无效" }
             require(initialPrompt.isEmpty() && !isolatedWorktree) { "接着跑已有会话时不带启动提示词、不建独立工作树" }
+            require('#' !in directory) { "目录名里有 #，tmux 会把它当格式展开，不能接着跑" }
         }
     }
     val sessionName: String get() {
@@ -67,6 +71,11 @@ print(target)
 """.trimIndent()
             "d=${'$'}(python3 -c ${Shell.q(script)} ${Shell.q(directory)} ${Shell.q(requestId)}) || { echo '$tag:worktree-failed'; exit 0; }"
         }
+        val resumeGuard = if (resumeSessionId == null) "" else """
+case "${'$'}want" in *'#'*) echo '$tag:resume-hash'; exit 0;; esac
+guard=${'$'}(python3 -c ${Shell.q(app.yxi.agent.ClaudeSessions.SCRIPT)} guard ${Shell.q(resumeSessionId)} "${'$'}want" 2>/dev/null | sed -n 's/^${app.yxi.agent.ClaudeSessions.GUARD_MARKER}//p')
+[ "${'$'}guard" = ok ] || { echo "$tag:resume-${'$'}{guard:-unknown}"; exit 0; }
+""".trimIndent()
         val joinGroup = if (collaborationGroup.isBlank()) "" else {
             val script = """
 import json, os, pathlib, sys, tempfile
@@ -103,6 +112,7 @@ if tmux has-session -t "=${'$'}n" 2>/dev/null; then
   [ "${'$'}got" = "${'$'}want" ] || { echo '$tag:conflict'; exit 0; }
   echo '$tag:exists'; exit 0
 fi
+$resumeGuard
 $checkMcp
 $joinGroup
 if [ -n "${'$'}prompt" ]; then

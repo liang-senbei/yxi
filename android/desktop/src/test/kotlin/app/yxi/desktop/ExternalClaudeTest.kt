@@ -31,6 +31,16 @@ class ExternalClaudeTest {
         assertFalse(fresh.command().contains("--resume")); assertTrue(fresh.command().contains("mkdir -p"))
     }
 
+    @Test fun `resume plan re-checks the session on the server right before tmux starts`() {
+        val command = DesktopLaunchPlan("/srv/web", "claude", DesktopLaunchPlan.newRequestId(), resumeSessionId = id).command()
+        val guard = command.indexOf(" guard '$id' \"\$want\"")
+        assertTrue(guard > 0, "没有 guard")
+        assertTrue(command.indexOf("tmux has-session") < guard && guard < command.indexOf("tmux new-session"), "guard 要在复用检查之后、起 tmux 之前")
+        assertTrue(command.contains("[ \"\$guard\" = ok ] || { echo \"${app.yxi.agent.Dirs.TAG}:resume-\${guard:-unknown}\"; exit 0; }"), "核不过就不起、回原因")
+        assertTrue(command.contains("case \"\$want\" in *'#'*)"), "解析符号链接后的目录也不许有 #")
+        assertFalse(DesktopLaunchPlan("/srv/web", "claude", DesktopLaunchPlan.newRequestId()).command().contains(" guard "), "新会话不跑 guard")
+    }
+
     @Test fun `resume plan rejects anything that is not a plain Claude session id`() {
         val request = DesktopLaunchPlan.newRequestId()
         listOf("x; rm -rf ~", "5F1C2D3E-4A5B-4C6D-8E7F-001122334455", "$id ", "--help", "").forEach { bad ->
@@ -39,6 +49,8 @@ class ExternalClaudeTest {
         assertFailsWith<IllegalArgumentException> { DesktopLaunchPlan("/srv/web", "codex", request, resumeSessionId = id) }
         assertFailsWith<IllegalArgumentException> { DesktopLaunchPlan("/srv/web", "claude", request, initialPrompt = "继续", resumeSessionId = id) }
         assertFailsWith<IllegalArgumentException> { DesktopLaunchPlan("/srv/web", "claude", request, isolatedWorktree = true, resumeSessionId = id) }
+        // tmux 会把 -c 的目录当格式展开：#(命令) 会被执行
+        assertFailsWith<IllegalArgumentException> { DesktopLaunchPlan("/srv/#(touch x)", "claude", request, resumeSessionId = id) }
     }
 
     @Test fun `rows hide sessions Yxi lists and remember adopted ones`() {

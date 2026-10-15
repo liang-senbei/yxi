@@ -749,7 +749,7 @@ private fun codeScenes() = listOf(
     // M4s：主机组里 Yxi 会话下面的「Claude Code 会话」组：终端起的、Claude App（sdk-cli）起的、正在终端里跑的（实心点）；
     // 在 Yxi 的 tmux 会话里跑着的那条（登记里 tmux = cc-demo-app）不列。右端是来源小字
     CodeScene("ssh-external-list", verify = { state, nodes ->
-        checkExternalRows(nodes, SHOT_EXT_LIVE to "终端", SHOT_EXT_CLI to "终端", SHOT_EXT_APP to "Claude App / SDK")
+        checkExternalRows(nodes, SHOT_EXT_LIVE to "终端", SHOT_EXT_CLI to "终端", SHOT_EXT_APP to "App")
         check(nodes.none { it.endsWith(" $SHOT_EXT_MANAGED") }) { "Yxi 的 tmux 会话里跑着的那条不该列出来" }
         check(nodes.any { it.trimEnd().endsWith(" Claude Code 会话") }) { "没有「Claude Code 会话」组标题" }
         check(state.page == Page.Workspace && state.externalClaude == null) { "列表场景不该打开只读页" }
@@ -809,7 +809,7 @@ private fun sshExternal(state: AppState, open: String?) {
         ))
     c.claudeSessions = snapshot
     ExternalClaude.list = { snapshot }
-    ExternalClaude.transcript = { _, e, _ -> shotExternalTranscript(e) }
+    ExternalClaude.transcript = { _, e, _ -> ExternalTranscript(shotExternalTranscript(e), more = false) }
     if (open != null) state.openExternalClaude(c, open)
 }
 

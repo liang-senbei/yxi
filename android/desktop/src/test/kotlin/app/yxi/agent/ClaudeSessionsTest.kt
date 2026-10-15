@@ -26,7 +26,7 @@ class ClaudeSessionsTest {
 
     private fun item(id: String, cwd: String = "/srv/web", dir: String = "-srv-web", title: String = "标题 $id", last: Long = 1_000, entry: String = "cli") =
         JSONObject().put("id", id).put("path", "$home/.claude/projects/$dir/$id.jsonl").put("cwd", cwd).put("title", title).put("last", last)
-            .put("entrypoint", entry).put("branch", "main").put("messages", 12).put("exact", true).put("bytes", 4096)
+            .put("entrypoint", entry).put("branch", "main").put("messages", 12).put("exact", true).put("bytes", 4096).put("cwdOk", true).put("recent", false)
     private fun proc(pid: Long, id: String, live: Boolean, tmux: String = "", resumed: String = "", status: String = "idle", entry: String = "cli") =
         JSONObject().put("pid", pid).put("id", id).put("live", live).put("tmux", tmux).put("resumed", resumed).put("status", status).put("entrypoint", entry)
     private fun output(history: List<JSONObject>, registry: List<JSONObject> = emptyList(), extra: JSONObject.() -> Unit = {}) =
@@ -111,12 +111,39 @@ class ClaudeSessionsTest {
 
     @Test fun `origin tags`() {
         assertEquals("终端", ClaudeSessions.originOf("cli"))
-        assertEquals("Claude App / SDK", ClaudeSessions.originOf("sdk-cli"))
+        assertEquals("App", ClaudeSessions.originOf("sdk-cli"), "侧栏小字用短的")
+        assertEquals("Claude App / SDK", ClaudeSessions.originOf("sdk-cli", long = true))
         assertEquals("SDK", ClaudeSessions.originOf("sdk-ts"))
         assertEquals("VS Code", ClaudeSessions.originOf("claude-vscode"))
         assertEquals("Claude Code", ClaudeSessions.originOf(""))
         val row = ClaudeSessions.Row(ClaudeSessions.Entry(a, "/p", "/srv", "t", 0, entrypoint = ""), ClaudeSessions.Process(1, a, true, entrypoint = "sdk-cli"))
-        assertEquals("Claude App / SDK", row.origin, "历史里没写 entrypoint 时用登记里的")
+        assertEquals("App", row.origin, "历史里没写 entrypoint 时用登记里的")
+        assertEquals("正在 Claude App / SDK 里运行，这里只读", row.liveNote)
+    }
+
+    @Test fun `continuing is refused whenever liveness or the directory is uncertain`() {
+        fun snap(vararg h: JSONObject, registry: JSONArray? = JSONArray()) = ClaudeSessions.parse(ClaudeSessions.MARKER +
+            JSONObject().put("v", 2).put("home", home).put("history", JSONArray(h.toList())).put("registry", registry ?: JSONObject.NULL))
+        val fine = snap(item(a))
+        assertTrue(fine.registryKnown); assertNull(ClaudeSessions.visible(fine, emptyList()).single().blocked)
+        // 没有 ~/.claude/sessions（老版本）：registry 是 null —— 不是「没有在跑的」
+        val unknown = snap(item(a), registry = null)
+        assertFalse(unknown.registryKnown)
+        assertTrue(ClaudeSessions.visible(unknown, emptyList()).single().blocked.orEmpty().contains("没有会话登记"))
+        // 3 分钟内还在写（可能是看不见的进程）
+        assertTrue(ClaudeSessions.visible(snap(item(a).put("recent", true)), emptyList()).single().blocked.orEmpty().contains("3 分钟"))
+        // 脚本没给 recent / cwdOk（老脚本）：都按拿不准算
+        assertTrue(ClaudeSessions.visible(snap(item(a).apply { remove("recent"); remove("cwdOk") }), emptyList()).single().blocked != null)
+        // 目录对不上项目目录名：脚本说没对上，或者脚本说对上了但编码其实不一样
+        assertTrue(ClaudeSessions.visible(snap(item(a).put("cwdOk", false)), emptyList()).single().blocked.orEmpty().contains("启动目录"))
+        val lying = snap(item(a, cwd = "/srv/web/sub"))   // 目录 -srv-web，cwd 编码是 -srv-web-sub
+        assertFalse(lying.history.single().cwdVerified)
+        assertTrue(snap(item(a, cwd = "/srv/my.web", dir = "-srv-my-web")).history.single().cwdVerified, "点、空格、中文都编成横杠")
+        // 目录里有 #：tmux 会把 -c 的目录当格式展开
+        assertTrue(ClaudeSessions.visible(snap(item(a, cwd = "/srv/#(id)", dir = "-srv---id-")), emptyList()).single().blocked.orEmpty().contains("#"))
+        // 在别处跑着的：原因是运行中
+        val live = snap(item(a), registry = JSONArray().put(proc(1, a, live = true)))
+        assertTrue(ClaudeSessions.visible(live, emptyList()).single().blocked.orEmpty().startsWith("正在终端里运行"))
     }
 
     @Test fun `command is bounded and quotes the script`() {
@@ -170,6 +197,10 @@ class ClaudeSessionsTest {
                 user(c, "/srv/web", JSONArray().put(JSONObject().put("type", "tool_result").put("tool_use_id", "t").put("content", "ok")), "2026-10-13T00:00:00Z"),
                 JSONObject().put("type", "last-prompt").put("lastPrompt", "  继续  上次的 ").put("sessionId", c).toString(),
             ), now - 3_000)
+            // e：中途 cd 进了子目录（开头的 cwd 是子目录），只认编码等于项目目录名的那个；f：目录名对不上任何 cwd（不给接着跑）
+            val e = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"; val f = "ffffffff-ffff-4fff-8fff-ffffffffffff"
+            write(File(web, "$e.jsonl"), listOf(user(e, "/srv/web/sub", "子目录里开头", "2026-10-12T00:00:00Z"), assistant(e, "/srv/web", "好", "2026-10-12T00:00:01Z")), now - 600_000)
+            write(File(base, "projects/-srv-moved/$f.jsonl"), listOf(user(f, "/srv/other", "挪过的", "2026-10-11T00:00:00Z")), now - 700_000)
             // 不该出现的：子 agent（整份 isSidechain）、agent-*.jsonl、会话子目录里的、符号链接、没有 cwd 的、只有空行的
             write(File(web, "$d.jsonl"), listOf(user(d, "/srv/web", "sub", "2026-10-15T00:00:00Z") { put("isSidechain", true) }), now - 10_000)
             write(File(web, "agent-1234.jsonl"), listOf(user(a, "/srv/web", "sub", "2026-10-15T00:00:00Z")), now)
@@ -199,7 +230,14 @@ class ClaudeSessionsTest {
             val raw = run(200)
             val snap = ClaudeSessions.parse(raw)
             assertTrue(snap.history.none { it.id == d || it.id.startsWith("9999") || it.id.startsWith("aaaa") }, snap.history.map { it.id }.toString())
-            assertEquals(listOf(a, b, c), snap.history.map { it.id }, "按修改时间新的在前")
+            assertEquals(listOf(a, b, c, e, f), snap.history.map { it.id }, "按修改时间新的在前")
+            assertTrue(snap.registryKnown)
+            assertTrue(snap.history.take(3).all { it.recent }, "几秒前写的算还在写")
+            assertTrue(snap.history.drop(3).none { it.recent })
+            val ee = snap.history[3]
+            assertEquals("/srv/web", ee.cwd); assertTrue(ee.cwdVerified, "取编码等于项目目录名的那个 cwd，不是开头的子目录")
+            val ef = snap.history[4]
+            assertEquals("/srv/other", ef.cwd); assertFalse(ef.cwdVerified)
             val home = root.toPath().toRealPath().toString().let { real -> if (raw.contains(real)) real else root.absolutePath }
             val ea = snap.history[0]
             assertEquals("$home/.claude/projects/-srv-web/$a.jsonl", ea.path)
@@ -217,10 +255,30 @@ class ClaudeSessionsTest {
             val mine = snap.registry.single { it.pid == me }
             assertTrue(mine.live); assertEquals("cc-web", mine.tmux); assertEquals("busy", mine.status)
             assertFalse(snap.registry.single { it.pid == 4_194_000L }.live)
-            assertEquals(listOf(b, c), ClaudeSessions.visible(snap, listOf("cc-web")).map { it.entry.id }, "a 在 Yxi 列着的 tmux 会话里")
+            assertEquals(listOf(b, c, e, f), ClaudeSessions.visible(snap, listOf("cc-web")).map { it.entry.id }, "a 在 Yxi 列着的 tmux 会话里")
             // 条数上限：只列最新的，标记截断
             val two = ClaudeSessions.parse(run(2))
             assertEquals(listOf(a, b), two.history.map { it.id }); assertTrue(two.truncated)
+            // guard 模式（启动脚本里 tmux new-session 之前那一道）
+            fun guard(id: String, cwd: String): String {
+                val pb = ProcessBuilder(exe, "-I", "-c", ClaudeSessions.SCRIPT, "guard", id, cwd).redirectErrorStream(true)
+                pb.environment()["HOME"] = root.absolutePath
+                val p = pb.start(); val out = p.inputStream.readBytes().decodeToString()
+                assertTrue(p.waitFor(30, TimeUnit.SECONDS) && p.exitValue() == 0, out)
+                return out.lineSequence().first { it.startsWith(ClaudeSessions.GUARD_MARKER) }.removePrefix(ClaudeSessions.GUARD_MARKER)
+            }
+            assertEquals("live", guard(a, "/srv/web"), "这个 JVM 的登记活着")
+            assertEquals("recent", guard(b, "/srv/api"))
+            assertTrue(File(api, "$b.jsonl").setLastModified(now - 600_000))
+            assertEquals("ok", guard(b, "/srv/api"))
+            assertEquals("elsewhere", guard(b, "/srv/web"), "从别的目录 resume 找不到它")
+            assertEquals("ok", guard(e, "/srv/web"))
+            assertEquals("missing", guard("not-a-uuid", "/srv/web"))
+            // 没有 ~/.claude/sessions：列表里 registry 是 null，guard 判不了
+            assertTrue(sessions.renameTo(File(base, "sessions.off")))
+            assertFalse(ClaudeSessions.parse(run(200)).registryKnown)
+            assertEquals("unknown", guard(e, "/srv/web"))
+            assertTrue(File(base, "sessions.off").renameTo(sessions))
             key.setReadable(true, true)
         } finally { root.deleteRecursively() }
     }

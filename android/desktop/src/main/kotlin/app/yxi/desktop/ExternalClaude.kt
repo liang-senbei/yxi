@@ -52,7 +52,11 @@ import app.yxi.agent.Transcript
 import app.yxi.ssh.Shell
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 import java.time.Instant
 import java.time.ZoneId
@@ -71,6 +75,9 @@ internal object ExternalClaude {
     /** 只读页先载最近这么多条消息（[TranscriptBranchStart] 的计数：当前分支上的 user / assistant 行），「加载更早的对话」每次翻倍，最多 [MAX]。 */
     const val FIRST = 200
     const val MAX = 2000
+    /** 读一次转录最多收这么多字节、服务器上最多跑这么多秒（本机再多等几秒）：超了就报错、留着已经载入的。 */
+    const val TRANSCRIPT_BYTES = 24 * 1024 * 1024
+    const val TRANSCRIPT_SECONDS = 30
     /** 侧栏一组先列这么多行，「显示更多」每次再加 [MORE]。 */
     const val SHOWN = 8
     const val MORE = 20
@@ -78,7 +85,7 @@ internal object ExternalClaude {
     /** 读这台主机的列表（[Conn.refreshClaudeSessions] 调）。可替换：截图夹具换成固定数据。 */
     internal var list: suspend (Conn) -> ClaudeSessions.Snapshot = { ClaudeSessions.read(it.ssh) }
     /** 读一个会话最近 [Int] 条消息的转录行（只读页调）。可替换，同上。 */
-    internal var transcript: suspend (Conn, ClaudeSessions.Entry, Int) -> List<String> = ::remoteTranscript
+    internal var transcript: suspend (Conn, ClaudeSessions.Entry, Int) -> ExternalTranscript = ::remoteTranscript
 
     /** 正在「在 Yxi 里继续」的（[key] → true）和上一次失败的原因（[key] → 原因）。 */
     val continuing = mutableStateMapOf<String, Boolean>()
@@ -108,26 +115,59 @@ internal object ExternalClaude {
     /** 行和会话头上的标题：脚本没找出标题（开头没有人说的话、也没有摘要）时用目录名，免得一列「没有标题」分不清。 */
     fun title(e: ClaudeSessions.Entry) = e.title.ifBlank { e.cwd.trimEnd('/').substringAfterLast('/').ifBlank { e.cwd } + " · 没有标题" }
 
-    /** 正在别处跑的说明（只读页的提示、侧栏菜单里的原因）。 */
-    fun liveNote(row: ClaudeSessions.Row) = "正在${row.origin}里运行，这里只读"
-
     /** 截图夹具：每张图开头清空（读取口换成空列表、不碰网络），场景要的数据自己再放。 */
     fun clearForFixture() {
         list = { ClaudeSessions.Snapshot(emptyList(), emptyList()) }
-        transcript = { _, _, _ -> emptyList() }
+        transcript = { _, _, _ -> ExternalTranscript(emptyList(), false) }
         continuing.clear(); errors.clear(); requests.clear()
     }
 
     /**
-     * 服务器上的那份：按当前分支取最近 [count] 条（同 SSH 对话页首屏的 [TranscriptBranchStart]，按文件大小取快照，别处正在写也不会读到半行）；
-     * 文件里认不出消息链（很老的格式）就退回末尾 [count] 行。路径是 [ClaudeSessions.parse] 核过的 `~/.claude/projects/<目录>/<编号>.jsonl`。
+     * 服务器上的那份：按当前分支取最近 [count] 条（同 SSH 对话页首屏的 [TranscriptBranchStart] 那段脚本，按文件大小取快照，别处正在写也不会读到半行）；
+     * 文件里认不出消息链（很老的格式）就退回末尾 [count] 行，那时「更早的」按行数判断（先数总行数）。路径是 [ClaudeSessions.parse] 核过的
+     * `~/.claude/projects/<目录>/<编号>.jsonl`。
+     *
+     * ⚠️ 不走 [SshSession.exec]：那条占着连接的 exec 锁直到读完，大文件要扫好一阵，期间审批按键、发送、抓屏都排在后面；
+     * 也不用 [TranscriptBranchStart.load]（同样走 exec、没有超时和上限）。这里开一条独立的 exec 流（锁只在开通道时占一下），
+     * 服务器上套 `timeout`、本机 [withTimeout]、最多收 [TRANSCRIPT_BYTES] 字节（同 ClaudeSubscriptionProbe 的读法）；离开页面（协程取消）就关通道。
      */
-    private suspend fun remoteTranscript(conn: Conn, entry: ClaudeSessions.Entry, count: Int): List<String> {
+    private suspend fun remoteTranscript(conn: Conn, entry: ClaudeSessions.Entry, count: Int): ExternalTranscript {
         check(conn.ssh.isConnected) { "服务器未连接" }
-        val snapshot = TranscriptBranchStart.load(conn.ssh, entry.path, count) ?: error("没读到这个会话的历史（连接可能断了，或文件刚被改写），请刷新重试")
-        return snapshot.lines ?: conn.ssh.exec("tail -n ${count.coerceIn(1, MAX)} ${Shell.q(entry.path)}").lineSequence().filter { it.isNotBlank() }.toList()
+        val n = count.coerceIn(1, MAX)
+        val raw = bounded(conn, "python3 -c ${Shell.q(TranscriptBranchStart.script)} ${Shell.q(entry.path)} $n snapshot")
+        val result = runCatching { JSONObject(raw) }.getOrNull() ?: error("没读到这个会话的历史（连接可能断了、读取超时，或文件刚被改写），请刷新重试")
+        if (!result.isNull("start")) {
+            val array = result.getJSONArray("lines")
+            val lines = (0 until array.length()).map { array.getString(it) }
+            return ExternalTranscript(lines, messages(lines) >= n)
+        }
+        // 认不出消息链：第一行是总行数，后面是末尾 n 行
+        val tail = bounded(conn, "sh -c 'wc -l < \"${'$'}1\" && tail -n \"${'$'}2\" \"${'$'}1\"' sh ${Shell.q(entry.path)} $n").lines()
+        val total = tail.firstOrNull()?.trim()?.toLongOrNull() ?: error("没读到这个会话的历史，请刷新重试")
+        return ExternalTranscript(tail.drop(1).filter { it.isNotBlank() }, total > n)
+    }
+
+    /**
+     * 跑一条命令、收它的输出：独立 exec 流，服务器上套 `timeout`（没有这个命令的主机照常跑，靠本机这边的超时），最多等 [TRANSCRIPT_SECONDS] + 5 秒、
+     * 收 [TRANSCRIPT_BYTES] 字节，超了报错；结束（含取消）都关通道。exec 流不像 [SshSession.exec] 那样补 `~/.local/bin`，这里自己补上。
+     */
+    private suspend fun bounded(conn: Conn, command: String): String {
+        val channel = conn.ssh.openExecStream("export PATH=\"${'$'}HOME/.local/bin:${'$'}PATH\"; " +
+            "if command -v timeout >/dev/null 2>&1; then timeout $TRANSCRIPT_SECONDS $command; else $command; fi")
+        try {
+            val bytes = withTimeout((TRANSCRIPT_SECONDS + 5) * 1000L) {
+                try { runInterruptible(Dispatchers.IO) { channel.output.readNBytes(TRANSCRIPT_BYTES + 1) } }
+                catch (e: java.io.InterruptedIOException) { currentCoroutineContext().ensureActive(); throw e }
+            }
+            check(bytes.size <= TRANSCRIPT_BYTES) { "这段历史超过 ${TRANSCRIPT_BYTES / 1024 / 1024} MB，没有载入；少载一些，或在服务器上查看" }
+            return bytes.toString(Charsets.UTF_8)
+        } catch (e: kotlinx.coroutines.TimeoutCancellationException) { error("读这个会话的历史超时了（文件太大或连接太慢），请稍后刷新重试") }
+        finally { channel.close() }
     }
 }
+
+/** 只读页一次读到的转录：[lines] 是转录行，[more] = 更早的可能还有（给「加载更早的对话」）。 */
+internal data class ExternalTranscript(val lines: List<String>, val more: Boolean)
 
 /**
  * 「在 Yxi 里继续」：在原目录起一个 Yxi 管的 tmux 会话跑 `claude --resume <编号>`（[DesktopLaunchPlan.resumeSessionId]），
@@ -136,7 +176,8 @@ internal object ExternalClaude {
  * 新会话的显示名用原会话的标题。
  *
  * ⚠️ 动手前**再读一次列表**：这期间它可能在终端 / Claude App 里又跑起来了，或者已经被接进 Yxi —— 两个进程同时写一份会话会把历史写乱，
- * 所以只认刚读到的状态，活着的一律不接。不碰原来那个进程：不发按键、不 attach 它的 tmux、不连它的 socket。
+ * 所以只认刚读到的状态，拿不准的一律不接（[ClaudeSessions.Row.blocked]）；启动脚本里 tmux new-session 之前还会在服务器上再核一次（guard）。
+ * 不碰原来那个进程：不发按键、不 attach 它的 tmux、不连它的 socket。
  */
 internal suspend fun continueExternalClaude(state: AppState, c: Conn, row: ClaudeSessions.Row): Session {
     check(c.status == Conn.Status.Connected && c.ssh.isConnected) { "请先连接服务器" }
@@ -144,7 +185,7 @@ internal suspend fun continueExternalClaude(state: AppState, c: Conn, row: Claud
     c.claudeSessions = fresh
     val now = ClaudeSessions.visible(fresh, c.sessions.map { it.name }, c.claudeAdopted).firstOrNull { it.entry.id == row.entry.id }
         ?: error("这个会话已经在 Yxi 里了，或者服务器上找不到它了；请刷新列表")
-    check(!now.live) { ExternalClaude.liveNote(now) + "；运行结束后才能在 Yxi 里继续" }
+    now.blocked?.let { error(it) }
     val registry = state.sharedMcp
     check(registry.problem.isBlank()) { registry.problem }
     val shared = registry.forHost(projectKey(c.host, "/")).filter { "claude" in it.desiredRunners }
@@ -216,16 +257,16 @@ private fun CodeExternalGroupTitle(closed: Boolean, loading: Boolean, connected:
     }
 }
 
-/** 一行的 ⋮：头是标题和目录；在跑的「在 Yxi 里继续」灰掉，下面一行写原因。 */
+/** 一行的 ⋮：头是标题和「来源（长）· 目录」；不能接着跑的「在 Yxi 里继续」灰掉，下面一行写原因（[ClaudeSessions.Row.blocked]）。 */
 @Composable
 private fun ColumnScope.CodeExternalRowMenu(state: AppState, actions: HostActions, c: Conn, r: ClaudeSessions.Row, close: () -> Unit) {
     val busy = ExternalClaude.continuing[ExternalClaude.key(c.host, r.entry.id)] == true
-    CodeMenuHeader(ExternalClaude.title(r.entry), r.entry.cwd)
+    CodeMenuHeader(ExternalClaude.title(r.entry), r.originLong + " · " + r.entry.cwd)
     CodeMenuDivider()
     CodeMenuItem("打开（只读）", { close(); state.openExternalClaude(c, r.entry.id) })
     CodeMenuItem(if (busy) "正在接着跑…" else "在 Yxi 里继续", { close(); state.openExternalClaude(c, r.entry.id); actions.continueClaude(c, r) },
-        enabled = !r.live && !busy && c.status == Conn.Status.Connected)
-    if (r.live) CodeMenuNote(ExternalClaude.liveNote(r) + "；运行结束后才能在 Yxi 里继续")
+        enabled = r.blocked == null && !busy && c.status == Conn.Status.Connected)
+    r.blocked?.let { CodeMenuNote(it) }
     CodeMenuDivider()
     CodeMenuItem("复制会话编号", { close(); copyToClipboard(r.entry.id) })
     CodeMenuItem("复制项目路径", { close(); copyToClipboard(r.entry.cwd) })
@@ -259,7 +300,7 @@ internal fun ExternalClaudePane(state: AppState, actions: HostActions) {
     val entry = row?.entry ?: c.claudeSessions?.history?.firstOrNull { it.id == id }
     val managed = if (row == null) ExternalClaude.managedSession(c, id) else null
     val connected = c.status == Conn.Status.Connected
-    val origin = row?.origin ?: ClaudeSessions.originOf(entry?.entrypoint.orEmpty())
+    val origin = row?.originLong ?: ClaudeSessions.originOf(entry?.entrypoint.orEmpty(), long = true)
     val viewKey = "external-claude:$key"
     val view = state.transcriptView(viewKey)
     var count by remember(key) { mutableStateOf(ExternalClaude.FIRST) }
@@ -279,9 +320,9 @@ internal fun ExternalClaudePane(state: AppState, actions: HostActions) {
         val e = entry ?: return@LaunchedEffect
         loading = true; error = ""
         try {
-            val lines = ExternalClaude.transcript(c, e, count)
-            val (parsed, n) = withContext(Dispatchers.Default) { Transcript.parse(lines.asSequence()) to ExternalClaude.messages(lines) }
-            items = parsed; more = n >= count
+            val got = ExternalClaude.transcript(c, e, count)
+            items = withContext(Dispatchers.Default) { Transcript.parse(got.lines.asSequence()) }
+            more = got.more
         } catch (ex: CancellationException) { throw ex }
         catch (ex: Exception) { error = ex.message.orEmpty().ifBlank { "读不到这个会话的历史" } }
         finally { loading = false }
@@ -352,17 +393,19 @@ internal fun ExternalClaudePane(state: AppState, actions: HostActions) {
                 when {
                     managed != null -> Note("这个会话已经在 Yxi 里接着跑了，到那边继续聊。", t.textSecondary)
                     entry == null -> Note("服务器上找不到这个会话了（可能被删了或换了位置），刷新看看。", t.warning)
-                    row?.live == true -> Note(ExternalClaude.liveNote(row) + "。不会跟随更新，点右上角刷新看最新内容。", t.warning)
-                    else -> Note("在${origin}里起的会话，这里只读。「在 Yxi 里继续」会在原目录新开一个 Yxi 管的会话接着聊（claude --resume），原来的历史都在。", t.textMuted)
+                    row?.live == true -> Note(row.liveNote + "。不会跟随更新，点右上角刷新看最新内容。", t.warning)
+                    row?.blocked != null -> Note(row.blocked!!, t.warning)
+                    else -> Note("在${if (origin.first().code < 128) " $origin " else origin}里起的会话，这里只读。「在 Yxi 里继续」会在原目录新开一个 Yxi 管的会话接着聊（claude --resume），原来的历史都在。", t.textMuted)
                 }
                 // 9.6 = Note 的 16 − chip 的 6.4：chip 的字和上面的提示字对齐
                 Row(Modifier.padding(horizontal = 9.6.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (managed != null) CodeFooterChip("打开 Yxi 里的会话", { state.select(c, managed) })
                     else if (row != null) {
-                        CodeFooterChip(if (busy) "正在启动…" else "在 Yxi 里继续", { actions.continueClaude(c, row) }, enabled = !row.live && !busy && connected)
+                        CodeFooterChip(if (busy) "正在启动…" else "在 Yxi 里继续", { actions.continueClaude(c, row) }, enabled = row.blocked == null && !busy && connected)
                         when {
                             !connected -> CodeFooterNote("服务器未连接", t.textMuted)
                             row.live -> CodeFooterNote("运行结束后才能在 Yxi 里继续", t.textMuted)
+                            row.blocked != null -> CodeFooterNote("暂时不能在 Yxi 里继续", t.textMuted)
                             else -> CodeFooterNote("权限：" + continuePermission(c, row.entry).title, t.textMuted)
                         }
                     }
