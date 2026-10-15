@@ -6,16 +6,20 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -67,7 +71,7 @@ fun LoginGate() {
 
     BackHandler { activity?.finish() }
 
-    Box(
+    BoxWithConstraints(
         Modifier.fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
             // 吃掉所有点击：底下是完整的 App，漏一下过去就等于没挡
@@ -89,8 +93,10 @@ fun LoginGate() {
                 ),
         )
 
+        // ⚠️ **放不下时要能滚**：横屏、小屏、大字号下这一列比屏幕高，原来下半截（说明、甚至按钮）直接被切掉，
+        //    人又过不了这一页。heightIn(min = 屏高) 让放得下时照旧居中，放不下才滚。
         Column(
-            Modifier.fillMaxSize().padding(36.dp),
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).heightIn(min = maxHeight).padding(36.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
