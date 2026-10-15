@@ -133,6 +133,8 @@ class CodeThemeShotsTest {
         UsageHistory.clearForFixture()   // M4n：统计卡的数据是全局的，每张都清空（第一遍就串到了后面 24 张新会话页）
         BranchChanges.local = { null }; BranchChanges.remote = { _, _ -> null }   // M4p：分支改动条只在摆了数的场景里出现，也不起 git、不连主机
         RemoteSlashCommands.clearForFixture()   // M4o：主机的命令表、技能表也是全局的（斜杠菜单、技能页的场景各自放）
+        Store.setPref(ChatFontSize.PREF, ChatFontSize.Medium.key)   // M4q：对话字号 / 宽度每张都回到默认档，改它的场景不串到后面
+        Store.setPref(ChatWidth.PREF, ChatWidth.Narrow.key)
         val state = AppState().apply { startupRestored = true }   // 跳过 HostEffects 的开机恢复 / 自动重连
         state.navigation.setMode("全部")   // 全部 / 待处理 / 归档落在夹具 profile 里，local-archived 改过（值没变不写盘）
         try {
@@ -407,7 +409,8 @@ private fun codeScenes() = listOf(
     }) { localOpenCode(it, permission = false, read = true); it.transcriptViews[it.localSelectedTaskKey!!] = TranscriptView.Detailed },
     // 设置 → 外观里的对话默认视图（M3h）；没单独切过的会话跟着偏好走（下一张：同 local-opencode-read，但没设会话档）
     CodeScene("settings-transcript-view", verify = { state, nodes ->
-        check(nodes.any { it.contains("对话默认视图（Code 风格）") } && state.transcriptView("any") == TranscriptView.Detailed) { "设置页没有对话默认视图，或偏好没生效" }
+        // M4q：Code 风格的设置弹窗里这一项叫「对话默认视图」（只在 Code 风格出现，不再括注；经典仍是「对话默认视图（Code 风格）」）
+        check(nodes.any { it.trimEnd().endsWith(" 对话默认视图") } && state.transcriptView("any") == TranscriptView.Detailed) { "设置页没有对话默认视图，或偏好没生效" }
     }) { check(Store.setPref(TranscriptView.PREF, TranscriptView.Detailed.key) == null); it.showSettings = true; it.settingsSection = "外观" },
     CodeScene("local-opencode-read-pref", verify = { _, nodes ->
         check(nodes.any { it.endsWith(" - title: 快速开始") }) { "会话没跟着偏好的详细档展开" }
@@ -707,6 +710,34 @@ private fun codeScenes() = listOf(
     },
     // 本机：还没有读本机 ~/.claude 的实现，只放说明卡
     CodeScene("customize-skills-local", verify = { _, nodes -> checkCustomizeCard(nodes, "还不能列出本机的技能") }) { customize(it, "本地"); it.customizeSkills = true },
+    // Code 风格的设置弹窗（M4q，规格表 §3.7）：左导航 192（搜索框 164–196，第二项「外观」选中 248.8–280.8），右上关闭 × 中心 (1508, 180)；
+    // 外观页一行一项，分段控件里有新加的对话字号、对话宽度。下一张是常规页（用户数据的两个按钮、三个开关，「关闭窗口时留在托盘」默认开）
+    CodeScene("code-settings-appearance", verify = { _, nodes ->
+        checkSettingsFrame(nodes, "外观")
+        for (text in listOf("界面风格", "明暗", "对话默认视图", "对话字号", "对话宽度", "小", "大", "窄", "宽")) check(nodes.any { it.trimEnd().endsWith(" $text") }) { "外观页没有「$text」" }
+    }) { it.showSettings = true; it.settingsSection = "外观" },
+    CodeScene("code-settings-general", verify = { _, nodes ->
+        checkSettingsFrame(nodes, "常规")
+        for (text in listOf("用户数据", "打开数据目录", "复制路径", "关闭窗口时留在托盘", "开机自启", "启动时重连上次主机")) check(nodes.any { it.trimEnd().endsWith(" $text") }) { "常规页没有「$text」" }
+        check(nodes.count { " Switch" in it } == 3) { "常规页应该有三个开关" }
+    }) { it.showSettings = true },
+    // 通知页的带框下拉点开：Code 浮层，当前档「仅在未聚焦时」打勾
+    CodeScene("code-settings-notify-menu", listOf("仅在未聚焦时"), verify = { _, nodes ->
+        checkSettingsFrame(nodes, "通知")
+        for (text in listOf("始终", "从不")) check(nodes.any { it.trimEnd().endsWith(" $text") }) { "下拉里没有「$text」" }
+    }) { it.showSettings = true; it.settingsSection = "通知" },
+    // 对话宽度「宽」（1024）：同 server-codex（放在最后时本机那几条已被前面的场景置顶 / 归档 / 新建过，服务器 Codex 的对话不受影响），对话列和输入卡都在主区（288–2048）里居中，656–1680：你的消息右对齐，字的右缘 = 1680 − 内边距 12
+    CodeScene("code-chat-wide", verify = { _, nodes ->
+        val bubble = nodes.firstOrNull { it.trimEnd().endsWith(" 给解析器加两组基准测试：大文件和深层嵌套。") } ?: error("没有你的消息：" + nodes.filter { "解析器" in it || "Codex" in it }.take(12))
+        fun num(key: String) = Regex("""$key=([0-9.]+)""").find(bubble)!!.groupValues[1].toFloat()
+        check(kotlin.math.abs(num("x") + num("w") - 1668f) < 0.6f) { "你的消息没贴着 1024 宽的列右缘（字右缘应在 1668）：$bubble" }
+    }) { serverCodex(it, approval = false); check(Store.setPref(ChatWidth.PREF, ChatWidth.Wide.key) == null) },
+    // 对话字号「大」（16 / 22.9）：同 server-codex，对话里的字整体放大（你的消息一行高 ≈22.9），输入卡和侧栏不变
+    CodeScene("code-chat-large-font", verify = { _, nodes ->
+        val bubble = nodes.firstOrNull { it.trimEnd().endsWith(" 给解析器加两组基准测试：大文件和深层嵌套。") } ?: error("没有你的消息：" + nodes.filter { "解析器" in it }.take(8))
+        val h = Regex("""h=([0-9.]+)""").find(bubble)!!.groupValues[1].toFloat()
+        check(h in 22.5f..23.5f) { "你的消息一行高 $h，不是「大」的 ≈22.9" }
+    }) { serverCodex(it, approval = false); check(Store.setPref(ChatFontSize.PREF, ChatFontSize.Large.key) == null) },
 )
 
 /** 自定义页（M4o）：[remote] 的服务器（不连），切到插件页；[location] 是「本地」或「服务器」（同经典的 pluginLocation）。 */
@@ -757,6 +788,16 @@ private fun checkSkillRows(nodes: List<String>, vararg rows: Pair<String, String
         val row = names.single { it.trimEnd().endsWith(" $name") }
         check(nodes.any { it.trimEnd().endsWith(" $source") && kotlin.math.abs(num(it, "y") - num(row, "y")) < 2f && num(it, "x") > 1400f }) { "「$name」那行右端没有「$source」" }
     }
+
+/** 设置弹窗（M4q）：关闭 × 在 (1496, 168) 24×24；导航项 168 宽、32 高，起于 x 524，第一项顶 215.8、步距 33；[selected] 是当前分区。 */
+private fun checkSettingsFrame(nodes: List<String>, selected: String) {
+    check(nodes.any { it.contains("x=1496.0 y=168.0 w=24.0 h=24.0 Button") }) { "关闭 × 不在 (1496, 168)" }
+    val tabs = nodes.filter { it.contains(" w=168.0 h=32.0 Tab") }
+    check(tabs.isNotEmpty() && tabs.all { it.contains(" x=524.0 ") }) { "导航项不是起于 x 524、168×32：$tabs" }
+    // 第一项顶 215.8 = 269.75 物理像素，取整到 270（216.0）；第二项 248.8 正好落在整像素上
+    val tops = tabs.map { Regex("""y=([0-9.]+)""").find(it)!!.groupValues[1].toFloat() }
+    check(tops.any { kotlin.math.abs(it - 215.8f) <= 0.4f } && tops.any { kotlin.math.abs(it - 248.8f) <= 0.4f }) { "导航项的位置不对（第一项 215.8、第二项 248.8）：$tabs" }
+    check(nodes.any { it.trimEnd().endsWith(" $selected") && it.contains(" x=728.0 ") }) { "内容区标题「$selected」没起于 x 728" }
 }
 
 /**

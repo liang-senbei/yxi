@@ -60,7 +60,7 @@ import androidx.compose.ui.input.key.isCtrlPressed
 
 /**
  * 用户消息气泡：#F0F0EF 底、圆角 10、左右 12 / 上下 8，单行高 36，字主色 14 / 20；
- * 最宽 627.2（参考端见到的最宽值，列宽的 ≈82%）。可点时点气泡就是 [onClick]。
+ * 最宽 627.2（参考端见到的最宽值，列宽的 ≈82%；对话宽度换档时按同一比例，见 [ChatWidth.bubbleMax]）。可点时点气泡就是 [onClick]。
  */
 @Composable
 internal fun CodeUserBubble(text: String, modifier: Modifier = Modifier, maxLines: Int = Int.MAX_VALUE, onClick: (() -> Unit)? = null) {
@@ -69,7 +69,7 @@ internal fun CodeUserBubble(text: String, modifier: Modifier = Modifier, maxLine
     val shape = RoundedCornerShape(10.dp)
     val lines = remember { intArrayOf(1) }   // 上次排版的行数：测量里读，不触发重组
     Box(
-        modifier.widthIn(max = 627.2.dp).clip(shape).background(t.userBubble)
+        modifier.widthIn(max = ChatWidth.current.bubbleMax).clip(shape).background(t.userBubble)
             .then(if (onClick != null) Modifier.clickable(interactionSource = source, indication = null, role = Role.Button, onClick = onClick) else Modifier)
             .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {

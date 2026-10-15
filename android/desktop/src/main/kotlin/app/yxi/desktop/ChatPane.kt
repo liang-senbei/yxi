@@ -845,16 +845,19 @@ private fun Dot(color: Color) = Box(Modifier.size(8.dp).background(color, Circle
 @Composable
 internal fun Note(text: String, color: Color) = Text(text, Modifier.padding(16.dp, 2.dp), fontSize = 12.sp, lineHeight = 16.sp, color = color)
 
-/** Code 风格的对话列：最宽 768、在父级里居中（对齐和两侧留白由父级给）；经典原样。只是布局，不加语义节点。 */
+/**
+ * Code 风格的对话列：最宽 = 设置里的对话宽度（默认「窄」768，[ChatWidth]）、在父级里居中（对齐和两侧留白由父级给），
+ * 里面的文字按对话字号缩放（[CodeChatText]，默认「中」不变）；经典原样。只是布局，不加语义节点。
+ */
 @Composable
 internal fun CodeColumn(code: Boolean, content: @Composable () -> Unit) {
-    if (code) Box(Modifier.widthIn(max = 768.dp).fillMaxWidth()) { content() } else content()
+    if (code) Box(Modifier.widthIn(max = ChatWidth.current.column).fillMaxWidth()) { CodeChatText(content) } else content()
 }
 
-/** 停靠区（状态行 / 审批卡 / 排队 / 输入卡）：Code 风格和对话列同宽、居中，窄时两侧各留 40（规格 §2）；经典原样。 */
+/** 停靠区（状态行 / 审批卡 / 排队 / 输入卡）：Code 风格和对话列同宽（[ChatWidth]）、居中，窄时两侧各留 40（规格 §2）；经典原样。 */
 @Composable
 internal fun ColumnScope.CodeDock(code: Boolean, content: @Composable ColumnScope.() -> Unit) {
-    if (code) Column(Modifier.align(Alignment.CenterHorizontally).padding(horizontal = 40.dp).widthIn(max = 768.dp).fillMaxWidth(), content = content)
+    if (code) Column(Modifier.align(Alignment.CenterHorizontally).padding(horizontal = 40.dp).widthIn(max = ChatWidth.current.column).fillMaxWidth(), content = content)
     else content()
 }
 

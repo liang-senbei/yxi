@@ -125,6 +125,10 @@ internal class CodePalette(
     val ringTrack: Color,
     val ringHigh: Color,
     val actionDisabled: Color,
+    val segmentThumb: Color,
+    val controlBorder: Color,
+    val switchOff: Color,
+    val searchFill: Color,
 ) {
     companion object {
         val current: CodePalette @Composable get() = if (Tokens.current.dark) CodeDark else CodeLight
@@ -149,6 +153,8 @@ private val CodeLight = CodePalette(
     chipHeld = Color(0xFFF0F0EF), checkRing = Color(0xFFCCCCCB), checkRingHeld = Color(0xFFC0C0BF),
     branchGlyph = Color(0xFF585754), ringTrack = Color(0xFFE2E2E1), ringHigh = Color(0xFFFAB219),
     actionDisabled = Color(0xFFCCCCCC), // 消息操作行里不可用的图标（§3.4 重试 #CCCCCC）
+    // 设置弹窗（M4q，§3.7）：分段控件滑块白、控件边框 #E6E6E6、开关（关）轨道 #C8C8C8～#CDCDCD 取中、导航搜索框 #FEFEFD
+    segmentThumb = Color(0xFFFFFFFF), controlBorder = Color(0xFFE6E6E6), switchOff = Color(0xFFCBCBCB), searchFill = Color(0xFFFEFEFD),
 )
 
 private val CodeDark = CodePalette(
@@ -167,6 +173,8 @@ private val CodeDark = CodePalette(
     chipHeld = Color(0xFF2E2E2D), checkRing = Color(0xFF5D5C5A), checkRingHeld = Color(0xFF6B6A66), // 推
     branchGlyph = Color(0xFFA8A69F), ringTrack = Color(0xFF3A3A39), ringHigh = Color(0xFFFAB219), // 推
     actionDisabled = Color(0xFF4A4A48), // 推
+    // 滑块取侧栏分段控件的深色实测 #363636；其余推（控件边框同审批卡次按钮的深色边）
+    segmentThumb = Color(0xFF363636), controlBorder = Color(0xFF3A3A39), switchOff = Color(0xFF4A4A48), searchFill = Color(0xFF1A1A19),
 )
 
 /**

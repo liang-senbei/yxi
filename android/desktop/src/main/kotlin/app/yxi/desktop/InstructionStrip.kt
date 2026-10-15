@@ -55,8 +55,9 @@ internal fun InstructionStrip(queue: InstructionQueue, taskKey: String, canDeliv
         active.take(if (expanded) active.size else 3).forEachIndexed { index, item ->
             key(item.id) {
                 if (index > 0) Spacer(Modifier.height(15.2.dp))
+                // 排队的气泡画在对话末尾，字号跟对话走（M4q，[CodeChatText]）；下面的操作行和输入卡一样不缩放
                 CodeHint(if (item.status == InstructionStatus.Local) "点击编辑" else "点击核对状态") {
-                    CodeUserBubble(item.text.ifBlank { "${item.attachments.size} 个附件" }, maxLines = 6) { editing = item; text = item.text; error = "" }
+                    CodeChatText { CodeUserBubble(item.text.ifBlank { "${item.attachments.size} 个附件" }, maxLines = 6) { editing = item; text = item.text; error = "" } }
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.height(24.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {

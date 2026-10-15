@@ -26,13 +26,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
-/** 设置弹窗（Ctrl+, / 托盘「设置…」）。分组照 Codex：常规 / 外观 / 通知；账户以后再说。值都进 Store.pref，读的地方自己重组。 */
+/** 设置的分区，两种风格共用（顺序就是左栏顺序）。 */
+internal val SETTINGS_SECTIONS = listOf("常规", "外观", "通知", "输入历史", "账号", "模型与线路", "服务器配置与插件", "快捷键", "关于")
+/** 点了不在弹窗里换内容、而是关掉弹窗去别的页面的分区（[SettingsDialog] 的 select）。 */
+internal val SETTINGS_JUMPS = setOf("账号", "模型与线路", "服务器配置与插件", "快捷键")
+
+/**
+ * 设置弹窗（Ctrl+, / 托盘「设置…」）。分组照 Codex：常规 / 外观 / 通知；账户以后再说。值都进 Store.pref，读的地方自己重组。
+ * Code 风格画 [CodeSettingsDialog]（M4q，规格表 §3.7）：分区、各项和动作（含跳到别的页面的四个分区）同经典，只换外观，另多对话字号 / 宽度两项。
+ */
 @Composable
 fun SettingsDialog(state: AppState) {
     var autostart by remember { mutableStateOf(autostartEnabled()) }
     var retentionError by remember { mutableStateOf("") }
-    val sections = listOf("常规", "外观", "通知", "输入历史", "账号", "模型与线路", "服务器配置与插件", "快捷键", "关于")
-    PreferencesLayout("设置", sections, state.settingsSection, { section ->
+    val sections = SETTINGS_SECTIONS
+    val select: (String) -> Unit = { section ->
         when (section) {
             "账号" -> { state.showSettings = false; state.meSection = "个人资料"; state.page = Page.Me }
             "模型与线路" -> { state.showSettings = false; state.openRoutes() }
@@ -40,7 +48,15 @@ fun SettingsDialog(state: AppState) {
             "快捷键" -> { state.showSettings = false; state.showShortcuts = true }
             else -> state.settingsSection = section
         }
-    }, { state.showSettings = false }) {
+    }
+    if (LocalThemeSpec.current.style == UiStyle.Code) {
+        CodeSettingsDialog(state, select, CodeSettingsActions(
+            autostart = autostart, autostartAvailable = isWindows, setAutostart = { autostart = it; setAutostart(it) },
+            retentionError = retentionError, setRetention = { retentionError = setRetention(state, it) },
+        ))
+        return
+    }
+    PreferencesLayout("设置", sections, state.settingsSection, select, { state.showSettings = false }) {
         androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.TopCenter) {
             Column(Modifier.widthIn(max = 820.dp).fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(20.dp)) {
                 Text(state.settingsSection, style = MaterialTheme.typography.headlineSmall)
@@ -73,10 +89,7 @@ fun SettingsDialog(state: AppState) {
                                 SwitchRow("只提醒置顶任务（没有置顶时提醒全部）", Store.pref("notifyOnlyPinned", "0") == "1") { Store.setPref("notifyOnlyPinned", if (it) "1" else "0") }
                             }
                             "输入历史" -> {
-                                Choice("已结束输入正文保留", listOf("0" to "一直保留", "3" to "3天", "7" to "7天", "30" to "30天"), Store.pref("inputRetentionDays", "0")) { value ->
-                                    // 没存上就别按新档清理：单选还停在旧值，原因走 Store.warning
-                                    runCatching { if (Store.setPref("inputRetentionDays", value) == null) state.instructions.pruneCompleted(value.toInt()); retentionError = "" }.onFailure { retentionError = it.message.orEmpty() }
-                                }
+                                Choice("已结束输入正文保留", RETENTION_OPTIONS, Store.pref("inputRetentionDays", "0")) { value -> retentionError = setRetention(state, value) }
                                 Text("仅清理已结束的本机输入正文，保留去重记录；服务器对话不受影响。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                                 if (retentionError.isNotBlank()) Text(retentionError, color = Tokens.current.danger)
                             }
@@ -116,6 +129,13 @@ private fun Choice(label: String, options: List<Pair<String, String>>, value: St
         }
     }
 }
+
+/** 输入历史的保留档（存的值 to 显示名），两种风格共用。 */
+internal val RETENTION_OPTIONS = listOf("0" to "一直保留", "3" to "3天", "7" to "7天", "30" to "30天")
+
+/** 换保留档：没存上就别按新档清理（选项还停在旧值，原因走 Store.warning）。返回要显示的错误，成功是空串。 */
+private fun setRetention(state: AppState, value: String): String =
+    runCatching { if (Store.setPref("inputRetentionDays", value) == null) state.instructions.pruneCompleted(value.toInt()); "" }.getOrElse { it.message.orEmpty() }
 
 private val isWindows = System.getProperty("os.name").startsWith("Windows")
 private const val RUN = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"

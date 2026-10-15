@@ -168,9 +168,10 @@ internal fun CodeHomeFrame(
 ) {
     val t = Tokens.current
     // 两侧 40（M2-d）：同对话页的 CodeColumn / CodeDock，PRD §5.1「主区不够宽时两侧各留 40，宽 = min(768, 主区 − 80)」；原来是 24。
-    // 主区够宽时列居中 768，这个边距看不出来（2048 宽的截图逐像素不变），只在窄窗口下起作用
+    // 主区够宽时列居中 768，这个边距看不出来（2048 宽的截图逐像素不变），只在窄窗口下起作用。
+    // M4q：768 换成设置里的对话宽度（[ChatWidth]，默认「窄」= 768）：输入卡和对话页一样宽，切到新会话页不跳
     Box(Modifier.fillMaxSize().padding(horizontal = 40.dp), contentAlignment = Alignment.TopCenter) {
-        CodeInputArea(focus, Modifier.widthIn(max = 768.dp).fillMaxSize()) {
+        CodeInputArea(focus, Modifier.widthIn(max = ChatWidth.current.column).fillMaxSize()) {
             Spacer(Modifier.height(52.4.dp))   // 页面起于 y 36；规格图标顶 91.2（§3.8），实测 92.0：52.4 和 Row 里居中的 2.8 各进 0.5px，在 §7 的 ±1px 内
             Row(Modifier.height(28.dp), verticalAlignment = Alignment.CenterVertically) {
                 Image(painterResource("icon.png"), null, Modifier.size(22.4.dp))
