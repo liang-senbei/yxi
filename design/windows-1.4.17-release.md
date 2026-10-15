@@ -20,4 +20,6 @@ desktop.yml 的 Windows 任务这次多一步「Code style unit tests」：在 W
 
 ## CI
 
-（跑完补）
+Desktop 工作流 run 38725108568（workflow_dispatch，分支 claude/windows-release-1.4.17，head 2163aaab）。Windows 任务成功：托盘中文字体检查、SSH 密钥更新契约、Workbench core regression（19 类 115 例，无失败、错误和跳过）、jpackage + uber jar、Velopack 从 Yxi.cfg 读到 1.4.17（Yxi-1.4.17-full.nupkg 330688656 字节）、冒烟 smoke ok、真装真启动 smoke ok。新加的「Code style unit tests」（不挡打包）在 Windows 上 87 例：1 例失败、1 例跳过——失败的是 OpenInTest 的测试假设（Windows 没有可执行位，canExecute 对任何文件都为真；产品在 Windows 上只找 .cmd / .exe，不受影响），测试已在 claude/code-theme 上改；跳过的是 LocalGitTest 里要 python3 的那一段（按设计 Windows 上跳过）。产物：Yxi-windows，artifact 11967318688，931264050 字节，digest sha256:c8813304eb4a568fa4fc59274f86f4fba5ea7cba257b5bc8637c1f0ee0888295。
+
+同一次运行的 macOS 任务（未签名 dmg，不在本次发布范围）在冒烟里失败：内嵌浏览器（JCEF）在 ad-hoc 签名下报签名校验错误，随后「Native browser shutdown did not finish」。留给 Mac 发版处理。

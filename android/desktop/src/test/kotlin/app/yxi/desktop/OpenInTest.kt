@@ -15,7 +15,9 @@ class OpenInTest {
 
     @Test fun `finds known editors on the path in a fixed order, first directory wins, non-executables ignored`() {
         val a = File(root, "a"); val b = File(root, "b")
-        exe(b, "zed"); exe(a, "code"); exe(b, "code"); File(a.apply { mkdirs() }, "cursor").writeText("not executable")
+        exe(b, "zed"); exe(a, "code"); exe(b, "code")
+        // Windows 没有可执行位（canExecute 对任何存在的文件都是 true），「没有可执行位的不算」只在别的系统上测（1.4.17 Windows CI 上发现）
+        if (File.separatorChar != '\\') File(a.apply { mkdirs() }, "cursor").writeText("not executable")
         val found = OpenIn.find(listOf(a.path, "", b.path).joinToString(File.pathSeparator), windows = false)
         assertEquals(listOf("Visual Studio Code" to File(a, "code").path, "Zed" to File(b, "zed").path), found.map { it.label to it.command })
     }
