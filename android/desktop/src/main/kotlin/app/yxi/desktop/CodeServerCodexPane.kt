@@ -327,7 +327,8 @@ private fun CodeServerCodexConversation(state: AppState, conn: Conn, record: Cod
                     // M3d-2b：请求卡停靠在输入卡上方（规格表 §3.3），不进对话滚动区
                     if (controller != null) requests.forEach { request -> key(request.get("id").toString()) { CodexRequestCard(request, controller, ::openTaskFile) { block -> act(block) } } }
                     // M4p：分支改动条（服务器上同一段只读脚本），点徽章开右侧「改动」；连上 / 断开时重读
-                    CodeBranchBar(record.key, controller?.activeTurnId != null, { BranchChanges.remote(conn, record.directory) }, refresh = online) { showChanges = true; showFiles = false }
+                    CodeBranchBar(record.key, controller?.activeTurnId != null, { BranchChanges.remote(conn, record.directory) }, refresh = online,
+                        poll = false, paused = controller?.sending == true || controller?.pendingRequests?.isNotEmpty() == true) { showChanges = true; showFiles = false }
                     CodeLocalComposer(draft.value, { draft.value = it },
                         hint = when {
                             controller == null || !controller.ready -> "连接任务后发送；现在发送会先排队"

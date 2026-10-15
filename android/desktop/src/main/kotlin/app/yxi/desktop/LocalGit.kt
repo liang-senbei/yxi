@@ -45,7 +45,7 @@ internal object LocalGit {
 
     /**
      * 分支改动条的数据（M4p，算法同 [BranchChanges.SCRIPT]）：分支 / HEAD、status 里的文件数（未跟踪的逐个文件算）、工作区相对 HEAD 的增删行数
-     * （还没有提交时是已暂存 + 未暂存两份），未跟踪的文本文件按整份新增（最多 [BranchChanges.UNTRACKED_FILES] 个、每个读开头 1 MB、不跟符号链接）。
+     * （还没有提交时是已暂存 + 未暂存两份），未跟踪的文本文件按整份新增（最多 [BranchChanges.UNTRACKED_FILES] 个、每个读开头 256 KiB、不跟符号链接、读不了的跳过）。
      * 目录不属于 Git 仓库时返回 null。
      */
     suspend fun stat(directory: String): BranchStat? = withContext(Dispatchers.IO) {
@@ -65,8 +65,10 @@ internal object LocalGit {
         }
         files.filter { it.first == "??" }.take(BranchChanges.UNTRACKED_FILES).forEach { (_, path) ->
             val file = File(root, path).toPath()
-            if (java.nio.file.Files.isRegularFile(file, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+            // 读不了的（没权限、Agent 刚删掉的临时文件）跳过，不让整条改动条消失
+            if (java.nio.file.Files.isRegularFile(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) runCatching {
                 added += BranchChanges.lines(java.nio.file.Files.newInputStream(file).use { it.readNBytes(BranchChanges.UNTRACKED_BYTES) })
+            }
         }
         BranchStat(branch, head, files.size, added, removed)
     }

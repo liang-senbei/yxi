@@ -625,7 +625,9 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
             val hostSlash = if (codeStyle && !session.isCodex) RemoteSlashCommands.get(conn.host.id) else null
             val slashCommands = remember(hostSlash) { hostSlash?.let { SlashCommands.merge(SlashCommands.builtIns(), it) }.orEmpty() }
             // M4p：分支改动条（Code 外观；会话目录在服务器上的改动），点徽章开「改动」；连上 / 断开时重读
-            if (codeStyle && session.cwd.isNotBlank()) CodeBranchBar(taskKey, live.busy, { BranchChanges.remote(conn, session.cwd) }, refresh = conn.status, onOpen = onChanges)
+            // 读要占连接的 exec 锁：发送 / 按键 / 等审批时不读，运行中也不轮询（只在进页面、每轮结束时读），同斜杠菜单的读取
+            if (codeStyle && session.cwd.isNotBlank()) CodeBranchBar(taskKey, live.busy, { BranchChanges.remote(conn, session.cwd) }, refresh = conn.status,
+                poll = false, paused = sending || keyBusy || pending != null, onOpen = onChanges)
             Composer(
                 attachments = staged.toList(),
                 onRemoveAttachment = { attachment ->

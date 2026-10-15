@@ -48,9 +48,10 @@ internal data class BranchStat(val branch: String, val head: String, val files: 
  * 目录不属于 Git 仓库时是 null（不显示条）。[local]、[remote] 可替换：截图夹具不许起进程、不碰网络。
  */
 internal object BranchChanges {
-    /** 未跟踪文件最多数这么多个、每个最多读这么多字节（再多的不算行数，只算文件数）。 */
-    const val UNTRACKED_FILES = 200
-    const val UNTRACKED_BYTES = 1_048_576
+    /** 未跟踪文件最多数这么多个、每个最多读这么多字节（再多的不算行数，只算文件数）；服务器那份整段最多跑 [REMOTE_SECONDS] 秒。 */
+    const val UNTRACKED_FILES = 100
+    const val UNTRACKED_BYTES = 262_144
+    const val REMOTE_SECONDS = 20
     internal var local: suspend (directory: String) -> BranchStat? = { LocalGit.stat(it) }
     internal var remote: suspend (conn: Conn, directory: String) -> BranchStat? = ::remoteStat
 
@@ -80,12 +81,16 @@ internal object BranchChanges {
         return BranchStat(o.optString("branch"), o.optString("head"), o.optInt("files"), o.optInt("added"), o.optInt("removed"))
     }
 
-    /** 服务器上的那份（算法同 [LocalGit.stat]）：只跑 git 的只读命令，未跟踪文件只读开头 1 MB、不跟符号链接。 */
+    /**
+     * 服务器上的那份（算法同 [LocalGit.stat]）：只跑 git 的只读命令（GIT_OPTIONAL_LOCKS=0：status 不顺手刷新索引、不抢 index.lock，
+     * 免得和正在 git add / commit 的 Agent 撞上），每条最多 5 秒；未跟踪文件只读开头 256 KiB、不跟符号链接，读不了的（权限、刚被删）跳过。
+     */
     internal val SCRIPT = """
 import json, os, subprocess, sys
 cwd = sys.argv[1]
+env = dict(os.environ, GIT_OPTIONAL_LOCKS='0', GIT_TERMINAL_PROMPT='0')
 def git(*args):
-    return subprocess.run(['git', '--no-pager', '-C', cwd, *args], capture_output=True, stdin=subprocess.DEVNULL, timeout=15)
+    return subprocess.run(['git', '--no-pager', '-C', cwd, *args], capture_output=True, stdin=subprocess.DEVNULL, timeout=5, env=env)
 top = git('rev-parse', '--show-toplevel')
 if top.returncode:
     print('__YXI_BRANCH__:null'); sys.exit(0)
@@ -108,15 +113,20 @@ for args in ([base + [head]] if head else [base + ['--cached'], base]):
         if len(parts) >= 3 and parts[0].isdigit() and parts[1].isdigit(): added += int(parts[0]); removed += int(parts[1])
 for code, path in [f for f in files if f[0] == '??'][:${UNTRACKED_FILES}]:
     full = os.path.join(cwd, path)
-    if os.path.isfile(full) and not os.path.islink(full):
+    if not os.path.isfile(full) or os.path.islink(full): continue
+    try:
         with open(full, 'rb') as handle: data = handle.read(${UNTRACKED_BYTES})
-        if data and b'\0' not in data: added += data.count(b'\n') + (0 if data.endswith(b'\n') else 1)
+    except OSError:
+        continue
+    if data and b'\0' not in data: added += data.count(b'\n') + (0 if data.endswith(b'\n') else 1)
 print('__YXI_BRANCH__:' + json.dumps({'branch': branch, 'head': head, 'files': len(files), 'added': added, 'removed': removed}, ensure_ascii=False))
 """.trimIndent()
 
     private suspend fun remoteStat(conn: Conn, directory: String): BranchStat? {
         if (!conn.ssh.isConnected) return null
-        val raw = conn.ssh.exec("python3 -c " + Shell.q(SCRIPT) + " " + Shell.q(directory))
+        // exec 占着这条连接的锁（审批按键、发送、抓屏都排在后面）：整段套 timeout，服务器没有 timeout 命令时照常跑（每条 git 仍有 5 秒上限）
+        val run = "python3 -c " + Shell.q(SCRIPT) + " " + Shell.q(directory)
+        val raw = conn.ssh.exec("if command -v timeout >/dev/null 2>&1; then timeout $REMOTE_SECONDS $run; else $run; fi")
         val line = raw.lineSequence().lastOrNull { it.startsWith("__YXI_BRANCH__:") } ?: error("读不到分支改动")
         return parse(line.removePrefix("__YXI_BRANCH__:"))
     }
@@ -125,17 +135,20 @@ print('__YXI_BRANCH__:' + json.dumps({'branch': branch, 'head': head, 'files': l
 /**
  * 分支改动条（M4p，规格表 §3.3）：会话目录有未提交的改动时停在输入卡上方（下缘到输入卡 6.4）——#F0F0EF 底、撑满停靠区（768）、高 40、圆角 10；
  * 左边文件夹图标 + 分支名（弱色，起于左边 + 15）；右边「+N −N」徽章（点开「改动」面板，悬停写文件数）和关闭 ×（中心离右边 20）。
- * 参照端还有「创建 PR ∨」：Yxi 没有建 PR 的真实链路，不放（PRD §1）。只读：进页面、每轮结束各读一次，运行中每 15 秒再读；
+ * 参照端还有「创建 PR ∨」：Yxi 没有建 PR 的真实链路，不放（PRD §1）。只读：进页面、每轮结束各读一次，运行中每 15 秒再读（[poll] 为 false 时运行中不读：
+ * 服务器上的读要占连接的 exec 锁）；[paused] 时不读、留着上次的（SSH 对话发送 / 按键 / 等审批时），解除后再读一次；
  * [refresh] 变了也重读（服务器连上 / 断开）。关掉后改动数变了才再出现。读不成（不是仓库、没连上、没有 git / python3）就不显示，不报错——「改动」面板会说原因。
  */
 @Composable
-internal fun CodeBranchBar(key: Any, running: Boolean, load: suspend () -> BranchStat?, refresh: Any? = null, onOpen: () -> Unit) {
+internal fun CodeBranchBar(key: Any, running: Boolean, load: suspend () -> BranchStat?, refresh: Any? = null,
+    poll: Boolean = true, paused: Boolean = false, onOpen: () -> Unit) {
     val t = Tokens.current
     val p = CodePalette.current
     val read by rememberUpdatedState(load)
     var stat by remember(key) { mutableStateOf<BranchStat?>(null) }
     var dismissed by remember(key) { mutableStateOf<BranchStat?>(null) }
-    LaunchedEffect(key, running, refresh) {
+    LaunchedEffect(key, running, refresh, paused) {
+        if (paused || running && !poll) return@LaunchedEffect
         while (true) {
             stat = try { read() } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
             if (!running) break
