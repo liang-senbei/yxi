@@ -204,6 +204,20 @@ private fun codeScenes() = listOf(
     CodeScene("ssh-chat") { remote(it, tab = 0) },
     // SSH 对话的工具组（M3e）：Code 的摘要行 + 卡片，点开的条目里是原来的富渲染 ToolCard（这里是 Bash：命令和输出）
     CodeScene("ssh-chat-tool", listOf("运行了一条命令", "./gradlew test --offline")) { remote(it, tab = 0) },
+    // M4k：斜杠菜单（SSH 上的 Claude 会话）：草稿「/mo」筛出内置的 /model 和这台主机上的 /mobile-release（主机的命令表先放进缓存，不连主机）；
+    // 浮层在输入卡上方 6、和卡片同宽，第一行高亮
+    CodeScene("ssh-chat-slash", verify = { _, nodes ->
+        for (text in listOf("/model", "换模型", "/mobile-release", "自定义命令")) check(nodes.any { it.trimEnd().endsWith(" $text") }) { "斜杠菜单里没有「$text」" }
+        check(nodes.none { it.trimEnd().endsWith(" /compact") || it.trimEnd().endsWith(" /memory") }) { "「/mo」没筛掉别的命令" }
+        checkSlashMenu(nodes, "/mo", "/mobile-release")
+    }) { sshSlash(it) },
+    // 菜单开着时回车补进高亮的那条（「/model 」、菜单收起），不发送、不排队
+    CodeScene("ssh-chat-slash-enter", listOf(ENTER), verify = { state, nodes ->
+        val key = taskNavigationKey(HOST, SESSION)
+        check(state.chatDrafts[key]?.value?.text == "/model ") { "回车没把 /model 补进草稿：${state.chatDrafts[key]?.value?.text}" }
+        check(state.instructions.entries.none { it.taskKey == key }) { "回车把草稿发出去了" }
+        check(nodes.none { it.trimEnd().endsWith(" /mobile-release") }) { "补完后菜单还开着" }
+    }) { sshSlash(it) },
     // SSH 会话的标题菜单里的「对话视图」（M3g）：三档平铺、当前档（普通）打勾
     CodeScene("ssh-title-view-menu", listOf("@任务操作"), verify = { _, nodes ->
         for (text in listOf("对话视图 · Ctrl+O", "普通", "思考", "详细")) check(nodes.any { it.endsWith(" $text") }) { "标题菜单里没有「$text」" }
@@ -284,11 +298,36 @@ private fun codeScenes() = listOf(
         records[0] = records[0].copy(threadId = "00000000-0000-4000-8000-000000000001")
         it.localSelectedTaskKey = records[0].key
     },
+    // M4k：同一页、草稿只有「/」：还没恢复（没有 initialize 回包）时列 Claude Code 的内置命令，整份 21 条只露 8 行、在浮层里滚
+    CodeScene("local-claude-slash", verify = { _, nodes ->
+        for (text in listOf("/compact", "压掉上下文，留个摘要接着聊", "/context")) check(nodes.any { it.trimEnd().endsWith(" $text") }) { "斜杠菜单里没有「$text」" }
+        checkSlashMenu(nodes, "/", null, rows = 8)
+    }) {
+        localHome(it)
+        val records = it.localClaudeTasks.registry.records
+        records[0] = records[0].copy(threadId = "00000000-0000-4000-8000-000000000001")
+        it.localSelectedTaskKey = records[0].key
+        it.chatDrafts[records[0].key] = androidx.compose.runtime.mutableStateOf(androidx.compose.ui.text.input.TextFieldValue("/", androidx.compose.ui.text.TextRange(1)))
+    },
     // 本机 ACP 对话（M2-b b3）：假传输只答 initialize / session/new（模式在页脚左段，模型在右段），消息直接写进控制器；
     // 记录只进内存里的索引（不落盘）。后两张点开模型 / 模式浮层
     CodeScene("local-acp") { localAcp(it) },
     CodeScene("local-acp-model", listOf("Gemini 2.5 Pro")) { localAcp(it) },
     CodeScene("local-acp-mode", listOf("Default")) { localAcp(it) },
+    // M4k：ACP 的斜杠菜单只列运行器报的命令（session/new 之后的 available_commands_update），不混内置；草稿只有「/」
+    CodeScene("local-acp-slash", verify = { state, nodes ->
+        val c = checkNotNull(state.localAcpTasks.controllers.values.singleOrNull()) { "没有控制器" }
+        check(c.slashCommands?.map { it.name } == SHOT_ACP_COMMANDS.map { it.first }) { "控制器没收下运行器的命令表：${c.slashCommands}" }
+        for ((name, description) in SHOT_ACP_COMMANDS) check(nodes.any { it.trimEnd().endsWith(" /$name") } && nodes.any { it.trimEnd().endsWith(" $description") }) { "斜杠菜单里没有「/$name」" }
+        check(nodes.none { it.trimEnd().endsWith(" /compact") }) { "ACP 的菜单混进了 Claude Code 的内置命令" }
+        checkSlashMenu(nodes, "/", "/" + SHOT_ACP_COMMANDS.last().first, rows = SHOT_ACP_COMMANDS.size)
+    }) { acpSlash(it) },
+    // 回车补进第一条（「/web 」），没有 session/prompt
+    CodeScene("local-acp-slash-enter", listOf(ENTER), verify = { state, nodes ->
+        check(state.chatDrafts[checkNotNull(state.localSelectedTaskKey)]?.value?.text == "/web ") { "回车没把 /web 补进草稿" }
+        check(shotAcpRequests.toList() == listOf("initialize", "session/new")) { "回车把草稿发出去了：$shotAcpRequests" }
+        check(nodes.none { it.trimEnd().endsWith(" /plan") }) { "补完后菜单还开着" }
+    }) { acpSlash(it) },
     // ACP 审批卡（M3d-2，规格表 §3.3）：控制器里塞一个等审批的请求（三个选项），停靠在输入卡上方；「仅本次拒绝」在左，「仅本次允许」是主按钮
     CodeScene("local-acp-approval", verify = { _, nodes ->
         for (text in listOf("运行 ./gradlew test", "./gradlew :app:test", "拒绝", "总是允许", "允许一次", "取消此次审批"))
@@ -801,13 +840,14 @@ private fun sshList(state: AppState, saved: Boolean) {
 /**
  * 本机 ACP 对话（M2-b b3）：在 [localHome] 上加一条 Gemini 对话并打开。控制器接 [ShotAcpTransport]（管道流，不起进程、不外连），
  * 握手在 EDT 上同步跑完；消息直接写进控制器（不走 session/prompt）。记录只进内存里的索引，收尾由 closeLocalFeatures 关掉控制器、客户端和传输。
+ * [commands] 不为空时运行器在 session/new 之后报这张命令表（M4k 斜杠菜单）。
  */
-private fun localAcp(state: AppState) {
+private fun localAcp(state: AppState, commands: JSONArray? = null) {
     localHome(state)
     val demo = File(System.getenv("YXI_THEME_SHOT_FIXTURE")).canonicalFile.resolve("projects").resolve("demo-app").canonicalFile
     val record = LocalCodexTaskRecord("shot-acp-local", System.getProperty("user.name"), System.getProperty("os.name"),
         File("C:\\fixture\\gemini-home").canonicalPath, demo.path, "排查构建缓存为什么没命中", "default", 1_700_000_400_000L, "gemini")
-    val client = AcpClient(ShotAcpTransport(record.threadId))
+    val client = AcpClient(ShotAcpTransport(record.threadId, commands = commands))
     runBlocking { client.initialize(); client.newSession(demo.path) }
     val controller = AcpTaskController(record.key, record.threadId, client, state.instructions)
     state.localAcpTasks.registry.records += record
@@ -821,10 +861,11 @@ private fun localAcp(state: AppState) {
 
 /** 截图用的 ACP 传输：答握手（initialize 带 [capabilities]、带模式 / 模型两个配置项的 session/new）；接回时 session/load 先回放 [replay] 再回包，
  *  session/resume 直接回包（回包都带同样两个配置项，模型是 Pro）；[reply] 不为空就答 session/prompt（先回一段话，再 end_turn）。别的请求不回。
+ *  [commands] 不为空就在 session/new 回包之后发一条 available_commands_update（M4k）。
  *  收到的方法记进 [shotAcpRequests]。管道流，不起进程、不外连。回包在 write 里同步写（AcpClient 先登记 pending 再写），写端是 EDT
  *  （一直活着，读端不会报 Pipe broken）；回放和回复都很短，管道写不满。 */
 private class ShotAcpTransport(private val sessionId: String, private val capabilities: JSONObject = JSONObject(),
-    private val replay: List<JSONObject> = emptyList(), private val reply: ((String) -> String)? = null) : AcpTransport {
+    private val replay: List<JSONObject> = emptyList(), private val reply: ((String) -> String)? = null, private val commands: JSONArray? = null) : AcpTransport {
     override val output = PipedInputStream(65536)
     private val pipe = PipedOutputStream(output)
     override suspend fun write(text: String): Boolean {
@@ -843,6 +884,7 @@ private class ShotAcpTransport(private val sessionId: String, private val capabi
             else -> null
         } ?: return true
         send(JSONObject().put("id", request.get("id")).put("result", result))
+        if (method == "session/new" && commands != null) update(JSONObject().put("sessionUpdate", "available_commands_update").put("availableCommands", commands))
         return true
     }
     private fun send(message: JSONObject) { pipe.write((message.put("jsonrpc", "2.0").toString() + "\n").toByteArray()); pipe.flush() }
@@ -852,6 +894,46 @@ private class ShotAcpTransport(private val sessionId: String, private val capabi
 
 /** [ShotAcpTransport] 收到的方法（本机对齐 P3 的场景摆场景时清空）。 */
 private val shotAcpRequests = java.util.concurrent.CopyOnWriteArrayList<String>()
+
+/** 斜杠菜单（M4k）的 SSH 场景：[remote] 上把这台主机的命令表先放进缓存（不连主机），草稿「/mo」。 */
+private fun sshSlash(state: AppState) {
+    remote(state, tab = 0)
+    RemoteSlashCommands.put(HOST.id, listOf(app.yxi.agent.ConfigRemote.Tool("claude", "Claude Code", listOf(app.yxi.agent.ConfigRemote.Cat("commands", "斜杠命令",
+        listOf(app.yxi.agent.ConfigRemote.Item("mobile-release"), app.yxi.agent.ConfigRemote.Item("deploy")))))))
+    state.chatDrafts[taskNavigationKey(HOST, SESSION)] = androidx.compose.runtime.mutableStateOf(androidx.compose.ui.text.input.TextFieldValue("/mo", androidx.compose.ui.text.TextRange(3)))
+}
+
+/** 斜杠菜单（M4k）的 ACP 场景：[localAcp] 的运行器在 session/new 之后报 [SHOT_ACP_COMMANDS]，草稿「/」。请求记录先清空。 */
+private fun acpSlash(state: AppState) {
+    shotAcpRequests.clear()
+    localAcp(state, commands = JSONArray(SHOT_ACP_COMMANDS.map { (name, description) -> JSONObject().put("name", name).put("description", description) }))
+    state.chatDrafts[checkNotNull(state.localSelectedTaskKey)] = androidx.compose.runtime.mutableStateOf(androidx.compose.ui.text.input.TextFieldValue("/", androidx.compose.ui.text.TextRange(1)))
+}
+
+/** local-acp-slash 里运行器报的命令表（名字、说明；同 ACP 文档的例子）。 */
+private val SHOT_ACP_COMMANDS = listOf("web" to "Search the web for information", "test" to "Run tests for the current project",
+    "plan" to "Create a detailed implementation plan")
+
+/**
+ * 斜杠菜单的位置（M4k）：按输入框（草稿是 [draft] 的那个可编辑节点）推出输入卡——单行草稿时输入行 44 高、字贴底（下边距 12），
+ * 卡片顶 = 字底 + 12 − 44，左缘 = 字起点 − 10。每行的命令名字墨起于卡片左 + 12.8（浮层内边距 4 + 行内 8.8）；[last] 是最下面一行的命令名
+ * （行高 24、字高 20 居中），它的行底 + 内边距 4 就是浮层底，离卡片顶 6。[rows] 不为空时核露出来的行数（多了在浮层里滚，看不见的行不进语义树）。
+ */
+private fun checkSlashMenu(nodes: List<String>, draft: String, last: String?, rows: Int? = null) {
+    fun num(line: String, key: String) = Regex("""$key=(-?[0-9.]+)""").find(line)!!.groupValues[1].toFloat()
+    val field = nodes.lastOrNull { it.trimEnd().endsWith(" $draft") && !it.contains("Button") } ?: error("没有草稿是「$draft」的输入框")
+    val left = num(field, "x") - 10f
+    val top = num(field, "y") + num(field, "h") + 12f - 44f
+    // 浮层是单独的一层（行首的 L 号和输入框那层不同）
+    val names = nodes.filter { !it.startsWith(field.substringBefore(' ') + " ") && Regex(" /[^ ]+$").containsMatchIn(it.trimEnd()) && num(it, "y") < top }
+    check(names.isNotEmpty()) { "输入卡上方没有斜杠菜单" }
+    check(names.all { kotlin.math.abs(num(it, "x") - (left + 12.8f)) < 1f }) { "命令名没起于卡片左缘 + 12.8：$names" }
+    if (rows != null) check(names.size == rows) { "露出来 ${names.size} 行，应是 $rows：$names" }
+    val bottom = names.maxBy { num(it, "y") }
+    if (last != null) check(bottom.trimEnd().endsWith(" $last")) { "最下面一行不是「$last」：$bottom" }
+    val gap = top - (num(bottom, "y") + num(bottom, "h") + 2f + 4f)
+    check(kotlin.math.abs(gap - 6f) < 1f) { "浮层底离卡片顶 $gap，应是 6（输入框 $field，最下一行 $bottom）" }
+}
 
 /** 截图 ACP 会话的两个配置项：模式（Default）和模型（[model] 是当前值）。 */
 private fun shotAcpOptions(model: String): JSONArray {

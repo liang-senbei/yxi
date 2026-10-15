@@ -118,7 +118,8 @@ internal class LocalClaudeTasks(private val queue: InstructionQueue, file: File,
                 val latest = registry.records.single { it.key == record.key }
                 registry.save(latest.copy(model = actual, effort = effort))
             }, history = history.toList(), historyPage = historyPage, modelEfforts = efforts, imageStore = images,
-            initialEffort = prepared.settings.optJSONObject("applied")?.optString("effort")?.takeIf { it in efforts[record.model].orEmpty() }).also { controllers[record.key] = it }
+            initialEffort = prepared.settings.optJSONObject("applied")?.optString("effort")?.takeIf { it in efforts[record.model].orEmpty() },
+            slashCommands = SlashCommands.fromClaudeInitialize(prepared.initialization)).also { controllers[record.key] = it }
     }
     override fun close() {
         disposed = true; starting.getAndSet(null)?.cancel()

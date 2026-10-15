@@ -21,7 +21,9 @@ internal class ClaudeTaskController(val taskKey: String, private val client: Cla
     val historyPage: LocalClaudeHistory.Page? = null,
     private val modelEfforts: Map<String, List<String>> = emptyMap(), initialEffort: String? = null,
     private val onSettingsChanged: (String, String?) -> Unit = { _, _ -> },
-    private val imageStore: LocalClaudeImages? = null) : AutoCloseable {
+    private val imageStore: LocalClaudeImages? = null,
+    /** initialize 回包里运行器报的斜杠命令（M4k）；回包没有 commands 时为 null。 */
+    val slashCommands: List<SlashCommand>? = null) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
     private val mutation = Mutex()
     private val rendered = mutableMapOf<String, CompletableDeferred<Unit>>()

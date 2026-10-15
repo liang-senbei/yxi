@@ -281,6 +281,8 @@ private class AcpPendingAuthentication(val plan: AcpTerminalAuthPlan, val comple
                                 },
                                 focus = focus, canSend = controller != null && controller.ready && draft.value.text.isNotBlank(), onSend = ::queueSend,
                                 running = controller?.busy == true, onStop = ::stop,
+                                // M4k：斜杠菜单只列运行器自己报的命令（available_commands_update），没报就不弹
+                                slashCommands = controller?.slashCommands.orEmpty(),
                                 start = {
                                     if (controller != null) {
                                         if (legacy) controller.modes?.let { modes ->

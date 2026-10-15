@@ -25,6 +25,8 @@ object ConfigRemote {
         val inline: String = "",
         /** 结构化文件（settings.json / config.toml）：查看时用打码版，编辑时取原文并校验。 */
         val structured: Boolean = false,
+        /** 由哪个插件带来（`installed_plugins.json` 里的键，如 `name@marketplace`）；用户自己的为空。 */
+        val from: String = "",
     )
     data class Cat(val key: String, val title: String, val items: List<Item>)
     data class Tool(val key: String, val name: String, val cats: List<Cat>)
@@ -146,7 +148,7 @@ object ConfigRemote {
         val items = (0 until (a?.length() ?: 0)).map { i ->
             val o = a!!.getJSONObject(i)
             val from = o.optString("from")
-            Item(o.optString("name"), sub = if (from.isNotBlank()) "由 $from 提供" else "自定义", path = o.optString("path"))
+            Item(o.optString("name"), sub = if (from.isNotBlank()) "由 $from 提供" else "自定义", path = o.optString("path"), from = from)
         }
         return Cat(key, title, items)
     }

@@ -75,7 +75,7 @@ private val ChipLine = 18.sp
  * 输入卡：768 宽由调用方给，最矮 44，圆角 10；外环聚焦深一档，底下一层很淡的阴影。
  * 右端是回车图元（聚焦深、失焦浅，和有没有字无关）；[running] 时换成停止方块。
  * [onKey] 最先处理（和经典 Composer 里 mentions.handle 同位，按下、抬起都会收到），返回 true 表示已处理。
- * [top] 画在输入行上方、卡片里面（附件托盘、@ 列表）；空着时卡片和原来一样。
+ * [top] 画在输入行上方、卡片里面（附件托盘、@ 列表；斜杠菜单在这里取卡片当锚点、0 高）；空着时卡片和原来一样。
  */
 @Composable
 internal fun CodeComposerCard(
@@ -250,7 +250,7 @@ internal fun CodeFooterChip(label: String, onClick: () -> Unit, color: Color = T
  * 对话页的输入区（规格 §2、§3.2）：输入卡 + 下面 28 高的页脚，宽度随停靠区（768）。
  * 由经典 [Composer] 在 Code 风格下调用，按键 [onKey] 是它传进来的同一个处理（发送 / 贴图 / 审批），行为不分叉。
  * 页脚左：权限、「+」（附件、历史、搜索、语音、线路）、状态字；右：模型、上下文环（用量写在悬停提示里）。
- * 运行中不画停止方块：对话页没有中断动作（PRD 有意偏差）。
+ * 运行中不画停止方块：对话页没有中断动作（PRD 有意偏差）。[slash] 是斜杠菜单（M4k），浮在输入卡上方；它的按键由调用方排进 [onKey]。
  */
 @Composable
 internal fun CodeChatComposer(
@@ -260,9 +260,11 @@ internal fun CodeChatComposer(
     canAct: Boolean, planMode: Boolean, tokens: Long,
     onAttach: () -> Unit, onHistory: () -> Unit, onSearch: (() -> Unit)?, onVoice: () -> Unit, onRoutes: (() -> Unit)?,
     permissionControl: @Composable () -> Unit, modelControl: @Composable () -> Unit,
+    slash: SlashMenu? = null,
 ) {
     CodeInputArea(focus, Modifier.fillMaxWidth()) {
         CodeComposerCard(draft, onDraft, hint, focus, canSend, onSend, Modifier.fillMaxWidth(), onKey = onKey) {
+            slash?.let { CodeSlashMenu(it, focus) }
             DraftAttachmentTray(attachments, onRemoveAttachment)
             AttachmentMentionList(mentions)
         }

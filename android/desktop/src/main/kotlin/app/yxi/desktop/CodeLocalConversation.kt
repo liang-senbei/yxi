@@ -85,6 +85,7 @@ internal fun CodeLocalSessionHeader(title: String, directory: String, runner: St
  * 本机对话的输入区：输入卡 + 28 高页脚，量值同 [CodeChatComposer]。和 SSH 对话页不同：运行中右端是停止方块（本机有中断动作）；
  * 页脚没有上下文用量环（本机对话拿不到用量）。页脚左右两段由面板给：[start] 在「+」的位置，[end] 靠右。
  * 服务器上的 Codex 对话也用它：附件走 SFTP，托盘显示上传状态（[showTransferStatus]），输入 @ 可以引用附件（[mentions]）。
+ * [slashCommands] 不为空时（本机 Claude、ACP）草稿打「/」弹斜杠菜单（M4k），按键先归菜单；为空时和原来一样。
  */
 @Composable
 internal fun CodeLocalComposer(
@@ -93,10 +94,14 @@ internal fun CodeLocalComposer(
     attachments: List<DraftAttach> = emptyList(), onRemoveAttachment: (DraftAttach) -> Unit = {},
     onKey: (KeyEvent) -> Boolean = { false },
     showTransferStatus: Boolean = false, mentions: AttachmentMentions? = null,
+    slashCommands: List<SlashCommand> = emptyList(),
     start: @Composable RowScope.() -> Unit = {}, end: @Composable RowScope.() -> Unit = {},
 ) {
+    val slash = rememberSlashMenu(slashCommands, draft, onDraft)
     CodeInputArea(focus, Modifier.fillMaxWidth()) {
-        CodeComposerCard(draft, onDraft, hint, focus, canSend, onSend, Modifier.fillMaxWidth(), running = running, onStop = onStop, onKey = onKey) {
+        CodeComposerCard(draft, onDraft, hint, focus, canSend, onSend, Modifier.fillMaxWidth(), running = running, onStop = onStop,
+            onKey = { e -> slash.handle(e) || onKey(e) }) {
+            CodeSlashMenu(slash, focus)
             DraftAttachmentTray(attachments, onRemoveAttachment, showTransferStatus = showTransferStatus)
             mentions?.let { AttachmentMentionList(it) }
         }

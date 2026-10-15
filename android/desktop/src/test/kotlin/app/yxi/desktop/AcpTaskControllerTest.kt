@@ -51,6 +51,25 @@ class AcpTaskControllerTest {
             }
         }
     }
+    @Test fun `available commands update is kept for the slash menu and other sessions are ignored`(): Unit = runBlocking(Dispatchers.Swing) {
+        val fixture = Fixture()
+        fun commands(session: String, vararg names: String) = fixture.emit(JSONObject().put("method", "session/update").put("params", JSONObject()
+            .put("sessionId", session).put("update", JSONObject().put("sessionUpdate", "available_commands_update").put("availableCommands",
+                org.json.JSONArray(names.map { JSONObject().put("name", it).put("description", "$it command") })))))
+        AcpClient(fixture).use { client ->
+            client.initialize(); client.newSession(root.path)
+            AcpTaskController("task", "session", client, InstructionQueue(File(root, "commands.json"))).use { controller ->
+                assertNull(controller.slashCommands)
+                commands("other", "elsewhere")
+                commands("session", "web", "test")
+                withTimeout(2000) { while (controller.slashCommands == null) delay(10) }
+                assertEquals(listOf(SlashCommand("web", "web command"), SlashCommand("test", "test command")), controller.slashCommands)
+                commands("session", "plan")   // 以最后一次为准
+                withTimeout(2000) { while (controller.slashCommands?.size != 1) delay(10) }
+                assertEquals(listOf("plan"), controller.slashCommands?.map { it.name })
+            }
+        }
+    }
     @Test fun `scheduled dispatch never sends a different queued instruction`(): Unit = runBlocking(Dispatchers.Swing) {
         val queue = InstructionQueue(File(root, "schedule-identity.json"))
         val fixture = Fixture()

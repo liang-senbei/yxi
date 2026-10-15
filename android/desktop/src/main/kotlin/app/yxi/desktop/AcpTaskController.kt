@@ -45,6 +45,8 @@ internal class AcpTaskController(
     var models by mutableStateOf(client.models(sessionId)); private set
     var configOptions by mutableStateOf(client.configOptions(sessionId)); private set
     var lastStopReason by mutableStateOf(""); private set
+    /** 运行器最近一次 available_commands_update 报的斜杠命令（M4k，Code 输入框的斜杠菜单）；还没报过是 null。 */
+    var slashCommands by mutableStateOf<List<SlashCommand>?>(null); private set
     var note by mutableStateOf(if (restoring) "正在接回会话…" else "已连接 ACP 会话"); private set
     /** 自动排队：上一轮正常结束（end_turn）就发队首的下一条，同服务器工作台。 */
     var autoDispatch by mutableStateOf(false); private set
@@ -102,6 +104,8 @@ internal class AcpTaskController(
                 configOptions = client.configOptions(sessionId)
                 onConfigurationChanged(configOptions)
             }
+            // 命令表是运行器当前的能力，不是历史：回放里来的也收，以最后一次为准
+            "available_commands_update" -> SlashCommands.fromAcp(update)?.let { slashCommands = it }
             "user_message_chunk" -> if (replaying) replayChunk("User", update)
             "agent_message_chunk" -> {
                 if (replaying) { replayChunk("Assistant", update); return }
@@ -124,7 +128,7 @@ internal class AcpTaskController(
                 val status = update.optString("status").takeIf { it.isNotBlank() } ?: previous?.status.orEmpty()
                 putMessage(AcpMessage(toolCallId, title, text, "tool", status))
             }
-            // agent_thought_chunk / plan / available_commands_update 和实时轮次里的 user_message_chunk
+            // agent_thought_chunk / plan 和实时轮次里的 user_message_chunk
             // 不进入会话视图：用户消息在发送时自己加，其余见限制说明。
         }
     }

@@ -61,6 +61,7 @@ fun ConfigPane(state: AppState) {
     LaunchedEffect(conn) {
         busy = true
         tools = if (conn == null) emptyList() else ConfigRemote.load(conn.ssh)
+        if (conn != null) RemoteSlashCommands.put(conn.host.id, tools)   // M4k：读到的命令和技能顺带给斜杠菜单，省一次往返
         busy = false
     }
 

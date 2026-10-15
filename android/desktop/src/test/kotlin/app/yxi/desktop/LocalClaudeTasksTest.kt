@@ -13,7 +13,8 @@ import kotlin.test.*
 
 class LocalClaudeTasksTest {
     @TempDir lateinit var root: File
-    private class Fixture(val reject: Boolean = false, val hold: Boolean = false, val declaredLevels: List<String> = listOf("low", "high")) : ClaudeControlTransport {
+    private class Fixture(val reject: Boolean = false, val hold: Boolean = false, val declaredLevels: List<String> = listOf("low", "high"),
+        val commands: org.json.JSONArray? = null) : ClaudeControlTransport {
         override val output = PipedInputStream(65536)
         private val producer = PipedOutputStream(output)
         val writes = CopyOnWriteArrayList<JSONObject>()
@@ -33,7 +34,7 @@ class LocalClaudeTasksTest {
                 .put("models", org.json.JSONArray(listOf("claude-fixture", "claude-saved").map { name ->
                     JSONObject().put("resolvedModel", name).put("supportsEffort", true)
                         .put("supportedEffortLevels", org.json.JSONArray(declaredLevels))
-                }))
+                })).apply { if (commands != null) put("commands", commands) }
             else JSONObject().put("effective", ClaudeSubscriptionSettings.overlay())
                 .put("applied", JSONObject().put("model", model).put("effort", effort))
             producer.write((JSONObject().put("type", "control_response").put("response", JSONObject().put("subtype", "success")
@@ -215,6 +216,20 @@ class LocalClaudeTasksTest {
         assertTrue(fixtures.all { it.closed })
         LocalClaudeTasks(queue, index, LocalClaudeSubscription { _, _ -> error("Index loading must not launch") }).use { reopened ->
             assertEquals(2, reopened.registry.records.size); assertTrue(reopened.controllers.isEmpty())
+        }
+    }
+    @Test fun `initialize commands reach the controller for the slash menu`(): Unit = runBlocking(Dispatchers.Swing) {
+        val commands = org.json.JSONArray().put(JSONObject().put("name", "compact").put("description", "Clear history but keep a summary").put("argumentHint", ""))
+            .put(JSONObject().put("name", "deploy").put("description", "Ship it").put("argumentHint", "<env>"))
+        for (reported in listOf(commands, null)) {
+            val fixture = Fixture(commands = reported)
+            LocalClaudeTasks(InstructionQueue(File(root, "slash-queue-${reported != null}.json")), File(root, "slash-tasks-${reported != null}.json"),
+                LocalClaudeSubscription { _, _ -> ClaudeControlClient(fixture, UUID.randomUUID().toString()) }).use { tasks ->
+                val record = tasks.create(runtime(), root.path, "Slash")
+                val controller = tasks.controllers.getValue(record.key)
+                if (reported == null) assertNull(controller.slashCommands)
+                else assertEquals(listOf(SlashCommand("compact", "Clear history but keep a summary"), SlashCommand("deploy", "Ship it")), controller.slashCommands)
+            }
         }
     }
     @Test fun `rejected configuration creates no task and closes its connection`(): Unit = runBlocking(Dispatchers.Swing) {

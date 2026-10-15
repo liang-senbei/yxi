@@ -316,6 +316,8 @@ import java.io.File
                                 else -> "跟它说点什么… Enter 发送，Shift+Enter 换行；截图直接 Ctrl+V"
                             },
                             focus = focus, canSend = canSend, onSend = ::send, running = controller?.busy == true, onStop = ::stop,
+                            // M4k：斜杠菜单以运行器 initialize 报的命令为准，没报（或还没恢复）时列内置
+                            slashCommands = SlashCommands.forRunner(SlashCommands.builtIns(), controller?.slashCommands),
                             attachments = imagePreviews, onRemoveAttachment = { preview -> imageDrafts.removeAll { it.remotePath == preview.stamp } },
                             onKey = { e -> (isTranscriptViewKey(e) && run { state.cycleTranscriptView(record.key); true }) || (e.type == KeyEventType.KeyDown && e.key == Key.V && (e.isCtrlPressed || e.isMetaPressed) && pasteImage()) },
                             start = {

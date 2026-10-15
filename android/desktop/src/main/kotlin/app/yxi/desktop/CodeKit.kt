@@ -264,7 +264,7 @@ internal fun CodeTooltip(label: String, shortcut: String? = null) {
 internal enum class PopupSide { Below, Above, Right }
 
 /** 贴着触发控件放：下方 / 上方（左对齐或右对齐），或右侧（子菜单）；超出窗口时夹回窗口内。 */
-private class CodePopupPosition(val side: PopupSide, val alignEnd: Boolean, val gap: Int) : PopupPositionProvider {
+internal class CodePopupPosition(val side: PopupSide, val alignEnd: Boolean, val gap: Int) : PopupPositionProvider {
     override fun calculatePosition(
         anchorBounds: IntRect,
         windowSize: IntSize,

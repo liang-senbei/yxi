@@ -90,6 +90,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.yxi.agent.Attachments
 import app.yxi.agent.ChatItem
+import app.yxi.agent.ConfigRemote
 import app.yxi.agent.Live
 import app.yxi.agent.Pending
 import app.yxi.agent.Session
@@ -614,6 +615,11 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
             }
             sendErr?.let { Note(it, t.danger) }
             if (!codeStyle) queueStrip()
+            // M4k：Claude 会话的斜杠菜单 = 内置 + 这台主机的命令和技能（Code 外观第一次打「/」时读一次，按主机记住）；Codex 会话没有来源，不弹
+            val slashWanted = codeStyle && !session.isCodex && SlashCommands.word(draft.text) != null
+            LaunchedEffect(conn.host.id, slashWanted, conn.status) {
+                if (slashWanted && conn.ssh.isConnected) RemoteSlashCommands.ensure(conn.host.id) { ConfigRemote.load(conn.ssh) }
+            }
             Composer(
                 attachments = staged.toList(),
                 onRemoveAttachment = { attachment ->
@@ -648,6 +654,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
                     else if (session.isCodex) { if (codeStyle) CodeFooterChip("模型与思考", onRoutes) else TextButton(onRoutes) { Text("模型与思考 ⌄") } }
                     else ConversationModelMenu(conn, session, ctx?.model.orEmpty(), ctx?.effort.orEmpty(), onRoutes, modelSwitches, onTerminal) },
                 onCycleView = onCycleView,
+                slashCommands = if (session.isCodex) emptyList() else SlashCommands.merge(SlashCommands.builtIns(), RemoteSlashCommands.get(conn.host.id)),
             )
         }
     }
@@ -657,7 +664,7 @@ internal fun ChatPane(conn: Conn, session: Session, instructions: InstructionQue
  * 输入区（ZCode / Codex 同款的一张卡）：无边框输入 + 底部功能行。
  * 左：+ 附件；右：模型 · 强度 · 模式 · 上下文 chips（转录顺带解析的，零开销）+ 圆形发送。
  * Enter / Esc 的审批语义照旧：空输入 + 在等审批 = Enter 批准 / Esc 拒绝（Codex）。
- * Code 风格下外观换成 [CodeChatComposer]，按键处理是同一个。
+ * Code 风格下外观换成 [CodeChatComposer]，按键处理是同一个；另有斜杠菜单（[slashCommands]，M4k），经典不弹。
  */
 @Composable
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
@@ -675,6 +682,7 @@ internal fun Composer(
     modelControl: @Composable () -> Unit,
     permissionControl: @Composable () -> Unit = {},
     onCycleView: (() -> Unit)? = null,
+    slashCommands: List<SlashCommand> = emptyList(),
 ) {
     val t = Tokens.current
     val mentions = rememberAttachmentMentions(attachments, draft, onDraft)
@@ -693,13 +701,15 @@ internal fun Composer(
         }
     }
     if (LocalThemeSpec.current.style == UiStyle.Code) {
+        // M4k：斜杠菜单开着时 ↑↓ / Enter / Tab / Esc 先归它
+        val slash = rememberSlashMenu(slashCommands, draft, onDraft)
         CodeChatComposer(
             attachments, onRemoveAttachment, mentions, draft, onDraft, focus, hint, canSend, onSend,
             // M3g：Code 下 Ctrl+O 轮换对话视图（经典不接）
-            { e -> (onCycleView != null && isTranscriptViewKey(e) && run { onCycleView(); true }) || onKey(e) },
+            { e -> slash.handle(e) || (onCycleView != null && isTranscriptViewKey(e) && run { onCycleView(); true }) || onKey(e) },
             canAct = canAct, planMode = ctx?.mode == "plan", tokens = ctx?.tokens ?: 0L,
             onAttach = onAttach, onHistory = onHistory, onSearch = onSearch, onVoice = onVoice, onRoutes = if (ctx != null) onRoutes else null,
-            permissionControl = permissionControl, modelControl = modelControl,
+            permissionControl = permissionControl, modelControl = modelControl, slash = slash,
         )
         return
     }
