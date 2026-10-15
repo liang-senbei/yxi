@@ -134,13 +134,34 @@ object AsrModel {
      * ⚠️ **只认这两个名字，别的一概不写。** 压缩包是从网上下的 ——
      * 照着包里的路径写文件，一个 `../../` 就能把东西写到 App 目录外面去
      * （Zip Slip）。白名单是这里唯一安全的做法。
+     *
+     * internal 是给 AsrUnpackTest 用的（仪器测试，解一个现做的小 tgz）。
      */
-    private fun unpack(tgz: File, into: File) {
+    internal fun unpack(tgz: File, into: File) {
         val want = setOf("model.int8.onnx", "tokens.txt")
         GZIPInputStream(tgz.inputStream().buffered()).use { gz ->
+            // ⚠️ 别用 `readNBytes` / `skipNBytes`：那是 API 33 / 34 才有的，minSdk 是 26 ——
+            //    8.0～13 的手机上会在 153MB 下完之后才 NoSuchMethodError，模型永远装不上。
+            fun readFully(b: ByteArray): Int {
+                var got = 0
+                while (got < b.size) {
+                    val n = gz.read(b, got, b.size - got)
+                    if (n < 0) break
+                    got += n
+                }
+                return got
+            }
+            fun skipFully(count: Long) {
+                var left = count
+                while (left > 0) {
+                    val n = gz.skip(left)
+                    if (n <= 0) break
+                    left -= n
+                }
+            }
             val hdr = ByteArray(512)
             while (true) {
-                if (gz.readNBytes(hdr, 0, 512) < 512) break
+                if (readFully(hdr) < 512) break
                 if (hdr.all { it == 0.toByte() }) break
                 // ⚠️ tar 的字段是用 **NUL** 补齐的，不是空格。
                 // ⭐ 而且这里必须写转义 `\u0000`：上一版我把一个**真的 NUL 字节**
@@ -160,15 +181,8 @@ object AsrModel {
                             o.write(buf, 0, n); left -= n
                         }
                     }
-                } else {
-                    var left = size
-                    while (left > 0) {
-                        val n = gz.skip(left)
-                        if (n <= 0) break
-                        left -= n
-                    }
-                }
-                if (pad > 0) gz.skipNBytes(pad.toLong())
+                } else skipFully(size)
+                if (pad > 0) skipFully(pad.toLong())
             }
         }
     }
