@@ -130,7 +130,9 @@ fun RhythmScreen(modifier: Modifier = Modifier) {
         val oldOri = activity?.requestedOrientation
         val w = activity?.window
         val c = w?.let { androidx.core.view.WindowInsetsControllerCompat(it, it.decorView) }
-        val oldCut = w?.attributes?.layoutInDisplayCutoutMode
+        // ⚠️ **读也要判版本**，不只是写：这个字段 API 28 才有，8.x 上一读就 NoSuchFieldError ——
+        //    而这一行在进音游页的那一刻就会跑（不管横不横）。
+        val oldCut = if (android.os.Build.VERSION.SDK_INT >= 28) w?.attributes?.layoutInDisplayCutoutMode else null
         if (landscape) {
             activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             if (android.os.Build.VERSION.SDK_INT >= 28) w?.attributes = w.attributes?.apply {
