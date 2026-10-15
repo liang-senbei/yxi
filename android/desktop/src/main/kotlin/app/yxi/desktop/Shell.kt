@@ -213,20 +213,27 @@ fun YxiTray(state: AppState, tray: TrayState, onQuit: () -> Unit) {
     if (!SystemTray.isSupported()) return
     val icon = remember { TrayIcon(ImageIO.read(Shell::class.java.getResource("/icon.png")), "Yxi").apply { isImageAutoSize = true } }
     DisposableEffect(Unit) {
-        icon.popupMenu = PopupMenu().apply {
-            fun item(text: String, act: () -> Unit) = add(MenuItem(text).apply { addActionListener { act() } })
-            item("显示窗口") { Shell.show() }
-            item("新建会话") { Shell.show(); state.newSessionRequest++ }
-            item("设置…") { Shell.show(); state.showSettings = true }
-            addSeparator()
-            item("退出 Yxi", onQuit)
-            TrayMenuFont.apply(this)
+        val entries = listOf(
+            TrayEntry("显示窗口") { Shell.show() },
+            TrayEntry("新建会话") { Shell.show(); state.newSessionRequest++ },
+            TrayEntry("设置…") { Shell.show(); state.showSettings = true },
+            TrayEntry(null),
+            TrayEntry("退出 Yxi", onQuit),
+        )
+        // Windows：右键菜单改用 Swing 画（TraySwingMenu.kt）——原生 PopupMenu 的中文在用户那里是乱码（10-15 反馈）；其他系统仍用原生菜单
+        val detach: () -> Unit = if (System.getProperty("os.name").startsWith("Windows")) attachTrayPopup(icon, entries) else {
+            icon.popupMenu = PopupMenu().apply {
+                for (e in entries) if (e.label == null) addSeparator() else add(MenuItem(e.label).apply { addActionListener { e.action() } })
+                TrayMenuFont.apply(this)
+            }
+            val nothing: () -> Unit = {}
+            nothing
         }
         icon.addMouseListener(object : MouseAdapter() { override fun mouseClicked(e: MouseEvent) { if (e.button == MouseEvent.BUTTON1) Shell.show() } })
         // 点气泡/Toast（Windows 上就是系统通知）= 叫回窗口 + 跳到通知说的那个会话（ZCode 同款，目标在 Notify.clicked 里）
         icon.addActionListener { Notify.clicked() }
         runCatching { SystemTray.getSystemTray().add(icon) }     // 没托盘（Linux 某些桌面）就没托盘，别把整个界面搞崩
-        onDispose { SystemTray.getSystemTray().remove(icon) }
+        onDispose { detach(); SystemTray.getSystemTray().remove(icon) }
     }
     LaunchedEffect(Unit) {
         tray.notificationFlow.collect {
