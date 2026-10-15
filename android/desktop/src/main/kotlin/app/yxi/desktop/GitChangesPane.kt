@@ -34,6 +34,7 @@ internal fun GitChangesView(source: Any, directory: String, sourceLine: String, 
     var error by remember { mutableStateOf("") }
     var feedbackContext by remember(source, directory) { mutableStateOf<String?>(null) }
     var feedback by remember(source, directory) { mutableStateOf("") }
+    val comments = remember(source, directory) { mutableStateListOf<DiffComment>() }   // M4j：逐行评论，换文件不丢，提交后清空
     val code = LocalThemeSpec.current.style == UiStyle.Code
     LaunchedEffect(source, directory, file, staged, revision) {
         // Code 的手风琴（M4c）点一个文件就重读：留着上一份直到新的到，列表不闪、不跳回顶上（交叉审查 10-15）；经典照旧先清空
@@ -61,6 +62,14 @@ internal fun GitChangesView(source: Any, directory: String, sourceLine: String, 
     }
     // M4c：Code 风格画成规格表 §3.12 的改动面板（文件行 + 行号 diff），数据、读取、对话框同经典
     if (LocalThemeSpec.current.style == UiStyle.Code) CodeGitChanges(snapshot, staged, file, busy, error, files = { visibleFiles(it) }, diffReady = loadedFor == file to staged,
+        comments = comments, onComment = { key, c -> comments.removeAll { it.key == key }; if (c != null) comments += c },
+        onSubmitComments = {
+            val data = snapshot
+            if (data != null && comments.isNotEmpty()) {
+                onQuote(DiffComment.quote(sourceLine, data.getString("root"), data.optString("branch"), data.optString("head"), comments.toList()))
+                comments.clear()
+            }
+        },
         onStaged = { if (staged != it) { staged = it; file = "" } }, onFile = { file = it }, onRefresh = { revision++ },
         openFile = { data -> openFile(data.getString("root").trimEnd('/') + "/" + file) }, ask = ::ask)
     else Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

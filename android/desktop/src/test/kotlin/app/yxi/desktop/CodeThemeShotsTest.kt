@@ -448,6 +448,11 @@ private fun codeScenes() = listOf(
             check(nodes.any { it.trimEnd().endsWith(" ${text.trimEnd()}") }) { "diff 里没有「$text」" }
         check(nodes.none { it.contains("diff --git") || it.contains("+++ b/") }) { "文件头不该画出来" }
     }) { localCodex(it, approval = false); shotLocalGit() },
+    // M4j：diff 逐行评论——点行号区（这里点新文件的第 13 行）在那一行下面开评论框（取消 / 保存，Ctrl+Enter 一起加入对话）
+    CodeScene("local-codex-diff-comment", listOf("@改动", "src/auth/errors.ts", "13"), verify = { _, nodes ->
+        check(nodes.any { "对这一行的意见" in it }) { "没开出评论框" }
+        check(nodes.any { it.trimEnd().endsWith(" 保存") } && nodes.any { it.trimEnd().endsWith(" 取消") }) { "评论框没有「取消」「保存」" }
+    }) { localCodex(it, approval = false); shotLocalGit() },
     // 本机首页选 Codex（P1d）：创建中（输入卡只读、页脚「取消创建」、说明换成 Codex 的）；上次创建待核对（说明，按 Enter 进经典对话框核对）
     CodeScene("local-home-codex-creating") { localHomeCodex(it, review = false) },
     CodeScene("local-home-codex-review") { localHomeCodex(it, review = true) },
