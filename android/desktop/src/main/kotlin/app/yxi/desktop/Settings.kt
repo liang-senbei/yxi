@@ -62,6 +62,11 @@ fun SettingsDialog(state: AppState) {
                                 }
                                 Choice("明暗", listOf("system" to "跟随系统", "light" to "浅色", "dark" to "深色"), Store.pref("theme", "system")) { Store.setPref("theme", it, "明暗没存上") }
                                 Text("聊天背景使用固定状态色，无循环波纹或闪烁。", style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
+                                // M3h：对话视图的默认档（Code 风格用）。没单独切过的会话马上跟着变；切过的（Ctrl+O / 标题菜单）留在自己那档
+                                Choice("对话默认视图（Code 风格）", TranscriptView.entries.map { it.key to it.label },
+                                    TranscriptView.of(Store.pref(TranscriptView.PREF, TranscriptView.Normal.key)).key) { Store.setPref(TranscriptView.PREF, it, "对话视图没存上") }
+                                Text("普通：不显示思考、工具只有一行摘要；思考：再显示思考；详细：工具调用全部展开。单个会话里用 Ctrl+O 临时切换。",
+                                    style = MaterialTheme.typography.bodySmall, color = Tokens.current.textMuted)
                             }
                             "通知" -> {
                                 Choice("轮次完成 / 需要你处理", listOf("always" to "始终", "unfocused" to "仅在未聚焦时", "never" to "从不"), Store.pref("notify", "unfocused")) { Store.setPref("notify", it) }

@@ -127,6 +127,7 @@ class CodeThemeShotsTest {
     private suspend fun shootCode(scene: CodeScene, theme: String, scope: FrameWindowScope): Pair<ByteArray, List<String>> {
         Store.setPref("theme", theme)
         Store.setPref("hostScope", "")
+        Store.setPref(TranscriptView.PREF, TranscriptView.Normal.key)   // M3h：对话视图默认档每张都回到普通，改它的场景不串到后面
         val state = AppState().apply { startupRestored = true }   // 跳过 HostEffects 的开机恢复 / 自动重连
         state.navigation.setMode("全部")   // 全部 / 待处理 / 归档落在夹具 profile 里，local-archived 改过（值没变不写盘）
         try {
@@ -298,6 +299,13 @@ private fun codeScenes() = listOf(
     CodeScene("local-opencode-read", verify = { _, nodes ->
         check(nodes.any { it.endsWith("/nav.yml") } && nodes.any { it.endsWith(" - title: 快速开始") } && nodes.any { it.trimEnd().endsWith(" 4") }) { "读文件条目没画出路径、行号或内容" }
     }) { localOpenCode(it, permission = false, read = true); it.transcriptViews[it.localSelectedTaskKey!!] = TranscriptView.Detailed },
+    // 设置 → 外观里的对话默认视图（M3h）；没单独切过的会话跟着偏好走（下一张：同 local-opencode-read，但没设会话档）
+    CodeScene("settings-transcript-view", verify = { state, nodes ->
+        check(nodes.any { it.contains("对话默认视图（Code 风格）") } && state.transcriptView("any") == TranscriptView.Detailed) { "设置页没有对话默认视图，或偏好没生效" }
+    }) { check(Store.setPref(TranscriptView.PREF, TranscriptView.Detailed.key) == null); it.showSettings = true; it.settingsSection = "外观" },
+    CodeScene("local-opencode-read-pref", verify = { _, nodes ->
+        check(nodes.any { it.endsWith(" - title: 快速开始") }) { "会话没跟着偏好的详细档展开" }
+    }) { localOpenCode(it, permission = false, read = true); check(Store.setPref(TranscriptView.PREF, TranscriptView.Detailed.key) == null) },
     // 运行中的状态行（M3f，规格表 §3.4）：在跑、没有审批时对话末尾一行「正在运行 · Ns」；夹具的时钟固定，所以是 0s
     CodeScene("local-opencode-running", verify = { _, nodes ->
         check(nodes.any { it.endsWith(" 正在运行 · 0s") }) { "运行中没有状态行" }
