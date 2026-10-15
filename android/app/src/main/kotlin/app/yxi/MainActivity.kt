@@ -32,6 +32,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
@@ -145,6 +146,16 @@ class MainActivity : ComponentActivity() {
         app.yxi.watch.EventService.sync(this, store.hosts.value.any { it.watch })
 
         setContent {
+            // 状态栏 / 导航栏的图标颜色跟 App 自己的风格（Skin）走，不跟系统的深色模式：两者是两回事。
+            // 不传参数的 enableEdgeToEdge() 按系统深浅挑图标色 —— 系统开深色、App 是浅色风格（默认）时，
+            // 状态栏的时间、电量变成白字压在浅色页面上，几乎看不见（10-15 在模拟器上测出来，登录页最明显）。
+            val lightSkin = app.yxi.ui.Skin.style.palette.light
+            LaunchedEffect(lightSkin) {
+                val status = if (lightSkin) SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+                    else SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                val nav = if (lightSkin) SystemBarStyle.light(0xE6FFFFFF.toInt(), 0x801B1B1B.toInt()) else SystemBarStyle.dark(0x801B1B1B.toInt())
+                enableEdgeToEdge(statusBarStyle = status, navigationBarStyle = nav)
+            }
             // 已登录就在进 App 时拉一次资料。
             // ⚠️ 以前只有打开「会员中心」才拉 —— 结果刚登录完，「我的」和侧边栏都写着「未登录」。
             //    刷新令牌是串行的（见 Account.refreshLock），这里多一次调用不会并发轮换。
