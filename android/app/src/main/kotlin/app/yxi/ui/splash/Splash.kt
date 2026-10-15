@@ -177,7 +177,9 @@ private fun Greeting(modifier: Modifier = Modifier, bottom: androidx.compose.ui.
         )
         if (name != null) {
             Spacer(Modifier.padding(top = 3.dp))
-            Text(name, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+            // 只占一行：横屏时问候区越高 logo 越小，长昵称折行会把 logo 挤没（交叉审查 10-15）
+            Text(name, Modifier.padding(horizontal = 24.dp), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         }
     }
 }
