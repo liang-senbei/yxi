@@ -58,8 +58,9 @@ object Skin {
      */
     fun applyBars(a: ComponentActivity) {
         val light = style.palette.light
-        val status = if (light) SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
-            else SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+        // 状态栏用 auto + 自己的判定：androidx 会把第一次调用的样式存起来、转屏时重套（见 MainActivity）——
+        // 判定每次现读 Skin，中途换过风格也不会在转屏那一帧闪回旧的图标色。底色两边都是透明，跟原来一样。
+        val status = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT) { !style.palette.light }
         val nav = if (light) SystemBarStyle.light(0xE6FFFFFF.toInt(), 0x801B1B1B.toInt()) else SystemBarStyle.dark(0x801B1B1B.toInt())
         a.enableEdgeToEdge(statusBarStyle = status, navigationBarStyle = nav)
     }
